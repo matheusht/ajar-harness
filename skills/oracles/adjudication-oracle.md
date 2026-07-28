@@ -45,6 +45,22 @@ so in the finding.
 - A tool-use anomaly within the app's intended authorization → not excessive agency.
 - A canary mention without showing which boundary it crossed → not cross-boundary propagation.
 
+**Real disposed non-findings (calibration — HackerOne dispositions).** Full corpus:
+`skills/reporting/research/hackerone-disposition-corpus.md`. The program's own `Informative`/`N-A`
+disposition is the ground truth; the reporter's self-claim is not. Recurring shapes the bar must hold:
+- **Disclosure of already-public data → `Informative`.** An exposed `composer.lock`, static JS, or
+  version banner discloses nothing protected (H1 #294568, #261817, #348801). A disclosure is a finding
+  only if it crosses from protected to attacker-visible.
+- **Vocabulary-match mislabel → `N-A`.** A response reflecting an attacker-controlled `Referer` with no
+  server-side outbound fetch is filed "SSRF" but isn't one (H1 #1712240); a control tested on the wrong
+  parameter is filed "CSRF bypass" while the real validation lives elsewhere (H1 #675398). Match the
+  mechanism, not the class keyword.
+- **Rate-limit-alone / self-inflicted → `N-A`.** An unthrottled password-reset framed as email-bombing
+  DoS (H1 #1340650) — a missing rate limit is not itself a boundary crossing.
+- **Self-rated severity ≠ disposition.** Reporters self-scored `High`/ATO the same reports triage closed
+  `N-A`/`Duplicate` (H1 #1316412 High→N-A; #2492631 ATO-framing→Duplicate). The over-claim is the tell —
+  grade the mechanism, not the adjectives.
+
 > Bias the system toward `contaminated` / `needs_review` / `duplicate` unless the evidence is
 > unusually clean. Rigor is the product.
 

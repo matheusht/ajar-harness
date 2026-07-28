@@ -49,6 +49,32 @@ Anything other than `confirmed`/`confirmed_with_correction`/`escalation_found` r
 - A named `needs_more_evidence` action item is a legitimate outcome — don't force `confirmed` or
   `refuted` when the honest answer is "one more specific test settles this."
 
+## Real adjudicated non-findings (calibration anchors)
+Grounds the `refuted` / `confirmed_with_correction` / `needs_more_evidence` verdicts in real CVE
+records an authority decided were *not* a vulnerability — the boundary this harness most
+under-evidences (`engine/regrade.md` §3's `refuted` bullet shipped with no worked instance). Full
+corpus + "Contested"/"Dropped": `skills/oracles/references/rejected-disputed-cve-corpus.md`. These are
+adjudicated non-findings, not live claims — the value is the *shape of the refutation*, not a verdict
+on any product.
+
+- **`refuted` — privileged actor, no boundary crossed.** CVE-2019-9193 (PostgreSQL `COPY TO/FROM
+  PROGRAM`): a superuser running OS commands via a default-on feature is disputed as *not a vuln* — the
+  actor already holds the privilege the "exploit" claims to gain. Same shape: CVE-2004-2339 /
+  CVE-2009-2653 (Administrator→SYSTEM "is not a security boundary"), and the admin-authoring-tool
+  cluster (CVE-2007-0830 vBulletin, CVE-2022-45544 Schlix, CVE-2020-36079 Zenphoto). *Control: check
+  the actor's required privilege against the capability supposedly gained, before crediting the
+  observed effect.*
+- **`refuted` — real malfunction, no security impact.** CVE-2020-19909 (curl integer overflow in the
+  retry delay): a genuine overflow, but "no direct security impact on the curl user." *Control: a bug
+  is not a finding unless it crosses a boundary someone defends.*
+- **`confirmed_with_correction` — cap to what's actually granted.** CVE-2012-5613 (MySQL `FILE`
+  privilege): real, but only "when configured to assign the FILE privilege to users who should not
+  have it" — impact caps to the misconfiguration, not an unconditional privesc.
+- **`needs_more_evidence` — a named reachability precondition is contested.** CVE-2021-43396 (glibc
+  iconv): the vendor states the bug "cannot be invoked through user input" without a NULL `inbuf` the
+  caller controls — settle the reachability precondition before signing off; don't force `refuted` or
+  `confirmed`.
+
 ## What this oracle is NOT for
 Not a CVSS-metric-precedent research pass — if a report's severity hinges on a single contested CVSS
 metric and needs disclosed-CVE precedent, that is the separate, narrower, later `oracles.severity-precedent`

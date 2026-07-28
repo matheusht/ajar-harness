@@ -77,7 +77,14 @@ having no stake in the outcome — dilute that and there's nothing left to forma
   work" or a full redo.
 - **`refuted`** — independent re-derivation from primary sources contradicts the original claim.
   Default-to-disbelief applies here exactly as it does in `adjudication-oracle.md`: a strong-looking
-  finding can still end here if re-derivation doesn't hold up.
+  finding can still end here if re-derivation doesn't hold up. Worked shape, from the adjudicated
+  non-findings corpus (`skills/oracles/references/rejected-disputed-cve-corpus.md`): a claimed
+  PostgreSQL privesc via `COPY TO/FROM PROGRAM` (CVE-2019-9193) re-derives to *not a finding* — the
+  feature executes OS commands by design and only for superusers, so the actor already holds the
+  privilege the "exploit" claims to gain; the command execution is real but crosses no boundary. The
+  control that separates this from a real finding is checking the actor's required privilege against
+  the capability supposedly gained — not the raw observation that a command ran. (Until this corpus,
+  `refuted` was the one verdict in this set with no worked instance to calibrate against.)
 - **`blocked`** — the reviewer genuinely couldn't independently re-derive the claim (no clean build,
   environment/artifact unavailable) — not a judgment on the finding either way. Included for symmetry
   with pocinator's own `blocked` verdict; no real instance of this specific outcome has occurred yet

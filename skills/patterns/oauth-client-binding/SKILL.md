@@ -10,7 +10,7 @@ type: pattern
 owasp: "A07:2021 Identification and Authentication Failures"
 also: "CWE-287 Improper Authentication"
 atlas: "—"
-routes_to: ["vulns/authentication-bypass"]
+routes_to: ["stub:vulns/authentication-bypass"]
 
 activation:
   strong:

@@ -13,6 +13,16 @@
     { "id": "trap-jwt-signature-valid-not-authorized", "verdict": "refuted" },
     { "id": "trap-bopla-echoed-property", "verdict": "needs_review" },
     { "id": "trap-ssrf-echo-not-fetch", "verdict": "refuted" },
-    { "id": "trap-graphql-introspection-only", "verdict": "refuted" }
+    { "id": "trap-graphql-introspection-only", "verdict": "refuted" },
+    { "id": "trap-cve-2019-9193", "verdict": "refuted" },
+    { "id": "trap-cve-2007-0830", "verdict": "refuted" },
+    { "id": "trap-cve-2004-2339", "verdict": "refuted" },
+    { "id": "trap-cve-2020-19909", "verdict": "refuted" },
+    { "id": "trap-cve-2013-3245", "verdict": "needs_review" },
+    { "id": "trap-cve-2005-1588", "verdict": "refuted" },
+    { "id": "trap-cve-2012-5613", "verdict": "needs_review" },
+    { "id": "trap-cve-2023-32001", "verdict": "refuted" },
+    { "id": "trap-cve-2018-14496", "verdict": "refuted" },
+    { "id": "trap-cve-2023-5129", "verdict": "deduped" }
   ]
 }

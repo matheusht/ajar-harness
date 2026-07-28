@@ -833,6 +833,36 @@ def command_check_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_in_pty(argv: list[str], stdin_text: str) -> str:
+    """Run argv attached to a pseudo-TTY and return combined stdout+stderr. Portable across BSD and
+    util-linux (unlike `/usr/bin/script`, whose command-invocation syntax differs between them). Used
+    only by the self-test to prove an agent-allocated TTY alone cannot satisfy operator authority."""
+    import pty, select, errno, time as _time
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+    os.close(slave)
+    try: os.write(master, stdin_text.encode())
+    except OSError: pass
+    chunks = bytearray(); deadline = _time.monotonic() + 30
+    while _time.monotonic() < deadline:
+        try: ready, _, _ = select.select([master], [], [], 1)
+        except (OSError, ValueError): break
+        if ready:
+            try: data = os.read(master, 4096)
+            except OSError as exc:
+                if exc.errno == errno.EIO: break   # Linux signals PTY EOF as EIO
+                raise
+            if not data: break
+            chunks.extend(data)
+        elif proc.poll() is not None:
+            break
+    try: os.close(master)
+    except OSError: pass
+    if proc.poll() is None: proc.kill()
+    proc.wait()
+    return chunks.decode(errors="replace")
+
+
 def state_self_test() -> list[tuple[str, bool, str]]:
     append_event = _append_kernel_event
     collect_preflight = _collect_legacy_preflight
@@ -870,7 +900,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         try: init_console_gate = init_cli.returncode != 0 and json.loads(init_cli.stdout)["error"]["code"] == "operator_signature_required"
         except (json.JSONDecodeError, KeyError): init_console_gate = False
         checks.append(("fresh public init reaches the cryptographic operator gate without requiring a prior ledger", init_console_gate, init_cli.stdout + init_cli.stderr))
-        pty_attempt=subprocess.run(["/usr/bin/script","-q","/dev/null",sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],input="initialize-engagement operator-selftest\n",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False);checks.append(("agent-created pseudo-TTY cannot satisfy operator authority without a scoped signature","operator_signature_required" in pty_attempt.stdout+pty_attempt.stderr and not (engagement/"events.jsonl").exists(),pty_attempt.stdout+pty_attempt.stderr))
+        pty_output=_run_in_pty([sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],"initialize-engagement operator-selftest\n");checks.append(("agent-created pseudo-TTY cannot satisfy operator authority without a scoped signature","operator_signature_required" in pty_output and not (engagement/"events.jsonl").exists(),pty_output))
         init_challenge={"schema_version":1,"namespace":"llm-redteam-harness-operator-v1","engagement_id":engagement.name,"scope_hash":sha256_file(engagement/"scope.md"),"ledger_hash":None,"operation":"initialize-engagement:2026-07-10T00:00:00Z","operator_id":"operator-selftest"};init_challenge_path=root/"init-challenge.json";init_challenge_path.write_bytes(canonical_json_bytes(init_challenge));subprocess.run(["/usr/bin/ssh-keygen","-Y","sign","-f",str(reviewer_key),"-n","llm-redteam-harness-operator-v1",str(init_challenge_path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);signed_env={**os.environ,"HARNESS_OPERATOR_SIGNATURE_FILE":str(init_challenge_path)+".sig","HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE":str(allowed_signers_path)};signed_init=subprocess.run([sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],env=signed_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False);checks.append(("public init accepts an exact scoped operator signature",signed_init.returncode==0,signed_init.stdout+signed_init.stderr))
         snapshot = initialize_engagement(engagement, "2026-07-10T00:00:00Z")
         checks.append(("signed-scope init creates one attested event", snapshot["event_count"] == 1 and read_ledger(engagement, "event")[0]["event_type"] == "scope.attested", str(snapshot)))

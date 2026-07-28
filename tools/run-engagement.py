@@ -833,6 +833,36 @@ def command_check_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_in_pty(argv: list[str], stdin_text: str) -> str:
+    """Run argv attached to a pseudo-TTY and return combined stdout+stderr. Portable across BSD and
+    util-linux (unlike `/usr/bin/script`, whose command-invocation syntax differs between them). Used
+    only by the self-test to prove an agent-allocated TTY alone cannot satisfy operator authority."""
+    import pty, select, errno, time as _time
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+    os.close(slave)
+    try: os.write(master, stdin_text.encode())
+    except OSError: pass
+    chunks = bytearray(); deadline = _time.monotonic() + 30
+    while _time.monotonic() < deadline:
+        try: ready, _, _ = select.select([master], [], [], 1)
+        except (OSError, ValueError): break
+        if ready:
+            try: data = os.read(master, 4096)
+            except OSError as exc:
+                if exc.errno == errno.EIO: break   # Linux signals PTY EOF as EIO
+                raise
+            if not data: break
+            chunks.extend(data)
+        elif proc.poll() is not None:
+            break
+    try: os.close(master)
+    except OSError: pass
+    if proc.poll() is None: proc.kill()
+    proc.wait()
+    return chunks.decode(errors="replace")
+
+
 def state_self_test() -> list[tuple[str, bool, str]]:
     append_event = _append_kernel_event
     collect_preflight = _collect_legacy_preflight
@@ -870,7 +900,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         try: init_console_gate = init_cli.returncode != 0 and json.loads(init_cli.stdout)["error"]["code"] == "operator_signature_required"
         except (json.JSONDecodeError, KeyError): init_console_gate = False
         checks.append(("fresh public init reaches the cryptographic operator gate without requiring a prior ledger", init_console_gate, init_cli.stdout + init_cli.stderr))
-        pty_attempt=subprocess.run(["/usr/bin/script","-q","/dev/null",sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],input="initialize-engagement operator-selftest\n",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False);checks.append(("agent-created pseudo-TTY cannot satisfy operator authority without a scoped signature","operator_signature_required" in pty_attempt.stdout+pty_attempt.stderr and not (engagement/"events.jsonl").exists(),pty_attempt.stdout+pty_attempt.stderr))
+        pty_output=_run_in_pty([sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],"initialize-engagement operator-selftest\n");checks.append(("agent-created pseudo-TTY cannot satisfy operator authority without a scoped signature","operator_signature_required" in pty_output and not (engagement/"events.jsonl").exists(),pty_output))
         init_challenge={"schema_version":1,"namespace":"llm-redteam-harness-operator-v1","engagement_id":engagement.name,"scope_hash":sha256_file(engagement/"scope.md"),"ledger_hash":None,"operation":"initialize-engagement:2026-07-10T00:00:00Z","operator_id":"operator-selftest"};init_challenge_path=root/"init-challenge.json";init_challenge_path.write_bytes(canonical_json_bytes(init_challenge));subprocess.run(["/usr/bin/ssh-keygen","-Y","sign","-f",str(reviewer_key),"-n","llm-redteam-harness-operator-v1",str(init_challenge_path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);signed_env={**os.environ,"HARNESS_OPERATOR_SIGNATURE_FILE":str(init_challenge_path)+".sig","HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE":str(allowed_signers_path)};signed_init=subprocess.run([sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],env=signed_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False);checks.append(("public init accepts an exact scoped operator signature",signed_init.returncode==0,signed_init.stdout+signed_init.stderr))
         snapshot = initialize_engagement(engagement, "2026-07-10T00:00:00Z")
         checks.append(("signed-scope init creates one attested event", snapshot["event_count"] == 1 and read_ledger(engagement, "event")[0]["event_type"] == "scope.attested", str(snapshot)))
@@ -1539,11 +1569,11 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         def approve_action(request_name: str, lane: str, action_value: dict[str, Any]) -> None:
             relative = f"authority/requests/{request_name}.action.json"; atomic_write(engagement/relative, canonical_json_bytes(action_value)); digest = sha256_bytes(canonical_json_bytes(action_value)); current_state = reduce_engagement(engagement)
             append_event(engagement, base_event(event_id=f"event-request-{request_name}", engagement_id=engagement.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, event_type="authority.requested", rationale="Exercise an exact canonical authority path.", payload={"request_id": request_name, "action_kind": action_value["action_kind"], "action_digest": digest, "action_path": relative, "lane_id": lane, "request_status": "pending_authority", "scope_hash": current_state["scope_hash"], "environment_ref": current_state["active_environment_ref"], "expires_at": "2099-07-10T00:00:00Z"}, session_id=broker_session, operation_class="notebook")); append_event(engagement, base_event(event_id=f"event-resolution-{request_name}", engagement_id=engagement.name, recorded_at=now_text, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve exact synthetic transition.", payload={"request_id": request_name, "request_event_ref": f"event-request-{request_name}", "action_digest": digest, "resolution": "approved", "resolved_at": now_text}, entity_refs=[f"event-request-{request_name}"], session_id=broker_session, operation_class="authority"))
-        prior_action = _authority_action("record-operator-prior", lane_id="lane-prior-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, prior_id="prior-public", prior_statement="Synthetic operator direction, not claim evidence.", strength="weak", reason="Exercise canonical prior authority."); approve_action("request-prior-public", "lane-prior-public", prior_action); command_record_operator_prior(argparse.Namespace(engagement=engagement, prior_id="prior-public", prior_statement="Synthetic operator direction, not claim evidence.", strength="weak", operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical prior authority.", authority_request_id="request-prior-public", lane_id="lane-prior-public", executor_id=broker_id, session_id=broker_session))
-        cleanup_proposal = {"entity_id": "cleanup-public", "status": "not_applicable", "cleanup_obligations": [{"obligation_id": "cleanup-public", "kind": "synthetic_local", "status": "not_applicable", "artifact_refs": [], "rationale": "No live effect exists.", "closed_at": now_text}]}; cleanup_path = root/"cleanup-public.json"; cleanup_path.write_bytes(canonical_json_bytes(cleanup_proposal)); cleanup_action = _authority_action("record-cleanup", lane_id="lane-cleanup-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical cleanup authority.", **cleanup_proposal); approve_action("request-cleanup-public", "lane-cleanup-public", cleanup_action); command_record_cleanup(argparse.Namespace(engagement=engagement, file=cleanup_path, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical cleanup authority.", authority_request_id="request-cleanup-public", lane_id="lane-cleanup-public", executor_id=broker_id, session_id=broker_session))
+        now_text = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"); prior_action = _authority_action("record-operator-prior", lane_id="lane-prior-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, prior_id="prior-public", prior_statement="Synthetic operator direction, not claim evidence.", strength="weak", reason="Exercise canonical prior authority."); approve_action("request-prior-public", "lane-prior-public", prior_action); command_record_operator_prior(argparse.Namespace(engagement=engagement, prior_id="prior-public", prior_statement="Synthetic operator direction, not claim evidence.", strength="weak", operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical prior authority.", authority_request_id="request-prior-public", lane_id="lane-prior-public", executor_id=broker_id, session_id=broker_session))
+        now_text = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"); cleanup_proposal = {"entity_id": "cleanup-public", "status": "not_applicable", "cleanup_obligations": [{"obligation_id": "cleanup-public", "kind": "synthetic_local", "status": "not_applicable", "artifact_refs": [], "rationale": "No live effect exists.", "closed_at": now_text}]}; cleanup_path = root/"cleanup-public.json"; cleanup_path.write_bytes(canonical_json_bytes(cleanup_proposal)); cleanup_action = _authority_action("record-cleanup", lane_id="lane-cleanup-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical cleanup authority.", **cleanup_proposal); approve_action("request-cleanup-public", "lane-cleanup-public", cleanup_action); command_record_cleanup(argparse.Namespace(engagement=engagement, file=cleanup_path, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical cleanup authority.", authority_request_id="request-cleanup-public", lane_id="lane-cleanup-public", executor_id=broker_id, session_id=broker_session))
         public_state = reduce_engagement(engagement); reopened = True
         if public_state["active_blockers"]:
-            reopen_action = _authority_action("reopen", lane_id="lane-reopen-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical reopening authority."); approve_action("request-reopen-public", "lane-reopen-public", reopen_action); command_reopen(argparse.Namespace(engagement=engagement, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical reopening authority.", authority_request_id="request-reopen-public", lane_id="lane-reopen-public", executor_id=broker_id, session_id=broker_session)); reopened = not reduce_engagement(engagement)["active_blockers"]
+            now_text = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"); reopen_action = _authority_action("reopen", lane_id="lane-reopen-public", executor_id=broker_id, session_id=broker_session, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical reopening authority."); approve_action("request-reopen-public", "lane-reopen-public", reopen_action); command_reopen(argparse.Namespace(engagement=engagement, operator_id="operator-selftest", recorded_at=now_text, reason="Exercise canonical reopening authority.", authority_request_id="request-reopen-public", lane_id="lane-reopen-public", executor_id=broker_id, session_id=broker_session)); reopened = not reduce_engagement(engagement)["active_blockers"]
         checks.append(("canonical public prior, cleanup, and reopening transitions use exact one-use async authority", public_state["authority_requests"]["request-prior-public"]["status"] == "approved" and public_state["authority_requests"]["request-cleanup-public"]["status"] == "approved" and any(item["prior_id"] == "prior-public" for item in public_state["operator_priors"]) and any(item["obligation_id"] == "cleanup-public" for item in public_state["cleanup"]["obligations"]) and reopened, "public authority transition missing"))
     return checks
 

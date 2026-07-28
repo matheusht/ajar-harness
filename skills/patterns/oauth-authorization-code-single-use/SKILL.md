@@ -9,7 +9,7 @@ type: pattern
 owasp: "A07:2021 Identification and Authentication Failures"
 also: "CWE-367 Time-of-check Time-of-use Race Condition"
 atlas: "—"
-routes_to: ["vulns/authentication-bypass"]
+routes_to: ["stub:vulns/authentication-bypass"]
 
 activation:
   strong:

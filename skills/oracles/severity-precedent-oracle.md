@@ -41,6 +41,26 @@ version; the full adjudicated distribution (per-metric counts, every CVE, the di
    concrete pivot") — not from metric definitions alone. A departure with no distributional backing is
    exactly the novel-scoring move this oracle exists to prevent.
 
+## Cross-check: program-assigned severity + bounty (HackerOne)
+
+A **second, complementary precedent source** to the NVD/GHSA CVSS vectors in the reference table below:
+the severity a real bug-bounty program *assigned* a disclosed report, plus the **bounty it actually
+paid** — real money as an independent "which classes/scores programs actually stand behind" signal.
+Corpus (bucket C, program-`resolved` reports with a rating): `skills/reporting/research/
+hackerone-disposition-corpus.md`. Use it to sanity-check the vector-derived score, **not** to replace
+it — program ratings inherit the same version/calculator caveat as rule 2 (a program's number does not
+transfer across programs), and a bounty reflects program economics, not just severity. Concrete
+comparables, matched to the buckets below:
+
+- **SSRF (CWE-918):** H1 #1108418 — program-rated **medium, 5.0**, $200. A plain metadata-less SSRF
+  landing mid-range corroborates the SSRF bucket's contested-`S:C` discriminator (the high scores need
+  the metadata/pivot escalation, which this one lacked).
+- **SQL injection (CWE-89):** H1 #383127 — **critical, 9.9**, $25,000. A clean unauth data-exfil SQLi
+  at the top of the range.
+- **HTTP request smuggling (CWE-444):** H1 #510152 — **high, 8.7**, $20,000.
+- **IDOR (CWE-639):** H1 #1323406 — **medium**, $500 — a single-object IDOR without an ATO escalation
+  sits mid-range, consistent with the IDOR bucket's "does it generalize?" discriminator.
+
 ## The gate: IN / CONTESTED / THIN
 
 Each metric in a bucket carries one verdict, decided per CVSS version:

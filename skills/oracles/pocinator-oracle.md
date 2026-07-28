@@ -60,6 +60,25 @@ a high-value finding earns a second independent pocinator pass before being trea
 12. **Counterfactual-novice framing** — ask explicitly: *where would a naive or reward-hacked
     verification stop and declare success here?* Sharper than "is this faithful?" alone.
 
+## Real adjudicated non-findings (calibration anchors)
+Grounds `claim_mismatch` and the deliberately-narrow `reward_hacked` in real disputed/rejected CVEs
+where the *PoC or claimed impact* — not the finding's existence — was the problem. Full corpus:
+`skills/oracles/references/rejected-disputed-cve-corpus.md`.
+
+- **`claim_mismatch` — crash is real, claimed class isn't.** CVE-2013-3245 (VLC): "This PoC crashes
+  VLC, indeed, but does not [prove code execution]" — sound PoC, proves DoS not the claimed RCE. Same
+  shape: CVE-2006-6061 / CVE-2006-4434 (impact is at most a kernel/disk DoS, not the filed severity).
+  This is lens 6 (claim strength) failing on the PoC-dependent part only.
+- **`claim_mismatch` — the mechanism doesn't exist in the target.** CVE-2005-1588 (Quick.cart): filed
+  as SQL injection against a product that "does not even use SQL." A PoC cannot prove a mechanism the
+  target lacks — lens 4: the negative control must diverge *through the claimed mechanism*.
+- **`reward_hacked` — the claim structurally cannot hold.** CVE-2023-32001 (curl): "We issued this CVE
+  pre-maturely… there really is no safe measures around or protections for [it]" — withdrawn because
+  the reported condition is not a defensible boundary at all. CVE-2018-14496 (Vivotek): filed as remote
+  memory-corruption RCE; the vendor states the issue produces zero observable effect, "not even a
+  crash." These are the *definite, articulable* failures the verdict is reserved for — an assertion
+  with nothing behind it — never a hedge.
+
 ## What this oracle is NOT for
 Passing pocinator does not guarantee a report won't return as a duplicate — it verifies the PoC is
 real and faithful to its claim, not that the finding is novel or undisclosed. Novelty is a separate,

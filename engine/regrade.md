@@ -90,6 +90,8 @@ having no stake in the outcome — dilute that and there's nothing left to forma
   with pocinator's own `blocked` verdict; no real instance of this specific outcome has occurred yet
   in this harness's practice, unlike the other five, which are each grounded in an actual pass.
 
+**Root-cause / severity re-derivation anchors (P0/ZDI corpus — `skills/oracles/references/project-zero-zdi-chain-corpus.md`, axis B).** A hostile third party's published root-cause analysis is exactly the primary-source re-derivation this stage demands, and two shapes recur: (a) a bare bug-class label understates real impact once traced — CVE-2025-38236 is filed a "UAF," but the P0 writeup re-derives full arbitrary-kernel-r/w from an unprivileged Chrome renderer (a `confirmed_with_correction` *upward*); (b) per-CVE severity understates chained impact — the Edge Pwn2Own CVEs score 4.3/5.0/7.5 individually but compose to a sandbox escape. Both are the "trace one level deeper than the original pass stopped" move (§4), grounded in a published analysis rather than the finder's self-claim.
+
 ## 4. What "re-derive from primary sources, trust nothing" actually means
 
 Not a slogan — a specific, repeated set of moves across every real regrade pass:

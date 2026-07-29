@@ -130,6 +130,25 @@ cross-instance evidence (§0), never from one disclosure. Full corpus (32 chains
 - **IDOR → mass account takeover.** A single client-supplied id substitution automated into a loop
   (H1 #1685970). Angle: *does this one-object IDOR generalize to every object, or to ATO?*
 
+**Cross-domain memory-safety / OS chains (P0/ZDI corpus — `skills/oracles/references/project-zero-zdi-chain-corpus.md`, 22 disclosed chains, same candidate status).** The HackerOne shapes above are almost all web request→state; the harder chaining lives in memory-safety and OS boundaries these six angles were never tested against. Representative cross-domain shapes:
+
+- **Sandbox/guest primitive → boundary desync → host/kernel takeover.** A UAF or TOCTOU reachable from
+  an unprivileged sandbox (Chrome renderer, VM guest) chained through an info-leak (KASLR/ASLR defeat)
+  to arbitrary host/kernel r/w (P0 `MSG_OOB` CVE-2025-38236 renderer→Linux-kernel; KVM EPYC
+  CVE-2021-29657 and VirtualBox VMSVGA CVE-2025-30712 guest→host escapes). Angle: *does this in-sandbox
+  primitive have a disclosed path to the leak+write it needs to cross the sandbox, or is the sandbox
+  the real ceiling?*
+- **Zero-click parse → decoder RCE → kernel-driver UAF.** An auto-processed attachment (SMS/RCS audio,
+  iMessage image, radio frame) reaches a decoder RCE, then a driver bug for kernel (Pixel-9
+  Dolby→BigWave CVE-2025-54957/36934; FORCEDENTRY CVE-2021-30860; AWDL CVE-2020-3843). Angle: *what
+  does the target auto-decode with no user action, and what does that decoder hand the kernel?*
+- **GPU userland → kernel LPE.** A mobile-GPU driver bug as the kernel-escape link after an
+  app/renderer foothold (Mali CVE-2022-36449; Adreno CVE-2023-33106/33107). Angle: *does the sandbox
+  reach the GPU driver, and is that the kernel boundary?*
+
+Per-CVE severity can understate a chain: the Edge Pwn2Own set (CVE-2026-45492/45494/45495, individually
+4.3/5.0/7.5) composed to a full sandbox escape — chaining is the point, not any one primitive.
+
 ## 4. Verdicts and routing
 
 `bounded` · `amplifier_found` · `new_finding_spun_off` · `needs_more_evidence` · `blocked`

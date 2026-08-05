@@ -120,6 +120,7 @@ engagement's own passes, not an invented one.
    convention-matching against comparable disclosed CVEs) — that's the narrow, separate
    CVSS-precedent-reviewer pattern (`skills/reporting/hackerone-reports.md`), not pocinator's, and
    not a full `engine/regrade.md` re-litigation either (see `engine/regrade.md` §5).
+   **Worked example (`claim_mismatch` from disclosed chains — `skills/oracles/references/project-zero-zdi-chain-corpus.md` axis C):** the Edge Pwn2Own primitives each executed, but individually reach only a narrow origin-bypass / UXSS / path-traversal boundary (CVE-2026-45492/45494/45495) — none is independently sandbox-escape-class. A PoC for one, offered as evidence of "sandbox escape," is `claim_mismatch`: the claim the evidence actually supports is the specific primitive, not the chained worst case. That is lens 4's "diverge through the claimed mechanism specifically," read across a real disclosed chain.
 7. **Clean-state reproducibility** — fresh checkout/extraction/container where reasonable, never just
    "it worked in the dev sandbox with whatever state was already lying around."
 8. **Anomaly tracing** — a stray log line, warning, or stack trace in an otherwise-passing run gets

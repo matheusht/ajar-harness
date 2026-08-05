@@ -149,6 +149,30 @@ cross-instance evidence (§0), never from one disclosure. Full corpus (32 chains
 Per-CVE severity can understate a chain: the Edge Pwn2Own set (CVE-2026-45492/45494/45495, individually
 4.3/5.0/7.5) composed to a full sandbox escape — chaining is the point, not any one primitive.
 
+**Cross-domain DeFi composed chains + dedup ground truth (Code4rena/Sherlock/Immunefi corpus — `skills/oracles/references/defi-contest-adjudication-corpus.md`, Axis C, same candidate status).** Smart-contract chaining has its own recurring shapes, distinct from both web and memory-safety, and the audit-contest **duplicate-merge group** is the hardest public "these N reports are one finding" dedup oracle. Representative shapes:
+
+- **Read-only reentrancy → oracle desync → fraudulent liquidation.** A view-only reentrancy window
+  (Curve `remove_liquidity` / Balancer join callback) transiently desyncs an LP-token price an unguarded
+  `getPrice` reads, and a same-transaction liquidation seizes collateral at the manufactured price
+  (Sherlock Sentiment #7, Blueberry #141). Angle: *does a price the protocol trusts get read inside a
+  reentrancy window it doesn't guard?*
+- **Donation → ERC4626 share-price inflation → next-depositor theft.** Front-run the first deposit, mint
+  negligible shares, donate assets directly to inflate price-per-share so the next depositor rounds to
+  zero (C4 GoGoPool #209, BakerFi; Sherlock Napier #125; exponential-rounding variant Sentiment-v2 #90).
+  Angle: *can an attacker move price-per-share between a victim's quote and mint?*
+- **Signature replay across a boundary → repeated execution.** A signed payload reused across
+  identities/chains because the domain/nonce omits the discriminator (caller-supplied `domainSeparator`
+  not from `block.chainid`, C4 next-generation H-01 / Ambire #39; a consumed signature never
+  invalidated, Rigor #95). Angle: *what stops this exact signature from being replayed on the next
+  identity/chain/call?*
+- **Flash-loan instantaneous weight → governance manipulation.** Borrowed one-block voting weight swings
+  a vote-outcome the attacker then executes (C4 Vader #187). Angle: *is any privileged decision priced
+  on a spot balance an attacker can flash-borrow?*
+
+Dedup discipline: the corpus's merge groups (C4 next-generation H-01 = 36 duplicates; Ajna #251 = 24)
+are real ground truth that same-root-cause reports collapse to one finding — the dedup calibration the
+web corpus lacked.
+
 ## 4. Verdicts and routing
 
 `bounded` · `amplifier_found` · `new_finding_spun_off` · `needs_more_evidence` · `blocked`

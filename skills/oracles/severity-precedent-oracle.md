@@ -61,6 +61,25 @@ comparables, matched to the buckets below:
 - **IDOR (CWE-639):** H1 #1323406 — **medium**, $500 — a single-object IDOR without an ATO escalation
   sits mid-range, consistent with the IDOR bucket's "does it generalize?" discriminator.
 
+## Cross-check: DeFi contest-judged severity — impact×likelihood (Code4rena / Sherlock / Immunefi)
+
+A **third precedent source, for the smart-contract / DeFi domain**, where severity is **not** a CVSS
+vector: it is **impact × likelihood denominated in funds at risk** ("attacker gains X, protocol loses
+Y"). Do not port the CWE table's numbers onto a contract finding — use this cross-check instead.
+Corpus (rubric spine + Axis B): `skills/oracles/references/defi-contest-adjudication-corpus.md`.
+
+- **The bar differs by platform — record which one.** Code4rena splits High/Medium on whether the
+  attack path carries *external requirements the attacker doesn't control* ("valid attack path, not
+  hand-wavy" = High; "external requirements" = Medium). Sherlock **excludes likelihood entirely**,
+  binning on external-condition prerequisites + $/% loss thresholds (>1% AND >$10 of principal = High).
+  A severity no more transfers across platforms than a CVSS number transfers across calculators.
+- **Contest platforms cap at High.** Every `Critical` in the corpus is Immunefi *platform-assessed*
+  (payout/postmortem) — a different authority type; do not read a contest "High" as under-scored.
+- **Same class, different disposition (the load-bearing signal).** immutable `DOMAIN_SEPARATOR` replay
+  = Medium at Golom (C4) but invalid at Aloe II (Sherlock); declining-auction bad-debt = Medium at Ajna
+  vs non-issue at Ethereum Credit Guild; read-only-reentrancy = High at Blueberry vs QA at LoopFi
+  (`KEEPER_ROLE`-gated). The divergence is the bar, not the mechanism.
+
 ## The gate: IN / CONTESTED / THIN
 
 Each metric in a bucket carries one verdict, decided per CVSS version:

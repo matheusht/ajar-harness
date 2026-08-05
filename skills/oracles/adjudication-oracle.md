@@ -61,6 +61,25 @@ disposition is the ground truth; the reporter's self-claim is not. Recurring sha
   `N-A`/`Duplicate` (H1 #1316412 High→N-A; #2492631 ATO-framing→Duplicate). The over-claim is the tell —
   grade the mechanism, not the adjectives.
 
+**Real disposed non-findings (calibration — DeFi contest dispositions).** Full corpus:
+`skills/oracles/references/defi-contest-adjudication-corpus.md` (Axis A). The judge's *final*
+(post-escalation) ruling is the ground truth; the submitter's self-rated severity is not. The
+smart-contract analog of the HackerOne shapes above — the invalid-classes that dominate contest triage:
+- **Trusted-role precondition → `invalid`.** A finding requiring the admin/owner/governance to act
+  maliciously is invalid (C4 Slingshot #76; the C4/Sherlock "admin functions assumed used correctly"
+  rule). "Owner can drain" is out-of-scope centralization, not a vuln (C4 Asymmetry #398).
+- **Already-known / in-scope-mitigation → `invalid` / known-issue.** A bug already in the repo's TODOs
+  or the automated-findings report adds no value (C4 Olympus #470).
+- **User-error / self-harm → `invalid`.** A user validating against their own mistake, harming no other
+  party, is a categorical non-finding (Sherlock validity §VII).
+- **Reachability precondition unmet in the deployment → downgraded/`invalid`.** A griefing/front-run
+  path that can't occur on the target L2's private mempool is QA, not a vuln (C4 Rubicon #558; the
+  Sherlock private-mempool "High→Medium, Medium→Invalid" rule). A read-only-reentrancy behind
+  `KEEPER_ROLE` is QA (C4 LoopFi #226) — the *same* primitive that is a valid High when permissionless
+  (Sherlock Blueberry #141).
+- **Submitter over-claim ≠ disposition.** Wardens self-tag `High`; judges downgrade or invalidate on
+  likelihood/precondition (C4 Salty #222 High→Med; the Sherlock reclassifications throughout Axis B).
+
 > Bias the system toward `contaminated` / `needs_review` / `duplicate` unless the evidence is
 > unusually clean. Rigor is the product.
 

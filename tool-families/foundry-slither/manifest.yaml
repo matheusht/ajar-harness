@@ -1,0 +1,70 @@
+# Harness-owned manifest for the FOUNDRY-SLITHER tool family — the authority contract for the EVM
+# contract-audit sensor + confirm-on-fork harness (ADR docs/decisions/0008-smart-contract-audit-capability.md).
+#
+# Detection-first. The manifest, broker, and oracle hold authority; the tools NEVER judge (no
+# confirmed / allow / verdict / success). A Slither detector or a Foundry run PROPOSES; the oracle
+# emits `confirmed`. Actions not explicitly listed fail closed. Advanced/value-moving surfaces stay in
+# scope but sit under blocked_until with their gates.
+
+family_id: foundry-slither
+integration: subprocess
+# Two arms-length standard dev tools, run as subprocesses — NOT vendored into Plane 1/2, NOT executed
+# as untrusted payload. Pinned by release; see FAMILY.md for the arms-length static-review posture.
+upstream:
+  - tool: slither
+    repo: https://github.com/crytic/slither
+    reviewed_commit: "0.10.4"
+    license: AGPL-3.0
+  - tool: aderyn
+    repo: https://github.com/Cyfrin/aderyn
+    reviewed_commit: "0.1.9"
+    license: MIT
+  - tool: foundry
+    repo: https://github.com/foundry-rs/foundry
+    reviewed_commit: "v1.7.1"
+    license: MIT-OR-Apache-2.0
+
+# Exposed NOW — sensor-tier detection + a non-value-moving confirm-on-fork invariant assertion.
+capabilities:
+  - id: external.foundry-slither.detect
+    class: sensor
+    authority: sensor_only
+    backs: capabilities/registry.yaml
+  - id: external.foundry-slither.fork_invariant
+    class: sensor
+    authority: sensor_only
+    backs: capabilities/registry.yaml
+
+# Benign sensor/build tier only. Static detectors -> activation signals; a local-fork invariant
+# ASSERTION (no value extraction) is the confirm-on-fork evidence. None of these move value or touch
+# a live chain. (Raw `fuzzer` is intentionally excluded — Echidna/Halmos stage under blocked_until.)
+allowed_actions: [slither_detect, aderyn_detect, list_detectors, static_inspect, forge_build, fork_invariant_assert]
+# Denied as RAW actions (fail closed). Not banned forever where staged below, but never auto-allowed.
+forbidden_actions: [mainnet_broadcast, live_target_interaction, autonomous_value_moving_poc, emit_confirmed]
+requires: [safe_signal, scope_allows_source_analysis]
+
+output_schema: contract_finding_digest.json
+redaction:
+  - no live/mainnet RPC endpoint, private key, or currently-vulnerable deployed address written to any plane
+  - fork PoC artifacts stay in the eval/temp dir; only the invariant-break assertion + a content hash are recorded
+evidence_role: detection + local-fork invariant evidence only ("invariant broke on the pinned ref") — never impact-in-production, never a verdict/confirmed
+
+# Staged surfaces — in scope, NOT erased. Exposed only when the named gate passes.
+blocked_until:
+  - id: value_moving_fork_poc
+    class: executor
+    risk_tier: high
+    blocked_until: operator-zone2-impact-confirm
+    requires: [signed_scope, scope_allows_impact_demo, containment_plan, cleanup_plan, human_impact_escalation_confirm]
+    redaction: local Anvil/EVM fork only; locally-minted valueless test tokens; no live address or endpoint; artifact temp/eval scoped, cleanup-verified
+    authority: proposal_only
+    evidence_role: local value-movement/impact evidence for a disclosed-and-patched contract — never a live drain, never a verdict; the oracle confirms
+
+  - id: symbolic_fuzz_lane
+    class: sensor
+    risk_tier: medium
+    blocked_until: M2-symbolic-fuzz-capability
+    requires: [signed_scope, scope_allows_source_analysis, containment_plan]
+    redaction: counterexample/property traces stay in the eval dir; only the failing property + a hash are recorded
+    authority: sensor_only
+    evidence_role: property-counterexample evidence (Halmos/Echidna) — never a verdict/confirmed

@@ -402,7 +402,7 @@ def tool_family_manifest_problems(text):
 # (pick ONE contract shape), NOT done in this reconciliation slice. When merged, the unified checker MUST
 # preserve BOTH guards: this branch's full TF_FORBIDDEN_AUTHORITY top-level reject AND GLOSS's
 # require-sensor_only + evidence_role + forbidden_authority + adapter-evidence-JSON scan.
-TOOL_FAMILY_CONTRACT_OWNED = {"st3gg", "p4rs3lt0ngv3"}
+TOOL_FAMILY_CONTRACT_OWNED = {"st3gg", "p4rs3lt0ngv3", "foundry-slither"}
 
 
 def check_tool_family_manifests():

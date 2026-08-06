@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: tools/decision6_replay.py reads the frozen baseline commit
+          # (23fc4f6a) via `git show <sha>:path`, which a shallow clone can't reach.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"

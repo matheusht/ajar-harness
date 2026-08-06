@@ -93,3 +93,6 @@ subsequent execution, or crashes the process at a reproducible rate. Negative co
   crash/contamination paths — run the real executor.
 - Report the honest branch you proved: if the crash rate is what you observed, say so with the
   rate; if deterministic cross-tx contamination was not observed, state that it was not observed.
+
+## Cross-ecosystem fix-diff corpus (B3)
+Verified **merged** fix-commits for this class — pre-patch shape → added guard — in `skills/oracles/references/blockchain-client-cve-corpus.md`: 4 merged CosmWasm/cosmos-evm anchors (call-depth bound, precompile RunAtomic snapshot, simulate-mode divergence, decode_sections gas-bypass); non-cosmos coverage is analogical only (see corpus honest-gaps). Every fix SHA was verified merged (unmerged/version-bump/substituted SHAs rejected); use it to cross-check a candidate's mechanism against how the real disclosed instances were actually closed.

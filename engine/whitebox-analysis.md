@@ -207,3 +207,31 @@ it for source-available work and adds what black-box mode doesn't need:
 - `engine/gates.md`/`AGENTS.md §1` still govern: no PoC construction against a program's production
   systems (doubly true here — this program forbids it outright), Zone-2 confirmation still needed
   before any artifact with real capability is built, even in a local repro environment.
+
+## 8. EVM smart-contract domain funnel (Decision 0008)
+
+The source-available funnel above applies to a Solidity/EVM contract audit with a domain-specific
+instantiation of each stage; the `foundry-slither` tool-family owns the tool authority (the tool
+proposes, the oracle confirms).
+
+- **Stage 0–1 narrow + classify.** `slither`/`aderyn` static detectors over the in-scope source emit
+  activation signals for the EVM vuln cards (`evm.reentrancy`, `evm.read-only-reentrancy-price`, …).
+  A detector proposes; it never confirms. The detector→card map lives in
+  `tool-families/foundry-slither/FAMILY.md`.
+- **Stage 2 reachability.** Who can call the entrypoint — permissioning / whitelist / `noContract` /
+  admin gates / upgradeability. A gated path caps severity (the LoopFi `KEEPER_ROLE` → QA precedent);
+  a permissionless fund-loss path is critical.
+- **Stage 4 confirm-on-fork** — the domain's form of §4 ("mechanical checks are necessary, not
+  sufficient"). A Foundry local-fork test asserts the protocol's OWN invariant before/after the
+  triggering sequence: the **assertion break is the signal, never a printed marker**. The
+  non-negotiable neg-control — the **patched twin (or the guard added) must yield covered-dry** on the
+  byte-identical harness; a fixture that "confirms" against both refs is tautological
+  (`fake-client-poc-invariant-check`). The fork/harness must be real (real block/bytecode/AMM), never a
+  mocked pool. Worked, verified instance: `evals/contract-audit/fixtures/jpegd-reentrancy/`.
+- **Stage 4.5 chainability.** The DeFi chain shapes in `engine/chainability.md` §3b (B1 judged + B2
+  realized): flash-loan→oracle→drain, donation→share-inflation→theft, read-only-reentrancy→stale-price→
+  liquidation.
+- **Stage 5 severity.** B1 impact×likelihood over funds (NOT CVSS) + the B2 realized-loss floor
+  (`skills/oracles/severity-precedent-oracle.md` DeFi cross-check).
+- **Gates unchanged.** No mainnet/live target; a value-moving fork PoC is Zone-2 (§7's rule, ADR 0008
+  §5.2) → human confirm; the tool never emits `confirmed` — the oracle does.

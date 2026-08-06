@@ -1,0 +1,9 @@
+[profile.default]
+src = "src"
+test = "test"
+optimizer = true
+
+# Fork target — a mainnet RPC is required (the reentrancy window is the REAL Curve pool's).
+# Run:  forge test --fork-url mainnet -vv   (or pass any archival/full mainnet RPC URL directly)
+[rpc_endpoints]
+mainnet = "https://ethereum-rpc.publicnode.com"

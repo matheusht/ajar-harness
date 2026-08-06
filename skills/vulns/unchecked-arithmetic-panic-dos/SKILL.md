@@ -115,3 +115,6 @@ versions)
   claiming confirmation.
 - "This is unmaintained code" (x/group, x/circuit, x/crisis, x/nft) is out of scope regardless of a
   real bug being present — check module scope before investing further.
+
+## Cross-ecosystem fix-diff corpus (B3)
+Verified **merged** fix-commits for this class — pre-patch shape → added guard — in `skills/oracles/references/blockchain-client-cve-corpus.md`: 8 merged anchors across geth (MULMOD mod-0 panic, CVE-2020-26242), cosmos-sdk/cometbft (x/distribution, x/group, BitArray, ConsensusParams), Solana rbpf ELF-bounds, and a Substrate ORML numeric-conversion panic. Every fix SHA was verified merged (unmerged/version-bump/substituted SHAs rejected); use it to cross-check a candidate's mechanism against how the real disclosed instances were actually closed.

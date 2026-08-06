@@ -114,3 +114,6 @@ reachability bar (who can trigger it) and the two diverging code paths both stat
   especially if the test payload was never actually constructed to diverge across two real
   serialization paths in the first place — don't claim `refuted` from one negative run without first
   confirming the payload construction genuinely exercised the canonicalization gap.
+
+## Cross-ecosystem fix-diff corpus (B3)
+Verified **merged** fix-commits for this class — pre-patch shape → added guard — in `skills/oracles/references/blockchain-client-cve-corpus.md`: 2 merged anchors — cosmos-sdk x/authz wall-clock-in-ValidateBasic (GHSA-2p6r) and ibc-go ICS-20 remarshal-and-compare (GHSA-jg6f) — plus cross-ecosystem consensus-divergence siblings (geth self-destruct-recreate, lighthouse/lodestar) in the candidate-new-card section. Every fix SHA was verified merged (unmerged/version-bump/substituted SHAs rejected); use it to cross-check a candidate's mechanism against how the real disclosed instances were actually closed.

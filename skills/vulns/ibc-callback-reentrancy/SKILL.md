@@ -94,3 +94,6 @@ currently-exploitable bug in patched, released ibc-go)
 - Report/advisory "at risk" dollar figures (like the $126M Osmosis estimate) are the reporting
   party's own TVL-based estimate of exposure, not a realized loss — state this distinction plainly
   if citing precedent in a report; do not imply funds were actually lost in the disclosed anchor.
+
+## Cross-ecosystem fix-diff corpus (B3)
+Verified **merged** fix-commits for this class — pre-patch shape → added guard — in `skills/oracles/references/blockchain-client-cve-corpus.md`: the one disclosed anchor (ASA-2024-007 / GHSA-j496, effects-before-interactions reorder) with its verified fix diff; the B3 top-up confirmed a 2nd public IBC-reentrancy advisory does not currently exist (single-anchor by disclosure landscape, not omission). Every fix SHA was verified merged (unmerged/version-bump/substituted SHAs rejected); use it to cross-check a candidate's mechanism against how the real disclosed instances were actually closed.

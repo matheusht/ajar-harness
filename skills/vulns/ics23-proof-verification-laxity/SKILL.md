@@ -104,3 +104,6 @@ currently-exploitable bugs in patched, released code)
   presenting either as if it were a currently-exploitable bug in the pinned, released version in
   scope (rather than a patched historical bug or an unconfirmed theoretical pattern) is overclaiming
   and must not appear in any report without a fresh, independently-reproduced finding backing it.
+
+## Cross-ecosystem fix-diff corpus (B3)
+Verified **merged** fix-commits for this class — pre-patch shape → added guard — in `skills/oracles/references/blockchain-client-cve-corpus.md`: 2 merged anchors — the Dragonberry confio/ics23 spec-not-threaded reduction (cosmos-sdk) and a Substrate hyperbridge GRANDPA raw-ed25519 verification laxity (GHSA-wwx5). Every fix SHA was verified merged (unmerged/version-bump/substituted SHAs rejected); use it to cross-check a candidate's mechanism against how the real disclosed instances were actually closed.

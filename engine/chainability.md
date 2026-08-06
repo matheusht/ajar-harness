@@ -173,6 +173,27 @@ Dedup discipline: the corpus's merge groups (C4 next-generation H-01 = 36 duplic
 are real ground truth that same-root-cause reports collapse to one finding — the dedup calibration the
 web corpus lacked.
 
+**Realized DeFi chains that ran in production (B2 corpus — `skills/oracles/references/defi-exploit-chain-corpus.md`, Axis A, same candidate status).** The contest chains above are *judged* (hypothetical); these are the same shapes where the money actually left, adjudicated by an on-chain tx — the realized complement, and the sharper evidence that a shape chains to a real drain. Recurring realized shapes:
+
+- **Leveraged-mint → unguarded state-donation → self-liquidation.** Amplify a collateral/debt position,
+  then call an unguarded `donateToReserves`-style function with no insolvency check to push your own
+  position underwater, then self-liquidate at the bad-debt discount (Euler, $197M — hand-verified).
+  Angle: *is there a state-mutating call that skips the health check the rest of the protocol enforces?*
+- **Donation → vault share-price inflation → oracle mis-read → over-borrow.** Direct-transfer into a
+  vault to inflate `pricePerShare`, which a lending oracle reads verbatim as collateral value (Cream
+  yUSD, $130M). Angle: *does a lending oracle read a share-price an attacker can move by donation?*
+- **Storage-collision → proxy re-initialization → governance takeover.** A proxy-admin slot that
+  overlaps the `Initializable` flag lets an attacker re-run an initializer, fabricate voting weight, and
+  pass a treasury-draining proposal (Audius, 18.5M AUDIO — hand-verified). Angle: *can any initializer
+  re-run, and does governance trust state it sets?*
+- **Flash-loan liquidity → spot/LP-price manipulation → over-borrow → drain** (bZx, Inverse, Warp) and
+  **read-only reentrancy → stale LP price → fraudulent liquidation** (Sturdy) — the realized twins of
+  B1's judged read-only-reentrancy/oracle shapes.
+
+Impact realism: realized loss is *measured* severity — a class rated "High" in the abstract that drained
+$197M vs one that netted little is the sharpest `regrade` calibration (§3/§4). Loss concentrates in
+oracle-manipulation, share-inflation, and bridge-signature bugs, not the reentrancy the textbooks lead with.
+
 ## 4. Verdicts and routing
 
 `bounded` · `amplifier_found` · `new_finding_spun_off` · `needs_more_evidence` · `blocked`

@@ -112,9 +112,13 @@ extension**, and a **validation fixture** — not a new engine.
 
 ## 5. Open decisions for the operator
 
-> **Operator decisions (2026-08-05):** sequencing is **B3 → B2 → this build** (B3 first as the cheap,
-> independent win that back-anchors the landed cards; B2 before this build's card severities are
-> finalized). Domain scope is **EVM/Solidity first** (decision 1 settled). Decisions 2–5 remain open.
+> **Operator decisions (2026-08-05 / -08-06) — now recorded in ADR
+> [`docs/decisions/0008-smart-contract-audit-capability.md`](../decisions/0008-smart-contract-audit-capability.md):**
+> sequencing **B3 → B2 → this build** (both corpora now landed in `main`); domain **EVM/Solidity first**
+> (decision 1); **tool stack Foundry + Slither (+Aderyn)**, symbolic/fuzz deferred (decision 2);
+> **thin end-to-end slice first** — 2 seed cards (`evm.reentrancy`, `evm.oracle-price-manipulation`) +
+> a Foundry fork-PoC + one known-vuln fixture and its patched twin — before the full card set
+> (decisions 3–4); planes per §5.5. See ADR 0008 for the Milestone-1 spec + acceptance gate.
 
 1. **Scope: EVM/Solidity first only, or also Move (Sui/Aptos) / Rust-contract (Solana/CosmWasm)?**
    **DECIDED — EVM/Solidity first** — where B1's corpus, the tooling maturity (Foundry/Slither), and the

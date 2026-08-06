@@ -79,6 +79,12 @@ Corpus (rubric spine + Axis B): `skills/oracles/references/defi-contest-adjudica
   = Medium at Golom (C4) but invalid at Aloe II (Sherlock); declining-auction bad-debt = Medium at Ajna
   vs non-issue at Ethereum Credit Guild; read-only-reentrancy = High at Blueberry vs QA at LoopFi
   (`KEEPER_ROLE`-gated). The divergence is the bar, not the mechanism.
+- **Realized loss-by-class (B2 — `skills/oracles/references/defi-exploit-chain-corpus.md`).** Judged
+  severity is *predicted*; the realized-exploit corpus is *measured* — which classes actually drained
+  the most on-chain. Loss concentrates in **oracle/price-manipulation, vault share-inflation, and
+  bridge-signature/proof** bugs (Euler $197M, Cream $130M, BSC Token Hub, Wormhole); classic reentrancy,
+  though common, is not the top realized-loss class. Use it as a prior for which classes carry the
+  highest *impact* ceiling, distinct from the contest *likelihood×impact* bar above.
 
 ## The gate: IN / CONTESTED / THIN
 

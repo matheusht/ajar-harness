@@ -24,14 +24,15 @@ detector or a Foundry run proposes an activation signal or presents an invariant
 
 | Card | Slither detector(s) | Tier | Notes |
 |---|---|---|---|
-| `evm.reentrancy` | `reentrancy-eth`, `reentrancy-no-eth` (internal class `ReentrancyReadBeforeWritten`), `reentrancy-benign`/`-events` | STRONG | plus Aderyn `reentrancy_state_change`; map to the card's strong activation |
+| `evm.reentrancy` | `reentrancy-benign`/`-events` (+ `reentrancy-eth`/`-no-eth`) | STRONG (activation) | **Empirically verified (Slither 0.11.6):** fires on the JPEG'd `YVault.deposit` (`token.safeTransferFrom` → `_mint` after) — but on **BOTH** the vuln and patched refs (2 vs 3 findings), because the fix reorders the *supply read*, not transfer-before-mint. So it is **activation, not a verdict** — confirm-on-fork distinguishes them. Aderyn `reentrancy_state_change` not run. |
 | `evm.read-only-reentrancy-price` | no direct detector — `reentrancy-*` on the writing path + manual "view reads state a guard doesn't cover" | RECON-ONLY | read-only reentrancy has no dedicated Slither detector; static tier is a lead, confirm-on-fork decides |
 
-**Honest gap:** neither Slither nor Aderyn ships a generic oracle-price-manipulation detector; the
-oracle/price class is recon-only at the static tier and leans on the confirm-on-fork step + card
-procedure. Also: Slither/Aderyn are **not installed in the current authoring environment** — the
-detector tier is declared-and-contracted here but was not run this session (Foundry `v1.7.1` IS
-installed and the confirm-on-fork lane is exercised by the Milestone-1 fixture).
+**Empirical note (this session):** Slither `0.11.6` is **installed and run** — the `evm.reentrancy` row
+above is a real result. Its key lesson is the tool-family's whole thesis in miniature: the reentrancy
+detector fires **identically on the vulnerable and the fixed contract**, so a Slither hit is an
+*activation signal*, never a confirmation — the oracle over the confirm-on-fork invariant break (with the
+covered-dry patched twin) is what decides. **Honest gaps:** Aderyn was not run; neither Slither nor
+Aderyn ships a generic oracle-price-manipulation detector (the oracle/price class stays recon-only).
 
 ## What is exposed today vs staged
 
@@ -39,7 +40,13 @@ installed and the confirm-on-fork lane is exercised by the Milestone-1 fixture).
   `forge_build`, `fork_invariant_assert` — all benign, no value movement, no live chain.
 - **Staged (`blocked_until`):** `value_moving_fork_poc` (a fork PoC that MOVES value to demonstrate
   impact) is **Zone-2** — gated on `human_impact_escalation_confirm` + signed scope + containment +
-  cleanup; `symbolic_fuzz_lane` (Halmos/Echidna) is deferred to Milestone 2.
+  cleanup; `symbolic_fuzz_lane` (Halmos/Echidna) stages here.
+
+**Tooling status (this session):** Foundry `v1.7.1`, Slither `0.11.6`, and Halmos `0.3.3` are installed
+and available; Echidna is not installed. Slither is **run** (the empirical `evm.reentrancy` result
+above). The Halmos symbolic lane is ready to activate — the natural first symbolic proof is
+"the v4.9 ERC-4626 vault has no first-depositor profit for ANY donation" over the
+`erc4626-first-depositor` fixture — and is the immediate next tooling increment.
 
 ## Permanent non-negotiables (any phase)
 

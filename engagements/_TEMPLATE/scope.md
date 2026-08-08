@@ -55,6 +55,35 @@ must be exactly `artifact_creation`; containment must be specific and non-placeh
 unbackticked authorization fields fail closed. Even when all fields authorize the exact category, a live human-confirm displays the digest-bound
 action, scope, environment, expiry, and cleanup binding before any artifact is created.
 
+## Impact-maximization mandate (optional, tick to enable)
+- **standing_impact_maximization_mandate:** `no`  ← default. Set to `yes` only with `impact_demo_authorized: yes`.
+
+The operator dictated this mandate by hand on six engagements (cosmos, google-oss-vrp, klever, tron,
+zeom, mercadobitcoin) before it was templated. Tick the field instead of re-writing the paragraph.
+
+When the field is `yes`, the following applies for this engagement:
+
+- Build any local PoC and **escalate each confirmed bug to its maximal demonstrated impact inside the
+  operator's own disposable environment.** Use a loopback or multi-node simulation to show blast
+  radius. Demonstrate fund-integrity classes on locally generated synthetic assets only. Demonstrate
+  key-exposure or RCE classes against locally generated keys only.
+- **Never under-demonstrate a bug.** Demonstrated-severity fidelity is the goal. Push *inside* the
+  sandbox. Never expand the sandbox.
+- **Hard wall, unchanged:** no contact with any live network, node, API, explorer, or service of the
+  target or a third party. No real funds, accounts, keys, or users. The fresh human-confirm gate stays
+  non-waivable for anything that touches live infrastructure, anything that can affect a third party,
+  and any submission or disclosure step.
+
+**Do not restate general methodology in this file.** The binding operating doctrine lives in the
+engine and must be read from there, so that a later edit to the engine does not leave a stale copy in
+an engagement file:
+
+- `engine/persistence.md` — a held vector is a wrong turn, not a dry verdict.
+- `engine/whitebox-analysis.md` §3 — keep-biased multi-round grading; never one-pass kill.
+- `engine/escalation.md` §1 — marginal-contribution severity.
+- `engine/regrade.md` §4a — the unbounded-negative discipline.
+- `engine/pocinator.md` — verification of the verification; do not reward-hack.
+
 ## Accounts / fixtures
 - accounts (owned, same-org if cross-user): ___
 - concurrency: `1`  (raising past 1 requires explicit authorization here)

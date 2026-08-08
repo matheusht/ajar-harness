@@ -12,6 +12,10 @@ description: >
   revert) against the REAL in-scope contract on a local fork, showing WHO is denied WHAT, for how long,
   and at what cost to the attacker.
 type: vuln
+# fixture_status: planned — the fixture directories cited below are NOT built. This card is
+# researched (real incidents, real commits) but NOT calibrated: nothing executes against it.
+# Remove this line only when every cited evals/ fixture directory exists and runs.
+fixture_status: planned
 owasp: "SWC-113 (DoS with Failed Call); SWC-128 (DoS With Block Gas Limit); CWE-400 (Uncontrolled Resource Consumption), CWE-834 (Excessive Iteration). Not an OWASP-web category — this is the EVM smart-contract class."
 atlas: "—"
 patterns: []

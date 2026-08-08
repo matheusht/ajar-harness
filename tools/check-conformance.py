@@ -21,6 +21,7 @@ that any finding is true (the model oracle still adjudicates that). Do not read 
 Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
+import hashlib
 import json
 import os
 import re
@@ -683,6 +684,49 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_doctrine_mirror():
+    """AGENTS.md must stay byte-identical to CLAUDE.md.
+
+    docs/agents/domain.md documents the mirror ("edit both together") and
+    evals/research-kernel/ab-readiness/preregistration.json pins a sha256 of AGENTS.md. A silent
+    divergence breaks the documented convention and invalidates a frozen preregistration record.
+    The convention was prose only until now; this makes it a machine check."""
+    print("\n[doctrine] CLAUDE.md / AGENTS.md mirror")
+    a = os.path.join(ROOT, "CLAUDE.md")
+    b = os.path.join(ROOT, "AGENTS.md")
+    if not (os.path.isfile(a) and os.path.isfile(b)):
+        record(False, "doctrine mirror: both CLAUDE.md and AGENTS.md are present")
+        return
+    da = hashlib.sha256(open(a, "rb").read()).hexdigest()
+    db = hashlib.sha256(open(b, "rb").read()).hexdigest()
+    record(da == db, "AGENTS.md is byte-identical to CLAUDE.md",
+           f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
+
+
+def check_cited_fixtures():
+    """Every fixture directory a card cites must exist, or the card must declare it as planned.
+
+    A card that names a fixture path that was never built reads as calibrated evidence when
+    nothing executes. Front-matter `fixture_status: planned` makes the gap explicit and passes."""
+    print("\n[fixtures] card-cited fixture paths resolve")
+    pat = re.compile(r"evals/[A-Za-z0-9_./-]*?fixtures/([A-Za-z0-9._-]+)/")
+    for subdir in ("vulns", "patterns", "techniques"):
+        for name, path in list_cards(subdir):
+            text = open(path).read()
+            fm = front_matter(text) or ""
+            planned = re.search(r"^fixture_status:\s*planned\s*$", fm, re.MULTILINE) is not None
+            cited = sorted({m.group(0) for m in pat.finditer(text)})
+            for rel in cited:
+                exists = os.path.isdir(os.path.join(ROOT, rel.rstrip("/")))
+                if exists:
+                    record(True, f"{subdir}/{name}: cited fixture exists — {rel}")
+                elif planned:
+                    record(True, f"{subdir}/{name}: {rel} absent, declared fixture_status: planned")
+                else:
+                    record(False, f"{subdir}/{name}: cited fixture exists — {rel}",
+                           "directory not found; build it or declare fixture_status: planned")
+
+
 def main():
     pattern_ids = collect_pattern_ids()
     cap_ids = collect_capability_ids()
@@ -704,6 +748,8 @@ def main():
     check_decision5_record_schemas()
     check_false_discovery_corpus()
     check_adversarial_candidates()
+    check_doctrine_mirror()
+    check_cited_fixtures()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

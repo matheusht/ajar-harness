@@ -17,6 +17,10 @@ description: >
   (aliased storage read, direct-call-reachable initializer, or hijacked delegatecall target) that
   breaks the protocol's own invariant on a real fork.
 type: vuln
+# fixture_status: planned — the fixture directories cited below are NOT built. This card is
+# researched (real incidents, real commits) but NOT calibrated: nothing executes against it.
+# Remove this line only when every cited evals/ fixture directory exists and runs.
+fixture_status: planned
 owasp: "SWC-112 (Delegatecall to Untrusted Callee); CWE-665 (Improper Initialization), CWE-829 (Inclusion of Functionality from Untrusted Control Sphere). Not an OWASP-web category — this is the EVM smart-contract class."
 atlas: "—"
 patterns: []

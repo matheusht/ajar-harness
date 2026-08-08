@@ -11,6 +11,10 @@ description: >
   invalidation write is an activation signal; a finding requires a reproduced replay that gets a real
   signature accepted somewhere the signer never authorized.
 type: vuln
+# fixture_status: planned — the fixture directories cited below are NOT built. This card is
+# researched (real incidents, real commits) but NOT calibrated: nothing executes against it.
+# Remove this line only when every cited evals/ fixture directory exists and runs.
+fixture_status: planned
 owasp: "SWC-121 (Missing Protection against Signature Replay Attack), SWC-117 (Signature Malleability); CWE-347 (Improper Verification of Cryptographic Signature), CWE-294 (Authentication Bypass by Capture-replay). EVM smart-contract class."
 atlas: "—"
 patterns: []

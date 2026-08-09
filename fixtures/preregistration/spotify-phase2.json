@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "PREREG-20260809-spotify-phase2",
+  "recorded_at": "2026-08-09",
+  "status": "declared-before-data",
+  "purpose": "Graduate one operator gate using the standby method, and measure whether removing it costs quality. This file fixes every decision rule BEFORE any data arrives. Nothing below may change once the run starts. A rule changed after seeing results is not a rule.",
+
+  "engagement": {
+    "target": "spotify-backstage-2026-07",
+    "mode": "informed-with-holdout",
+    "authorization": "PENDING — a fresh signed scope.md is required. The run must not start without it. The prior engagement is closed."
+  },
+
+  "gate_under_test": {
+    "name": "oracle-negative re-confirmation",
+    "today": "The operator re-confirms each verdict the oracle has already downgraded, one at a time.",
+    "under_test": "The harness batches negatives and surfaces only disagreements, low-confidence verdicts, and any suspected_success. The operator stays on standby and does not gate.",
+    "why_this_one": "It uses the most operator attention for the least value. The alarm-fatigue and exception-management literature both give the same fix: batch, and surface only exceptions. It is also reversible and produces no artifact, so a bad outcome costs a re-review and nothing else."
+  },
+
+  "standby_method": {
+    "source": "Feng, McDonald & Zhang 2025 (arXiv:2506.12469), 'assisted evaluation'. One paper, not independently validated. Treat the method as reasonable, not proven.",
+    "procedure": [
+      "Run the stage with the operator watching but NOT gating.",
+      "Record every real intervention as it happens, with provenance 'live'.",
+      "Decide at N. Do not decide before N."
+    ]
+  },
+
+  "sample": {
+    "n": 40,
+    "unit": "negative verdict (a candidate the oracle downgraded)",
+    "why_40": "The prior run produced exactly 40 attempts and all 40 carry status 'none_observed'. N matches observed volume rather than being chosen.",
+    "power_limit": "With N=40 and zero misses the rule of three puts the 95% upper bound on the true miss rate at about 7.5%. A clean run does NOT show the gate is safe. It shows the miss rate is probably below 7.5%. Do not report it as proof."
+  },
+
+  "holdout": {
+    "rationale": "The run is informed so cascading has fuel. That makes 're-derives the known findings' meaningless for anything the harness can read. A phase cut fixes this: it is verifiable as a file list, unlike a scrub by finding id, where one missed reference voids the holdout silently.",
+    "custody": "The operator holds these outside the repository and outside the working tree for the whole run. If an agent can read any of them, the measurement is void.",
+    "paths": [
+      "engagements/spotify-backstage-2026-07/evidence/phase5",
+      "engagements/spotify-backstage-2026-07/evidence/phase5-escalation-rounds.md",
+      "engagements/spotify-backstage-2026-07/evidence/phase6-closure-rounds.md",
+      "engagements/spotify-backstage-2026-07/goal-prompts/spotify-backstage-2026-07-goal-prompt-phase5-escalation.md",
+      "engagements/spotify-backstage-2026-07/policy-gate-check.md",
+      "engagements/spotify-backstage-2026-07/PENDING-AFTER-CLOSE.md"
+    ],
+    "answer_key_note": "policy-gate-check.md holds the Critical-reversed-to-High decision. That error survived four phases plus twelve days and is the longest-surviving claim in the intervention corpus. It is the highest-value single test case available."
+  },
+
+  "quality_proxy": {
+    "primary": "Blind re-derivation of the withheld outcomes. Quality holds if the run reaches the withheld conclusions on its own. Quality dropped if the removed gate let a withheld finding through as a false negative, or repeated the Critical severity error.",
+    "secondary": "Count of claims the harness confirms that the operator then refutes.",
+    "not_used": "score_finding.py block rate. It measures package hygiene, not whether the analysis was right."
+  },
+
+  "decision_rule": {
+    "graduate_the_gate_if": [
+      "live interventions on negative verdicts are 0 or 1 across the 40, AND",
+      "no withheld outcome is missed as a false negative, AND",
+      "the Critical severity error is not repeated"
+    ],
+    "keep_the_gate_if": "any of the three conditions fails",
+    "declare_inconclusive_if": "fewer than 40 negative verdicts are produced, or any withheld path was readable during the run",
+    "no_other_outcome": "There is no partial pass. A gate is graduated or it is not."
+  },
+
+  "threats_to_validity": [
+    "Informed mode: structural familiarity substitutes for memorisation. CWE-Trace (arXiv:2606.20502) estimated 84% of nominally contaminated samples carried no usable memorisation signal, so a holdout bounds the problem without removing it.",
+    "N=40 gives a wide interval. See power_limit.",
+    "One engagement, one target. The result does not transfer to a different domain without a repeat.",
+    "The operator watching may change operator behaviour even while on standby (a Hawthorne effect on the human, not the harness)."
+  ]
+}

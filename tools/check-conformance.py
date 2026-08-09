@@ -14,6 +14,9 @@ security semantics:
   - finding fixtures honor the evidence-contract migration gate (Phase 2.5A)
   - the false-discovery corpus has a zero invalid-accept rate
   - the adversarial-candidate corpus is well-formed (>=1 retain, all immutable-touching = block)
+  - AGENTS.md stays byte-identical to CLAUDE.md (a preregistration pins its sha256)
+  - every evals/ fixture directory a card cites exists, or the card declares fixture_status: planned
+  - every intervention record carries an auditable quote and declares its provenance
 
 Structural only: a green run means the evidence CONTRACT is present and well-formed (necessary), NOT
 that any finding is true (the model oracle still adjudicates that). Do not read green as "confirmed".
@@ -684,6 +687,44 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_intervention_corpus():
+    """Every intervention record must carry a quote, and live and backfilled must stay separable.
+
+    The corpus is the baseline for CLM-0001 and the source of the regression corpus for
+    score-finding.py. A record with no quote cannot be audited, so it must not count toward either.
+    Absent corpus is not a failure; the check returns early."""
+    print("\n[interventions] operator-intervention ledger")
+    base = os.path.join(ROOT, "fixtures", "interventions")
+    if not os.path.isdir(base):
+        return
+    files = sorted(f for f in os.listdir(base) if f.endswith(".json"))
+    if not files:
+        return
+    seen = {}
+    for fn in files:
+        doc = load_json(os.path.join(base, fn))
+        entries = doc.get("entries", [])
+        record(len(entries) > 0, f"interventions/{fn}: corpus non-empty")
+        record(bool(doc.get("method")), f"interventions/{fn}: declares its method",
+               "add a `method` field saying how the entries were produced")
+        for e in entries:
+            eid = e.get("intervention_id", "?")
+            refs = e.get("source_refs") or []
+            record(any(r.get("quote") for r in refs),
+                   f"interventions/{eid}: carries an auditable quote",
+                   "no source_ref has a quote")
+            record(e.get("provenance") in ("live", "backfilled"),
+                   f"interventions/{eid}: provenance declared", f"got {e.get('provenance')!r}")
+            dup = eid in seen
+            record(not dup, f"interventions/{eid}: id is unique",
+                   f"also in {seen.get(eid)}" if dup else "")
+            seen[eid] = fn
+            if e.get("machine_checkable"):
+                record(bool(e.get("check_shape")),
+                       f"interventions/{eid}: machine_checkable names its check_shape",
+                       "machine_checkable is true but check_shape is absent")
+
+
 def check_doctrine_mirror():
     """AGENTS.md must stay byte-identical to CLAUDE.md.
 
@@ -750,6 +791,7 @@ def main():
     check_adversarial_candidates()
     check_doctrine_mirror()
     check_cited_fixtures()
+    check_intervention_corpus()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

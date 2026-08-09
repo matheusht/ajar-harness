@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-redteam-harness.local/schemas/intervention.schema.json",
+  "title": "Operator intervention record",
+  "description": "One record per correction the operator or an independent check makes to harness output. This is the instrument CLM-0001 needs: it measures whether operator interventions fall while quality holds. It is also the input the pattern-promotion path has never had.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intervention_id",
+    "engagement_id",
+    "provenance",
+    "stage",
+    "judgement_class",
+    "detected_by",
+    "latency",
+    "claim_before",
+    "claim_after",
+    "root_cause",
+    "source_refs"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "intervention_id": {
+      "type": "string",
+      "pattern": "^INT-[0-9]{8}-[0-9]{3}$",
+      "description": "INT-YYYYMMDD-NNN. The date is the date of the correction, not of the backfill."
+    },
+    "engagement_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory name under engagements/, or 'harness' for a correction to the harness itself."
+    },
+    "provenance": {
+      "enum": ["live", "backfilled"],
+      "description": "live: captured when the correction happened. backfilled: reconstructed later from a written record. Never mix the two in one statistic without saying so."
+    },
+    "stage": {
+      "enum": [
+        "stage-0-narrowing",
+        "stage-1-classify",
+        "stage-2-triples",
+        "stage-3-reachability",
+        "stage-3.5-chain",
+        "stage-4-confirm",
+        "stage-4.25-verify",
+        "stage-5-chainability",
+        "stage-5.25-novelty",
+        "stage-5.5-dossier",
+        "goal-advisory",
+        "post-triage",
+        "packaging",
+        "harness-maintenance"
+      ],
+      "description": "The stage that produced the wrong claim, not the stage that caught it."
+    },
+    "judgement_class": {
+      "enum": ["authorization", "calibration", "persistence", "skepticism", "taste", "process"],
+      "description": "What the operator supplied. authorization and taste are the classes least likely to be automatable."
+    },
+    "detected_by": {
+      "enum": ["operator", "independent-agent", "self", "tool", "external-party"],
+      "description": "self means the same actor that made the claim caught it. external-party means a vendor or third party caught it."
+    },
+    "latency": {
+      "enum": ["same-round", "later-round", "at-packaging", "post-close", "post-filing"],
+      "description": "How long the wrong claim survived. same-round is cheap. Anything later is the expensive class."
+    },
+    "claim_before": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The wrong claim, quoted where possible."
+    },
+    "claim_after": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The corrected claim."
+    },
+    "root_cause": {
+      "enum": [
+        "source-misreading",
+        "measurement-artifact",
+        "claim-propagated-unchecked",
+        "stale-ground-truth",
+        "unit-or-arithmetic",
+        "reward-hacked-verification",
+        "tooling-misreport",
+        "environment-dependence",
+        "wrong-or-destroyed-control",
+        "scope-or-policy",
+        "other"
+      ]
+    },
+    "source_refs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Where the evidence for this record lives. For a backfilled record this is the file and line that documents the correction. A record with no source cannot be audited.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "line": { "type": "integer", "minimum": 1 },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "machine_checkable": {
+      "type": "boolean",
+      "description": "True when a deterministic check could have caught this claim. This field selects the regression corpus for tools/score-finding.py."
+    },
+    "check_shape": {
+      "type": "string",
+      "description": "If machine_checkable, name the check. Example: 'cited path must exist', 'severity vector must recompute'."
+    },
+    "check_family": {
+      "enum": [
+        "existence",
+        "recompute",
+        "cross-doc",
+        "pin-version",
+        "negative-control",
+        "real-path-exec",
+        "refetch-external",
+        "enumeration",
+        "one-off"
+      ],
+      "description": "The reusable check that would catch this class. `one-off` means the shape needs bespoke domain logic and does NOT generalise. Count families, not shapes: a corpus of 52 unique shapes gives a tool 52 special cases, whereas a corpus of 8 families gives it 8 checks. Only non-`one-off` entries scope tools/score-finding.py."
+    },
+    "check_mode": {
+      "enum": ["computable", "attestable"],
+      "description": "computable: a program can decide the claim from the artifacts alone (a path exists, a number recomputes). attestable: a program cannot judge the work, but it can refuse a finding that does not name the required reference (an enumeration census, a negative control, a real-path run). Both are enforceable; only the first is decidable."
+    },
+    "notes": { "type": "string" }
+  }
+}

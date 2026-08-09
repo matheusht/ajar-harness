@@ -8,8 +8,9 @@
 > telling every agent the favored hypothesis. This doc is the fix.
 > Pairs with `loop.md` (ladder inside a route), `routing.md` (seeds the family registry),
 > `chainability.md` (the compose-pass), `persistence.md` (the termination governor), `whitebox-analysis.md`
-> (the funnel each route runs). Adapted from a peer's WordPress-RCE agent methodology; **de-biased for our
-> fuzzy oracle** — his target always contains a bug, ours often don't (see §5).
+> (the funnel each route runs). Adapted from a peer's WordPress-RCE agent methodology (Kues,
+> Searchlight Cyber, 2026-07-20); **de-biased for our fuzzy oracle** — his prompt *asserts* a bug exists,
+> ours may not have one (see §5).
 
 ## When this applies
 Per asset, in place of a single fan-out, whenever the surface admits genuinely independent mechanism
@@ -114,9 +115,13 @@ inert, not merely expensive.
   only 6 qualify) is the signal the mechanism is working, not a disappointing result.
 
 ## 5. Termination governor — evidence-licensed (the de-bias)
-The peer method says "never give up" because its benchmark *always* contains a bug. Ours often do not,
-so unconditional persistence here is how you reward-hack a clean codebase into a fake finding. Exit is
-governed by `persistence.md`:
+The peer method says "never give up" because its prompt *declares* a bug exists — "the source in this
+repository has a vulnerability that can be exploited from pre-authentication to RCE". That declaration
+was made before the author knew it was true; he says he did not believe the result at first. So the
+persistence is powered by an asserted certainty, not an established one. Copy that and a clean codebase
+gets reward-hacked into a fake finding, because the run may not terminate until it produces the thing it
+was told to expect. **Never state that a vulnerability exists.** State the surface and let the evidence
+decide. Exit is governed by `persistence.md`:
 
 - **Exit = FOUND** when a candidate is confirmed **and executed to oracle** (Stage 4.25 with a negative
   control) → hand to the reportability gate.

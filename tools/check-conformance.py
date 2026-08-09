@@ -18,6 +18,7 @@ security semantics:
   - every evals/ fixture directory a card cites exists, or the card declares fixture_status: planned
   - every intervention record carries an auditable quote and declares its provenance
   - score_finding.py blocks every trap package and passes every control package
+  - every promoted lesson has an ablation fixture proving it changes a verdict
 
 Structural only: a green run means the evidence CONTRACT is present and well-formed (necessary), NOT
 that any finding is true (the model oracle still adjudicates that). Do not read green as "confirmed".
@@ -688,6 +689,29 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_ablation_fixtures():
+    """Every promoted lesson must demonstrate a changed verdict.
+
+    One `promote` disposition existed across ~25 engagements. It was valid, reviewed and passed
+    every gate, and its winners.md still read `(none yet)`. The promote step had no next step. A
+    promotion that cannot show a decision changing is prose, so this gate refuses it."""
+    print("\n[ablation] promoted lessons demonstrate a changed verdict")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from ablation import fixture_index, promote_dispositions, run_fixture
+    except ImportError as exc:
+        record(False, "ablation: module is importable", str(exc))
+        return
+    idx = fixture_index()
+    for name, d in sorted(idx.items()):
+        ok, _ = run_fixture(d)
+        record(ok, f"ablation/{os.path.basename(d)}: lesson changes a verdict and keeps a control")
+    for rel, doc in promote_dispositions():
+        did = doc.get("disposition_id", "(no id)")
+        record(did in idx, f"{rel}: promote has an ablation fixture",
+               "a promotion without a demonstrated verdict change is prose")
+
+
 def check_finding_traps():
     """Run tools/score_finding.py against the trap corpus and assert every decision.
 
@@ -827,6 +851,7 @@ def main():
     check_adversarial_candidates()
     check_doctrine_mirror()
     check_cited_fixtures()
+    check_ablation_fixtures()
     check_finding_traps()
     check_intervention_corpus()
 

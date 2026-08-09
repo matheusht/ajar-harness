@@ -19,6 +19,7 @@ security semantics:
   - every intervention record carries an auditable quote and declares its provenance
   - score_finding.py blocks every trap package and passes every control package
   - every promoted lesson has an ablation fixture proving it changes a verdict
+  - the novelty mapper separates a card restatement from an unrelated idea
 
 Structural only: a green run means the evidence CONTRACT is present and well-formed (necessary), NOT
 that any finding is true (the model oracle still adjudicates that). Do not read green as "confirmed".
@@ -689,6 +690,37 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_ideation_mapper():
+    """The novelty mapper must separate a restatement from an unrelated idea.
+
+    A mapper that calls everything novel is as useless as one that calls everything known. This
+    runs its own selftest: every card must map to itself as a rediscovery, and prose from an
+    unrelated domain must land as a novelty-candidate."""
+    print("\n[ideation] novelty mapper separation")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from ideation import load_cards, idf_table, nearest, classify
+    except ImportError as exc:
+        record(False, "ideation: module is importable", str(exc))
+        return
+    cards = load_cards()
+    if not cards:
+        return
+    idf, dflt = idf_table(cards)
+    TH = 0.60
+    hits = sum(1 for c in cards
+               if nearest(" ".join(sorted(c["tokens"])), cards, idf, dflt)[1] >= TH)
+    record(hits == len(cards), "ideation: every card maps to itself as a rediscovery",
+           f"{hits}/{len(cards)}")
+    unrelated = ["the sourdough starter must be fed twice daily with equal parts flour and water",
+                 "migratory geese navigate using the earth magnetic field during autumn",
+                 "concrete cures more slowly at low ambient temperature and retains moisture"]
+    bad = [u for u in unrelated
+           if classify(nearest(u, cards, idf, dflt)[1], TH) != "novelty-candidate"]
+    record(not bad, "ideation: unrelated prose lands as novelty-candidate",
+           f"{len(bad)} misclassified")
+
+
 def check_ablation_fixtures():
     """Every promoted lesson must demonstrate a changed verdict.
 
@@ -851,6 +883,7 @@ def main():
     check_adversarial_candidates()
     check_doctrine_mirror()
     check_cited_fixtures()
+    check_ideation_mapper()
     check_ablation_fixtures()
     check_finding_traps()
     check_intervention_corpus()

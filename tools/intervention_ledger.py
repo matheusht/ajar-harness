@@ -210,9 +210,26 @@ def cmd_report(args):
         early = sum(1 for e in group if e.get("latency") == "same-round")
         print(f"\nearly-catch rate: {early}/{n} = {100.0 * early / n:.1f}%")
 
-        checkable = sum(1 for e in group if e.get("machine_checkable"))
-        print(f"machine-checkable: {checkable}/{n} = {100.0 * checkable / n:.1f}%")
-        print("  -> this share is the ceiling on what tools/score-finding.py can catch.")
+        # Report by reusable family, not by machine_checkable. A corpus of N unique check shapes
+        # gives a tool N special cases; only recurring families scope a general grader.
+        fams = collections.Counter(e.get("check_family") for e in group if e.get("check_family"))
+        reusable = sum(v for k, v in fams.items() if k and k != "one-off")
+        flagged = sum(1 for e in group if e.get("machine_checkable"))
+        if fams:
+            _table("by check family (a family is a reusable check; one-off is not)", fams, n)
+            print(f"\nflagged machine_checkable : {flagged}/{n} = {100.0 * flagged / n:.1f}%")
+            print(f"in a reusable family      : {reusable}/{n} = {100.0 * reusable / n:.1f}%")
+            print("  -> the SECOND number scopes tools/score_finding.py. The first counts claims a")
+            print("     program could check one at a time, which does not generalise into a tool.")
+            modes = collections.Counter(e.get("check_mode") for e in group
+                                        if e.get("check_family") not in (None, "one-off"))
+            for mode, cnt in modes.most_common():
+                note = ("decided from the artifacts" if mode == "computable"
+                        else "cannot be judged, but a missing reference can be refused")
+                print(f"     {mode:11s} {cnt:3d}  {note}")
+        else:
+            print(f"machine-checkable flagged: {flagged}/{n} = {100.0 * flagged / n:.1f}%")
+            print("  -> no check_family assigned yet; do not scope a tool from this number.")
     return 0
 
 

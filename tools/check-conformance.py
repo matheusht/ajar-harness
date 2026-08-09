@@ -17,6 +17,7 @@ security semantics:
   - AGENTS.md stays byte-identical to CLAUDE.md (a preregistration pins its sha256)
   - every evals/ fixture directory a card cites exists, or the card declares fixture_status: planned
   - every intervention record carries an auditable quote and declares its provenance
+  - score_finding.py blocks every trap package and passes every control package
 
 Structural only: a green run means the evidence CONTRACT is present and well-formed (necessary), NOT
 that any finding is true (the model oracle still adjudicates that). Do not read green as "confirmed".
@@ -687,6 +688,41 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_finding_traps():
+    """Run tools/score_finding.py against the trap corpus and assert every decision.
+
+    A grader that blocks everything is useless, so this gates on both directions: every trap must
+    block and every control must pass. Package names carry the expectation — `control-*` must pass,
+    everything else must block. This mirrors fixtures/false-discovery/corpus.json, which gates on
+    invalid_accept_rate == 0."""
+    print("\n[finding-traps] score_finding.py decisions")
+    base = os.path.join(ROOT, "fixtures", "finding-traps")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from score_finding import score
+    except ImportError as exc:
+        record(False, "finding-traps: score_finding is importable", str(exc))
+        return
+    for name in sorted(os.listdir(base)):
+        pkg = os.path.join(base, name)
+        if not os.path.isdir(pkg):
+            continue
+        attest_path = os.path.join(pkg, "attest.json")
+        attest = load_json(attest_path) if os.path.isfile(attest_path) else None
+        res, _ = score(pkg, attest)
+        blocked = bool(res.failures)
+        want_block = not name.startswith("control-")
+        detail = ""
+        if blocked != want_block:
+            detail = ("blocked but should pass: " + "; ".join(
+                f"{c['family']}: {c['detail'] or c['label']}" for c in res.failures)
+                if blocked else "passed but should block")
+        record(blocked == want_block,
+               f"finding-traps/{name}: decision is {'block' if want_block else 'pass'}", detail)
+
+
 def check_intervention_corpus():
     """Every intervention record must carry a quote, and live and backfilled must stay separable.
 
@@ -791,6 +827,7 @@ def main():
     check_adversarial_candidates()
     check_doctrine_mirror()
     check_cited_fixtures()
+    check_finding_traps()
     check_intervention_corpus()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")

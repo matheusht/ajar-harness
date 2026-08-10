@@ -77,6 +77,16 @@ privilege fails, because it does not establish that the attacker can reach the c
 This is the failure ZSec documented: a named pipe that looked exploitable from SYSTEM and was
 unreachable as a standard user. Our own equivalent is any finding whose PoC ran as the operator.
 
+**`proven: not-established`** is a valid declared value. Use it when the proof does not start from an
+attacker position at all — a unit test that constructs the post-bypass state, a harness that begins
+mid-chain. It always blocks, but it blocks as a STATEMENT rather than as an omission. "We know this is
+missing" and "nobody looked" should not look the same in the record.
+
+First real use, 2026-08-10: all eleven spotify findings declare it. The A2 keystone PoC calls
+`mockCredentials.service()`, which constructs the post-bypass state and asserts the real
+`ServerPermissionClient` allows it. That proves the CONSUMER against real code; the PRODUCER half is
+source-verified, not executed.
+
 ### G4 — the adjudication gate
 
 `tools/adjudication_audit.py` over the package's `reviews/` **and over the engagement's whole

@@ -78,6 +78,12 @@ PRIVILEGE_RANK = {
     "system": 3, "root": 3, "kernel": 3, "superuser": 3,
 }
 
+# Declared honestly when the proof does not start from an attacker position at all — a unit test
+# that constructs the post-bypass state, a harness that begins mid-chain. It always blocks, but it
+# blocks as a STATEMENT rather than as an omission, which is the difference between "we know this is
+# missing" and "nobody looked".
+NOT_ESTABLISHED = "not-established"
+
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -161,6 +167,12 @@ def g3_privilege(finding, attest, g):
         g.add("G3", False, "claimed and proven privilege positions are both declared",
               f"claimed={claimed or 'MISSING'}, proven={proven or 'MISSING'}; "
               f"known positions: {', '.join(sorted(set(PRIVILEGE_RANK)))}")
+        return
+    if NOT_ESTABLISHED in (str(claimed).lower(), str(proven).lower()):
+        g.add("G3", False, "the execution position is established",
+              f"claimed={claimed}, proven={proven} — the proof does not start from an attacker "
+              f"position (declared, not omitted); a PoC that constructs the post-bypass state "
+              f"proves the consumer, not the reach")
         return
     rc, rp = _rank(claimed), _rank(proven)
     if rc is None or rp is None:

@@ -800,8 +800,8 @@ def check_finding_lifecycle():
         record(False, "finding-lifecycle: module is importable", str(exc))
         return
     # fixture name suffix -> the gate that must be the blocker
-    expected_gate = {"privilege-mismatch": "G3", "synthetic-review": "G4",
-                     "no-control": "G2", "no-cvss": "G5"}
+    expected_gate = {"privilege-mismatch": "G3", "privilege-not-established": "G3",
+                     "synthetic-review": "G4", "no-control": "G2", "no-cvss": "G5"}
     seen_clear = 0
     for name in sorted(os.listdir(base)):
         pkg = os.path.join(base, name)

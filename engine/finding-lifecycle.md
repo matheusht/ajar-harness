@@ -79,10 +79,15 @@ unreachable as a standard user. Our own equivalent is any finding whose PoC ran 
 
 ### G4 — the adjudication gate
 
-`tools/adjudication_audit.py` over the package's `reviews/`. It blocks a review set that carries the
-signature of generation: one reviewer identity, no dissent, and boilerplate rationale, all together.
-A single review cannot be judged on set statistics, so it passes — but a null input hash fails at any
-count.
+`tools/adjudication_audit.py` over the package's `reviews/` **and over the engagement's whole
+claim_adjudication set**. It blocks a review corpus that carries the signature of generation: one
+reviewer identity, no dissent, and boilerplate rationale, all together.
+
+Auditing the engagement corpus is not optional. The signature is a property of the **corpus**, not of
+one review. A package normally carries the single review that adjudicated it, and one review can
+never show all three signals. Running the gates over the eleven spotify findings on 2026-08-10 passed
+G4 on all eleven, while the engagement's 15-review corpus audited `synthetic`. If the corpus was
+generated, no finding resting on it may promote.
 
 ## 5. The package
 

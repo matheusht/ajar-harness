@@ -173,7 +173,16 @@ def g3_privilege(finding, attest, g):
           f"a proof run at more privilege than the attacker holds does not establish reach")
 
 
-def g4_adjudication(pkg, g):
+def g4_adjudication(pkg, engagement, g):
+    """The synthetic signature is a property of the review CORPUS, not of one review.
+
+    A package usually carries the single review that adjudicated it, and one review can never show
+    single-reviewer / no-dissent / boilerplate together. So this audits the package AND, when an
+    engagement is given, the engagement's whole claim_adjudication set. If that corpus was generated,
+    no finding resting on it may promote.
+
+    Found 2026-08-10 by running the gates over the eleven spotify findings: G4 passed on all eleven
+    while the engagement's 15-review corpus audited `synthetic`."""
     from adjudication_audit import audit, load_reviews
     rdir = os.path.join(pkg, "reviews")
     reviews = load_reviews(rdir) if os.path.isdir(rdir) else []
@@ -183,9 +192,22 @@ def g4_adjudication(pkg, g):
         return
     verdict, signals, stats = audit(reviews)
     fired = sorted(s["signal"] for s in signals if s["fired"])
-    g.add("G4", verdict != "synthetic", "the adjudication is judgement, not generation",
-          f"{stats['reviews']} review(s), {stats['distinct_reviewers']} reviewer(s), "
-          f"{stats['corrections']} correction(s); fired={fired}")
+    detail = (f"package: {stats['reviews']} review(s), {stats['distinct_reviewers']} reviewer(s), "
+              f"{stats['corrections']} correction(s); fired={fired}")
+
+    corpus_verdict = None
+    if engagement:
+        cdir = os.path.join(engagement, "reviews")
+        corpus = load_reviews(cdir) if os.path.isdir(cdir) else []
+        if corpus:
+            corpus_verdict, csig, cstats = audit(corpus)
+            cfired = sorted(s["signal"] for s in csig if s["fired"])
+            detail += (f" | engagement corpus: {cstats['reviews']} review(s), "
+                       f"{cstats['distinct_reviewers']} reviewer(s), "
+                       f"{cstats['corrections']} correction(s); fired={cfired}")
+
+    ok = verdict != "synthetic" and corpus_verdict != "synthetic"
+    g.add("G4", ok, "the adjudication is judgement, not generation", detail)
 
 
 SEV_WORDS = {"critical", "high", "medium", "low", "informational", "none"}
@@ -218,7 +240,7 @@ def g5_severity(pkg, finding, g):
     g.add("G5", True, "a claimed severity carries a CVSS vector that recomputes")
 
 
-def run_gates(pkg):
+def run_gates(pkg, engagement=None):
     g = Gates()
     finding = load_json(os.path.join(pkg, "finding.json")) or {}
     attest = load_json(os.path.join(pkg, "attest.json")) or {}
@@ -226,7 +248,7 @@ def run_gates(pkg):
     g1_real_path(finding, attest, g)
     g2_control(finding, attest, g)
     g3_privilege(finding, attest, g)
-    g4_adjudication(pkg, g)
+    g4_adjudication(pkg, engagement, g)
     g5_severity(pkg, finding, g)
     return g, finding
 
@@ -239,7 +261,7 @@ def append_log(engagement, record):
 
 
 def cmd_gates(args):
-    g, _ = run_gates(args.package)
+    g, _ = run_gates(args.package, getattr(args, "engagement", None))
     report(args, g, args.package, moved=None)
     return 1 if g.blocked else 0
 
@@ -247,7 +269,7 @@ def cmd_gates(args):
 def cmd_promote(args):
     pkg = os.path.abspath(args.package)
     fid = os.path.basename(pkg.rstrip("/"))
-    g, _ = run_gates(pkg)
+    g, _ = run_gates(pkg, args.engagement)
     dest = os.path.join(args.engagement, PROVEN, fid)
     moved = False
     if not g.blocked:
@@ -335,6 +357,8 @@ def main():
 
     p = sub.add_parser("gates", help="run the gates without moving anything")
     p.add_argument("package")
+    p.add_argument("--engagement", default=None,
+                   help="also audit this engagement's whole review corpus for G4")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_gates)
 

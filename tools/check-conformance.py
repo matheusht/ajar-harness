@@ -825,6 +825,22 @@ def check_finding_lifecycle():
     record(seen_clear >= 1, "lifecycle: at least one fixture promotes cleanly",
            "a gate set that blocks everything is useless")
 
+    # G4 regression: the synthetic signature lives in the review CORPUS, not in one review.
+    # A package carrying a single plausible review is indistinguishable on its own, so G4 must also
+    # audit the engagement's whole claim_adjudication set. Running the gates over the eleven spotify
+    # findings on 2026-08-10 passed G4 on all eleven while the engagement corpus audited synthetic.
+    corp = os.path.join(ROOT, "fixtures", "lifecycle-corpus")
+    pkg = os.path.join(corp, "unproven", "F-CORP")
+    if os.path.isdir(pkg):
+        alone, _ = run_gates(pkg)
+        with_corpus, _ = run_gates(pkg, corp)
+        record([r["gate"] for r in alone.blocked] == [],
+               "lifecycle-corpus: the package alone shows nothing",
+               f"blocked_by={[r['gate'] for r in alone.blocked]}")
+        record([r["gate"] for r in with_corpus.blocked] == ["G4"],
+               "lifecycle-corpus: the engagement corpus is what blocks G4",
+               f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
 
 def check_adjudication_audit():
     """Run tools/adjudication_audit.py against the fixture pair and assert both directions.

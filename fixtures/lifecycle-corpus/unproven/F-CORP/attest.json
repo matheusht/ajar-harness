@@ -1,0 +1,5 @@
+{
+ "real-path-exec": "ran against the pinned build",
+ "negative-control": "control did not fire",
+ "independent-review": "reviewer-a, fresh context"
+}

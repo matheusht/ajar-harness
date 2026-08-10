@@ -1,0 +1,5 @@
+{
+ "real-path-exec": "PoC ran against the pinned build, not a mock",
+ "negative-control": "attempt-control exercised the guarded branch and did not fire",
+ "independent-review": "two reviewers, fresh context, briefed to refute"
+}

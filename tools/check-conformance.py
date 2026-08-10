@@ -779,6 +779,53 @@ def check_finding_traps():
                f"finding-traps/{name}: decision is {'block' if want_block else 'pass'}", detail)
 
 
+def check_finding_lifecycle():
+    """Run the promotion gates against the lifecycle fixtures and assert both directions.
+
+    Package names carry the expectation: `promote-*` must clear every gate, `block-*` must be
+    blocked, and each block fixture must be blocked by the ONE gate its name identifies. Testing the
+    specific gate matters — a fixture that blocks for the wrong reason would pass a naive both-
+    directions check while the gate it was built for silently does nothing.
+
+    Grounded in spotify-backstage-2026-07 (2026-08-09): findings were written straight into
+    findings/ with a self-set status. See engine/finding-lifecycle.md."""
+    print("\n[finding-lifecycle] promotion gates")
+    base = os.path.join(ROOT, "fixtures", "lifecycle")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+    except ImportError as exc:
+        record(False, "finding-lifecycle: module is importable", str(exc))
+        return
+    # fixture name suffix -> the gate that must be the blocker
+    expected_gate = {"privilege-mismatch": "G3", "synthetic-review": "G4",
+                     "no-control": "G2", "no-cvss": "G5"}
+    seen_clear = 0
+    for name in sorted(os.listdir(base)):
+        pkg = os.path.join(base, name)
+        if not os.path.isdir(pkg):
+            continue
+        g, _ = run_gates(pkg)
+        blocked = [r["gate"] for r in g.blocked]
+        want_block = not name.startswith("promote-")
+        record(bool(blocked) == want_block,
+               f"lifecycle/{name}: decision is {'block' if want_block else 'promote'}",
+               f"blocked_by={blocked}")
+        if not want_block:
+            seen_clear += 1
+            continue
+        suffix = name.split("block-", 1)[-1]
+        want_gate = expected_gate.get(suffix)
+        if want_gate:
+            record(blocked == [want_gate],
+                   f"lifecycle/{name}: blocked by {want_gate} and nothing else",
+                   f"blocked_by={blocked}")
+    record(seen_clear >= 1, "lifecycle: at least one fixture promotes cleanly",
+           "a gate set that blocks everything is useless")
+
+
 def check_adjudication_audit():
     """Run tools/adjudication_audit.py against the fixture pair and assert both directions.
 
@@ -930,6 +977,7 @@ def main():
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()
+    check_finding_lifecycle()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

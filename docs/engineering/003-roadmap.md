@@ -189,7 +189,62 @@ recoverable. Build the entries from the documented corrections instead. State th
 does not measure the catch rate for new error shapes. Every regression suite has this limit. Do not
 report the number as a false-negative rate.
 
-## Priority order and reason
+## REVISION 2026-08-10 — the organising idea changed
+
+This roadmap was written around **graduating gates**: pick a human check, run a standby experiment,
+remove it. Phase 2 tried that and the answer was KEEP (`D-04`). The attempt was not wasted, but the
+framing was wrong.
+
+The better lever is **making checks decidable** (`D-07`). Every check that becomes computable is
+autonomy gained while trusting nothing extra. It is a capability you build, not a risk you take.
+
+Evidence from one session: G4 was judgement until 2026-08-09, G3 until 2026-08-10. Both now run with
+no human. Neither needed an experiment or a graduation.
+
+Gate graduation is not cancelled. It is second place.
+
+### Status at 2026-08-10
+
+| Phase | State |
+|---|---|
+| 0 Hygiene | done |
+| 1a Intervention ledger | done — 62 backfilled, 3 live |
+| 1b Deterministic grader | done |
+| 2 Graduate a gate | attempted; answer is KEEP (`D-04`); retry needs a fresh engagement |
+| 3 Learning loop | done — ablation gate |
+| 4 Evaluation primitive | direction decided (`D-08`); scoped to a Go experiment |
+| 5 Ideation experiments | half — tool built and used once; the Q-02 test has not run |
+
+### Added this revision
+
+**Phase 6 — finding lifecycle. DONE 2026-08-10.** Findings start in `unproven/`; promotion runs six
+gates (`D-05`, `engine/finding-lifecycle.md`). This is the default inversion, and it is the piece that
+makes an unattended run fail loudly instead of quietly.
+
+**Phase 7 — mechanical reachability.** Workstream A of
+`docs/research/static-analysis-and-knowledge-base-plan.md`. Licence question first, then a Go
+experiment producing a miss rate. Confirm only, never kill.
+
+**Phase 8 — cross-engagement memory.** Workstream B of the same plan. One format, two entry kinds,
+JSONL in git, gated by the existing ablation rule. Changes order, never kills (`D-09`).
+
+**Phase 9 — make G1 and G2 computable.** They are attestable today, so a human writes "yes, this ran".
+They become computable once attempt records carry a machine-readable execution context. Small, bounded,
+and it is autonomy under `D-07`.
+
+### Revised order
+
+| Order | Phase | Why |
+|---|---|---|
+| 1 | Phase 8 — memory | no decision blocks it; the only compounding machinery identified |
+| 2 | Phase 9 — G1/G2 computable | small, closed-loop, direct autonomy gain |
+| 3 | Phase 7 — reachability | high value, needs the licence answer and the experiment first |
+| 4 | Phase 2 retry | needs a fresh engagement with no answer key |
+| 5 | Phase 5 Q-02 | rides on a real engagement we run twice; not scheduled alone |
+
+---
+
+## Priority order and reason (superseded 2026-08-10 — kept for the record)
 
 Revised 2026-08-08 after the closed-loop analysis above. Phase 3 moved ahead of Phase 2, because
 Phase 3 is closed-loop and Phase 2 is not.

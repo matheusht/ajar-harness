@@ -1,0 +1,193 @@
+{
+ "adjudication": {
+  "justification": "Independent claim adjudication review.",
+  "review_ref": "review-F-OIDC3-225249"
+ },
+ "change_reason": "Initial registration of the confirmed finding from the 2026-07/2026-08 engagement evidence.",
+ "claims": {
+  "attacker_model": "authenticated but unprivileged Backstage user",
+  "conflicting_evidence": [],
+  "impact_claims": [
+   {
+    "claim_id": "claim-impact",
+    "evidence_refs": [
+     "artifact-registration-sha256:39dce262a",
+     "artifact-registration-sha256:6f74cd793",
+     "artifact-registration-sha256:a380ba755",
+     "artifact-registration-sha256:6ccf19eba"
+    ],
+    "statement": "Full Backstage user token for the victim identity with no client authentication; stolen refresh token renewable for up to a year.",
+    "status": "demonstrated"
+   }
+  ],
+  "mechanism": {
+   "claim_id": "claim-mechanism",
+   "evidence_refs": [
+    "artifact-registration-sha256:39dce262a",
+    "artifact-registration-sha256:6f74cd793",
+    "artifact-registration-sha256:a380ba755",
+    "artifact-registration-sha256:6ccf19eba"
+   ],
+   "statement": "exchangeCodeForToken takes no client_id and never authenticates the DCR client; DCR registration sets requiresPkce:false; the server advertises client_secret_basic/post it never enforces."
+  },
+  "preconditions": [
+   "experimental DCR/CIMD flags enabled (reference config)",
+   "a valid authorization code or stolen refresh token"
+  ],
+  "reachability": {
+   "causal_spine": [
+    "entrypoint",
+    "missing control",
+    "state transition"
+   ],
+   "claim_id": "claim-reach",
+   "evidence_refs": [
+    "artifact-registration-sha256:39dce262a",
+    "artifact-registration-sha256:6f74cd793",
+    "artifact-registration-sha256:a380ba755",
+    "artifact-registration-sha256:6ccf19eba"
+   ],
+   "statement": "Any attacker holding a valid authorization code (or the victim's refresh token) redeems it with zero client credentials; refresh client auth is optional, renewable up to 1 year."
+  },
+  "uncertainty": [
+   "deployment prevalence / config-gating may vary"
+  ]
+ },
+ "classification": {
+  "domain": "broken-authentication",
+  "severity": {
+   "label": "high",
+   "rationale": "Vector derived by the orchestrator 2026-08-10 and NOT independently reviewed. G5 checks only that a vector exists and recomputes; the metric choices are judgement.",
+   "system": "cvssv31",
+   "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+  },
+  "weakness_identifiers": [
+   {
+    "id": "CWE-287",
+    "namespace": "CWE"
+   }
+  ]
+ },
+ "engagement_id": "spotify-backstage-2026-07",
+ "finding_id": "F-OIDC3",
+ "proof": {
+  "claim_proofs": [
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:39dce262a",
+     "artifact-registration-sha256:6f74cd793",
+     "artifact-registration-sha256:a380ba755",
+     "artifact-registration-sha256:6ccf19eba"
+    ],
+    "attempt_refs": [
+     "attempt-F-OIDC3-primary-225232"
+    ],
+    "claim_id": "claim-mechanism",
+    "control_refs": [
+     "attempt-F-OIDC3-neg-225238"
+    ],
+    "replay_refs": [
+     "attempt-F-OIDC3-replay-225244"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:39dce262a",
+     "artifact-registration-sha256:6f74cd793",
+     "artifact-registration-sha256:a380ba755",
+     "artifact-registration-sha256:6ccf19eba"
+    ],
+    "attempt_refs": [
+     "attempt-F-OIDC3-primary-225232"
+    ],
+    "claim_id": "claim-reach",
+    "control_refs": [
+     "attempt-F-OIDC3-neg-225238"
+    ],
+    "replay_refs": [
+     "attempt-F-OIDC3-replay-225244"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:39dce262a",
+     "artifact-registration-sha256:6f74cd793",
+     "artifact-registration-sha256:a380ba755",
+     "artifact-registration-sha256:6ccf19eba"
+    ],
+    "attempt_refs": [
+     "attempt-F-OIDC3-primary-225232"
+    ],
+    "claim_id": "claim-impact",
+    "control_refs": [
+     "attempt-F-OIDC3-neg-225238"
+    ],
+    "replay_refs": [
+     "attempt-F-OIDC3-replay-225244"
+    ]
+   }
+  ],
+  "contamination_disposition": "ruled_out",
+  "control_applicability": {
+   "negative": "required",
+   "positive": "not_applicable",
+   "rationale": "Matched negative controls and fresh replay establish the bounded claim.",
+   "replay": "required"
+  },
+  "evidence_refs": [
+   "artifact-registration-sha256:39dce262a",
+   "artifact-registration-sha256:6f74cd793",
+   "artifact-registration-sha256:a380ba755",
+   "artifact-registration-sha256:6ccf19eba"
+  ],
+  "fresh_state_properties": [
+   "fresh node 24 run against pinned commit cfb9f07"
+  ],
+  "negative_control_refs": [
+   "attempt-F-OIDC3-neg-225238"
+  ],
+  "positive_control_refs": [],
+  "primary_attempt_refs": [
+   "attempt-F-OIDC3-primary-225232"
+  ],
+  "replay_refs": [
+   "attempt-F-OIDC3-replay-225244"
+  ]
+ },
+ "recorded_at": "2026-08-09T22:53:03Z",
+ "revision": 1,
+ "schema_version": 3,
+ "scope_provenance": {
+  "environment_ref": "preflight-registration-runtime-3",
+  "provenance": {
+   "actor": {
+    "id": "reviewer-external-canonical",
+    "role": "reviewer"
+   },
+   "card_versions": [],
+   "model": null,
+   "prompt_version": null,
+   "provider": null,
+   "tool_versions": []
+  },
+  "scope_hash": "sha256:58783846431940a68dbe89dbe4d58468f86596c34ffef9f6ef3e842bd569efea",
+  "target_refs": []
+ },
+ "search_linkage": {
+  "candidate_refs": [
+   "candidate-oidc-confidential-client-binding-replay"
+  ],
+  "hypothesis_refs": [
+   "hypothesis-oidc-confidential-client-binding-replay"
+  ]
+ },
+ "supersedes_revision": null,
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "not-established",
+  "note": "No PoC in this engagement was verified to run from the claimed attacker position. Declared, not omitted."
+ }
+}

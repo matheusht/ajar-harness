@@ -1,0 +1,41 @@
+{
+ "schema_version": 1,
+ "review_id": "review-CTL-3",
+ "engagement_id": "fixture-adjudication",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F-CTL-3",
+ "entity_ref": "F-CTL-3",
+ "recorded_at": "2026-08-09T18:00:00Z",
+ "input_refs": [
+  "attempt-F-CTL-3"
+ ],
+ "input_hash": "sha256:abababababababababababababababababababababababababababababababab",
+ "evidence_refs": [
+  "artifact-F-CTL-3"
+ ],
+ "conflicting_evidence": [
+  {
+   "ref": "artifact-F-CTL-3-b",
+   "note": "log shows the guard held on the sibling path"
+  }
+ ],
+ "independence": {
+  "reviewer_id": "reviewer-c",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-review-CTL-3",
+  "reviewer_session_id": "session-review-CTL-3",
+  "originating_run_id": "attempt-F-CTL-3",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism and control linkage."
+ },
+ "verdict": "supported_with_correction",
+ "rationale": "Mechanism holds; the impact statement overstated scope to all tenants.",
+ "corrections": [
+  {
+   "field": "claims.impact_claims",
+   "correction": "single tenant, not all"
+  }
+ ],
+ "required_next_actions": []
+}

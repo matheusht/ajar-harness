@@ -209,6 +209,71 @@ ATTESTATIONS = {
 }
 
 
+NULL_HASH = "sha256:" + "0" * 64
+
+
+def _package_reviews(docs):
+    """Every review record carried inside the package, parsed."""
+    out = []
+    for name, text in docs.items():
+        if not name.endswith(".json"):
+            continue
+        try:
+            obj = json.loads(text)
+        except ValueError:
+            continue
+        for rec in (obj if isinstance(obj, list) else [obj]):
+            if isinstance(rec, dict) and rec.get("review_type") == "claim_adjudication":
+                out.append((name, rec))
+    return out
+
+
+def check_adjudication(docs, attest, res):
+    """A package must not carry an adjudication it generated for itself.
+
+    Two things are decidable here. A placeholder input hash is not a binding, so it fails outright.
+    And a review that ASSERTS independence — fresh context, no prior verdict visible, a disconfirming
+    objective — states something the package cannot substantiate on its own, so it must name the
+    reference, exactly like the other attestable families.
+
+    When the package carries three or more reviews the set-level detector applies too. See
+    tools/adjudication_audit.py for why these signals, and spotify-backstage-2026-07 for the case."""
+    reviews = _package_reviews(docs)
+    if not reviews:
+        return
+
+    for name, rec in reviews:
+        if rec.get("input_hash") == NULL_HASH:
+            res.add(False, "adjudication", "computable",
+                    f"{name}: review input_hash is a real binding",
+                    f"{rec.get('review_id')} carries the all-zero placeholder")
+
+    asserts_independence = [
+        (name, rec) for name, rec in reviews
+        if (rec.get("independence") or {}).get("fresh_context") is True
+        or (rec.get("independence") or {}).get("prior_verdict_visible") is False]
+    if asserts_independence:
+        ref = (attest or {}).get("independent-review")
+        res.add(bool(ref), "independent-review", "attestable",
+                "attestation present — independent-review",
+                "a review asserting fresh context or a disconfirming objective must name the "
+                "reviewer's run; add 'independent-review' to the attestation file "
+                f"({len(asserts_independence)} such review(s))")
+
+    if len(reviews) >= 3:
+        try:
+            from adjudication_audit import audit
+        except ImportError:
+            return
+        verdict, signals, stats = audit([r for _, r in reviews])
+        fired = sorted(s["signal"] for s in signals if s["fired"])
+        res.add(verdict != "synthetic", "adjudication", "computable",
+                "package reviews show judgement, not generation",
+                f"{stats['reviews']} reviews, {stats['distinct_reviewers']} reviewer(s), "
+                f"{stats['corrections']} corrections, {stats['distinct_rationales']} rationale(s); "
+                f"fired={fired}")
+
+
 def check_attestations(docs, attest, res):
     blob = "\n".join(docs.values())
     for family, (trigger, why) in ATTESTATIONS.items():
@@ -233,6 +298,7 @@ def score(root, attest=None):
     check_recompute(docs, res)
     check_cross_doc(docs, res)
     check_pin_version(docs, res)
+    check_adjudication(docs, attest, res)
     check_attestations(docs, attest, res)
     return res, docs
 

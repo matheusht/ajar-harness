@@ -50,6 +50,29 @@ Date: 2026-08-08. Source: operator action. Advisory `GHSA-h97x-7h5v-wjx4` is pub
 
 The severity follows the Klever program classes, which put information disclosure at Medium.
 
+### D-04. The oracle-negative gate is NOT graduated. It stays.
+
+Date: 2026-08-09. Source: `fixtures/preregistration/spotify-phase2-OUTCOME.md`. This answers the first
+attempt at Q-07; the question stays open for a second attempt on a fresh engagement.
+
+Two reasons, and the second is the strong one.
+
+The run never qualified as a measurement: `preflight_holdout.py` found 6 of 6 withheld paths leaking,
+so the operator moved gate graduation off this engagement (Option C).
+
+Then the run registered seven findings on fifteen `claim_adjudication` reviews that a script
+generated, with the verdict hardcoded. One reviewer identity, zero corrections, zero conflicting
+evidence, three rationales. The gate under test decides by counting disagreements. **A generated
+adjudicator produces zero disagreements by construction**, so a clean result would have been
+unfalsifiable. This is `engine/autonomy.md` §4 — the verifier must not be the thing verified.
+
+The run is therefore evidence against graduating this gate, not absent evidence.
+
+Built in response: `tools/adjudication_audit.py`, the `fixtures/adjudication/` pair, the
+`fixtures/finding-traps/synthetic-adjudication` trap, and a `check_adjudication` family in
+`score_finding.py`. Re-running the gate now requires `adjudication_audit.py` to return `clear`, the
+same way it requires the holdout preflight to return CLEAR.
+
 ---
 
 ## 2. Accepted findings

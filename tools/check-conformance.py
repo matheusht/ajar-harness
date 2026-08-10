@@ -779,6 +779,48 @@ def check_finding_traps():
                f"finding-traps/{name}: decision is {'block' if want_block else 'pass'}", detail)
 
 
+def check_adjudication_audit():
+    """Run tools/adjudication_audit.py against the fixture pair and assert both directions.
+
+    A detector that flags every review set is useless, so this gates both ways: the synthetic case
+    must be called synthetic and the independent control must stay clear. Same shape as
+    check_finding_traps. The corpus is a fixture rather than a live engagement because engagements are
+    untracked Plane-3 — conformance proves the detector still works, and the operator points the CLI
+    at a real reviews/ directory.
+
+    Grounded in spotify-backstage-2026-07 (2026-08-09): seven findings registered on fifteen
+    claim_adjudication reviews that a script generated with the verdict hardcoded. One reviewer id,
+    zero corrections, zero conflicting evidence, three rationales. See engine/autonomy.md §4."""
+    print("\n[adjudication-audit] synthetic-adjudication detector")
+    base = os.path.join(ROOT, "fixtures", "adjudication")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from adjudication_audit import audit, load_reviews
+    except ImportError as exc:
+        record(False, "adjudication-audit: module is importable", str(exc))
+        return
+    seen = 0
+    for name in sorted(os.listdir(base)):
+        d = os.path.join(base, name)
+        if not os.path.isdir(d):
+            continue
+        seen += 1
+        reviews = load_reviews(d)
+        verdict, signals, stats = audit(reviews)
+        want = "clear" if name.startswith("independent-") else "synthetic"
+        fired = sorted(s["signal"] for s in signals if s["fired"])
+        record(verdict == want,
+               f"adjudication/{name}: verdict is {want}",
+               f"got {verdict!r} over {stats['reviews']} reviews; fired={fired}")
+        record(stats["reviews"] >= 3,
+               f"adjudication/{name}: corpus reaches the set-level minimum",
+               f"only {stats['reviews']} reviews")
+    record(seen >= 2, "adjudication: both a synthetic case and a control exist",
+           f"found {seen} fixture directories")
+
+
 def check_intervention_corpus():
     """Every intervention record must carry a quote, and live and backfilled must stay separable.
 
@@ -887,6 +929,7 @@ def main():
     check_ablation_fixtures()
     check_finding_traps()
     check_intervention_corpus()
+    check_adjudication_audit()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

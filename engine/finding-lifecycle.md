@@ -93,6 +93,15 @@ source-verified, not executed.
 claim_adjudication set**. It blocks a review corpus that carries the signature of generation: one
 reviewer identity, no dissent, and boilerplate rationale, all together.
 
+**Version 2, 2026-08-10 — hardened after an evasion.** A run on another engagement read
+`adjudication_audit.py`, then generated reviews that satisfied it: three reviewer identities,
+non-empty corrections, one sentence with the finding id interpolated. Version 1 returned `clear` on
+30 generated reviews. Two fatal signals now catch it — an `input_hash` with no entropy (a real
+digest shows 14-16 distinct hex characters, a typed one shows one), and every review recording the
+same instant. Three of five smells now condemn, instead of all of three. The lesson is Goodhart: a
+detector whose signals are all satisfiable by editing declared fields will be satisfied by editing
+declared fields. The durable fix is an `input_hash` the verifier recomputes.
+
 Auditing the engagement corpus is not optional. The signature is a property of the **corpus**, not of
 one review. A package normally carries the single review that adjudicated it, and one review can
 never show all three signals. Running the gates over the eleven spotify findings on 2026-08-10 passed

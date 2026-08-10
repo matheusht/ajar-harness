@@ -5,11 +5,11 @@
  "review_type": "claim_adjudication",
  "proposed_finding_id": "F-CTL-4",
  "entity_ref": "F-CTL-4",
- "recorded_at": "2026-08-09T18:00:00Z",
+ "recorded_at": "2026-08-09T17:31:40Z",
  "input_refs": [
   "attempt-F-CTL-4"
  ],
- "input_hash": "sha256:abababababababababababababababababababababababababababababababab",
+ "input_hash": "sha256:0d545eb3fcb378fb0f134ae4b5a34e5175db74e7128cd6f9659cfdf7731a859c",
  "evidence_refs": [
   "artifact-F-CTL-4"
  ],

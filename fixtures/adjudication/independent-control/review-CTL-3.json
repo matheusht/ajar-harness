@@ -5,19 +5,16 @@
  "review_type": "claim_adjudication",
  "proposed_finding_id": "F-CTL-3",
  "entity_ref": "F-CTL-3",
- "recorded_at": "2026-08-09T18:00:00Z",
+ "recorded_at": "2026-08-09T16:05:19Z",
  "input_refs": [
   "attempt-F-CTL-3"
  ],
- "input_hash": "sha256:abababababababababababababababababababababababababababababababab",
+ "input_hash": "sha256:78354d3a0f972376efaad0ce91af3c769e8e6b34a27e0bd6a60f0d291f3432f9",
  "evidence_refs": [
   "artifact-F-CTL-3"
  ],
  "conflicting_evidence": [
-  {
-   "ref": "artifact-F-CTL-3-b",
-   "note": "log shows the guard held on the sibling path"
-  }
+  "artifact-F-CTL-3-b"
  ],
  "independence": {
   "reviewer_id": "reviewer-c",

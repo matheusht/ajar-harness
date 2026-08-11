@@ -177,3 +177,52 @@ prior beyond the shared recon-signals.md seed. Reports in `evidence/round0/<key>
 
 All leads adjudicated; nothing remaining is a live consensus/fund finding. The final harvest:
 F1 (Medium, promoted), F4 (Low, promoted), F3 (pending kill-pair), plus hardening notes.
+
+## Round E1 — cascading/escalation/chainability (2026-08-11, 16 hunters, 5 timed out mid-experiment)
+
+Big-picture step-back (orchestrator): money-creation lane (fee accounting), the missing two-node
+lab, the incidental parent_composer crash, AA issueAsset precision, multisig paths, the F3→F4
+chain edge.
+
+| lane | verdict | decisive evidence |
+|---|---|---|
+| E1-1 fee accounting | **capped (orchestrator OV-1; E1-1 timed out mid-verification)** | declared fee burned from inputs (validation.js:2654-2656); delta-only settlement (storage.js:1246-1261); recipient override (storage.js:1458-1465); double-application candidate traced single-application under locks — ER-4 verifying |
+| E1-2 fork race | **capped** | conflict machinery never fires on two 'good' units (main_chain.js:1292-1293); grind-space empirically confirmed (8 hashes); value ledger resolves to victim (divisible_asset.js:159) |
+| E1-3 vulnerable-AA demo | TIMED OUT (partial) | retry E2 with the E1-7 lab |
+| E1-4 F1 sibling sweep | **F1 is a one-off** | only primitive with a prover-supplied truth anchor; is_valid_sig/vrf/signed-package sound-as-stated (HN-12) |
+| E1-5 parent_composer crash | **capped → HN-14** | throw empirically reproduced (16 exclusions → unhandled rejection); attacker-influenceable pool; node-side-fixable → out-of-scope class |
+| E1-6 issueAsset cap precision | TIMED OUT | retry E2 |
+| E1-7 two-node lab | **DONE — infrastructure built** | real relay protocol, real validation, stability + 7 balls on both nodes (evidence/lab/e17b-*) |
+| E1-8 merchant exposure | **escalated exposure evidence** | direct-descendant ghost, unbounded window, no signal; Low ceiling intact |
+| E1-9 flood e2e | TIMED OUT | retry E2 with the E1-7 lab |
+| E1-10 fee recipients | **capped** | conserved; witness-rounding dust zero-mean, OP-only |
+| E1-11 storage-size accounting | **held/capped + HN-13** | 16/16 shapes conserved; checkStorageSizes crash-on-mismatch (scheduled, not attacker-reachable) |
+| E1-12 multisig wallet paths | **Q-2 quarantine candidate confirmed** | extended_pubkeys injection → permanent silent multisig-wallet DoS (device.js:214, wallet_defined_by_keys.js:361-378, no removal path) |
+| E1-13 chain graph | **no escalation** | F3→F4 edge corrected (capability-neutrality, not MC status); no amplifier, no new finding |
+| E1-14 big-picture re-scan | **explicit none** | 3 observations (wallet fee-estimation timing, light cache growth, Q-1 remains the only new crash class) |
+| E1-15 reorg corner | **capped (definitively closed)** | retreat NULLs indices; re-advance above the join; resolution atomic with balling |
+| E1-16 issue spend proof | TIMED OUT | retry E2 |
+
+**E1 review round launched (ER-1..ER-4, fresh context):** fork-race + merchant exposure; parent
+composer + storage accounting; multisig + F1 one-off; the orchestrator's fee-accounting
+adjudication (incl. the double-application question — Critical if real).
+
+**E2 plan (next):** retry the 5 timed-out lanes with the working two-node lab; AA trigger
+execution on the network; empirical F3 displacement; HN-5→parent-composer chain; natural-burst F4;
+estimation-asymmetry refund path; light-vendor handshake; archiving edge; governance vote
+economics; exchange-integration surface.
+
+## Round ER — E1 verification (2026-08-11, 4 fresh reviewers) — ALL VERIFIED
+
+| review | verdict | key findings |
+|---|---|---|
+| ER-1 (E1-2 + E1-8) | verified | grind confirmed with nuances (isOP tier on mainnet before unit ASC — no-op for non-witnesses; ranking at main_chain.js:46-48; '8 hashes' lacks a raw artifact); value ledger resolves to victim; merchant exposure verified (raw log: A accepted, both on MC) |
+| ER-2 (E1-5 + E1-11) | verified | crash intercepted by the lab handler (unhandled rejection observed, Node-default crash); LIMIT 16 + ordering + exclusion math verified (rate-change exposure: units paid at low-rate undercut the later min); flood reachability source-traced |
+| ER-3 (E1-12 + E1-4) | verified | multisig DoS chain fully verified against source; F1 one-off confirmed |
+| ER-4 (fee accounting) | verified | conservation verified; double-application: single-application in all direct paths (function boundaries, one-MCI-per-pass, monotonic watermark); ONE conditional residual — MySQL watermark `creation_date` tie-break can go stale across restarts → double-application (double-credit/debit); sqlite immune; MySQL unsupported → **hardening note (HN-15)**, no live money creation |
+
+**E2 launched (16 lanes):** fee-accounting empirical, vulnerable-AA demo, issueAsset precision,
+flood e2e on the two-node lab, issue spend proof, AA trigger on the network, F3 displacement
+empirical, HN-5→parent-composer chain, natural-burst F4, estimation-asymmetry refund,
+witness-rounding dust, light-vendor handshake, archiving edge, governance vote economics,
+exchange-integration surface, Q-1 crash-loop persistence.

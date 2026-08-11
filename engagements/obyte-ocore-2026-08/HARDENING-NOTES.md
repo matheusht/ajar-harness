@@ -110,3 +110,30 @@ claimed as bounty-reportable under Primacy of Rules.
   intended pattern (eventBus nonfatal_error) is commented out beside it.
 - **Why not a finding here:** wallet/device layer, outside the declared DLT surfaces; node-side fix.
   **Fix:** restore the eventBus.emit pattern (delete the throw).
+
+## HN-12 — is_valid_sig / vrf_verify with prover-supplied keys (E1-4)
+- An AA that keys on trigger-supplied pubkeys gets no authenticity (any self-chosen key+sig pair
+  verifies — measured). The opcode makes no identity claim — sound as stated; AA authors must pin
+  the key. is_valid_signed_package replay: last_ball_unit is optional (evaluation.js:1666) — an AA
+  using it for authorization must require freshness itself.
+
+## HN-13 — checkStorageSizes audit throw -> scheduled node crash (E1-11)
+- The periodic checkStorageSizes audit (aa_composer.js:1913-1935) throws on ANY mismatch -> uncaught
+  -> node crash, scheduled at startup + every 10 minutes on every full node (aa_composer.js:2061-2062).
+  Not attacker-reachable today (storage accounting conserved, 16/16 shapes measured) — the HN-2
+  uncaught-throw pattern. Fix: log + repair instead of throw.
+
+## HN-14 — parent_composer throw via fee-inflation (E1-5/OV-4)
+- filterParentsByTpsFeeAndReplace (parent_composer.js:~461) throws "all potential parents underpay
+  the tps fee" when every candidate parent's paid fee is below the local estimate — reachable when
+  HN-5's future-timestamp units inflate the local fee estimate above historical parents' paid fees:
+  the victim wallet's composition crashes. Wallet-layer client DoS; fix: fall back to the best
+  available parent instead of throwing.
+
+## HN-15 — MySQL-only watermark tie-break → double fee application across restarts (ER-4 e5)
+- getLastTpsFeesMci (storage.js:1264-1266) orders by creation_date on MySQL; same-second rows
+  tie-break nondeterministically → a stale watermark makes updateMissingTpsFees reprocess higher
+  mcis → the (address, mci) delta applies twice (double-credit for refunds, double-debit for fees).
+  sqlite immune (rowid). MySQL is "not currently supported" (conf.js:66-68). Not attacker-
+  triggerable (needs restart + same-second settlement + stale tie-break). Fix: SELECT MAX(mci) or
+  a dedicated watermark column.

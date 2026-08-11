@@ -172,3 +172,24 @@ are fixed and already reported. **A fixed bug marks a family, not a target.**
 **Notable methodology outcomes:** the adversarial round refuted a triple-sourced "confirmed" crash
 and an empirically-crashing PoC (state reachability); the refuter pass executed (not assumed) the
 MySQL coercion claim and killed it; a blind terminal round found what 16 directed hunters missed.
+
+## 2026-08-11 — ESCALATION PHASE: E1 + ER complete, E2 running
+
+- **E1 (16 escalation hunters):** 11 delivered, 5 timed out mid-lab (retried in E2). Key results:
+  fork-race capped (grind-space empirically confirmed, value resolves to victim); F1 is a genuine
+  one-off (only unsound primitive); parent_composer crash real (HN-14); **two-node lab built and
+  verified** (real relay protocol, stability + balls — evidence/lab/e17b-*); merchant exposure
+  escalated (Low ceiling intact); reorg corner definitively closed; chain graph: no composition
+  escalates any finding (capability-neutrality); Q-2 quarantine candidate (multisig wallet DoS);
+  storage accounting conserved.
+- **ER (4 fresh reviewers):** ALL E1 claims verified. The money-creation question: conservation
+  verified; double-application single in all direct paths; ONE conditional MySQL watermark
+  residual (HN-15 — sqlite immune, MySQL unsupported).
+- **Orchestrator adjudications:** fee accounting conserved (OV-1); estimation-asymmetry refund
+  conserved (no withdrawal — fee-only account); reorg corner closed (OV-2); ghost-in-fee-window
+  edge real but marginal ~0 (OV-3); HN-5→parent-composer chain (OV-4); grind mechanism
+  structurally confirmed (content→unit hash→tie-break).
+- **E2 (16 lanes) running:** retries of the 5 timed-out lanes on the two-node lab + AA trigger on
+  the network + F3 displacement empirical + HN-5 chain + natural-burst F4 + estimation refund +
+  rounding dust + light handshake + archiving + governance economics + exchange surface + Q-1
+  crash-loop PoC.

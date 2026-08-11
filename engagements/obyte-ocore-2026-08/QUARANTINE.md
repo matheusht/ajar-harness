@@ -21,3 +21,16 @@ service, it is OUT unless scope.md names it, and evidence gathered against it is
   vendor regardless.
 - **Status:** QUARANTINED (not promoted; no finding package). Operator decides whether to widen
   scope or forward as a hardening note (already in HARDENING-NOTES as HN-11 candidate).
+
+## Q-2 — Permanent silent DoS on multisig wallet creation via extended_pubkeys injection (E1-12 W1)
+- **Mechanism (confirmed, real schema + query logic):** `my_xpubkey` is accepted from
+  NON-correspondents (device.js:214 allowlist); wallet.js:162-170 validates only the string length;
+  `addDeviceXPubKey` (wallet_defined_by_keys.js:361-378) inserts the sender as a wallet member with
+  an approval_date, no membership/wallet validation, no FK (initial-db comment). The wallet never
+  reaches ready_date (the attacker never sends member_ready), deleteWallet cannot remove the
+  attacker's row (approval_date blocks decline), cancelWallet is initiator-only, and re-creating
+  with the same xpubkey reproduces the same wallet id → permanent, silent, remote, unauthenticated.
+- **Scope:** wallet layer — outside the declared DLT surfaces. Node-side fix class.
+- **Status:** QUARANTINED (operator scope decision required). Fix direction: require
+  correspondence/membership before accepting my_xpubkey; add an FK or a membership check; allow
+  removal of non-ready members.

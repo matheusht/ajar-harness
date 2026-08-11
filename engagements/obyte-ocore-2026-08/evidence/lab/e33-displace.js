@@ -10,7 +10,7 @@
 // ROLE=hub  PORT=6611 : poster — setup waypoints, then C + grind A, relays, control phase
 "use strict";
 const path = require("path");
-const WebSocket = require("/Users/matheusvsky/Documents/trab/llm-redteam-harness/engagements/obyte-ocore-2026-08-ocore/node_modules/ws");
+const WebSocket = require("/Users/matheusvsky/Documents/trab/obyte-ocore-2026-08-ocore/node_modules/ws");
 const { boot, keys, defOf, sleep } = require("./e17b-boot.js");
 
 const ROLE = process.env.ROLE || "hub";
@@ -84,7 +84,7 @@ async function main() {
 	const composeWithAmount = (key, address, label, amount) => new Promise((resolve, reject) => {
 		ctx.composer.composeJoint({
 			paying_addresses: [address], signing_addresses: [address],
-			outputs: [{ address, amount }],
+			outputs: amount > 0 ? [{ address, amount }, { address, amount: 0 }] : [{ address, amount: 0 }],
 			messages: [{ app: "text", payload_location: "inline", payload: label }],
 			signer: makeSigner2(key),
 			callbacks: {

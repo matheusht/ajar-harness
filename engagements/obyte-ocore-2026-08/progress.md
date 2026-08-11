@@ -193,3 +193,38 @@ MySQL coercion claim and killed it; a blind terminal round found what 16 directe
   the network + F3 displacement empirical + HN-5 chain + natural-burst F4 + estimation refund +
   rounding dust + light handshake + archiving + governance economics + exchange surface + Q-1
   crash-loop PoC.
+
+## 2026-08-11 — ESCALATION CAMPAIGN COMPLETE (4 rounds + 4 review rounds, 76 subagents)
+
+**Structure honored:** E1 (16) → ER (4 reviewers) → E2 (16) → ER2 (4) → E3 (16) → E4 (16) → ER4 (4).
+Every round's claims verified by fresh-context reviewers reading RAW evidence.
+
+### What the escalation phase achieved
+1. **Built the missing infrastructure:** the two-node local Obyte network (real relay protocol,
+   stability + balls, full AA path execution — evidence/lab/e17b-*, e31-aa-demo.js).
+2. **Refuted its own finding:** obyte-2026-08-004 (tps-fee poisoning) DEMOTED — the honest-author
+   freeze is unreachable (M2 elapsed-dilution + funding bound + self-frosting; E3-10 real-path +
+   E2-9 real-network + orchestrator source verification). The count>=30 state was a
+   synthesized-state error — the same class the crash-family refutation exposed in round 1.
+3. **Confirmed F1's fund-impact class:** the whitelist-gated AA bypass (withdrawal + airdrop
+   patterns) demonstrated on the real network (E3-1: BYPASS-CONFIRMED vs bounce).
+4. **Confirmed the merchant-exposure evidence** for F3 (direct-descendant ghost, unbounded window,
+   no signal) with the ceiling at Low (value always resolves to the victim).
+5. **Closed every remaining corner:** reorg, money-creation, natural-burst, estimation asymmetry,
+   rounding dust, issue spend proof, multi-asset uniqueness, archiving, AA self-redefinition,
+   governance votes, light-vendor, exchange surface, AA→AA chains, parent-composer.
+6. **Corrected its own evidence quality:** the tps_interval=60 cache artifact in E2-9/E4-2 (ER4-2
+   found 34/34 DB fees match interval=60); the M1 "count=1 always" overstatement (ER4-1); the
+   E4-2 "fully inert" overstatement (ER4-2) — every correction applied to the records.
+
+### Terminal state
+- **Findings:** 001 Medium (5.3, fund-impact demonstrated) PROVEN; 003 Low (3.7) PROVEN; 004
+  unproven (impact refuted, mechanism = design note + HN-15 + self-frosting economics).
+- **Hardening backlog:** 20 items (HN-1..HN-17 + additions).
+- **Quarantine:** Q-1 (device crash, crash-loop PoC 3/3 verified), Q-2 (multisig wallet DoS) —
+  operator scope decisions.
+- **Coverage:** covered-dry VERIFIED (ER4-4) for the declared in-scope surfaces; ladder lanes
+  covered-dry; blind round no new in-scope family.
+- **Net severity effect of the escalation phase: zero changes to the standing findings, one
+  self-correction, multiple evidence corrections** — the anti-reward-hack outcome the doctrine
+  demands.

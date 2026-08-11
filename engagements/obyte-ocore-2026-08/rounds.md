@@ -297,3 +297,46 @@ design note.
 **E4 (final round) launched:** F4 refutation review, attacker-cost measurement, F3 displacement,
 airdrop-claim demo, F1/F3 package revisions, terminal severity audit, Q-1 PoC, AA→AA chains,
 AA-response fee, lessons + memory + casebook + handoff packages, lifecycle re-run, covered-dry audit.
+
+## Round E4 — final escalation round (2026-08-11, 16 agents, 5 timed out mid-lab)
+
+| lane | verdict |
+|---|---|
+| E4-1 F4 refutation review | **demotion CORRECT**; M1 rationale needs correction (E2-9 produced count=22 — a real lag state exists; the true protections are M2 elapsed-dilution + funding bound + self-frosting) |
+| E4-2 attacker cost | **REFUTED (inert) end-to-end** — real two-node network at mainnet parameters: no impact of any kind (attacker or victim); the trigger state is unreachable |
+| E4-5 F1 package revision | revised — E3-1 fund-impact demo folded in; gates re-run |
+| E4-6 terminal severity audit | **001 Medium (5.3) confirmed** (impact class demonstrated); **003 Low (3.7) confirmed** (ceiling); 004 demoted; NET severity change of the escalation phase = zero + one correction |
+| E4-10 lessons package | drafted (5 cross-engagement lessons incl. the synthesized-state lesson applied to our own finding) |
+| E4-11 memory disposition | finalized (PC-2/3/5 promote, PC-1/4 defer, casebook recommendation) |
+| E4-12 casebook draft | scrubbed structure prepared |
+| E4-13 operator handoff | assembled (findings + hardening + quarantine + coverage + submission framing) |
+| E4-14 lifecycle re-run | gates pass for 001/003; 004 refutation recorded inside the package (re-promotion guarded) |
+| E4-15 covered-dry audit | **COVERED-DRY** — 16 families + 48 escalation lanes exhausted; primitive registry disposed; blind round no new in-scope family; ladder lanes dry |
+| E4-16 pattern promotions | PC-2/3/5 finalized; conformance re-run |
+| E4-3/4/7/8/9 | timed out (lab) — coverage unaffected (per E4-15; the E3-1 demo + E1-2/E1-8 audits cover their questions) |
+
+**E4-REVIEW round launched (4 fresh reviewers)** — final verification of: the demotion + M1
+correction, the end-to-end flood refutation + severity audit, the lifecycle/conformance/handoff,
+and the covered-dry audit.
+
+## Round ER4 — E4 final verification (2026-08-11, 4 fresh reviewers) — ALL VERIFIED WITH CORRECTIONS
+
+- ER4-1: F4 demotion CORRECT; M1 rationale corrected (E2-9 count=22 — a real lag state; the true
+  protections are M2 elapsed-dilution + funding bound + self-frosting).
+- ER4-2: E4-2's "fully inert" OVERSTATED and corrected: tps_interval=60 cache artifact (34/34 DB
+  fees match interval=60); count=31 measured on the real path; elapsed=1 constructible (stamp at
+  last_ball_ts+1, validation bounds only the future); the attacker CAN self-frost (~10.7% of
+  supply on their own chain) — self-grief, out of program scope. NO VICTIM IMPACT → the 004
+  demotion stands.
+- ER4-3: lifecycle gates 6/6 CLEAR for 001/003; 004 refutation recorded in-package; conformance
+  801/0 PASS; handoff accurate (cosmetic warts only).
+- ER4-4: covered-dry VERIFIED for the declared in-scope surfaces; the F4-magnitude evidence
+  quality corrected (tps_interval=60); demotion direction survives independent re-derivation
+  (micro-GBYTE magnitudes at interval=1).
+
+**CAMPAIGN TERMINAL STATE (escalation phase, 4 rounds + 4 review rounds):**
+- 2 proven findings: 001 (Medium 5.3, fund-impact demonstrated), 003 (Low 3.7, ceiling confirmed).
+- 004 unproven (impact refuted; mechanism = design note + HN-15 + self-frosting economics).
+- Hardening: 20 items. Quarantine: Q-1 (crash-loop PoC ready), Q-2 (multisig DoS).
+- Covered-dry verified. The escalation phase's net severity effect: zero changes to the standing
+  findings, one self-correction (004 demoted), multiple evidence-quality corrections applied.

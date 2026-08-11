@@ -77,3 +77,62 @@ the fix (in-scope class if it were reached; the economics keep it below).
 - `attempts.jsonl` — round-1/round-2 attempt records
 
 **CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:N/I:N/A:L** = 3.1
+
+## REFUTATION / DEMOTION (2026-08-11 — escalation phase)
+
+**The honest-author-freeze impact claim is REFUTED. The package is demoted to `unproven/` (no
+status field) and stays there.**
+
+### What the escalation phase established (raw evidence)
+
+- **E3-10 (real storage path, `evidence/lab/e310-exp.js`):** under the pinned 1-MCI-at-a-time
+  stabilization, a 30-unit chain settles with **fee=17 at every step** (count=1 per unit). The
+  count>=30 state that the round-1 R2 drive seeded (last ball at mci 0, tip at mci 30) is
+  **synthesized** — the pinned stabilization never produces it. An honest unit in the lag state
+  with its own wall-clock timestamp settles at **4,917 base** (~0.000005 GBYTE).
+- **E2-9 (real two-node network):** a 20-unit burst settled with fees 0-190 base and balances
+  monotonically INCREASING (+181, the 10x estimation multiplier credit), **no negative balances
+  anywhere**.
+- **Orchestrator source verification:** the settlement runs after the unit's own mci is balled
+  (`stabilizeMci`: `markMcIndexStable` → `addBalls` → `updateTpsFees`, main_chain.js:1243-1258;
+  writer throws if a pass stabilizes >1 MCI, writer.js:718/740), so `last_ball_mci` = the previous
+  mci and the count walk (storage.js:1186-1200) counts 1.
+- **The equal-timestamp trick** (the F4 attacker's elapsed=1 lever) is usable only on the
+  attacker's OWN units → **self-frosting**, not collateral.
+
+### The synthesized-state lesson (applied to our own finding)
+
+The round-1 R2 drive and the round-2 IR-F4 reproduction verified the fee ARITHMETIC against a
+seeded state that the consensus machinery cannot produce — the same error class as the p2 crash
+PoC (a crash on a seeded state is not a reachable crash). The escalation phase's real-network and
+real-path corroboration corrected the record.
+
+### Residual truth (what survives)
+
+1. The exponential settlement fee formula itself (storage.js:1228-1234) — a design note: unbounded
+   relative to balances if a future stabilization change re-opens the window.
+2. **HN-15** — MySQL-only stale-watermark double-application (conditional; sqlite immune; MySQL
+   "not currently supported" per conf.js:66-68); not attacker-triggerable on sqlite.
+3. Self-frosting economics — an attacker can burn ~10.7% of the supply-equivalent on its own chain
+   for no collateral damage (griefing-against-self).
+4. The `tps_fees_balance` API-invisibility (E2-15 F15-1) — monitoring/robustness note.
+
+### Gate status
+
+All six lifecycle gates still pass mechanically (the package is internally consistent); the
+refutation is recorded here and in `finding.json` (conflicting_evidence, uncertainty,
+adjudication). Promotion remains blocked by the refuted impact claim. The finding was demoted by
+the orchestrator (`finding_lifecycle.py demote`, reason recorded in `lifecycle.jsonl`).
+
+
+## CORRECTION (2026-08-11, ER4 review) — evidence-quality note on the F4 refutation numbers
+
+ER4-4 + ER4-2 independently found: the E2-9 and E4-2 real-network flood runs computed settlement
+with tps_interval=60 in the in-memory cache (a lab-config artifact; the DB carries interval=1).
+Their measured trivial fees (0-190 base; +181 credits) are therefore conservative in magnitude.
+Independent re-derivation at the true interval=1: fees ~2 to 1,736 base, negative deltas,
+self-frosting — still ~6 orders of magnitude below the F4 10.7%-of-supply figure, and the
+elapsed-dilution (M2) + funding bound + repayable debt protect honest authors. **The demotion
+direction survives; only the magnitude evidence was softened.** E3-10's S1-S3 arithmetic used
+interval=1 (correct); its M1 "count=1 always" rationale was itself too strong (E2-9 produced
+count=22 — a real lag state exists; the true protections are M2 + self-frosting + funding bound).

@@ -35,7 +35,7 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
 - **lesson kind:** positive
 - **held counterexample:** f11 (forged AA unit) — 3 layers of clean rejection show the intended pattern; the crash sites are the exceptions.
 - **sanitization:** no secrets; file:line + mechanism only
-- **promotion status:** local
+- **promotion status:** **deferred** (PC-1 + PC-4 merged — unreachable states today; hardening note)
 
 ### PC-2 — upgrade-gated rules keyed on position-height without the network-height disjunct (old-DAG rule gating)
 - **observed shape:** consensus rules gated on `last_ball_mci >= constants.X` (the unit's position) where the fix pattern adds `|| (!hasBall && getMinRetrievableMci() >= X)` (the network's height). Rules missing the disjunct are bypassable by attaching a unit to an old DAG part. Found: validation.js:741 (non-AA parent), :1025-1028 (multi-trigger), :986-992 (outer AA-trigger gate), formula/evaluation.js:1652-1687 (signed-package budget, max_complexity=0). The migration is mid-flight — the team fixed the validation-side rules (277fad7/048fbdb) and is missing eval-side + 3 validation sites.
@@ -47,7 +47,7 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
 - **lesson kind:** positive
 - **held counterexample:** definition.js — migration complete (f4-H1); f11 — AA-trigger rules all carry the disjunct.
 - **sanitization:** shapes only
-- **promotion status:** local
+- **promotion status:** **proposed → PROMOTED pending operator review** (card updated with the stabilization cap; conformance re-run clean)
 
 ### PC-3 — vacuously-satisfiable verification predicate in an engine (merkle)
 - **observed shape:** an engine-level predicate that verifies a proof whose root is supplied by the prover and never bound to a committed/anchored value — self-consistency masquerading as membership. `is_valid_merkle_proof` (formula/evaluation.js:1763) vs the sound sibling `in merkle` (definition.js:1006-1031, root must equal a posted feed).
@@ -57,7 +57,7 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
 - **why it may NOT:** usage-dependent (which AAs call it); may be documented as a helper.
 - **candidate destination:** new pattern.verification-root-not-anchored
 - **lesson kind:** positive
-- **promotion status:** local
+- **promotion status:** **proposed → PROMOTED pending operator review** (card authored: skills/patterns/verification-root-not-anchored; conformance re-run clean)
 
 ### PC-4 — uncaught-throw-on-attacker-input in async completion callbacks (crash-pattern family)
 - **observed shape:** `throw Error(...)` inside `conn.query`/async completion callbacks (outside
@@ -70,7 +70,7 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
   (iterator vs completion callback) is the generalizable mechanism.
 - **why it may NOT:** unreachable states today; node managers restart.
 - **lesson kind:** negative (refutation) + hardening
-- **promotion status:** local
+- **promotion status:** **deferred** (merged into PC-1 — the uncaught-throw family is unreachable today; hardening note)
 
 ### PC-5 — bearer-token uniqueness keyed on a party-chosen string (F3 root)
 - **observed shape:** a uniqueness check for a bearer secret keys the conflict match on a
@@ -81,25 +81,20 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
   tokens) where the uniqueness registry is keyed by a claimable identity.
 - **why it may NOT:** the input-layer check partially compensates for public payloads.
 - **lesson kind:** positive
-- **promotion status:** local
+- **promotion status:** **proposed → PROMOTED pending operator review** (card authored: skills/patterns/bearer-token-uniqueness-party-keyed; conformance re-run clean)
 
-## Memory disposition (orchestrator recommendation, 2026-08-11 — operator review required)
+## Memory disposition — FINALIZED (E4-11, 2026-08-11; operator review + scrubbed PR required)
 
-- **PC-1 (uncaught-throw-on-attacker-input):** recommend `defer` — the pattern is real and
-  generalizable (async-completion-callback throws), but all four sites are unreachable today;
-  promote only if a reachable instance appears or as a defensive-engineering pattern.
-- **PC-2 (old-DAG rule gating):** recommend `promote` (with the reachability cap recorded) — the
-  shape is target-agnostic and the disjunct-migration audit method is reusable; extend
-  `pattern.dag-old-dag-rule-gating` with the stabilization-link finding (the kill condition).
-- **PC-3 (verification-root-not-anchored):** recommend `promote` — confirmed finding F1; the
-  shape (prover-supplied root in a verification predicate) generalizes beyond merkle.
-- **PC-4 (crash-pattern family):** recommend `defer` (merge into PC-1).
-- **PC-5 (bearer-token uniqueness party-keyed):** recommend `promote` — confirmed finding F3; the
-  shape (uniqueness registry keyed on a claimable identity instead of the committed value)
-  generalizes to any bearer-token system.
-- **Lessons eligible for field-notes (promote candidates):** (a) SQL-engine semantic claims must
-  be executed, not assumed (P4 lesson); (b) synthesized-state PoCs must prove state reachability —
-  a crash on a seeded state is not a reachable crash (p2/r1 lesson); (c) eval-side gates can lag
-  validation-side disjunct migrations — audit both sides of a rule boundary (S1 lesson);
-  (d) a blind no-new-family round can find what 16 directed families miss (LR-4 lesson — the
-  device-layer crash).
+Per Decision 0005 §11: a disposition is a requirement to decide, not a requirement to promote.
+Full rationale + evidence in `evidence/roundE4/E4-11.md`.
+
+| candidate | disposition | destination | recorded cap |
+|---|---|---|---|
+| PC-1 uncaught-throw pattern | DEFER (merge PC-4) | field-notes | all 4 sites unreachable (address-binding; temp-bad state machine; flow ordering; reorg corner closed) |
+| PC-2 old-DAG rule gating | PROMOTE | extend pattern.dag-old-dag-rule-gating | old-DAG units cannot stabilize → skips affect junk only; the audit method is the durable value |
+| PC-3 verification-root-not-anchored | PROMOTE | new pattern.dag.verification-root-not-anchored | confirmed F1; usage-cap (which AAs use the construct not enumerable) |
+| PC-4 crash-pattern family | DEFER (merge PC-1) | field-notes | same reachability argument |
+| PC-5 bearer-token uniqueness party-keyed | PROMOTE | extend pattern.dag-spend-proof-uniqueness | confirmed F3; impact-cap (no direct theft; merchant exposure triple-contingent) |
+
+**Field-notes lessons (5)** + **casebook PROMOTE recommendation** in `evidence/roundE4/E4-11.md`.
+Engagement disposition: **promote**.

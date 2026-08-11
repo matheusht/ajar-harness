@@ -135,3 +135,40 @@ are fixed and already reported. **A fixed bug marks a family, not a target.**
   unbounded streams, privacy logs, light trust, economics residuals).
 - **Ladder questions:** Q-A (total shutdown) and Q-B (spend-without-key) both COVERED-DRY with
   proof strategies written and sub-conditions enumerated (recon-signals.md final verdicts).
+
+## 2026-08-11 — TERMINAL VERDICT (engagement complete, orchestrator)
+
+**Terminal state: coverage-dry for the declared in-scope surfaces + 3 confirmed findings.**
+
+### Findings (all promoted through the 6 lifecycle gates, each with an independent fresh-context PoC run)
+1. **obyte-2026-08-001 (Medium)** — formula `is_valid_merkle_proof` vacuously satisfiable: the
+   proof root is attacker-supplied and never bound to a committed tree; any AA using it as a
+   membership/authz gate is bypassable. Real-path confirmed + independently re-run (IR-F1).
+2. **obyte-2026-08-003 (Low)** — spend-proof uniqueness check keyed on a party-chosen address:
+   the only network-wide private-payment double-spend detection is defeated; two 'good' units with
+   the same spend proof can coexist on the MC path unresolved. Kill-pair adjudicated (Low;
+   Medium ceiling triple-contingent).
+3. **obyte-2026-08-004 (Low)** — settlement tps-fee exponential and unbounded vs author balances:
+   a 30-unit/1s window charges 10.7% of the supply per settling author; small authors frozen.
+   Real-but-capped (funding bound; below the in-scope bar).
+
+### Ladder questions (the $50k lanes)
+- **Q-A (total network shutdown): COVERED-DRY** — consensus split, stability stall, and
+  chain-halting-unit sub-conditions all enumerated and closed (canonicalization total, validation
+  fail-closed, SQL divergence refuted empirically, crash family unreachable, stability atomic).
+- **Q-B (spend without their key): COVERED-DRY** — signature/definition/forgery sub-conditions
+  all enumerated and closed (malleability refuted, pubkey fail-closed, spend-time revalidation,
+  proof unforgeable without blinding). F3 is a protection-defeat, not key-free spend.
+
+### Coverage audit (100% exhaustion)
+- 16 directed families + 1 blind prior-free sweep + light surface + hub + deps + witness protocol
+  + formula completeness: all in-scope surfaces adjudicated; the blind round found exactly ONE new
+  family (device-layer wallet crash) — quarantined as an adjacent surface (QUARANTINE.md Q-1).
+- 6+ hours of orchestrated multi-agent work; 40 subagents total (16+8+8+8), no quota stop reached.
+- Hardening backlog: 11 items (HARDENING-NOTES.md) for the operator to consider forwarding.
+- Memory disposition recommendation recorded in pattern-candidates.md (operator review required).
+- Cleanup ledger complete (scratch dirs destroyed, symlink removed, no secrets stored).
+
+**Notable methodology outcomes:** the adversarial round refuted a triple-sourced "confirmed" crash
+and an empirically-crashing PoC (state reachability); the refuter pass executed (not assumed) the
+MySQL coercion claim and killed it; a blind terminal round found what 16 directed hunters missed.

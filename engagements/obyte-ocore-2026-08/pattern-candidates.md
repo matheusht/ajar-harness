@@ -82,3 +82,24 @@ evidence by id (`finding://`, `attempt://`), never paste transcripts or live val
 - **why it may NOT:** the input-layer check partially compensates for public payloads.
 - **lesson kind:** positive
 - **promotion status:** local
+
+## Memory disposition (orchestrator recommendation, 2026-08-11 — operator review required)
+
+- **PC-1 (uncaught-throw-on-attacker-input):** recommend `defer` — the pattern is real and
+  generalizable (async-completion-callback throws), but all four sites are unreachable today;
+  promote only if a reachable instance appears or as a defensive-engineering pattern.
+- **PC-2 (old-DAG rule gating):** recommend `promote` (with the reachability cap recorded) — the
+  shape is target-agnostic and the disjunct-migration audit method is reusable; extend
+  `pattern.dag-old-dag-rule-gating` with the stabilization-link finding (the kill condition).
+- **PC-3 (verification-root-not-anchored):** recommend `promote` — confirmed finding F1; the
+  shape (prover-supplied root in a verification predicate) generalizes beyond merkle.
+- **PC-4 (crash-pattern family):** recommend `defer` (merge into PC-1).
+- **PC-5 (bearer-token uniqueness party-keyed):** recommend `promote` — confirmed finding F3; the
+  shape (uniqueness registry keyed on a claimable identity instead of the committed value)
+  generalizes to any bearer-token system.
+- **Lessons eligible for field-notes (promote candidates):** (a) SQL-engine semantic claims must
+  be executed, not assumed (P4 lesson); (b) synthesized-state PoCs must prove state reachability —
+  a crash on a seeded state is not a reachable crash (p2/r1 lesson); (c) eval-side gates can lag
+  validation-side disjunct migrations — audit both sides of a rule boundary (S1 lesson);
+  (d) a blind no-new-family round can find what 16 directed families miss (LR-4 lesson — the
+  device-layer crash).

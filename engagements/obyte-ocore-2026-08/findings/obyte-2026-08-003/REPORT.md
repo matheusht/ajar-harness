@@ -4,7 +4,7 @@
 
 ## Summary (one sentence)
 
-The only network-wide double-spend protection for private payments — the spend-proof uniqueness
+The only network-wide double-spend detection for private payments — the spend-proof uniqueness
 check — keys its conflict match on the unit's claimed author address instead of the output owner
 the proof commits to, so a sender who retains the bearer spend proof can place a second `'good'`
 unit carrying the same proof under a different address, with no conflict detection and no

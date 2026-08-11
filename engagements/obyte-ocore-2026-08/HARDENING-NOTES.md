@@ -103,3 +103,10 @@ suggestions (filing is operator-only).
 All HN items are engagement-local records. The operator decides which (if any) to forward to the
 Obyte Foundation as hardening suggestions alongside the three findings (001/003/004). None are
 claimed as bounty-reportable under Primacy of Rules.
+
+## HN-11 — Scheduled uncaught throw on unknown device key (device.js:431-432)
+- **Mechanism (verified):** remote, zero-cost wallet crash — any peer can deliver a device message
+  encrypted to an unknown key; `decryptPackage` schedules an uncaught throw 100ms later. The
+  intended pattern (eventBus nonfatal_error) is commented out beside it.
+- **Why not a finding here:** wallet/device layer, outside the declared DLT surfaces; node-side fix.
+  **Fix:** restore the eventBus.emit pattern (delete the throw).

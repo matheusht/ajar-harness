@@ -15,16 +15,38 @@ Record before any attack. A finding means nothing without this.
 |---|---|---|
 | | | |
 
-## The two ladder questions
+## History-sweep shapes (fill from the commit sweep — SHAPES, never diffs)
 
-The reward ladder is flat except for two mechanisms. Answer both early, even if the answer is
-"no path found yet", and revisit as recon proceeds.
+A fixed bug marks a family. Record the abstract shape, then hunt for siblings. Any candidate that
+maps to a shape here must be checked against the actual fix before promotion.
 
-**Q-A — What would an unrecoverable total shutdown of the entire Obyte network require?**
+| # | Abstract shape | Family it marks | Sibling paths to check |
+|---|---|---|---|
+| | | | |
+
+## The two $50k lanes — PROOF STRATEGY, not a feasibility verdict
+
+Do not write "no path found". Write what proof would look like and what the condition decomposes
+into. A lane with a written strategy and no path yet stays open.
+
+**Q-A — unrecoverable total shutdown of the entire Obyte network**
+
+- What would count as proof to a reviewer?
+> 
+- Sub-conditions (all order providers down? a consensus-rule violation that partitions permanently?
+  a state no valid unit can extend?):
+> 
+- What must the local lab show?
 > 
 
-**Q-B — What would executing a transaction from another user's account, without their private key,
-require?**
+**Q-B — executing a transaction from another user's account, without their private key**
+
+- What would count as proof to a reviewer?
+> 
+- Sub-conditions (signature verification, authentifier parsing, definition-language predicate,
+  private spend proof — which of these could produce it, and how would each look?):
+> 
+- What must the local lab show?
 > 
 
 ## The DoS coordination question

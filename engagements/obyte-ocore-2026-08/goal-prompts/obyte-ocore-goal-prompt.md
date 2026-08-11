@@ -16,10 +16,48 @@ either a reachable flaw exists on it, or every mechanism family on it is bounded
 name and demonstrate. Both cost the same to prove. Return only when one is proven. **"I did not find
 anything" is not a terminal state.**
 
-Work from first principles by reading the code. Do not diff against a patched version, read
-changelogs, or search for known issues in this asset — that rediscovers an n-day and presents it as a
-find. Reading Node.js or dependency source is fine. Reading the Obyte developer documentation and the
-Autonomous Agents guide is fine and encouraged.
+Work from first principles by reading the code. Reading Node.js or dependency source is fine. Reading
+the Obyte developer documentation and the Autonomous Agents guide is encouraged.
+
+### The history sweep — do it once, at the start, and record shapes only
+
+**Read the recent commit history. It is the strongest routing signal available.** An earlier version
+of this prompt forbade it. That was a rule borrowed from capability benchmarks, where the goal is to
+prove a model can find a bug unaided. This is a bounty, where the goal is impact. The rule cost
+signal and bought nothing.
+
+`ocore` is being actively hardened. Verified 2026-08-11 against the public history:
+
+| commit | date | subject |
+|---|---|---|
+| `991c5d65d` | 2026-08-03 | fix: V-001 security vulnerability (#305) |
+| `16ddd6a41` | 2026-08-03 | pre-validate asset in aa composer |
+| `f3b253ebf` | 2026-08-02 | check allowed charset in isValidAddress |
+| `f503efc9f` | 2026-07-28 | move stability point by 1 after validation found that a later MC unit is stable in parents |
+| `c368211fc` | 2026-07-26 | validateAATriggerObject: no early success if no non-base assets |
+| `d7d6a8256` | 2026-06-02 | try/catch getBase64Hash in spend proofs |
+| `403e96b93` | 2025-05-20 | delay parenting AA responses to mitigate partitioning on OP doublespend |
+| `05f291d8d` | 2025-02-19 | uniqueness of spend proof is not verified in light |
+
+`V-001` reads like an audit finding id, so assume a recent third-party audit and assume its findings
+are already fixed and already reported.
+
+**What the sweep is for: a fixed bug marks a family, not a target.** Where one instance was wrong,
+siblings live. A validation that needed hardening in one path is worth checking in every sibling path.
+
+**Three binding rules on the sweep:**
+
+1. **Record abstract shapes in `recon-signals.md`, not fixes.** Write "asset pre-validation was
+   missing at one AA composer entry point" — a shape you then hunt for elsewhere. Do not copy the
+   diff into the engagement.
+2. **Never report a fix as a find.** Any candidate that maps to a swept shape must be checked against
+   the actual fix before it can be promoted. If the fix covers it, it is `covered-dry`, not a
+   finding. Stage 5.25 novelty already enforces this; the sweep does not bypass it.
+3. **One sweep, at the start.** Do not return to the history to steer the loop. It seeds routing; it
+   does not run it.
+
+**And know why code is defended.** Without the sweep, a hunter meets hardened code and cannot tell
+whether it was always careful or was fixed last month. That wastes rounds.
 
 ## Part 2 — The hard wall
 
@@ -59,6 +97,21 @@ Name the wire, state the cleanup path, then ask.
 **Read this before choosing a lane.** The ladder is nearly flat except for two named mechanisms. A
 third Critical class pays what a Medium-plus pays. So effort belongs on those two conditions, and on
 honest High/Medium coverage — not on manufacturing another Critical.
+
+**The two $50k lanes need a PROOF STRATEGY, not a feasibility verdict.** Do not answer "is there a
+path?" early — that question invites a premature "no" on the hardest and most valuable lane, and Q-B
+lives in the subtlest code in the repository (signature verification, authentifier parsing, the
+definition language, private spend proofs). Answer these instead, and revisit as recon proceeds:
+
+- **What would count as proof?** What evidence would convince a reviewer that a transaction executed
+  from another user's account without their key, or that the whole network stopped unrecoverably?
+- **What does the condition decompose into?** Does "total network shutdown" mean every order provider
+  down, a consensus-rule violation that partitions permanently, or a state no valid unit can extend?
+  Name the sub-conditions. Each is then a lane.
+- **What would the local lab have to show?** Write the experiment before you can run it.
+
+A lane with a written proof strategy and no path yet stays open. A lane with neither is not closed —
+it is unexamined, and saying so is the honest record.
 
 **Settle the DoS question early, because it decides many candidates.** A temporary network disruption
 is **out of scope** when a fix resolves it **without network coordination**. It is **in scope** when
@@ -108,9 +161,18 @@ different representation of it. Second, **JavaScript numeric semantics on money*
 double; any value arithmetic that leaves integer-safe range, or any comparison that coerces, is worth
 a hard look.
 
-**BUILD A CARD FIRST** if a lead needs one. A card-less lead has no oracle. `skills/vulns/` and
-`skills/patterns/` have EVM and Cosmos cards but nothing DAG-specific. Author the card before deep
-grading, oracle-grade it, and log a pattern-candidate.
+**Author 3–4 DAG cards during recon, BEFORE round 0.** `skills/` has EVM and Cosmos cards and nothing
+DAG-shaped, so every DAG lead would otherwise pay a card tax at grading time — hours per lead on a
+codebase class we have never audited. Pay it once, up front. Candidates, adjust after recon:
+
+- unit/joint acceptance desync — validated in one pass, acted on in another
+- JS numeric semantics on value arithmetic — `Number` is a double
+- spend-proof uniqueness and the full-versus-light verification asymmetry
+- witness / main-chain mutation and stability advancement
+
+These are **oracles**, not hypotheses. They describe how to grade a shape, not where to look, so they
+do not compromise a blind round 0. A lead that needs a card the recon did not anticipate still builds
+one before deep grading; log a pattern-candidate either way.
 
 ## Part 6 — Search management
 
@@ -229,18 +291,38 @@ operator-only. Publication is Category 3 — approval required.
 
 **The product of this run is rigor, not a finding count.**
 
-## Part 13 — First move
+## Part 13 — Calibration
 
-1. Clone `ocore`, pin the commit, record it in `progress.md`. Set up a local multi-node Obyte network
-   with synthetic genesis and locally generated keys.
-2. Environment preflight: Node version, install, run the existing test suite. Record any blocker
+`ocore` is a nine-year-old production consensus library, and the history sweep shows it is under
+active hardening. **The honest prior is: mostly solid, with a scattering of Medium and High bugs and
+a long-shot Critical.**
+
+That is calibration for reading the result, not a licence to work less. The persistence contract in
+Part 11 is unchanged.
+
+**What success looks like here.** "Covered-dry on both $50k lanes, with the proof strategies written
+and the sub-conditions enumerated, plus two confirmed Mediums with runnable PoCs" is a **good
+engagement**. Report it as one. Obyte's historically severe issues lived in the wallet layer — out of
+scope here — so a DLT-core run that produces Mediums and Highs has hit the realistic distribution.
+
+The failure to avoid is not a low finding count. It is six hours spent chasing a $50k shutdown
+because it was worth the most, while the High and Medium surface went unexamined.
+
+## Part 14 — First move
+
+1. **Pin.** Clone `ocore`, pick the latest commit whose test suite runs, and record that identity in
+   `progress.md`. Note if you had to move off `HEAD` and why.
+2. **Sweep the history once** (Part 1). Record abstract shapes in `recon-signals.md`. No diffs.
+3. **Build the lab once and persist it.** A local multi-node Obyte network — synthetic genesis, a
+   generated key set, node config — checked in as a reusable artifact with a one-command bring-up.
+   Every severity needs a runnable PoC, so this is the most-used tool in the engagement. Per-candidate
+   bring-up must be minutes, not hours.
+4. **Environment preflight:** Node version, install, run the existing test suite. Record any blocker
    verbatim — a blocked environment is a real result, not a delay.
-3. Recon: complete the activation-signals table in `recon-signals.md`. Capture **baseline controls** —
-   what the node refuses with no attack at all.
-4. Answer the two ladder questions early: what would total unrecoverable network shutdown require,
-   and what would spending from another account without its key require? Write the answer even if it
-   is "no path found yet".
-5. Settle the DoS coordination question: for the availability surface, what resolves without network
-   coordination and what does not?
-6. Seed the family registry. Mark every family `unexplored`.
-7. Launch Round 0 blind, one family per hunter.
+5. **Recon:** complete the activation-signals table in `recon-signals.md`. Capture **baseline
+   controls** — what the node refuses with no attack at all.
+6. **Write the proof strategies** for both $50k conditions (Part 3). Decompose each into
+   sub-conditions. Do not answer "is it feasible".
+7. **Settle the DoS coordination question** for the availability surface.
+8. **Author the DAG cards** (Part 5).
+9. Seed the family registry, everything `unexplored`. Launch Round 0 blind, one family per hunter.

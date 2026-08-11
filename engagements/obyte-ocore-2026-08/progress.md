@@ -228,3 +228,23 @@ Every round's claims verified by fresh-context reviewers reading RAW evidence.
 - **Net severity effect of the escalation phase: zero changes to the standing findings, one
   self-correction, multiple evidence corrections** — the anti-reward-hack outcome the doctrine
   demands.
+
+## 2026-08-11 — ENGAGEMENT CLOSE-OUT (winners/losers + humanized reports)
+
+- **memory/winners.md written:** 4 WIN entries (verification-root-in-prover-input; bearer-token
+  uniqueness party-keyed; settlement-ordering keystone; real-network-beats-seeded-drive) + 6 LOSE
+  entries (crash family, S1 old-DAG, MySQL coercion, money creation, natural-burst freeze,
+  MySQL watermark) each with the decisive control. Memory disposition: WIN-1/WIN-2 promote,
+  WIN-3/WIN-4 field-notes, LOSE refutations field-notes. Operator review required.
+- **Humanized reports written (reports/, submission-ready, per the harness human-report-voice
+  skill — corpus-calibrated):**
+  - `HUMANIZED-obyte-2026-08-001-merkle-vacuous.md` (Medium, CVSS 5.3): the is_valid_merkle_proof
+    vacuous-satisfiability finding, full reproduction + honest usage-cap.
+  - `HUMANIZED-obyte-2026-08-003-spendproof-keying.md` (Low, CVSS 3.7): the spend-proof
+    uniqueness-keying finding, reproduction + honest ceiling.
+  - Voice audit: zero em-dashes, zero AI filler, zero signposting; first person; contractions;
+    blunt assertion; honest capping. Both end with an offer to retest.
+- **Filing remains operator-only** (per scope: "AI is barred from filing"). The reports are
+  drafted and ready; the operator files them with the Obyte Foundation via Immunefi. The formal
+  kernel `close` is an operator act (requires terminal coverage + cleanup disposition + memory
+  disposition acceptance).

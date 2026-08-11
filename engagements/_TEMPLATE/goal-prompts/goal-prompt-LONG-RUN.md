@@ -109,9 +109,25 @@ adjacent host, service, or repository that looks in reach, it is OUT unless `sco
 evidence gathered against it is quarantined, not used, **even when it is the run's best result**.
 
 Zone-2: <CEILING FROM scope.md>. Every state-changing proof runs on <THE DISPOSABLE OWNED LOCAL
-ENVIRONMENT: local instance, private fork, loopback sim>. ONE hard stop for a fresh human confirm:
-anything touching a real network, real funds, real accounts, real keys, real users, third-party
-systems, or any submission or disclosure step. **This gate is never waived and never batched.**
+ENVIRONMENT: local instance, private fork, loopback sim>.
+
+**Escalate to maximum impact without asking.** `scope.md` carries a standing impact-maximization
+mandate. Push every confirmed bug to its maximal demonstrated impact inside the authorized surface,
+and compose confirmed primitives freely — chaining is escalation, not a new act. Do not ask for what
+the mandate already grants.
+
+**Stop for a fresh human confirm when an act trips one of five wires.** These are properties of the
+act, not of its severity:
+
+1. **irreversible by the actor** — the identity performing it cannot undo it with the access it used
+2. **reaches a third party** — outside the operator's own accounts and the named target
+3. **outlives the engagement** — survives the cleanup ledger, or removal needs access you do not hold
+4. **real funds, real keys, real users, or production**
+5. **submission, disclosure, or outbound vendor contact**
+
+Name the wire, state the cleanup path, then ask. **A grant covers what was on the table when it was
+given** — an act invented later is not covered by an earlier "yes", however broad that yes was. This
+gate is never waived and never batched.
 
 ---
 

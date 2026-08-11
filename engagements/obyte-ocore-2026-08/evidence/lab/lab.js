@@ -20,6 +20,9 @@ const desktop_app = require(O_CORE + "/desktop_app.js");
 desktop_app.getAppDataDir = function () { return dst_dir; };
 desktop_app.getAppRootDir = function () { return O_CORE; };
 const constants = require(O_CORE + "/constants.js");
+// NOTE: keep the DEFAULT pool size (1 connection). Lab scripts must RELEASE their connection
+// before calling library internals that take their own (initCaches etc.) — holding it across
+// would deadlock; raising the pool races the DB migration.
 // zero the upgrade MCIs so ALL rules apply from genesis in the lab
 constants.aa2UpgradeMci = 0;
 constants.aa3UpgradeMci = 0;
@@ -29,7 +32,10 @@ constants.noPrivateAssetsWithConditionsUpgradeMci = 0;
 
 const db = require(O_CORE + "/db.js");
 const storage = require(O_CORE + "/storage.js");
-const network = require(O_CORE + "/network.js");
+// optional network: network.js auto-starts (network.js:4347 start()) which runs initCaches at
+// boot — scripts that seed their own ledger state first must skip it (LAB_NO_NETWORK=1) and call
+// storage.initCaches() themselves after seeding. Scripts that need live network handlers keep the default.
+const network = process.env.LAB_NO_NETWORK ? null : require(O_CORE + "/network.js");
 const validation = require(O_CORE + "/validation.js");
 const objectHash = require(O_CORE + "/object_hash.js");
 const signature = require(O_CORE + "/signature.js");

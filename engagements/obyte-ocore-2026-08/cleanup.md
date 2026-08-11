@@ -10,3 +10,5 @@ cleanup **blocks pattern promotion**. Redact secrets always.
 ## Canary disposal
 Every canary issued gets an id and a disposal state (`live / revoked / expired`). Persistence,
 memory-bleed, and residual poisoned content are themselves part of what we measure — track them.
+| ~/Library/Application Support/ocore/ (empty scratch sqlite, side-effect of an out-of-lab node -e probe) | artifact | 2026-08-11 | — | deleted | done |
+| docker containers p4mysql, p4mysql57 (MySQL 5.7/8.0 predicate verification) | docker | 2026-08-11 | — | docker rm -f (performed by p4 builder) | done |

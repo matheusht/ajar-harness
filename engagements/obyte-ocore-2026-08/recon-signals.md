@@ -118,3 +118,46 @@ network transactions).
 Settling rule: for every availability candidate, first answer "what is the fix?" — if a single node
 can fix itself (ignore the message, cap the size, crash-recover), it's out; if the whole network
 must agree to reject or upgrade, it's in.
+
+## Ladder-question final verdicts (2026-08-11, after rounds 0-2)
+
+**Q-A — unrecoverable total network shutdown: COVERED-DRY (bounded + enumerated).**
+Sub-conditions and dispositions:
+1. *Permanent consensus split* — ENUMERATED + CLOSED. Canonicalization (f12 N3/N4: serializers
+   total + deterministic, -0 handled), definition language (f4 H1-H6: spend-time revalidation),
+   signature paths (f3: malleability refuted, pubkey fail-closed), SQL backend divergence
+   (p4: empirically refuted on 4 engines; conf.js marks mysql unsupported), validation ordering
+   (f1 H2/H3: all paths converge on the same pipeline; fail-closed). No rule evaluated
+   inconsistently across honest nodes was found.
+2. *Stability-point stall* — ENUMERATED + CLOSED. Main-chain selection is deterministic
+   (f2: tie-breakers stable, OP-preference verified); the alt-branch stall (f2-T-f2-03) was held
+   weak (WL-increasing constraint bounds it); stability advancement is 1-MCI-at-a-time and
+   resolution is atomic with ball creation (r1 state machine). No attacker-reachable freeze found.
+3. *Chain-halting valid unit* — ENUMERATED + CLOSED. Crash family (4 sites) refuted as
+   attacker-reachable (address-binding, state machine, flow ordering). Network layer: no
+   crash-on-crafted-message (f9 H4). No valid-unit crash found.
+Verdict: covered-dry with the proof strategies written and sub-conditions enumerated; no path to
+the $50k shutdown condition.
+
+**Q-B — spend from another user's account without their key: COVERED-DRY (bounded + enumerated).**
+Sub-conditions and dispositions:
+1. *Signature verification bypass* — ENUMERATED + CLOSED. secp256k1 high-S rejected (f3 T1
+   tested), pubkey parsing fail-closed (T2 tested), unsigned joints refused on all 3 delivery
+   paths (T4/H3), authentifier paths require consumed signatures (f4 H6/H7).
+2. *Definition-language bypass* — ENUMERATED + CLOSED. All predicate gates carry the S1 disjunct
+   (f4 H1); malformed-mci definitions refuted by spend-time revalidation (f4 T1); thresholds and
+   nesting bounded (f4 T2/T3, T8).
+3. *Spend-proof forgery* — ENUMERATED + CLOSED for forgery (proof binds output fields +
+   blinding; no blinding → cannot compute P — f6 H3/H4). **BUT the uniqueness dodge (F3) is real**:
+   the SENDER (who retains P) can place a second 'good' unit — that is not forgery (the sender
+   legitimately holds P); it is a protection-defeat (Low-Medium, F3).
+4. *Validation omission* — ENUMERATED + CLOSED. Old-DAG attachment cannot stabilize (KP-F2-link);
+   validation gates are position-consistent for all units that matter.
+Verdict: covered-dry for the $50k spend-without-key condition (no signature/definition/forgery
+bypass); the F3 protection-defeat is a Low-Medium finding, not key-free spend.
+
+**DoS coordination question — settled per candidate:** every availability candidate found
+(crash family, unbounded streaming f9-T1, unhandled-joints flood f9-T4, paid-witness walk f16-T4,
+signed-package amplification F2) resolves with a node-side fix → OUT of scope per the program rule;
+none requires network coordination. F2's valid-unit amplification would have been in-scope had the
+stabilization link held — it does not.

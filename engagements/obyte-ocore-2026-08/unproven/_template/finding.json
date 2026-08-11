@@ -1,0 +1,28 @@
+{
+  "schema_version": 3,
+  "finding_id": "FINDING-ID",
+  "engagement_id": "obyte-ocore-2026-08",
+  "revision": 1,
+  "supersedes_revision": null,
+  "recorded_at": "2026-08-11T00:00:00Z",
+  "change_reason": "initial filing",
+  "classification": {"class": "vulnerability", "owasp": null, "cwe": null, "atlas": null},
+  "scope_provenance": {"scope_hash": "see-engagement-scope.md", "surface": "SF-x", "in_scope": true},
+  "claim_state": "unproven",
+  "claims": {
+    "mechanism": "one-sentence mechanism with file:line",
+    "reachability": "who can reach it, entry points",
+    "impact": "what it enables, bounded by the marginal-contribution critique",
+    "severity_candidate": "medium|high|critical",
+    "cvss_vector": "CVSS:3.1/...",
+    "privilege_context": {"claimed": "unauthenticated|authenticated|...", "proven": "not-established"}
+  },
+  "proof": {
+    "primary_attempt_id": "attempt-...",
+    "negative_control_attempt_id": "attempt-...",
+    "poC_path": "evidence/lab/<poc-id>/",
+    "independent_review_run": {"reviewer": "...", "raw_output_ref": "...", "ran_at": "..."}
+  },
+  "adjudication": {"verdict": "needs_review", "reviews": [], "notes": ""},
+  "search_linkage": {"hypothesis_refs": [], "rounds": ["round1"], "families": []}
+}

@@ -1,0 +1,69 @@
+{
+ "keys": {
+  "sender": {
+   "priv": "616082e944f6172c025f15f4fc1e4445d04b57717dcf6b596ede8a9005ea4ed6",
+   "pub": "AlrYYZREXHKAww/BWDLBa6Tc7WxkrcMUKV3yfUw4vryh"
+  },
+  "recipient": {
+   "priv": "6b460ede9f7a9b0552495f32e47dcd612230b96587e0b3fb4944dd0a2ac16d0e",
+   "pub": "Ah03BQ4H97L6e9GEwqf+ew1n/QFmENeoQmyC12WDpTv/"
+  },
+  "witness": {
+   "priv": "2509623905f0fa088c5bf30304d20cce2dd08bbcf629362f7c9a9490b5174379",
+   "pub": "Akggk+kXgxcezE88YCiHCNG+cap9UmLZvr6lLJsTOzEA"
+  }
+ },
+ "genesis": {
+  "version": "4.0",
+  "alt": "1",
+  "timestamp": 1786422381,
+  "authors": [
+   {
+    "address": "JCH3LC6PMBRS2CE2DGQGQ44A4ACQVXKJ",
+    "definition": [
+     "sig",
+     {
+      "pubkey": "Akggk+kXgxcezE88YCiHCNG+cap9UmLZvr6lLJsTOzEA"
+     }
+    ],
+    "authentifiers": {
+     "r": "103,232,211,244,182,216,159,84,194,30,93,220,24,223,249,94,74,153,63,92,215,231,174,6,76,177,153,127,245,62,239,213,92,198,173,141,76,17,34,4,230,117,201,5,68,230,62,201,125,205,227,55,236,24,1,18,32,220,108,114,152,224,235,228"
+    }
+   }
+  ],
+  "messages": [
+   {
+    "app": "payment",
+    "payload_location": "inline",
+    "payload": {
+     "outputs": [
+      {
+       "address": "JURXPKXQYLATLNJ4XENJNYHV7THOADUL",
+       "amount": 600000000000000
+      },
+      {
+       "address": "SKPCT3QZEWIWRAAWFU6PJVYC3SRW6RRG",
+       "amount": 200000000000000
+      },
+      {
+       "address": "JCH3LC6PMBRS2CE2DGQGQ44A4ACQVXKJ",
+       "amount": 200000000000000
+      }
+     ]
+    },
+    "payload_hash": "22flolF5XqyeMY138D8bfl97+60t8AKFCCvWkX+hbg0="
+   }
+  ],
+  "witnesses": [
+   "JCH3LC6PMBRS2CE2DGQGQ44A4ACQVXKJ"
+  ],
+  "headers_commission": 0,
+  "payload_commission": 0,
+  "unit": "qc5/c4ACzA7o05YiNEtbD+/MJ5lBXYZT9KJR7hsneX8="
+ },
+ "addresses": {
+  "sender_addr": "JURXPKXQYLATLNJ4XENJNYHV7THOADUL",
+  "recipient_addr": "SKPCT3QZEWIWRAAWFU6PJVYC3SRW6RRG",
+  "witness_addr": "JCH3LC6PMBRS2CE2DGQGQ44A4ACQVXKJ"
+ }
+}

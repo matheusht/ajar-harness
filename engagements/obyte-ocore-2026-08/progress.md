@@ -114,3 +114,24 @@ are fixed and already reported. **A fixed bug marks a family, not a target.**
   p8 signed-package budget, p9 merkle) + 2 fresh-context refuters (r1 crash family, r2 MySQL+fee).
 - **Standing gate (operator):** every finding ships a maximum-impact PoC + an independent
   fresh-context run of that PoC by a reviewer reading RAW output (recorded in memory/winners.md).
+
+## 2026-08-11 — ROUNDS 2-3 + 3 FINDINGS PROMOTED
+
+- **Round 2 (independent runs + kill-pair + link + chainability):** IR-F1/F2/F3/F4 all CONFIRMED
+  the PoCs independently (standing gate honored). KP-F2-link: the S1 old-DAG family is DEAD
+  (stabilization impossible — witnessed-level ancestry, best-parent sorting, MC-from-tip). CHAIN-1:
+  composition pass — S1 eval-side family is the durable form (dead), temp_data refuted,
+  F3×F4 bounded. KP-F3 kill-pair: establish side won the mechanism ("the only network-wide private
+  double-spend protection is keyed out of reach"), kill side capped the impact (no direct theft).
+- **Round 3 launched (terminal):** blind no-new-family sweep (LR-4), light-client surface (LR-1),
+  F3 adjudication review (LR-2), F4 natural-burst escalation (LR-3), hub surface (LR-5),
+  dependencies (LR-6), witness protocol (LR-7), formula completeness (LR-8).
+- **Findings promoted (3):** `obyte-2026-08-001` (formula is_valid_merkle_proof vacuously
+  satisfiable — Medium), `obyte-2026-08-003` (spend-proof uniqueness keyed on party-chosen address —
+  Low), `obyte-2026-08-004` (tps-fee settlement unbounded — Low). Each passed all 6 lifecycle gates
+  with an independent fresh-context PoC run recorded.
+- **Hardening backlog:** HARDENING-NOTES.md (10 items — S1 disjunct migration, uncaught-throw
+  pattern, SQL unary-plus, fee asymmetry, future-timestamp multiplier, missing return, network
+  unbounded streams, privacy logs, light trust, economics residuals).
+- **Ladder questions:** Q-A (total shutdown) and Q-B (spend-without-key) both COVERED-DRY with
+  proof strategies written and sub-conditions enumerated (recon-signals.md final verdicts).

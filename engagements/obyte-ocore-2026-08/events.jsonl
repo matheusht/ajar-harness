@@ -3,3 +3,7 @@
 {"ts":"2026-08-11T01:06:00Z","kind":"event","event_type":"round0.launch","note":"16 hunters, one family each, blind portfolio; briefs in evidence/round0/BRIEFS.md"}
 {"ts":"2026-08-11T02:40:00Z","kind":"event","event_type":"round0.complete","note":"16/16 reports adjudicated; A1 downgraded (f8 refutation confirmed by orchestrator source reading — 2289 race/flow-dependent; 1662 promoted as strongest crash); f5-T1 added as S1-family candidate; A6 (outer v4 gate) confirmed by orchestrator spot-check"}
 {"ts":"2026-08-11T02:41:00Z","kind":"event","event_type":"round1.launch","note":"PoC builders + refuters (adversarial throughout)"}
+{"ts":"2026-08-11T05:10:00Z","kind":"event","event_type":"finding.promoted","note":"obyte-2026-08-001 (merkle vacuous) promoted through all 6 lifecycle gates; independent run (IR-F1) recorded in reviews/; standing max-impact PoC gate satisfied"}
+{"ts":"2026-08-11T05:40:00Z","kind":"event","event_type":"finding.promoted","note":"obyte-2026-08-004 (tps-fee poisoning) promoted — Low, real-but-capped, all 6 gates clear; independent run (IR-F4) in reviews/"}
+{"ts":"2026-08-11T06:00:00Z","kind":"event","event_type":"cascades.recorded","note":"4 cascades recorded (S1 family dead, crash pattern hardening, F3 root, F4 natural-burst form); pattern candidates PC-4/PC-5 added"}
+{"ts":"2026-08-11T06:45:00Z","kind":"event","event_type":"finding.promoted","note":"obyte-2026-08-003 (spend-proof uniqueness key) promoted — Low, kill-pair adjudicated, all 6 gates clear"}

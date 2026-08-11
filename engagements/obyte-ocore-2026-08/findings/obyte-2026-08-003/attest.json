@@ -1,0 +1,39 @@
+{
+  "finding_id": "obyte-2026-08-003",
+  "real-path-exec": true,
+  "negative-control": true,
+  "primary_attempt": {
+    "id": "attempt://obyte-r1-invisible-fork",
+    "attested_by": "orchestrator",
+    "evidence": "evidence-r1.md section 6 (A_own accepted+saved while the victim's row exists) + evidence-IR-F3.md (independent re-run with direct DB verification)",
+    "real_execution": true
+  },
+  "negative_control": {
+    "id": "attempt://obyte-r1-fork-contrast",
+    "attested_by": "orchestrator",
+    "evidence": "same runs: A_multi (same P + same address) cleanly rejected 'conflicting spend proof in inner unit'; A_victim cleanly rejected (address not allowed single-authored)",
+    "real_execution": true
+  },
+  "replay": {
+    "id": "attempt://obyte-r2-irf3-replay",
+    "attested_by": "orchestrator",
+    "evidence": "round-2 independent reviewer (IR-F3) re-ran the experiment and verified from raw log + direct sqlite reads of the spend_proofs and units tables",
+    "real_execution": true
+  },
+  "privilege_context": {
+    "claimed": "authenticated-user",
+    "proven": "authenticated-user",
+    "provenance_note": "The attacker is the private-payment sender (holds the bearer proof); the lab ran as the local user with no special access"
+  },
+  "poC_runnable": {
+    "command": "cd /Users/matheusvsky/Documents/trab/obyte-ocore-2026-08-ocore && node <abs>/unproven/obyte-2026-08-003/p1-refute.js",
+    "raw_output_path": "evidence-IR-F3.md"
+  },
+  "independent_run": {
+    "reviewer_context": "fresh (round-2 IR-F3)",
+    "reviewer_id": "IR-F3",
+    "raw_output_path": "evidence-IR-F3.md",
+    "confirmed_claim_tuple": true,
+    "note": "IR-F3 verified the invisible-fork property from raw log + direct DB reads; the kill-pair's ghost experiment (kp-f3-ghost-exp.js) demonstrated the impact ceiling (no direct theft)"
+  }
+}

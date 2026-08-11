@@ -1,0 +1,8 @@
+{
+  "finding_id": "FINDING-ID",
+  "primary_attempt": {"id": "attempt-...", "attested_by": "orchestrator", "evidence": "attempts.jsonl entry + lab output path"},
+  "negative_control": {"id": "attempt-...", "attested_by": "orchestrator", "evidence": "..."},
+  "privilege_context": {"claimed": "...", "proven": "...", "provenance_note": "..."},
+  "poC_runnable": {"command": "cd <ocore> && node lab-obyte.js <abs script>", "raw_output_path": "..."},
+  "independent_run": {"reviewer_context": "fresh", "reviewer_id": "...", "raw_output_path": "...", "confirmed_claim_tuple": true}
+}

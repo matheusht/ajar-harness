@@ -42,5 +42,12 @@
  },
  "real-path-exec": true,
  "negative-control": true,
- "positive-control": true
+ "positive-control": true,
+ "escalation_evidence": {
+  "id": "attempt://obyte-e3-1-aa-demo",
+  "attested_by": "orchestrator",
+  "evidence": "evidence/E3-1-fund-impact-demo.md \u2014 real two-node network (hub 6611 + node 6612), real relay protocol, real AA trigger machinery; attack scenario BYPASS-CONFIRMED (withdrawal output amount=1000, response unit committed sequence=good on both nodes); control scenario (wrong-root proof) bounced ('neither case is true'), responses=0",
+  "real_execution": true,
+  "raw_db_state": "evidence/lab/.e31-attack-node/, .e31-attack-hub/, .e31-control-hub/ (retained as evidence; synthetic keys only)"
+ }
 }

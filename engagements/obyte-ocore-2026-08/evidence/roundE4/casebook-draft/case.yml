@@ -1,0 +1,65 @@
+id: case-2026-08-dag-ledger-consensus
+date: 2026-08
+target_class: "DAG-based distributed ledger core library (Node.js, consensus-critical)"
+surfaces:
+  - dag_validation
+  - main_chain_selection
+  - signature_verification
+  - definition_language
+  - formula_engine
+  - asset_handling
+  - private_payments
+  - network_protocol
+  - storage_catchup
+  - aa_engine
+  - encoding_hashing
+  - fee_economics
+auth_model: "public permissionless DAG; witnesses (order providers) anchor the main chain via waypoint units; smart addresses (definition language) gate spends; private payments use published bearer spend proofs"
+scope_ref: "engagements/obyte-ocore-2026-08/ (Plane 3, with the target) — see its rounds.md for the full adjudication trail"
+confirmed_findings:
+  - label: F1
+    pattern: pattern.dag-canonicalization-split  # nearest existing card; the confirmed shape is verification-root-not-anchored (PC-3)
+    owasp: ""
+    severity: medium
+    one_line: "an engine verification predicate proves only self-consistency: the proof root comes from the prover, never an anchored value, so any smart-contract gating on it is bypassable"
+  - label: F3
+    pattern: pattern.dag-spend-proof-uniqueness
+    owasp: ""
+    severity: low
+    one_line: "the uniqueness check for a private-payment bearer proof is keyed on a party-chosen string (the unit's own author) instead of the value the proof commits to (the output owner), so the only network-wide double-spend detection is dodgeable"
+refuted_candidates:
+  - label: F4
+    looked_like: "settlement fee (exponential in the window rate) unbounded vs author balances — a flood window freezes every settling author"
+    refuted_by: "real-path settlement ordering: each unit settles after its own MCI is balled, so the window count is 1; the count>=30 state was seeded synthetically (the honest unit was given the attacker's equal timestamps). Real-network run: fees 0-190 base, balances monotonically increasing, no negatives"
+    pattern: pattern.dag-js-numeric-value-arithmetic
+  - label: crash-family
+    looked_like: "4 uncaught-throw sites in the validation path crash any full node on crafted input"
+    refuted_by: "state machine: the temp-bad resolution is atomic with ball creation, so the triggering state is unreachable; the address-binding check precedes the 'another address' throw; flow ordering preempts the spend-proof throw"
+  - label: mysql-divergence
+    looked_like: "SQL unary-plus on a TEXT column coerces on Oracle MySQL, diverging final-bad resolution -> ball-hash split"
+    refuted_by: "execution on 4 engines: unary plus coerces only pure-integer strings; the backend is also marked unsupported by the vendor"
+  - label: s1-old-dag-family
+    looked_like: "upgrade-gated validation rules without the network-height disjunct are bypassable by attaching units to old DAG parts"
+    refuted_by: "old-DAG-attached units cannot stabilize (witnessed level is ancestry-derived; best-parent sorts by it; the main chain walks from the tip), so the gated code never executes"
+  - label: temp-data-fee
+    looked_like: "temp_data fee trusts the claimed length -> underpaid storage fees"
+    refuted_by: "validation reconciles the claimed data_length against the actual length"
+held_defenses:
+  - control: "signature malleability rejected (low-S only)"
+    why_held: "the ECDSA library enforces low-S; pubkey parsing fails closed"
+    contrast_pattern: "signature-verification"
+  - control: "canonical serialization for hashing is total and deterministic (-0, key order, arrays)"
+    why_held: "no hashing-path canonicalization divergence found; the fix was formula-internal comparison semantics"
+    contrast_pattern: "pattern.dag-canonicalization-split"
+  - control: "catchup trust chain anchored at every layer (witness signatures, ball hashes, hash tree, proof chain)"
+    why_held: "no false-proof acceptance found in catchup or merkle with a feed-bound root"
+    contrast_pattern: "pattern.dag-canonicalization-split"
+  - control: "definition-language predicates re-validated at spend time against the spend height"
+    why_held: "a malformed definition accepted at creation is unspendable (self-freeze only)"
+    contrast_pattern: "pattern.dag-old-dag-rule-gating"
+  - control: "declared fees funded from inputs (balance closure) and recipient sets author-constrained"
+    why_held: "no money creation; the fee accounting is conserved; non-author recipients are overridden"
+    contrast_pattern: "pattern.dag-js-numeric-value-arithmetic"
+sanitization:
+  scrubbed: true
+  attestation: "drafted 2026-08-11 by E4-12 (escalation-phase agent): no target names beyond the DAG class, no live ids/tokens/URLs, no verbatim payloads; all evidence refs point to engagement-local labels and file:line shapes only"

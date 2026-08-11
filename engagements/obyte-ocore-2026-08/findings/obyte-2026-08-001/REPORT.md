@@ -88,3 +88,49 @@ is provided. Add the `!hasBall && getMinRetrievableMci()` disjunct to the eval-s
 - `evidence/IR-F1-review.md` — independent fresh-context run + source verification + reward-hack audit
 - `evidence/p9-poc.js`, `evidence/p9-README.md` — runnable PoC
 - `attempts.jsonl` — round-1/round-2 attempt records
+
+## Revision 2 — end-to-end fund-impact demonstration (escalation phase, 2026-08-11)
+
+### Exploitability: the whitelist-gated AA bypass (E3-1, real two-node network)
+
+The fund-impact class is now demonstrated end-to-end. A realistic withdrawal-gated AA — only
+holders of a merkle-membership proof for `trigger.data.element` may withdraw 1000 base — was
+bypassed by the vacuous proof:
+
+- **Attack scenario (vacuous proof `"0-" + base64(sha256(element))`):** an attacker who is NOT in
+  any merkle tree triggered the withdrawal. The case formula evaluated
+  `is_valid_merkle_proof(...)` → TRUE → the AA composed a payment response; the withdrawal output
+  (amount=1000) was committed to the response unit with `sequence=good` on BOTH nodes of the
+  network. Log anchor: `SCENARIO-RESULT: attack withdrawals=1 BYPASS-CONFIRMED`. The AA's received
+  funds moved (10000 − 1000 − commissions = change; value conserved).
+- **Control scenario (wrong-root proof):** the identical trigger correctly bounced
+  (`bounce('neither case is true')` at aa_composer.js:903), responses=0, withdrawals=0 —
+  proving the gate is real and only the vacuous proof defeats it.
+
+Re-run instructions (independent reproduction):
+```
+cd <harness>/engagements/obyte-ocore-2026-08/evidence/lab
+LAB_GENESIS_TS=1700000000 ROLE=node PORT=6612 SCENARIO=attack node e31-aa-demo.js   # terminal 1
+LAB_GENESIS_TS=1700000000 ROLE=hub  PORT=6611 SCENARIO=attack node e31-aa-demo.js   # terminal 2
+# repeat with SCENARIO=control (fresh scratch dirs)
+```
+
+### Severity rationale update
+
+- **Before revision 2:** "engine footgun, usage-capped at Medium" — the fund impact was inferred.
+- **After revision 2:** the fund-impact class is DEMONSTRATED (non-member withdrawal on the real
+  network). Medium is confirmed; the only remaining limiter is which DEPLOYED AAs use the construct
+  (individual AA logic is out of scope; the engine defect and its exploitability are in scope).
+
+### Evidence added (package-relative)
+
+- `evidence/E3-1-fund-impact-demo.md` — the full demonstration report (raw DB state, log anchors)
+- `evidence/e31-aa-demo.js` — the runnable two-scenario demo
+- Raw DB state retained: `evidence/lab/.e31-attack-node/`, `.e31-attack-hub/`, `.e31-control-hub/`
+
+### Verification note
+
+The wrong-root control bounce is the negative control for the END-TO-END path (in addition to the
+engine-level negative control from revision 1). The control run's node side had a relay get_joint
+race (lab flakiness); the hub side ran the complete path cleanly (AA registered, trigger fired,
+gate evaluated, bounce) — recorded in the E3-1 report's residual notes.

@@ -1,0 +1,51 @@
+# hypotheses.yml — signal -> hypothesis -> predicted finding -> oracle plan -> outcome
+# Light YAML by design (schema-free). Abstract shapes only.
+
+hypotheses:
+  - id: H-verification-root
+    signal: "formula predicate verifies a proof whose root is prover-supplied"
+    hypothesis: "the predicate is vacuously satisfiable — any element passes with a self-consistent proof"
+    predicted_finding: "engine-level verification flaw (membership cannot be proven)"
+    oracle_plan: "real engine evaluation; positive control (real tree), negative control (wrong root), contrast (root-anchored sibling)"
+    outcome: "CONFIRMED (4/4 arbitrary elements; contrast rejects; independent reviewer reproduced)"
+    pattern: pattern.dag-canonicalization-split
+
+  - id: H-spend-proof-keying
+    signal: "uniqueness check keys on the unit's own author rather than the committed owner"
+    hypothesis: "a bearer-proof holder can place a second 'good' unit under a different address, undetected"
+    predicted_finding: "private-payment double-spend detection defeated"
+    oracle_plan: "real compose/validate/save; DB read of both rows; contrast (same P + same address rejected)"
+    outcome: "CONFIRMED (both units saved 'good'; same-proof rows under two addresses; contrast rejected; kill-pair adjudicated Low)"
+    pattern: pattern.dag-spend-proof-uniqueness
+
+  - id: H-fee-poisoning
+    signal: "settlement fee exponential in a window rate; elapsed collapses to 1 on equal timestamps"
+    hypothesis: "a flood window charges every settling author ~10% of the supply and freezes them"
+    predicted_finding: "economic DoS / fee poisoning"
+    oracle_plan: "real settlement path with a synthesized window; then real-network burst; then the settlement ordering trace"
+    outcome: "MECHANISM CONFIRMED, IMPACT REFUTED — the settlement ordering makes the window count 1 on the real path; the count>=30 state was synthesized; real network: trivial fees, no negatives. Demoted."
+    pattern: pattern.dag-js-numeric-value-arithmetic
+
+  - id: H-crash-family
+    signal: "4 throw sites in the validation path inside async completion callbacks"
+    hypothesis: "crafted input reaches a throw and crashes the full node"
+    predicted_finding: "network-wide crash"
+    oracle_plan: "reachability trace per site; state-machine trace of the sequence transitions"
+    outcome: "REFUTED — every site's triggering state is unreachable (address binding; temp-bad resolution atomic with balling; flow ordering). Hardening note."
+    pattern: ""
+
+  - id: H-mysql-coercion
+    signal: "SQL unary-plus idiom on a TEXT column; a string column could coerce differently per backend"
+    hypothesis: "Oracle MySQL coerces and diverges final-bad resolution -> ball-hash split"
+    predicted_finding: "DB-backend consensus divergence"
+    oracle_plan: "execute the exact predicate on every available engine"
+    outcome: "REFUTED — unary plus coerces only pure-integer strings; all engines match only the intended value; backend marked unsupported."
+    pattern: ""
+
+  - id: H-s1-old-dag
+    signal: "upgrade-gated rules without the network-height disjunct; defense commits name the class"
+    hypothesis: "old-DAG attachment skips new rules"
+    predicted_finding: "validation-rule bypass / amplification"
+    oracle_plan: "mechanism confirmation at the gated site; then the stabilization reachability (can the attached unit execute?)"
+    outcome: "MECHANISM CONFIRMED (bare-mci gates; acceptance divergence measured), REACHABILITY REFUTED (old-DAG units cannot stabilize; every execution path runs at a current position). Hardening note."
+    pattern: pattern.dag-old-dag-rule-gating

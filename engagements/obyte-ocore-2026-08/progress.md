@@ -2,6 +2,44 @@
 
 Newest first.
 
+## 2026-08-11 — ORCHESTRATOR: pin + preflight + sweep + round-0 launch
+
+### Pinned identity (authoritative for every finding)
+
+- **repo:** `github.com/byteball/ocore`
+- **commit:** `a7eb776afc68ed4bed05ba554f7f1e95f5d49b44` (2026-08-10 13:48:56 +0200, `master`)
+  - subject: "only joints with balls while catching up" — 8 commits after the V-001 fix (991c5d6)
+  - chosen as the latest commit whose test suite runs; recorded move-off-HEAD policy: any later pin must be recorded here
+- **local clone:** `/Users/matheusvsky/Documents/trab/obyte-ocore-2026-08-ocore` (private clone, never pushed)
+
+### Environment preflight
+
+- Node `v25.9.0`, npm `11.12.1`; `npm install` clean (714 packages).
+- Test suite on pinned commit: **957 passed**, 1 exception: `test/aa.test.js` exits 7 — **runner crash, not test failure**:
+  ava 0.22.0 crashes in conf handling under Node 25 (`Cannot find module .../ava/conf.js`, `setFatalError` in
+  `formula/evaluation.js:3195`); the aa tests themselves pass ("12 passed"… "14 passed" observed before the runner
+  dies). Recorded verbatim as an environment quirk; not treated as a finding.
+- sqlite3/rocksdb native modules built fine. Test data dirs are created at test time under `test/.testdata-*/`.
+
+### Record-kernel note (decision-0006)
+
+`run-engagement.py init` requires the operator-console authority lane and the canonical scope section headings;
+this engagement's signed scope uses the extended format. **Kernel `init` is deferred to operator console**; the
+orchestrator maintains the engagement records in the documented append-only formats (attempts.jsonl, events.jsonl,
+artifacts.jsonl, hypotheses/rounds/cascades markdown) per the engagement template, and will reconcile into the
+decision-0006 ledger at close if the operator enables it.
+
+### History sweep → recon-signals.md
+
+Security-relevant shape set recorded in `recon-signals.md` (shapes only, no diffs). Dominant recent-fix families:
+old-DAG/`hasBall` rule-gating, depth/size limits on structured payloads, string-type checks before sort/hash,
+canonicalization (-0/arrays), SQL-interpolation escaping, stability/MC advancement, AA trigger/getter validation,
+private-payment spend-proof uniqueness, merkle-proof sibling checks.
+
+### Round 0
+
+Blind round 0 launched (16 hunters, one family each). See `rounds.md`.
+
 ## 2026-08-11 — bootstrap
 
 Engagement created from `_TEMPLATE`. `scope.md` signed by the operator in session. Program rules
@@ -60,3 +98,19 @@ are fixed and already reported. **A fixed bug marks a family, not a target.**
 - [ ] PROOF STRATEGY written for each $50k condition, decomposed into sub-conditions
 - [ ] the DoS coordination question settled for the availability surface
 - [ ] 3-4 DAG pattern cards authored and oracle-calibrated BEFORE round 0
+
+## 2026-08-11 — ROUND 0 COMPLETE + ROUND 1 (PoC + refute) LAUNCHED
+
+- **Round 0:** 16/16 blind hunters delivered. Adjudication in `rounds.md`. Harvest: 6 Tier-A
+  candidates, 3 Tier-B, 8 Tier-C leads, 8 held/refuted negatives. **Crash family** (4 uncaught-throw
+  sites: validation.js 1662/1678/2289/2449) is the strongest lead class; S1 old-DAG gating has 3+
+  incomplete-migration sites; tps-fee exp() blow-up and MySQL sequence-coercion are the
+  consensus/economics candidates.
+- **Round 0 adjudication correction (orchestrator):** the triple-sourced "2289 crash" (f1/f7/f13)
+  was partially refuted by f8 (unit-level validateSpendProofs cleanly rejects included+good
+  conflicts for units carrying spend_proofs) and confirmed by my own source reading; 1662 promoted
+  as the strongest crash site. Adversarial round-1 will settle each site empirically.
+- **Round 1 launched:** 6 PoC builders (p1 crash-1662, p2 crash-2289/1678, p4 MySQL, p6 tps-fee,
+  p8 signed-package budget, p9 merkle) + 2 fresh-context refuters (r1 crash family, r2 MySQL+fee).
+- **Standing gate (operator):** every finding ships a maximum-impact PoC + an independent
+  fresh-context run of that PoC by a reviewer reading RAW output (recorded in memory/winners.md).

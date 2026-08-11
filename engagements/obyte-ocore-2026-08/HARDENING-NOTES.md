@@ -171,3 +171,23 @@ claimed as bounty-reportable under Primacy of Rules.
   A2 re-issuing A1's serial passes validation). No value impact (uncapped assets only; capped
   assets force serial=1 + definer-only → address-free key). Fix: omit address from the issue key
   so "no double issue" holds for all authors.
+
+## HN-16 — Permanent balance gate × node-local settlement timing = cross-node divergence window (E3-12)
+- The tps_fees_balance-sufficiency rejection is PERMANENT (ifUnitError, validation.js:1087-1089 +
+  :464-470 routing) and depends on the node's settlement height. Nodes at different heights can
+  permanently accept/reject the same unit; the F4 poisoning amplifies this (balances differ by
+  ~10.7% of supply). Capped: the OPs' (ahead) nodes reject the divergent branch, so it never
+  stabilizes on the witness-anchored MC — the divergence is behind-node junk pollution + a
+  temporary DAG-content mismatch, no consensus impact. Note added to the F4 package. Fix (optional):
+  make the balance-sufficiency rejection transient (re-validate on re-arrival after catchup) or
+  settle fees before ball creation.
+
+## HN-16 — AA-trigger re-run after crash: state-var double-application (E3-4)
+- The startup `aa_composer.handleAATriggers()` (network.js:4289, "in case anything's left from the
+  previous run") re-executes leftover triggers. The trigger-row DELETE (aa_composer.js:102, SQL
+  transaction :94/:119) and the AA-state kvstore `batch.write({sync:true})` (:117) are SEPARATE
+  stores — not atomic. A crash between the kvstore write and the SQL COMMIT leaves the trigger row
+  present with the state already updated → the restart re-runs the trigger against post-first-run
+  state → non-fund state vars can double-apply. Fund responses save once (post-commit event), so
+  no double payment — state-integrity robustness note. Fix: delete the trigger row in the same
+  store as the state (kvstore batch), or write a started/finished marker.

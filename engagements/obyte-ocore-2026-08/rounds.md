@@ -266,3 +266,34 @@ empirical, the device-crash→restart→double-application chain, F1 fund-impact
 finalization, rounding quantification, AA→AA chains, AA-response fee interplay, exchange
 hot-wallet F4, light-vendor fund path, recipient spend race, parent-composer blast radius, AA
 self-redefinition, terminal coverage review, multi-asset private uniqueness.
+
+## Round E3 — terminal escalation (2026-08-11, 16 hunters, 6 timed out mid-lab)
+
+| lane | verdict | decisive evidence |
+|---|---|---|
+| E3-1 vulnerable-AA demo | **DELIVERED — F1 fund-impact** | attack → BYPASS-CONFIRMED (withdrawal 1000) vs control → bounce, on the real two-node network |
+| E3-2 flood e2e | TIMED OUT | partial: the equal-timestamp flood hits the parent filter (future-stamped) — fix identified (WP-1 at T0-1, flood at T0, WP-2 at T0+1); retry E4 |
+| E3-3 F3 displacement | TIMED OUT | partial: relay working, temp-bad control meaningful; retry E4 |
+| E3-4 double-application chain | **attacker-triggerable in every link** but MySQL-unsupported + sqlite-immune | flood → same-second tie → device-crash on bServeAsHub → restart → stale watermark → reprocess; HN-15 confirmed with the full chain |
+| E3-5 airdrop-claim demo | TIMED OUT | retry E4 |
+| E3-6 Q-1 PoC finalization | TIMED OUT | retry E4 |
+| E3-7 rounding | **capped** | paid-witnessing OP-only; hc minting real (+50) but economically dead (≥29 units/hop) |
+| E3-8 AA→AA chains | TIMED OUT | retry E4 |
+| E3-9 AA-response fee | TIMED OUT | retry E4 |
+| E3-10 exchange F4 | **REFUTED F4 impact — DEMOTION** | M1: 1-MCI-at-a-time → count=1 (fee=17 every step, real path); M2: wall-clock elapsed dilutes honest units (4,917 base); E2-9 real-network: fees 0-190, balances +181, no negatives; r2 drive = synthesized-state error |
+| E3-11 light-vendor | **trust-model-bound** | no fund-impact candidate crosses the hub-trust boundary |
+| E3-12 recipient spend race | **capped** | no same-block race; balance-gate divergence window capped at behind-node junk |
+| E3-13 parent-composer blast | **capped at Low client-availability** | HN-14 stands; not reportable under Primacy of Rules |
+| E3-14 AA self-redefinition | **capped** | no redefinition/overwrite/re-wiring; churn bounded |
+| E3-15 terminal coverage | **no new in-scope lane — COVERED** | full terminal coverage statement appended |
+| E3-16 multi-asset uniqueness | **sound** | cross-asset reuse impossible (asset in the hash); same-asset double-claim rejected; cross-asset reference blocked |
+
+**THE ESCALATION PHASE REFUTED ITS OWN FINDING:** obyte-2026-08-004 (tps-fee poisoning) DEMOTED —
+the honest-author-freeze impact claim is unreachable (E3-10 M1/M2 + E2-9 real-network + orchestrator
+source verification of the settlement ordering). The count>=30 state was a synthesized-state error
+(the p2 lesson applied to our own finding). Residual: self-frosting economics, HN-15, fee-curve
+design note.
+
+**E4 (final round) launched:** F4 refutation review, attacker-cost measurement, F3 displacement,
+airdrop-claim demo, F1/F3 package revisions, terminal severity audit, Q-1 PoC, AA→AA chains,
+AA-response fee, lessons + memory + casebook + handoff packages, lifecycle re-run, covered-dry audit.

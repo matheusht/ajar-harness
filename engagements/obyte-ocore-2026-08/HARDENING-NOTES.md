@@ -123,7 +123,20 @@ claimed as bounty-reportable under Primacy of Rules.
   Not attacker-reachable today (storage accounting conserved, 16/16 shapes measured) — the HN-2
   uncaught-throw pattern. Fix: log + repair instead of throw.
 
-## HN-14 — parent_composer throw via fee-inflation (E1-5/OV-4)
+## HN-14 — parent_composer throw via fee-inflation (E1-5/OV-4) — EMPIRICALLY CONFIRMED end-to-end (E2-8)
+- Confirmed on the real path: 16 recent low-fee flood units raised the window rate (current tps 33
+  → min_parentable = current_fee × 3 = 21); a fresh victim's composition excluded the ENTIRE pool
+  (paid fee 1 < 21) and the genesis replacement (fee 0) → `replacement_parents []` →
+  `throw "all potential parents underpay the tps fee"` (parent_composer.js:461) → unhandled
+  rejection → process crash (evidence/lab/e28/e28b-run.raw.log). 
+- **HN-5 does NOT drive this**: getCurrentTps (the filter's rate source, parent_composer.js:427)
+  skips future-timestamped units (storage.js:1360) — empirically: 901 future-dated units moved the
+  recent window to 901 while currentFee stayed 0 (evidence/lab/e28/e28a-run.raw.log). The 5×
+  multiplier (getRecentTps > 15, needs >900 units/60s, 60s cache) applies to the new-unit fee gate
+  (validation.js:1075), not the parent filter.
+- Fix: replace the bare throw with onDone(err) (the sibling branches do); the wallet should fall
+  back to the best available parent.
+
 - filterParentsByTpsFeeAndReplace (parent_composer.js:~461) throws "all potential parents underpay
   the tps fee" when every candidate parent's paid fee is below the local estimate — reachable when
   HN-5's future-timestamp units inflate the local fee estimate above historical parents' paid fees:
@@ -137,3 +150,24 @@ claimed as bounty-reportable under Primacy of Rules.
   sqlite immune (rowid). MySQL is "not currently supported" (conf.js:66-68). Not attacker-
   triggerable (needs restart + same-second settlement + stale tie-break). Fix: SELECT MAX(mci) or
   a dedicated watermark column.
+
+## HN-16 — S1 disjunct inconsistency on vote-value bounds (E2-14)
+- The fee-parameter vote bounds (validation.js:1895-1905) use the `last_ball_mci || !hasBall &&
+  minRetrievableMci` form: an old-DAG-attached vote with an out-of-range value (tps_interval < 0.1,
+  base_tps_fee > 1e8, multiplier > 1000) passes validation but never counts (saveSystemVote
+  requires MC stability — old-DAG units can't stabilize). Latent only; align with the migration
+  pattern for defense-in-depth.
+
+## HN-17 — governance fee ceiling is 10Mx the current base (E2-14)
+- Within validated bounds, a majority (or >5%-of-supply capture) can set base_tps_fee up to 1e8
+  (10Mx the current 10) or multiplier up to 1000 — a network-wide fee wall at tps=2: ~6.4e8 base
+  per unit. Governance-by-design, not a defect; recorded for the F4 parameter-dependence framing
+  and a possible tighter-bound design discussion.
+
+## HN-16 — Issue-input duplicate key includes the address (E2-5)
+- The inputs-table doublespend query (validation.js:2353-2370) and the schema
+  `UNIQUE (asset, denomination, serial_number, address, is_unique)` both key on the author address
+  for non-definer-only assets — a cross-author duplicate serial issuance is missed (empirically:
+  A2 re-issuing A1's serial passes validation). No value impact (uncapped assets only; capped
+  assets force serial=1 + definer-only → address-free key). Fix: omit address from the issue key
+  so "no double issue" holds for all authors.

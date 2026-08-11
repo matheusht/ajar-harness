@@ -147,8 +147,7 @@ async function main() {
             console.log("E1-16 " + label + " SAVED " + joint.unit.unit);
             // cache repair: saved units are stable+on-MC in this lab; remove stale unstable entries
             const saved = joint.unit.unit;
-            delete storage.assocUnstableUnits[saved];
-            if (storage.assocStableUnits[saved]) storage.assocStableUnits[saved].is_free = 0;
+            // writer.js:592 already maintains assocUnstableUnits on save; do not touch the cache
             resolve(objValidationState);
           });
         },
@@ -202,7 +201,6 @@ async function main() {
   console.log("E1-16 GENESIS-DB:", JSON.stringify(gRows[0]));
   // rebuild the in-memory caches from the DB; the genesis save leaves a stale unstable entry
   await storage.initCaches();
-  delete storage.assocUnstableUnits[genesis.unit];
   const gOut = await q("SELECT output_index, address, amount FROM outputs WHERE unit=? ORDER BY output_index", [genesis.unit]);
   console.log("E1-16 GENESIS-OUTPUTS:", JSON.stringify(gOut));
   // find each author's genesis output index
@@ -221,7 +219,7 @@ async function main() {
   console.log("E1-16 ASSET:", assetHash);
   const assetBallRow = await q("SELECT ball FROM balls WHERE unit=?", [assetHash]);
   const assetBall = assetBallRow[0] ? assetBallRow[0].ball : genesisBall;
-  const assetAnchor = { parent_units: [assetHash], last_ball: assetBall, last_ball_unit: assetHash };
+  const assetAnchor = { parent_units: [genesis.unit], last_ball: genesisBall, last_ball_unit: genesis.unit };
 
   // ---- 2. A1 issues serial 1 (U1) ----
   function issueUnit(key, baseInputIdx, serial, amount, label) {

@@ -226,3 +226,43 @@ flood e2e on the two-node lab, issue spend proof, AA trigger on the network, F3 
 empirical, HN-5→parent-composer chain, natural-burst F4, estimation-asymmetry refund,
 witness-rounding dust, light-vendor handshake, archiving edge, governance vote economics,
 exchange-integration surface, Q-1 crash-loop persistence.
+
+## Round E2 — directed escalation on the two-node lab (2026-08-11, 16 hunters, 3 timed out)
+
+| lane | verdict | decisive evidence |
+|---|---|---|
+| E2-1 fee accounting | **RESOLVED — no money creation** | funding gates block un-funded declarations (A1/A2); conservation (A3: net = final); delta re-applies on double-call (C: caller discipline is the invariant); **double-application confirmed through the real reprocess path** (D: 1e6→2e6→3e6) → HN-15 real-but-conditional (MySQL watermark, sqlite immune) |
+| E2-2 vulnerable-AA demo | TIMED OUT | retry E3 (E2-6's AA path now available) |
+| E2-3 issueAsset cap | **REFUTED cap-exceedance** | validation total caps close the 2^53 window; residue = composer-side drift, self-inflicted |
+| E2-4 flood e2e | TIMED OUT | retry E3 on the E1-7 lab |
+| E2-5 issue spend proof | **capped** | mechanism confirmed; reachable case economically inert; value-bearing contained |
+| E2-6 AA trigger on network | **CONFIRMED** | full AA path executes: definition→stabilize→aa_triggers→handleAATriggers→formula→deterministic response committed (identical hash both nodes) |
+| E2-7 F3 displacement | TIMED OUT | retry E3 on the E1-7 lab |
+| E2-8 HN-5→parent-composer | **chain refuted; crash confirmed** | future-dating doesn't hit the parent filter's rate source; the flood DOES → crash end-to-end (E1-5/HN-14) |
+| E2-9 natural-burst F4 | **REFUTED (LR-3 corrected)** | composition throughput caps ~6/s; settlement elapsed dilutes tps ~3; the 10x estimation multiplier credits (not debits) the balance; F4 = attack-only, economics-capped |
+| E2-10 estimation refund | **capped** | refund mechanism, no withdrawal, net = final (declared 1.068e15, final 17, net 17) |
+| E2-11 rounding dust | **capped** | floor dust always destroys; half-up can create but OP-only or economically dead; E1-10 zero-mean imprecise |
+| E2-12 light handshake | (read separately) | — |
+| E2-13 archiving | **capped** | sound for double-claim/theft; NOT EXISTS guards; residuals hardening |
+| E2-14 governance votes | **capped** | no escalation lane; 2 HN; F4 parameter-dependence bounded |
+| E2-15 exchange surface | **capped** | no new mechanism; 3 integration-level consequences of existing findings |
+| E2-16 Q-1 crash-loop | **escalated (evidence)** | remote zero-cost wallet crash, crash-loop persistence 3/3 cycles on the real path (bServeAsHub victims / stale-key edges); quarantine-level, operator's scope decision |
+
+**E2-review round launched (4 fresh reviewers).** E3 plan: retry E2-2/E2-4/E2-7 with the working
+AA path + two-node lab; then the terminal coverage review.
+
+## Round ER2 — E2 verification (2026-08-11, 4 fresh reviewers) — ALL VERIFIED
+
+- ER2-1: money-creation resolution confirmed (no money creation; HN-15 conditional MySQL
+  watermark); 2 evidence-quality findings recorded (E2-10 writer-grep regex false negative; E2-1
+  dead-code in final JSON) — conclusions stand, artifacts flagged.
+- ER2-2: natural-burst refutation verified (composition cap 6.7/s measured; settlement window
+  4-7s dilutes tps; credit direction verified with a tps_interval=60 magnitude caveat).
+- ER2-3: Q-1 crash-loop verified 3/3 (exact raw log lines); delivery path real and remote.
+- ER2-4: issueAsset/issue-proof/archiving caps verified.
+
+**E3 launched (16 lanes):** vulnerable-AA demo on the working AA path, flood e2e, F3 displacement
+empirical, the device-crash→restart→double-application chain, F1 fund-impact demo, Q-1 PoC
+finalization, rounding quantification, AA→AA chains, AA-response fee interplay, exchange
+hot-wallet F4, light-vendor fund path, recipient spend race, parent-composer blast radius, AA
+self-redefinition, terminal coverage review, multi-asset private uniqueness.

@@ -8,3 +8,4 @@
 {"ts":"2026-08-11T06:00:00Z","kind":"event","event_type":"cascades.recorded","note":"4 cascades recorded (S1 family dead, crash pattern hardening, F3 root, F4 natural-burst form); pattern candidates PC-4/PC-5 added"}
 {"ts":"2026-08-11T06:45:00Z","kind":"event","event_type":"finding.promoted","note":"obyte-2026-08-003 (spend-proof uniqueness key) promoted — Low, kill-pair adjudicated, all 6 gates clear"}
 {"ts":"2026-08-11T07:15:00Z","kind":"event","event_type":"round3.complete","note":"8/8 reports adjudicated; coverage-dry for in-scope surfaces; device-layer crash quarantined (Q-1); F3 precision correction applied; hardening notes extended (HN-11)"}
+{"ts":"2026-08-11T15:30:00Z","kind":"event","event_type":"escalation.e2-review.complete","note":"ER2 verified all E2 claims; money-creation resolved (no creation, HN-15 conditional); natural-burst refuted; Q-1 crash-loop verified 3/3; E3 terminal round launched (16 lanes)"}

@@ -41,7 +41,7 @@ async function boot(dataDir, port, opts) {
 		const g = {
 			version: "4.0",
 			alt: "1",
-			timestamp: Math.round(Date.now() / 1000),
+			timestamp: Number(process.env.LAB_GENESIS_TS || Math.round(Date.now() / 1000)),
 			authors: [{ address: witness_addr, definition: defOf(keys.witness), authentifiers: { r: "-" } }],
 			messages: [],
 			witnesses: [witness_addr],

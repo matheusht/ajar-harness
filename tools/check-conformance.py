@@ -1032,7 +1032,7 @@ def check_framing_probe():
     scrubber missed — `CVSS: S:C 8.5`, a partial vector and a score with text between them, which
     none of the three vector patterns matched."""
     print("\n[framing-probe] evidence packets carry no severity signal")
-    pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets")
+    pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2")
     if not os.path.isdir(pk):
         return
     sys.path.insert(0, os.path.join(ROOT, "tools"))

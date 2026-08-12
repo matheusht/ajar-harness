@@ -66,6 +66,27 @@ SCRUB = [
     # A bare decimal next to a removed band is still a severity signal.
     (re.compile(r"\[band removed\]\s*\d{1,2}\.\d\b", re.I), "[band removed]"),
     (re.compile(r"\b\d{1,2}\.\d\s*\[band removed\]", re.I), "[band removed]"),
+    # ANY bare one-decimal number. Run 1 (2026-08-12) leaked 4.9, 6.5, 7.7, 8.1, 8.8, 3.1, 4.3,
+    # 7.1 and 7.4 straight through, because every earlier pattern required an adjacent cue word
+    # ("score", "CVSS", a band). A parenthesised "(4.9)" or an arrow "6.5 -> 7.1" carried the whole
+    # assessment with no cue at all. The lookarounds spare version strings, which have two dots
+    # (1.20.1) or trail into more digits. This over-scrubs the occasional genuine measurement; that
+    # is the correct trade, because a leaked score ends the experiment and a lost measurement does
+    # not.
+    (re.compile(r"(?<![\w.])\d{1,2}\.\d(?![\d.])"), "[score removed]"),
+    # Adjudication HISTORY is a stronger steer than any band word, and run 1 proved it: graders
+    # cited "the one recorded raise above this level was explicitly WITHDRAWN" as their reason for
+    # holding a band down. The dossiers were updated after the audit, so the packet was telling the
+    # grader which conclusion had already been discredited. That is not grading, it is agreeing.
+    (re.compile(r"\b(?:withdrawn|leading prompt|no kill side|misquot\w*|re-escalation|"
+                r"symmetric re-audit|kill-pair|refut\w*|reward.hack\w*|prompt-led|"
+                r"escalat\w*|demot\w*|reframed|over-?claim\w*|overstat\w*|conced\w*|"
+                r"ArcadeDB|NocoDB|better-auth|GHSA-[\w-]+|CVE-\d{4}-\d+)\b", re.I),
+     "[adjudication history removed]"),
+    # An arrow between two removed bands still announces that an assessment moved, and a reader
+    # infers a direction from the surrounding prose. Collapse the whole construction.
+    (re.compile(r"\[band removed\]\s*(?:->|=>|→|to)\s*\*{0,2}\[band removed\]", re.I),
+     "[assessment change removed]"),
 ]
 
 # Files that carry mechanism and evidence. Adjudication documents are deliberately NOT read: they
@@ -81,7 +102,13 @@ def scrub(text):
 
 
 def leaks(text):
-    """Severity signals that survived. Empty list means the packet is safe to hand to a grader."""
+    """Severity signals that survived. Empty list means the packet is safe to hand to a grader.
+
+    This detector reported CLEAN on all five run-1 packets while every one of them still carried
+    bare scores, and three carried the audit's own narrative. It looked only for what the scrubber
+    already removed, so it could only ever confirm the scrubber's own definition of a leak. The
+    lesson generalises past this tool: a verifier built from the same list as the thing it verifies
+    is not an independent check."""
     found = []
     for pat, _ in SCRUB[:3]:
         found += [("vector", m.group(0)[:40]) for m in pat.finditer(text)]
@@ -89,6 +116,14 @@ def leaks(text):
         found.append(("band", m.group(0)))
     for m in re.finditer(r"\bCVSS\b[^\n]{0,30}\d\.\d", text, re.I):
         found.append(("score", m.group(0)[:40]))
+    # A bare one-decimal number IS the assessment. "(4.9)" needs no cue word to be read as one.
+    for m in re.finditer(r"(?<![\w.])\d{1,2}\.\d(?![\d.])", text):
+        found.append(("bare-score", m.group(0)))
+    # Prior-verdict narrative steers harder than a band word, because it tells the grader which
+    # answer is already discredited.
+    for m in re.finditer(r"\b(?:withdrawn|leading prompt|no kill side|misquot\w*|prompt-led|"
+                         r"symmetric re-audit|GHSA-[\w-]+|CVE-\d{4}-\d+)\b", text, re.I):
+        found.append(("adjudication-history", m.group(0)[:40]))
     return found
 
 
@@ -221,8 +256,22 @@ def cmd_score(args):
              "total_flips": total_flips, "directional": directional, "detail": detail}
 
     # Fixed in fixtures/preregistration/framing-invariance.json BEFORE any grader ran.
+    #
+    # MIN_FLIPS was added after run 2 and applies from run 3 onward, declared in
+    # framing-invariance-OUTCOME.md before that data existed. The rule as originally written carried
+    # no minimum: run 2 produced exactly one flip, 1/1 read as 100% directional, and the rule
+    # declared framing bias confirmed on a single observation. That is the same over-reading the
+    # disposition ledger's floor exists to prevent, and this preregistration should have had one.
+    # Run 2 is still scored against the original rule in the outcome document — the defect is
+    # recorded rather than quietly edited away.
+    MIN_FLIPS = 3
     if n < 3:
         stats["verdict"] = "insufficient-data"
+    elif 0 < total_flips < MIN_FLIPS:
+        stats["verdict"] = "inconclusive-few-flips"
+        stats["note"] = (f"{total_flips} flip(s) over {n * 2} comparisons. Consistent with framing "
+                         f"bias and equally consistent with grader variance; this design cannot "
+                         f"separate them below {MIN_FLIPS} flips.")
     elif total_flips == 0:
         stats["verdict"] = "framing-invariant"
         stats["note"] = ("No band moved under any framing. At this sample size the bias thesis is "
@@ -258,7 +307,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("pack"); p.add_argument("--package", required=True)
-    p.add_argument("--out", default=os.path.join(ROOT, "fixtures", "framing-probe", "packets"))
+    p.add_argument("--out", default=os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2"))
     p.set_defaults(fn=cmd_pack)
 
     p = sub.add_parser("verify"); p.add_argument("--packet", required=True); p.set_defaults(fn=cmd_verify)

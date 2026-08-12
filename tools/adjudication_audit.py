@@ -244,33 +244,46 @@ def audit(reviews, min_reviews=DEFAULT_MIN):
     fatal = [s for s in signals if s["fired"] and s["severity"] == "fatal"]
     smells = [s for s in signals if s["fired"] and s["severity"] == "smell"]
 
-    # A corpus that only REJECTS cannot be manufacturing findings.
+    # A corpus that only REJECTS is not manufacturing findings — but that does NOT make it judged.
     #
     # Fabrication inflates: the spotify generator wrote `supported` fifteen times. The opposite shape
-    # — every verdict a rejection — is what an operator produces when they batch-annotate a set of
-    # bad reviews by hand. That looks identical on every structural signal: one reviewer, one
-    # instant, one template, one verdict. Found 2026-08-11 sweeping every engagement, where
-    # gemini-cli fired four signals including a fatal one; the reviews were the operator marking
-    # three stub reviews `non_compliant` in one sitting.
+    # — every verdict a rejection — is also what an operator produces when they batch-annotate bad
+    # reviews by hand, and the two are structurally identical: one reviewer, one instant, one
+    # template, one verdict. gemini-cli fired four signals including a fatal one for exactly that
+    # innocent reason.
     #
-    # The asymmetry is deliberate. A generator that emits rejections manufactures NON-findings, and
-    # under default-reject a non-finding costs nothing and reaches no vendor. The failure this tool
-    # exists to prevent is a fabricated confirmation.
+    # The first version of this rule zeroed every signal and returned `clear`. That was wrong, and
+    # wrong in a way that matters: an all-rejecting corpus IS the shape of findings killed without
+    # real review, which is the exact failure mode a harness accused of over-killing needs to be
+    # able to see. A reviewer demonstrated it the same day — a corpus firing all seven signals,
+    # placeholder hashes and identical timestamps included, returned CLEAR purely because its
+    # verdicts rejected.
+    #
+    # So the verdict now splits the two questions the old one conflated:
+    #   synthetic             — generated CONFIRMATIONS. Blocks promotion (G4).
+    #   rejections-unreviewed — generated or batch-annotated REJECTIONS. Does not block a promotion,
+    #                           because nothing is being promoted on the strength of a rejection.
+    #                           It is not a fraud accusation; it is the true statement that this set
+    #                           of kills carries no sign of independent judgement. Feeds a demotion
+    #                           audit, which is the thing that catches over-killing.
     rejecting = {"non_compliant", "noncompliant", "refuted", "rejected", "unsupported",
                  "not_supported", "quarantined", "withdrawn", "invalid", "demoted"}
     verdict_words = {str(v).strip().lower() for v in verdicts if v}
     all_rejecting = bool(verdict_words) and verdict_words <= rejecting
-    if all_rejecting:
+    if all_rejecting and (fatal or len(smells) >= 3):
         signals.append({
-            "signal": "all-verdicts-rejecting", "fired": True, "severity": "exculpatory",
-            "detail": f"every verdict is a rejection ({', '.join(sorted(verdict_words))}) — a "
-                      f"corpus that only rejects is not manufacturing findings; structural signals "
-                      f"are the expected shape of one person annotating a batch by hand"})
-        fatal, smells = [], []
+            "signal": "all-verdicts-rejecting", "fired": True, "severity": "smell",
+            "detail": f"every verdict is a rejection ({', '.join(sorted(verdict_words))}) — these "
+                      f"kills carry no sign of independent judgement. This does not block a "
+                      f"promotion, but a batch of unreviewed rejections is how a real finding "
+                      f"disappears quietly; audit them before trusting the kills"})
     # Majority of five. The original rule was all-of-three; five signals with a 3/5 bar keeps the
     # "each is innocent alone" principle while removing the single-signal escape hatch that let a
     # generator satisfy the detector by varying exactly the fields it checked.
-    verdict = "synthetic" if (fatal or len(smells) >= 3) else "clear"
+    if fatal or len(smells) >= 3:
+        verdict = "rejections-unreviewed" if all_rejecting else "synthetic"
+    else:
+        verdict = "clear"
 
     stats = {"reviews": n, "distinct_reviewers": len(reviewers), "corrections": corrections,
              "conflicting_evidence": conflicts, "distinct_rationales": len(rationales),
@@ -308,6 +321,10 @@ def main():
         if verdict == "synthetic":
             print("These reviews carry the signature of generation, not judgement.")
             print("Do not treat any finding they adjudicate as confirmed until a real reviewer runs.")
+        elif verdict == "rejections-unreviewed":
+            print("Every verdict here is a rejection, and the set shows no sign of independent")
+            print("judgement. Nothing promotes on a rejection, so this blocks no finding — but a")
+            print("batch of unreviewed kills is how a real finding disappears quietly. Audit them.")
     return 1 if verdict == "synthetic" else 0
 
 

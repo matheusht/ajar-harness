@@ -28,6 +28,7 @@ Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -954,6 +955,122 @@ def check_gates_on_real_data():
            f"verdict={rej} — a fabricated set of kills must stay visible")
 
 
+def check_disposition_ledger():
+    """The calibration arithmetic, and the floor that stops it speaking too early.
+
+    Built 2026-08-12. Four reviewers had just read every engagement record and concluded almost
+    nothing had ever been filed; the operator then said findings HAD been filed and adjudicated
+    across four programs. Both were right — the repository did not know. This ledger is the only
+    place external verdicts can live, so its arithmetic is worth a regression test."""
+    print("\n[disposition-ledger] calibration against external verdicts")
+    base = os.path.join(ROOT, "fixtures", "dispositions")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import disposition_ledger as DL
+    except ImportError as exc:
+        record(False, "disposition-ledger: module is importable", str(exc))
+        return
+
+    class A:
+        pass
+
+    for case, want in (("under-calling", "under-calling"), ("over-calling", "over-calling"),
+                       ("calibrated", "calibrated")):
+        d = os.path.join(base, case)
+        if not os.path.isdir(d):
+            continue
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["verdict"] == want, f"dispositions/{case}: verdict is {want}",
+               f"got {got['verdict']}, deltas under={got['under_called']} "
+               f"agree={got['agreed']} over={got['over_called']}")
+
+    # `not-assigned` must contribute NO delta. Folding an ungraded closure in as a zero would claim
+    # an agreement that never happened — the calibrated fixture carries 7 records and 5 gradings.
+    d = os.path.join(base, "calibrated")
+    if os.path.isdir(d):
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["dispositions"] > got["both_graded"],
+               "dispositions: an ungraded closure contributes no delta",
+               f"{got['dispositions']} records, {got['both_graded']} graded")
+
+    # A thin ledger must refuse to issue a verdict. The harness's recurring failure is a confident
+    # answer over too little input; this is the one place that would be most tempting.
+    a = A(); a.root = os.path.join(base, "calibrated"); a.json = True; a.min = 99
+    buf = io.StringIO()
+    old, sys.stdout = sys.stdout, buf
+    try:
+        DL.cmd_calibrate(a)
+    finally:
+        sys.stdout = old
+    record(json.loads(buf.getvalue())["verdict"] == "insufficient-data",
+           "dispositions: below the floor, no verdict is issued",
+           "a lopsided two-record ledger is noise, not a finding")
+
+
+def check_framing_probe():
+    """Every packet handed to a grader must carry zero severity signals.
+
+    A grader who can see the band already assigned is not grading, they are agreeing. The scrub is
+    what makes the experiment an experiment, so it is asserted here rather than trusted. The
+    verifier earned its keep immediately: on the first real packet (F-F1) it caught a leak the
+    scrubber missed — `CVSS: S:C 8.5`, a partial vector and a score with text between them, which
+    none of the three vector patterns matched."""
+    print("\n[framing-probe] evidence packets carry no severity signal")
+    pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets")
+    if not os.path.isdir(pk):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import framing_probe as FP
+    except ImportError as exc:
+        record(False, "framing-probe: module is importable", str(exc))
+        return
+
+    packets = sorted(f for f in os.listdir(pk) if f.endswith(".packet.json"))
+    record(len(packets) >= 3, "framing-probe: packets exist", f"{len(packets)} packet(s)")
+    for name in packets:
+        p = json.load(open(os.path.join(pk, name)))
+        leaked = FP.leaks(p["body"])
+        record(not leaked, f"framing-probe/{p['finding_id']}: zero severity signals survive",
+               f"{len(leaked)} leak(s): {[t for _, t in leaked[:3]]}")
+        import hashlib
+        record(hashlib.sha256(p["body"].encode()).hexdigest() == p["body_sha256"],
+               f"framing-probe/{p['finding_id']}: body matches its recorded hash",
+               "an edited packet invalidates the run it was used in")
+
+    # The scrubber must actually remove what the detector looks for, including the F-F1 shape.
+    probe = ("This is CRITICAL. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H base score 9.8 High. "
+             "Rated CVSS: S:C 8.5 and considered Medium overall, arguably Low.")
+    record(not FP.leaks(FP.scrub(probe)),
+           "framing-probe: the scrubber removes every signal the verifier detects",
+           f"residual after scrub: {FP.leaks(FP.scrub(probe))}")
+
+    # Three framings, one packet: the evidence must be byte-identical across them.
+    if packets:
+        p = json.load(open(os.path.join(pk, packets[0])))
+        record(len(set(FP.FRAMINGS.values())) == 3,
+               "framing-probe: the three framings are distinct texts")
+        record(all(p["body"] not in v for v in FP.FRAMINGS.values()),
+               "framing-probe: no framing text embeds the evidence",
+               "the packet must be the only shared content")
+
+
 def check_adjudication_audit():
     """Run tools/adjudication_audit.py against the fixture pair and assert both directions.
 
@@ -1105,6 +1222,8 @@ def main():
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()
+    check_disposition_ledger()
+    check_framing_probe()
     check_finding_lifecycle()
     check_gates_on_real_data()
 

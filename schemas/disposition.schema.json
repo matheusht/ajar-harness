@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "disposition",
+  "description": "An EXTERNAL verdict on a filed finding. The only ground truth this harness has. Everything else in the repo is the harness grading itself. One record per (report, adjudicating party). Append-only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "engagement", "finding_ref", "program", "recorded_at", "our_severity", "outcome", "source"],
+  "properties": {
+    "schema_version": { "const": 1 },
+
+    "engagement": { "type": "string", "description": "engagement id, e.g. klever-2026-07" },
+    "finding_ref": { "type": "string", "description": "the finding id or package path this disposition adjudicates" },
+    "report_id": { "type": "string", "description": "the external report identifier: H1 report number, GHSA id, issue url. Empty when the program does not issue one." },
+    "program": { "type": "string", "description": "the adjudicating program, e.g. 'HackerOne/Netflix', 'GitHub Security Advisories/Klever', 'Google OSS VRP'" },
+
+    "recorded_at": { "type": "string", "description": "when this record was written (not when the vendor decided)" },
+    "decided_at": { "type": "string", "description": "when the external party decided, if known" },
+
+    "our_severity": {
+      "description": "the band THIS HARNESS assigned before filing. Never back-edit it to match the vendor — that destroys the measurement.",
+      "enum": ["informational", "low", "medium", "high", "critical"]
+    },
+    "our_vector": { "type": "string", "description": "CVSS vector we filed, if any" },
+
+    "their_severity": {
+      "description": "the band the external party assigned. `not-assigned` when they accepted or rejected without grading — common for Informative closures.",
+      "enum": ["informational", "low", "medium", "high", "critical", "not-assigned"]
+    },
+    "their_vector": { "type": "string" },
+
+    "outcome": {
+      "description": "What the external party DID. Kept separate from severity because the two dissociate: Klever closed our report not-accepted while publishing their own advisory crediting us as reporter. A schema that forces those into one field forces a lie.",
+      "enum": [
+        "accepted",
+        "accepted_lower_severity",
+        "accepted_higher_severity",
+        "credited_via_vendor_advisory",
+        "duplicate",
+        "informative",
+        "not_accepted",
+        "out_of_scope",
+        "pending",
+        "withdrawn_by_us"
+      ]
+    },
+
+    "bounty_usd": { "type": "number", "description": "amount paid, if any. 0 is meaningful; absent means unknown." },
+
+    "source": {
+      "type": "object",
+      "description": "How we know. A disposition with no retrievable source is hearsay, and hearsay is what this ledger exists to replace.",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["repo_record", "operator_report", "external_url", "vendor_advisory"] },
+        "ref": { "type": "string", "description": "file:line for repo_record, a URL for external_url/vendor_advisory" },
+        "note": { "type": "string" }
+      }
+    },
+
+    "confidence": {
+      "description": "How firmly this record is established. `operator_recall` is legitimate and common, and MUST be marked so that a calibration run can report how much of its basis is unverified.",
+      "enum": ["verified", "operator_recall", "provisional"]
+    },
+
+    "notes": { "type": "string", "description": "Anything that would change how a later reader weighs this record. Disagreements, partial credit, a finder credited alongside us." }
+  }
+}

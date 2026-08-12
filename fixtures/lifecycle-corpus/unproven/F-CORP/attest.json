@@ -1,5 +1,11 @@
 {
- "real-path-exec": "ran against the pinned build",
- "negative-control": "control did not fire",
- "independent-review": "reviewer-a, fresh context"
+  "real-path-exec": "ran against the pinned build",
+  "negative-control": "control did not fire",
+  "independent-review": "reviewer-a, fresh context",
+  "state_provenance": {
+    "mode": "real-path",
+    "established_by": "fixture: attempt-0001 raw log, target's own request path",
+    "impact_bearing_state": "fixture state reached by driving the target",
+    "synthesized_setup": []
+  }
 }

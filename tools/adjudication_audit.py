@@ -83,15 +83,29 @@ DEFAULT_TYPE = "claim_adjudication"
 
 
 def load_reviews(path, review_type=DEFAULT_TYPE):
-    """Load review records from a directory of .json files, a .jsonl, or a single .json."""
+    """Load review records from a directory tree, a .jsonl, or a single .json.
+
+    Directories are walked RECURSIVELY. Version 1 used os.listdir, so pointing this at an engagement
+    root found nothing and printed `VERDICT: CLEAR` over zero reviews — absence of input read as a
+    pass. Real engagements keep reviews at `<engagement>/<unproven|findings>/<id>/reviews/*.json`,
+    never at the root, so the corpus arm of G4 had never once executed on real data. Found
+    2026-08-11 while measuring obyte-ocore-2026-08 against its preregistration.
+
+    Callers that need "no reviews found" to be an error must check the returned length. This
+    function reports what it finds; it does not decide what an empty set means."""
     out = []
     if os.path.isdir(path):
-        for fn in sorted(os.listdir(path)):
-            if fn.endswith(".json"):
+        for dirpath, dirnames, filenames in os.walk(path):
+            # Hidden dirs are scratch DB state (.kp-f3-data, .labdata-*), never review records.
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            for fn in sorted(filenames):
+                if not fn.endswith(".json"):
+                    continue
                 try:
-                    out.append(json.load(open(os.path.join(path, fn))))
+                    obj = json.load(open(os.path.join(dirpath, fn)))
                 except (OSError, ValueError):
-                    pass
+                    continue
+                out.extend(obj if isinstance(obj, list) else [obj])
     elif path.endswith(".jsonl"):
         for line in open(path, errors="replace"):
             if line.strip():
@@ -102,9 +116,21 @@ def load_reviews(path, review_type=DEFAULT_TYPE):
     else:
         obj = json.load(open(path))
         out = obj if isinstance(obj, list) else [obj]
+    out = [r for r in out if isinstance(r, dict)]
     if review_type:
         out = [r for r in out if r.get("review_type") == review_type]
-    return out
+    # A recursive walk can meet the same review twice (a package copied into evidence/, a review
+    # also appended to a ledger). Counting it twice would inflate n and weaken every set-level
+    # signal, which is the wrong direction to be wrong in.
+    seen, deduped = set(), []
+    for r in out:
+        key = r.get("review_id")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(r)
+    return deduped
 
 
 HEX_RE = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
@@ -139,6 +165,22 @@ def _normalise(text):
     return ID_RE.sub("<id>", (text or "").strip()).lower()
 
 
+def _count_entries(value):
+    """Number of entries in a field that may be written as a list OR as one prose string.
+
+    `len()` on a string counts characters. A real review carrying a 399-character
+    conflicting_evidence paragraph scored 399 dissent entries, so the no-dissent smell could never
+    fire on any engagement that wrote prose instead of a list. Wrong in the fail-open direction.
+    Found 2026-08-11 auditing obyte-ocore-2026-08."""
+    if not value:
+        return 0
+    if isinstance(value, str):
+        return 1
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value)
+    return 1
+
+
 def audit(reviews, min_reviews=DEFAULT_MIN):
     """Return (verdict, signals, stats) for a set of claim-adjudication reviews."""
     signals, n = [], len(reviews)
@@ -161,8 +203,8 @@ def audit(reviews, min_reviews=DEFAULT_MIN):
 
     # --- smells: each has an innocent reading alone -------------------------------------------
     reviewers = {r.get("independence", {}).get("reviewer_id") for r in reviews}
-    corrections = sum(len(r.get("corrections") or []) for r in reviews)
-    conflicts = sum(len(r.get("conflicting_evidence") or []) for r in reviews)
+    corrections = sum(_count_entries(r.get("corrections")) for r in reviews)
+    conflicts = sum(_count_entries(r.get("conflicting_evidence")) for r in reviews)
     rationales = {(r.get("rationale") or "").strip() for r in reviews}
     templates = {_normalise(r.get("rationale")) for r in reviews}
     verdicts = [r.get("verdict") for r in reviews]
@@ -201,6 +243,30 @@ def audit(reviews, min_reviews=DEFAULT_MIN):
 
     fatal = [s for s in signals if s["fired"] and s["severity"] == "fatal"]
     smells = [s for s in signals if s["fired"] and s["severity"] == "smell"]
+
+    # A corpus that only REJECTS cannot be manufacturing findings.
+    #
+    # Fabrication inflates: the spotify generator wrote `supported` fifteen times. The opposite shape
+    # — every verdict a rejection — is what an operator produces when they batch-annotate a set of
+    # bad reviews by hand. That looks identical on every structural signal: one reviewer, one
+    # instant, one template, one verdict. Found 2026-08-11 sweeping every engagement, where
+    # gemini-cli fired four signals including a fatal one; the reviews were the operator marking
+    # three stub reviews `non_compliant` in one sitting.
+    #
+    # The asymmetry is deliberate. A generator that emits rejections manufactures NON-findings, and
+    # under default-reject a non-finding costs nothing and reaches no vendor. The failure this tool
+    # exists to prevent is a fabricated confirmation.
+    rejecting = {"non_compliant", "noncompliant", "refuted", "rejected", "unsupported",
+                 "not_supported", "quarantined", "withdrawn", "invalid", "demoted"}
+    verdict_words = {str(v).strip().lower() for v in verdicts if v}
+    all_rejecting = bool(verdict_words) and verdict_words <= rejecting
+    if all_rejecting:
+        signals.append({
+            "signal": "all-verdicts-rejecting", "fired": True, "severity": "exculpatory",
+            "detail": f"every verdict is a rejection ({', '.join(sorted(verdict_words))}) — a "
+                      f"corpus that only rejects is not manufacturing findings; structural signals "
+                      f"are the expected shape of one person annotating a batch by hand"})
+        fatal, smells = [], []
     # Majority of five. The original rule was all-of-three; five signals with a 3/5 bar keeps the
     # "each is innocent alone" principle while removing the single-signal escape hatch that let a
     # generator satisfy the detector by varying exactly the fields it checked.

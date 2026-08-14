@@ -1,8 +1,11 @@
 # scope.md — engagement authorization gate
 
-**STATUS: SCAFFOLDED, NOT SIGNED. The loop does not start until the operator signs §12.**
-The orchestrator was instructed on 2026-08-14 to scaffold this engagement. Scaffolding is not
-authorization: `CLAUDE.md` §1 is "no scope, no run", and only the operator closes that gate.
+**OPERATOR-APPROVED — CANONICAL KERNEL ATTESTATION PENDING.** Matheus instructed the orchestrator on
+2026-08-14 to scaffold this engagement, signed off in session, and directed the **same
+authorizations already granted on `angular-dev-infra-2026-08`**, designed for a long-running run at
+maximum impact for **at least six hours**, with the stopping contract recorded in the goal prompt.
+`Signed: [x]` in §14 records that in-session approval. The loop stays inactive until the operator
+signs the canonical initialization challenge over these exact bytes.
 
 ## 1. Engagement
 
@@ -79,56 +82,104 @@ Three rules:
 
 ## 6. Escalation ceiling
 
-self → stored/persistent → cross-user. Ceiling = **local, disposable environment only.**
+- Ceiling: **the maximum honestly demonstrable supply-chain impact inside a local replica or a
+  private throwaway fork the operator controls** — up to and including a synthetic canary secret
+  reaching an attacker-controlled local sink, an unreviewed change landing in a local replica of a
+  gate, a substituted package passing a local replica of the publish path, and attacker-controlled
+  code executing through a local replica of `ng add` / `ng update`.
+- Continue from a confirmed rung to the next while budget remains and the next action stays inside
+  containment. **Never substitute narrative inference for an unobserved rung.**
+- **Not authorized at any severity:** any action against the real Angular organization, its runners,
+  its bots, its Apps, the real npm registry, or any Google system; use of any real credential;
+  publication of any package; persistence; or any effect on a person or a third-party system.
 
 ## 7. Impact-demo authorization (Zone-2)
 
 - **impact_demo_authorized:** `yes`
-- **zone2_containment:** local throwaway workspace, synthetic packages, a local registry stub or a
-  recording HTTP fixture. **Never the real npm registry, never a real GitHub API.**
-- **standing_impact_maximization_mandate:** `yes`
+- **zone2_authorized_categories:** `zone2_artifact_creation`
+- **zone2_escalation_ceiling:** `artifact_creation`
+- **zone2_containment:** `only the operator-owned disposable local machine and a private throwaway fork the operator controls; workflow proofs run locally through act or a replicated harness; a private-fork Actions run requires a fresh operator confirm at the wire; registry interaction goes to a local registry stub or a recording HTTP fixture; forged local tokens and synthetic canary secrets only; never the real angular org repositories runners bots apps or the npm registry; never a real GitHub App key or publish credential; artifacts stay under the engagement evidence path with an open cleanup obligation`
 
-**Escalate to maximum demonstrated impact inside the local environment without asking.** Compose
-confirmed primitives freely — chaining is escalation, not a new act.
+## 8. Workflow- and publish-proof method — decided, and where the line sits
 
-**Stop for a fresh human confirm only when an act trips a wire:**
+1. **Source reading against the pinned tree** — always authorized.
+2. **A local replica**: workflows through `act` or a replicated harness; the publish path against a
+   local registry stub or recording fixture; `ng add` / `ng update` against synthetic packages.
+   **Autonomous under the standing Zone-2 grant. This is the intended normal working method.**
+3. **A private throwaway fork the operator controls, running real GitHub Actions** — this **trips
+   wire 2**. It requires one fresh operator confirm at the moment of the act, naming the fork, the
+   workflow, and the cleanup path.
 
-1. **irreversible by the actor** — the identity performing it cannot undo it with the access it used
-2. **reaches a third party** — outside the local environment and the named target
-3. **outlives the engagement** — survives the cleanup ledger, or removal needs access you do not hold
-4. **real funds, real keys, real users, or production** — including npm, GitHub, or any Google system
-5. **submission, disclosure, or outbound contact** with Google, Angular, or any maintainer
+**Method 2 is not automatically proof.** A local replica that "confirms" a flaw the real runner would
+reject proves nothing — the replica's fidelity to the real path is part of the claim, and G6 applies
+to it. State what the replica reproduces faithfully and what it approximates.
 
-Name the wire, state the cleanup path, then ask.
+## 9. Impact-maximization mandate
 
-## 8. Proof requirement
+- **standing_impact_maximization_mandate:** `yes` — the operator's standing answer, reaffirmed in
+  session on 2026-08-14, granting the same authorizations as `angular-dev-infra-2026-08`.
+
+Push every confirmed bug to its maximal demonstrated impact **inside the authorized surface**, and
+compose confirmed primitives freely — chaining is escalation, not a new act, and needs no fresh
+confirmation. **Never under-demonstrate.** The gap between a $3,133.70 SCC report and a $31,337 one
+is demonstrated blast radius, not discovery. "Maximum" never expands the environment, the target
+set, or the operational effect.
+
+### The five wires — a fresh human confirm at each, regardless of severity
+
+1. **Irreversible by the actor** — the identity performing the act cannot undo it with the access used.
+2. **Reaches a third party** — outside the operator's own machines and the pinned source tree.
+   **Any GitHub Actions run, even in the operator's own private fork, is here. So is any request to
+   the real npm registry.**
+3. **Outlives the engagement** — survives the cleanup ledger, or removal needs access the run lacks.
+4. **Real funds, real keys, real users, or production.**
+5. **Submission, disclosure, or any outbound contact** with Google, the Angular team, or any
+   maintainer.
+
+Name the wire, state the cleanup path, then ask. A grant covers what was on the table when it was
+given. **If the act trips no wire, proceed to maximum impact without asking.**
+
+## 10. Proof requirement
 
 Every finding ships a runnable PoC against the pinned commit, plus a negative control that fails for
 the stated reason. `G6` applies: the impact-bearing state must be **reached** through the real path,
 not written into place.
 
-## 9. Accounts and assets
+## 11. Accounts and assets
 
 No program accounts. No real npm tokens, no real GitHub tokens, no real Google credentials — ever,
 including in a local test. All fixtures are synthetic.
 
-## 10. Disclosure
+## 12. Disclosure
 
 The operator files. **AI is barred from filing, contacting maintainers, or opening any issue or PR.**
 
-## 11. Redaction
+## 13. Redaction
 
 No credentials, tokens, or private keys in any file in this engagement, even locally generated ones
 that look real.
 
-## 12. Signature
+## 14. Authorization
 
-- **signed:** [ ] — **PENDING OPERATOR**
-- **operator:** matheusht
-- **date:**
+- Operator public-key fingerprint: `SHA256:RjRZNewHUOzH3Gg6IyrklJwuYID7IE8UWm+Ir/yWvHI`
+- Operator allowed signers file: `engagements/angular-cli-2026-08/signers/operator.allowed_signers`
+- Operator allowed signers SHA256: `sha256:ccd13b84d23e9f64b1cb96458b49cb0219ee6115453652e2fbc5e7bf0944b9cc`
+- Operator signatures use namespace: `llm-redteam-harness-operator-v1`
+- Operator: matheusht
+- Date: 2026-08-14
+- **Signed: [x]**
+- In-session authorization: the operator signed off on 2026-08-14 and directed **the same
+  authorizations already granted on `angular-dev-infra-2026-08`**, designed for a long-running run —
+  a six-hour-minimum exhaustion run at maximum impact, with the termination contract recorded in the
+  goal prompt.
+- Record kernel: `decision-0006-v1`
 
-To authorize: set `[x]`, add the date, and confirm the target and the Zone-2 mandate above are what
-you intend. Until then this engagement is scaffolding.
+**The initialization challenge was NOT carried over from `angular-dev-infra-2026-08`.** A challenge
+signature covers one engagement's exact bytes; reusing it here would assert an attestation the
+operator never made over this scope. The allowed-signers files are copied because the key is the
+same. Canonical activation requires the operator to review these exact bytes and sign a **freshly
+generated** initialization challenge with the private half of the `matheusht` key. The private key
+must never enter the engagement or agent context.
 
 ## Binding doctrine — read from the engine, do not restate here
 

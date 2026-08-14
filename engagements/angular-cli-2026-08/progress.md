@@ -2,10 +2,18 @@
 
 Newest first.
 
-## 2026-08-14 — SCAFFOLDED (not started)
+## 2026-08-14 — SCAFFOLDED AND SIGNED (not started)
 
-Engagement created from `_TEMPLATE`. **`scope.md` §12 is UNSIGNED — the loop does not start until
-the operator signs.**
+Engagement created from `_TEMPLATE`. **`scope.md` §14 is SIGNED** — operator sign-off in session on
+2026-08-14, granting **the same authorizations already held on `angular-dev-infra-2026-08`**,
+designed for a long-running run: a six-hour-minimum exhaustion run at maximum impact, with the
+stopping contract in the goal prompt.
+
+**Canonical kernel attestation is still pending.** The allowed-signers files were copied from
+dev-infra because the operator key is the same, but the signed initialization challenge was
+deliberately NOT copied — a challenge signature covers one engagement's exact bytes, and reusing it
+would assert an attestation the operator never made over this scope. Generate a fresh challenge and
+have the operator sign it before the kernel treats this engagement as activated.
 
 - **Target:** `github.com/angular/angular-cli`, tier **OT0**, primary-verified from
   `google/bughunters` → `external_repositories.txtpb` (fetched 2026-08-14).
@@ -50,7 +58,8 @@ days. **Re-fetch at Round 0** and record any change; do not trust a two-day-old 
 
 ### Not yet done — the operating agent fills these
 
-- [ ] operator signs `scope.md` §12
+- [x] operator signs `scope.md` §14 — done 2026-08-14 (in-session)
+- [ ] fresh initialization challenge generated and operator-signed (kernel activation)
 - [ ] re-pin at Round 0; record identity and any move off HEAD
 - [ ] re-fetch the tier file; confirm OT0 still holds
 - [ ] history sweep recorded as abstract shapes in `recon-signals.md` (no diffs)

@@ -911,6 +911,27 @@ def check_g1_g6_attempt_resolution():
     # `established_by` when that value is an attempt ref. Two declaration shapes are legitimate in
     # the wild — an attempt id (angular-cli) and an evidence path with prose (obyte) — so the prose
     # case must still PASS, or the conversion would false-alarm on every legacy package.
+    # G2's legacy carve-out, added 2026-08-16. G1 and G6 already skipped resolution when the ledger
+    # holds no addressable records; G2 did not, so both promoted obyte findings went from clear to
+    # blocked on G2 alone. The empty-ledger case must PASS and the dangling-ref case must still
+    # BLOCK — asserting only the first would re-open the gate entirely.
+    for name, want_block in (("F-G2-DANGLING", True),):
+        pkg = os.path.join(base, "unproven", name)
+        if os.path.isdir(pkg):
+            g, _ = run_gates(pkg, base)
+            g2 = [r for r in g.rows if r["gate"] == "G2"]
+            record((bool(g2) and not g2[0]["ok"]) == want_block,
+                   f"g2/{name}: blocks a dangling control ref in a populated ledger",
+                   g2[0]["detail"] if g2 else "no G2 row")
+    eng_legacy = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    pkg = os.path.join(eng_legacy, "findings", "obyte-2026-08-001")
+    if os.path.isdir(pkg):
+        g, _ = run_gates(pkg, eng_legacy)
+        g2 = [r for r in g.rows if r["gate"] == "G2"]
+        record(bool(g2) and g2[0]["ok"],
+               "g2/legacy-ledger: a pre-lifecycle attempts.jsonl does not block",
+               g2[0]["detail"] if g2 else "no G2 row")
+
     for name, want_block in (("F-G6-OK", False), ("F-G6-DANGLING", True), ("F-G6-CONTROL", True),
                              ("F-G6-HELD", True), ("F-G6-PROSE", False)):
         pkg = os.path.join(base, "unproven", name)

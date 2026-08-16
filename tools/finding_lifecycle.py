@@ -302,6 +302,19 @@ def g2_control(finding, attest, g, engagement=None):
         g.add("G2", False, "a distinct negative control is named, resolved, and attested", error)
         return
 
+    # Same legacy carve-out G1 and G6 carry, and G2 was missing it. An engagement whose ledger holds
+    # NO addressable attempt records predates the lifecycle format — obyte-ocore-2026-08's
+    # attempts.jsonl is a research journal of `kind: attempt` rows with no attempt_id, so every ref
+    # reads as unresolved. Blocking there is a false alarm against already-adjudicated work.
+    # A ledger that HAS records but is missing this one is the opposite: a dangling reference.
+    # Found 2026-08-16 when both promoted obyte findings went from clear to blocked on G2 alone,
+    # after G1 and G6 had already been given this guard.
+    if not attempts:
+        g.add("G2", True, "a distinct negative control is named, resolved, and attested",
+              "control and replay refs are role-disjoint; the engagement ledger holds no addressable "
+              "attempt records (pre-lifecycle format), so kind/outcome could not be resolved")
+        return
+
     unresolved = [ref for ref in neg if ref not in attempts]
     if unresolved:
         g.add("G2", False, "a distinct negative control is named, resolved, and attested",

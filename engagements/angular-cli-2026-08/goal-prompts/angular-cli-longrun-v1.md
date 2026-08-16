@@ -114,6 +114,49 @@ Promotion is the **orchestrator's** act. If no reviewer ran, do **not** write a 
 
 **Package hygiene, learned the hard way:** every path a report cites must resolve inside the package. G0 has flagged two shippable packages on this exact defect. If you cite a target file, ship a copy of it under `target/`.
 
+### WRITE PARTIALS. This is the instruction most likely to change your result.
+
+An audit on 2026-08-16 measured the last three engagements: the gates blocked **zero** promotions out
+of twelve, and `unproven/` was **empty** in two of them. One hundred per cent promote, zero partial.
+
+That is how a careful pipeline loses deep findings — not by rejecting them, but by having nowhere to
+put an incomplete one. A three-stage chain with two stages proven is worth more than a fourth
+single-step Medium. If your only two options are "passes seven gates" or "a line in a hardening
+note", the chain evaporates.
+
+So: a chain you cannot finish goes in `unproven/` as a package with declared `stages` —
+`proven` / `argued` / `refuted` each, plus `what_would_close_it` on every non-proven one. It claims
+no severity above what its proven stages support. It is not promoted. It is not a failure. It
+survives the round and a later run can pick it up.
+
+### A SCOPE-BLOCKED CEILING IS A REQUEST, NOT A CAP
+
+Operator standing instruction: **scope will always widen if more authorization is what it takes to
+prove a ceiling. Always.**
+
+That does not authorize YOU to widen it. The five wires in `scope.md` §9 are unchanged. What it
+changes is what you do when a ceiling is held down only by authorization: **do not write "out of
+scope" and move on.** Open a row in `ceiling-requests.md` naming the ceiling, the band it reaches,
+the exact act required, the wire it trips, what would be irreversible, and the cleanup path. Then
+surface it.
+
+The precedent: the highest-value result in the dev-infra engagement was a Supply-Chain top-band
+chain, written out in full and marked "hypothesis, not claimed" because probing it tripped wires 2
+and 4. Correct about the act, wrong about the record — it capped silently instead of asking. A
+ceiling nobody asked about is a finding we chose not to have.
+
+### POPULATE THE PRIMITIVE REGISTRY AS YOU GO
+
+`primitive-registry.md`. Every confirmed capability goes in the moment it is confirmed, **even when
+its own impact is nil** — nil-impact primitives are the ones that compose later. A primitive is a
+capability ("I can overwrite an arbitrary path under $RUNNER_TEMP"), not a finding ("path traversal
+in the deploy action"). Every capped finding contributes its proven rungs before the cap is recorded.
+
+The same audit found 11 rows in the obyte registry and **1 row** in dev-infra — the CI/supply-chain
+engagement, where composition is the characteristic bug shape, and whose round ledger held at least
+six fragments that never reached the registry. Depth comes from composing fragments across rounds.
+A fragment nobody wrote down cannot compose with anything.
+
 ---
 
 ## 8. Escalation and chaining

@@ -1,0 +1,42 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "E1-C1-i18n-locale-key-escape",
+ "entity_ref": "E1-C1-i18n-locale-key-escape",
+ "finding_revision": 1,
+ "input_refs": [],
+ "input_hash": "9017c0db171fac22446bbac41345cb31790bff1b76fb8bd68f15b1ff49d3fbe5",
+ "evidence_refs": [],
+ "conflicting_evidence": [
+  "application builder generateFullPath (packages/angular/build/src/builders/application/index.ts:258-282) HAS isSubDirectory containment (path.ts:46-52 lexical-relative) \u2014 the report's 'index.ts:258, no re-containment' for A1 is factually wrong; the same containment blocks D's write-side landing",
+  "webpack entry modules execute in the BROWSER (bundled entry), not the dev-server/build node process \u2014 C's 'executes in the dev-server/build process' overstates the venue",
+  "evidence entry2.mjs exercises the WEBPACK ensureOutputPaths (output-paths.ts:17 join+mkdirSync), not the application-builder write path \u2014 the app-builder members (A1/D) have no live proof and are refuted at source"
+ ],
+ "corrections": [
+  "A1 (app-builder write escape): REFUTED \u2014 generateFullPath re-contains via isSubDirectory(base, fullFilePath) after the i18n.ts subPath join; a locale key escaping base throws 'The output file path ... outside of the configured output path'; remove A1 from the family or re-scope the family to the webpack stack",
+  "D (SSR manifest runtime import): REFUTED as demonstrated \u2014 the app-builder write containment fails the build before the manifest's escaped import can be produced; residual is build failure / runtime import-miss (availability), deployment-dependent at best; downgrade or drop",
+  "C (module load): re-frame venue \u2014 unshift(dataPath) into webpackConfig.entry['main'] (webpack-server.ts:284-294) bundles the resolved file and executes it in the served/shpped client page; the build process reads+bundles (Babel-parse bound, binary targets abort); impact = arbitrary parseable-file read into the bundle (exfil across the workspace boundary) + client-side content injection; NOT build-process code execution",
+  "B (string-form sourceLocale): real for the webpack stack (same ensureOutputPaths channel); app-builder side contained by generateFullPath \u2014 qualify per stack",
+  "family width: surviving members are A2/A3 (webpack write escape), B-webpack, C (module read/bundle) \u2014 same legacy webpack stack as the M3/D2 family; the app-builder expansion (A1/D) is invalid",
+  "review recorded against the pre-re-scope package; superseded input_hash \u2014 the E1-R6 re-scope was driven by this review"
+ ],
+ "required_next_actions": [
+  "operator review",
+  "correct the REPORT (A1/D removal or webpack-scoping, C venue, evidence-function naming) before any promotion",
+  "KP-C1 primary attempt attestation text should name the webpack ensureOutputPaths function exercised"
+ ],
+ "claim_tuple_hash": "9017c0db171fac22446bbac41345cb31790bff1b76fb8bd68f15b1ff49d3fbe5",
+ "independence": {
+  "reviewer_id": "refuter-rv-c1-a",
+  "reviewer_run_id": "rv-c1-a",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill-the-E1-C1-claim"
+ },
+ "review_id": "review-e1c1-rv-c1-a",
+ "recorded_at": "2026-08-15T18:00:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "Adversarial kill attempt FAILED against the core webpack-stack claims but REFUTED the app-builder expansion. Surviving (live/source-verified at pin d827ba9005): (1) locale keys and string-form sourceLocale are unvalidated in createI18nOptions (ensureValidSubPath guards only explicit subPath fields at :128/:176; keys at :160->:194 and sourceLocale at :103-104->:126 become default subPath); (2) the webpack stack write path is uncontained \u2014 output-paths.ts:17 join(baseOutputPath, subPath) + mkdirSync recursive, and process-bundle.ts:192-197 writeFile \u2014 live-proven by the evidence bundle (mkdir '/evil' attempted; control explicit subPath throws the ensureValidSubPath error, the missed-sibling discriminator); (3) module resolution primitive is live \u2014 i18n-webpack.ts:56-58 projectRequire.resolve('@angular/common/locales/global/' + key) with the unvalidated key; dev-server webpack-server.ts:284-294 unshifts the resolved path into the main entry; process-bundle.ts:161-168 reads it. Kill arguments that LANDED: A1 and D are blocked by the application builder's generateFullPath isSubDirectory containment (the 8358805d3 write-fix the M3 finding uses as its discriminator) \u2014 the report's 'no re-containment' claim is wrong and D's runtime-import escape cannot be produced because the build fails first; C's execution venue is the browser (bundled entry), not the build process. Cap (unchanged): config-controlled value (workspace angular.json i18n.locales keys + localize option) in a cloned-repo/supply-chain precondition \u2014 same trust channel as M3/D2; legacy webpack stack still shipped (deprecated, functional). Severity Low-Medium is honest for the surviving members; the family must be re-scoped to the webpack stack."
+}

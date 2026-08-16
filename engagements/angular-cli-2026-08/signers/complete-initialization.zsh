@@ -1,16 +1,16 @@
 #!/bin/zsh
-# Operator-run activation for angular-dev-infra-2026-08.
+# Operator-run activation for angular-cli-2026-08.
 # An agent prepared this file. Only the operator may execute it — the private key
 # must never enter an agent context (engine/gates.md: agents never become the signed operator).
 set -euo pipefail
 
-engagement_dir="/Users/matheusvsky/Documents/trab/llm-redteam-harness/engagements/angular-dev-infra-2026-08"
+engagement_dir="/Users/matheusvsky/Documents/trab/llm-redteam-harness/engagements/angular-cli-2026-08"
 harness_dir="/Users/matheusvsky/Documents/trab/llm-redteam-harness"
 operator_key="/Users/matheusvsky/.ssh/harness-signing/gemini-cli-operator-ed25519"
 challenge_file="${engagement_dir}/signers/init-challenge.json"
 allowed_signers="${engagement_dir}/signers/operator.allowed_signers"
-recorded_at="2026-08-12T12:00:00Z"
-expected_scope="9feb17a37cf15bcfa170b3117e253dd5c7243e459225b038dea8b3917b75bf3c"
+recorded_at="2026-08-14T12:00:00Z"
+expected_scope="95971192631d012ce629d019725eeebd8055cd4274aebf27b9b003ea7d923a5e"
 expected_allowed="ccd13b84d23e9f64b1cb96458b49cb0219ee6115453652e2fbc5e7bf0944b9cc"
 
 actual_scope="$(shasum -a 256 "${engagement_dir}/scope.md" | awk '{print $1}')"

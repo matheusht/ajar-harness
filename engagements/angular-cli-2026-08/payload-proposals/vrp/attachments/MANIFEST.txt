@@ -1,0 +1,16 @@
+VRP PoC ATTACHMENTS (2026-08-15) — angular-cli Google OSS VRP
+
+All kits re-verified from the packaged copies on 2026-08-15 (7/7 sweeps pass). Windows kit excluded from local runs by design; it ships for the triager's Windows machine.
+
+| Zip | Finding | Contents | Verified (2026-08-15) |
+|---|---|---|---|
+| M3-outputpath.zip | M3 outputPath deletion + case-guard | poc.mjs, poc2.mjs, evidence-caseguard/ (compiled delete-output-dir.mjs + driver) | YES: control throws; case-variant deletes root; legacy-builder victim emptied |
+| D2-cache-clean.zip | D2 cache purge deletion | poc.mjs + purge-cache.bundle.mjs (esbuild-bundled) + README | YES: victim dir child force-deleted |
+| M2-mcp-roots.zip | M2 MCP roots residual + steering | repoc-pin/ (server + clients + deps), steering-demo/ (full chain) | YES: MARKER-ATTACKER-GUIDE-2 @ priority 0.9; steering chain completes with exfil artifact |
+| D1-route.zip | D1 route codegen injection | evidence/comma-exec-check.mjs, nr2-d1ssr/ (SSR runtime demo) | YES: EXECUTION-DEMONSTRATED=true (both) |
+| D3-fork-guard.zip | D3 fork guard + budget | workflow yml, d3-budget-math/ | YES: S1 120% / S5 200% EXCEED |
+| E1C1-i18n.zip | E1-C1 i18n locale-key escape | chain4/ (demo.cjs, check4dot.mjs, neg.cjs, ssr-venue/, ssr-e2e-real/, member-e/, member-f/, killpair-delivery/) | YES: browser exec, 4-dot confusion, negatives, SSR boot exec, SSR E2E marker |
+| W1-disttags-windows-kit.zip | W1 win32 injection (Windows) | w1-repro-triager.ps1 + registry stub + fixture + kit-README | NOT run locally (no Windows) — triager runs one command |
+
+Reproduce: unzip, cd into the kit, run the documented command (each kit has a README or inline header).
+Note: E1C1-i18n.zip (12MB) and M2-mcp-roots.zip (4.2MB) contain the materialized dependency closures needed to run without npm install.

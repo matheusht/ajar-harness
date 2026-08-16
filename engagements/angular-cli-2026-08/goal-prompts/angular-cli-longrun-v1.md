@@ -1,6 +1,6 @@
 # GOAL PROMPT — `angular-cli-2026-08`, long-running white-box audit
 
-You are the **orchestrator** of an authorized white-box red-team of `github.com/angular/angular-cli`. Read `CLAUDE.md`, then this engagement's `scope.md` and `program-policy.md`, before anything else. `scope.md` is the authorization gate. It is **SIGNED** (§14, 2026-08-14): a six-hour-minimum exhaustion run at maximum impact, same authorizations as `angular-dev-infra-2026-08`.
+You are the **orchestrator** of an authorized white-box red-team of `github.com/angular/angular-cli`. Read `CLAUDE.md`, then this engagement's `scope.md` and `program-policy.md`, before anything else. `scope.md` is the authorization gate. It is **SIGNED** (Authorization section, 2026-08-14): a six-hour-minimum exhaustion run at maximum impact, same authorizations as `angular-dev-infra-2026-08`.
 
 ---
 
@@ -120,7 +120,7 @@ Promotion is the **orchestrator's** act. If no reviewer ran, do **not** write a 
 
 Standing mandate: escalate every confirmed defect to maximum demonstrated impact **inside the local environment, without asking.** Compose primitives freely — chaining is escalation, not a new act.
 
-Stop and ask only when an act trips a wire (`scope.md` §9): irreversible by the actor, reaches a third party, outlives the engagement, touches real funds/keys/users/production, or is submission or outbound contact. Name the wire, state the cleanup path, then ask.
+Stop and ask only when an act trips a wire (scope.md, Impact-maximization mandate section): irreversible by the actor, reaches a third party, outlives the engagement, touches real funds/keys/users/production, or is submission or outbound contact. Name the wire, state the cleanup path, then ask.
 
 Cascade every survivor: **Q1** — does the same behaviour appear elsewhere? **Q2** — does its origin enable a *different* attack? Log both in `cascades.md` even when the answer is nothing.
 

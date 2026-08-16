@@ -1,0 +1,30 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "verification",
+ "entity_ref": "H9",
+ "finding_revision": 1,
+ "input_refs": [],
+ "input_hash": null,
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "eslint cache key (pr.yml:44) not ref-scoped \u2014 fork can poison shared .eslintcache entry; capped (advisory lint output, self-heals, no merge impact) \u2014 hardening note, not a finding"
+ ],
+ "required_next_actions": [
+  "operator note: consider ref-scoped cache key"
+ ],
+ "independence": {
+  "reviewer_id": "verifier-r2-6",
+  "reviewer_run_id": "3391379a",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "find a wiring gap or confirm clean",
+  "originating_run_id": null
+ },
+ "review_id": "review-r2-6-ci",
+ "recorded_at": "2026-08-15T01:10:00Z",
+ "verdict": "wiring_clean",
+ "rationale": "dev-infra.yml jobs never checkout PR content; robot key only reaches pinned base-repo actions (attribution to dev-infra); pr.yml has zero secrets and permissions:{}; branch-manager has fork==false guard. Only note: eslint cache key not ref-scoped (capped hardening)."
+}

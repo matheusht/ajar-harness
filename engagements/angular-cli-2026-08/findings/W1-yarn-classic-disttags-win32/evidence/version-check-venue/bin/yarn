@@ -1,0 +1,12 @@
+#!/bin/bash
+# Stub yarn-classic binary: echoes the manifest/metadata JSONL the real yarn would
+# return from the (attacker-controlled) registry for the given specifier.
+# ARG 1: subcommand; we handle only `info --json --verbose <spec>`
+spec="${@: -1}"
+if [[ "$spec" == *'@angular/cli@'* ]]; then
+  # manifest call (versioned specifier) - attacker manifest
+  printf '{"type":"inspect","data":{"name":"@angular/cli","version":"22.0.0","dist-tags":{}},"content_type":"text/json"}\n'
+else
+  # metadata call (bare package name) - attacker packument with malicious dist-tags
+  printf '{"type":"inspect","data":{"name":"@angular/cli","dist-tags":{"latest":"1.0.0\\" & calc & \\"","next":"1.0.0\\" & echo N1G-PWNED & \\""},"versions":{"1.0.0":{"name":"@angular/cli","version":"1.0.0"}},"time":{}},"content_type":"text/json"}\n'
+fi

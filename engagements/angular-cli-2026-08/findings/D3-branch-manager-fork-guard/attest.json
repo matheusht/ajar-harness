@@ -1,0 +1,28 @@
+{
+ "engagement": "angular-cli-2026-08",
+ "primary_attempt": {
+  "attempt_id": "attempt-d3-001-primary",
+  "attested": true,
+  "attestation": "workflow source at pin + documented GitHub event semantics"
+ },
+ "negative_control": {
+  "attempt_ids": [
+   "attempt-d3-002-control-ns"
+  ],
+  "attested": true,
+  "attestation": "see REPORT.md negative control"
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated"
+ },
+ "real-path-exec": true,
+ "real-path-exec-attestation": "workflow source at pin + documented GitHub event semantics",
+ "negative-control": true,
+ "negative-control-attestation": "see REPORT.md negative control",
+ "state_provenance": {
+  "mode": "real-path",
+  "established_by": "attempt-d3-001-primary",
+  "statement": "impact-bearing state reached through the pinned tree / built CLI / compiled module"
+ }
+}

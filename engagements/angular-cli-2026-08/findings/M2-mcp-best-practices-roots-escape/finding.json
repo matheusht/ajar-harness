@@ -1,0 +1,50 @@
+{
+ "id": "M2-mcp-best-practices-roots-escape",
+ "engagement": "angular-cli-2026-08",
+ "schema_version": 1,
+ "owasp": "A01:2021 Broken Access Control (root-confinement bypass)",
+ "atlas": "MCP tool reads outside declared roots; content injected into agent context",
+ "surface": "packages/angular/cli/src/commands/mcp/tools/best-practices.ts",
+ "objective": "unauthorized_file_read (variant: root-boundary bypass + assistant instruction injection)",
+ "scope_class": "injection",
+ "severity": "low_medium",
+ "confidence": "confirmed",
+ "status": "needs_review",
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-m2-001-primary"
+  ],
+  "negative_control_refs": [
+   "attempt-m2-002-control-ns"
+  ],
+  "positive_control_refs": [],
+  "replay_refs": [
+   "attempt-m2-003-replay"
+  ]
+ },
+ "recorded_date": "2026-08-14",
+ "dedup_key": "MCP get_best_practices createRequire ancestor resolution escapes declared roots",
+ "oracle_verdict": {
+  "signal": "suspected_signal",
+  "adjudication": "confirmed",
+  "contamination_ruled_out": true
+ },
+ "evidence_contract": {
+  "negative_control": "root-restricted host checkPath rejects the same paths; isAllowedWorkspacePath rejects out-of-roots workspace input",
+  "positive_control": "n/a",
+  "replay": "two input forms (file path + directory path) both returned the attacker guide byte-for-byte",
+  "contamination": "none",
+  "justification": "PoC via built CLI + raw stdio MCP client with declared roots=[workspace]: hoisted @angular/core at the workspace parent (outside roots) resolved by createRequire ancestor walk; its angular.bestPractices.path guide returned as assistant-audience content (priority 0.9).",
+  "run_cost": {
+   "wall_seconds": 1200,
+   "model_seconds": 300,
+   "tool_seconds": 120,
+   "target_calls": 0,
+   "model_calls": 0,
+   "human_review_seconds": 0
+  },
+  "evidence_refs": []
+ },
+ "leaked_fragments": [],
+ "review_history": []
+}

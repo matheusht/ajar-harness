@@ -1,0 +1,30 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "D2-cache-clean-deletion",
+ "entity_ref": "D2-cache-clean-deletion",
+ "finding_revision": 1,
+ "input_refs": [],
+ "input_hash": "7a8d5e412fb7c3fd32f71dbeecc7bae6f59da6bb9e0102a1f798b82cc2390aea",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [],
+ "required_next_actions": [
+  "operator review"
+ ],
+ "claim_tuple_hash": "7a8d5e412fb7c3fd32f71dbeecc7bae6f59da6bb9e0102a1f798b82cc2390aea",
+ "independence": {
+  "reviewer_id": "IR-D2-cache",
+  "reviewer_run_id": "d224fc4f",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the candidate finding; independently verify every claim",
+  "originating_run_id": null
+ },
+ "review_id": "review-d2-cache-clean-deletion-ir",
+ "recorded_at": "2026-08-15T06:15:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "unguarded rm(force+recursive) confirmed (clean/cli.ts:28-34); getCacheBasePath returns absolute paths unchanged and resolves .. escapes; schema plain string; DISCRIMINATOR: the same path consumed as tempDirectory (command-runner.ts) IS guarded by a relative() containment check (package-manager.ts:647-651) \u2014 the clean path is the missed sibling, not intended behavior; cap = developer must run ng cache clean inside the crafted project; identical at v22.1.4 (git diff 0 lines)."
+}

@@ -4,10 +4,10 @@
 2026-08-14 to scaffold this engagement, signed off in session, and directed the **same
 authorizations already granted on `angular-dev-infra-2026-08`**, designed for a long-running run at
 maximum impact for **at least six hours**, with the stopping contract recorded in the goal prompt.
-`Signed: [x]` in §14 records that in-session approval. The loop stays inactive until the operator
+`Signed: [x]` in the Authorization section records that in-session approval. The loop stays inactive until the operator
 signs the canonical initialization challenge over these exact bytes.
 
-## 1. Engagement
+## Engagement
 
 - **id:** `angular-cli-2026-08`
 - **target:** `https://github.com/angular/angular-cli` — the Angular CLI monorepo. Publishes 15 npm
@@ -20,7 +20,7 @@ signs the canonical initialization challenge over these exact bytes.
   target.** Recon is source reading against the public repository.
 - **box:** white-box — full public source.
 
-## 2. Pinned identity
+## Pinned identity
 
 - HEAD at scoping: `d827ba9005b86b23d05ee7c62c0823367aa245c1` (2026-08-14T16:05:57Z, `main`)
 - The run **re-pins at Round 0** and records the pin in `progress.md`. Every attempt, finding and PoC
@@ -28,7 +28,7 @@ signs the canonical initialization challenge over these exact bytes.
 - **Stale-version-only findings are rejected by the program.** Confirm each candidate is still
   unfixed at the current released tag before any deep work.
 
-## 3. Surfaces in scope
+## Surfaces in scope
 
 | # | Surface | Notes |
 |---|---|---|
@@ -50,7 +50,7 @@ publish and CI surfaces (SF-10, SF-11) outrank library logic on expected value. 
 `ng add` (SF-8) are the two commands that fetch and execute third-party code, so they carry the
 supply-chain weight on the client side.
 
-## 4. THE ATTRIBUTION BOUNDARY — read before filing anything
+## THE ATTRIBUTION BOUNDARY — read before filing anything
 
 `angular/angular-cli` **consumes** `angular/dev-infra` through `.ng-dev/` and `dev-infra.yml`. We
 audited dev-infra last week and promoted two findings there (`F13`, `R8`).
@@ -66,9 +66,9 @@ Three rules:
    granting it more privilege than it needs. The defect must be in *this* repo's wiring.
 3. If attribution is genuinely ambiguous, that is an operator decision, not an orchestrator one.
 
-## 5. Out of scope — kill before deep work
+## Out of scope — kill before deep work
 
-- **Schematics execute code by design.** `ng add <pkg>` and `ng update` run third-party package code
+- **Schematics execute code by design.** `ng add` and `ng update` run third-party package code
   on purpose; that is documented behaviour, not a vulnerability. Reporting it wastes a round. A
   finding must show a *boundary crossed that the design does not intend*.
 - **Memory-corruption reports** pay only with an exact OSS-Fuzz reproduction via an existing fuzz
@@ -80,7 +80,19 @@ Three rules:
 - Denial of service against a developer's own local machine by their own configuration.
 - Best-practice recommendations, missing hardening, feature requests.
 
-## 6. Escalation ceiling
+## Benign safe-objective set (allowlisted win-conditions)
+
+Win-conditions for this white-box engagement, all demonstrable inside the local lab (see the
+Escalation ceiling and Impact-demo authorization sections):
+
+- [x] synthetic canary secret reaching an attacker-controlled local sink through a local replica of a
+      fetch-and-execute or publish path
+- [x] unreviewed change landing in a local replica of a review gate (CI / PullApprove / merge queue)
+- [x] substituted or downgraded package passing a local replica of the install / publish path
+- [x] attacker-controlled code executing through a local replica of `ng add` / `ng update`
+- [x] logic-defect PoC reaching an unauthorized file-system or network effect inside the local lab
+
+## Escalation ceiling
 
 - Ceiling: **the maximum honestly demonstrable supply-chain impact inside a local replica or a
   private throwaway fork the operator controls** — up to and including a synthetic canary secret
@@ -93,14 +105,14 @@ Three rules:
   its bots, its Apps, the real npm registry, or any Google system; use of any real credential;
   publication of any package; persistence; or any effect on a person or a third-party system.
 
-## 7. Impact-demo authorization (Zone-2)
+## Impact-demo authorization (Zone-2)
 
 - **impact_demo_authorized:** `yes`
 - **zone2_authorized_categories:** `zone2_artifact_creation`
 - **zone2_escalation_ceiling:** `artifact_creation`
 - **zone2_containment:** `only the operator-owned disposable local machine and a private throwaway fork the operator controls; workflow proofs run locally through act or a replicated harness; a private-fork Actions run requires a fresh operator confirm at the wire; registry interaction goes to a local registry stub or a recording HTTP fixture; forged local tokens and synthetic canary secrets only; never the real angular org repositories runners bots apps or the npm registry; never a real GitHub App key or publish credential; artifacts stay under the engagement evidence path with an open cleanup obligation`
 
-## 8. Workflow- and publish-proof method — decided, and where the line sits
+## Workflow- and publish-proof method — decided, and where the line sits
 
 1. **Source reading against the pinned tree** — always authorized.
 2. **A local replica**: workflows through `act` or a replicated harness; the publish path against a
@@ -114,7 +126,7 @@ Three rules:
 reject proves nothing — the replica's fidelity to the real path is part of the claim, and G6 applies
 to it. State what the replica reproduces faithfully and what it approximates.
 
-## 9. Impact-maximization mandate
+## Impact-maximization mandate
 
 - **standing_impact_maximization_mandate:** `yes` — the operator's standing answer, reaffirmed in
   session on 2026-08-14, granting the same authorizations as `angular-dev-infra-2026-08`.
@@ -139,35 +151,37 @@ set, or the operational effect.
 Name the wire, state the cleanup path, then ask. A grant covers what was on the table when it was
 given. **If the act trips no wire, proceed to maximum impact without asking.**
 
-## 10. Proof requirement
+## Proof requirement
 
 Every finding ships a runnable PoC against the pinned commit, plus a negative control that fails for
 the stated reason. `G6` applies: the impact-bearing state must be **reached** through the real path,
 not written into place.
 
-## 11. Accounts and assets
+## Accounts / fixtures
 
-No program accounts. No real npm tokens, no real GitHub tokens, no real Google credentials — ever,
-including in a local test. All fixtures are synthetic.
+- accounts: none (no program accounts)
+- concurrency: `1` (raising past 1 requires explicit authorization here)
+- No real npm tokens, no real GitHub tokens, no real Google credentials — ever, including in a local
+  test. All fixtures are synthetic.
 
-## 12. Disclosure
+## Disclosure
 
 The operator files. **AI is barred from filing, contacting maintainers, or opening any issue or PR.**
 
-## 13. Redaction
+## Redaction
 
 No credentials, tokens, or private keys in any file in this engagement, even locally generated ones
 that look real.
 
-## 14. Authorization
+## Authorization
 
 - Operator public-key fingerprint: `SHA256:RjRZNewHUOzH3Gg6IyrklJwuYID7IE8UWm+Ir/yWvHI`
 - Operator allowed signers file: `engagements/angular-cli-2026-08/signers/operator.allowed_signers`
-- Operator allowed signers SHA256: `sha256:ccd13b84d23e9f64b1cb96458b49cb0219ee6115453652e2fbc5e7bf0944b9cc`
+- Operator allowed signers SHA256: sha256:ccd13b84d23e9f64b1cb96458b49cb0219ee6115453652e2fbc5e7bf0944b9cc
 - Operator signatures use namespace: `llm-redteam-harness-operator-v1`
 - Operator: matheusht
 - Date: 2026-08-14
-- **Signed: [x]**
+- Signed: [x]
 - In-session authorization: the operator signed off on 2026-08-14 and directed **the same
   authorizations already granted on `angular-dev-infra-2026-08`**, designed for a long-running run —
   a six-hour-minimum exhaustion run at maximum impact, with the termination contract recorded in the

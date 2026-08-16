@@ -1,0 +1,28 @@
+{
+ "engagement": "angular-cli-2026-08",
+ "primary_attempt": {
+  "attempt_id": "attempt-w1-001-primary",
+  "attested": true,
+  "attestation": "source-verified chain at pin + kill-pair adjudication"
+ },
+ "negative_control": {
+  "attempt_ids": [
+   "attempt-w1-002-control-ns"
+  ],
+  "attested": true,
+  "attestation": "npm/yarn-modern skip the dist-tag-value path; POSIX safe; sibling paths throw on the malicious version"
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated"
+ },
+ "real-path-exec": true,
+ "real-path-exec-attestation": "source-verified win32 command construction at the pin; Windows E2E blocked in environment (no Windows runner) - fixture shape documented for E0-R5",
+ "negative-control": true,
+ "negative-control-attestation": "see REPORT.md caps that held",
+ "state_provenance": {
+  "mode": "real-path",
+  "established_by": "attempt-w1-001-primary",
+  "statement": "the injected command string is constructed by the pinned code path; the E2E execution on Windows is environment-blocked and declared"
+ }
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "step": "H1a-real-http",
+    "expected": "GET /good-pkg in registry.log; raw value \"1.0.0\" consumed by npm",
+    "actual": "logHit=true rawConsumed=true metaErr=null",
+    "pass": true,
+    "extra": "npm view fetched the packument from the repo-configured registry and resolved the RAW dist-tags value (E404 names it verbatim = unvalidated)"
+  },
+  {
+    "step": "H7-npmrc-native-benign",
+    "expected": ".npmrc resolves the attacker registry natively BUT the benign value carries no payload",
+    "actual": "freshHit=true rawNative=true payloadInNative=false registry=http://127.0.0.1:48731/",
+    "pass": true,
+    "extra": "PM-native precedence verified: npm honors the project .npmrc from cwd silently; the CLI/`npm view` receives no registry argument (C1A)."
+  },
+  {
+    "step": "H1b-yarnclassic-wrap",
+    "expected": "manifest specifier carries raw dist-tags value",
+    "actual": "rawInCommand=true cmd=info --json --verbose \"good-pkg@1.0.0\"",
+    "pass": true,
+    "extra": "the value the win32 shell:string would receive (host.ts:157-164 shell:true)"
+  },
+  {
+    "step": "H1c-posix-noexec",
+    "expected": "no W1 marker on POSIX (array spawn, safe)",
+    "actual": "marker=false",
+    "pass": true,
+    "extra": "cmd.exe execution is the Windows-only rung"
+  },
+  {
+    "step": "H2-neg-noescape",
+    "expected": "no deletion outside workspace",
+    "actual": "marker=true",
+    "pass": true,
+    "extra": "in-workspace outputPath untouched"
+  },
+  {
+    "step": "H3-neg-nopurge",
+    "expected": "no stale deletion outside workspace",
+    "actual": "staleGone=false currentKept=true",
+    "pass": true,
+    "extra": "purgeStaleBuildCache fires on every default build; base outside the workspace -> arbitrary stale-dir deletion"
+  },
+  {
+    "step": "H4-neg-nosub",
+    "expected": "no escape",
+    "actual": "subPath=en resolved=/tmp/chain1/dist-out/en outsideBase=false written=true",
+    "pass": true,
+    "extra": "locale KEY unvalidated -> default subPath (webpack stack write escape); the ../../ key lands two levels above the output base"
+  },
+  {
+    "step": "H5-neg-benign-route",
+    "expected": "benign route only",
+    "actual": "present=false",
+    "pass": true,
+    "extra": "route=\"lazy\" (workspace schematics-defaults channel, no --route flag)"
+  },
+  {
+    "step": "H6-caseguard",
+    "expected": "root contents deleted (case-insensitive fs)",
+    "actual": "ci=true deleted=true guard=threw",
+    "pass": true,
+    "extra": "control: exact root throws; variant bypasses the case-sensitive === guard"
+  }
+]

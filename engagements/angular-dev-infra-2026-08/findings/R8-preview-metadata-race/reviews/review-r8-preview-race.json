@@ -1,0 +1,38 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-dev-infra-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "R8-preview-metadata-race",
+ "entity_ref": "R8-preview-metadata-race",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-r8-preview-001-primary",
+  "attempt-r8-preview-002-control"
+ ],
+ "input_hash": "a4290974ad6c2656fa734aa955bfc47034ba888638c6c5dc87b9e71098186785",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "reachability capped: current consumer wiring omits required inputs (dormant); ran end-to-end July 2026",
+  "impact capped: no secrets/code-exec; preview content + comments only"
+ ],
+ "required_next_actions": [
+  "validate pull-number/revision in extract",
+  "bind artifact to workflow_run PR number",
+  "operator decides packaging"
+ ],
+ "claim_tuple_hash": null,
+ "independence": {
+  "reviewer_id": "r8-preview-refuter",
+  "reviewer_run_id": "escalation-e1",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the preview metadata race claim link by link",
+  "originating_run_id": null
+ },
+ "review_id": "review-r8-preview-race",
+ "recorded_at": "2026-08-13T18:10:00Z",
+ "verdict": "confirmed_with_correction",
+ "rationale": "Independent refuter: NOT REFUTED - same-job wiring confirmed, race reproduced 0/60, zero validation confirmed; material unknown: current consumer wiring non-functional (missing required inputs), identical structure ran July 2026."
+}

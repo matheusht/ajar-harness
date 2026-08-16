@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "E1-C1-i18n-locale-key-escape",
+ "entity_ref": "E1-C1-i18n-locale-key-escape",
+ "finding_revision": 2,
+ "input_refs": [
+  "attest.json"
+ ],
+ "input_hash": "bbbbe0dd4aaf2270b0ae2fe0ceda81910a515391cca4132b55c9f4e9df41c001",
+ "evidence_refs": [],
+ "conflicting_evidence": [
+  "attempt-e1c1-001-primary observation text names refuted members A1/D as confirmed (pre-re-scope historical record)"
+ ],
+ "corrections": [
+  "finding.json proof.replay_refs is EMPTY although attempt-e1c1-003-replay (seq 24, kind=replay) is recorded in the kernel \u2014 add it to proof.replay_refs for trail consistency (compare M2's proof which carries its replay ref)",
+  "attempt-e1c1-001-primary observation statement still claims the full pre-re-scope family (A1/A2/A3/B/C/D); the REPORT scopes correctly but the kernel record text is stale \u2014 annotate the record or accept as historical (note only, not a blocker)",
+  "hypothesis lifecycle is queued -> closed with no intermediate running/selected transition (other hypotheses show the full chain); cosmetic consistency note"
+ ],
+ "required_next_actions": [
+  "operator adds attempt-e1c1-003-replay to finding.json proof.replay_refs",
+  "operator review; filing"
+ ],
+ "claim_tuple_hash": "bbbbe0dd4aaf2270b0ae2fe0ceda81910a515391cca4132b55c9f4e9df41c001",
+ "independence": {
+  "reviewer_id": "refuter-rv-c1-f",
+  "reviewer_run_id": "rv-c1-f",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "break the E1-C1 attestation on kernel/records consistency",
+  "originating_run_id": null
+ },
+ "review_id": "review-e1c1-rv-c1-f",
+ "recorded_at": "2026-08-15T16:30:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "The attestation SURVIVES the disconfirming attempt. (a) attest.json text matches the re-scope: primary_attempt + real-path-exec attestations describe the webpack-stack members (A2/A3/B/C) live-verified and the app-builder expansion (A1/D) refuted by RV-C1-A \u2014 no stale source-verified-only claim remains (the earlier 'C/D source-verified only' text was corrected). (b) All three attempts exist and are consistent (primary seq 22 signal, control seq 23 no_signal with control_of, replay seq 24 with control_of=control); the negative-control chain resolves; the replay is recorded in the kernel. (c) reviews/ carries three independent claim_adjudication reviews (rv-c1-a/b/c) with distinct reviewer ids and real input_hash fields \u2014 judgement-not-generation is satisfied (their input hashes predate the re-scope; the parallel RV-C1-D/E/F set refreshes the hash-bound trail on the corrected package). (d) hypothesis lifecycle: created (queued, seq 40) -> status_changed (closed, seq 42) with origin_ref resolving to the E1-R3 funnel observation \u2014 consistent. (e) finding.json family structure matches the re-scope (members A2/A3/B/C, refuted_members A1/D, root_cause correct). CAPS/ISSUES: (1) finding.json proof.replay_refs empty while the replay attempt exists \u2014 record-level inconsistency, does not affect the claim truth; (2) the primary attempt's observation text names the refuted members as confirmed (historical record); (3) hypothesis lifecycle lacks the intermediate selected/running transitions (cosmetic). None of these break the attestation's core: the surviving webpack-stack claims are live-verified at the pin with real compiled modules, the controls resolve, and the scope boundary (app-builder containment) is an explicit negative control."
+}

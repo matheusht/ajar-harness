@@ -1,0 +1,34 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "W1-yarn-classic-disttags-win32",
+ "entity_ref": "W1-yarn-classic-disttags-win32",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-w1-001-primary"
+ ],
+ "input_hash": "0e4d49eb377941b870c9deeb01c1135719a5b65d487d27761f3a893fa2e8bae2",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "delta scoped precisely: pre-gate pre-install invisible execution (interactive cancel moot; non-TTY abort-before-exec becomes exec)"
+ ],
+ "required_next_actions": [
+  "operator review; E0-R5 Windows fixture when available"
+ ],
+ "claim_tuple_hash": "0e4d49eb377941b870c9deeb01c1135719a5b65d487d27761f3a893fa2e8bae2",
+ "independence": {
+  "reviewer_id": "killpair-kp-w1",
+  "reviewer_run_id": "e40f86fc",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the W1 claim",
+  "originating_run_id": null
+ },
+ "review_id": "review-w1-kp",
+ "recorded_at": "2026-08-15T16:30:00Z",
+ "verdict": "survives",
+ "rationale": "all hops verified; the schematic-exec kill fails (gated+reversible vs ungated+irreversible+invisible); yarn-only scope exact (npm path safe); trigger order confirmed (metadata fetch before confirmation gate; update/cli.ts:466 second trigger bypasses resolver semver guards)."
+}

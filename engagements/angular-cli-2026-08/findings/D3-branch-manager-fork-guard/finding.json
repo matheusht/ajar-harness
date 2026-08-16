@@ -1,0 +1,49 @@
+{
+ "id": "D3-branch-manager-fork-guard",
+ "engagement": "angular-cli-2026-08",
+ "schema_version": 1,
+ "owasp": "A01:2021 Broken Access Control",
+ "atlas": "ineffective fork guard on pull_request_target reaches robot-key job",
+ "surface": ".github/workflows/assistant-to-the-branch-manager.yml",
+ "objective": "control_ineffectiveness",
+ "scope_class": "injection",
+ "severity": "low",
+ "confidence": "confirmed",
+ "status": "needs_review",
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-d3-001-primary"
+  ],
+  "negative_control_refs": [
+   "attempt-d3-002-control-ns"
+  ],
+  "positive_control_refs": [],
+  "replay_refs": []
+ },
+ "recorded_date": "2026-08-15",
+ "dedup_key": "D3 fork guard",
+ "oracle_verdict": {
+  "signal": "suspected_signal",
+  "adjudication": "confirmed",
+  "contamination_ruled_out": true
+ },
+ "evidence_contract": {
+  "negative_control": "correct expression would be pull_request.head.repo.fork; dev-infra's own repo does not use PR triggers",
+  "positive_control": "",
+  "replay": "GitHub event semantics verified (documented behavior); action source read at pin",
+  "contamination": "none",
+  "justification": "github.event.repository is the base repo on PR events (documented semantics) -> guard always true; action is API-only so impact capped; merge gates downstream in dev-infra (attribution).",
+  "run_cost": {
+   "wall_seconds": 300,
+   "model_seconds": 60,
+   "tool_seconds": 30,
+   "target_calls": 0,
+   "model_calls": 0,
+   "human_review_seconds": 0
+  },
+  "evidence_refs": []
+ },
+ "leaked_fragments": [],
+ "review_history": [],
+ "cvss": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N"
+}

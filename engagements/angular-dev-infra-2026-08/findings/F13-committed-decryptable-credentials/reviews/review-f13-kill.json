@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-dev-infra-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F13-committed-decryptable-credentials",
+ "entity_ref": "F13-committed-decryptable-credentials",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-f13-001-primary",
+  "attempt-f13-002-negative-tamper",
+  "attempt-f13-003-negative-wrongtag",
+  "attempt-f13-004-replay"
+ ],
+ "input_hash": "eadf04d8c002a7ef8dbacecec80a4ee9e01603a1c6f850d098865d89cf2658bb",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "no-delta disclosure argument: every reader already holds the plaintext",
+  "wrapper contribution is scanner-evasion (negative hygiene)",
+  "residual report-worthy ONLY if key live and IAM beyond read-only RBE \u2014 unassessable in scope"
+ ],
+ "required_next_actions": [
+  "operator rotates/reports; liveness and IAM assessment requires Google-side facts"
+ ],
+ "claim_tuple_hash": null,
+ "independence": {
+  "reviewer_id": "f13-killpair-kill",
+  "reviewer_run_id": "round3-f13-killpair-kill",
+  "reviewer_model": "deepseek-v4-pro",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Independently determine whether the committed blobs decrypt from public material and what severity/category is honest; refute if the claim does not hold",
+  "originating_run_id": null
+ },
+ "review_id": "review-f13-kill",
+ "recorded_at": "2026-08-13T06:24:00Z",
+ "verdict": "needs_review",
+ "rationale": "Kill side: blobs are obfuscation-only, public-by-construction; the marginal disclosure is zero; concedes the GCP key is a real, non-ancient SA private key whose liveness/IAM are the entire crux and are out-of-scope."
+}

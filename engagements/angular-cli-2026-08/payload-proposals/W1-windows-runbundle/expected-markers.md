@@ -1,0 +1,8 @@
+- [ ] `yarn --version` prints a 1.x version (yarn-classic detection; 2+ silently disables the value path — INVALID RUN, re-run with yarn 1)
+- [ ] Registry log shows `GET /w1-poc-pkg` (the metadata fetch happened)
+- [ ] **`%TEMP%\w1-poc` EXISTS** (the injected `echo PWNED > %TEMP%\w1-poc` executed via cmd `&` chaining)
+- [ ] The marker file appeared **before** any install/confirmation output (injection fires pre-gate) and **before** `node_modules` install trail appears
+- [ ] `ng add` printed the tag NAME (`w1-poc-pkg@latest`) in its prompt — the injected value is NOT revealed
+- [ ] **Negative control A:** `node registry-server.cjs 4873 benign` + re-run → marker ABSENT
+- [ ] **Negative control B (POSIX):** same fixture on Linux/macOS → marker ABSENT (array-spawn)
+- [ ] (optional) npm-managed repo (.npmrc redirect, `ng update w1-poc-pkg@latest`) → marker PRESENT (manager-independent update path)

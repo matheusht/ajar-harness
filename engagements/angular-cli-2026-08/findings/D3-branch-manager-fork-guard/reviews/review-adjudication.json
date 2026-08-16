@@ -1,0 +1,30 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "D3-branch-manager-fork-guard",
+ "entity_ref": "D3-branch-manager-fork-guard",
+ "finding_revision": 1,
+ "input_refs": [],
+ "input_hash": "01c05c4d89d056fcc28ab38b3d8fefdf81eb2826ae462ca956f564523185606b",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [],
+ "required_next_actions": [
+  "operator review"
+ ],
+ "claim_tuple_hash": "01c05c4d89d056fcc28ab38b3d8fefdf81eb2826ae462ca956f564523185606b",
+ "independence": {
+  "reviewer_id": "IR-D3-forkguard",
+  "reviewer_run_id": "d224fc4f",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the candidate finding; independently verify every claim",
+  "originating_run_id": null
+ },
+ "review_id": "review-d3-branch-manager-fork-guard-ir",
+ "recorded_at": "2026-08-15T06:15:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "guard semantics confirmed (github.event.repository = base repo on PR events \u2014 always not-a-fork); checkout materializes the PR merge commit; pinned action verified API-only (never reads workspace); impact capped to ineffective-control + fork-PR status/dispatch spam; merge decision gated downstream in dev-infra (attribution)."
+}

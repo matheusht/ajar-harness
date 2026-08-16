@@ -1,0 +1,5 @@
+[HOP1] loaded translations from OUT-OF-WORKSPACE path: ["marker-message-id"]
+[HOP1] marker content present: {"text":"MARKER-ATTACKER-TRANSLATION-N1F-7c9f2e","messageParts":["MARKER-ATTACKER-TRANSLATION-N1F-7c9f2e"],"placeholderNames":[]}
+[HOP1] READ-OUTSIDE-WORKSPACE = true
+[HOP2] in-workspace translations loaded: ["benign-message-id"]
+[HOP2] benign marker present: true

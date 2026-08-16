@@ -1,0 +1,28 @@
+{
+ "engagement": "angular-cli-2026-08",
+ "primary_attempt": {
+  "attempt_id": "attempt-e1c1-001-primary",
+  "attested": true,
+  "attestation": "compiled-module verification at pin (KP-C1 + KP-C1-CD): webpack-stack members live-verified; explicit-subPath control throws; app-builder expansion refuted E1-R6 (RV-C1-A)"
+ },
+ "negative_control": {
+  "attempt_ids": [
+   "attempt-e1c1-002-control-ns"
+  ],
+  "attested": true,
+  "attestation": "see REPORT.md negative controls (explicit subPath throws; benign locale resolves in-project; extract-i18n clean for this family)"
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated"
+ },
+ "real-path-exec": true,
+ "real-path-exec-attestation": "compiled-module verification at pin (esbuild bundles of real i18n-options/ensureOutputPaths + findLocaleDataPath + Babel transform): webpack-stack write escape (A2/A3/B) + locale-data module load (C) live-verified; application-builder expansion (A1/D) REFUTED by independent review (generateFullPath isSubDirectory containment throws on escaping keys)",
+ "negative-control": true,
+ "negative-control-attestation": "see REPORT.md negative controls",
+ "state_provenance": {
+  "mode": "real-path",
+  "established_by": "attempt-e1c1-001-primary",
+  "statement": "impact-bearing state reached through the pinned tree / compiled modules (createI18nOptions + ensureOutputPaths + findLocaleDataPath primitives); full build E2E not run"
+ }
+}

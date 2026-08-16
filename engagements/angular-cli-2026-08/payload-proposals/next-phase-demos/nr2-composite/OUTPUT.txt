@@ -1,0 +1,6 @@
+COMPOSITE-ONE-RUN
+C1_DELIVERY=true
+C3_EXFIL=true
+C4_PWNED=true
+all=true
+bundle=/Users/matheusvsky/Documents/trab/llm-redteam-harness/engagements/angular-cli-2026-08/payload-proposals/next-phase-demos/nr2-composite/dist/main.js

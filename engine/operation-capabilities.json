@@ -39,6 +39,7 @@
         "propose": {"blocking_scope": "none", "required_evidence": ["source_inventory"], "tier": "notebook"}
       }
     },
+    "migrate-kernel": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope_draft", "fresh_operator_console"], "tier": "authority"},
     "normalize-runtime": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "preflight": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "session_provenance"], "tier": "notebook"},
     "review-preflight": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "immutable_preflight", "operator_review"], "tier": "authority"},

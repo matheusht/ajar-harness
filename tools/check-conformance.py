@@ -28,6 +28,7 @@ Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -801,7 +802,8 @@ def check_finding_lifecycle():
         return
     # fixture name suffix -> the gate that must be the blocker
     expected_gate = {"privilege-mismatch": "G3", "privilege-not-established": "G3",
-                     "synthetic-review": "G4", "no-control": "G2", "no-cvss": "G5"}
+                     "synthetic-review": "G4", "no-control": "G2", "no-cvss": "G5",
+                     "synthesized-state": "G6"}
     seen_clear = 0
     for name in sorted(os.listdir(base)):
         pkg = os.path.join(base, name)
@@ -829,6 +831,12 @@ def check_finding_lifecycle():
     # A package carrying a single plausible review is indistinguishable on its own, so G4 must also
     # audit the engagement's whole claim_adjudication set. Running the gates over the eleven spotify
     # findings on 2026-08-10 passed G4 on all eleven while the engagement corpus audited synthetic.
+    #
+    # The fixture keeps reviews at `unproven/<id>/reviews/`, which is where real engagements put
+    # them. It used to keep them in a top-level `reviews/` dir — a layout no engagement has ever
+    # had. The fixture was shaped to the code, so this check passed for a month while the corpus arm
+    # of G4 silently found nothing on every real engagement. Reshaped 2026-08-11. If this fixture is
+    # ever restructured again, restructure it toward what engagements actually look like.
     corp = os.path.join(ROOT, "fixtures", "lifecycle-corpus")
     pkg = os.path.join(corp, "unproven", "F-CORP")
     if os.path.isdir(pkg):
@@ -840,6 +848,313 @@ def check_finding_lifecycle():
         record([r["gate"] for r in with_corpus.blocked] == ["G4"],
                "lifecycle-corpus: the engagement corpus is what blocks G4",
                f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
+    # G2 regression: a declaration cannot turn a replay into a negative control. These cases vary
+    # only the ref used in proof.negative_control_refs and exercise the production G2 function
+    # against a synthetic attempt ledger.
+    control_fixture = os.path.join(ROOT, "fixtures", "lifecycle-control-kind")
+    if os.path.isdir(control_fixture):
+        from finding_lifecycle import Gates, g2_control
+
+        def control_case(name):
+            case = os.path.join(control_fixture, "cases", name)
+            finding = load_json(os.path.join(case, "finding.json"))
+            attest = load_json(os.path.join(case, "attest.json"))
+            gate = Gates()
+            g2_control(finding, attest, gate, control_fixture)
+            return gate.rows[0]
+
+        replay = control_case("replay-as-control")
+        matched = control_case("matched-control")
+        record(not replay["ok"], "lifecycle-control-kind: replay-as-control blocks G2",
+               replay["detail"])
+        record(matched["ok"], "lifecycle-control-kind: matched control clears G2",
+               matched["detail"])
+
+
+def check_g1_g6_attempt_resolution():
+    """G1 resolves the primary attempt against the ledger — Phase 9's other half.
+
+    G1 used to check that a ref existed and a boolean was set. Both are strings the package writes
+    about itself, so it could be satisfied by naming an attempt that never ran. It now resolves the
+    ref and requires a non-control record with a signalling outcome — the mirror of G2, which
+    requires the control to resolve to held/no_signal.
+
+    Three paths, all asserted, because the first version got the legacy case wrong: it blocked both
+    already-promoted obyte findings, whose attempts.jsonl is a pre-lifecycle research journal with
+    no addressable records at all. An empty ledger is a format gap; a populated ledger missing one
+    ref is a dangling reference. Only the second is a defect."""
+    print("\n[finding-lifecycle] G1 + G6 attempt resolution")
+    base = os.path.join(ROOT, "fixtures", "lifecycle-attempts")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+    except ImportError as exc:
+        record(False, "g1: module is importable", str(exc))
+        return
+    for name, want_block in (("F-G1-OK", False), ("F-G1-DANGLING", True), ("F-G1-HELD", True)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g1/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        blocked = bool(g1) and not g1[0]["ok"]
+        record(blocked == want_block,
+               f"g1/{name}: {'blocks' if want_block else 'clears'}",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+    # G6 resolution — Phase 9's last conversion. G6 was a pure string check, so obyte-2026-08-004,
+    # the finding it exists to catch, passed if you relabelled one dict value. It now resolves
+    # `established_by` when that value is an attempt ref. Two declaration shapes are legitimate in
+    # the wild — an attempt id (angular-cli) and an evidence path with prose (obyte) — so the prose
+    # case must still PASS, or the conversion would false-alarm on every legacy package.
+    for name, want_block in (("F-G6-OK", False), ("F-G6-DANGLING", True), ("F-G6-CONTROL", True),
+                             ("F-G6-HELD", True), ("F-G6-PROSE", False)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g6/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g6 = [r for r in g.rows if r["gate"] == "G6"]
+        blocked = bool(g6) and not g6[0]["ok"]
+        record(blocked == want_block,
+               f"g6/{name}: {'blocks' if want_block else 'clears'}",
+               g6[0]["detail"] if g6 else "no G6 row")
+
+    # The legacy path: a ledger with no addressable records must NOT block. Regression guard for
+    # the false alarm this gate produced on its first run against obyte-ocore-2026-08.
+    eng = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    pkg = os.path.join(eng, "findings", "obyte-2026-08-001")
+    if os.path.isdir(pkg):
+        g, _ = run_gates(pkg, eng)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        record(bool(g1) and g1[0]["ok"],
+               "g1/legacy-ledger: a pre-lifecycle attempts.jsonl does not block",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+
+def check_gates_on_real_data():
+    """Run the gates and the corpus audit against REAL engagement directories.
+
+    Why this exists. Every gate fixture in this repo was authored by the same person who wrote the
+    gates. On 2026-08-11 that cost us: `adjudication_audit.load_reviews` was not recursive and G4's
+    corpus arm looked for `<engagement>/reviews/`, a directory no engagement has ever had. Both
+    failed OPEN — the audit printed CLEAR over zero reviews — and the fixture hid it because the
+    fixture had been shaped to the code. The synthetic suite was green the whole time.
+
+    So the suite now also runs on directories nobody authored to satisfy it, with outcomes already
+    adjudicated by hand. These are records of known outcomes, not rules. If a package below is ever
+    repaired or re-adjudicated, update the expectation and say so in the OUTCOME document."""
+    print("\n[real-data] gates against adjudicated engagement packages")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+        from adjudication_audit import load_reviews, audit
+    except ImportError as exc:
+        record(False, "real-data: modules are importable", str(exc))
+        return
+
+    # obyte-ocore-2026-08, adjudicated 2026-08-11. 004 is the gate-validation miss: it passed all six
+    # earlier gates and promoted, and its impact rested on a fee window the PoC wrote itself.
+    # Assert only the gates this check is a regression test FOR — the adjudication gates whose
+    # verdicts were hand-adjudicated. G0 is deliberately excluded: it reads whatever files the
+    # package currently cites, so a live engagement that is still being worked moves it. On
+    # 2026-08-11 a concurrent escalation added ER5-independent-poc-review.md to the 001 package,
+    # citing four evidence paths that live in the ENGAGEMENT but were never copied into the
+    # PACKAGE, and G0 went red. That is a genuine packaging defect and it is reported to the
+    # operator — but it is not a regression in the gate machinery, and pinning it here would couple
+    # this suite to someone else's in-flight work. Narrowing the claim is not the same as weakening
+    # it: what is asserted below is exactly what was adjudicated.
+    eng = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    expect = [("findings/obyte-2026-08-001", set()),
+              ("findings/obyte-2026-08-003", set()),
+              ("unproven/obyte-2026-08-004", {"G6"})]
+    if os.path.isdir(eng):
+        for rel, want in expect:
+            pkg = os.path.join(eng, rel)
+            if not os.path.isdir(pkg):
+                record(False, f"real-data: {rel} is present", "package missing")
+                continue
+            g, _ = run_gates(pkg, eng)
+            got = {r["gate"] for r in g.blocked} & {"G4", "G6"}
+            record(got == want,
+                   f"real-data/{os.path.basename(rel)}: adjudication gates blocked == {sorted(want) or '[]'}",
+                   f"G4/G6 blocked={sorted(got)}; all blocked={[r['gate'] for r in g.blocked]}")
+
+    # G4 corpus arm on real data. spotify-backstage's fifteen reviews were generated by a script that
+    # hardcoded `"verdict": "supported"` (2026-08-09). The package's single review is unremarkable on
+    # its own; only the corpus convicts. This is the check that was silently dead.
+    spot = os.path.join(ROOT, "engagements", "spotify-backstage-2026-07")
+    if os.path.isdir(spot):
+        rv = load_reviews(spot)
+        record(len(rv) >= 10, "real-data: the recursive walker finds the spotify corpus",
+               f"found {len(rv)} review(s) — a non-recursive walker finds 0 here")
+        if rv:
+            verdict, _, _ = audit(rv)
+            record(verdict == "synthetic",
+                   "real-data: the known-fabricated spotify corpus audits synthetic",
+                   f"verdict={verdict}")
+        pkg = os.path.join(spot, "unproven", "F-OIDC3")
+        if os.path.isdir(pkg):
+            alone, _ = run_gates(pkg)
+            with_corpus, _ = run_gates(pkg, spot)
+            record("G4" not in [r["gate"] for r in alone.blocked],
+                   "real-data/F-OIDC3: the package's own review shows nothing alone",
+                   f"blocked_by={[r['gate'] for r in alone.blocked]}")
+            record("G4" in [r["gate"] for r in with_corpus.blocked],
+                   "real-data/F-OIDC3: the engagement corpus is what blocks G4",
+                   f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
+    # gemini-cli: three reviews the OPERATOR wrote by hand in one sitting to mark earlier stubs
+    # non_compliant. Identical timestamps, one reviewer, one template, one verdict — structurally
+    # indistinguishable from generation. It must not be convicted as `synthetic` (nothing promotes
+    # on a rejection), and it must not be called `clear` either, because a batch of unreviewed kills
+    # is exactly how a real finding disappears quietly.
+    gem = os.path.join(ROOT, "engagements", "gemini-cli")
+    if os.path.isdir(gem):
+        rv = load_reviews(gem)
+        if rv:
+            verdict, sig, _ = audit(rv)
+            record(verdict == "rejections-unreviewed",
+                   "real-data/gemini-cli: an all-rejecting corpus is flagged, not convicted",
+                   f"verdict={verdict}")
+
+    # The rejecting branch must not become an escape hatch. An identically fabricated corpus has to
+    # be distinguishable from an honest one in BOTH directions. The first version of the rejecting
+    # rule zeroed every signal and returned `clear`, so a corpus firing all seven signals — fatal
+    # ones included — passed purely because its verdicts rejected. Found 2026-08-11 by a reviewer
+    # auditing the harness for downward bias, which is precisely the bias that hole would hide.
+    def _fab(i, verdict):
+        return {"review_id": f"fab-{i}", "review_type": "claim_adjudication",
+                "recorded_at": "2026-08-11T00:00:00Z", "input_hash": "sha256:" + "a" * 64,
+                "proposed_finding_id": f"F-{i}", "verdict": verdict, "corrections": [],
+                "rationale": "Reviewed and found non-compliant per policy.",
+                "conflicting_evidence": [], "independence": {"reviewer_id": "solo-reviewer"}}
+    rej, _, _ = audit([_fab(i, "refuted") for i in range(5)])
+    conf, _, _ = audit([_fab(i, "confirmed") for i in range(5)])
+    record(conf == "synthetic", "fabrication/confirming corpus audits synthetic", f"verdict={conf}")
+    record(rej == "rejections-unreviewed",
+           "fabrication/rejecting corpus is flagged, never clear",
+           f"verdict={rej} — a fabricated set of kills must stay visible")
+
+
+def check_disposition_ledger():
+    """The calibration arithmetic, and the floor that stops it speaking too early.
+
+    Built 2026-08-12. Four reviewers had just read every engagement record and concluded almost
+    nothing had ever been filed; the operator then said findings HAD been filed and adjudicated
+    across four programs. Both were right — the repository did not know. This ledger is the only
+    place external verdicts can live, so its arithmetic is worth a regression test."""
+    print("\n[disposition-ledger] calibration against external verdicts")
+    base = os.path.join(ROOT, "fixtures", "dispositions")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import disposition_ledger as DL
+    except ImportError as exc:
+        record(False, "disposition-ledger: module is importable", str(exc))
+        return
+
+    class A:
+        pass
+
+    for case, want in (("under-calling", "under-calling"), ("over-calling", "over-calling"),
+                       ("calibrated", "calibrated")):
+        d = os.path.join(base, case)
+        if not os.path.isdir(d):
+            continue
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["verdict"] == want, f"dispositions/{case}: verdict is {want}",
+               f"got {got['verdict']}, deltas under={got['under_called']} "
+               f"agree={got['agreed']} over={got['over_called']}")
+
+    # `not-assigned` must contribute NO delta. Folding an ungraded closure in as a zero would claim
+    # an agreement that never happened — the calibrated fixture carries 7 records and 5 gradings.
+    d = os.path.join(base, "calibrated")
+    if os.path.isdir(d):
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["dispositions"] > got["both_graded"],
+               "dispositions: an ungraded closure contributes no delta",
+               f"{got['dispositions']} records, {got['both_graded']} graded")
+
+    # A thin ledger must refuse to issue a verdict. The harness's recurring failure is a confident
+    # answer over too little input; this is the one place that would be most tempting.
+    a = A(); a.root = os.path.join(base, "calibrated"); a.json = True; a.min = 99
+    buf = io.StringIO()
+    old, sys.stdout = sys.stdout, buf
+    try:
+        DL.cmd_calibrate(a)
+    finally:
+        sys.stdout = old
+    record(json.loads(buf.getvalue())["verdict"] == "insufficient-data",
+           "dispositions: below the floor, no verdict is issued",
+           "a lopsided two-record ledger is noise, not a finding")
+
+
+def check_framing_probe():
+    """Every packet handed to a grader must carry zero severity signals.
+
+    A grader who can see the band already assigned is not grading, they are agreeing. The scrub is
+    what makes the experiment an experiment, so it is asserted here rather than trusted. The
+    verifier earned its keep immediately: on the first real packet (F-F1) it caught a leak the
+    scrubber missed — `CVSS: S:C 8.5`, a partial vector and a score with text between them, which
+    none of the three vector patterns matched."""
+    print("\n[framing-probe] evidence packets carry no severity signal")
+    pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2")
+    if not os.path.isdir(pk):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import framing_probe as FP
+    except ImportError as exc:
+        record(False, "framing-probe: module is importable", str(exc))
+        return
+
+    packets = sorted(f for f in os.listdir(pk) if f.endswith(".packet.json"))
+    record(len(packets) >= 3, "framing-probe: packets exist", f"{len(packets)} packet(s)")
+    for name in packets:
+        p = json.load(open(os.path.join(pk, name)))
+        leaked = FP.leaks(p["body"])
+        record(not leaked, f"framing-probe/{p['finding_id']}: zero severity signals survive",
+               f"{len(leaked)} leak(s): {[t for _, t in leaked[:3]]}")
+        import hashlib
+        record(hashlib.sha256(p["body"].encode()).hexdigest() == p["body_sha256"],
+               f"framing-probe/{p['finding_id']}: body matches its recorded hash",
+               "an edited packet invalidates the run it was used in")
+
+    # The scrubber must actually remove what the detector looks for, including the F-F1 shape.
+    probe = ("This is CRITICAL. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H base score 9.8 High. "
+             "Rated CVSS: S:C 8.5 and considered Medium overall, arguably Low.")
+    record(not FP.leaks(FP.scrub(probe)),
+           "framing-probe: the scrubber removes every signal the verifier detects",
+           f"residual after scrub: {FP.leaks(FP.scrub(probe))}")
+
+    # Three framings, one packet: the evidence must be byte-identical across them.
+    if packets:
+        p = json.load(open(os.path.join(pk, packets[0])))
+        record(len(set(FP.FRAMINGS.values())) == 3,
+               "framing-probe: the three framings are distinct texts")
+        record(all(p["body"] not in v for v in FP.FRAMINGS.values()),
+               "framing-probe: no framing text embeds the evidence",
+               "the packet must be the only shared content")
 
 
 def check_adjudication_audit():
@@ -993,7 +1308,11 @@ def main():
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()
+    check_disposition_ledger()
+    check_framing_probe()
     check_finding_lifecycle()
+    check_g1_g6_attempt_resolution()
+    check_gates_on_real_data()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

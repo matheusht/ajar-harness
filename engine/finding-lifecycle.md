@@ -57,10 +57,25 @@ satisfied by writing more text.
 |---|---|---|
 | G0 | does every path the package cites exist? | computable |
 | G1 | is a primary attempt named, and real execution attested? | computable + attestable |
-| G2 | is a negative control named and attested? | computable + attestable |
+| G2 | does a distinct control ref resolve to a `negative_control` attempt with a held/no-signal outcome, and is it attested? | computable + attestable |
 | G3 | did the proof run at or below the claimed attacker privilege? | computable |
 | G4 | is the adjudication judgement rather than generation? | computable |
 | G5 | does a claimed severity carry a CVSS vector that recomputes? | computable |
+
+### G2 — the control-role gate
+
+For v3 findings, naming a control is no longer enough. With `--engagement`, G2 resolves every
+`proof.negative_control_refs` entry against `attempts.jsonl`, requires `kind=negative_control`,
+requires a `held`/`no_signal` outcome, and rejects any reference also cited as a primary attempt or
+replay. If a modern attempt carries `control_of`, it must point to one of the finding's cited primary
+attempts. Missing ledgers and unresolved refs fail closed.
+
+This split matters: a replay asks whether a signal happens again; a negative control asks whether
+the signal disappears when one causal variable changes. The same attempt cannot prove both.
+
+Legacy flat v1 packages predate addressable proof refs. They retain the old attestation check until
+they are migrated; they do not receive a false claim that attempt semantics were mechanically
+verified.
 
 ### G3 — the privilege gate
 
@@ -120,6 +135,65 @@ unproven/<FINDING_ID>/
 
 `finding.json` must carry `privilege_context`. Without it, G3 blocks — a finding that does not say
 what position it was proven from has not been proven.
+
+## 5b. Partials live in `unproven/`. That is what it is for.
+
+Added 2026-08-16 after an audit measured this directly: across three post-gate engagements the
+gates blocked **zero** promotions out of twelve, and `unproven/` was **empty** in both angular
+engagements. One hundred per cent promote, zero partial. The designed home for incomplete work
+existed and nobody used it.
+
+That is the failure mode a peer named: *"making your tool's judging phase too rigorous can lead to
+dropping valid severe vulnerabilities."* It did not reach us through the gates — the gates never
+said no. It reaches us through **what never gets written down**. A three-stage chain with stages 1
+and 2 proven and stage 3 argued has real value, and if the only two states are "passes seven gates"
+and "a line in a hardening note", that value evaporates.
+
+**Write the partial.** A package in `unproven/` is not a failure and not a draft. It is a finding
+whose completion is bounded and stated.
+
+A partial package declares, in `finding.json`:
+
+```json
+"stages": [
+  {"n": 1, "claim": "...", "state": "proven",   "evidence": "attempt://..."},
+  {"n": 2, "claim": "...", "state": "proven",   "evidence": "attempt://..."},
+  {"n": 3, "claim": "...", "state": "argued",   "blocked_by": "scope-ceiling",
+   "what_would_close_it": "one live probe of the RBE ActionCache IAM binding"}
+]
+```
+
+`state` is one of `proven` · `argued` · `refuted`. A partial is any package with at least one
+non-`proven` stage. It stays in `unproven/`, it never claims a severity above what its proven
+stages support, and it is **not** promoted — promotion still means every gate passed.
+
+What a partial buys: it survives the round, it is re-readable by a later run, its proven stages
+enter the primitive registry, and its `what_would_close_it` is a concrete next action rather than
+a shrug. A hardening note is a dead end. A partial is a queue.
+
+## 5c. A scope-blocked ceiling is a REQUEST, not a cap
+
+Operator standing instruction, 2026-08-16: **scope will always widen if more authorization is what
+it takes to prove a ceiling. Always.**
+
+That does **not** authorize anyone to widen it. The five wires in `scope.md` are unchanged, and the
+acts that need a fresh confirm still need one. What changes is the disposition of a ceiling that
+only authorization is holding down.
+
+Before: the run wrote *"conditional escalation, out of scope to test"* and moved on. The highest-
+value finding in `angular-dev-infra-2026-08` is exactly this shape — the GCP service-account key to
+RBE cache-poisoning chain, the Supply-Chain top band, written out in full in `cascades.md` and
+marked "hypothesis, not claimed" because liveness and IAM are Google-side facts and probing them
+trips wires 2 and 4. That is the correct call about the act. It was the wrong call about the
+record: it capped silently instead of asking.
+
+Now: record it in `ceiling-requests.md` and **surface it to the operator**. One row per blocked
+ceiling:
+
+| what the ceiling is | the band it would reach | the exact act required | which wire it trips | what would be irreversible | cleanup path |
+
+The orchestrator does not perform the act. It states the request precisely enough that the operator
+can answer yes or no in one reading. A ceiling nobody asked about is a finding we chose not to have.
 
 ## 6. What this does not do
 

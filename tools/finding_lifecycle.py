@@ -24,7 +24,8 @@ The gates
 ---------
   G0 existence      every path the package cites exists                    computable
   G1 real-path      a primary attempt is named AND real execution attested computable + attestable
-  G2 control        a negative control attempt is named AND attested       computable + attestable
+  G2 control        a distinct negative-control attempt resolves to a      computable + attestable
+                    held/no-signal outcome AND is attested
   G3 privilege      the proven execution context is no more privileged
                     than the claimed attacker position                     computable
   G4 adjudication   a review exists and is not synthetic                   computable
@@ -116,6 +117,48 @@ def dig(obj, *paths):
     return None
 
 
+def _refs(value):
+    """Normalize one reference or a reference list into non-empty strings."""
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
+
+
+def _attempt_index(engagement):
+    """Read just enough of attempts.jsonl for referential checks.
+
+    This deliberately does not print or return attempt inputs/outputs. Older engagements use
+    ``id``/``verdict`` while the governed record uses ``attempt_id``/``assessment``; the gate reads
+    both so a lifecycle migration does not silently discard evidence.
+    """
+    path = os.path.join(engagement, "attempts.jsonl")
+    rows = {}
+    try:
+        with open(path) as fh:
+            for lineno, line in enumerate(fh, 1):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    return None, f"attempts.jsonl line {lineno} is not an object"
+                attempt_id = record.get("attempt_id") or record.get("id")
+                if not isinstance(attempt_id, str) or not attempt_id.strip():
+                    # Some pre-lifecycle research journals are also named attempts.jsonl but do
+                    # not contain addressable attempt records. They cannot satisfy a v3 proof ref.
+                    continue
+                attempt_id = attempt_id.strip()
+                if attempt_id in rows:
+                    return None, f"attempts.jsonl contains duplicate id {attempt_id}"
+                rows[attempt_id] = record
+    except OSError as exc:
+        return None, f"attempt ledger unavailable: {exc.__class__.__name__}"
+    except ValueError:
+        return None, "attempts.jsonl contains invalid JSON"
+    return rows, None
+
+
 class Gates:
     def __init__(self):
         self.rows = []
@@ -151,12 +194,73 @@ def g1_real_path(finding, attest, g):
           f"real-path-exec attestation={'yes' if attested else 'MISSING'}")
 
 
-def g2_control(finding, attest, g):
-    neg = dig(finding, "proof.negative_control_refs", "control_attempt_id")
+def g2_control(finding, attest, g, engagement=None):
+    neg = _refs(dig(finding, "proof.negative_control_refs", "control_attempt_id"))
+    primary = _refs(dig(finding, "proof.primary_attempt_refs", "attempt_id"))
+    replay = _refs(dig(finding, "proof.replay_refs", "replay_attempt_refs"))
     attested = bool((attest or {}).get("negative-control"))
-    g.add("G2", bool(neg) and attested, "a negative control is named and attested",
-          f"control_attempt={'yes' if neg else 'MISSING'}, "
-          f"negative-control attestation={'yes' if attested else 'MISSING'}")
+    if not neg or not attested:
+        g.add("G2", False, "a distinct negative control is named, resolved, and attested",
+              f"control_attempt={'yes' if neg else 'MISSING'}, "
+              f"negative-control attestation={'yes' if attested else 'MISSING'}")
+        return
+
+    overlap = sorted(set(neg) & (set(primary) | set(replay)))
+    if overlap:
+        g.add("G2", False, "a distinct negative control is named, resolved, and attested",
+              f"role collision: {', '.join(overlap[:3])} is cited as both negative control and "
+              "primary/replay; replay is not a negative control")
+        return
+
+    # Flat v1 packages predate addressable attempt records. Preserve their old attestable
+    # behaviour; v3 packages opt into proof refs and therefore fail closed unless those refs can be
+    # resolved against the engagement ledger. Promotion always supplies ``engagement``.
+    v3_refs = isinstance(finding.get("proof"), dict) and "negative_control_refs" in finding["proof"]
+    if not engagement or not v3_refs:
+        g.add("G2", True, "a distinct negative control is named, resolved, and attested",
+              "control and replay refs are role-disjoint; attempt kind/outcome not resolved "
+              "(supply --engagement with a v3 package for the computable check)")
+        return
+
+    attempts, error = _attempt_index(engagement)
+    if error:
+        g.add("G2", False, "a distinct negative control is named, resolved, and attested", error)
+        return
+
+    unresolved = [ref for ref in neg if ref not in attempts]
+    if unresolved:
+        g.add("G2", False, "a distinct negative control is named, resolved, and attested",
+              f"unresolved negative-control ref(s): {', '.join(unresolved[:3])}")
+        return
+
+    failures = []
+    legacy_unlinked = 0
+    for ref in neg:
+        record = attempts[ref]
+        kind = str(record.get("kind") or "").strip().lower().replace("-", "_")
+        outcome = str(record.get("assessment") or record.get("verdict") or "").strip().lower()
+        if kind != "negative_control":
+            failures.append(f"{ref} is {kind or 'missing-kind'}; expected negative_control")
+            continue
+        if outcome not in {"held", "no_signal", "no-signal"}:
+            failures.append(f"{ref} outcome is {outcome or 'missing'}; expected held/no_signal")
+            continue
+        controls = _refs(record.get("control_of"))
+        if controls and primary and not (set(controls) & set(primary)):
+            failures.append(f"{ref} does not control a cited primary attempt")
+        elif not controls:
+            legacy_unlinked += 1
+
+    if failures:
+        g.add("G2", False, "a distinct negative control is named, resolved, and attested",
+              "; ".join(failures[:3]))
+        return
+
+    detail = (f"{len(neg)} control(s) resolve to kind=negative_control with a held/no_signal "
+              "outcome and are role-disjoint from primary/replay")
+    if legacy_unlinked:
+        detail += f"; {legacy_unlinked} legacy record(s) have no control_of linkage"
+    g.add("G2", True, "a distinct negative control is named, resolved, and attested", detail)
 
 
 def _rank(name):
@@ -358,7 +462,7 @@ def run_gates(pkg, engagement=None):
     attest = load_json(os.path.join(pkg, "attest.json")) or {}
     g0_existence(pkg, g)
     g1_real_path(finding, attest, g)
-    g2_control(finding, attest, g)
+    g2_control(finding, attest, g, engagement)
     g3_privilege(finding, attest, g)
     g4_adjudication(pkg, engagement, g)
     g5_severity(pkg, finding, g)

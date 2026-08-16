@@ -849,6 +849,28 @@ def check_finding_lifecycle():
                "lifecycle-corpus: the engagement corpus is what blocks G4",
                f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
 
+    # G2 regression: a declaration cannot turn a replay into a negative control. These cases vary
+    # only the ref used in proof.negative_control_refs and exercise the production G2 function
+    # against a synthetic attempt ledger.
+    control_fixture = os.path.join(ROOT, "fixtures", "lifecycle-control-kind")
+    if os.path.isdir(control_fixture):
+        from finding_lifecycle import Gates, g2_control
+
+        def control_case(name):
+            case = os.path.join(control_fixture, "cases", name)
+            finding = load_json(os.path.join(case, "finding.json"))
+            attest = load_json(os.path.join(case, "attest.json"))
+            gate = Gates()
+            g2_control(finding, attest, gate, control_fixture)
+            return gate.rows[0]
+
+        replay = control_case("replay-as-control")
+        matched = control_case("matched-control")
+        record(not replay["ok"], "lifecycle-control-kind: replay-as-control blocks G2",
+               replay["detail"])
+        record(matched["ok"], "lifecycle-control-kind: matched control clears G2",
+               matched["detail"])
+
 
 def check_gates_on_real_data():
     """Run the gates and the corpus audit against REAL engagement directories.

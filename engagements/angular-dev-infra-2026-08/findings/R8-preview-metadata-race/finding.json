@@ -1,0 +1,37 @@
+{
+  "id": "R8-preview-metadata-race",
+  "engagement": "angular-dev-infra-2026-08",
+  "schema_version": 1,
+  "owasp": "A01:2021 Broken Access Control / untrusted-data-to-privileged-sink",
+  "atlas": "preview-deploy metadata substitution",
+  "surface": "github-actions/previews/{pack-and-upload-artifact,upload-artifacts-to-firebase}",
+  "objective": "artifact_substituted (variant: attacker-chosen metadata reaches privileged deploy sinks)",
+  "scope_class": "injection",
+  "severity": "low",
+  "confidence": "confirmed",
+  "status": "needs_review",
+  "proof": {
+    "primary_attempt_refs": ["attempt-r8-preview-001-primary"],
+    "negative_control_refs": ["attempt-r8-preview-002-control"],
+    "positive_control_refs": [],
+    "replay_refs": []
+  },
+  "recorded_date": "2026-08-13",
+  "dedup_key": "angular/dev-infra preview pack metadata race unvalidated channelId",
+  "oracle_verdict": {
+    "signal": "suspected_signal",
+    "adjudication": "confirmed_with_correction",
+    "contamination_ruled_out": true
+  },
+  "evidence_contract": {
+    "negative_control": "attempt-r8-preview-002-control: no-attacker runs 20/20 injected survives (decoy clobbered by inject) - harness validity proven; no numeric/format validation in extract-artifact-metadata.ts",
+    "positive_control": "race direction proven: 60 attacker trials, injected survives 0/60; atomic overwriter wins 37/40, torn 3/40",
+    "replay": "independent refuter re-reproduced the race (0/60) in fresh context",
+    "contamination": "none - local replication + public consumer workflow reads",
+    "justification": "fork-controlled bazel build runs in the SAME job as pack-and-upload-artifact (consumer wiring, verified via public file); deterministic metadata path under $RUNNER_TEMP; continuous overwriter beats the inject step 100%; deploy job extracts unsafe-pull-number unvalidated into channelId (deploy action.yml:103) and comment number (:112)",
+    "run_cost": {"wall_seconds": 1800, "model_seconds": 400, "tool_seconds": 120, "target_calls": 0, "model_calls": 2, "human_review_seconds": 0},
+    "evidence_refs": []
+  },
+  "leaked_fragments": [],
+  "review_history": []
+}

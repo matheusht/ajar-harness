@@ -1,0 +1,33 @@
+{
+ "engagement": "angular-dev-infra-2026-08",
+ "primary_attempt": {
+  "attempt_id": "attempt-r8-preview-001-primary",
+  "attested": true,
+  "attestation": "recorded attempts.jsonl seq 12; local replication 60 trials + consumer wiring verification"
+ },
+ "negative_control": {
+  "attempt_ids": [
+   "attempt-r8-preview-002-control"
+  ],
+  "attested": true,
+  "attestation": "recorded attempts.jsonl seq 13; 20/20 control trials + validation-absence check"
+ },
+ "positive_control": {
+  "attempt_ids": [],
+  "attested": false,
+  "attestation": "race direction is the primary signal; control harness validates the discriminator"
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated"
+ },
+ "real-path-exec": true,
+ "real-path-exec-attestation": "local replication executed the verbatim inject-artifact-metadata.js logic + tar on real files (60 attacker trials, 20 control trials); consumer wiring read from public workflow files",
+ "negative-control": true,
+ "negative-control-attestation": "no-attacker control 20/20 injected content survives; validation-absence verified in extract-artifact-metadata.ts source",
+ "state_provenance": {
+  "mode": "real-path",
+  "established_by": "attempt-r8-preview-001-primary",
+  "statement": "the raced state (attacker-chosen metadata in the packed artifact) arises from the real action pipeline steps executed locally with a real concurrent overwriter"
+ }
+}

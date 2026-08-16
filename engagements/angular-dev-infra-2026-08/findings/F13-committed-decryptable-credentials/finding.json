@@ -1,0 +1,54 @@
+{
+ "id": "F13-committed-decryptable-credentials",
+ "engagement": "angular-dev-infra-2026-08",
+ "schema_version": 1,
+ "owasp": "A02:2021 Cryptographic Failures / information-disclosure",
+ "atlas": "credential disclosure in CI configuration",
+ "surface": "github-actions/{bazel/configure-remote,browserstack,saucelabs} committed *_token.data blobs",
+ "objective": "secret_reaches_attacker_controlled_sink (variant: secret recoverable from public repository alone)",
+ "scope_class": "information-disclosure",
+ "severity": "medium",
+ "confidence": "confirmed",
+ "status": "needs_review",
+ "recorded_date": "2026-08-13",
+ "dedup_key": "angular/dev-infra committed token blobs public-key GCM wrapper",
+ "oracle_verdict": {
+  "signal": "suspected_signal",
+  "adjudication": "confirmed",
+  "contamination_ruled_out": true
+ },
+ "evidence_contract": {
+  "negative_control": "attempt-f13-002-negative-tamper + attempt-f13-003-negative-wrongtag: GCM rejects tampered ciphertext and wrong tag/IV \u2014 the discriminator is sound",
+  "positive_control": "attempt-f13-004-replay + oracle-calibration: correct public-only material decrypts all three blobs reproducibly; sha256 matches across four independent runs",
+  "replay": "four independent fresh-process decryptions (orchestrator x2, independent verifier, kill-pair establish/kill) produce identical sha256 values",
+  "contamination": "none \u2014 pure local computation on public repository content; no prior exposure of plaintext to any agent",
+  "justification": "Every decryption input (alg, key derivation, IV, auth tag, ciphertext) is committed in the public repository; the scheme provides integrity only, zero confidentiality",
+  "run_cost": {
+   "wall_seconds": 180,
+   "model_seconds": 0,
+   "tool_seconds": 30,
+   "target_calls": 0,
+   "model_calls": 0,
+   "human_review_seconds": 0
+  },
+  "evidence_refs": [
+   "evidence/calibration.txt"
+  ]
+ },
+ "leaked_fragments": [],
+ "review_history": [],
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-f13-001-primary"
+  ],
+  "negative_control_refs": [
+   "attempt-f13-002-negative-tamper"
+  ],
+  "positive_control_refs": [
+   "attempt-f13-004-replay"
+  ],
+  "replay_refs": [
+   "attempt-f13-004-replay"
+  ]
+ }
+}

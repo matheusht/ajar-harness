@@ -4,30 +4,72 @@
   "description": "An EXTERNAL verdict on a filed finding. The only ground truth this harness has. Everything else in the repo is the harness grading itself. One record per (report, adjudicating party). Append-only.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "engagement", "finding_ref", "program", "recorded_at", "our_severity", "outcome", "source"],
+  "required": [
+    "schema_version",
+    "engagement",
+    "finding_ref",
+    "program",
+    "recorded_at",
+    "our_severity",
+    "outcome",
+    "source"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
-
-    "engagement": { "type": "string", "description": "engagement id, e.g. klever-2026-07" },
-    "finding_ref": { "type": "string", "description": "the finding id or package path this disposition adjudicates" },
-    "report_id": { "type": "string", "description": "the external report identifier: H1 report number, GHSA id, issue url. Empty when the program does not issue one." },
-    "program": { "type": "string", "description": "the adjudicating program, e.g. 'HackerOne/Netflix', 'GitHub Security Advisories/Klever', 'Google OSS VRP'" },
-
-    "recorded_at": { "type": "string", "description": "when this record was written (not when the vendor decided)" },
-    "decided_at": { "type": "string", "description": "when the external party decided, if known" },
-
+    "schema_version": {
+      "const": 1
+    },
+    "engagement": {
+      "type": "string",
+      "description": "engagement id, e.g. klever-2026-07"
+    },
+    "finding_ref": {
+      "type": "string",
+      "description": "the finding id or package path this disposition adjudicates"
+    },
+    "report_id": {
+      "type": "string",
+      "description": "the external report identifier: H1 report number, GHSA id, issue url. Empty when the program does not issue one."
+    },
+    "program": {
+      "type": "string",
+      "description": "the adjudicating program, e.g. 'HackerOne/Netflix', 'GitHub Security Advisories/Klever', 'Google OSS VRP'"
+    },
+    "recorded_at": {
+      "type": "string",
+      "description": "when this record was written (not when the vendor decided)"
+    },
+    "decided_at": {
+      "type": "string",
+      "description": "when the external party decided, if known"
+    },
     "our_severity": {
-      "description": "the band THIS HARNESS assigned before filing. Never back-edit it to match the vendor — that destroys the measurement.",
-      "enum": ["informational", "low", "medium", "high", "critical"]
+      "description": "the band THIS HARNESS assigned before filing. Never back-edit it to match the vendor \u2014 that destroys the measurement.",
+      "enum": [
+        "informational",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
     },
-    "our_vector": { "type": "string", "description": "CVSS vector we filed, if any" },
-
+    "our_vector": {
+      "type": "string",
+      "description": "CVSS vector we filed, if any"
+    },
     "their_severity": {
-      "description": "the band the external party assigned. `not-assigned` when they accepted or rejected without grading — common for Informative closures.",
-      "enum": ["informational", "low", "medium", "high", "critical", "not-assigned"]
+      "description": "the band the external party assigned. `not-assigned` when they accepted or rejected without grading \u2014 common for Informative closures.",
+      "enum": [
+        "informational",
+        "low",
+        "medium",
+        "high",
+        "critical",
+        "not-assigned"
+      ]
     },
-    "their_vector": { "type": "string" },
-
+    "their_vector": {
+      "type": "string"
+    },
     "outcome": {
       "description": "What the external party DID. Kept separate from severity because the two dissociate: Klever closed our report not-accepted while publishing their own advisory crediting us as reporter. A schema that forces those into one field forces a lie.",
       "enum": [
@@ -43,26 +85,60 @@
         "withdrawn_by_us"
       ]
     },
-
-    "bounty_usd": { "type": "number", "description": "amount paid, if any. 0 is meaningful; absent means unknown." },
-
+    "bounty_usd": {
+      "type": "number",
+      "description": "amount paid, if any. 0 is meaningful; absent means unknown."
+    },
     "source": {
       "type": "object",
       "description": "How we know. A disposition with no retrievable source is hearsay, and hearsay is what this ledger exists to replace.",
       "additionalProperties": false,
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": { "enum": ["repo_record", "operator_report", "external_url", "vendor_advisory"] },
-        "ref": { "type": "string", "description": "file:line for repo_record, a URL for external_url/vendor_advisory" },
-        "note": { "type": "string" }
+        "kind": {
+          "enum": [
+            "repo_record",
+            "operator_report",
+            "external_url",
+            "vendor_advisory"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "file:line for repo_record, a URL for external_url/vendor_advisory"
+        },
+        "note": {
+          "type": "string"
+        }
       }
     },
-
     "confidence": {
       "description": "How firmly this record is established. `operator_recall` is legitimate and common, and MUST be marked so that a calibration run can report how much of its basis is unverified.",
-      "enum": ["verified", "operator_recall", "provisional"]
+      "enum": [
+        "verified",
+        "operator_recall",
+        "provisional"
+      ]
     },
-
-    "notes": { "type": "string", "description": "Anything that would change how a later reader weighs this record. Disagreements, partial credit, a finder credited alongside us." }
+    "notes": {
+      "type": "string",
+      "description": "Anything that would change how a later reader weighs this record. Disagreements, partial credit, a finder credited alongside us."
+    },
+    "their_rating": {
+      "type": "string",
+      "description": "The external party's rating VERBATIM, in their own vocabulary. Google Bug Hunters uses priority/severity (`P2`, `S4`); HackerOne uses its own bands; Immunefi uses named impacts. `their_severity` maps those onto a common ladder so deltas are computable, and mapping loses information. This field keeps the original so a later reader can re-map it or challenge the mapping. Record it whenever the program does not speak in CVSS bands."
+    },
+    "novelty": {
+      "type": "string",
+      "enum": [
+        "novel",
+        "duplicate",
+        "already-known",
+        "unknown"
+      ],
+      "description": "Whether the finding was NEW to the program. A duplicate is external confirmation the bug is REAL \u2014 it is a novelty failure, not a validity failure, and Google states plainly that duplicates earn no reward or credit. Keeping this separate from `outcome` is what lets the ledger answer two different questions: duplicates validate our DETECTION, and only non-duplicates test our SEVERITY calibration. Folding them together would destroy both signals."
+    }
   }
 }

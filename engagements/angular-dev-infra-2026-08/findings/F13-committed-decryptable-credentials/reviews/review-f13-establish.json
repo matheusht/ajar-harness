@@ -1,0 +1,38 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-dev-infra-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F13-committed-decryptable-credentials",
+ "entity_ref": "F13-committed-decryptable-credentials",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-f13-001-primary",
+  "attempt-f13-002-negative-tamper",
+  "attempt-f13-003-negative-wrongtag",
+  "attempt-f13-004-replay"
+ ],
+ "input_hash": "eadf04d8c002a7ef8dbacecec80a4ee9e01603a1c6f850d098865d89cf2658bb",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "framing: intentional-low-priv design is a mitigant, not a refutation",
+  "wrapper signals intent-to-hide and defeats secret scanning"
+ ],
+ "required_next_actions": [
+  "operator rotates/reports; liveness and IAM assessment requires Google-side facts"
+ ],
+ "claim_tuple_hash": null,
+ "independence": {
+  "reviewer_id": "f13-killpair-establish",
+  "reviewer_run_id": "round3-f13-killpair-establish",
+  "reviewer_model": "deepseek-v4-pro",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Independently determine whether the committed blobs decrypt from public material and what severity/category is honest; refute if the claim does not hold",
+  "originating_run_id": null
+ },
+ "review_id": "review-f13-establish",
+ "recorded_at": "2026-08-13T06:21:00Z",
+ "verdict": "supported",
+ "rationale": "Framing-ambiguous kill-pair establish side: disclosure fact re-verified; design intent signals concealment; IAM floor for the SA is remote-execution capability at minimum; files under leaked-credentials category."
+}

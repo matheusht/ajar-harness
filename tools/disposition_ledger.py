@@ -114,6 +114,7 @@ def cmd_record(args):
         "confidence": args.confidence,
     }
     for key, val in (("report_id", args.report_id), ("their_severity", args.theirs),
+                     ("their_rating", args.their_rating), ("novelty", args.novelty),
                      ("our_vector", args.our_vector), ("their_vector", args.their_vector),
                      ("decided_at", args.decided_at), ("notes", args.notes)):
         if val:
@@ -166,6 +167,11 @@ def cmd_calibrate(args):
         "over_called": sum(1 for d in deltas if d > 0),
         "mean_delta": round(sum(deltas) / len(deltas), 3) if deltas else None,
         "accepted": sum(1 for r in recs if r.get("outcome") in ACCEPTING),
+        # A duplicate is the program telling us the bug is REAL and someone else filed it first.
+        # It validates DETECTION and says nothing about our severity call, so it is counted here
+        # and excluded from nothing — the delta stats already skip it whenever they did not grade.
+        "duplicates": sum(1 for r in recs if r.get("novelty") == "duplicate"),
+        "novel": sum(1 for r in recs if r.get("novelty") == "novel"),
         "verified_basis": sum(1 for r in recs if r.get("confidence") == "verified"),
         "operator_recall_basis": sum(1 for r in recs if r.get("confidence") == "operator_recall"),
     }
@@ -195,7 +201,7 @@ def cmd_calibrate(args):
         print("Calibration against external verdicts")
         print("-" * 60)
         for k in ("dispositions", "both_graded", "under_called", "agreed", "over_called",
-                  "mean_delta", "accepted"):
+                  "mean_delta", "accepted", "duplicates", "novel"):
             print(f"  {k:22} {stats[k]}")
         if stats["operator_recall_basis"]:
             print(f"  {'operator_recall_basis':22} {stats['operator_recall_basis']}  "
@@ -246,6 +252,10 @@ def main():
     r.add_argument("--report-id", dest="report_id")
     r.add_argument("--our-vector", dest="our_vector")
     r.add_argument("--their-vector", dest="their_vector")
+    r.add_argument("--their-rating", dest="their_rating",
+                   help="the program's own words, e.g. 'P2 / S4' — kept because mapping to a band loses information")
+    r.add_argument("--novelty", choices=["novel", "duplicate", "already-known", "unknown"],
+                   help="a duplicate confirms the bug is REAL; it fails novelty, not validity")
     r.add_argument("--decided-at", dest="decided_at")
     r.add_argument("--bounty", type=float)
     r.add_argument("--notes")

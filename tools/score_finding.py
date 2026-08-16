@@ -112,6 +112,29 @@ PATH_RE = re.compile(r"`([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|go|c|json|sol|tx
 URL_RE = re.compile(r"https?://[^\s`)>\]]+")
 
 
+def _packaged_anywhere(root, rel, _cache={}):
+    """True when the package ships this file somewhere, at any depth.
+
+    G0 used to resolve a citation only against the package ROOT. A report that cites `pr.yml` and
+    ships it as `target/pr.yml` — the standard layout for a copy of a target file — failed, because
+    the string did not resolve at the top level. That is a false alarm: the point of the gate is
+    that a reviewer opening the zip can find what the report cites, and they can.
+
+    Ruled 2026-08-16 after G0 flagged two shippable packages (obyte-2026-08-001, angular F13) on
+    exactly this. It deliberately does NOT invent a match: a cited `action.yml` still fails when the
+    package ships `action-browserstack.yml`, because there genuinely is no `action.yml` in the zip
+    and the prose should say which action it means."""
+    key = os.path.abspath(root)
+    if key not in _cache:
+        names = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fn in filenames:
+                names.add(fn)
+        _cache[key] = names
+    return os.path.basename(rel) in _cache[key]
+
+
 def check_existence(root, docs, res):
     """Every package-relative path a document cites must exist in the package."""
     for name, text in docs.items():
@@ -121,7 +144,8 @@ def check_existence(root, docs, res):
                 continue
             hit = (os.path.isfile(os.path.join(root, rel))
                    or any(os.path.basename(k) == os.path.basename(rel) for k in docs)
-                   or os.path.isfile(os.path.join(root, os.path.dirname(name), rel)))
+                   or os.path.isfile(os.path.join(root, os.path.dirname(name), rel))
+                   or _packaged_anywhere(root, rel))
             # A path that clearly points at the TARGET's source tree is not a package artifact.
             if not hit and not re.match(r"^(src|lib|core|kvm|engine|skills|tools|cmd|pkg|x)/", rel):
                 res.add(False, "existence", "computable",

@@ -255,6 +255,57 @@ def cmd_corpus(args):
     return 0
 
 
+def cmd_live(args):
+    """Capture one intervention AS IT HAPPENS during a standby run.
+
+    Live capture is the point. The 62 backfilled entries were reconstructed from prose written
+    afterwards, which loses the ones nobody thought worth writing down, and it cannot be produced
+    during a run. `provenance` stays separate so the two never merge into one figure.
+
+    The id uses today's date and the next free sequence number, so an operator mid-run does not have
+    to invent one."""
+    import datetime
+    today = datetime.date.today().strftime("%Y%m%d")
+    path = args.outfile or os.path.join(
+        ROOT, "fixtures", "interventions", f"live-{args.engagement}.json")
+
+    existing = []
+    if os.path.isfile(path):
+        existing = json.load(open(path)).get("entries", [])
+    seq = 1 + max([int(e["intervention_id"][-3:]) for e in existing
+                   if e.get("intervention_id", "").startswith(f"INT-{today}")] or [0])
+
+    src, _, line = args.source.partition(":")
+    ref = {"path": src, "quote": args.quote}
+    if line.isdigit():
+        ref["line"] = int(line)
+
+    entry = {
+        "schema_version": 1,
+        "intervention_id": f"INT-{today}-{seq:03d}",
+        "engagement_id": args.engagement,
+        "provenance": "live",
+        "stage": args.stage,
+        "judgement_class": args.jclass,
+        "detected_by": args.detected_by,
+        "latency": args.latency,
+        "claim_before": args.before,
+        "claim_after": args.after,
+        "root_cause": args.root_cause,
+        "source_refs": [ref],
+    }
+    if args.machine_checkable:
+        entry["machine_checkable"] = True
+        if not args.check_shape:
+            print("refusing: --machine-checkable requires --check-shape")
+            print("an unnamed check cannot become a regression case")
+            return 1
+        entry["check_shape"] = args.check_shape
+
+    ns = argparse.Namespace(file=path, json=json.dumps(entry))
+    return cmd_add(ns)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -267,6 +318,24 @@ def main():
     p.add_argument("--file", required=True)
     p.add_argument("--json", required=True)
     p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("live", help="capture one live intervention during a run")
+    p.add_argument("--engagement", required=True)
+    p.add_argument("--stage", required=True)
+    p.add_argument("--class", dest="jclass", required=True)
+    p.add_argument("--before", required=True)
+    p.add_argument("--after", required=True)
+    p.add_argument("--root-cause", required=True)
+    p.add_argument("--source", required=True,
+                   help="path[:line] where the wrong claim appeared")
+    p.add_argument("--quote", required=True,
+                   help="the wrong claim, verbatim. A record with no quote cannot be audited.")
+    p.add_argument("--detected-by", default="operator")
+    p.add_argument("--latency", default="same-round")
+    p.add_argument("--machine-checkable", action="store_true")
+    p.add_argument("--check-shape", default=None)
+    p.add_argument("--file", dest="outfile", default=None)
+    p.set_defaults(func=cmd_live)
 
     p = sub.add_parser("report", help="counts by stage, class, latency, root cause")
     p.add_argument("paths", nargs="*")

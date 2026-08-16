@@ -1,0 +1,37 @@
+{
+ "schema_version": 1,
+ "review_id": "review:obyte-2026-08-003-irf3",
+ "engagement_id": "obyte-ocore-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "obyte-2026-08-003",
+ "recorded_at": "2026-08-11T06:20:00Z",
+ "entity_ref": "evidence://obyte/round2/IR-F3.md",
+ "finding_revision": 1,
+ "input_refs": [
+  "evidence://obyte/lab/r1/p1-refute.js",
+  "evidence://obyte/round1/r1.md"
+ ],
+ "input_hash": "sha256:7cfe29a14a757981200181fbc262c561e1b3b8dbdff0d16ba9ff0d0137bc5c0f",
+ "evidence_refs": [
+  "evidence://obyte/round2/IR-F3.md",
+  "evidence://obyte/round2/KP-F3-establish.md"
+ ],
+ "rationale": "Independent fresh-context run: victim's spend saved with its (P, victim) row; attacker's re-spend with the same P under the attacker's address accepted and saved as 'good' (direct DB read of spend_proofs and units tables); contrast variants cleanly rejected; no crash. The kill-pair establish side demonstrated the input-level check cannot run network-wide for private payloads and the fork machinery never resolves the same-branch case.",
+ "conflicting_evidence": "The kill side's impact ceiling (no direct theft via payload binding; no voiding of the victim's unit) is incorporated into the claims as bounds; the merchant-exposure escalation remains conditional.",
+ "verdict": "confirmed",
+ "corrections": [
+  "The f8 'merchant defrauded when C goes final-bad' expected outcome does not reproduce in the same-branch construction (the victim's unit stays 'good'); the fork-variant exposure is conditional on the race win."
+ ],
+ "required_next_actions": [
+  "Operator decides submission framing (payment-race vs ledger-integrity); the fix direction is binding the uniqueness key to the output owner."
+ ],
+ "independence": {
+  "reviewer_id": "IR-F3",
+  "reviewer_run_id": "round2:IR-F3",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": true,
+  "originating_run_id": "round2-workflow-56687c73"
+ }
+}

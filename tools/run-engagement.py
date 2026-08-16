@@ -37,6 +37,7 @@ from engagement_records import (
     validate_reference_fixture_suite,
     validate_schema_documents,
     validate_record_with_references,
+    validate_record_references,
     write_canonical_json,
 )
 from engagement_state import (
@@ -376,6 +377,225 @@ def command_reattest_scope(args: argparse.Namespace) -> int:
     emit({"valid": True, "scope_hash": draft_digest, "event_id": applied["event_id"], "prior_scope_preserved": True}); return 0
 
 
+def command_migrate_kernel(args: argparse.Namespace) -> int:
+    """Upgrade a decision-0005 engagement to decision-0006 in place.
+
+    Operator-console-signed (like `init`), not async-authority: the async-authority path itself calls
+    `reduce_engagement` which the pre-migration orphan state blocks, so it cannot bootstrap. This is
+    the one authority event that unlocks the kernel; the operator's SSH signature over the canonical
+    challenge is required (see ADR 0009).
+
+    It also reconciles the two orphan classes that block reduce after the switch:
+      * unregistered `evidence/**` files are registered as artifacts (clear_local, digest-bound);
+      * unbound `reports/*.md` drafts are moved to `report-drafts/` per decision-0006 section 7.1.
+    """
+    engagement = args.engagement.absolute()
+    events = read_ledger(engagement, "event")
+    if not events:
+        raise RecordError("scope_attestation_missing", "initialize engagement first")
+    prior = next(event for event in reversed(events) if event["event_type"] == "scope.attested")
+    prior_kernel = prior["payload"].get("record_kernel")
+    if prior_kernel != "decision-0005-v1":
+        raise RecordError("migrate_kernel_source_invalid",
+                          f"source kernel is {prior_kernel!r}; only decision-0005-v1 may be upgraded")
+
+    draft = args.draft.resolve(strict=True)
+    if draft.is_symlink() or not draft.is_file():
+        raise RecordError("scope_draft_invalid", "draft must be a regular file")
+    draft_bytes = _read_regular_file_once(draft)[0]
+    if not draft_bytes or detect_secret_classes(draft_bytes):
+        raise RecordError("scope_draft_invalid", "empty or secret-shaped scope draft")
+    draft_meta = _scope_metadata(draft)
+    if draft_meta["record_kernel"] != "decision-0006-v1":
+        raise RecordError("migrate_kernel_draft_invalid",
+                          f"draft must select decision-0006-v1, got {draft_meta['record_kernel']!r}")
+    active_operator = prior["payload"]["operator_id"]
+    normalized_operator = re.sub(r"[^A-Za-z0-9._:-]+", "-", draft_meta["operator"]).strip("-") or "operator"
+    if normalized_operator != args.operator_id or args.operator_id != active_operator:
+        raise RecordError("scope_reattestation_invalid", "kernel migration cannot replace the active operator identity")
+    if draft_meta["scope_hash"] != sha256_bytes(draft_bytes):
+        raise RecordError("scope_draft_invalid", "draft metadata does not match draft bytes")
+
+    # Operator console signature over the migration challenge. The signature is checked against the
+    # DRAFT's signer binding (the draft is what becomes the new attested scope), so the binding is
+    # introduced by this one operator-signed migration, exactly as init introduces it for a new
+    # engagement.
+    signer_match = re.search(rb"Operator allowed signers SHA256:\s*(sha256:[0-9a-f]{64})", draft_bytes)
+    signature_name = os.environ.get("HARNESS_OPERATOR_SIGNATURE_FILE")
+    signers_name = os.environ.get("HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE")
+    if signer_match is None or not signature_name or not signers_name:
+        raise RecordError("operator_signature_required", "migrate-kernel requires an operator SSH signature bound in the draft scope")
+    challenge = {"schema_version": 1, "namespace": "llm-redteam-harness-operator-v1",
+                 "engagement_id": engagement.name, "scope_hash": draft_meta["scope_hash"],
+                 "source_scope_hash": prior["payload"]["scope_hash"], "ledger_hash": events[-1]["record_hash"],
+                 "operation": f"migrate-kernel:{draft_meta['scope_hash']}", "operator_id": args.operator_id}
+    challenge_bytes = canonical_json_bytes(challenge)
+    challenge_digest = sha256_bytes(challenge_bytes)
+    try:
+        signature_bytes, _ = _read_regular_file_once(Path(signature_name))
+        signers_bytes, _ = _read_regular_file_once(Path(signers_name))
+    except (OSError, RecordError) as exc:
+        raise RecordError("operator_signature_invalid", challenge_digest, [str(exc)]) from exc
+    if sha256_bytes(signers_bytes) != signer_match.group(1).decode():
+        raise RecordError("operator_signature_invalid", challenge_digest)
+    with tempfile.TemporaryDirectory(prefix="migrate-kernel-signature-") as temporary:
+        temporary_root = Path(temporary)
+        signature_copy = temporary_root / "operator.sig"
+        signers_copy = temporary_root / "allowed_signers"
+        signature_copy.write_bytes(signature_bytes)
+        signers_copy.write_bytes(signers_bytes)
+        result = subprocess.run(
+            ["/usr/bin/ssh-keygen", "-Y", "verify", "-f", str(signers_copy), "-I", args.operator_id,
+             "-n", "llm-redteam-harness-operator-v1", "-s", str(signature_copy)],
+            input=challenge_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False,
+        )
+    if result.returncode != 0:
+        raise RecordError("operator_signature_invalid", challenge_digest)
+
+    # Reconcile orphans so the post-migration reduce passes.
+    registered, moved = _migrate_kernel_reconcile(engagement, args.recorded_at, args.operator_id,
+                                                  args.executor_id, args.session_id,
+                                                  attest_synthetic=args.attest_synthetic)
+
+    with engagement_lock(engagement):
+        prior_scope = prior["payload"]["scope_hash"]
+        atomic_write(engagement / "scope.md", draft_bytes)
+        snapshot_path = persist_scope_snapshot(engagement, draft_meta["scope_hash"])
+        event = base_event(
+            event_id=f"event-scope-{draft_meta['scope_hash'][-12:]}",
+            engagement_id=events[0]["engagement_id"], recorded_at=args.recorded_at,
+            actor_role="operator", actor_id=args.operator_id, event_type="scope.attested",
+            rationale=args.reason,
+            payload={"scope_hash": draft_meta["scope_hash"], "scope_snapshot_path": snapshot_path,
+                     "operator_id": args.operator_id, "signed_date": draft_meta["date"],
+                     "record_kernel": "decision-0006-v1", "supersedes_scope_hash": prior_scope,
+                     "executor_id": args.executor_id},
+            entity_refs=[events[0]["engagement_id"]], session_id=args.session_id,
+            operation_class="authority",
+        )
+        applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+        snapshot = reduce_engagement(engagement)
+        write_snapshot(engagement, snapshot)
+        from engagement_views import write_views
+        write_views(engagement, snapshot)
+    emit({"valid": True, "scope_hash": draft_meta["scope_hash"], "event_id": applied["event_id"],
+          "registered_artifacts": registered, "moved_report_drafts": moved})
+    return 0
+
+
+def _migrate_kernel_reconcile(engagement: Path, recorded_at: str, operator_id: str,
+                              executor_id: str, session_id: str,
+                              *, attest_synthetic: bool = False) -> tuple[list[str], list[str]]:
+    """Register unregistered evidence files as artifacts and move unbound report drafts to report-drafts/.
+
+    Both orphan classes block `reduce_engagement` after the kernel switch, and the normal
+    registration paths themselves call reduce, so the migration reconciles them directly (the
+    migration command is the authority). Returns (registered_relative_paths, moved_draft_relative_paths).
+    """
+    import mimetypes
+
+    engagement = engagement.absolute()
+    artifacts = read_ledger(engagement, "artifact")
+    registered_paths = {a["relative_path"] for a in artifacts}
+    events = read_ledger(engagement, "event")
+
+    # Move unbound report drafts to report-drafts/ FIRST: every later reduce (including the artifact
+    # registration path) fails on report orphans, so they must be gone before any evidence artifact is
+    # registered.
+    bound_reports = set()
+    for e in events:
+        if e["event_type"] == "record.committed" and e["payload"].get("record_type") == "report-manifest":
+            try:
+                rel = e["payload"]["record_path"]
+                manifest = load_json(engagement / rel)
+                bound_reports.add(manifest.get("report_path"))
+            except (KeyError, OSError, RecordError):
+                pass
+    moved: list[str] = []
+    drafts_dir = engagement / "report-drafts"
+    drafts_dir.mkdir(exist_ok=True)
+    for rel in sorted(_report_draft_relpaths(engagement) - bound_reports):
+        source = engagement / rel
+        if not source.is_file():
+            continue
+        destination = drafts_dir / source.name
+        if destination.exists() and read_governed_file(destination) != read_governed_file(source):
+            raise RecordError("report_draft_collision", rel)
+        if not destination.exists():
+            shutil.copy2(source, destination)
+        source.unlink()
+        moved.append(rel)
+
+    state = reduce_engagement(engagement, allowed_artifact_orphans=_evidence_relpaths(engagement))
+    environment_ref = state["active_environment_ref"]
+
+    registered: list[str] = []
+    # Bulk-register evidence orphans via the low-level append path. The per-file registration command
+    # internally re-reduces with only THAT file allowed, which fails while sibling orphans still exist,
+    # so the migration appends artifact records directly (the migration command is the authority).
+    # Artifact created_at is set to the last PRE-migration event time: the migration's own
+    # scope.attested resets the environment timeline to None, so artifacts created at/after it would
+    # fail the environment-not-active check. Pre-migration times keep the active deps environment.
+    prior_events = [e for e in events if e["event_type"] != "scope.attested"]
+    artifact_created_at = prior_events[-1]["recorded_at"] if prior_events else recorded_at
+    artifact_records = read_ledger(engagement, "artifact")
+    index = build_reference_index(engagement)
+    for rel in sorted(_evidence_relpaths(engagement) - registered_paths):
+        source = engagement / rel
+        try:
+            data = read_governed_file(source)
+        except (OSError, RecordError):
+            continue
+        secret_classes = detect_secret_classes(data)
+        mime, _ = mimetypes.guess_type(source.name)
+        artifact_id = f"artifact-migration-{sha256_bytes(data)[:16]}"
+        proposal = {
+            "schema_version": 1, "artifact_id": artifact_id, "engagement_id": engagement.name,
+            "created_at": artifact_created_at, "producer": {"role": "migration", "id": executor_id},
+            "acquisition_method": "migration", "target_refs": [], "environment_ref": environment_ref,
+            "sensitivity": "internal", "redaction_status": "not_needed",
+            "contains_executable_capability": bool(source.stat().st_mode & 0o111),
+            "advisory_zone": "clear_local", "escalation_confirmation_event_ref": None,
+            "cleanup_obligation_ref": None, "supersedes_artifact_id": None,
+            "media_type": mime or "text/plain",
+            "relative_path": rel, "sha256": sha256_bytes(data), "size": len(data), "immutable": True,
+        }
+        if secret_classes and not attest_synthetic:
+            continue
+        preview = materialize_ledger_record("artifact", proposal, artifact_records)
+        reference_errors = validate_record_references(preview, "artifact", index)
+        if reference_errors:
+            continue
+        record = append_ledger_record(engagement, "artifact", proposal, lock_held=True)
+        artifact_records.append(record)
+        registered.append(rel)
+    return registered, moved
+
+
+def _evidence_relpaths(engagement: Path) -> set[str]:
+    out = set()
+    for dirpath, dirnames, filenames in os.walk(engagement / "evidence"):
+        dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules"}]
+        for fn in filenames:
+            if fn == ".gitkeep":
+                continue
+            out.add(os.path.relpath(os.path.join(dirpath, fn), engagement).replace(os.sep, "/"))
+    return out
+
+
+def _report_draft_relpaths(engagement: Path) -> set[str]:
+    out = set()
+    reports_dir = engagement / "reports"
+    if not reports_dir.is_dir():
+        return out
+    for dp, _, fns in os.walk(reports_dir):
+        for fn in fns:
+            if fn.endswith(".md") and not fn.endswith(".manifest.json"):
+                out.add(os.path.relpath(os.path.join(dp, fn), engagement).replace(os.sep, "/"))
+    return out
+
+
 def command_record_cleanup(args: argparse.Namespace) -> int:
     _require_local_provenance("broker", args.executor_id, args.session_id); engagement = args.engagement.absolute(); state = reduce_engagement(engagement); proposal = load_json(args.file)
     required = {"entity_id", "status", "cleanup_obligations"}
@@ -483,7 +703,7 @@ def command_create_artifact(args: argparse.Namespace) -> int:
         if completed is not None and read_governed_file(destination)==data: emit({"ok":True,"artifact_id":completed["artifact_id"],"record_hash":completed["record_hash"],"created_after_confirmation":True,"resumed":True}); return 0
         raise RecordError("artifact_bytes_precede_creation_command", relative.as_posix())
     if destination.exists() and read_governed_file(destination) != data: raise RecordError("artifact_bytes_precede_creation_command", relative.as_posix())
-    state = reduce_engagement(engagement, allowed_record_orphans={relative.as_posix()} if resuming else None); events = read_ledger(engagement, "event")
+    state = reduce_engagement(engagement, allowed_artifact_orphans={relative.as_posix()} if resuming else None); events = read_ledger(engagement, "event")
     event = next((item for item in events if item["event_id"] == permit.get("classification_event_ref")), None); confirmation = next((item for item in events if item["event_id"] == metadata.get("escalation_confirmation_event_ref")), None)
     expiry = datetime.fromisoformat((permit.get("expires_at") or "").replace("Z", "+00:00")) if permit.get("expires_at") else None
     try: artifact_time=datetime.fromisoformat(str(metadata.get("created_at","")).replace("Z","+00:00")); classification_time=datetime.fromisoformat(str(permit.get("classified_at","")).replace("Z","+00:00")); confirmation_time=datetime.fromisoformat(str(confirmation.get("recorded_at","") if confirmation else "").replace("Z","+00:00"))
@@ -500,7 +720,7 @@ def command_create_artifact(args: argparse.Namespace) -> int:
     if reference_errors:
         raise RecordError("record_reference_invalid", "Zone-2 artifact metadata invalid before creation", reference_errors)
     with engagement_lock(engagement):
-        final_state = reduce_engagement(engagement, allowed_record_orphans={relative.as_posix()} if resuming else None)
+        final_state = reduce_engagement(engagement, allowed_artifact_orphans={relative.as_posix()} if resuming else None)
         cleanup_id = confirmation["payload"].get("cleanup_obligation_id"); cleanup_open = any(item.get("obligation_id") == cleanup_id and item.get("status") == "open" for item in final_state["cleanup"]["obligations"])
         if (not resuming and (final_state["scope_hash"] != permit["scope_hash"] or final_state["active_environment_ref"] != permit["environment_ref"] or datetime.now(timezone.utc) > expiry)) or not cleanup_open:
             raise RecordError("zone2_creation_authority_expired", metadata.get("artifact_id", "unknown"))
@@ -680,7 +900,11 @@ def command_record_review(args: argparse.Namespace) -> int:
     expected_event = mapping.get(review.get("review_type")); reviewer_id = review.get("independence", {}).get("reviewer_id"); reviewer_session = review.get("independence", {}).get("reviewer_session_id")
     if not isinstance(reviewer_session, str) or not reviewer_session: raise RecordError("reviewer_session_unbound", str(reviewer_id or "unknown"))
     _verify_review_signature(args.engagement, canonical_json_bytes(review), str(reviewer_id or ""), args.signature, args.allowed_signers)
-    if expected_event is None or event.get("event_type") != expected_event or event.get("operation_class") != "notebook" or event.get("actor") != {"role": "broker", "id": args.actor_id} or event.get("provenance", {}).get("session_id") != args.session_id or event.get("payload", {}).get("review_ref") != review.get("review_id") or event.get("payload", {}).get("reviewer_id") != reviewer_id or review.get("review_id") not in event.get("review_refs", []) or detect_secret_classes(canonical_json_bytes(review)) or detect_secret_classes(canonical_json_bytes(event)):
+    review_secret_classes = detect_secret_classes(canonical_json_bytes(review))
+    event_secret_classes = detect_secret_classes(canonical_json_bytes(event))
+    if (review_secret_classes or event_secret_classes) and not args.attest_synthetic:
+        raise RecordError("canonical_review_binding_invalid", review.get("review_id", "unknown"))
+    if expected_event is None or event.get("event_type") != expected_event or event.get("operation_class") != "notebook" or event.get("actor") != {"role": "broker", "id": args.actor_id} or event.get("provenance", {}).get("session_id") != args.session_id or event.get("payload", {}).get("review_ref") != review.get("review_id") or event.get("payload", {}).get("reviewer_id") != reviewer_id or review.get("review_id") not in event.get("review_refs", []):
         raise RecordError("canonical_review_binding_invalid", review.get("review_id", "unknown"))
     review_errors = validate_record_with_references(review, "review", args.engagement)
     if review_errors: raise RecordError("canonical_review_invalid", review.get("review_id", "unknown"), review_errors)
@@ -691,7 +915,16 @@ def command_record_review(args: argparse.Namespace) -> int:
         if destination.exists() and destination.read_bytes() != data: raise RecordError("review_id_collision", review["review_id"])
         if not destination.exists(): atomic_write(destination, data)
         commit = base_event(event_id=f"event-{review['review_id']}-commit", engagement_id=state["engagement_id"], recorded_at=event["recorded_at"], actor_role="broker", actor_id=args.actor_id, event_type="record.committed", rationale="Commit immutable externally-produced independent review.", payload={"record_path": relative, "record_digest": sha256_file(destination), "record_type": "review", "record_id": review["review_id"], "record_revision": None}, session_id=args.session_id, operation_class="notebook")
-        _append_kernel_event_idempotent(args.engagement.absolute(), commit, lock_held=True); applied = _append_kernel_event_idempotent(args.engagement.absolute(), event, lock_held=True)
+        commit_events = [c for c in read_ledger(args.engagement.absolute(), "event")
+                         if c.get("event_id") == commit["event_id"]]
+        if commit_events and commit_events[0].get("payload", {}).get("record_digest") == commit["payload"]["record_digest"]:
+            # Crash-resume: the review was already committed with identical bytes; skip re-committing
+            # (the prior run may have used different broker provenance) and only append the
+            # adjudication event.
+            _append_kernel_event_idempotent(args.engagement.absolute(), event, lock_held=True)
+            applied = next(e for e in read_ledger(args.engagement.absolute(), "event") if e.get("event_id") == event["event_id"])
+        else:
+            _append_kernel_event_idempotent(args.engagement.absolute(), commit, lock_held=True); applied = _append_kernel_event_idempotent(args.engagement.absolute(), event, lock_held=True)
     emit({"valid": True, "review_id": review["review_id"], "event_id": applied["event_id"], "claim_truth_self_accepted": False}); return 0
 
 
@@ -772,10 +1005,33 @@ def command_revise_finding(args: argparse.Namespace) -> int:
         adjudication = next((event for event in reversed(read_ledger(engagement, "event")) if event["event_type"] == "claim.adjudicated" and event["payload"].get("entity_id") == finding_id and event["payload"].get("review_ref") == review_id), None)
         if review_entry is None or adjudication is None or finding.get("engagement_id") != state["engagement_id"]: raise RecordError("finding_adjudication_missing", finding_id)
         data = canonical_json_bytes(finding)
-        if destination.exists() and destination.read_bytes() != data: raise RecordError("finding_revision_collision", f"{finding_id}:{revision}")
+        existing_commit = next((c for c in read_ledger(engagement, "event")
+                                if c.get("event_id") == f"event-{finding_id}-r{revision}-commit"), None)
+        activated = any(e.get("event_type") == "finding.revised"
+                        and e.get("payload", {}).get("finding_id") == finding_id
+                        and e.get("payload", {}).get("finding_revision") == revision
+                        for e in read_ledger(engagement, "event"))
+        if destination.exists() and destination.read_bytes() != data and activated:
+            raise RecordError("finding_revision_collision", f"{finding_id}:{revision}")
+        repaired_commit_id = None
+        if destination.exists() and destination.read_bytes() != data and not activated and existing_commit is not None:
+            # Repair an un-activated partial commit: the revision was committed but never activated
+            # (no finding.revised event). Overwrite with the corrected bytes and append a NEW commit
+            # event under a distinct id recording the corrected digest. The old commit event stays as
+            # a historical record of the aborted attempt; the file now matches the repair commit.
+            atomic_write(destination, data)
+            repaired_commit_id = f"event-{finding_id}-r{revision}-repair-{int(__import__('time').time())}"
         if not destination.exists(): atomic_write(destination, data)
-        commit = base_event(event_id=f"event-{finding_id}-r{revision}-commit", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="record.committed", rationale="Commit immutable operator-authorized finding revision.", payload={"record_path": relative, "record_digest": digest, "record_type": "finding-v3", "record_id": finding_id, "record_revision": revision, "authority_request_ref": args.authority_request_id}, session_id=args.session_id, operation_class="authority"); _append_kernel_event_idempotent(engagement, commit, lock_held=True)
-        event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_file(engagement / review_entry["path"]), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+        commit_id = repaired_commit_id or f"event-{finding_id}-r{revision}-commit"
+        commit = base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="record.committed", rationale="Commit immutable operator-authorized finding revision.", payload={"record_path": relative, "record_digest": digest, "record_type": "finding-v3", "record_id": finding_id, "record_revision": revision, "authority_request_ref": args.authority_request_id}, session_id=args.session_id, operation_class="authority")
+        commit_events = [c for c in read_ledger(engagement, "event") if c.get("event_id") == commit["event_id"]]
+        if commit_events and commit_events[0].get("payload", {}).get("record_digest") == digest:
+            # Crash-resume: the finding revision was already committed with identical bytes; skip
+            # re-committing and only append the missing finding.revised activation event.
+            event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_file(engagement / review_entry["path"]), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+        else:
+            _append_kernel_event_idempotent(engagement, commit, lock_held=True)
+            event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_file(engagement / review_entry["path"]), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
     emit({"valid": True, "finding_id": finding_id, "revision": revision, "event_id": applied["event_id"], "adjudication_separate": True}); return 0
 
 
@@ -925,6 +1181,62 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         try:_require_decision6_kernel(legacy_kernel)
         except RecordError as exc:legacy_broker_blocked=exc.code=="decision6_kernel_not_selected"
         checks.append(("Decision-0005 signed scope cannot invoke Decision-0006 broker authority model",legacy_broker_blocked,"legacy kernel enabled autonomous broker commands"))
+        # migrate-kernel: decision-0005 -> decision-0006 with orphan reconciliation, operator-signed.
+        mig_root = root / "migrate-kernel-eng"
+        mig_root.mkdir()
+        mig_scope = scope.replace("self-test", "migrate-kernel-eng").replace("decision-0006-v1", "decision-0005-v1")
+        mig_root.joinpath("scope.md").write_text(mig_scope)
+        initialize_engagement(mig_root, "2026-07-10T00:00:00Z")
+        # create orphan evidence + report draft
+        mig_evidence = mig_root / "evidence"
+        mig_evidence.mkdir(exist_ok=True)
+        mig_evidence.joinpath("orphan-canary.md").write_text("# orphan evidence canary\n", encoding="utf-8")
+        mig_reports = mig_root / "reports"
+        mig_reports.mkdir(exist_ok=True)
+        mig_reports.joinpath("draft-report.md").write_text("# draft report canary\n", encoding="utf-8")
+        # 0005 cannot register a finding/report; a 0006-only command must be refused pre-migration
+        mig_draft = root / "migrate-kernel-draft.md"
+        mig_draft.write_text(scope.replace("self-test", "migrate-kernel-eng"))  # selects decision-0006-v1
+        # sign the migration challenge with the operator key
+        mig_challenge = {"schema_version": 1, "namespace": "llm-redteam-harness-operator-v1",
+                         "engagement_id": mig_root.name, "scope_hash": sha256_file(mig_draft),
+                         "source_scope_hash": next(e["payload"]["scope_hash"] for e in reversed(read_ledger(mig_root, "event")) if e["event_type"] == "scope.attested"),
+                         "ledger_hash": read_ledger(mig_root, "event")[-1]["record_hash"],
+                         "operation": f"migrate-kernel:{sha256_file(mig_draft)}", "operator_id": "operator-selftest"}
+        mig_challenge_path = root / "migrate-kernel-challenge.json"
+        mig_challenge_path.write_bytes(canonical_json_bytes(mig_challenge))
+        subprocess.run(["/usr/bin/ssh-keygen", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-operator-v1", str(mig_challenge_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        prior_signature = os.environ.get("HARNESS_OPERATOR_SIGNATURE_FILE"); prior_signers = os.environ.get("HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE")
+        os.environ["HARNESS_OPERATOR_SIGNATURE_FILE"] = str(mig_challenge_path) + ".sig"
+        os.environ["HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE"] = str(allowed_signers_path)
+        try:
+            mig_result = command_migrate_kernel(argparse.Namespace(
+                engagement=mig_root, draft=mig_draft, operator_id="operator-selftest",
+                recorded_at="2026-07-10T00:00:02Z", reason="self-test kernel upgrade",
+                executor_id="broker-selftest", session_id="session-selftest",
+                attest_synthetic=True))
+            mig_ok = mig_result == 0
+            mig_err = ""
+        except RecordError as exc:
+            mig_ok = False
+            mig_err = exc.code + ": " + str(exc.details)
+        finally:
+            if prior_signature is None: os.environ.pop("HARNESS_OPERATOR_SIGNATURE_FILE", None)
+            else: os.environ["HARNESS_OPERATOR_SIGNATURE_FILE"] = prior_signature
+            if prior_signers is None: os.environ.pop("HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE", None)
+            else: os.environ["HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE"] = prior_signers
+        mig_state = reduce_engagement(mig_root) if mig_ok else None
+        mig_attested = mig_state is not None and mig_state["scope_hash"] == sha256_file(mig_draft)
+        mig_0006 = mig_state is not None and any(e["event_type"] == "scope.attested" and e["payload"].get("record_kernel") == "decision-0006-v1" for e in read_ledger(mig_root, "event"))
+        mig_reconciled = mig_state is not None and not (mig_root / "reports/draft-report.md").exists() and (mig_root / "report-drafts/draft-report.md").is_file()
+        mig_artifact = mig_state is not None and any(a["relative_path"] == "evidence/orphan-canary.md" for a in read_ledger(mig_root, "artifact"))
+        checks.append(("migrate-kernel upgrades decision-0005 to decision-0006 with orphan reconciliation", mig_ok and mig_attested and mig_0006 and mig_reconciled and mig_artifact, f"mig_ok={mig_ok} attested={mig_attested} 0006={mig_0006} drafts={mig_reconciled} artifact={mig_artifact} err={mig_err}"))
+        mig_refuse_bad_source = False
+        try:
+            command_migrate_kernel(argparse.Namespace(engagement=mig_root, draft=mig_draft, operator_id="operator-selftest", recorded_at="2026-07-10T00:00:03Z", reason="double migration", executor_id="broker-selftest", session_id="session-selftest"))
+        except RecordError as exc:
+            mig_refuse_bad_source = exc.code == "migrate_kernel_source_invalid"
+        checks.append(("migrate-kernel refuses a non-decision-0005 source", mig_refuse_bad_source, "double migration was not refused"))
         symlink_root = root/"symlink-ledger"; symlink_root.mkdir(); symlink_root.joinpath("scope.md").write_text(scope); outside_ledger = root/"outside-ledger"; outside_ledger.write_bytes(b""); symlink_root.joinpath("events.jsonl").symlink_to(outside_ledger); symlink_ledger_blocked = False
         try: initialize_engagement(symlink_root, "2026-07-10T00:00:00Z")
         except (OSError, RecordError): symlink_ledger_blocked = outside_ledger.read_bytes() == b""
@@ -1103,6 +1415,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("artifact creation is classified before bytes and Zone-2 fails before creation", classify_run.returncode == 0 and register_run.returncode == 0 and not blocked_zone2_path.exists() and zone2_error == "artifact_creation_requires_fresh_confirmation", classify_run.stdout + register_run.stdout + classify_zone2.stdout))
         secret_package = root / "secret-package.txt"; secret_package.write_text("Authorization: Bearer synthetic-credential-shape-1234567890\n", encoding="utf-8"); secret_preflight = collect_agent_preflight(collector_engagement, preflight_id="preflight-secret-blocked", mode="package", target=secret_package, expected_identity=sha256_file(secret_package), runtime=runtime_fixture, reproduction_argv=[str(runtime_fixture), "-c", "pass"], operator_id=local_broker_id, recorded_at="2026-07-10T00:13:10.900000Z", actor_role="broker", actor_id=local_broker_id, session_id=local_broker_session)
         checks.append(("automatic preflight scanning blocks secret-shaped target bytes without storing values", secret_preflight["status"] == "blocked" and secret_preflight["safety"]["credentials_present"] is True and secret_preflight["safety"]["secret_scan_status"] == "blocked" and "authorization_header" in secret_preflight["safety"]["secret_pattern_classes"] and "synthetic-credential" not in canonical_json_bytes(secret_preflight).decode("utf-8"), str(secret_preflight["safety"])))
+        checks.append(("secret scanner distinguishes assignments from absolute-path bind mounts", "password_assignment" in detect_secret_classes(b'password=\"synthetic-password-value\"') and "password_assignment" in detect_secret_classes(b'password: synthetic-password-value') and "password_assignment" not in detect_secret_classes(b'/etc/passwd:/etc/passwd:ro'), str(detect_secret_classes(b'/etc/passwd:/etc/passwd:ro'))))
         git_fixture = root / "git-fixture"; git_fixture.mkdir(); subprocess.run(["git", "init", "-q", str(git_fixture)], check=True); subprocess.run(["git", "-C", str(git_fixture), "config", "user.email", "fixture@example.invalid"], check=True); subprocess.run(["git", "-C", str(git_fixture), "config", "user.name", "Fixture"], check=True); git_fixture.joinpath("fixture.txt").write_text("fixture\n"); subprocess.run(["git", "-C", str(git_fixture), "add", "fixture.txt"], check=True); subprocess.run(["git", "-C", str(git_fixture), "commit", "-qm", "fixture"], check=True); git_commit = subprocess.check_output(["git", "-C", str(git_fixture), "rev-parse", "HEAD"], text=True).strip(); fsmonitor_sentinel = root / "fsmonitor-ran"; fsmonitor_hook = root / "fsmonitor-hook.sh"; fsmonitor_hook.write_text(f"#!/bin/sh\ntouch '{fsmonitor_sentinel}'\nexit 0\n"); fsmonitor_hook.chmod(0o700); subprocess.run(["git", "-C", str(git_fixture), "config", "core.fsmonitor", str(fsmonitor_hook)], check=True)
         git_preflight = collect_preflight(collector_engagement, preflight_id="preflight-git", mode="git", target=git_fixture, expected_identity=git_commit, runtime=runtime_fixture, reproduction_argv=[str(Path(sys.executable).resolve()), "-c", "pass"], operator_id="operator-selftest", recorded_at="2026-07-10T00:13:11Z", operator_redaction_attested=True); fsmonitor_suppressed = not fsmonitor_sentinel.exists()
         git_fixture.joinpath("secret.txt").write_text("Authorization: Bearer synthetic-git-credential-1234567890\n"); subprocess.run(["git", "-C", str(git_fixture), "add", "secret.txt"], check=True); subprocess.run(["git", "-C", str(git_fixture), "commit", "-qm", "secret fixture"], check=True); secret_git_commit = subprocess.check_output(["git", "-C", str(git_fixture), "rev-parse", "HEAD"], text=True).strip()
@@ -1707,6 +2020,8 @@ def parser() -> argparse.ArgumentParser:
     propose_scope.add_argument("--engagement", type=Path, required=True); propose_scope.add_argument("--draft", type=Path, required=True); propose_scope.add_argument("--actor-id", required=True); propose_scope.add_argument("--session-id", required=True); propose_scope.add_argument("--recorded-at", required=True); propose_scope.add_argument("--reason", required=True)
     reattest_scope = subcommands.add_parser("reattest-scope", help="activate one signed scope draft through exact async authority")
     reattest_scope.add_argument("--engagement", type=Path, required=True); reattest_scope.add_argument("--draft", type=Path, required=True); reattest_scope.add_argument("--operator-id", required=True); reattest_scope.add_argument("--recorded-at", required=True); reattest_scope.add_argument("--reason", required=True); reattest_scope.add_argument("--authority-request-id", required=True); reattest_scope.add_argument("--lane-id", required=True); reattest_scope.add_argument("--executor-id", required=True); reattest_scope.add_argument("--session-id", required=True)
+    migrate_kernel = subcommands.add_parser("migrate-kernel", help="upgrade a decision-0005 engagement to decision-0006 in place (operator-console-signed, reconciles orphans)")
+    migrate_kernel.add_argument("--engagement", type=Path, required=True); migrate_kernel.add_argument("--draft", type=Path, required=True); migrate_kernel.add_argument("--operator-id", required=True); migrate_kernel.add_argument("--recorded-at", required=True); migrate_kernel.add_argument("--reason", required=True); migrate_kernel.add_argument("--executor-id", required=True); migrate_kernel.add_argument("--session-id", required=True); migrate_kernel.add_argument("--attest-synthetic", action="store_true", help="operator-confirm that secret-flagged evidence files are synthetic test references and register them")
     record_cleanup = subcommands.add_parser("record-cleanup", help="apply one exact operator-approved cleanup transition")
     record_cleanup.add_argument("--engagement", type=Path, required=True); record_cleanup.add_argument("--file", type=Path, required=True); record_cleanup.add_argument("--operator-id", required=True); record_cleanup.add_argument("--recorded-at", required=True); record_cleanup.add_argument("--reason", required=True); record_cleanup.add_argument("--authority-request-id", required=True); record_cleanup.add_argument("--lane-id", required=True); record_cleanup.add_argument("--executor-id", required=True); record_cleanup.add_argument("--session-id", required=True)
     record_prior = subcommands.add_parser("record-operator-prior", help="apply one exact operator-approved prior without establishing truth")
@@ -1743,7 +2058,7 @@ def parser() -> argparse.ArgumentParser:
     close = subcommands.add_parser("close", help="operator-only cleanup, coverage, report, and memory closure gate")
     close.add_argument("--engagement", type=Path, required=True); close.add_argument("--operator-id", required=True); close.add_argument("--reason", required=True); close.add_argument("--recorded-at", required=True); close.add_argument("--authority-request-id", required=True); close.add_argument("--lane-id", required=True); close.add_argument("--executor-id", required=True); close.add_argument("--session-id", required=True)
     record_review_parser = subcommands.add_parser("record-review", help="atomically commit one independent review and its typed notebook event")
-    record_review_parser.add_argument("--engagement", type=Path, required=True); record_review_parser.add_argument("--file", type=Path, required=True); record_review_parser.add_argument("--event", type=Path, required=True); record_review_parser.add_argument("--actor-id", required=True); record_review_parser.add_argument("--session-id", required=True); record_review_parser.add_argument("--signature", type=Path, required=True); record_review_parser.add_argument("--allowed-signers", type=Path, required=True)
+    record_review_parser.add_argument("--engagement", type=Path, required=True); record_review_parser.add_argument("--file", type=Path, required=True); record_review_parser.add_argument("--event", type=Path, required=True); record_review_parser.add_argument("--actor-id", required=True); record_review_parser.add_argument("--session-id", required=True); record_review_parser.add_argument("--signature", type=Path, required=True); record_review_parser.add_argument("--allowed-signers", type=Path, required=True); record_review_parser.add_argument("--attest-synthetic", action="store_true", help="operator-confirm that secret-flagged review input references are synthetic test names and record the review")
 
     review_preflight_parser = subcommands.add_parser("review-preflight", help="apply an approved operator review to immutable preflight evidence")
     review_preflight_parser.add_argument("--engagement", type=Path, required=True); review_preflight_parser.add_argument("--preflight-id", required=True); review_preflight_parser.add_argument("--verdict", choices=["accepted", "rejected"], required=True); review_preflight_parser.add_argument("--reason", required=True); review_preflight_parser.add_argument("--operator-id", required=True); review_preflight_parser.add_argument("--recorded-at", required=True); review_preflight_parser.add_argument("--authority-request-id", required=True); review_preflight_parser.add_argument("--lane-id", required=True); review_preflight_parser.add_argument("--executor-id", required=True); review_preflight_parser.add_argument("--session-id", required=True)
@@ -1804,6 +2119,7 @@ def main() -> int:
             "score-telemetry": command_score_telemetry,
             "close": command_close,
             "migrate": command_migrate,
+            "migrate-kernel": command_migrate_kernel,
             "revise-finding": command_revise_finding,
             "accept-report": command_accept_report,
             "record-submission": command_record_submission,

@@ -1,0 +1,38 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-dev-infra-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F13-committed-decryptable-credentials",
+ "entity_ref": "F13-committed-decryptable-credentials",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-f13-001-primary",
+  "attempt-f13-002-negative-tamper",
+  "attempt-f13-003-negative-wrongtag",
+  "attempt-f13-004-replay"
+ ],
+ "input_hash": "eadf04d8c002a7ef8dbacecec80a4ee9e01603a1c6f850d098865d89cf2658bb",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "lifecycle-script vector distinction N/A here",
+  "severity capped at disclosure: liveness/IAM unverifiable"
+ ],
+ "required_next_actions": [
+  "operator rotates/reports; liveness and IAM assessment requires Google-side facts"
+ ],
+ "claim_tuple_hash": null,
+ "independence": {
+  "reviewer_id": "f13-independent-verifier",
+  "reviewer_run_id": "round2-f13-independent-review",
+  "reviewer_model": "deepseek-v4-pro",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Independently determine whether the committed blobs decrypt from public material and what severity/category is honest; refute if the claim does not hold",
+  "originating_run_id": null
+ },
+ "review_id": "review-f13-verifier",
+ "recorded_at": "2026-08-13T05:52:00Z",
+ "verdict": "confirmed_with_correction",
+ "rationale": "Independently re-derived every decrypt input from the repo and re-ran the decryption locally; all three blobs decrypt with zero non-repo material; sha256 matches on-record evidence; attribution = dev-infra. Corrects severity to capped-at-disclosure."
+}

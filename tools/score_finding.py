@@ -112,6 +112,29 @@ PATH_RE = re.compile(r"`([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|go|c|json|sol|tx
 URL_RE = re.compile(r"https?://[^\s`)>\]]+")
 
 
+def _packaged_anywhere(root, rel, _cache={}):
+    """True when the package ships this file somewhere, at any depth.
+
+    G0 used to resolve a citation only against the package ROOT. A report that cites `pr.yml` and
+    ships it as `target/pr.yml` — the standard layout for a copy of a target file — failed, because
+    the string did not resolve at the top level. That is a false alarm: the point of the gate is
+    that a reviewer opening the zip can find what the report cites, and they can.
+
+    Ruled 2026-08-16 after G0 flagged two shippable packages (obyte-2026-08-001, angular F13) on
+    exactly this. It deliberately does NOT invent a match: a cited `action.yml` still fails when the
+    package ships `action-browserstack.yml`, because there genuinely is no `action.yml` in the zip
+    and the prose should say which action it means."""
+    key = os.path.abspath(root)
+    if key not in _cache:
+        names = set()
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fn in filenames:
+                names.add(fn)
+        _cache[key] = names
+    return os.path.basename(rel) in _cache[key]
+
+
 def check_existence(root, docs, res):
     """Every package-relative path a document cites must exist in the package."""
     for name, text in docs.items():
@@ -121,7 +144,8 @@ def check_existence(root, docs, res):
                 continue
             hit = (os.path.isfile(os.path.join(root, rel))
                    or any(os.path.basename(k) == os.path.basename(rel) for k in docs)
-                   or os.path.isfile(os.path.join(root, os.path.dirname(name), rel)))
+                   or os.path.isfile(os.path.join(root, os.path.dirname(name), rel))
+                   or _packaged_anywhere(root, rel))
             # A path that clearly points at the TARGET's source tree is not a package artifact.
             if not hit and not re.match(r"^(src|lib|core|kvm|engine|skills|tools|cmd|pkg|x)/", rel):
                 res.add(False, "existence", "computable",
@@ -209,6 +233,71 @@ ATTESTATIONS = {
 }
 
 
+NULL_HASH = "sha256:" + "0" * 64
+
+
+def _package_reviews(docs):
+    """Every review record carried inside the package, parsed."""
+    out = []
+    for name, text in docs.items():
+        if not name.endswith(".json"):
+            continue
+        try:
+            obj = json.loads(text)
+        except ValueError:
+            continue
+        for rec in (obj if isinstance(obj, list) else [obj]):
+            if isinstance(rec, dict) and rec.get("review_type") == "claim_adjudication":
+                out.append((name, rec))
+    return out
+
+
+def check_adjudication(docs, attest, res):
+    """A package must not carry an adjudication it generated for itself.
+
+    Two things are decidable here. A placeholder input hash is not a binding, so it fails outright.
+    And a review that ASSERTS independence — fresh context, no prior verdict visible, a disconfirming
+    objective — states something the package cannot substantiate on its own, so it must name the
+    reference, exactly like the other attestable families.
+
+    When the package carries three or more reviews the set-level detector applies too. See
+    tools/adjudication_audit.py for why these signals, and spotify-backstage-2026-07 for the case."""
+    reviews = _package_reviews(docs)
+    if not reviews:
+        return
+
+    for name, rec in reviews:
+        if rec.get("input_hash") == NULL_HASH:
+            res.add(False, "adjudication", "computable",
+                    f"{name}: review input_hash is a real binding",
+                    f"{rec.get('review_id')} carries the all-zero placeholder")
+
+    asserts_independence = [
+        (name, rec) for name, rec in reviews
+        if (rec.get("independence") or {}).get("fresh_context") is True
+        or (rec.get("independence") or {}).get("prior_verdict_visible") is False]
+    if asserts_independence:
+        ref = (attest or {}).get("independent-review")
+        res.add(bool(ref), "independent-review", "attestable",
+                "attestation present — independent-review",
+                "a review asserting fresh context or a disconfirming objective must name the "
+                "reviewer's run; add 'independent-review' to the attestation file "
+                f"({len(asserts_independence)} such review(s))")
+
+    if len(reviews) >= 3:
+        try:
+            from adjudication_audit import audit
+        except ImportError:
+            return
+        verdict, signals, stats = audit([r for _, r in reviews])
+        fired = sorted(s["signal"] for s in signals if s["fired"])
+        res.add(verdict != "synthetic", "adjudication", "computable",
+                "package reviews show judgement, not generation",
+                f"{stats['reviews']} reviews, {stats['distinct_reviewers']} reviewer(s), "
+                f"{stats['corrections']} corrections, {stats['distinct_rationales']} rationale(s); "
+                f"fired={fired}")
+
+
 def check_attestations(docs, attest, res):
     blob = "\n".join(docs.values())
     for family, (trigger, why) in ATTESTATIONS.items():
@@ -233,6 +322,7 @@ def score(root, attest=None):
     check_recompute(docs, res)
     check_cross_doc(docs, res)
     check_pin_version(docs, res)
+    check_adjudication(docs, attest, res)
     check_attestations(docs, attest, res)
     return res, docs
 

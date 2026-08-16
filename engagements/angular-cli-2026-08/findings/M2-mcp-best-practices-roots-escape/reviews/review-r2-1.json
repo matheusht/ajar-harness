@@ -1,0 +1,35 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "adversarial_refutation",
+ "proposed_finding_id": "M2-mcp-best-practices-roots-escape",
+ "entity_ref": "M2-mcp-best-practices-roots-escape",
+ "finding_revision": 1,
+ "input_refs": [
+  "attempt-m2-001-primary"
+ ],
+ "input_hash": null,
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "add symlink-follow detail: the guide-path relative() check is string-based (no realpath) \u2014 a symlink inside the resolved package dir yields an arbitrary-file read following the link (same package-control precondition)",
+  "severity guided to Low/Low-Medium with caps stated"
+ ],
+ "required_next_actions": [
+  "operator review; route reads through restricted host; realpath the resolved path"
+ ],
+ "claim_tuple_hash": null,
+ "independence": {
+  "reviewer_id": "refuter-r2-1",
+  "reviewer_run_id": "3391379a",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the M2 claim: find why the roots-escape is NOT a vulnerability",
+  "originating_run_id": null
+ },
+ "review_id": "review-m2-r2-1",
+ "recorded_at": "2026-08-15T01:05:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "bypass confirmed (input-only validation; raw readFile bypasses host checkPath; ancestor/symlink resolution); cap = attacker must control the resolved @angular/core metadata (dependency confusion / vendored override / compromised package) \u2014 a precondition already code-exec at install time. Kill argument (file-path input keeps resolution in-root) failed: input schema advertises the directory form and hoisted/symlink layouts fire regardless."
+}

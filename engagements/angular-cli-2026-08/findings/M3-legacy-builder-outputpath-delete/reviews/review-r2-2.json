@@ -1,0 +1,31 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "adversarial_refutation",
+ "entity_ref": "M3-legacy-builder-outputpath-delete",
+ "finding_revision": 2,
+ "input_refs": [],
+ "input_hash": null,
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "ESCALATION: the same unguarded delete exists in the flagship @angular/build:application builder \u2014 the 8358805d3 fix contained the WRITE path (isSubDirectory at index.ts:284) but never touched the DELETE path (index.ts:176-178); base is plain path.resolve(workspaceRoot, outputPath) (options.ts:331) with no containment. Orchestrator PoC (poc2.mjs) confirmed: outputPath ../victim -> unrelated contents deleted, browser/server dirs preserved for the build's writes.",
+  "finding title/scope updated: application builder (current stable) + legacy browser/server builders"
+ ],
+ "required_next_actions": [
+  "operator review; file as Medium (arbitrary directory contents deletion via build config)"
+ ],
+ "independence": {
+  "reviewer_id": "refuter-r2-2",
+  "reviewer_run_id": "3391379a",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the M3 claim: find a validation upstream of deleteOutputDir",
+  "originating_run_id": null
+ },
+ "review_id": "review-m3-r2-2",
+ "recorded_at": "2026-08-15T01:30:00Z",
+ "verdict": "confirmed_escalated",
+ "rationale": "the kill attempt failed AND found more: no upstream validation for the delete path in either the legacy or the application builder; the partial fix (8358805d3) is the discriminator proving this is unintended behavior."
+}

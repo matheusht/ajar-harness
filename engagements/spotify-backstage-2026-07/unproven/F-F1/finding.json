@@ -1,0 +1,186 @@
+{
+ "adjudication": {
+  "justification": "Independent claim adjudication review.",
+  "review_ref": "review-F-F1-225114"
+ },
+ "change_reason": "Initial registration of the confirmed finding from the 2026-07/2026-08 engagement evidence.",
+ "claims": {
+  "attacker_model": "authenticated but unprivileged Backstage user",
+  "conflicting_evidence": [],
+  "impact_claims": [
+   {
+    "claim_id": "claim-impact",
+    "evidence_refs": [
+     "artifact-registration-sha256:968af856e",
+     "artifact-registration-sha256:60127f2b7",
+     "artifact-registration-sha256:aad32cf85"
+    ],
+    "statement": "Private-repo content disclosure with the integration credential, provenance forgery, and group-membership forgery that can flip a real permission decision.",
+    "status": "demonstrated"
+   }
+  ],
+  "mechanism": {
+   "claim_id": "claim-mechanism",
+   "evidence_refs": [
+    "artifact-registration-sha256:968af856e",
+    "artifact-registration-sha256:60127f2b7",
+    "artifact-registration-sha256:aad32cf85"
+   ],
+   "statement": "parseGitUrlSafe decodes/rejects '..' in filepath only; owner/name concatenated raw into the fetch URL; CatalogRules.matchLocation minimatches the raw still-encoded target while the reader fetches a decoded interpretation, and the reader fetch precedes rule enforcement."
+  },
+  "preconditions": [
+   "authenticated user",
+   "POST /locations with an encoded-traversal target"
+  ],
+  "reachability": {
+   "causal_spine": [
+    "entrypoint",
+    "missing control",
+    "state transition"
+   ],
+   "claim_id": "claim-reach",
+   "evidence_refs": [
+    "artifact-registration-sha256:968af856e",
+    "artifact-registration-sha256:60127f2b7",
+    "artifact-registration-sha256:aad32cf85"
+   ],
+   "statement": "Any authenticated user via POST /locations (allow-by-default); 6 of 8 SCM readers affected (GitHub/Bitbucket Cloud/Server narrow+broad; GitLab/Azure/BB-Server/Harness/Gerrit broad)."
+  },
+  "uncertainty": [
+   "deployment prevalence / config-gating may vary"
+  ]
+ },
+ "classification": {
+  "domain": "authorization-bypass",
+  "severity": {
+   "label": "high",
+   "rationale": "Vector derived by the orchestrator 2026-08-10 and NOT independently reviewed. G5 checks only that a vector exists and recomputes; the metric choices are judgement.",
+   "system": "cvssv31",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N"
+  },
+  "weakness_identifiers": [
+   {
+    "id": "CWE-22",
+    "namespace": "CWE"
+   }
+  ]
+ },
+ "engagement_id": "spotify-backstage-2026-07",
+ "finding_id": "F-F1",
+ "proof": {
+  "claim_proofs": [
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:968af856e",
+     "artifact-registration-sha256:60127f2b7",
+     "artifact-registration-sha256:aad32cf85"
+    ],
+    "attempt_refs": [
+     "attempt-F-F1-primary-225049"
+    ],
+    "claim_id": "claim-mechanism",
+    "control_refs": [
+     "attempt-F-F1-neg-225053"
+    ],
+    "replay_refs": [
+     "attempt-F-F1-replay-225104"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:968af856e",
+     "artifact-registration-sha256:60127f2b7",
+     "artifact-registration-sha256:aad32cf85"
+    ],
+    "attempt_refs": [
+     "attempt-F-F1-primary-225049"
+    ],
+    "claim_id": "claim-reach",
+    "control_refs": [
+     "attempt-F-F1-neg-225053"
+    ],
+    "replay_refs": [
+     "attempt-F-F1-replay-225104"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:968af856e",
+     "artifact-registration-sha256:60127f2b7",
+     "artifact-registration-sha256:aad32cf85"
+    ],
+    "attempt_refs": [
+     "attempt-F-F1-primary-225049"
+    ],
+    "claim_id": "claim-impact",
+    "control_refs": [
+     "attempt-F-F1-neg-225053"
+    ],
+    "replay_refs": [
+     "attempt-F-F1-replay-225104"
+    ]
+   }
+  ],
+  "contamination_disposition": "ruled_out",
+  "control_applicability": {
+   "negative": "required",
+   "positive": "not_applicable",
+   "rationale": "Matched negative controls and fresh replay establish the bounded claim.",
+   "replay": "required"
+  },
+  "evidence_refs": [
+   "artifact-registration-sha256:968af856e",
+   "artifact-registration-sha256:60127f2b7",
+   "artifact-registration-sha256:aad32cf85"
+  ],
+  "fresh_state_properties": [
+   "fresh node 24 run against pinned commit cfb9f07"
+  ],
+  "negative_control_refs": [
+   "attempt-F-F1-neg-225053"
+  ],
+  "positive_control_refs": [],
+  "primary_attempt_refs": [
+   "attempt-F-F1-primary-225049"
+  ],
+  "replay_refs": [
+   "attempt-F-F1-replay-225104"
+  ]
+ },
+ "recorded_at": "2026-08-09T22:51:36Z",
+ "revision": 1,
+ "schema_version": 3,
+ "scope_provenance": {
+  "environment_ref": "preflight-registration-runtime-3",
+  "provenance": {
+   "actor": {
+    "id": "reviewer-external-canonical",
+    "role": "reviewer"
+   },
+   "card_versions": [],
+   "model": null,
+   "prompt_version": null,
+   "provider": null,
+   "tool_versions": []
+  },
+  "scope_hash": "sha256:58783846431940a68dbe89dbe4d58468f86596c34ffef9f6ef3e842bd569efea",
+  "target_refs": []
+ },
+ "search_linkage": {
+  "candidate_refs": [
+   "candidate-catalog-github-provenance-normalization"
+  ],
+  "hypothesis_refs": [
+   "hypothesis-catalog-github-provenance-normalization"
+  ]
+ },
+ "supersedes_revision": null,
+ "privilege_context": {
+  "claimed": "authenticated-user",
+  "proven": "not-established",
+  "note": "No PoC in this engagement was verified to run from the claimed attacker position. Declared, not omitted."
+ }
+}

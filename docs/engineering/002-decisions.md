@@ -50,6 +50,106 @@ Date: 2026-08-08. Source: operator action. Advisory `GHSA-h97x-7h5v-wjx4` is pub
 
 The severity follows the Klever program classes, which put information disclosure at Medium.
 
+### D-04. The oracle-negative gate is NOT graduated. It stays.
+
+Date: 2026-08-09. Source: `fixtures/preregistration/spotify-phase2-OUTCOME.md`. This answers the first
+attempt at Q-07; the question stays open for a second attempt on a fresh engagement.
+
+Two reasons, and the second is the strong one.
+
+The run never qualified as a measurement: `preflight_holdout.py` found 6 of 6 withheld paths leaking,
+so the operator moved gate graduation off this engagement (Option C).
+
+Then the run registered seven findings on fifteen `claim_adjudication` reviews that a script
+generated, with the verdict hardcoded. One reviewer identity, zero corrections, zero conflicting
+evidence, three rationales. The gate under test decides by counting disagreements. **A generated
+adjudicator produces zero disagreements by construction**, so a clean result would have been
+unfalsifiable. This is `engine/autonomy.md` §4 — the verifier must not be the thing verified.
+
+The run is therefore evidence against graduating this gate, not absent evidence.
+
+Built in response: `tools/adjudication_audit.py`, the `fixtures/adjudication/` pair, the
+`fixtures/finding-traps/synthetic-adjudication` trap, and a `check_adjudication` family in
+`score_finding.py`. Re-running the gate now requires `adjudication_audit.py` to return `clear`, the
+same way it requires the holdout preflight to return CLEAR.
+
+### D-05. Findings start unproven. Promotion is an act that passes gates.
+
+Date: 2026-08-10. Source: the spotify registration failure. Built:
+`tools/finding_lifecycle.py`, `engine/finding-lifecycle.md`.
+
+A finding used to be written into `findings/` with a status field that the run producing it set. That
+is default-accept. Under default-accept a check that does not run is a silent pass, so a broken
+unattended run makes confident garbage and looks productive.
+
+Now a finding is written to `unproven/`. It has no status. It has a location, and the location changes
+only by running `promote`, which runs six gates. A broken unattended run now produces nothing.
+
+Hunters write and move nothing. Only the orchestrator promotes. Any role may demote with a reason.
+Promote is hard and demote is easy because a wrong demote costs a re-review and a wrong promote
+reaches a vendor.
+
+### D-06. Adjudication is machine-audited.
+
+Date: 2026-08-09. Built: `tools/adjudication_audit.py`, `fixtures/adjudication/`.
+
+A review set is called synthetic when one reviewer identity, no dissent, and boilerplate rationale all
+appear together. A null input hash fails alone. The three smells must all fire, because each alone has
+an innocent reading.
+
+The signal lives in the **corpus**, not in one review. A package holding a single review cannot show
+it. So the gate audits the engagement's whole review set as well as the package's.
+
+### D-07. Autonomy comes from making checks decidable, not from removing gates.
+
+Date: 2026-08-10. This corrects the framing of the whole roadmap.
+
+The roadmap was written around graduating gates: pick a human check, run a standby experiment, remove
+it. That is slow, risky, and it failed on its first attempt.
+
+The better lever is converting judgement into decidable checks. Every check that becomes computable is
+autonomy gained **while trusting nothing extra**. It is a capability you build, not a risk you take.
+
+Evidence from this session: G4 was judgement until 2026-08-09. G3 was judgement until 2026-08-10. Both
+now run with no human. Neither required an experiment or a graduation.
+
+Gate graduation is not cancelled. It is demoted to second place.
+
+### D-08. A static analysis engine joins the harness. It may CONFIRM. It may never KILL.
+
+Date: 2026-08-10. Operator decision. Answers Q-04 in direction; the scope is still open (see G-02).
+
+The problem: nothing mechanically checks whether a claimed path is real. Kettle has a response
+differential. Big Sleep has AddressSanitizer. A source audit has nothing, so a model's opinion is the
+only evaluator. That is why the work is filtering thousands of fakes.
+
+Static analysis is not fuzzing. Fuzzing runs the program and waits for a crash; it needs a runnable
+target and a crash to detect. Static analysis computes over the code structure without running it, and
+answers whether data from a source reaches a sink along the real call graph.
+
+The IRIS split applies: the model proposes sources and sinks because that is semantic; the engine
+computes the dataflow because that is mechanical. Same boundary as computable-versus-attestable in
+`score_finding.py`.
+
+**Confirm only.** The engine has false negatives and will miss things a model catches. This follows the
+standing rule that a static rule is a Stage-1 pre-filter and never kills a candidate alone.
+
+### D-09. Cross-engagement memory informs ORDER. It never kills.
+
+Date: 2026-08-10. Status: agreed in principle, not yet built.
+
+There is no cross-engagement memory today. `winners.md` exists once per engagement and nothing reads
+it afterwards. `routing.md` reads recon signals only. Every engagement starts cold.
+
+A losers entry records that **we failed to find something**. That is evidence about our search, not
+about the target. Using it to kill converts "we did not find it" into "it is not there", which is the
+omission error that Skitka measured as untrainable.
+
+So the knowledge base re-orders and annotates. It never removes a route and never kills a candidate.
+The one edge case is an entry naming a **proven control** rather than a failed search: that is a fact
+about the target, and it earns a stronger annotation — still not kill authority, because the control
+is version-specific and may have changed.
+
 ---
 
 ## 2. Accepted findings

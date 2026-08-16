@@ -1,0 +1,3 @@
+{"assessment": "success", "attempt_id": "attempt://fix-primary", "kind": "exploit"}
+{"assessment": "held", "attempt_id": "attempt://fix-control", "control_of": ["attempt://fix-primary"], "kind": "negative_control"}
+{"assessment": "held", "attempt_id": "attempt://fix-dud", "kind": "exploit"}

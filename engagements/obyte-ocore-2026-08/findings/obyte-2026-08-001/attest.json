@@ -1,0 +1,75 @@
+{
+ "finding_id": "obyte-2026-08-001",
+ "primary_attempt": {
+  "id": "attempt://obyte-r1-p9",
+  "attested_by": "orchestrator",
+  "evidence": "evidence/round1/p9.md (builder) + evidence/round2/IR-F1.md (independent run) — both executed evidence/lab/p9/p9-poc.js on the pinned commit; raw P9-RESULTS blocks show 4/4 vacuous rows res:true",
+  "real_execution": true
+ },
+ "negative_control": {
+  "id": "attempt://obyte-r1-p9-negctrl",
+  "attested_by": "orchestrator",
+  "evidence": "same run: negative-control-wrong-root res:false; in-merkle-vacuous-proof-no-feed res:false with real dataFeedExists query (0 / 0 records inspected)",
+  "real_execution": true
+ },
+ "positive_control": {
+  "id": "attempt://obyte-r1-p9-posctrl",
+  "attested_by": "orchestrator",
+  "evidence": "same run: positive-control-real-tree-proof res:true (real 5-element merkle tree)",
+  "real_execution": true
+ },
+ "replay": {
+  "id": "attempt://obyte-r2-irf1-replay",
+  "attested_by": "orchestrator",
+  "evidence": "round-2 independent reviewer executed the unmodified PoC in a fresh scratch dir (LAB_TAG=ir-f2 pattern; IR-F1 used its own run) and independently cross-constructed proofs on the real engine — reproduced vacuous=true, wrong-root=false, 60-sibling above=false/below=true",
+  "real_execution": true
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated",
+  "provenance_note": "The proof supply requires no keys or privileges — any formula caller; the PoC ran as the local user with no special access (local library evaluation only)"
+ },
+ "poC_runnable": {
+  "command": "cd /Users/matheusvsky/Documents/trab/obyte-ocore-2026-08-ocore && node lab-obyte.js /Users/matheusvsky/Documents/trab/llm-redteam-harness/engagements/obyte-ocore-2026-08/evidence/lab/p9/p9-poc.js",
+  "raw_output_path": "evidence/round2/IR-F1.md (P9-RESULTS block); evidence/round1/p9.md"
+ },
+ "independent_run": {
+  "reviewer_context": "fresh (round-2 IR-F1)",
+  "reviewer_id": "IR-F1",
+  "raw_output_path": "evidence/round2/IR-F1.md",
+  "confirmed_claim_tuple": true,
+  "note": "IR-F1 also flagged a precision nuance on the in-merkle row 10 (different failure mode) and an S1-reachability caveat owned by the F2 link question; neither affects this finding's mechanism confirmation."
+ },
+ "real-path-exec": true,
+ "negative-control": true,
+ "positive-control": true,
+ "escalation_evidence": {
+  "id": "attempt://obyte-e3-1-aa-demo",
+  "attested_by": "orchestrator",
+  "evidence": "evidence/E3-1-fund-impact-demo.md — real two-node network (hub 6611 + node 6612), real relay protocol, real AA trigger machinery; attack scenario BYPASS-CONFIRMED (withdrawal output amount=1000, response unit committed sequence=good on both nodes); control scenario (wrong-root proof) bounced ('neither case is true'), responses=0",
+  "real_execution": true,
+  "raw_db_state": "evidence/lab/.e31-attack-node/, .e31-attack-hub/, .e31-control-hub/ (retained as evidence; synthetic keys only)"
+ },
+ "state_provenance": {
+  "mode": "real-path",
+  "declared_by": "orchestrator",
+  "declared_at": "2026-08-11",
+  "established_by": "evidence/E3-1-fund-impact-demo.md — real two-process network (hub 6611 + node 6612), real relay websocket protocol, real composer/validation/writer/stabilization, real aa_composer trigger machinery; the AA was deployed and triggered by an ordinary payment unit, and the withdrawal output (amount=1000) was committed sequence=good on both nodes",
+  "impact_bearing_state": "an AA deployed on the network that gates a withdrawal on is_valid_merkle_proof, plus a trigger unit from a non-member attacker",
+  "synthesized_setup": [
+   {
+    "element": "deterministic shared genesis (LAB_GENESIS_TS=1700000000)",
+    "reachability_basis": "every Obyte network has a genesis; the program PROHIBITS testing against mainnet or public testnet, so a local genesis is the required environment, not a shortcut"
+   },
+   {
+    "element": "locally generated keys and funded addresses",
+    "reachability_basis": "ordinary user state — any participant holds keys and a funded address"
+   },
+   {
+    "element": "the vulnerable AA definition itself",
+    "reachability_basis": "deployed through the normal AA definition path; the whitelist-gate pattern is the documented use of the predicate. Which DEPLOYED AAs use it is the finding's stated severity cap, and is not claimed here"
+   }
+  ],
+  "note": "The defect step — the formula gate evaluating TRUE on an attacker-rooted proof — ran inside the real evaluation engine, not a harness reimplementation. The negative control (wrong root) bounced on the same path."
+ }
+}

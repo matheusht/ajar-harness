@@ -1,0 +1,48 @@
+{
+ "id": "V1-pullapprove-exclude-inversion",
+ "engagement": "angular-dev-infra-2026-08",
+ "schema_version": 1,
+ "owasp": "A04:2021 Insecure Design / review-gate integrity",
+ "atlas": "review-requirement logic inversion in shared library",
+ "surface": "ng-dev/pullapprove/pullapprove_arrays.ts (shipped in @angular/ng-dev)",
+ "objective": "unreviewed_code_lands (variant: review-gate conditions evaluate inverted)",
+ "scope_class": "injection",
+ "severity": "medium",
+ "confidence": "confirmed",
+ "status": "needs_review",
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-v1-001-primary"
+  ],
+  "negative_control_refs": [
+   "attempt-v1-002-control"
+  ],
+  "positive_control_refs": [],
+  "replay_refs": []
+ },
+ "recorded_date": "2026-08-14",
+ "dedup_key": "ng-dev PullApproveGroupArray.exclude missing negation inverts review gates",
+ "oracle_verdict": {
+  "signal": "suspected_signal",
+  "adjudication": "confirmed",
+  "contamination_ruled_out": true
+ },
+ "evidence_contract": {
+  "negative_control": "include vs exclude are byte-identical except the negation; the include method is correct (sibling comparison)",
+  "positive_control": "reached by production gate configs: angular/angular .pullapprove.yml:47-48,78,366-367,401-402; angular/components :10,87",
+  "replay": "orchestrator re-read the file at the pin and re-fetched both consumer configs via public API",
+  "contamination": "none",
+  "justification": "PullApproveGroupArray.exclude (pullapprove_arrays.ts) filters IN groups matching the pattern - identical to include - the negation is missing. Every groups.*.exclude() condition inverts. Demonstrated fail-open: angular/angular no-matching-group failure override collapses to only the global-* clause; components-team activation condition becomes self-contradictory (can never activate).",
+  "run_cost": {
+   "wall_seconds": 1800,
+   "model_seconds": 600,
+   "tool_seconds": 60,
+   "target_calls": 0,
+   "model_calls": 3,
+   "human_review_seconds": 0
+  },
+  "evidence_refs": []
+ },
+ "leaked_fragments": [],
+ "review_history": []
+}

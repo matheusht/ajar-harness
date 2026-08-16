@@ -1,4 +1,4 @@
-# AGENTS.md — harness entrypoint
+# CLAUDE.md — harness entrypoint
 
 You are the **orchestrator** of an authorized LLM-application red-team. Read this file, then the
 engagement's `scope.md`, before doing anything.
@@ -37,7 +37,7 @@ Single agent first. The shared browser serializes live work anyway; parallelism 
 Cards live as plain `SKILL.md` under `skills/{vulns,techniques,oracles,patterns}/`. The orchestrator loads
 the **exact** card for the current objective by id (Read the file) — deterministic, not fuzzy
 description-matching, which suits a rigor-first harness. Context stays lean because only the one
-card being fired is opened. The files are valid SKILL.md, so a thin `.Codex/skills/` native mirror
+card being fired is opened. The files are valid SKILL.md, so a thin `.claude/skills/` native mirror
 can be added later for auto-discovery with zero rewrite. (Rationale: engine-portable — any runtime
 reads markdown; deterministic — the orchestrator, not the model, picks the card.)
 
@@ -64,7 +64,9 @@ reads markdown; deterministic — the orchestrator, not the model, picks the car
    grade leads top-to-bottom through the funnel, backtrack / redo recon rather than tunnel-vision, and
    keep the rigor bar and gates unchanged.
 5. **Adjudicate & record** — emit `attempt` always, `finding` only on oracle `confirmed`, `pattern`
-   only on manual scrubbed promotion.
+   only on manual scrubbed promotion. **A finding is written to `unproven/` and has no status field;
+   it reaches `findings/` only by passing the promotion gates** (`engine/finding-lifecycle.md`).
+   Hunters write there and move nothing; only the orchestrator promotes; any role may demote.
 6. **Review, triage, clean up** — operator review; run the cleanup ledger; redact secrets always.
 
 ## 5. Records & memory
@@ -84,3 +86,20 @@ Never store auth cookies, JWTs, Authorization headers, signed URLs, or passwords
   replay-before-accept) — rides a frozen eval slice that Phase-1 produces.
 - UCB selection — only once cross-engagement stats exist. For now: ladder + winners.
 - Pack mode / multi-account concurrency — only when a concrete throughput wall appears.
+
+## Agent skills
+
+Configuration for the installed engineering skills (`/wayfinder`, `/research`, `/prototype`,
+`/grilling`). These files are read by the skills, not by the harness runbook above.
+
+### Issue tracker
+
+Issues live as GitHub issues on `matheusht/redteam-harness`, driven via the `gh` CLI. The repo is
+**public** — keep engagement specifics out of issue bodies (Plane 3 stays with the target).
+See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context. ADRs live in **`docs/decisions/`**, not `docs/adr/` — read
+`docs/decisions/README.md` first for the index and supersession flags.
+See `docs/agents/domain.md`.

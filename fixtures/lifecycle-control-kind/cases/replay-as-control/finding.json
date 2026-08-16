@@ -1,0 +1,9 @@
+{
+  "schema_version": 3,
+  "finding_id": "F-G2-REPLAY",
+  "proof": {
+    "primary_attempt_refs": ["attempt-primary"],
+    "negative_control_refs": ["attempt-replay"],
+    "replay_refs": ["attempt-replay"]
+  }
+}

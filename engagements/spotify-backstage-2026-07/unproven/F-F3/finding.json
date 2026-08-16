@@ -1,0 +1,187 @@
+{
+ "adjudication": {
+  "justification": "Independent claim adjudication review.",
+  "review_ref": "review-F-F3-225525"
+ },
+ "change_reason": "Initial registration of the confirmed finding from the 2026-07/2026-08 engagement evidence.",
+ "claims": {
+  "attacker_model": "authenticated but unprivileged Backstage user",
+  "conflicting_evidence": [],
+  "impact_claims": [
+   {
+    "claim_id": "claim-impact",
+    "evidence_refs": [
+     "artifact-registration-sha256:3465580da",
+     "artifact-registration-sha256:b8da26917",
+     "artifact-registration-sha256:85644a7be"
+    ],
+    "statement": "Multiple valid tokens from one authorization code / one session (amplification).",
+    "status": "demonstrated"
+   }
+  ],
+  "mechanism": {
+   "claim_id": "claim-mechanism",
+   "evidence_refs": [
+    "artifact-registration-sha256:3465580da",
+    "artifact-registration-sha256:b8da26917",
+    "artifact-registration-sha256:85644a7be"
+   ],
+   "statement": "Code redemption is read-check-then-write with no WHERE used=false and no affected-rows check; concurrent redemptions of the same code mint multiple tokens."
+  },
+  "preconditions": [
+   "experimental DCR/CIMD flags",
+   "a valid code and concurrent redemption"
+  ],
+  "reachability": {
+   "causal_spine": [
+    "entrypoint",
+    "missing control",
+    "state transition"
+   ],
+   "claim_id": "claim-reach",
+   "evidence_refs": [
+    "artifact-registration-sha256:3465580da",
+    "artifact-registration-sha256:b8da26917",
+    "artifact-registration-sha256:85644a7be"
+   ],
+   "statement": "Concurrent POST /v1/token with the same code; observed 8/24 on MySQL; also approve-no-CAS mints multiple codes per session."
+  },
+  "uncertainty": [
+   "deployment prevalence / config-gating may vary"
+  ]
+ },
+ "classification": {
+  "domain": "broken-access-control",
+  "severity": {
+   "label": "medium",
+   "rationale": "Vector derived by the orchestrator 2026-08-10 and NOT independently reviewed. G5 checks only that a vector exists and recomputes; the metric choices are judgement.",
+   "system": "cvssv31",
+   "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:N"
+  },
+  "weakness_identifiers": [
+   {
+    "id": "CWE-367",
+    "namespace": "CWE"
+   }
+  ]
+ },
+ "engagement_id": "spotify-backstage-2026-07",
+ "finding_id": "F-F3",
+ "proof": {
+  "claim_proofs": [
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:3465580da",
+     "artifact-registration-sha256:b8da26917",
+     "artifact-registration-sha256:85644a7be"
+    ],
+    "attempt_refs": [
+     "attempt-F-F3-primary-225505"
+    ],
+    "claim_id": "claim-mechanism",
+    "control_refs": [
+     "attempt-F-F3-neg-225511"
+    ],
+    "replay_refs": [
+     "attempt-F-F3-replay-225518"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:3465580da",
+     "artifact-registration-sha256:b8da26917",
+     "artifact-registration-sha256:85644a7be"
+    ],
+    "attempt_refs": [
+     "attempt-F-F3-primary-225505"
+    ],
+    "claim_id": "claim-reach",
+    "control_refs": [
+     "attempt-F-F3-neg-225511"
+    ],
+    "replay_refs": [
+     "attempt-F-F3-replay-225518"
+    ]
+   },
+   {
+    "applicability_rationale": "Same primary, control, and replay evidence establish this atomic claim.",
+    "artifact_refs": [
+     "artifact-registration-sha256:3465580da",
+     "artifact-registration-sha256:b8da26917",
+     "artifact-registration-sha256:85644a7be"
+    ],
+    "attempt_refs": [
+     "attempt-F-F3-primary-225505"
+    ],
+    "claim_id": "claim-impact",
+    "control_refs": [
+     "attempt-F-F3-neg-225511"
+    ],
+    "replay_refs": [
+     "attempt-F-F3-replay-225518"
+    ]
+   }
+  ],
+  "contamination_disposition": "ruled_out",
+  "control_applicability": {
+   "negative": "required",
+   "positive": "not_applicable",
+   "rationale": "Matched negative controls and fresh replay establish the bounded claim.",
+   "replay": "required"
+  },
+  "evidence_refs": [
+   "artifact-registration-sha256:3465580da",
+   "artifact-registration-sha256:b8da26917",
+   "artifact-registration-sha256:85644a7be"
+  ],
+  "fresh_state_properties": [
+   "fresh node 24 run against pinned commit cfb9f07"
+  ],
+  "negative_control_refs": [
+   "attempt-F-F3-neg-225511"
+  ],
+  "positive_control_refs": [],
+  "primary_attempt_refs": [
+   "attempt-F-F3-primary-225505"
+  ],
+  "replay_refs": [
+   "attempt-F-F3-replay-225518"
+  ]
+ },
+ "recorded_at": "2026-08-09T22:55:44Z",
+ "revision": 1,
+ "schema_version": 3,
+ "scope_provenance": {
+  "environment_ref": "preflight-registration-runtime-3",
+  "provenance": {
+   "actor": {
+    "id": "reviewer-external-canonical",
+    "role": "reviewer"
+   },
+   "card_versions": [],
+   "model": null,
+   "prompt_version": null,
+   "provider": null,
+   "tool_versions": []
+  },
+  "scope_hash": "sha256:58783846431940a68dbe89dbe4d58468f86596c34ffef9f6ef3e842bd569efea",
+  "target_refs": []
+ },
+ "search_linkage": {
+  "candidate_refs": [
+   "candidate-oidc-code-redemption-race",
+   "candidate-oidc-code-redemption-race-single-use"
+  ],
+  "hypothesis_refs": [
+   "hypothesis-oidc-code-redemption-race-single-use"
+  ]
+ },
+ "supersedes_revision": null,
+ "privilege_context": {
+  "claimed": "authenticated-user",
+  "proven": "not-established",
+  "note": "No PoC in this engagement was verified to run from the claimed attacker position. Declared, not omitted."
+ }
+}

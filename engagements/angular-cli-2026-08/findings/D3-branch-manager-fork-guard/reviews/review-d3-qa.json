@@ -1,0 +1,36 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "D3-branch-manager-fork-guard",
+ "entity_ref": "D3-branch-manager-fork-guard",
+ "finding_revision": 3,
+ "input_refs": [
+  "attempt-d3-001-primary"
+ ],
+ "input_hash": "6192d0e6ba4a420965705aa80f3226dec7f36b5c43c70fa2ff11a88d64a1b771",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "consistency: the Severity paragraph's 'demonstrated impact capped to action spam + dispatch' predates the E12 amplifier fold and contradicts the amplifier block above it ('NOT cosmetic-only'); reword to reflect the narrowed amplification (robot-token rate-limit pressure = intermittent availability degradation)",
+  "minor: workflow trigger lines cited as :7-9; the types array sits at lines 9-11 (pull_request_target at :8) - cosmetic",
+  "minor: CVSS A:N vs the surviving availability delta - the control-integrity vector is defensible (hourly budget recovery, marginal-delta framing), flag for operator consistency"
+ ],
+ "required_next_actions": [
+  "operator review of the severity-paragraph reword"
+ ],
+ "claim_tuple_hash": "6192d0e6ba4a420965705aa80f3226dec7f36b5c43c70fa2ff11a88d64a1b771",
+ "independence": {
+  "reviewer_id": "qa-d3-reviewer",
+  "reviewer_run_id": "f0444707",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "verify the D3 report against the pinned workflow + pinned action sources",
+  "originating_run_id": null
+ },
+ "review_id": "review-d3-qa-r9",
+ "recorded_at": "2026-08-15T18:20:00Z",
+ "verdict": "corrected_minor",
+ "rationale": "mechanism, guard semantics, API-only action, unguarded sibling jobs, googlers-org token per event, and rate-limit claim all verified against the pinned tree; one consistency correction (severity paragraph vs amplifier fold) + two cosmetic notes."
+}

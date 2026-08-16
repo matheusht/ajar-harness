@@ -1,0 +1,31 @@
+{
+ "engagement": "angular-dev-infra-2026-08",
+ "primary_attempt": {
+  "attempt_id": "attempt-v1-001-primary",
+  "attested": true,
+  "attestation": "orchestrator source read + consumer config fetches 2026-08-14"
+ },
+ "negative_control": {
+  "attempt_ids": [],
+  "attested": false,
+  "attestation": "sibling include method is correct - the divergence is the negation"
+ },
+ "positive_control": {
+  "attempt_ids": [],
+  "attested": false,
+  "attestation": "production gate configs exercise the bug (evidence-* files attached)"
+ },
+ "privilege_context": {
+  "claimed": "unauthenticated",
+  "proven": "unauthenticated"
+ },
+ "real-path-exec": true,
+ "real-path-exec-attestation": "source read at pin 04230133; consumer configs fetched from live public repos (interface reads)",
+ "negative-control": true,
+ "negative-control-attestation": "sibling PullApproveStringArray.exclude has the negation and is correct - the divergence is exactly the missing ! in the group variant (target-pullapprove-arrays.ts)",
+ "state_provenance": {
+  "mode": "real-path",
+  "established_by": "attempt-v1-001-primary",
+  "statement": "the inverted semantics arise from the shipped library code; the gate configs are the real production consumption"
+ }
+}

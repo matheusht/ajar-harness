@@ -189,7 +189,64 @@ recoverable. Build the entries from the documented corrections instead. State th
 does not measure the catch rate for new error shapes. Every regression suite has this limit. Do not
 report the number as a false-negative rate.
 
-## Priority order and reason
+## REVISION 2026-08-10 — the organising idea changed
+
+This roadmap was written around **graduating gates**: pick a human check, run a standby experiment,
+remove it. Phase 2 tried that and the answer was KEEP (`D-04`). The attempt was not wasted, but the
+framing was wrong.
+
+The better lever is **making checks decidable** (`D-07`). Every check that becomes computable is
+autonomy gained while trusting nothing extra. It is a capability you build, not a risk you take.
+
+Evidence from one session: G4 was judgement until 2026-08-09, G3 until 2026-08-10. Both now run with
+no human. Neither needed an experiment or a graduation.
+
+Gate graduation is not cancelled. It is second place.
+
+### Status at 2026-08-10
+
+| Phase | State |
+|---|---|
+| 0 Hygiene | done |
+| 1a Intervention ledger | done — 62 backfilled, 3 live |
+| 1b Deterministic grader | done |
+| 2 Graduate a gate | attempted; answer is KEEP (`D-04`); retry needs a fresh engagement |
+| 3 Learning loop | done — ablation gate |
+| 4 Evaluation primitive | direction decided (`D-08`); scoped to a Go experiment |
+| 5 Ideation experiments | half — tool built and used once; the Q-02 test has not run |
+
+### Added this revision
+
+**Phase 6 — finding lifecycle. DONE 2026-08-10.** Findings start in `unproven/`; promotion runs six
+gates (`D-05`, `engine/finding-lifecycle.md`). This is the default inversion, and it is the piece that
+makes an unattended run fail loudly instead of quietly.
+
+**Phase 7 — mechanical reachability.** Workstream A of
+`docs/research/static-analysis-and-knowledge-base-plan.md`. Licence question first, then a Go
+experiment producing a miss rate. Confirm only, never kill.
+
+**Phase 8 — cross-engagement memory.** Workstream B of the same plan. One format, two entry kinds,
+JSONL in git, gated by the existing ablation rule. Changes order, never kills (`D-09`).
+
+**Phase 9 — make G1 and G2 computable. PARTIAL 2026-08-13.** G2 now resolves v3 control refs against
+`attempts.jsonl`, rejects replay/control role collisions, and checks `kind` plus held/no-signal
+outcome. Its attestation remains; legacy flat v1 packages remain attestable until migrated. G1 still
+needs machine-readable execution context. This is autonomy under `D-07`: the gate stayed, while more
+of its decision became decidable.
+
+### Revised order
+
+| Order | Phase | Why |
+|---|---|---|
+| 1 | Phase 8 — memory | no decision blocks it; the only compounding machinery identified |
+| 2 | Phase 9 — finish G1 + migrate legacy G2 records | small, closed-loop, direct autonomy gain |
+| 3 | Phase 7 — reachability | high value, needs the licence answer and the experiment first |
+| 4 | Phase 2 retry | needs a fresh engagement with no answer key |
+| 5 | Phase 5 Q-02 | rides on a real engagement we run twice; not scheduled alone |
+
+---
+
+## Priority order and reason (superseded 2026-08-10 — kept for the record)
 
 Revised 2026-08-08 after the closed-loop analysis above. Phase 3 moved ahead of Phase 2, because
 Phase 3 is closed-loop and Phase 2 is not.
@@ -232,3 +289,78 @@ The operator stays in the loop for two things. No framework in the research supp
 2. The adjudication of `confirmed`. This is the decision stage, where silent misses hide.
 
 The plan reduces the work around these two gates. It does not remove them.
+
+---
+
+## REVISION 2026-08-16 — three phases closed, and the ceiling relocated
+
+### Status corrections
+
+**Phase 3 — DONE.** `tools/ablation.py` and `check_ablation_fixtures()` already existed and already
+asserted that every `promote` disposition carries a fixture proving the lesson changes a verdict.
+What was missing was WHERE that lived: enforcement sat in conformance, noticed after the record was
+written, and the disposition-to-fixture link was inferred by matching ids against directory names.
+`ablation_fixture` is now a schema property, conditionally required when `disposition == "promote"`.
+It blocked six fixture records on its first run. A `defer` owes nothing — demanding a fixture there
+would push authors toward a weaker disposition to dodge the work.
+
+Deliberately NOT done: the "open a draft PR on each promote" step. Auto-opening PRs is an outbound
+side effect on every promotion and trip-wire 5 covers outbound contact. If wanted, it is an explicit
+operator command, not a hook.
+
+**Phase 6 — DONE** (2026-08-10, unchanged).
+
+**Phase 9 — DONE 2026-08-16.** All three attestable gates now resolve against `attempts.jsonl`:
+G2 (control resolves to held/no_signal, role-disjoint), G1 (primary resolves to a signalling
+non-control record), G6 (`established_by` resolves when it is an attempt ref). Legacy handling is
+uniform: a ledger with no addressable records passes with a stated caveat rather than a false block,
+because blocking there is an alarm about the format, not about the package.
+
+### Added this revision
+
+**Phase 10 — depth instrumentation. DONE 2026-08-16, effect UNMEASURED.** Partials in `unproven/`
+with declared `stages`, `ceiling-requests.md`, and `primitive-registry.md` in the template. See
+Decision 0011. These exist because an audit found `unproven/` empty in two of three post-gate
+engagements and the primitive registry holding 1 row in the engagement where composition is the
+characteristic bug shape. **Whether they change outcomes is the next thing to measure, not to
+assume.**
+
+**Phase 11 — external calibration. STARTED, blocked on operator data.**
+`tools/disposition_ledger.py` + `schemas/disposition.schema.json`. 5 records, 1 graded; the floor is
+5 graded before `calibrate` issues a verdict. This is the only ground truth the harness will ever
+have — every internal audit shares the priors of the thing it measures.
+
+### What the audits changed about the plan
+
+The roadmap assumed the binding constraint was tooling. Two audits say otherwise.
+
+1. **The gates have blocked ZERO promotions out of twelve.** They have never had to say no. That is
+   consistent with a well-calibrated stack and with an untested one, and no current data separates
+   them. Gate count is not a target; a gate that has never blocked is unproven.
+2. **The ceiling is AUTHORIZATION, not rigor.** The Supply-Chain top band ($31,337) requires
+   demonstrating impact on live third-party infrastructure, which scope forbids. That fully explains
+   a Medium/Low severity ceiling with no appeal to over-rigorous judging. The operator's standing
+   instruction is that scope widens when a ceiling needs it — which makes surfacing the request the
+   binding step, not loosening a gate.
+3. **The stall is the last inch.** 12 of 13 engagements that produced a report are parked at
+   "drafted, operator files"; drafts land 0-2 days after scope and then sit 28-36 days.
+
+### Revised order
+
+| # | Item | Why |
+|---|---|---|
+| 1 | **Phase 2** — graduate a gate | 3 of 4 steps remain; standby instrumentation is reversible and unblocks the rest |
+| 2 | **Phase 11** — fill the disposition ledger | blocked only on operator data; the only external calibration that exists |
+| 3 | **Measure Phase 10** | partials and primitives are shipped and unproven; measure before building more |
+| 4 | Phase 8 — cross-engagement memory | the only compounding machinery identified |
+| 5 | Phase 7 — reachability | **licence answered 2026-08-16**: CodeQL permits analysis of OSI-licensed codebases hosted on GitHub, including automated/CI database generation. It restricts by CODEBASE type, not by business model — so it is licensed for every OSS VRP target and NOT for the private commercial ones. Scope Phase 7 to OSS targets, TypeScript first. |
+| 6 | Phase 4 — evaluation primitive | needs Q-04's scope settled; direction already decided (D-08) |
+
+### Not a substitute for CodeQL, recorded so it is not re-litigated
+
+`vercel-labs/deepsec` was evaluated 2026-08-16 by reading its source. Its `MatcherPlugin` contract is
+`match(content: string, filePath: string)` — one file's text and its path is the entire input. 200
+matchers, all regex, no parser dependency, zero occurrences of taint/dataflow/interprocedural across
+its docs. It is a candidate finder plus an LLM reviewer: architecturally the same funnel this harness
+already runs, and its matchers map onto our Stage-1 rules. Using it as the confirmer would be a model
+confirming a model, which D-08 forbids. Worth watching as a peer product; not a component.

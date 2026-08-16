@@ -1,0 +1,30 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "D1-route-codegen-injection",
+ "entity_ref": "D1-route-codegen-injection",
+ "finding_revision": 1,
+ "input_refs": [],
+ "input_hash": "20d705a397f961af9378723af18c48ce6dc5d129b50e8341aa0b375ae07ab799",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [],
+ "required_next_actions": [
+  "operator review"
+ ],
+ "claim_tuple_hash": "20d705a397f961af9378723af18c48ce6dc5d129b50e8341aa0b375ae07ab799",
+ "independence": {
+  "reviewer_id": "IR-D1-route",
+  "reviewer_run_id": "d224fc4f",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "kill the candidate finding; independently verify every claim",
+  "originating_run_id": null
+ },
+ "review_id": "review-d1-route-codegen-injection-ir",
+ "recorded_at": "2026-08-15T06:15:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "interpolation confirmed (module/index.ts:135) with zero sanitization in the insert chain (ast-utils InsertChange); schema has no pattern; valid-TS payload executes at module import; cap = input-trust model (attacker must influence generation args; workspace schematics-defaults amplification noted)."
+}

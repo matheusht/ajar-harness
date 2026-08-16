@@ -1,0 +1,65 @@
+case: case-2026-08-dag-ledger-consensus
+
+# Abstract observation -> activation training data from this engagement.
+# Shapes only: no target identifiers, no verbatim payloads. Strengths as observed.
+
+signals:
+  - observation: "a validation rule is gated on the unit's position height with a network-height escape hatch being added rule-by-rule in recent commits; some rules still lack the hatch"
+    where: dag_validation
+    activates: [pattern.dag-old-dag-rule-gating]
+    strength: strong
+    note: "hunt the rules the migration missed; then verify old-DAG attachment can actually reach the gated code (stabilization is the kill condition — witnessed level is ancestry-derived)"
+
+  - observation: "a recent commit replaced a comparison/equality helper and added explicit negative-zero and array-descent canonicalization"
+    where: encoding_hashing
+    activates: [pattern.dag-canonicalization-split]
+    strength: strong
+    note: "canonicalization fixes are consensus-critical; check every hashing feed for a total serializer"
+
+  - observation: "a private-payment uniqueness check matches on a pair where one element is the unit's own author rather than the committed output owner"
+    where: private_payments
+    activates: [pattern.dag-spend-proof-uniqueness]
+    strength: strong
+    note: "bearer tokens need a uniqueness key bound to the committed value, not a party-chosen identity"
+
+  - observation: "money arithmetic runs on double-precision values with a documented cap below the integer-safe bound"
+    where: asset_handling
+    activates: [pattern.dag-js-numeric-value-arithmetic]
+    strength: weak
+    note: "held here (cap bounds every amount); the residual is composer-side drift and fee math"
+
+  - observation: "verification predicates in the smart-contract formula language accept a proof structure that includes its own truth anchor"
+    where: formula_engine
+    activates: [pattern.dag-canonicalization-split]
+    strength: strong
+    note: "a sound sibling binds the root to an on-chain value; the unsound one never does — the contrast is the finding"
+
+  - observation: "a fee formula is exponential in a rate computed from a window whose elapsed can collapse to 1 on equal timestamps"
+    where: fee_economics
+    activates: [pattern.dag-js-numeric-value-arithmetic]
+    strength: weak
+    note: "before claiming impact, verify WHERE the settlement runs relative to ball creation — the window count was 1 on the real path"
+
+  - observation: "upgrade rules apply 'to all new units even if attached to an old part of the DAG' — the defense pattern names the attack it closes"
+    where: dag_validation
+    activates: [pattern.dag-old-dag-rule-gating]
+    strength: strong
+    note: "defense-commit subjects are the best routing seed; they name the exact class being hardened"
+
+  - observation: "the light client skips graph-based checks and trusts its vendor for private-payment uniqueness"
+    where: private_payments
+    activates: [pattern.dag-spend-proof-uniqueness]
+    strength: weak
+    note: "trust-model-bound: the vendor runs the same code; the asymmetry is documented design"
+
+  - observation: "the periodic accounting audit throws (not repairs) on any mismatch, scheduled on every node"
+    where: fee_economics
+    activates: []
+    strength: negative
+    note: "uncaught-throw pattern on a scheduled path — hardening note, not attacker-reachable"
+
+  - observation: "network message handlers apply size/depth caps on some paths but not sibling paths"
+    where: network_protocol
+    activates: []
+    strength: negative
+    note: "node-side-fixable DoS class — out of scope per the engagement's coordination rule"

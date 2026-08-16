@@ -67,7 +67,7 @@ SECRET_PATTERNS = {
     "jwt": re.compile(rb"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
     "private_key": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "signed_url": re.compile(rb"[?&](?:x-amz-signature|signature|sig)=[A-Fa-f0-9%]{16,}", re.IGNORECASE),
-    "password_assignment": re.compile(rb"(?:password|passwd|pwd)[\"']?\s*[:=]\s*[\"']?[^\s,;\"']{8,}", re.IGNORECASE),
+    "password_assignment": re.compile(rb"(?:password|passwd|pwd)[\"']?\s*[:=]\s*[\"']?(?!/)[^\s,;\"']{8,}", re.IGNORECASE),
     "provider_token": re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9_-]{20,})"),
 }
 
@@ -462,7 +462,13 @@ def build_reference_index(engagement_dir: os.PathLike[str] | str) -> dict[str, l
     index: dict[str, list[dict[str, Any]]] = {}
     paths = sorted(set(root.glob("**/*.json")) | set(root.glob("*.jsonl")))
     for path in paths:
-        if path.name in {"state.snapshot.json", "records.index.json"} or (path.name.endswith(".action.json") and "authority" in path.parts and "requests" in path.parts):
+        relative_parts = path.relative_to(root).parts
+        if (
+            path.name in {"state.snapshot.json", "records.index.json"}
+            or relative_parts[:1] == ("upstream",)
+            or relative_parts[:2] == ("legacy", "zone2-pending")
+            or (path.name.endswith(".action.json") and "authority" in path.parts and "requests" in path.parts)
+        ):
             continue
         records: list[Any]
         if path.suffix == ".jsonl":

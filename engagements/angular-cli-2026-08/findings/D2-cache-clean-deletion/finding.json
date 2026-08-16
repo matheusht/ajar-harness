@@ -1,0 +1,48 @@
+{
+ "id": "D2-cache-clean-deletion",
+ "engagement": "angular-cli-2026-08",
+ "schema_version": 1,
+ "owasp": "A01:2021 Broken Access Control",
+ "atlas": "D2: workspace-controlled cache path force-deleted",
+ "surface": "packages/angular/cli/src/commands/cache/clean/cli.ts + utilities.ts",
+ "objective": "arbitrary_directory_deletion",
+ "scope_class": "path_traversal",
+ "severity": "medium",
+ "confidence": "confirmed",
+ "status": "needs_review",
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-d2-001-primary"
+  ],
+  "negative_control_refs": [
+   "attempt-d2-002-control-ns"
+  ],
+  "positive_control_refs": [],
+  "replay_refs": []
+ },
+ "recorded_date": "2026-08-15",
+ "dedup_key": "D2",
+ "oracle_verdict": {
+  "signal": "suspected_signal",
+  "adjudication": "confirmed",
+  "contamination_ruled_out": true
+ },
+ "evidence_contract": {
+  "negative_control": "see REPORT.md",
+  "positive_control": "",
+  "replay": "replicated twice",
+  "contamination": "none",
+  "justification": "orchestrator verification against pinned source + real-path PoC (D2: built ng cache clean; D1: exact buildRoute replication)",
+  "run_cost": {
+   "wall_seconds": 600,
+   "model_seconds": 60,
+   "tool_seconds": 60,
+   "target_calls": 0,
+   "model_calls": 0,
+   "human_review_seconds": 0
+  },
+  "evidence_refs": []
+ },
+ "leaked_fragments": [],
+ "review_history": []
+}

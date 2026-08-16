@@ -1,0 +1,35 @@
+{
+ "schema_version": 1,
+ "engagement_id": "angular-cli-2026-08",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "E1-C1-i18n-locale-key-escape",
+ "entity_ref": "E1-C1-i18n-locale-key-escape",
+ "finding_revision": 2,
+ "input_refs": [],
+ "input_hash": "68576cb9dd61c50c8865c1f395eb8515e7a7f3819abb130601b7e8727f4379c3",
+ "evidence_refs": [],
+ "conflicting_evidence": [],
+ "corrections": [
+  "C1: bundled driver payload depth \u2014 the committed entry2.mjs uses a 7-dot key that resolves to /evil (filesystem root) and mkdir fails with ENOENT (root permission) in normal runs; the ESCAPE mechanism is real (join-escape demonstrated: key accepted, subPath = raw key, resolved path outside base) and a 2-dot variant of the same bundled code lands writable (verified live: mkdir /tmp/rv-c1e/evil succeeded outside /tmp/rv-c1e/out). Report should state the dot-depth/writability nuance explicitly",
+  "C2: evidence/member-cd/ is cited in the REPORT for the C-member (webpack locale-data load) live verification but the directory does NOT exist on file \u2014 the KP-C1-CD artifacts (driver-c.mjs, i18n-options.bundle.mjs, manifest.bundle.mjs, project) live at /tmp/c1cd/ and must be copied into the package before filing",
+  "C3: entry2.mjs/evil.js hardcode /tmp/i18n-kp/... absolute paths (translation file, output base) \u2014 the committed evidence only replays if the scratch path is restored; artifact-hygiene note"
+ ],
+ "required_next_actions": [
+  "copy /tmp/c1cd/* into evidence/member-cd/",
+  "state the dot-depth/writability nuance in the REPORT mechanism section"
+ ],
+ "claim_tuple_hash": "68576cb9dd61c50c8865c1f395eb8515e7a7f3819abb130601b7e8727f4379c3",
+ "independence": {
+  "reviewer_id": "refuter-rv-c1-e",
+  "reviewer_run_id": "rv-c1-e",
+  "reviewer_model": "deepseek-v4-flash",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "break the corrected package from the evidence side",
+  "originating_run_id": null
+ },
+ "review_id": "review-e1c1-rv-c1-e",
+ "recorded_at": "2026-08-15T19:30:00Z",
+ "verdict": "real_but_capped",
+ "rationale": "Evidence-side kill attempt failed against the core webpack claims: (a) entry2.mjs (real bundled production code: createI18nOptions + devkit output-paths ensureOutputPaths) accepts the malicious locale key with subPath = raw key (no ensureValidSubPath on keys) and the write-side escapes the output base \u2014 verified live with a 2-dot variant landing mkdir at /tmp/rv-c1e/evil outside /tmp/rv-c1e/out; (b) the explicit-subPath control throws exactly as claimed (regex ^[\\w-]*$); (c) ws/ fixture carries the benign en.js for the in-project negative control; (d) the committed 7-dot driver payload itself lands at /evil and mkdir ENOENTs (root permission) \u2014 a precision gap, not a kill (mechanism reproduced with the same bundled functions). Caps: config-controlled workspace value (cloned-repo precondition), read-side needs attacker package in resolution chain (RV-C1-B), browser venue for the module-load member."
+}

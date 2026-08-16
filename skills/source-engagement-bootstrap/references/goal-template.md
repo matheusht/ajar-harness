@@ -15,8 +15,15 @@ Replace every bracketed field with verified engagement facts. Delete inapplicabl
 >   orchestrator-participation / second-reviewer-synchronisation rule, re-attack-the-prior-kill-
 >   conditions framing, and the never-audited-surface-first routing. Modeled on the Crown engagement's
 >   revisit prompt.
+> - `goal-prompt-LONG-RUN.md` — **standard format for a LONG-RUN (6+ hour, multi-round) deep hunt on
+>   ONE asset**, when the operator will not be available to steer. Twelve parts + the anti-bias
+>   construction in Part 0: a **symmetric exit obligation** replaces the source method's asserted
+>   vulnerability, the optimistic prior is confined to the hunter lane and barred from the adjudicating
+>   lane, and the stubbornness framing is scoped to effort and kept out of the verdict. Governs the round
+>   loop through `engine/multi-round-orchestration.md`. Modeled on the Sol-Ultra prompts in
+>   `docs/research/` (gvisor, protobuf, gemini-cli), de-biased per that engine doc §5.
 >
-> Both are referenced by `/goal` via `engagements/<id>/goal-prompts/<id>-goal-prompt[-<round>].md`.
+> All three are referenced by `/goal` via `engagements/<id>/goal-prompts/<id>-goal-prompt[-<round>].md`.
 > The LLM adapts structure and detail to the engagement's domain; the section skeleton is the constant.
 > This file below remains the long-form structured fallback for cases neither template fits (very large
 > multi-surface engagements wanting a fuller section layout).

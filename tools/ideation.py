@@ -153,9 +153,19 @@ def nearest(hyp_text, cards, idf=None, default_idf=None):
 # Calibrated 2026-08-09 against both extremes of the corpus:
 #   unrelated prose (5 samples, unrelated domains) tops out at 0.195
 #   a card's own token set scores 1.000 against itself
-# 0.60 sits in that gap. CAVEAT: the upper point is an identity match, not a realistic restatement,
-# so the middle of the range is UNCALIBRATED. Re-calibrate against real generated hypotheses before
-# reading any rediscovery rate as a measurement.
+# 0.60 sits in that gap.
+#
+# MIDDLE RANGE CALIBRATED 2026-08-09 (the caveat below is now discharged). Five hypotheses written as
+# analyst restatements of real cards scored 0.61 / 0.70 / 0.74 / 0.95 / 0.74 and all classified
+# rediscovery; an unrelated control scored 0.10. The threshold separates them cleanly, so a
+# 0-rediscovery result on real hypotheses means the corpus genuinely lacks a card, not that the bar
+# is unreachable. Known residual: the nearest-card ATTRIBUTION can be wrong while the verdict is
+# right (an object-ownership restatement matched a proof-verification card). Read the card as a hint,
+# never as a citation.
+#
+# Superseded caveat, kept for the record: the upper point is an identity match, not a realistic
+# restatement, so the middle of the range is UNCALIBRATED. Re-calibrate against real generated
+# hypotheses before reading any rediscovery rate as a measurement.
 
 
 def classify(score, threshold):
@@ -183,8 +193,15 @@ def cmd_map(args):
     doc = json.load(open(args.hypotheses))
     hyps = doc if isinstance(doc, list) else doc.get("hypotheses", [])
     rows, counts = [], Counter()
-    for h in hyps:
+    unreadable = []
+    for i, h in enumerate(hyps):
         text = h if isinstance(h, str) else f"{h.get('title','')} {h.get('text','')}"
+        # Fail CLOSED on a schema we cannot read. Scoring unreadable text gives 0.00, which
+        # classifies as novelty-candidate — the tool would silently manufacture novelty from a typo'd
+        # field name. Found 2026-08-09 while testing a hypothesis file that used `statement`.
+        if not tokens(text):
+            unreadable.append(h.get("id", f"#{i}") if isinstance(h, dict) else f"#{i}")
+            continue
         card, score = nearest(text, cards, idf, dflt)
         verdict = classify(score, args.threshold)
         counts[verdict] += 1
@@ -198,6 +215,12 @@ def cmd_map(args):
         print(f"  {n:4d}  {100.0*n/total:5.1f}%  {v}")
     print("\nnovelty-candidate means no existing card covers it. That is a review queue, not a")
     print("novelty claim: absence from this corpus is not absence from the field.")
+    if unreadable:
+        print(f"\nREFUSED {len(unreadable)} hypothesis/es with no readable text: "
+              f"{', '.join(str(u) for u in unreadable[:8])}")
+        print("Each hypothesis needs a 'title' and/or 'text' field. These were NOT scored — a "
+              "hypothesis the mapper cannot read is not a novelty candidate.")
+        return 1
     return 0
 
 

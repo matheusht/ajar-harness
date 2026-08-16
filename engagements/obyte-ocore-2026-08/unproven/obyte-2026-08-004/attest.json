@@ -1,0 +1,50 @@
+{
+ "finding_id": "obyte-2026-08-004",
+ "real-path-exec": true,
+ "negative-control": true,
+ "primary_attempt": {
+  "id": "attempt://obyte-r2-feedrive",
+  "attested_by": "orchestrator",
+  "evidence": "evidence-R2.md (round-1 refuter drive through real storage.getFinalTpsFee/updateTpsFees) + evidence-IR-F4.md (round-2 independent run)",
+  "real_execution": true
+ },
+ "negative_control": {
+  "id": "attempt://obyte-r1-p9-negctrl",
+  "attested_by": "orchestrator",
+  "evidence": "normal-rate windows produce small deltas (r2 drive); the min-fee gate rejection of the poisoned author is the observed control; -Infinity storage is real but its trigger is unreachable (funding bound)",
+  "real_execution": true
+ },
+ "replay": {
+  "id": "attempt://obyte-r2-irf4-replay",
+  "attested_by": "orchestrator",
+  "evidence": "round-2 independent reviewer re-ran both scripts and verified all four checkpoints from raw output, including -Infinity persisting as REAL -Inf across a pool close/reopen",
+  "real_execution": true
+ },
+ "privilege_context": {
+  "claimed": "authenticated-user",
+  "proven": "authenticated-user",
+  "provenance_note": "The attacker is a funded network participant; the lab run used synthetic units with a local user, no special access"
+ },
+ "poC_runnable": {
+  "command": "cd /Users/matheusvsky/Documents/trab/obyte-ocore-2026-08-ocore && node lab-obyte.js <abs>/unproven/obyte-2026-08-004/r2-tps-fee-drive.js && node lab-obyte.js <abs>/unproven/obyte-2026-08-004/r2-sqlite-infinity-test.js",
+  "raw_output_path": "evidence-IR-F4.md"
+ },
+ "independent_run": {
+  "reviewer_context": "fresh (round-2 IR-F4)",
+  "reviewer_id": "IR-F4",
+  "raw_output_path": "evidence-IR-F4.md",
+  "confirmed_claim_tuple": true,
+  "note": "IR-F4 independently reproduced fee, balance, gate rejection, and -Infinity persistence; the reachability/economics caps come from the round-1 R2 refutation, incorporated into the claims"
+ },
+ "state_provenance": {
+  "mode": "synthesized",
+  "declared_by": "orchestrator",
+  "declared_at": "2026-08-11",
+  "synthesized_elements": [
+   "the count>=30 / elapsed=1 fee window that produces the 10.7%-of-supply charge — written by r2-tps-fee-drive.js rather than reached by posting units to a network"
+  ],
+  "impact_bearing_state": "a settlement window carrying count>=30 at elapsed=1. This state WAS the impact claim, and it is the part that was written.",
+  "established_by": null,
+  "note": "Declared retroactively on 2026-08-11 while adding G6. The engagement's own escalation phase refuted this finding on exactly this ground: E3-10 measured fee=17 at every step on the real path under 1-MCI-at-a-time stabilization, E2-9 corroborated on the two-node network (20-unit burst, fees 0-190, balances monotonically increasing), and orchestrator source reading showed settlement runs with count=1. The mechanism is real; the impact state is unreachable. This package is the worked example G6 exists for."
+ }
+}

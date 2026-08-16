@@ -872,7 +872,7 @@ def check_finding_lifecycle():
                matched["detail"])
 
 
-def check_g1_attempt_resolution():
+def check_g1_g6_attempt_resolution():
     """G1 resolves the primary attempt against the ledger — Phase 9's other half.
 
     G1 used to check that a ref existed and a boolean was set. Both are strings the package writes
@@ -884,7 +884,7 @@ def check_g1_attempt_resolution():
     already-promoted obyte findings, whose attempts.jsonl is a pre-lifecycle research journal with
     no addressable records at all. An empty ledger is a format gap; a populated ledger missing one
     ref is a dangling reference. Only the second is a defect."""
-    print("\n[finding-lifecycle] G1 attempt resolution")
+    print("\n[finding-lifecycle] G1 + G6 attempt resolution")
     base = os.path.join(ROOT, "fixtures", "lifecycle-attempts")
     if not os.path.isdir(base):
         return
@@ -905,6 +905,24 @@ def check_g1_attempt_resolution():
         record(blocked == want_block,
                f"g1/{name}: {'blocks' if want_block else 'clears'}",
                g1[0]["detail"] if g1 else "no G1 row")
+
+    # G6 resolution — Phase 9's last conversion. G6 was a pure string check, so obyte-2026-08-004,
+    # the finding it exists to catch, passed if you relabelled one dict value. It now resolves
+    # `established_by` when that value is an attempt ref. Two declaration shapes are legitimate in
+    # the wild — an attempt id (angular-cli) and an evidence path with prose (obyte) — so the prose
+    # case must still PASS, or the conversion would false-alarm on every legacy package.
+    for name, want_block in (("F-G6-OK", False), ("F-G6-DANGLING", True), ("F-G6-CONTROL", True),
+                             ("F-G6-HELD", True), ("F-G6-PROSE", False)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g6/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g6 = [r for r in g.rows if r["gate"] == "G6"]
+        blocked = bool(g6) and not g6[0]["ok"]
+        record(blocked == want_block,
+               f"g6/{name}: {'blocks' if want_block else 'clears'}",
+               g6[0]["detail"] if g6 else "no G6 row")
 
     # The legacy path: a ledger with no addressable records must NOT block. Regression guard for
     # the false alarm this gate produced on its first run against obyte-ocore-2026-08.
@@ -1293,7 +1311,7 @@ def main():
     check_disposition_ledger()
     check_framing_probe()
     check_finding_lifecycle()
-    check_g1_attempt_resolution()
+    check_g1_g6_attempt_resolution()
     check_gates_on_real_data()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")

@@ -33,7 +33,8 @@ The gates
   G5 severity       a claimed severity carries a CVSS vector that
                     recomputes to its stated score                         computable
   G6 state          the world state the proof depends on was REACHED
-                    through the real path, not written directly            attestable
+                    through the real path, not written directly, and the
+                    attempt cited as reaching it resolves                   computable + attestable
 
 G3 is the gate this harness did not have. It cannot decide whether a proof really ran as a low
 privilege user. It can decide that the package DECLARES both positions and that they agree. That
@@ -65,6 +66,7 @@ Exit 0 = clear or moved, 1 = blocked.
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -456,7 +458,7 @@ STATE_MODES = {STATE_REAL_PATH, STATE_NONE_REQUIRED, STATE_SYNTHESIZED, NOT_ESTA
 STATE_PASSING = {STATE_REAL_PATH, STATE_NONE_REQUIRED}
 
 
-def g6_state_provenance(attest, g):
+def g6_state_provenance(attest, g, engagement=None):
     """The state the proof depends on must have been REACHED, not written.
 
     obyte-2026-08-004 passed all five earlier gates and promoted. Its PoC ran, its negative control
@@ -524,9 +526,54 @@ def g6_state_provenance(attest, g):
         g.add("G6", False, "every seeded setup element carries a reachability basis",
               f"{len(unjustified)} of {len(setup)} element(s) have no reachability_basis: {names}")
         return
-    g.add("G6", True, "the impact-bearing state was reached through the real path",
-          f"mode={mode}, established_by={sp['established_by']}, "
-          f"{len(setup)} seeded setup element(s), each with a reachability basis")
+    # Phase 9's last conversion. G6 was a pure string check: a package could satisfy it by writing
+    # the word "real-path", and obyte-2026-08-004 — the finding G6 exists to catch — passes if you
+    # relabel one dict value. G1 and G2 already resolve their refs against the attempt ledger, so
+    # G6 was the odd one out. Named as such in Decision 0010; converted 2026-08-16.
+    #
+    # Two declaration shapes are in the wild and both are legitimate: an attempt id
+    # (`attempt-d1-001-primary`, angular-cli) and an evidence path with prose (obyte). Only the
+    # first is resolvable, so only the first is resolved. The rest keeps the attestable behaviour
+    # with a stated caveat rather than a false block — the same legacy handling G1 uses.
+    ev = str(sp["established_by"]).strip()
+    looks_like_ref = bool(re.match(r"^(attempt://|attempt-)[\w.:/-]+$", ev))
+    detail = (f"mode={mode}, established_by={ev[:70]}, "
+              f"{len(setup)} seeded setup element(s), each with a reachability basis")
+
+    if engagement and looks_like_ref:
+        attempts, error = _attempt_index(engagement)
+        if error:
+            g.add("G6", False, "the impact-bearing state was reached through the real path", error)
+            return
+        if attempts:
+            if ev not in attempts:
+                g.add("G6", False, "the impact-bearing state was reached through the real path",
+                      f"established_by {ev} does not resolve — the ledger has {len(attempts)} "
+                      f"addressable record(s), so this reference dangles")
+                return
+            rec = attempts[ev]
+            kind = str(rec.get("kind") or "").strip().lower().replace("-", "_")
+            outcome = str(rec.get("assessment") or rec.get("verdict") or "").strip().lower()
+            # The state cannot have been "reached through the real path" by an attempt that is a
+            # control, or by one whose own record says nothing happened.
+            if kind == "negative_control":
+                g.add("G6", False, "the impact-bearing state was reached through the real path",
+                      f"established_by {ev} is kind=negative_control; a control does not establish "
+                      f"the impact-bearing state")
+                return
+            if outcome in {"held", "no_signal", "no-signal", "blocked", "refuted", "error",
+                           "not_run", "not-run"}:
+                g.add("G6", False, "the impact-bearing state was reached through the real path",
+                      f"established_by {ev} resolves to outcome={outcome}; the attempt cited as "
+                      f"reaching the state did not reach it")
+                return
+            detail += "; established_by resolves to a signalling non-control attempt"
+        else:
+            detail += "; ledger holds no addressable records (pre-lifecycle), ref not resolved"
+    elif not looks_like_ref:
+        detail += "; established_by is prose/path, not an attempt ref — not resolvable"
+
+    g.add("G6", True, "the impact-bearing state was reached through the real path", detail)
 
 
 def run_gates(pkg, engagement=None):
@@ -539,7 +586,7 @@ def run_gates(pkg, engagement=None):
     g3_privilege(finding, attest, g)
     g4_adjudication(pkg, engagement, g)
     g5_severity(pkg, finding, g)
-    g6_state_provenance(attest, g)
+    g6_state_provenance(attest, g, engagement)
     return g, finding
 
 

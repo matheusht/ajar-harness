@@ -121,6 +121,57 @@ Not a slogan — a specific, repeated set of moves across every real regrade pas
   original finding was; the escalation-found symlink case had its own regrade claim checked before it
   was acted on.
 
+### 4a. The same discipline for a NEGATIVE — the unbounded-negative failure
+
+Everything above is written for re-deriving that something **is** so. A negative needs its own moves,
+because the failure mode inverts: you are not asked to reproduce an observation, you are asserting
+that an observation *cannot* occur. Those are not symmetric, and this harness has failed at it
+repeatedly.
+
+`refuted`, `covered-dry`, "no path exists", "the ceiling is X" and "this cannot be reached" are all
+**negative claims about a search space**. A negative is only as good as the enumeration behind it, and
+the enumeration is the part that goes unexamined — because the *measurement* usually looks rigorous.
+
+**Three moves, required before any negative or ceiling is graded `confirmed`:**
+
+- **State the set you searched, in the record.** Not "I checked the pools" — "I enumerated pools by
+  filtering `Initialize` on `topics[3]=<token>` over full history; N=6." A negative whose search set is
+  unstated is `needs_more_evidence`, not `refuted`. This is the single highest-yield line in this
+  subsection.
+- **Prove the set is the whole set, by a second and structurally different method.** Log-scan and
+  factory-query are different methods; two log-scans are one method run twice. Where a second method
+  is impossible, say so and downgrade the confidence explicitly.
+- **Name the one call that would falsify you.** If you cannot name it, you have not understood your own
+  claim well enough to assert it. Usually it is cheap — and that asymmetry (one call to falsify, hours
+  to assert) is the tell that the claim was never bounded.
+
+**Absence-of-evidence substitutions — the recurring concrete shape.** Nearly every instance in practice
+reduces to grading an absence in one source as a proof of impossibility:
+
+| Asserted | Actually enumerated | The falsifying call |
+|---|---|---|
+| "this role can never be granted" | `RoleGranted` event history | `getRoleAdmin(role)` — one call |
+| "extraction is $0" | one venue, which was dead | enumerate all venues, then swap |
+| "no caller reaches this sink" | the repo you were given | the dependency set / other repos |
+| "the section is missing" | mangled tool output | read the file |
+
+**Worked instance, self-implicating (crown-2026-08).** Three confident negatives were graded and later
+overturned, and a fourth occurred while writing this very subsection:
+`UPGRADE_ROLE` had zero grants in full history → asserted "can never be upgraded"; `getRoleAdmin`
+returned `DEFAULT_ADMIN_ROLE`, held by a live EOA. The same inference then produced an undercount of
+roots-of-trust (2 vs 6–7). Separately, a lane executed a real swap against real bytecode, decoded the
+PoolManager's own return value, and reported "$0.00, measured" — it had measured 1 of 6 pools and
+picked the one with zero liquidity; the real ceiling was ~$19.9K. And the author of this section
+asserted "§5 is missing from this file" from corrupted grep output, while §5 was present.
+**All four had rigorous method and unbounded enumeration.** None were caught by verification, because
+verification was not the thing that failed.
+
+**Grading rule.** A negative with an unstated or single-method search set is at most
+`needs_more_evidence`. Only a negative whose enumeration is stated, second-sourced, and falsifiable
+may be graded `refuted` or fed into a `covered-dry` exit under
+`engine/multi-round-orchestration.md` §5. A ceiling claim carries the same bar — a ceiling is a
+negative wearing a number.
+
 ## 5. Scope boundary: not the CVSS-precedent-reviewer pattern
 
 Regrade is not the same thing as spawning a narrow, fresh reviewer to research disclosed-CVE

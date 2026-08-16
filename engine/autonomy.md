@@ -30,6 +30,13 @@ an independent check does.
 
 Everything else is a candidate for graduation.
 
+**Long-range note (Decision 0012, 2026-08-16).** The operator's stated end state is full autonomy
+with scope as the only human decision, which means both gates above eventually change. That is
+recorded as a DIRECTION, not a decision — nothing here is weakened by it. The reframe that makes it
+coherent: §2 is an argument about *supervision*, and full autonomy is an argument about *capability*.
+A hard gate is retired by bounding the act so the worst outcome is recoverable, never by trusting
+supervision more. Decision 0012 lists the six preconditions, none of which is met today.
+
 ## 3. The standby method
 
 A gate is removed by evidence, never by decision.

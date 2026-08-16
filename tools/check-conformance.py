@@ -872,6 +872,52 @@ def check_finding_lifecycle():
                matched["detail"])
 
 
+def check_g1_attempt_resolution():
+    """G1 resolves the primary attempt against the ledger — Phase 9's other half.
+
+    G1 used to check that a ref existed and a boolean was set. Both are strings the package writes
+    about itself, so it could be satisfied by naming an attempt that never ran. It now resolves the
+    ref and requires a non-control record with a signalling outcome — the mirror of G2, which
+    requires the control to resolve to held/no_signal.
+
+    Three paths, all asserted, because the first version got the legacy case wrong: it blocked both
+    already-promoted obyte findings, whose attempts.jsonl is a pre-lifecycle research journal with
+    no addressable records at all. An empty ledger is a format gap; a populated ledger missing one
+    ref is a dangling reference. Only the second is a defect."""
+    print("\n[finding-lifecycle] G1 attempt resolution")
+    base = os.path.join(ROOT, "fixtures", "lifecycle-attempts")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+    except ImportError as exc:
+        record(False, "g1: module is importable", str(exc))
+        return
+    for name, want_block in (("F-G1-OK", False), ("F-G1-DANGLING", True), ("F-G1-HELD", True)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g1/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        blocked = bool(g1) and not g1[0]["ok"]
+        record(blocked == want_block,
+               f"g1/{name}: {'blocks' if want_block else 'clears'}",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+    # The legacy path: a ledger with no addressable records must NOT block. Regression guard for
+    # the false alarm this gate produced on its first run against obyte-ocore-2026-08.
+    eng = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    pkg = os.path.join(eng, "findings", "obyte-2026-08-001")
+    if os.path.isdir(pkg):
+        g, _ = run_gates(pkg, eng)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        record(bool(g1) and g1[0]["ok"],
+               "g1/legacy-ledger: a pre-lifecycle attempts.jsonl does not block",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+
 def check_gates_on_real_data():
     """Run the gates and the corpus audit against REAL engagement directories.
 
@@ -1247,6 +1293,7 @@ def main():
     check_disposition_ledger()
     check_framing_probe()
     check_finding_lifecycle()
+    check_g1_attempt_resolution()
     check_gates_on_real_data()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")

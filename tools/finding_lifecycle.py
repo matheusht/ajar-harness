@@ -23,7 +23,8 @@ promote reaches a vendor, so the asymmetry matches the cost.
 The gates
 ---------
   G0 existence      every path the package cites exists                    computable
-  G1 real-path      a primary attempt is named AND real execution attested computable + attestable
+  G1 real-path      the primary attempt resolves to a real execution      computable + attestable
+                    that SIGNALLED, and is attested
   G2 control        a distinct negative-control attempt resolves to a      computable + attestable
                     held/no-signal outcome AND is attested
   G3 privilege      the proven execution context is no more privileged
@@ -186,12 +187,84 @@ def g0_existence(pkg, g):
           "; ".join(c["detail"] or c["label"] for c in bad[:4]))
 
 
-def g1_real_path(finding, attest, g):
-    prim = dig(finding, "proof.primary_attempt_refs", "attempt_id")
+def g1_real_path(finding, attest, g, engagement=None):
+    """The primary attempt must be named, attested, AND resolve to a real execution that signalled.
+
+    G1 was attestable-only: it checked that a ref existed and that a boolean was set. Both are
+    strings the package writes about itself, so a package could satisfy G1 by naming an attempt that
+    never ran, or one that ran and produced nothing.
+
+    This is the mirror of G2 and completes Phase 9. G2 requires the control to resolve to a
+    held/no_signal outcome; G1 requires the primary to resolve to the opposite — an attempt that
+    actually produced the signal the finding rests on. Together they make the claim "this fired and
+    the control did not" computable rather than asserted.
+
+    Legacy v1 packages predate addressable attempt records and keep the old attestable behaviour,
+    reported with a stated caveat rather than a false block. v3 packages opt into proof refs and
+    therefore fail closed."""
+    prim = _refs(dig(finding, "proof.primary_attempt_refs", "attempt_id"))
     attested = bool((attest or {}).get("real-path-exec"))
-    g.add("G1", bool(prim) and attested, "a primary attempt is named and real execution is attested",
-          f"primary_attempt={'yes' if prim else 'MISSING'}, "
-          f"real-path-exec attestation={'yes' if attested else 'MISSING'}")
+    if not prim or not attested:
+        g.add("G1", False, "a primary attempt is named, resolved, and attested",
+              f"primary_attempt={'yes' if prim else 'MISSING'}, "
+              f"real-path-exec attestation={'yes' if attested else 'MISSING'}")
+        return
+
+    v3_refs = isinstance(finding.get("proof"), dict) and "primary_attempt_refs" in finding["proof"]
+    if not engagement or not v3_refs:
+        g.add("G1", True, "a primary attempt is named, resolved, and attested",
+              "primary named and attested; attempt kind/outcome not resolved "
+              "(supply --engagement with a v3 package for the computable check)")
+        return
+
+    attempts, error = _attempt_index(engagement)
+    if error:
+        g.add("G1", False, "a primary attempt is named, resolved, and attested", error)
+        return
+
+    # An engagement whose ledger holds NO addressable attempt records predates the lifecycle format
+    # entirely — obyte-ocore-2026-08's attempts.jsonl is a research journal of `kind: attempt` rows
+    # with no attempt_id. Every ref is "unresolved" there, and blocking on that is a false alarm
+    # against already-adjudicated work, not a finding about the package. A ledger that HAS records
+    # but is missing this one is the opposite: a genuinely dangling reference. Found 2026-08-15 when
+    # this gate blocked both promoted obyte findings on first run.
+    if not attempts:
+        g.add("G1", True, "a primary attempt is named, resolved, and attested",
+              "primary named and attested; the engagement ledger holds no addressable attempt "
+              "records (pre-lifecycle format), so kind/outcome could not be resolved")
+        return
+
+    unresolved = [ref for ref in prim if ref not in attempts]
+    if unresolved:
+        g.add("G1", False, "a primary attempt is named, resolved, and attested",
+              f"unresolved primary-attempt ref(s): {', '.join(unresolved[:3])} — the ledger has "
+              f"{len(attempts)} addressable record(s), so this reference dangles")
+        return
+
+    # A primary attempt that resolves to a held or no-signal outcome is the finding's own evidence
+    # saying the thing did not happen. That is not a blocker to argue with; it is a contradiction.
+    DEAD = {"held", "no_signal", "no-signal", "blocked", "refuted", "error", "not_run", "not-run"}
+    failures = []
+    for ref in prim:
+        record = attempts[ref]
+        kind = str(record.get("kind") or "").strip().lower().replace("-", "_")
+        outcome = str(record.get("assessment") or record.get("verdict") or "").strip().lower()
+        if kind == "negative_control":
+            failures.append(f"{ref} is kind=negative_control; a control is not a primary attempt")
+            continue
+        if not outcome:
+            failures.append(f"{ref} records no assessment/verdict")
+            continue
+        if outcome in DEAD:
+            failures.append(f"{ref} outcome is {outcome}; the primary attempt did not signal")
+
+    if failures:
+        g.add("G1", False, "a primary attempt is named, resolved, and attested",
+              "; ".join(failures[:3]))
+        return
+
+    g.add("G1", True, "a primary attempt is named, resolved, and attested",
+          f"{len(prim)} primary attempt(s) resolve to a non-control record with a signalling outcome")
 
 
 def g2_control(finding, attest, g, engagement=None):
@@ -461,7 +534,7 @@ def run_gates(pkg, engagement=None):
     finding = load_json(os.path.join(pkg, "finding.json")) or {}
     attest = load_json(os.path.join(pkg, "attest.json")) or {}
     g0_existence(pkg, g)
-    g1_real_path(finding, attest, g)
+    g1_real_path(finding, attest, g, engagement)
     g2_control(finding, attest, g, engagement)
     g3_privilege(finding, attest, g)
     g4_adjudication(pkg, engagement, g)

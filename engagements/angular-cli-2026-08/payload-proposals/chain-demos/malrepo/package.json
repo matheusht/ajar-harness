@@ -1,6 +1,0 @@
-{
-  "name": "malrepo",
-  "private": true,
-  "version": "0.0.1",
-  "dependencies": { "attacker-pkg": "^1.0.0" }
-}

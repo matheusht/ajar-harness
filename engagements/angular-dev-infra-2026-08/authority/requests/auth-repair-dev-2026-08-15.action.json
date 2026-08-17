@@ -1,1 +1,0 @@
-{"action_kind":"repair-ledger-tail","executor_id":"local-uid-501:broker","lane_id":"repair-lane","ledger":"event","operator_id":"matheusht","reason":"Quarantine broker-error ledger tail (marker at legacy/tail-repair.pending.json)","recorded_at":"2026-08-15T14:49:28Z","session_id":"session-posix-501-55176"}

@@ -1,6 +1,0 @@
-{
-  "name": "goodrepo",
-  "private": true,
-  "version": "0.0.1",
-  "dependencies": { "good-pkg": "^1.0.0" }
-}

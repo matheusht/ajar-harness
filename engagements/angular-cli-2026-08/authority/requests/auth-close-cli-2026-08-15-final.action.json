@@ -1,8 +1,0 @@
-{
- "action_kind": "close",
- "engagement_id": "angular-cli-2026-08",
- "lane_id": "close-lane",
- "operator_id": "matheusht",
- "reason": "Close angular-cli-2026-08 after 7 promoted findings (M3, D2, W1, M2, D1, D3, E1-C1), 5 chain verdicts, VRP filing prep complete, winners/losers recorded, cleanup ledger final.",
- "recorded_at": "2026-08-16T02:05:10Z"
-}

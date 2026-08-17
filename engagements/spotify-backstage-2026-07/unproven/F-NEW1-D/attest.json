@@ -1,3 +1,0 @@
-{
- "_note": "Only attestations the evidence supports. real-path-exec and negative-control are ABSENT on purpose: the PoCs construct post-bypass state rather than running from an attacker position, so neither can be attested honestly today."
-}

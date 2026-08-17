@@ -1,1 +1,0 @@
-globalThis.MARKER_EVIL = 'PWNED-FROM-SIBLING';

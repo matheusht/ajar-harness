@@ -334,7 +334,13 @@ have — every internal audit shares the priors of the thing it measures.
 
 The roadmap assumed the binding constraint was tooling. Two audits say otherwise.
 
-1. **The gates have blocked ZERO promotions out of twelve.** They have never had to say no. That is
+1. **The gates have blocked ZERO promotions out of twelve.** **SUPERSEDED 2026-08-21** by
+   `docs/engineering/004-gate-block-audit.md`: `exodus-2026-08` produced 19 packages whose
+   blocks were never iterated away, giving 87 real blocks. 85% are paperwork (an absent
+   record); 15% are substance (a declared negative). Across the 4 packages that had a fair
+   chance, substance blocks land only on **G3 (execution position) and G6 (state
+   provenance)**. N=4 supports no rate, but the gates have now said no on merit.
+   Original text follows. They have never had to say no. That is
    consistent with a well-calibrated stack and with an untested one, and no current data separates
    them. Gate count is not a target; a gate that has never blocked is unproven.
 2. **The ceiling is AUTHORIZATION, not rigor.** The Supply-Chain top band ($31,337) requires

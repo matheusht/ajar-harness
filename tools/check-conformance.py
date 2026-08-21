@@ -32,6 +32,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 
 from engagement_records import (
@@ -722,6 +723,52 @@ def check_ideation_mapper():
            f"{len(bad)} misclassified")
 
 
+def check_kb_entries():
+    """Phase 8 / Workstream B. Every KB entry obeys the four rules and carries a live ablation proof.
+
+    B.3 is the load-bearing one: an entry that changes no routing decision is noise. This re-runs
+    the gate rather than trusting the `ablation_fixture` field the entry wrote about itself --
+    self-attestation is not evidence, and this is the same lesson the promotion gates learned.
+    """
+    print("\n[kb] cross-engagement entries obey the four rules and still change a decision")
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import kb as kbmod
+    except Exception as exc:
+        record(False, "kb: module is importable", str(exc))
+        return
+    entries = kbmod.load_kb()
+    ids = [e.get("id") for e in entries]
+    record(len(ids) == len(set(ids)), "kb: entry ids are unique (append-only)")
+    for e in entries:
+        eid = e.get("id", "<no id>")
+        record(not kbmod.validate(e), f"kb/{eid}: schema and the four rules",
+               "; ".join(kbmod.validate(e))[:200])
+        fx_rel = e.get("ablation_fixture")
+        if not fx_rel:
+            record(False, f"kb/{eid}: carries an ablation fixture",
+                   "B.3: a promoted entry must prove it changes a routing decision")
+            continue
+        fx_path = os.path.join(ROOT, fx_rel)
+        if not os.path.isfile(fx_path):
+            record(False, f"kb/{eid}: ablation fixture exists", fx_rel)
+            continue
+        with open(fx_path) as fh:
+            fx = json.load(fh)
+        changed, detail = kbmod.ablate(e, fx, entries)
+        record(changed, f"kb/{eid}: still changes a routing decision",
+               f"{detail['without']} == {detail['with']}")
+        rows = kbmod.route(fx["base"], fx["context"], entries)
+        record({r["route"] for r in rows} == {r["route"] for r in fx["base"]},
+               f"kb/{eid}: routing removed no route (D-09, rule 4)")
+    rc = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "kb.py"), "--self-test"],
+                        capture_output=True, text=True)
+    record(rc.returncode == 0, "kb: tool self-test", rc.stdout[-300:])
+    rc2 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "q02_compare.py"), "--self-test"],
+                         capture_output=True, text=True)
+    record(rc2.returncode == 0, "q02: prompt-ablation adjudicator self-test", rc2.stdout[-300:])
+
+
 def check_ablation_fixtures():
     """Every promoted lesson must demonstrate a changed verdict.
 
@@ -1326,6 +1373,7 @@ def main():
     check_cited_fixtures()
     check_ideation_mapper()
     check_ablation_fixtures()
+    check_kb_entries()
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()

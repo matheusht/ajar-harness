@@ -1,0 +1,8 @@
+{
+  "context": {"target": "unrelated-wallet-sdk", "framework": "node", "language": "javascript"},
+  "base": [
+    {"route": "secret-in-crash-report", "family": "redaction", "priority": 5},
+    {"route": "traversal-to-keystore",  "family": "traversal",  "priority": 5},
+    {"route": "dep-confusion",          "family": "supply-chain", "priority": 4}
+  ]
+}

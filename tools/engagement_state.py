@@ -1523,12 +1523,13 @@ def append_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool 
 
 
 def _append_kernel_event_idempotent(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
-    existing = next((event for event in read_ledger(engagement, "event") if event["event_id"] == proposal["event_id"]), None)
-    if existing is not None:
-        strip_chain = lambda value: {key: item for key, item in value.items() if key not in {"sequence", "previous_hash", "record_hash"}}
-        if canonical_json_bytes(strip_chain(existing)) != canonical_json_bytes(strip_chain(proposal)): raise RecordError("event_id_collision", proposal["event_id"])
-        return existing
-    return _append_kernel_event(engagement, proposal, lock_held=lock_held)
+    with (nullcontext() if lock_held else engagement_lock(engagement)):
+        existing = next((event for event in read_ledger(engagement, "event") if event["event_id"] == proposal["event_id"]), None)
+        if existing is not None:
+            strip_chain = lambda value: {key: item for key, item in value.items() if key not in {"sequence", "previous_hash", "record_hash"}}
+            if canonical_json_bytes(strip_chain(existing)) != canonical_json_bytes(strip_chain(proposal)): raise RecordError("event_id_collision", proposal["event_id"])
+            return existing
+        return _append_kernel_event(engagement, proposal, lock_held=True)
 
 
 def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:

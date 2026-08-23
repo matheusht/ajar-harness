@@ -723,6 +723,38 @@ def check_ideation_mapper():
            f"{len(bad)} misclassified")
 
 
+def check_kernel_precondition():
+    """GK must block a kernel-less engagement, and preflight must refuse before work starts.
+
+    A gate that has never said no is unproven (`docs/decisions/0011`), so this asserts BOTH
+    directions rather than only the happy path.
+    """
+    print("\n[kernel] GK blocks a kernel-less engagement; preflight refuses at Round 0")
+    import tempfile, shutil
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import finding_lifecycle as fl
+    except Exception as exc:
+        record(False, "kernel: finding_lifecycle importable", str(exc))
+        return
+    src = os.path.join(ROOT, "fixtures", "lifecycle-corpus")
+    with tempfile.TemporaryDirectory(prefix="kernel-precondition-") as tmp:
+        eng = os.path.join(tmp, "eng")
+        shutil.copytree(src, eng)
+        os.remove(os.path.join(eng, "events.jsonl"))          # a run that never started its kernel
+        ok, _ = fl.kernel_state(eng)
+        record(ok is False, "kernel: a missing events.jsonl is detected")
+        g, _ = fl.run_gates(os.path.join(eng, "unproven", "F-CORP"), eng)
+        blocked = [r["gate"] for r in g.rows if not r["ok"]]
+        record("GK" in blocked, "kernel: GK blocks when the kernel never ran", str(blocked))
+        ok2, _ = fl.kernel_state(src)
+        record(ok2 is True, "kernel: an initialized engagement passes")
+        g2, _ = fl.run_gates(os.path.join(src, "unproven", "F-CORP"), src)
+        blocked2 = [r["gate"] for r in g2.rows if not r["ok"]]
+        record("GK" not in blocked2, "kernel: GK does not fire on an initialized engagement",
+               str(blocked2))
+
+
 def check_kb_entries():
     """Phase 8 / Workstream B. Every KB entry obeys the four rules and carries a live ablation proof.
 
@@ -1374,6 +1406,7 @@ def main():
     check_ideation_mapper()
     check_ablation_fixtures()
     check_kb_entries()
+    check_kernel_precondition()
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()

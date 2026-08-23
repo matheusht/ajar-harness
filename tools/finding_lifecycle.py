@@ -589,10 +589,64 @@ def g6_state_provenance(attest, g, engagement=None):
     g.add("G6", True, "the impact-bearing state was reached through the real path", detail)
 
 
+# --- G-K: the record kernel must be running BEFORE the work, not after it ---------------------
+
+KERNEL_WAIVER = "HARNESS_KERNEL_WAIVER"
+
+
+def kernel_state(engagement):
+    """Return (attested, detail). A kernel that starts mid-run cannot cover the work before it.
+
+    exodus-2026-08 initialized its kernel on day 3 of a three-day run. 16 of its 19 packages could
+    never resolve an attempt reference afterwards, because the rows they would have cited were never
+    appended. The work was real -- 185 KB of evidence, controls named with file:line -- and it is
+    unpromotable. Activating late is retroactively fatal, and nothing in this tool noticed.
+
+    This is a PRECONDITION, not a gate on the finding. It says nothing about whether the claim is
+    true; it says the ledger cannot speak to it.
+    """
+    if not engagement:
+        return None, "no engagement given, so the kernel cannot be checked"
+    path = os.path.join(engagement, "events.jsonl")
+    if not os.path.isfile(path):
+        return False, "no events.jsonl: the record kernel was never initialized"
+    stamps = []
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        et = row.get("event_type") or row.get("type") or ""
+        if row.get("recorded_at"):
+            stamps.append((row["recorded_at"], et))
+    if not stamps:
+        return False, "events.jsonl is empty: the record kernel was never initialized"
+    first = min(stamps)[0]
+    return True, f"kernel active from {first}"
+
+
+def gk_kernel(engagement, g):
+    ok, detail = kernel_state(engagement)
+    if ok is None:
+        return
+    if not ok and os.environ.get(KERNEL_WAIVER):
+        g.add("GK", True, "the record kernel was running before the work",
+              f"WAIVED via {KERNEL_WAIVER}: {detail}. A waived precondition is recorded, never silent.")
+        return
+    g.add("GK", bool(ok), "the record kernel was running before the work",
+          detail if ok else detail + " -- start it BEFORE any attempt, not after. Work done before "
+          "the kernel cannot cite a ledger row, so it can never clear G1/G2. Set "
+          f"{KERNEL_WAIVER}=1 to record an explicit, visible waiver.")
+
+
 def run_gates(pkg, engagement=None):
     g = Gates()
     finding = load_json(os.path.join(pkg, "finding.json")) or {}
     attest = load_json(os.path.join(pkg, "attest.json")) or {}
+    gk_kernel(engagement, g)
     g0_existence(pkg, g)
     g1_real_path(finding, attest, g, engagement)
     g2_control(finding, attest, g, engagement)
@@ -614,6 +668,30 @@ def cmd_gates(args):
     g, _ = run_gates(args.package, getattr(args, "engagement", None))
     report(args, g, args.package, moved=None)
     return 1 if g.blocked else 0
+
+
+def cmd_preflight(args):
+    """Round-0 check: refuse to start work before the record kernel is running.
+
+    GK catches a kernel-less engagement at promotion time, which is far too late -- by then the
+    attempts that would have been cited are already unrecorded and unrecoverable. This is the same
+    check, run BEFORE any work, where it costs one command instead of an engagement.
+
+    Run this as the first line of Round 0, before recon, before the first attempt.
+    """
+    ok, detail = kernel_state(args.engagement)
+    if ok:
+        print(f"PREFLIGHT: OK  -- {detail}")
+        return 0
+    print(f"PREFLIGHT: REFUSED  -- {detail}")
+    print()
+    print("Start the record kernel before any attempt, recon note, or finding package:")
+    print(f"    ./.venv/bin/python tools/run-engagement.py init --engagement {args.engagement} ...")
+    print()
+    print("Work done before the kernel cannot cite a ledger row, so it can never clear G1 or G2.")
+    print("exodus-2026-08 initialized on day 3 of a three-day run and stranded 16 of 19 packages")
+    print("that way -- real work, controls named with file:line, permanently unpromotable.")
+    return 1
 
 
 def cmd_promote(args):
@@ -714,6 +792,10 @@ def report(args, g, pkg, moved, dest=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("preflight", help="Round 0 — refuse to start work before the kernel runs")
+    p.add_argument("--engagement", required=True)
+    p.set_defaults(fn=cmd_preflight)
 
     p = sub.add_parser("gates", help="run the gates without moving anything")
     p.add_argument("package")

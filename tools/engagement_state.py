@@ -60,6 +60,7 @@ EVENT_STATE_RULES = {
     "finding.revised": (set(), set()),
     "review.regrade_completed": (set(), set()),
     "review.pocinator_completed": (set(), set()),
+    "coverage.reopened": ({"coverage"}, {"coverage"}),
     "coverage.status_changed": ({"coverage"}, {"coverage"}),
     "report.generated": ({"report"}, {"report"}),
     "operator.review_recorded": ({"report"}, {"report"}),
@@ -648,6 +649,14 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
     if event_type == "review.coverage_completed":
         if event.get("actor", {}).get("role") not in ({"reviewer", "broker"} if payload.get("reviewer_id") else {"reviewer"}) or not event.get("review_refs") or payload.get("review_type") != "coverage" or payload.get("verdict") not in {"continue", "coverage_dry", "blocked"}:
             raise RecordError("coverage_review_event_invalid", event.get("event_id", "unknown"))
+    if event_type == "coverage.reopened":
+        change = by_dimension.get("coverage")
+        if event.get("actor", {}).get("role") not in {"orchestrator", "broker"} or payload.get("entity_id") != engagement_id or payload.get("status") != "active" or not isinstance(payload.get("reason"), str) or not payload["reason"].strip() or payload["reason"] != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") not in {"coverage_dry", "budget_bounded"} or change.get("current") != "active":
+            raise RecordError("coverage_reopen_invalid", event.get("event_id", "unknown"))
+    if event_type == "coverage.status_changed":
+        change = by_dimension.get("coverage")
+        if change is not None and change.get("previous") in {"coverage_dry", "budget_bounded"} and change.get("current") == "active":
+            raise RecordError("coverage_reopen_event_required", event.get("event_id", "unknown"))
     if event_type == "coverage.status_changed" and payload.get("status") == "budget_bounded":
         disposed_count = payload.get("disposed_count")
         enumerated_count = payload.get("enumerated_count")
@@ -677,6 +686,8 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         binding = ("claim", payload.get("entity_id"), payload.get("status"))
     elif event_type == "finding.revised":
         binding = None
+    elif event_type == "coverage.reopened":
+        binding = ("coverage", engagement_id, "active")
     elif event_type == "coverage.status_changed":
         binding = ("coverage", engagement_id, payload.get("status"))
     elif event_type == "report.generated":

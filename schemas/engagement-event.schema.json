@@ -79,6 +79,7 @@
         "review.regrade_completed",
         "review.pocinator_completed",
         "review.coverage_completed",
+        "coverage.reopened",
         "coverage.status_changed",
         "report.generated",
         "operator.review_recorded",
@@ -1199,6 +1200,44 @@
               "review_ref",
               "review_digest"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "coverage.reopened"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "operation_class"
+        ],
+        "properties": {
+          "operation_class": {
+            "const": "notebook"
+          },
+          "payload": {
+            "required": [
+              "entity_id",
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "active"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }

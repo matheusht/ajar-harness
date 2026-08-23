@@ -92,6 +92,7 @@
     "candidate.skipped": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["candidate"], "tier": "notebook"},
     "claim.adjudicated": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
     "cleanup.updated": {"allowed_roles": ["operator", "broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request"], "tier": "authority"},
+    "coverage.reopened": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["recorded_reason", "closed_coverage"], "tier": "notebook"},
     "coverage.status_changed": {"allowed_roles": ["orchestrator", "reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["coverage_review_or_budget_counts"], "tier": "notebook"},
     "engagement.blocked": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["blocker"], "tier": "notebook"},
     "engagement.closed": {"allowed_roles": ["broker"], "blocking_scope": "global", "required_evidence": ["approved_authority_request", "closure_gates"], "tier": "authority"},

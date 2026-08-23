@@ -28,6 +28,7 @@
     "export-telemetry": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "generate-report": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "filed_finding_revision"], "tier": "authority"},
     "init": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope", "fresh_operator_console"], "tier": "authority"},
+    "ledger-health": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "migrate": {
       "allowed_roles": ["migration", "operator", "broker"],
       "blocking_scope": "variant_dispatch",

@@ -72,6 +72,7 @@ from engagement_state import (
 from engagement_views import assert_views_current, render_views, write_views
 from environment_preflight import collect_preflight as collect_agent_preflight, _collect_legacy_preflight, review_preflight
 from finding_review import claim_tuple_hash, render_claim_proof
+from ledger_health import probe_ledger_health
 from memory_disposition import _validate_promotable_abstraction, close_engagement, record_memory_disposition
 from reporting import accept_report, generate_report, record_submission
 from research_telemetry import export_telemetry, score_telemetry
@@ -883,6 +884,11 @@ def command_reduce(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_ledger_health(args: argparse.Namespace) -> int:
+    emit(probe_ledger_health(args.engagement))
+    return 0
+
+
 def command_render(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute()
     with engagement_lock(engagement):
@@ -1217,6 +1223,29 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         init_challenge={"schema_version":1,"namespace":"llm-redteam-harness-operator-v1","engagement_id":engagement.name,"scope_hash":sha256_file(engagement/"scope.md"),"ledger_hash":None,"operation":"initialize-engagement:2026-07-10T00:00:00Z","operator_id":"operator-selftest"};init_challenge_path=root/"init-challenge.json";init_challenge_path.write_bytes(canonical_json_bytes(init_challenge));subprocess.run(["/usr/bin/ssh-keygen","-Y","sign","-f",str(reviewer_key),"-n","llm-redteam-harness-operator-v1",str(init_challenge_path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);signed_env={**os.environ,"HARNESS_OPERATOR_SIGNATURE_FILE":str(init_challenge_path)+".sig","HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE":str(allowed_signers_path)};signed_init=subprocess.run([sys.executable,str(Path(__file__).resolve()),"init","--engagement",str(engagement),"--recorded-at","2026-07-10T00:00:00Z"],env=signed_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False);checks.append(("public init accepts an exact scoped operator signature",signed_init.returncode==0,signed_init.stdout+signed_init.stderr))
         snapshot = initialize_engagement(engagement, "2026-07-10T00:00:00Z")
         checks.append(("signed-scope init creates one attested event", snapshot["event_count"] == 1 and read_ledger(engagement, "event")[0]["event_type"] == "scope.attested", str(snapshot)))
+        healthy_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "ledger-health", "--engagement", str(engagement)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try: healthy_status = json.loads(healthy_cli.stdout)
+        except json.JSONDecodeError: healthy_status = {}
+        checks.append(("public ledger health reports a reducible engagement as healthy", healthy_cli.returncode == 0 and healthy_status.get("status") == "healthy" and healthy_status.get("reducible") is True and healthy_status.get("error") is None, healthy_cli.stdout + healthy_cli.stderr))
+        invalid_health = root / "invalid-health"; invalid_health.mkdir(); invalid_health.joinpath("scope.md").write_text(scope.replace("self-test", "invalid-health"), encoding="utf-8"); initialize_engagement(invalid_health, "2026-07-10T00:00:01Z")
+        sensitive_marker = "health-probe-redaction-" + "x" * 32; invalid_event = copy.deepcopy(read_ledger(invalid_health, "event")[0]); invalid_event["event_type"] = sensitive_marker; invalid_event["record_hash"] = compute_record_hash(invalid_event); (invalid_health / "events.jsonl").write_bytes(canonical_json_bytes(invalid_event))
+        invalid_bytes = (invalid_health / "events.jsonl").read_bytes(); raw_read_code = None; raw_reduce_code = None; raw_append_code = None
+        try: read_ledger(invalid_health, "event")
+        except RecordError as exc: raw_read_code = exc.code
+        try: reduce_engagement(invalid_health)
+        except RecordError as exc: raw_reduce_code = exc.code
+        invalid_proposal = base_event(event_id="event-health-invalid-append", engagement_id=invalid_health.name, recorded_at="2026-07-10T00:00:02Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="observation.recorded", rationale="Prove the existing append refusal remains unchanged.", payload={"entity_id": "invalid-health", "entity_type": "ledger_health_control", "status": "invalid", "reason": "The invalid ledger must refuse mutation."}, session_id="session-health-invalid", operation_class="notebook")
+        try: append_event(invalid_health, invalid_proposal)
+        except RecordError as exc: raw_append_code = exc.code
+        invalid_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "ledger-health", "--engagement", str(invalid_health)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try: invalid_status = json.loads(invalid_cli.stdout)
+        except json.JSONDecodeError: invalid_status = {}
+        checks.append(("public ledger health reports an invalid ledger as sanitized status without raising", invalid_cli.returncode == 0 and invalid_status.get("status") == "invalid" and invalid_status.get("reducible") is False and invalid_status.get("error", {}).get("code") == raw_reduce_code and invalid_status.get("error", {}).get("details") == [] and sensitive_marker not in (invalid_cli.stdout + invalid_cli.stderr), invalid_cli.stdout + invalid_cli.stderr))
+        checks.append(("raw read, reduce, and append paths still refuse the invalid ledger unchanged", raw_read_code == "ledger_schema_invalid" and raw_reduce_code == raw_read_code and raw_append_code == raw_read_code and (invalid_health / "events.jsonl").read_bytes() == invalid_bytes, f"read={raw_read_code} reduce={raw_reduce_code} append={raw_append_code}"))
+        unreadable_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "ledger-health", "--engagement", str(root / "missing-health")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try: unreadable_status = json.loads(unreadable_cli.stdout)
+        except json.JSONDecodeError: unreadable_status = {}
+        checks.append(("public ledger health distinguishes an unreadable engagement from an invalid ledger", unreadable_cli.returncode == 0 and unreadable_status.get("status") == "unreadable" and unreadable_status.get("reducible") is False and unreadable_status.get("error", {}).get("code") == "ledger_unreadable", unreadable_cli.stdout + unreadable_cli.stderr))
         signature_events=read_ledger(engagement,"event");signature_challenge={"schema_version":1,"namespace":"llm-redteam-harness-operator-v1","engagement_id":engagement.name,"scope_hash":snapshot["scope_hash"],"ledger_hash":signature_events[-1]["record_hash"],"operation":"selftest-signed-operation","operator_id":"operator-selftest"};challenge_path=root/"operator-challenge.json";challenge_path.write_bytes(canonical_json_bytes(signature_challenge));subprocess.run(["/usr/bin/ssh-keygen","-Y","sign","-f",str(reviewer_key),"-n","llm-redteam-harness-operator-v1",str(challenge_path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);prior_signature=os.environ.get("HARNESS_OPERATOR_SIGNATURE_FILE");prior_signers=os.environ.get("HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE");os.environ["HARNESS_OPERATOR_SIGNATURE_FILE"]=str(challenge_path)+".sig";os.environ["HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE"]=str(allowed_signers_path);signed_gate_passed=True
         try:
             _require_operator_console(engagement,"operator-selftest","selftest-signed-operation");swapped_blocked=False
@@ -2126,6 +2155,8 @@ def parser() -> argparse.ArgumentParser:
     init = subcommands.add_parser("init", help="bind a signed scope and initialize the append-only record kernel")
     init.add_argument("--engagement", type=Path, required=True)
     init.add_argument("--recorded-at", help="explicit timestamp for deterministic replay/tests")
+    ledger_health = subcommands.add_parser("ledger-health", help="report whether an engagement ledger is reducible without changing it")
+    ledger_health.add_argument("--engagement", type=Path, required=True)
     for name in ("append-event", "append-attempt"):
         command = subcommands.add_parser(name, help=f"trusted {name} operation")
         command.add_argument("--engagement", type=Path, required=True)
@@ -2236,6 +2267,7 @@ def main() -> int:
             "validate": command_validate,
             "runtime-identity": command_runtime_identity,
             "init": command_init,
+            "ledger-health": command_ledger_health,
             "append-event": command_append_event,
             "append-attempt": command_append_attempt,
             "classify-artifact": command_classify_artifact,

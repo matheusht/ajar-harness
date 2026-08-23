@@ -841,6 +841,12 @@ def check_kb_entries():
     rc2 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "q02_compare.py"), "--self-test"],
                          capture_output=True, text=True)
     record(rc2.returncode == 0, "q02: prompt-ablation adjudicator self-test", rc2.stdout[-300:])
+    rc3 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "transcript_distill.py"),
+                          "--self-test"], capture_output=True, text=True)
+    record(rc3.returncode == 0, "distill: transcript distiller self-test", rc3.stdout[-300:])
+    rc4 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "overlay_pins.py"), "check"],
+                         capture_output=True, text=True)
+    record(rc4.returncode == 0, "overlay: pin check exits clean", rc4.stdout[-200:])
 
 
 def check_ablation_fixtures():

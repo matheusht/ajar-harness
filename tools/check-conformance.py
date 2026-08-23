@@ -727,6 +727,44 @@ def check_ideation_mapper():
            f"{len(bad)} misclassified")
 
 
+def check_overlay_pins():
+    """A preregistration's safety-overlay pins must match the files, or the drift must be visible.
+
+    D-03 (`docs/engineering/002-decisions.md`) says a change to AGENTS.md's bytes invalidates a
+    frozen preregistration record, and added check_doctrine_mirror() for the CLAUDE/AGENTS pair.
+    Nothing was ever added for the pins. On 2026-08-23 all four overlay files had drifted and no
+    check noticed -- a pin with no enforcement is an instrument that returns a pass because it
+    never ran.
+
+    Drift on an AUTHORIZED record fails. Drift on a draft is reported as stale, not failed, because
+    doctrine legitimately moves before a study is authorized.
+    """
+    print("\n[overlay] preregistration safety-overlay pins track the files they pin")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import overlay_pins
+    except Exception as exc:
+        record(False, "overlay: module is importable", str(exc))
+        return
+    irregular = 0
+    for prereg in overlay_pins.find_preregs():
+        doc, rows = overlay_pins.inspect(prereg)
+        if not rows:
+            continue
+        rel = os.path.relpath(prereg, ROOT)
+        authorized = bool(doc.get("execution_authorized"))
+        bad = [r for r in rows if r["state"] != "ok"]
+        if authorized:
+            record(not bad, f"overlay/{rel}: authorized record's pins are intact",
+                   f"{[r['path'] for r in bad]} drifted -- D-03 invalidates this record")
+        else:
+            record(True, f"overlay/{rel}: draft record, {len(bad)} stale pin(s) reported",
+                   "")
+            irregular += len(bad)
+    record(irregular == 0, "overlay: no stale pins outstanding",
+           f"{irregular} stale -- refresh with tools/overlay_pins.py repin --apply")
+
+
 def check_kernel_precondition():
     """GK must block a kernel-less engagement, and preflight must refuse before work starts.
 
@@ -1611,6 +1649,7 @@ def main():
     check_ablation_fixtures()
     check_kb_entries()
     check_kernel_precondition()
+    check_overlay_pins()
     check_finding_traps()
     check_intervention_corpus()
     check_adjudication_audit()

@@ -159,6 +159,12 @@ def _require_local_provenance(role: str, actor_id: str, session_id: str) -> None
         raise RecordError("runtime_provenance_not_principal_bound", role)
 
 
+def _require_local_orchestrator_provenance(actor_id: str, session_id: str) -> None:
+    expected_actor, expected_session = _local_identity("orchestrator")
+    if actor_id != expected_actor or session_id != expected_session:
+        raise RecordError("runtime_provenance_not_principal_bound", "orchestrator")
+
+
 def _require_local_session(session_id: str) -> None:
     if session_id != _local_identity("operator")[1]:
         raise RecordError("runtime_session_not_process_bound", "operator")
@@ -260,7 +266,7 @@ def command_append_event(args: argparse.Namespace) -> int:
     actor = proposal.get("actor", {})
     if capability["tier"] != "notebook":
         raise RecordError("canonical_authority_command_required", proposal.get("event_type", "unknown"))
-    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested"}:
+    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "coverage.reopened"}:
         raise RecordError("canonical_notebook_command_required", proposal.get("event_type", "unknown"))
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-event:{proposal.get('event_type','event')}:{proposal.get('event_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
     if proposal.get("operation_class") != capability["tier"]:
@@ -623,6 +629,57 @@ def command_reopen(args: argparse.Namespace) -> int:
     action = _authority_action("reopen", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, operator_id=args.operator_id, recorded_at=args.recorded_at, reason=args.reason); _require_async_authority(args, action, args.recorded_at)
     payload = {"entity_id": state["engagement_id"], "status": "active", "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id, "executor_id": args.executor_id}; changes = [{"dimension": dimension, "entity_id": state["engagement_id"], "previous": current[dimension], "current": "active"} for dimension in ("engagement", "coverage")]
     event = base_event(event_id=f"event-reopen-{args.authority_request_id}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="engagement.reopened", rationale=args.reason, payload=payload, state_changes=changes, session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(engagement, event); emit({"valid": True, "event_id": applied["event_id"]}); return 0
+
+
+def command_reopen_coverage(args: argparse.Namespace) -> int:
+    capability = classify_command("reopen-coverage")
+    require_actor(capability, "orchestrator")
+    engagement = args.engagement.absolute()
+    _require_decision6_kernel(engagement)
+    _require_local_orchestrator_provenance(args.actor_id, args.session_id)
+    if not args.reason.strip():
+        raise RecordError("coverage_reopen_reason_required", "reason must be nonblank")
+
+    state = reduce_engagement(engagement)
+    event_identity = {
+        "engagement_id": state["engagement_id"],
+        "recorded_at": args.recorded_at,
+        "actor_id": args.actor_id,
+        "session_id": args.session_id,
+        "reason": args.reason,
+    }
+    event_id = f"event-coverage-reopen-{sha256_bytes(canonical_json_bytes(event_identity))[-12:]}"
+    existing = next((event for event in read_ledger(engagement, "event") if event["event_id"] == event_id), None)
+    if existing is None:
+        previous = state["coverage"]
+        if previous not in {"coverage_dry", "budget_bounded"}:
+            raise RecordError("coverage_reopen_not_applicable", str(previous))
+    else:
+        matching_changes = [
+            change
+            for change in existing.get("state_changes", [])
+            if change.get("dimension") == "coverage" and change.get("entity_id") == state["engagement_id"]
+        ]
+        if len(matching_changes) != 1 or matching_changes[0].get("previous") not in {"coverage_dry", "budget_bounded"}:
+            raise RecordError("event_id_collision", event_id)
+        previous = matching_changes[0]["previous"]
+
+    event = base_event(
+        event_id=event_id,
+        engagement_id=state["engagement_id"],
+        recorded_at=args.recorded_at,
+        actor_role="orchestrator",
+        actor_id=args.actor_id,
+        event_type="coverage.reopened",
+        rationale=args.reason,
+        payload={"entity_id": state["engagement_id"], "status": "active", "reason": args.reason},
+        state_changes=[{"dimension": "coverage", "entity_id": state["engagement_id"], "previous": previous, "current": "active"}],
+        session_id=args.session_id,
+        operation_class=str(capability["tier"]),
+    )
+    applied = _append_kernel_event_idempotent(engagement, event)
+    emit({"valid": True, "event_id": applied["event_id"], "coverage": reduce_engagement(engagement)["coverage"]})
+    return 0
 
 
 def command_request_authority(args: argparse.Namespace) -> int:
@@ -1358,23 +1415,30 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         active_budget = root / "budget-active"; active_budget.mkdir(); active_budget.joinpath("scope.md").write_text(scope.replace("self-test", "budget-active"), encoding="utf-8"); initialize_engagement(active_budget, "2026-07-10T00:02:00Z"); active_event = json.loads(json.dumps(budget_event)); active_event["event_id"] = "event-budget-from-active"; active_event["engagement_id"] = active_budget.name; active_event["payload"].update({"entity_id": active_budget.name, "disposed_count": 0, "enumerated_count": 1}); active_event["state_changes"] = [{"dimension": "coverage", "entity_id": active_budget.name, "previous": "active", "current": "budget_bounded"}]; active_path = root / "budget-from-active.json"; active_path.write_bytes(canonical_json_bytes(active_event)); active_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(active_budget), "--file", str(active_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         checks.append(("active coverage can end budget-bounded", active_cli.returncode == 0 and reduce_engagement(active_budget)["coverage_counts"] == {"disposed_count": 0, "enumerated_count": 1}, active_cli.stdout + active_cli.stderr))
 
-        orchestrator_reopenable = root / "budget-orchestrator-reopen"; shutil.copytree(budget_bounded, orchestrator_reopenable)
-        orchestrator_reopen = base_event(event_id="event-coverage-reopened-orchestrator", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:02Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.reopened", rationale="A materially distinct bounded branch remains to be tested.", payload={"entity_id": engagement.name, "status": "active", "reason": "A materially distinct bounded branch remains to be tested."}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "budget_bounded", "current": "active"}], session_id="session-orchestrator-selftest", operation_class="notebook")
-        orchestrator_reopen_ok = True
-        try: append_event(orchestrator_reopenable, orchestrator_reopen)
-        except RecordError: orchestrator_reopen_ok = False
-        orchestrator_reopened_state = reduce_engagement(orchestrator_reopenable)
-        checks.append(("orchestrator notebook event reopens budget-bounded coverage without authority and clears its counts", orchestrator_reopen_ok and orchestrator_reopened_state["coverage"] == "active" and orchestrator_reopened_state["coverage_counts"] is None and not orchestrator_reopened_state["authority_requests"], str(orchestrator_reopened_state)))
+        identity_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "runtime-identity", "--role", "orchestrator"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try: orchestrator_identity = json.loads(identity_cli.stdout)
+        except json.JSONDecodeError: orchestrator_identity = {"actor_id": "unavailable", "session_id": "unavailable"}
+        orchestrator_id, orchestrator_session = orchestrator_identity["actor_id"], orchestrator_identity["session_id"]
+        forged_orchestrator_reopenable = root / "budget-forged-orchestrator-reopen"; shutil.copytree(budget_bounded, forged_orchestrator_reopenable)
+        forged_orchestrator_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(forged_orchestrator_reopenable), "--recorded-at", "2026-07-10T00:02:02Z", "--reason", "A forged identity must not reopen coverage.", "--actor-id", "orchestrator-selftest", "--session-id", orchestrator_session], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        checks.append(("public coverage reopen requires a process-bound orchestrator identity", forged_orchestrator_cli.returncode != 0 and reduce_engagement(forged_orchestrator_reopenable)["coverage"] == "budget_bounded", forged_orchestrator_cli.stdout + forged_orchestrator_cli.stderr))
+        orchestrator_reopenable = root / "budget-orchestrator-reopen"; shutil.copytree(budget_bounded, orchestrator_reopenable); before_reopen_events = len(read_ledger(orchestrator_reopenable, "event"))
+        reopen_command = [sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(orchestrator_reopenable), "--recorded-at", "2026-07-10T00:02:02Z", "--reason", "A materially distinct bounded branch remains to be tested.", "--actor-id", orchestrator_id, "--session-id", orchestrator_session]
+        orchestrator_reopen_cli = subprocess.run(reopen_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False); orchestrator_reopen_retry = subprocess.run(reopen_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        active_reopen_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(orchestrator_reopenable), "--recorded-at", "2026-07-10T00:02:03Z", "--reason", "Active coverage is not a terminal state.", "--actor-id", orchestrator_id, "--session-id", orchestrator_session], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        orchestrator_reopened_state = reduce_engagement(orchestrator_reopenable); orchestrator_reopened_event = read_ledger(orchestrator_reopenable, "event")[-1]
+        try: reopen_result, retry_result = json.loads(orchestrator_reopen_cli.stdout), json.loads(orchestrator_reopen_retry.stdout)
+        except json.JSONDecodeError: reopen_result = retry_result = {}
+        expected_orchestrator = {"role": "orchestrator", "id": orchestrator_id}
+        checks.append(("public orchestrator command reopens only terminal budget-bounded coverage with exact identity and idempotence", identity_cli.returncode == 0 and orchestrator_reopen_cli.returncode == 0 and orchestrator_reopen_retry.returncode == 0 and active_reopen_cli.returncode != 0 and orchestrator_reopened_state["coverage"] == "active" and orchestrator_reopened_state["coverage_counts"] is None and not orchestrator_reopened_state["authority_requests"] and len(read_ledger(orchestrator_reopenable, "event")) == before_reopen_events + 1 and reopen_result.get("event_id") == retry_result.get("event_id") == orchestrator_reopened_event["event_id"] and orchestrator_reopened_event["event_type"] == "coverage.reopened" and orchestrator_reopened_event["actor"] == expected_orchestrator and orchestrator_reopened_event["provenance"]["actor"] == expected_orchestrator and orchestrator_reopened_event["provenance"]["session_id"] == orchestrator_session and orchestrator_reopened_event["payload"]["reason"] == "A materially distinct bounded branch remains to be tested.", orchestrator_reopen_cli.stdout + orchestrator_reopen_cli.stderr + orchestrator_reopen_retry.stdout + orchestrator_reopen_retry.stderr + active_reopen_cli.stdout + active_reopen_cli.stderr))
 
         broker_reopenable = root / "budget-broker-reopen"; shutil.copytree(budget_bounded, broker_reopenable)
-        broker_reopen = json.loads(json.dumps(orchestrator_reopen)); broker_reopen.update({"event_id": "event-coverage-reopened-broker", "actor": {"role": "broker", "id": budget_broker_id}}); broker_reopen["provenance"].update({"actor": broker_reopen["actor"], "session_id": budget_broker_session})
+        broker_reopen = base_event(event_id="event-coverage-reopened-broker", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:02Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.reopened", rationale="A broker must not obscure who reopened coverage.", payload={"entity_id": engagement.name, "status": "active", "reason": "A broker must not obscure who reopened coverage."}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "budget_bounded", "current": "active"}], session_id=budget_broker_session, operation_class="notebook")
         broker_reopen_path = root / "budget-broker-reopen.json"; broker_reopen_path.write_bytes(canonical_json_bytes(broker_reopen)); broker_reopen_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(broker_reopenable), "--file", str(broker_reopen_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        broker_reopened_state = reduce_engagement(broker_reopenable); broker_reopened_event = read_ledger(broker_reopenable, "event")[-1]
-        checks.append(("public notebook append records who reopened coverage and why", broker_reopen_cli.returncode == 0 and broker_reopened_state["coverage"] == "active" and broker_reopened_event["event_type"] == "coverage.reopened" and broker_reopened_event["actor"] == broker_reopen["actor"] and broker_reopened_event["payload"]["reason"] == broker_reopen["payload"]["reason"], broker_reopen_cli.stdout + broker_reopen_cli.stderr))
+        checks.append(("generic broker append cannot obscure the orchestrator coverage-reopen actor", broker_reopen_cli.returncode != 0 and reduce_engagement(broker_reopenable)["coverage"] == "budget_bounded", broker_reopen_cli.stdout + broker_reopen_cli.stderr))
 
         missing_reopen_reason = root / "budget-reopen-missing-reason"; shutil.copytree(budget_bounded, missing_reopen_reason)
-        no_reason_event = json.loads(json.dumps(broker_reopen)); no_reason_event["event_id"] = "event-coverage-reopened-without-reason"; no_reason_event["payload"].pop("reason")
-        no_reason_path = root / "budget-reopen-missing-reason.json"; no_reason_path.write_bytes(canonical_json_bytes(no_reason_event)); no_reason_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(missing_reopen_reason), "--file", str(no_reason_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        no_reason_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(missing_reopen_reason), "--recorded-at", "2026-07-10T00:02:02Z", "--reason", "", "--actor-id", orchestrator_id, "--session-id", orchestrator_session], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         no_reason_state = reduce_engagement(missing_reopen_reason)
         checks.append(("coverage reopen is refused without a recorded reason", no_reason_cli.returncode != 0 and no_reason_state["coverage"] == "budget_bounded" and no_reason_state["coverage_counts"] == {"disposed_count": 3, "enumerated_count": 5}, no_reason_cli.stdout + no_reason_cli.stderr))
 
@@ -1532,9 +1596,9 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         negative_state = reduce_engagement(supported_negative)
         checks.append(("well-supported negative reaches cold-reviewed coverage_dry without a finding", negative_state["coverage"] == "coverage_dry" and negative_state["hypotheses"]["hypothesis-h1"]["status"] == "exhausted" and negative_state["findings"] == {}, str(negative_state)))
         dry_reopenable = root / "coverage-dry-orchestrator-reopen"; shutil.copytree(supported_negative, dry_reopenable)
-        dry_reopen = base_event(event_id="event-coverage-dry-reopened-orchestrator", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:18.250000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.reopened", rationale="Cold review omitted a materially distinct bounded branch.", payload={"entity_id": engagement.name, "status": "active", "reason": "Cold review omitted a materially distinct bounded branch."}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "coverage_dry", "current": "active"}], session_id="session-orchestrator-selftest", operation_class="notebook"); append_event(dry_reopenable, dry_reopen)
+        dry_reopen_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(dry_reopenable), "--recorded-at", "2026-07-10T00:15:18.250000Z", "--reason", "Cold review omitted a materially distinct bounded branch.", "--actor-id", orchestrator_id, "--session-id", orchestrator_session], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         dry_reopened_state = reduce_engagement(dry_reopenable)
-        checks.append(("orchestrator notebook event reopens coverage_dry without changing claim or search state", dry_reopened_state["coverage"] == "active" and dry_reopened_state["hypotheses"] == negative_state["hypotheses"] and dry_reopened_state["findings"] == negative_state["findings"], str(dry_reopened_state)))
+        checks.append(("public orchestrator command reopens coverage_dry without changing claim or search state", dry_reopen_cli.returncode == 0 and dry_reopened_state["coverage"] == "active" and dry_reopened_state["hypotheses"] == negative_state["hypotheses"] and dry_reopened_state["findings"] == negative_state["findings"], dry_reopen_cli.stdout + dry_reopen_cli.stderr))
         late_payload = json.loads(json.dumps(hypothesis["payload"])); late_payload["hypothesis_id"] = "hypothesis-after-dry"
         late_hypothesis = base_event(event_id="event-hypothesis-after-dry", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:18.500000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Must explicitly reopen coverage before introducing new search material.", payload=late_payload, entity_refs=["candidate-c1"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-after-dry", "previous": None, "current": "queued"}])
         late_hypothesis_blocked = False
@@ -2049,7 +2113,7 @@ def parser() -> argparse.ArgumentParser:
     validate.add_argument("--output", type=Path)
 
     identity = subcommands.add_parser("runtime-identity", help="print OS-process-bound local provenance values")
-    identity.add_argument("--role", choices=["broker", "operator"], required=True)
+    identity.add_argument("--role", choices=["broker", "operator", "orchestrator"], required=True)
 
     init = subcommands.add_parser("init", help="bind a signed scope and initialize the append-only record kernel")
     init.add_argument("--engagement", type=Path, required=True)
@@ -2058,6 +2122,12 @@ def parser() -> argparse.ArgumentParser:
         command = subcommands.add_parser(name, help=f"trusted {name} operation")
         command.add_argument("--engagement", type=Path, required=True)
         command.add_argument("--file", type=Path, required=True)
+    reopen_coverage = subcommands.add_parser("reopen-coverage", help="reopen terminal coverage for a recorded orchestrator reason")
+    reopen_coverage.add_argument("--engagement", type=Path, required=True)
+    reopen_coverage.add_argument("--recorded-at", required=True)
+    reopen_coverage.add_argument("--reason", required=True)
+    reopen_coverage.add_argument("--actor-id", required=True)
+    reopen_coverage.add_argument("--session-id", required=True)
     classify_artifact = subcommands.add_parser("classify-artifact", help="classify a planned artifact before any bytes are created")
     classify_artifact.add_argument("--engagement", type=Path, required=True)
     classify_artifact.add_argument("--metadata", type=Path, required=True)
@@ -2167,6 +2237,7 @@ def main() -> int:
             "record-cleanup": command_record_cleanup,
             "record-operator-prior": command_record_operator_prior,
             "reopen": command_reopen,
+            "reopen-coverage": command_reopen_coverage,
             "request-authority": command_request_authority,
             "resolve-authority": command_resolve_authority,
             "confirm-zone2": command_confirm_zone2,

@@ -651,7 +651,7 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
             raise RecordError("coverage_review_event_invalid", event.get("event_id", "unknown"))
     if event_type == "coverage.reopened":
         change = by_dimension.get("coverage")
-        if event.get("actor", {}).get("role") not in {"orchestrator", "broker"} or payload.get("entity_id") != engagement_id or payload.get("status") != "active" or not isinstance(payload.get("reason"), str) or not payload["reason"].strip() or payload["reason"] != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") not in {"coverage_dry", "budget_bounded"} or change.get("current") != "active":
+        if event.get("actor", {}).get("role") != "orchestrator" or payload.get("entity_id") != engagement_id or payload.get("status") != "active" or not isinstance(payload.get("reason"), str) or not payload["reason"].strip() or payload["reason"] != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") not in {"coverage_dry", "budget_bounded"} or change.get("current") != "active":
             raise RecordError("coverage_reopen_invalid", event.get("event_id", "unknown"))
     if event_type == "coverage.status_changed":
         change = by_dimension.get("coverage")

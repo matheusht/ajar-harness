@@ -683,6 +683,53 @@ def command_reopen_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_operator_queue_control(args: argparse.Namespace, *, command_name: str, status: str) -> int:
+    engagement = args.engagement.absolute()
+    _require_local_session(args.session_id)
+    if not args.reason.strip():
+        raise RecordError("operator_queue_reason_required", "reason must be nonblank")
+    previous_status = "active" if status == "parked" else "parked"
+    event_type = "operator_stop.recorded" if status == "parked" else "operator_resume.recorded"
+    capability = classify_command(command_name)
+    with engagement_lock(engagement):
+        state = reduce_engagement(engagement)
+        action = {"command": command_name, "entity_id": state["engagement_id"], "previous_status": previous_status, "reason": args.reason, "recorded_at": args.recorded_at, "session_id": args.session_id, "status": status}
+        if detect_secret_classes(canonical_json_bytes(action)):
+            raise RecordError("secret_shaped_operator_queue_reason", "operator queue-control reason contains a forbidden secret shape")
+        action_digest = sha256_bytes(canonical_json_bytes(action))
+        event_id = f"event-{command_name}-{action_digest[-12:]}"
+        event = base_event(
+            event_id=event_id,
+            engagement_id=state["engagement_id"],
+            recorded_at=args.recorded_at,
+            actor_role="operator",
+            actor_id=args.operator_id,
+            event_type=event_type,
+            rationale=args.reason,
+            payload={"entity_id": state["engagement_id"], "status": status, "reason": args.reason, "operator_id": args.operator_id},
+            state_changes=[{"dimension": "queue", "entity_id": state["engagement_id"], "previous": previous_status, "current": status}],
+            session_id=args.session_id,
+            operation_class=str(capability["tier"]),
+        )
+        existing = next((item for item in read_ledger(engagement, "event") if item["event_id"] == event_id), None)
+        if existing is None:
+            if state["queue_control"]["status"] != previous_status:
+                raise RecordError("operator_queue_control_not_applicable", f"{command_name} requires queue status {previous_status}")
+            _enforce_mutation(capability, engagement, "operator", args.operator_id, f"{command_name}:{action_digest}")
+        applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+        queue_control = reduce_engagement(engagement)["queue_control"]
+    emit({"valid": True, "event_id": applied["event_id"], "queue_control": queue_control})
+    return 0
+
+
+def command_operator_stop(args: argparse.Namespace) -> int:
+    return _command_operator_queue_control(args, command_name="operator-stop", status="parked")
+
+
+def command_operator_resume(args: argparse.Namespace) -> int:
+    return _command_operator_queue_control(args, command_name="operator-resume", status="active")
+
+
 def command_request_authority(args: argparse.Namespace) -> int:
     action = load_json(args.action_file)
     if not isinstance(action, dict) or action.get("action_kind") != args.action_kind or action.get("lane_id") != args.lane_id or detect_secret_classes(canonical_json_bytes(action)):
@@ -1421,15 +1468,53 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("reducer is byte-deterministic", canonical_json_bytes(reduced_once) == canonical_json_bytes(reduced_twice), "same ledgers reduced differently"))
         checks.append(("valid transition updates separate engagement and coverage state", reduced_once["coverage"] == "blocked" and reduced_once["active_blockers"], str(reduced_once)))
 
+        def run_signed_queue_commands(target: Path, command_name: str, previous_status: str, status: str, recorded_at: str, reason: str, *, concurrency: int = 1) -> list[subprocess.CompletedProcess[str]]:
+            session_id = _local_identity("operator")[1]
+            target_state = reduce_engagement(target); target_events = read_ledger(target, "event")
+            action = {"command": command_name, "entity_id": target_state["engagement_id"], "previous_status": previous_status, "reason": reason, "recorded_at": recorded_at, "session_id": session_id, "status": status}
+            action_digest = sha256_bytes(canonical_json_bytes(action))
+            challenge = {"schema_version": 1, "namespace": "llm-redteam-harness-operator-v1", "engagement_id": target.name, "scope_hash": target_state["scope_hash"], "ledger_hash": target_events[-1]["record_hash"], "operation": f"{command_name}:{action_digest}", "operator_id": "operator-selftest"}
+            challenge_path = root / f"{command_name}-challenge.json"; challenge_path.write_bytes(canonical_json_bytes(challenge))
+            subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-operator-v1", str(challenge_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            command_env = {**os.environ, "HARNESS_OPERATOR_SIGNATURE_FILE": str(challenge_path) + ".sig", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(allowed_signers_path)}
+            argv = [sys.executable, str(Path(__file__).resolve()), command_name, "--engagement", str(target), "--operator-id", "operator-selftest", "--session-id", session_id, "--recorded-at", recorded_at, "--reason", reason]
+            processes = [subprocess.Popen(argv, env=command_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(concurrency)]
+            results = []
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=30)
+                results.append(subprocess.CompletedProcess(argv, process.returncode, stdout, stderr))
+            return results
+
+        operator_control = root / "operator-control"; shutil.copytree(engagement, operator_control)
+        stop_reason = "Operator deliberately parks this bounded run for an external scheduling decision."
+        stop_clis = run_signed_queue_commands(operator_control, "operator-stop", "active", "parked", "2026-07-10T00:02:00.100000Z", stop_reason, concurrency=4)
+        stopped_state = reduce_engagement(operator_control); stopped_events = read_ledger(operator_control, "event"); stopped_progress = (operator_control / "progress.md").read_text(encoding="utf-8")
+        stopped_control = stopped_state.get("queue_control", {})
+        stop_detail = "".join(result.stdout + result.stderr for result in stop_clis) + str(stopped_control)
+        checks.append(("concurrent signed operator-stop retries all succeed and append one typed reason without pretending the run exhausted", all(result.returncode == 0 for result in stop_clis) and sum(event["event_type"] == "operator_stop.recorded" for event in stopped_events) == 1 and stopped_control.get("status") == "parked" and stopped_control.get("last_stop", {}).get("reason") == stop_reason and stopped_events[-1]["event_type"] == "operator_stop.recorded" and stopped_state["coverage"] == "blocked" and "Work queue: `parked`" in stopped_progress and stop_reason in stopped_progress, stop_detail))
+
+        resume_reason = "The operator's scheduling constraint is resolved."
+        resume_cli = run_signed_queue_commands(operator_control, "operator-resume", "parked", "active", "2026-07-10T00:02:00.200000Z", resume_reason)[0]
+        resumed_state = reduce_engagement(operator_control); resumed_events = read_ledger(operator_control, "event"); resumed_control = resumed_state.get("queue_control", {})
+        checks.append(("signed operator resume makes the parked queue runnable while preserving the stop/resume record", resume_cli.returncode == 0 and resumed_control.get("status") == "active" and resumed_control.get("last_stop", {}).get("reason") == stop_reason and resumed_control.get("last_resume", {}).get("reason") == resume_reason and [event["event_type"] for event in resumed_events[-2:]] == ["operator_stop.recorded", "operator_resume.recorded"] and resumed_state["coverage"] == "blocked", resume_cli.stdout + resume_cli.stderr + str(resumed_control)))
+
+        forged_control = root / "forged-operator-control"; shutil.copytree(engagement, forged_control); forged_before = (forged_control / "events.jsonl").read_bytes()
+        forged_stop = base_event(event_id="event-forged-operator-stop", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:00.100000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="operator_stop.recorded", rationale="An orchestrator cannot manufacture an operator stop.", payload={"entity_id": engagement.name, "status": "parked", "reason": "An orchestrator cannot manufacture an operator stop.", "operator_id": "operator-selftest"}, state_changes=[{"dimension": "queue", "entity_id": engagement.name, "previous": "active", "current": "parked"}], session_id="session-orchestrator-selftest", operation_class="authority")
+        forged_stop_blocked = False
+        try: append_event(forged_control, forged_stop)
+        except RecordError as exc: forged_stop_blocked = exc.code in {"actor_capability_invalid", "operator_queue_control_invalid"}
+        checks.append(("non-operator principals cannot manufacture the deliberate-stop record", forged_stop_blocked and (forged_control / "events.jsonl").read_bytes() == forged_before and reduce_engagement(forged_control)["queue_control"]["status"] == "active", "forged operator stop changed the ledger"))
+
         budget_bounded = root / "budget-bounded"; shutil.copytree(engagement, budget_bounded); budget_broker_id, budget_broker_session = _local_identity("broker")
         budget_event = base_event(event_id="event-budget-bounded", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:01Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.status_changed", rationale="The configured ceiling fired after disposing three of five enumerated work items.", payload={"entity_id": engagement.name, "status": "budget_bounded", "disposed_count": 3, "enumerated_count": 5}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "budget_bounded"}], session_id=budget_broker_session, operation_class="notebook")
         budget_proposal_path = root / "budget-bounded-event.json"; budget_proposal_path.write_bytes(canonical_json_bytes(budget_event)); budget_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(budget_bounded), "--file", str(budget_proposal_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        budget_reached = False; budget_detail = budget_cli.stdout + budget_cli.stderr
+        budget_reached = False; budget_state = None; budget_detail = budget_cli.stdout + budget_cli.stderr
         if budget_cli.returncode == 0:
             budget_state = reduce_engagement(budget_bounded); budget_progress = (budget_bounded / "progress.md").read_text(encoding="utf-8")
             budget_reached = budget_state["coverage"] == "budget_bounded" and budget_state["coverage_counts"] == {"disposed_count": 3, "enumerated_count": 5} and "Coverage: `budget_bounded`" in budget_progress and "Coverage fraction: `3/5` work items disposed (closes on visitation, not understanding)" in budget_progress
             budget_detail = str(budget_state)
         checks.append(("budget-bounded coverage records the disposed/enumerated fraction without a review", budget_reached, budget_detail))
+        checks.append(("run exhaustion does not fabricate an operator stop or park the queue", budget_state is not None and budget_state["queue_control"] == {"status": "active", "last_stop": None, "last_resume": None}, str((budget_state or {}).get("queue_control"))))
 
         missing_count_refusals = []
         for missing_field in ("disposed_count", "enumerated_count"):
@@ -2167,6 +2252,13 @@ def parser() -> argparse.ArgumentParser:
     reopen_coverage.add_argument("--reason", required=True)
     reopen_coverage.add_argument("--actor-id", required=True)
     reopen_coverage.add_argument("--session-id", required=True)
+    for name in ("operator-stop", "operator-resume"):
+        command = subcommands.add_parser(name, help=f"record an operator decision to {'park' if name == 'operator-stop' else 'resume'} the work queue")
+        command.add_argument("--engagement", type=Path, required=True)
+        command.add_argument("--operator-id", required=True)
+        command.add_argument("--session-id", required=True)
+        command.add_argument("--recorded-at", required=True)
+        command.add_argument("--reason", required=True)
     classify_artifact = subcommands.add_parser("classify-artifact", help="classify a planned artifact before any bytes are created")
     classify_artifact.add_argument("--engagement", type=Path, required=True)
     classify_artifact.add_argument("--metadata", type=Path, required=True)
@@ -2278,6 +2370,8 @@ def main() -> int:
             "record-operator-prior": command_record_operator_prior,
             "reopen": command_reopen,
             "reopen-coverage": command_reopen_coverage,
+            "operator-stop": command_operator_stop,
+            "operator-resume": command_operator_resume,
             "request-authority": command_request_authority,
             "resolve-authority": command_resolve_authority,
             "confirm-zone2": command_confirm_zone2,

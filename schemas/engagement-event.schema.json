@@ -83,6 +83,8 @@
         "coverage.status_changed",
         "report.generated",
         "operator.review_recorded",
+        "operator_stop.recorded",
+        "operator_resume.recorded",
         "submission.recorded",
         "cleanup.updated",
         "memory.disposition_recorded",
@@ -167,7 +169,8 @@
               "cleanup",
               "memory",
               "engagement",
-              "environment"
+              "environment",
+              "queue"
             ]
           },
           "entity_id": {
@@ -1280,6 +1283,91 @@
               "required": [
                 "coverage_review_ref"
               ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "operator_stop.recorded",
+              "operator_resume.recorded"
+            ]
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "operation_class"
+        ],
+        "properties": {
+          "operation_class": {
+            "const": "authority"
+          },
+          "payload": {
+            "required": [
+              "entity_id",
+              "status",
+              "reason",
+              "operator_id"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "operator_stop.recorded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "status": {
+                "const": "parked"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "operator_resume.recorded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "status": {
+                "const": "active"
+              }
             }
           }
         }

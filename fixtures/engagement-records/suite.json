@@ -2106,6 +2106,11 @@
         "operator_priors": [],
         "outstanding_reviews": [],
         "proof_reviews": {},
+        "queue_control": {
+          "last_resume": null,
+          "last_stop": null,
+          "status": "active"
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,
@@ -2230,6 +2235,16 @@
         "operator_priors": [],
         "outstanding_reviews": [],
         "proof_reviews": {},
+        "queue_control": {
+          "last_resume": null,
+          "last_stop": {
+            "event_ref": "event-operator-stop-1",
+            "operator_id": "operator-1",
+            "reason": "Operator paused this fixture deliberately.",
+            "recorded_at": "2026-07-10T00:00:00Z"
+          },
+          "status": "parked"
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,

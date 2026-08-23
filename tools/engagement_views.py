@@ -20,6 +20,15 @@ def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
     engagement_id = snapshot["engagement_id"]
     coverage_counts = snapshot.get("coverage_counts")
     coverage_fraction = (f"\n- Coverage fraction: `{coverage_counts['disposed_count']}/{coverage_counts['enumerated_count']}` work items disposed (closes on visitation, not understanding)" if coverage_counts is not None else "")
+    queue_control = snapshot["queue_control"]
+    queue_history = ""
+    if queue_control["status"] == "parked":
+        stop = queue_control["last_stop"]
+        queue_history = f"\n- Operator stop: `{stop['event_ref']}` by `{stop['operator_id']}` at `{stop['recorded_at']}` — {' '.join(stop['reason'].split())}"
+    elif queue_control["last_resume"] is not None:
+        stop = queue_control["last_stop"]
+        resume = queue_control["last_resume"]
+        queue_history = f"\n- Last operator stop: `{stop['event_ref']}` — {' '.join(stop['reason'].split())}\n- Operator resume: `{resume['event_ref']}` by `{resume['operator_id']}` at `{resume['recorded_at']}` — {' '.join(resume['reason'].split())}"
     candidate_lines = [f"- `{key}` — {value.get('status', 'unknown')}" for key, value in sorted(snapshot["candidates"].items())]
     hypothesis_lines = [f"- `{key}` — {value.get('status', 'unknown')}" for key, value in sorted(snapshot["hypotheses"].items())]
     finding_lines = [f"- `{key}` rev {value.get('revision')} — {value.get('status') or 'ungraded'}" for key, value in sorted(snapshot["findings"].items())]
@@ -29,6 +38,7 @@ def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
 - Scope: attested `{snapshot['scope_hash']}`
 - Environment: `{snapshot['active_environment_ref'] or 'not-recorded'}`
 - Coverage: `{snapshot['coverage']}`{coverage_fraction}
+- Work queue: `{queue_control['status']}`{queue_history}
 - Events: {snapshot['event_count']}
 - Attempts: {snapshot['attempt_count']}
 - Artifacts: {snapshot['artifact_count']}

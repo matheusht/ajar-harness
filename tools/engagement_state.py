@@ -46,6 +46,7 @@ STATE_VALUES = {
     "memory": {"pending", "promote", "defer", "no_novel_lesson"},
     "engagement": {"active", "blocked", "closed"},
     "environment": {"ready", "blocked", "needs_review"},
+    "queue": {"active", "parked"},
 }
 EVENT_STATE_RULES = {
     "scope.attested": ({"engagement", "coverage", "memory"}, set()),
@@ -62,6 +63,8 @@ EVENT_STATE_RULES = {
     "review.pocinator_completed": (set(), set()),
     "coverage.reopened": ({"coverage"}, {"coverage"}),
     "coverage.status_changed": ({"coverage"}, {"coverage"}),
+    "operator_stop.recorded": ({"queue"}, {"queue"}),
+    "operator_resume.recorded": ({"queue"}, {"queue"}),
     "report.generated": ({"report"}, {"report"}),
     "operator.review_recorded": ({"report"}, {"report"}),
     "submission.recorded": ({"report"}, {"report"}),
@@ -100,6 +103,7 @@ TRANSITIONS = {
     "memory": {None: {"pending", "promote", "defer", "no_novel_lesson"}, "pending": {"promote", "defer", "no_novel_lesson"}, "promote": {"defer"}, "defer": {"promote", "no_novel_lesson"}, "no_novel_lesson": {"defer", "promote"}},
     "engagement": {None: {"active"}, "active": {"blocked", "closed"}, "blocked": {"active", "closed"}, "closed": set()},
     "environment": {None: {"ready", "blocked", "needs_review"}, "needs_review": {"ready", "blocked"}, "ready": {"blocked"}, "blocked": set()},
+    "queue": {"active": {"parked"}, "parked": {"active"}},
 }
 
 
@@ -662,6 +666,13 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         enumerated_count = payload.get("enumerated_count")
         if not isinstance(disposed_count, int) or isinstance(disposed_count, bool) or not isinstance(enumerated_count, int) or isinstance(enumerated_count, bool) or enumerated_count < 1 or disposed_count < 0 or disposed_count > enumerated_count:
             raise RecordError("budget_bounded_counts_invalid", event.get("event_id", "unknown"))
+    if event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+        change = by_dimension.get("queue")
+        expected_status = "parked" if event_type == "operator_stop.recorded" else "active"
+        expected_previous = "active" if expected_status == "parked" else "parked"
+        reason = payload.get("reason")
+        if event.get("actor") != {"role": "operator", "id": payload.get("operator_id")} or payload.get("entity_id") != engagement_id or payload.get("status") != expected_status or not isinstance(reason, str) or not reason.strip() or reason != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") != expected_previous or change.get("current") != expected_status:
+            raise RecordError("operator_queue_control_invalid", event.get("event_id", "unknown"))
 
     if event_type == "scope.attested":
         if event.get("actor", {}).get("role") != "operator" or event.get("actor", {}).get("id") != payload.get("operator_id"):
@@ -690,6 +701,8 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         binding = ("coverage", engagement_id, "active")
     elif event_type == "coverage.status_changed":
         binding = ("coverage", engagement_id, payload.get("status"))
+    elif event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+        binding = ("queue", engagement_id, payload.get("status"))
     elif event_type == "report.generated":
         binding = ("report", payload.get("report_ref"), "draft")
     elif event_type == "operator.review_recorded":
@@ -948,7 +961,7 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
         "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "coverage_counts": None, "reports": {}, "report_refs": [], "submission_refs": [],
+        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "coverage_counts": None, "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
 
@@ -977,6 +990,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
     verify_file_authority(engagement, events, artifacts, allowed_record_orphans=allowed_record_orphans, allowed_artifact_orphans=allowed_artifact_orphans)
     state = _initial_snapshot(engagement_id, scope_hash)
     states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
+    states["queue"][engagement_id] = "active"
     seen_events: dict[str, dict[str, Any]] = {}
     committed_entity_ids: set[str] = set()
     committed_records: dict[str, dict[str, Any]] = {}
@@ -1004,6 +1018,8 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "ledger_tail_repair" and payload.get("authority_request_ref"): expected_authority_action = "repair-ledger-tail"
         event_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
         broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request["environment_ref"] == state["active_environment_ref"] and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
+        if event["event_type"] in {"operator_stop.recorded", "operator_resume.recorded"} and (event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("operator_id") != active_scope_operator):
+            raise RecordError("operator_queue_control_not_scope_authorized", event["event_id"])
         validate_reference_precedence(event, index, committed_entity_ids)
         if event["event_type"] == "record.committed":
             validate_committed_record_precedence(engagement, event, index, committed_entity_ids)
@@ -1333,6 +1349,14 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             request = state["authority_requests"][payload["request_id"]]; request["status"] = payload["resolution"]; request["resolved_at"] = payload["resolved_at"]; request["resolution_event_ref"] = event["event_id"]
         elif event_type == "scope.amendment_proposed":
             state["scope_drafts"].append({"event_id": event["event_id"], "draft_path": payload["draft_path"], "draft_digest": payload["draft_digest"], "supersedes_scope_hash": payload["supersedes_scope_hash"]})
+        elif event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+            transition = {"event_ref": event["event_id"], "operator_id": payload["operator_id"], "reason": payload["reason"], "recorded_at": event["recorded_at"]}
+            state["queue_control"]["status"] = payload["status"]
+            if event_type == "operator_stop.recorded":
+                state["queue_control"]["last_stop"] = transition
+                state["queue_control"]["last_resume"] = None
+            else:
+                state["queue_control"]["last_resume"] = transition
         elif event_type == "environment.review_recorded":
             current = state["environment_preflights"][payload["environment_ref"]]; current["status"] = payload["status"]; current["operator_review_ref"] = payload["review_ref"]
             state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
@@ -1450,6 +1474,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
     state["attempt_count"] = len(attempts)
     state["artifact_count"] = len(artifacts)
     state["coverage"] = states["coverage"].get(state["engagement_id"], "active")
+    state["queue_control"]["status"] = states["queue"].get(state["engagement_id"], "active")
     state["ledger_hash"] = events[-1]["record_hash"]
     state["source_hashes"] = {
         name: sha256_file(engagement / name) for name in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl")
@@ -1577,6 +1602,7 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         elif proposal.get("event_type") != "scope.attested":
             reduce_engagement(engagement)  # blocks every ordinary write after scope drift
         states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
+        states["queue"][current_events[0]["engagement_id"]] = "active"
         for event in current_events:
             for change in event["state_changes"]:
                 validate_transition(states, change)

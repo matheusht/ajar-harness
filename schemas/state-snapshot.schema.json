@@ -24,6 +24,7 @@
     "outstanding_reviews",
     "proof_reviews",
     "coverage",
+    "queue_control",
     "reports",
     "report_refs",
     "submission_refs",
@@ -461,6 +462,156 @@
             "enumerated_count": {
               "type": "integer",
               "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "queue_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "last_stop",
+        "last_resume"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "active",
+            "parked"
+          ]
+        },
+        "last_stop": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "event_ref",
+                "operator_id",
+                "reason",
+                "recorded_at"
+              ],
+              "properties": {
+                "event_ref": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                },
+                "operator_id": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recorded_at": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+                }
+              }
+            }
+          ]
+        },
+        "last_resume": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "event_ref",
+                "operator_id",
+                "reason",
+                "recorded_at"
+              ],
+              "properties": {
+                "event_ref": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                },
+                "operator_id": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recorded_at": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "parked"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "last_stop": {
+                "type": "object"
+              },
+              "last_resume": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "active"
+              },
+              "last_stop": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "status",
+              "last_stop"
+            ]
+          },
+          "then": {
+            "properties": {
+              "last_resume": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "last_resume": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "last_resume"
+            ]
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "active"
+              },
+              "last_stop": {
+                "type": "object"
+              }
             }
           }
         }

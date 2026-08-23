@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-redteam-harness.local/schemas/corpus-enumeration.schema.json",
+  "title": "corpus-enumeration-freeze",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "frozen_at",
+    "generated_by",
+    "granularity",
+    "columns",
+    "coverage_semantics",
+    "artifact",
+    "source",
+    "frozen_inputs_base",
+    "frozen_inputs"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_type": {"const": "corpus-enumeration"},
+    "frozen_at": {"type": "string", "format": "date-time"},
+    "generated_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "tool_sha256", "mode", "model_involvement", "parser_versions"],
+      "properties": {
+        "tool": {"const": "tools/corpus_enumeration.py"},
+        "tool_sha256": {"$ref": "#/$defs/sha256"},
+        "mode": {"const": "syntactic"},
+        "model_involvement": {"const": false},
+        "parser_versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tree-sitter", "tree-sitter-javascript", "tree-sitter-typescript"],
+          "properties": {
+            "tree-sitter": {"type": "string", "minLength": 1},
+            "tree-sitter-javascript": {"type": "string", "minLength": 1},
+            "tree-sitter-typescript": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "granularity": {"const": ["package", "entrypoint"]},
+    "columns": {
+      "const": [
+        "status",
+        "package",
+        "version",
+        "dist.shasum",
+        "entrypoint_path",
+        "entrypoint_tag",
+        "entrypoint_sha256"
+      ]
+    },
+    "coverage_semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["closes_on", "does_not_establish", "necessary_for_coverage", "sufficient_for_coverage"],
+      "properties": {
+        "closes_on": {"const": "visitation"},
+        "does_not_establish": {"const": "understanding"},
+        "necessary_for_coverage": {"const": true},
+        "sufficient_for_coverage": {"const": false}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "row_count", "package_count"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relativePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "row_count": {"type": "integer", "minimum": 1},
+        "package_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pins_path", "tarballs_path"],
+      "properties": {
+        "pins_path": {"$ref": "#/$defs/relativePath"},
+        "tarballs_path": {"$ref": "#/$defs/relativePath"}
+      }
+    },
+    "frozen_inputs_base": {"const": "manifest"},
+    "frozen_inputs": {
+      "type": "object",
+      "minProperties": 5,
+      "required": ["corpus-enumeration", "package-pins", "enumerator", "schema"],
+      "properties": {
+        "corpus-enumeration": {"$ref": "#/$defs/frozenInput"},
+        "package-pins": {"$ref": "#/$defs/frozenInput"},
+        "enumerator": {"$ref": "#/$defs/frozenInput"},
+        "schema": {"$ref": "#/$defs/frozenInput"}
+      },
+      "patternProperties": {
+        "^tarball:[0-9]{4}$": {"$ref": "#/$defs/frozenInput"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:[\\\\/]).+"},
+    "frozenInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relativePath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

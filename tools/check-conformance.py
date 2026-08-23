@@ -27,6 +27,8 @@ that any finding is true (the model oracle still adjudicates that). Do not read 
 Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
+import csv
+import gzip
 import hashlib
 import io
 import json
@@ -34,6 +36,8 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 
 from engagement_records import (
     legacy_finding_inventory,
@@ -1380,6 +1384,205 @@ def check_cited_fixtures():
                            "directory not found; build it or declare fixture_status: planned")
 
 
+def _build_fixture_npm_tarball(source_dir, destination):
+    """Build a byte-stable npm-style tarball from a checked-in source fixture."""
+    with (
+        open(destination, "wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
+    ):
+        for root, dirs, files in os.walk(source_dir):
+            dirs.sort()
+            for name in sorted(files):
+                path = os.path.join(root, name)
+                rel = os.path.relpath(path, source_dir).replace(os.sep, "/")
+                info = archive.gettarinfo(path, arcname=f"package/{rel}")
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = 0
+                with open(path, "rb") as handle:
+                    archive.addfile(info, handle)
+
+
+def check_corpus_enumeration():
+    """Issue #76: the frozen denominator is produced by code, never asserted by the agent."""
+    print("\n[corpus-enumeration] syntactic package + entrypoint denominator")
+    fixture = os.path.join(ROOT, "fixtures", "corpus-enumeration")
+    tool = os.path.join(ROOT, "tools", "corpus_enumeration.py")
+    schema = os.path.join(ROOT, "schemas", "corpus-enumeration.schema.json")
+    expected_path = os.path.join(fixture, "expected.json")
+    required = [tool, schema, expected_path]
+    record(all(os.path.isfile(path) for path in required),
+           "corpus enumeration tool, schema, and expected fixture exist",
+           f"missing={[os.path.relpath(path, ROOT) for path in required if not os.path.isfile(path)]}")
+    if not all(os.path.isfile(path) for path in required):
+        return
+
+    expected = load_json(expected_path)
+    with tempfile.TemporaryDirectory() as temp:
+        tarballs = os.path.join(temp, "tarballs")
+        os.mkdir(tarballs)
+        pin_rows = []
+        for package in expected["packages"]:
+            source = os.path.join(fixture, "packages", package["fixture"])
+            tarball = os.path.join(tarballs, f"{package['fixture']}.tgz")
+            _build_fixture_npm_tarball(source, tarball)
+            with open(tarball, "rb") as handle:
+                digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
+            pin_rows.append((package["status"], package["name"], package["version"], digest))
+
+        pins = os.path.join(temp, "package-pins.tsv")
+        with open(pins, "w", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+            writer.writerow(["status", "package", "version", "dist.shasum"])
+            writer.writerows(pin_rows)
+        artifact = os.path.join(temp, "corpus-enumeration.tsv")
+        freeze = os.path.join(temp, "corpus-enumeration.freeze.json")
+        command = [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+                   "--output", artifact, "--freeze", freeze]
+        built = subprocess.run(command, capture_output=True, text=True, check=False)
+        record(built.returncode == 0, "corpus enumeration builds from pinned tarballs",
+               (built.stdout + built.stderr).strip())
+        if built.returncode != 0:
+            return
+
+        with open(artifact) as handle:
+            lines = handle.read().splitlines()
+        caveat = "# coverage_semantics=visitation-not-understanding; necessary-not-sufficient-for-coverage"
+        record(lines and lines[0] == caveat,
+               "corpus artifact carries the visitation-not-understanding caveat")
+        rows = list(csv.DictReader(lines[1:], delimiter="\t"))
+        projected = [{key: row[key] for key in ("status", "package", "version", "entrypoint_path", "entrypoint_tag")}
+                     for row in rows]
+        record(projected == expected["rows"],
+               "corpus artifact distinguishes declared and undeclared-published entrypoints",
+               f"got={projected}")
+        record(all(re.fullmatch(r"[0-9a-f]{64}", row["entrypoint_sha256"] or "") for row in rows),
+               "every enumerated entrypoint carries a SHA-256 pin")
+        record(any(row["status"] == "out-of-scope" for row in rows),
+               "out-of-scope units remain enumerated with their disposition")
+
+        hostile_tarballs = os.path.join(temp, "hostile-tarballs")
+        os.mkdir(hostile_tarballs)
+        hostile_tarball = os.path.join(hostile_tarballs, "fixture-hostile.tgz")
+        hostile_members = {
+            "package/package.json": b'{"name":"fixture-hostile","version":"1.0.0"}\n',
+            "package/index.js": b"module.exports = true;\n",
+            "package/a\nb.js": b"export const hiddenByNewline = true;\n",
+        }
+        with tarfile.open(hostile_tarball, "w:gz") as archive:
+            for name, payload in hostile_members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+        with open(hostile_tarball, "rb") as handle:
+            hostile_digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
+        hostile_pins = os.path.join(temp, "hostile-pins.tsv")
+        with open(hostile_pins, "w") as handle:
+            handle.write(
+                "status\tpackage\tversion\tdist.shasum\n"
+                f"not-opened\tfixture-hostile\t1.0.0\t{hostile_digest}\n"
+            )
+        hostile_artifact = os.path.join(temp, "hostile-enumeration.tsv")
+        hostile_freeze = os.path.join(temp, "hostile-enumeration.freeze.json")
+        hostile = subprocess.run(
+            [sys.executable, tool, "build", "--pins", hostile_pins,
+             "--tarballs", hostile_tarballs, "--output", hostile_artifact,
+             "--freeze", hostile_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        record(hostile.returncode != 0 and not os.path.exists(hostile_artifact) and
+               not os.path.exists(hostile_freeze),
+               "hostile control characters cannot enter a frozen entrypoint path",
+               (hostile.stdout + hostile.stderr).strip())
+
+        manifest = load_json(freeze)
+        record(manifest.get("generated_by", {}).get("mode") == "syntactic" and
+               manifest.get("generated_by", {}).get("model_involvement") is False,
+               "freeze records syntactic generation with no model involvement")
+        record(manifest.get("granularity") == ["package", "entrypoint"] and
+               manifest.get("artifact", {}).get("row_count") == len(rows),
+               "freeze records package + entrypoint granularity and exact denominator")
+
+        verified = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                  capture_output=True, text=True, check=False)
+        record(verified.returncode == 0, "frozen corpus artifact re-verifies intact",
+               (verified.stdout + verified.stderr).strip())
+        hasher = os.path.join(ROOT, "tools", "hash-campaign-inputs.py")
+        generic_verified = subprocess.run([sys.executable, hasher, "--check", freeze],
+                                          capture_output=True, text=True, check=False)
+        record(generic_verified.returncode == 0,
+               "corpus freeze is compatible with the existing frozen-input checker",
+               (generic_verified.stdout + generic_verified.stderr).strip())
+
+        recovery_artifact = os.path.join(temp, "recovered-corpus-enumeration.tsv")
+        recovery_freeze = os.path.join(temp, "recovered-corpus-enumeration.freeze.json")
+        with open(artifact, "rb") as source, open(recovery_artifact, "wb") as destination:
+            destination.write(source.read())
+        recovered = subprocess.run(
+            [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+             "--output", recovery_artifact, "--freeze", recovery_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        recovered_verify = subprocess.run(
+            [sys.executable, tool, "verify", "--freeze", recovery_freeze],
+            capture_output=True, text=True, check=False,
+        ) if recovered.returncode == 0 else None
+        record(recovered.returncode == 0 and recovered_verify is not None and
+               recovered_verify.returncode == 0,
+               "an interrupted exact TSV is recoverably frozen instead of stranded",
+               (recovered.stdout + recovered.stderr +
+                ((recovered_verify.stdout + recovered_verify.stderr) if recovered_verify else "")).strip())
+
+        rejected_artifact = os.path.join(temp, "agent-authored-enumeration.tsv")
+        rejected_freeze = os.path.join(temp, "agent-authored-enumeration.freeze.json")
+        rejected_bytes = b"status\tpackage\nnot-opened\tasserted-by-agent\n"
+        with open(rejected_artifact, "wb") as handle:
+            handle.write(rejected_bytes)
+        rejected = subprocess.run(
+            [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+             "--output", rejected_artifact, "--freeze", rejected_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        with open(rejected_artifact, "rb") as handle:
+            rejected_after_build = handle.read()
+        record(rejected.returncode != 0 and rejected_after_build == rejected_bytes and
+               not os.path.exists(rejected_freeze),
+               "build refuses to freeze an agent-authored denominator",
+               (rejected.stdout + rejected.stderr).strip())
+
+        with open(artifact, "rb") as handle:
+            original = handle.read()
+        overwrite = subprocess.run(command, capture_output=True, text=True, check=False)
+        with open(artifact, "rb") as handle:
+            artifact_after_overwrite = handle.read()
+        record(overwrite.returncode != 0 and artifact_after_overwrite == original,
+               "build refuses to replace an existing frozen denominator",
+               (overwrite.stdout + overwrite.stderr).strip())
+
+        with open(artifact, "ab") as handle:
+            handle.write(b"# drift\n")
+        drifted = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                 capture_output=True, text=True, check=False)
+        record(drifted.returncode != 0 and "DRIFT" in (drifted.stdout + drifted.stderr),
+               "artifact drift fails verification rather than rewriting the denominator",
+               (drifted.stdout + drifted.stderr).strip())
+
+        with open(artifact, "wb") as handle:
+            handle.write(original)
+        first_tarball = os.path.join(tarballs, f"{expected['packages'][0]['fixture']}.tgz")
+        with open(first_tarball, "ab") as handle:
+            handle.write(b"source-drift")
+        source_drifted = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                        capture_output=True, text=True, check=False)
+        with open(artifact, "rb") as handle:
+            artifact_after_source_drift = handle.read()
+        record(source_drifted.returncode != 0 and "DRIFT tarball:" in
+               (source_drifted.stdout + source_drifted.stderr) and artifact_after_source_drift == original,
+               "mid-run corpus drift is reported without replacing the frozen denominator",
+               (source_drifted.stdout + source_drifted.stderr).strip())
+
+
 def main():
     pattern_ids = collect_pattern_ids()
     cap_ids = collect_capability_ids()
@@ -1403,6 +1606,7 @@ def main():
     check_adversarial_candidates()
     check_doctrine_mirror()
     check_cited_fixtures()
+    check_corpus_enumeration()
     check_ideation_mapper()
     check_ablation_fixtures()
     check_kb_entries()

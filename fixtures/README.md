@@ -10,6 +10,7 @@ environment; live engagements feed *new* sanitized fixtures here, they are never
 | `findings/` | example finding instances exercising the evidence-contract gate | `tools/check-conformance.py` |
 | `false-discovery/corpus.json` | live traps; a correct evaluator never `confirmed`s any | `tools/check-conformance.py` (invalid-accept == 0) |
 | `adversarial-candidates/corpus.json` | Phase-3 gate: retain the valid additive, block the gamers | `tools/check-conformance.py` (well-formedness) |
+| `corpus-enumeration/` | synthetic npm packages for the frozen package + entrypoint denominator | `tools/check-conformance.py` (shape, tags, freeze, drift) |
 
 ## The evidence-contract gate (`findings/`)
 `schemas/finding.schema.json` carries a structured `evidence_contract` (negative/positive control,

@@ -1,0 +1,39 @@
+{
+  "packages": [
+    {
+      "fixture": "fixture-declared",
+      "status": "not-opened",
+      "name": "@fixture/declared",
+      "version": "1.2.3"
+    },
+    {
+      "fixture": "fixture-main",
+      "status": "out-of-scope",
+      "name": "fixture-main",
+      "version": "4.5.6"
+    }
+  ],
+  "rows": [
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/conditional.cjs", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/conditional.mjs", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/features/a.js", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/features/no-export.js", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/index.js", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/pattern/private/secret.js", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "dist/pattern/public.js", "entrypoint_tag": "declared"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/common.cjs", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/conditional.cjs", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/hidden.js", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/iife.cjs", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/initializer.cjs", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/module.cts", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/module.mts", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "internal/widget.jsx", "entrypoint_tag": "undeclared-published"},
+    {"status": "not-opened", "package": "@fixture/declared", "version": "1.2.3", "entrypoint_path": "package.json", "entrypoint_tag": "declared"},
+    {"status": "out-of-scope", "package": "fixture-main", "version": "4.5.6", "entrypoint_path": "lib/extra.ts", "entrypoint_tag": "undeclared-published"},
+    {"status": "out-of-scope", "package": "fixture-main", "version": "4.5.6", "entrypoint_path": "lib/reexport.ts", "entrypoint_tag": "undeclared-published"},
+    {"status": "out-of-scope", "package": "fixture-main", "version": "4.5.6", "entrypoint_path": "lib/root.js", "entrypoint_tag": "declared"},
+    {"status": "out-of-scope", "package": "fixture-main", "version": "4.5.6", "entrypoint_path": "lib/ui.tsx", "entrypoint_tag": "undeclared-published"},
+    {"status": "out-of-scope", "package": "fixture-main", "version": "4.5.6", "entrypoint_path": "lib/value.js", "entrypoint_tag": "undeclared-published"}
+  ]
+}

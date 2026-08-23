@@ -18,6 +18,8 @@ def _bullets(values: list[str], empty: str = "None.") -> str:
 
 def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
     engagement_id = snapshot["engagement_id"]
+    coverage_counts = snapshot.get("coverage_counts")
+    coverage_fraction = (f"\n- Coverage fraction: `{coverage_counts['disposed_count']}/{coverage_counts['enumerated_count']}` work items disposed (closes on visitation, not understanding)" if coverage_counts is not None else "")
     candidate_lines = [f"- `{key}` — {value.get('status', 'unknown')}" for key, value in sorted(snapshot["candidates"].items())]
     hypothesis_lines = [f"- `{key}` — {value.get('status', 'unknown')}" for key, value in sorted(snapshot["hypotheses"].items())]
     finding_lines = [f"- `{key}` rev {value.get('revision')} — {value.get('status') or 'ungraded'}" for key, value in sorted(snapshot["findings"].items())]
@@ -26,7 +28,7 @@ def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
 
 - Scope: attested `{snapshot['scope_hash']}`
 - Environment: `{snapshot['active_environment_ref'] or 'not-recorded'}`
-- Coverage: `{snapshot['coverage']}`
+- Coverage: `{snapshot['coverage']}`{coverage_fraction}
 - Events: {snapshot['event_count']}
 - Attempts: {snapshot['attempt_count']}
 - Artifacts: {snapshot['artifact_count']}

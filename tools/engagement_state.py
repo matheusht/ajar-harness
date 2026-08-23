@@ -40,7 +40,7 @@ LEDGERS = {
 STATE_VALUES = {
     "claim": {"needs_review", "supported", "confirmed", "contaminated", "refuted"},
     "search": {"queued", "selected", "running", "held", "exhausted", "deferred", "blocked", "closed"},
-    "coverage": {"active", "blocked", "coverage_dry"},
+    "coverage": {"active", "blocked", "coverage_dry", "budget_bounded"},
     "report": {"none", "draft", "accepted", "submitted"},
     "cleanup": {"open", "completed", "not_applicable", "blocked"},
     "memory": {"pending", "promote", "defer", "no_novel_lesson"},
@@ -93,7 +93,7 @@ COMMITTED_RECORD_SCHEMAS = {
 TRANSITIONS = {
     "claim": {None: {"needs_review", "supported"}, "needs_review": {"supported", "contaminated", "refuted"}, "supported": {"confirmed", "needs_review", "contaminated", "refuted"}, "confirmed": {"needs_review", "contaminated", "refuted"}, "contaminated": {"needs_review", "refuted"}, "refuted": {"needs_review"}},
     "search": {None: {"queued"}, "queued": {"selected", "deferred", "blocked", "closed"}, "selected": {"running", "deferred", "blocked"}, "running": {"queued", "held", "exhausted", "deferred", "blocked", "closed"}, "held": {"queued", "closed"}, "exhausted": {"queued", "closed"}, "deferred": {"queued", "closed"}, "blocked": {"queued", "deferred", "closed"}, "closed": {"queued"}},
-    "coverage": {None: {"active"}, "active": {"blocked", "coverage_dry"}, "blocked": {"active", "coverage_dry"}, "coverage_dry": {"active"}},
+    "coverage": {None: {"active"}, "active": {"blocked", "coverage_dry", "budget_bounded"}, "blocked": {"active", "coverage_dry", "budget_bounded"}, "coverage_dry": {"active"}, "budget_bounded": {"active"}},
     "report": {None: {"none", "draft"}, "none": {"draft"}, "draft": {"accepted", "none"}, "accepted": {"submitted", "draft"}, "submitted": {"draft"}},
     "cleanup": {None: {"open", "completed", "not_applicable", "blocked"}, "open": {"completed", "not_applicable", "blocked"}, "blocked": {"completed", "not_applicable"}, "completed": set(), "not_applicable": set()},
     "memory": {None: {"pending", "promote", "defer", "no_novel_lesson"}, "pending": {"promote", "defer", "no_novel_lesson"}, "promote": {"defer"}, "defer": {"promote", "no_novel_lesson"}, "no_novel_lesson": {"defer", "promote"}},
@@ -648,6 +648,11 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
     if event_type == "review.coverage_completed":
         if event.get("actor", {}).get("role") not in ({"reviewer", "broker"} if payload.get("reviewer_id") else {"reviewer"}) or not event.get("review_refs") or payload.get("review_type") != "coverage" or payload.get("verdict") not in {"continue", "coverage_dry", "blocked"}:
             raise RecordError("coverage_review_event_invalid", event.get("event_id", "unknown"))
+    if event_type == "coverage.status_changed" and payload.get("status") == "budget_bounded":
+        disposed_count = payload.get("disposed_count")
+        enumerated_count = payload.get("enumerated_count")
+        if not isinstance(disposed_count, int) or isinstance(disposed_count, bool) or not isinstance(enumerated_count, int) or isinstance(enumerated_count, bool) or enumerated_count < 1 or disposed_count < 0 or disposed_count > enumerated_count:
+            raise RecordError("budget_bounded_counts_invalid", event.get("event_id", "unknown"))
 
     if event_type == "scope.attested":
         if event.get("actor", {}).get("role") != "operator" or event.get("actor", {}).get("id") != payload.get("operator_id"):
@@ -932,7 +937,7 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
         "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "reports": {}, "report_refs": [], "submission_refs": [],
+        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "coverage_counts": None, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
 
@@ -1042,7 +1047,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             memory_bound = memory is not None and payload.get("disposition_ref") == memory["disposition_ref"] and payload.get("disposition_digest") == memory["disposition_digest"]
             close_action = {"action_kind": "close", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "reason": event["rationale"], "recorded_at": event["recorded_at"]}
             close_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action)
-            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or states["coverage"].get(engagement_id, "active") not in {"coverage_dry", "blocked"} or pending_reviews or not reports_current:
+            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or states["coverage"].get(engagement_id, "active") not in {"coverage_dry", "budget_bounded", "blocked"} or pending_reviews or not reports_current:
                 raise RecordError("engagement_closure_gate_failed", event["event_id"])
         if event["event_type"] == "escalation.confirmed":
             require_scope_zone2_authorized(engagement, state["scope_hash"]); confirmation_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")); expires_at = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")); cleanup_event = seen_events.get(payload["cleanup_obligation_ref"]); bounded = payload.get("confirmation", {})
@@ -1109,7 +1114,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             if payload["status"] == "ready" and (environment.get("fidelity_complete") is not True or environment.get("collector", {}).get("reproducible") is not True or environment.get("identity", {}).get("runtime_digest") is None or safety.get("advisory_zone") != "clear_local" or safety.get("zone2_authorization_granted") is not False or safety.get("secret_scan_status") != "clean" or safety.get("cleanup_open_count") != 0 or v2_ready_invalid):
                 raise RecordError("environment_preflight_not_usable", event["event_id"])
             latest_preflight_ref = environment_ref
-        if event["event_type"] in {"candidate.proposed", "candidate.selected", "hypothesis.created"} and (states["coverage"].get(engagement_id) == "coverage_dry" or states["engagement"].get(engagement_id) == "closed"):
+        if event["event_type"] in {"candidate.proposed", "candidate.selected", "hypothesis.created"} and (states["coverage"].get(engagement_id) in {"coverage_dry", "budget_bounded"} or states["engagement"].get(engagement_id) == "closed"):
             raise RecordError("search_material_after_closed_coverage", event["event_id"])
         if event["event_type"] == "report.generated":
             report_ref = payload["report_ref"]; commitment = committed_records.get(report_ref)
@@ -1298,6 +1303,9 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 raise RecordError("coverage_dry_with_active_hypotheses", str(unresolved))
         for change in event["state_changes"]:
             validate_transition(states, change)
+        coverage_change = next((change for change in event["state_changes"] if change["dimension"] == "coverage"), None)
+        if coverage_change is not None:
+            state["coverage_counts"] = ({"disposed_count": payload["disposed_count"], "enumerated_count": payload["enumerated_count"]} if coverage_change["current"] == "budget_bounded" else None)
         event_type = event["event_type"]
         if event_type == "scope.attested":
             prior = state["scope_hash"]

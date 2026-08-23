@@ -533,6 +533,14 @@
         "coverage_review_ref": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
         },
+        "disposed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enumerated_count": {
+          "type": "integer",
+          "minimum": 1
+        },
         "decisive_falsifiers": {
           "type": "array",
           "minItems": 1,
@@ -1211,9 +1219,29 @@
           "payload": {
             "required": [
               "entity_id",
-              "status",
-              "coverage_review_ref"
-            ]
+              "status"
+            ],
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "budget_bounded"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "required": [
+                "disposed_count",
+                "enumerated_count"
+              ]
+            },
+            "else": {
+              "required": [
+                "coverage_review_ref"
+              ]
+            }
           }
         }
       }

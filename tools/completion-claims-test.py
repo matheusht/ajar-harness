@@ -382,6 +382,15 @@ class CompletionClaimsTest(unittest.TestCase):
             after = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
         self.assertEqual(before, after)
 
+    def test_35_repeated_tree_failures_close_every_descriptor(self) -> None:
+        outside = Path(self.temporary.name) / "outside.md"; outside.write_text("coverage_dry\n", encoding="utf-8")
+        os.symlink(outside, self.root / "leak-check.md")
+        before = len(os.listdir("/dev/fd"))
+        for _ in range(40):
+            self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(self.root)), "completion_claims_tree_unsafe")
+        after = len(os.listdir("/dev/fd"))
+        self.assertLessEqual(after, before + 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

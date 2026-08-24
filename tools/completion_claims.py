@@ -264,10 +264,9 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                         + genesis_record_hash.encode("ascii") + b"\0" + relative.encode("utf-8")
                     ).hexdigest()
                     claims.append((path_hash, "sha256:" + content_hash, count))
+        return tuple(trees), tuple(claims)
     except UnicodeEncodeError as exc:
         raise _failure("completion_claims_tree_path_invalid", first_scope_hash) from exc
-    try:
-        return tuple(trees), tuple(claims)
     finally:
         # A failing child open leaves its parent frame live; close every still-owned descriptor.
         while stack:

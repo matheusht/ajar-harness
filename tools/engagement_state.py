@@ -997,9 +997,21 @@ def initialize_engagement(
     logical_engagement_id = engagement_id or engagement.name
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
+        metadata = _scope_metadata(engagement / "scope.md")
+        existing = read_ledger(engagement, "event")
+        if existing:
+            first = existing[0]
+            active_scope = next(event["payload"]["scope_hash"] for event in reversed(existing) if event["event_type"] == "scope.attested")
+            if first["event_type"] != "scope.attested" or active_scope != metadata["scope_hash"]:
+                raise RecordError("engagement_already_initialized", "existing ledger is bound to different scope bytes")
+            from completion_claims import assert_completion_claims_clear_bound, assert_completion_claims_token_current_bound
+            admission = assert_completion_claims_clear_bound(engagement)
+            snapshot = admission.state
+            # Idempotent initialization may repair scaffolding and publish projections. Validate
+            # before its first mutation under this already-held cooperative lock.
+            assert_completion_claims_token_current_bound(engagement, admission.token)
         root_fd = _open_absolute_directory(engagement)
         try:
-            metadata = _scope_metadata(engagement / "scope.md")
             directories = ("reviews", "reports", "submissions", "environment", "evidence", "findings", "legacy", "memory", "scope-attestations")
             for name in directories:
                 try: os.mkdir(name, 0o700, dir_fd=root_fd)
@@ -1010,19 +1022,7 @@ def initialize_engagement(
                 if not stat.S_ISREG(os.fstat(fd).st_mode): os.close(fd); raise RecordError("unsafe_ledger_path", ledger)
                 os.close(fd)
         finally: os.close(root_fd)
-        existing = read_ledger(engagement, "event")
-        if existing:
-            first = existing[0]
-            active_scope = next(event["payload"]["scope_hash"] for event in reversed(existing) if event["event_type"] == "scope.attested")
-            if first["event_type"] != "scope.attested" or active_scope != metadata["scope_hash"]:
-                raise RecordError("engagement_already_initialized", "existing ledger is bound to different scope bytes")
-            from completion_claims import assert_completion_claims_clear_bound, assert_completion_claims_token_current_bound
-            admission = assert_completion_claims_clear_bound(engagement)
-            snapshot = admission.state
-            # Idempotent initialization is a projection writer. Validate once immediately
-            # before publishing both filesets under this already-held cooperative lock.
-            assert_completion_claims_token_current_bound(engagement, admission.token)
-        else:
+        if not existing:
             operator_id = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
             scope_snapshot_path = persist_scope_snapshot(engagement, metadata["scope_hash"])
             proposal = base_event(

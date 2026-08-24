@@ -460,13 +460,22 @@ class CompletionClaimsTest(unittest.TestCase):
         generated = ("state.snapshot.json", *render_views(reduce_engagement(self.root)))
         for index, relative in enumerate(generated):
             atomic_write(self.root / relative, f"init-sentinel-{index}\n".encode("utf-8"))
+        (self.root / "reports").rmdir()
         (self.root / "ordinary.md").write_text("coverage_dry\n", encoding="utf-8")
-        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        before = {
+            path.relative_to(self.root).as_posix():
+                ("directory", None) if path.is_dir() else ("file", path.read_bytes())
+            for path in self.root.rglob("*")
+        }
         self.assertEqual(
             self._error(lambda: initialize_engagement(self.root, "2026-08-24T00:00:01Z")),
             "completion_claims_unjustified",
         )
-        after = {relative: (self.root / relative).read_bytes() for relative in generated}
+        after = {
+            path.relative_to(self.root).as_posix():
+                ("directory", None) if path.is_dir() else ("file", path.read_bytes())
+            for path in self.root.rglob("*")
+        }
         self.assertEqual(after, before)
 
     def test_40_idempotent_init_success_publishes_current_snapshot_and_every_generated_view(self) -> None:

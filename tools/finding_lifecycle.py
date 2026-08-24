@@ -138,6 +138,20 @@ def _snapshot_engagement(engagement):
     return snapshot
 
 
+def _snapshot_package(bound_engagement, relative):
+    """Capture only one package while its inferred parent engagement remains bound."""
+
+    parts = tuple(relative) if isinstance(relative, tuple) else Path(relative).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise RecordError("engagement_source_changed", "gate package changed")
+    prefix = "bound-package"
+    package_snapshot = _snapshot_engagement(Path(bound_engagement).joinpath(*parts))
+    return {
+        f"{prefix}/{package_relative}": data
+        for package_relative, data in package_snapshot.items()
+    }, prefix
+
+
 def _require_bound_package_current(logical, bound, *, portable):
     """Final pre-report admission check for a snapshot's bound source inode."""
 
@@ -800,8 +814,9 @@ def run_gates(pkg, engagement=None, snapshot=None, package_relative=None):
     """Evaluate gates only from an admitted snapshot for standalone package calls.
 
     Internal promotion/corpus callers that already supply a snapshot retain their exact behavior.
-    The historic public ``run_gates(pkg)`` seam now performs the same inferred-engagement or
+    The historic public ``run_gates(pkg)`` seam performs the same inferred-engagement or
     portable-package binding as the CLI before any finding detail can reach a returned gate row.
+    Inference is an admission boundary only: corpus-aware gates remain opt-in via ``engagement``.
     """
 
     if snapshot is not None:
@@ -846,11 +861,10 @@ def run_gates(pkg, engagement=None, snapshot=None, package_relative=None):
     try:
         if located is not None:
             logical, relative = located
-            relative_name = Path(*relative).as_posix()
             with bound_engagement_source(logical) as bound:
-                admitted = _snapshot_engagement(bound)
+                admitted, package_prefix = _snapshot_package(bound, relative)
                 result = _run_gates_snapshot(
-                    pkg, bound, admitted, relative_name
+                    pkg, snapshot=admitted, package_relative=package_prefix
                 )
                 _require_bound_package_current(logical, bound, portable=False)
                 return result
@@ -1021,11 +1035,10 @@ def cmd_gates(args):
     try:
         if located is not None:
             logical, relative = located
-            package_relative = Path(*relative).as_posix()
             with bound_engagement_source(logical) as engagement:
-                snapshot = _snapshot_engagement(engagement)
+                snapshot, package_prefix = _snapshot_package(engagement, relative)
                 g, _ = run_gates(
-                    args.package, engagement, snapshot, package_relative
+                    args.package, snapshot=snapshot, package_relative=package_prefix
                 )
                 _require_bound_package_current(logical, engagement, portable=False)
                 report(args, g, args.package, moved=None)

@@ -34,6 +34,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -987,6 +988,50 @@ def check_finding_lifecycle():
         record([r["gate"] for r in with_corpus.blocked] == ["G4"],
                "lifecycle-corpus: the engagement corpus is what blocks G4",
                f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
+        # A package path may live inside a governed engagement even when the caller deliberately
+        # omits --engagement. Bind that engagement for quarantine and source-identity admission,
+        # but preserve the historical package-only gate semantics unless corpus context is explicit.
+        with tempfile.TemporaryDirectory(prefix="lifecycle-governed-package-") as temporary:
+            governed = os.path.join(temporary, "synthetic-engagement")
+            shutil.copytree(corp, governed)
+            with open(os.path.join(governed, "scope.md"), "w", encoding="utf-8") as handle:
+                handle.write("# Synthetic governed lifecycle fixture\n")
+            with open(os.path.join(governed, ".record-kernel.lock"), "wb"):
+                pass
+            governed_pkg = os.path.join(governed, "unproven", "F-CORP")
+            governed_alone, _ = run_gates(governed_pkg)
+            governed_with_corpus, _ = run_gates(governed_pkg, governed)
+            record([row["gate"] for row in governed_alone.blocked] == [],
+                   "lifecycle-governed: an implicit engagement binding stays package-only",
+                   f"blocked_by={[row['gate'] for row in governed_alone.blocked]}")
+            record([row["gate"] for row in governed_with_corpus.blocked] == ["G4"],
+                   "lifecycle-governed: explicit engagement context audits the whole corpus",
+                   f"blocked_by={[row['gate'] for row in governed_with_corpus.blocked]}")
+
+            lifecycle_tool = os.path.join(ROOT, "tools", "finding_lifecycle.py")
+            implicit_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "gates", governed_pkg, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            explicit_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "gates", governed_pkg,
+                 "--engagement", governed, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            try:
+                implicit_payload = json.loads(implicit_cli.stdout)
+                explicit_payload = json.loads(explicit_cli.stdout)
+            except json.JSONDecodeError:
+                implicit_payload = explicit_payload = {}
+            record(implicit_cli.returncode == 0 and implicit_payload.get("decision") == "clear",
+                   "lifecycle-governed CLI: omitted --engagement stays package-only",
+                   implicit_cli.stdout + implicit_cli.stderr)
+            record(explicit_cli.returncode == 1
+                   and [row["gate"] for row in explicit_payload.get("gates", []) if not row["ok"]]
+                   == ["G4"],
+                   "lifecycle-governed CLI: explicit --engagement retains corpus semantics",
+                   explicit_cli.stdout + explicit_cli.stderr)
 
     # G2 regression: a declaration cannot turn a replay into a negative control. These cases vary
     # only the ref used in proof.negative_control_refs and exercise the production G2 function

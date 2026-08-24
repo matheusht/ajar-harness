@@ -486,7 +486,9 @@ class CompletionClaimsTest(unittest.TestCase):
     def test_41_copied_template_inputs_reserve_completion_tokens_for_outputs(self) -> None:
         template = ROOT / "engagements" / "_TEMPLATE"
         occurrences = 0
-        for path in template.rglob("*.md"):
+        for path in template.rglob("*"):
+            if not path.is_file() or not path.name.lower().endswith(".md"):
+                continue
             relative = path.relative_to(template).as_posix()
             if relative in claims.GENERATED_VIEWS:
                 continue

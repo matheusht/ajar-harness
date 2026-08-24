@@ -15,6 +15,7 @@ from engagement_state import (
     _scope_metadata, _append_kernel_event as append_event, atomic_write, base_event, engagement_lock,
     read_governed_file, read_ledger, reduce_engagement,
 )
+from completion_claims import assert_completion_claims_clear_bound
 
 
 def _operator(value: str) -> str:
@@ -108,6 +109,8 @@ def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_a
             for change in event["state_changes"]:
                 if change["dimension"] == "engagement" and change["entity_id"] == state["engagement_id"]: prior = change["current"]
         if prior == "closed": raise RecordError("engagement_already_closed", state["engagement_id"])
+        # This is deliberately the final admission before irreversible closure append.
+        state = assert_completion_claims_clear_bound(engagement)
         event = base_event(event_id=f"event-{state['engagement_id']}-closed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker" if authority_request_ref else "operator", actor_id=executor_id if authority_request_ref else operator_id, event_type="engagement.closed", rationale=reason, payload={"entity_id": state["engagement_id"], "status": "closed", "scope_hash": state["scope_hash"], "operator_id": operator_id, "disposition_ref": memory["disposition_ref"], "disposition_digest": memory["disposition_digest"], **({"authority_request_ref": authority_request_ref} if authority_request_ref else {})}, entity_refs=[memory["disposition_ref"]], state_changes=[{"dimension": "engagement", "entity_id": state["engagement_id"], "previous": prior, "current": "closed"}], session_id=session_id, operation_class="authority" if authority_request_ref else None)
         append_event(engagement, event, lock_held=True)
         return reduce_engagement(engagement)

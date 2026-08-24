@@ -125,6 +125,26 @@ def check_cards(subdir, pattern_ids, cap_ids):
         check_optional_capabilities(name, subdir, fm, cap_ids)
 
 
+def check_completion_claims():
+    """Keep this portable: only the checked-in manifest and synthetic fixture run are admitted."""
+    tools_dir = os.path.join(ROOT, "tools")
+    sys.path.insert(0, tools_dir)
+    try:
+        import completion_claims
+        completion_claims.load_pins()
+        manifest_ok = True
+        manifest_detail = ""
+    except Exception as exc:
+        manifest_ok = False
+        manifest_detail = type(exc).__name__
+    finally:
+        if sys.path and sys.path[0] == tools_dir:
+            sys.path.pop(0)
+    record(manifest_ok, "completion-claims: portable canonical grandfather manifest", manifest_detail)
+    result = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "completion-claims-test.py")], capture_output=True, text=True, check=False)
+    record(result.returncode == 0, "completion-claims: hermetic-only synthetic regression suite", (result.stdout + result.stderr).strip())
+
+
 def check_routes_to(name, subdir, fm, pattern_ids):
     line = re.search(r"^routes_to:\s*(\[[^\]]*\])", fm, re.MULTILINE)
     if not line:
@@ -1695,6 +1715,7 @@ def main():
     check_capability_classes()
     check_capability_scope_flags()
     check_capability_must_reject()
+    check_completion_claims()
     check_tool_family_manifests()
     check_tool_family_must_reject()
     check_payload_proposals()

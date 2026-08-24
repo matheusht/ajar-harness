@@ -84,6 +84,7 @@ from environment_preflight import collect_preflight as collect_agent_preflight, 
 from finding_review import claim_tuple_hash, render_claim_proof
 from ledger_health import probe_ledger_health
 from memory_disposition import _validate_promotable_abstraction, close_engagement, record_memory_disposition
+from completion_claims import assert_completion_claims_clear, assert_completion_claims_clear_bound
 from reporting import accept_report, generate_report, record_submission
 from research_telemetry import _remove_published_output, export_telemetry, score_telemetry
 from decision6_capabilities import artifact_variant, classify_command, classify_event, load_capability_matrix, require_actor
@@ -1458,9 +1459,16 @@ def command_clear_ledger_quarantine(args: argparse.Namespace) -> int:
 def command_render(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute()
     with engagement_lock(engagement) as bound_engagement:
-        snapshot = reduce_engagement(bound_engagement)
+        # The returned snapshot is the same atomically admitted state we render.
+        snapshot = assert_completion_claims_clear_bound(bound_engagement)
         write_views(bound_engagement, snapshot)
     emit({"ok": True, "views": sorted(render_views(snapshot))})
+    return 0
+
+
+def command_check_completion_claims(args: argparse.Namespace) -> int:
+    assert_completion_claims_clear(args.engagement.absolute())
+    emit({"code": "completion_claims_clear", "valid": True})
     return 0
 
 
@@ -3133,7 +3141,7 @@ def parser() -> argparse.ArgumentParser:
     proof.add_argument("--engagement", type=Path, required=True)
     proof.add_argument("--finding-id", required=True)
     proof.add_argument("--revision", type=int, required=True)
-    for name in ("reduce", "render", "check-resume"):
+    for name in ("reduce", "render", "check-resume", "check-completion-claims"):
         command = subcommands.add_parser(name, help=f"{name} deterministic engagement state")
         command.add_argument("--engagement", type=Path, required=True)
     return result
@@ -3170,6 +3178,7 @@ def main() -> int:
             "repair-ledger-tail": command_repair_tail,
             "reduce": command_reduce,
             "render": command_render,
+            "check-completion-claims": command_check_completion_claims,
             "preflight": command_preflight,
             "record-review": command_record_review,
             "review-preflight": command_review_preflight,
@@ -3189,7 +3198,7 @@ def main() -> int:
         if args.command in commands:
             engagement_argument = getattr(args, "engagement", None)
             if engagement_argument is not None and args.command not in {
-                "ledger-health", "quarantine-ledger", "clear-ledger-quarantine"
+                "ledger-health", "quarantine-ledger", "clear-ledger-quarantine", "check-completion-claims"
             }:
                 require_not_quarantined(engagement_argument.absolute())
             matrix = load_capability_matrix()

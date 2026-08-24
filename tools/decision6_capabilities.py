@@ -142,6 +142,7 @@ def self_test() -> list[tuple[str, bool, str]]:
     matrix = load_capability_matrix()
     checks: list[tuple[str, bool, str]] = []
     checks.append(("fixed notebook command classifies", classify_command("preflight", matrix=matrix)["tier"] == "notebook", "preflight"))
+    checks.append(("completion-claim gate is a notebook-only check", classify_command("check-completion-claims", matrix=matrix)["tier"] == "notebook" and classify_command("check-completion-claims", matrix=matrix)["required_evidence"] == ["healthy_current_coverage_or_exact_opaque_pin"], "check-completion-claims"))
     checks.append(("record commit dispatches by immutable type", classify_event("record.committed", {"record_type": "review"}, matrix=matrix)["tier"] == "notebook" and classify_event("record.committed", {"record_type": "finding-v3"}, matrix=matrix)["tier"] == "authority", "record.committed"))
     for label, function in (
         ("unknown command fails closed", lambda: classify_command("future-unclassified", matrix=matrix)),

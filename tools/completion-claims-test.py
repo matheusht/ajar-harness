@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import completion_claims as claims  # noqa: E402
 from engagement_records import RecordError, build_reference_index, canonical_json_bytes, sha256_file
 from engagement_state import _append_kernel_event, atomic_write, base_event, compute_review_input_hash, engagement_lock, initialize_engagement, persist_scope_snapshot, read_ledger, reduce_engagement
-from engagement_views import write_views
+from engagement_views import render_views, write_views
 from memory_disposition import close_engagement, record_memory_disposition
 
 
@@ -421,6 +421,22 @@ class CompletionClaimsTest(unittest.TestCase):
             after = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
         self.assertEqual(before, after)
         self.assertFalse((self.root / "scope-drafts").exists())
+
+    def test_37_reduce_failure_preserves_snapshot_and_every_generated_view(self) -> None:
+        generated = ("state.snapshot.json", *render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"sentinel-{index}\n".encode("utf-8"))
+        (self.root / "ordinary.md").write_text("coverage_dry\n", encoding="utf-8")
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "run-engagement.py"), "reduce", "--engagement", str(self.root)],
+            capture_output=True,
+            check=False,
+        )
+        after = {relative: (self.root / relative).read_bytes() for relative in generated}
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'"code":"completion_claims_unjustified"', result.stdout)
+        self.assertEqual(after, before)
 
 
 if __name__ == "__main__":

@@ -1346,9 +1346,10 @@ def command_repair_tail(args: argparse.Namespace) -> int:
 def command_reduce(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute()
     with engagement_lock(engagement) as bound_engagement:
-        snapshot = reduce_engagement(bound_engagement)
-        write_snapshot(bound_engagement, snapshot)
-        write_views(bound_engagement, snapshot)
+        admission = assert_completion_claims_clear_bound(bound_engagement)
+        snapshot = admission.state
+        write_snapshot(bound_engagement, snapshot, completion_claims_token=admission.token)
+        write_views(bound_engagement, snapshot, completion_claims_token=admission.token)
     emit({"ok": True, "event_count": snapshot["event_count"], "ledger_hash": snapshot["ledger_hash"]})
     return 0
 

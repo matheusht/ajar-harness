@@ -274,16 +274,28 @@ class CompletionClaimsTest(unittest.TestCase):
         with engagement_lock(self.root) as bound, mock.patch.object(claims.os, "listdir", return_value=["\udcff.MD"]):
             self.assertEqual(self._error(lambda: claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)), "completion_claims_tree_path_invalid")
 
-    def test_29_pin_binds_genesis_but_byte_identical_clone_retains_it(self) -> None:
+    def test_29_pin_binds_canonical_logical_genesis(self) -> None:
         note = self.root / "notes.md"; note.write_text("coverage_dry\n", encoding="utf-8")
         manifest = self._pin_manifest(self._claim_rows())
         clone = Path(self.temporary.name) / "clone"; shutil.copytree(self.root, clone)
+        same = Path(self.temporary.name) / "same-parent" / self.root.name; same.parent.mkdir(); same.mkdir()
+        (same / "scope.md").write_text(SCOPE, encoding="utf-8")
+        initialize_engagement(same, "2026-08-24T00:00:00Z")
+        (same / "notes.md").write_text("coverage_dry\n", encoding="utf-8")
+        different_time = Path(self.temporary.name) / "different-time-parent" / self.root.name; different_time.parent.mkdir(); different_time.mkdir()
+        (different_time / "scope.md").write_text(SCOPE, encoding="utf-8")
+        initialize_engagement(different_time, "2026-08-24T00:00:01Z")
+        (different_time / "notes.md").write_text("coverage_dry\n", encoding="utf-8")
         other = Path(self.temporary.name) / "other"; other.mkdir(); (other / "scope.md").write_text(SCOPE, encoding="utf-8")
         initialize_engagement(other, "2026-08-24T00:00:00Z")
         (other / "notes.md").write_text("coverage_dry\n", encoding="utf-8")
+        self.assertEqual(self._claim_rows(), self._claim_rows_for(same))
+        self.assertNotEqual(self._claim_rows(), self._claim_rows_for(different_time))
         self.assertNotEqual(self._claim_rows(), self._claim_rows_for(other))
         with mock.patch.object(claims, "MANIFEST_PATH", manifest):
             self.assertEqual(claims.assert_completion_claims_clear(clone)["coverage"], "active")
+            self.assertEqual(claims.assert_completion_claims_clear(same)["coverage"], "active")
+            self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(different_time)), "completion_claims_unjustified")
             self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(other)), "completion_claims_unjustified")
 
     def test_30_descriptor_swap_after_lstat_fails_closed(self) -> None:

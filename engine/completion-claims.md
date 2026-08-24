@@ -10,12 +10,13 @@ The claim is clear only when the current reducer state is `coverage_dry` and its
 coverage review is linked, or when the exact immutable bytes match a canonical, opaque
 grandfather pin. Pins use full `sha256:` digests for both the POSIX path and exact content bytes.
 The path digest binds the first validated scope hash *and* the immutable genesis event record
-hash, so it cannot be replayed into a separately initialized engagement with identical scope
-text. The checked-in pin manifest is canonical and has no CLI, environment, or manifest-path
-override. A whole-tree byte-identical clone intentionally retains that genesis record and is
-therefore indistinguishable from its source. The converse is deliberate: copying or moving a
-claim to another relative path, or placing it in an independently attested engagement, loses the
-pin.
+hash. That canonical record is the logical engagement identity: a byte-identical clone, and a
+separately recreated root with the same basename, scope, and initial timestamp that produces the
+same canonical genesis bytes, are intentionally equivalent. Without adding a nonce or changing
+the record, the gate cannot and does not distinguish those cases. A different logical genesis
+(for example, a different initial timestamp, engagement identifier, or scope) loses the pin. The
+checked-in pin manifest is canonical and has no CLI, environment, or manifest-path override. The
+converse is deliberate: copying or moving a claim to another relative path loses the pin.
 
 Writers call the bound API while holding their lock immediately before writing. Admission returns
 an immutable tree/state token, rechecked immediately before render publication or the closure

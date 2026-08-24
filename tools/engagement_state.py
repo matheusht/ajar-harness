@@ -2039,12 +2039,17 @@ def _append_kernel_event_idempotent(engagement: Path, proposal: dict[str, Any], 
         return _append_kernel_event(engagement, proposal, lock_held=True)
 
 
-def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
+def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False, completion_claims_token: Any | None = None) -> dict[str, Any]:
     """Trusted kernel producer path; never expose this as a public command."""
     # The append, reduction, snapshot, and views share one lock so concurrent writers cannot publish
     # a projection older than the authoritative ledger tail.
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
+        if completion_claims_token is not None:
+            # This is before every private append-path write, including a scope-draft
+            # preservation write that can precede the proposed ledger record.
+            from completion_claims import assert_completion_claims_token_current_bound
+            assert_completion_claims_token_current_bound(engagement, completion_claims_token)
         current_events = read_ledger(engagement, "event")
         if not current_events:
             raise RecordError("scope_attestation_missing", "initialize engagement first")

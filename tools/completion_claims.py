@@ -13,6 +13,7 @@ import os
 import re
 import stat
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,33 @@ GENERATED_VIEWS = frozenset({
 })
 CLAIM_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9_-])(?:covered-dry|coverage_dry)(?![A-Za-z0-9_-])")
 HEX = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MAX_TREE_DEPTH = 512
+
+
+@dataclass(frozen=True)
+class CompletionClaimsToken:
+    """The exact admission snapshot a writer must consume before its mutation."""
+
+    scope_hash: str
+    genesis_record_hash: str
+    tree: tuple[tuple[Any, ...], ...]
+    claims: tuple[tuple[str, str, int], ...]
+    state_bytes: bytes
+    events_digest: str
+    manifest_bytes: bytes
+    manifest_identity: tuple[int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class CompletionClaimsAdmission:
+    """Reducer state plus its immutable, re-checkable source token."""
+
+    state: dict[str, Any]
+    token: CompletionClaimsToken
+
+    # Preserve the small pre-token convenience surface for in-tree callers and tests.
+    def __getitem__(self, key: str) -> Any:
+        return self.state[key]
 
 
 def _failure(code: str, scope_hash: str | None = None, path_hash: str | None = None) -> RecordError:
@@ -130,12 +158,18 @@ def load_pins() -> dict[str, tuple[str, int]]:
     return _parse_pins(raw)
 
 
-def _read_regular(parent_fd: int, name: str) -> tuple[bytes, tuple[int, int, int, int, int]]:
+def _identity(item: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_mode)
+
+
+def _read_regular(parent_fd: int, name: str, expected: os.stat_result | None = None) -> tuple[bytes, tuple[int, int, int, int, int]]:
     fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
             raise _failure("completion_claims_tree_unsafe")
+        if expected is not None and _identity(before) != _identity(expected):
+            raise _failure("completion_claims_tree_changed")
         chunks: list[bytes] = []
         while True:
             chunk = os.read(fd, 1024 * 1024)
@@ -151,18 +185,32 @@ def _read_regular(parent_fd: int, name: str) -> tuple[bytes, tuple[int, int, int
         os.close(fd)
 
 
-def _scan_markdown(bound: Path, first_scope_hash: str) -> tuple[tuple[tuple[Any, ...], ...], tuple[tuple[str, str, int], ...]]:
+def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str) -> tuple[tuple[tuple[Any, ...], ...], tuple[tuple[str, str, int], ...]]:
     """Return a complete Markdown identity/content snapshot and non-generated claims."""
     root_fd = os.dup(int(bound.parts[3]))
     trees: list[tuple[Any, ...]] = []
     claims: list[tuple[str, str, int]] = []
 
-    def walk(directory_fd: int, prefix: tuple[str, ...]) -> None:
+    def names_for(directory_fd: int) -> list[str]:
         try:
-            names = sorted(os.listdir(directory_fd))
+            return sorted(os.listdir(directory_fd))
         except OSError as exc:
             raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
-        for name in names:
+
+    # Frames, rather than recursive calls, prevent a hostile/deep tree from exhausting Python's
+    # interpreter stack.  Each child descriptor is identity-checked against its lstat before use.
+    stack: list[tuple[int, tuple[str, ...], list[str], int]] = []
+    try:
+        stack.append((root_fd, (), [], 0))
+        stack[-1] = (root_fd, (), names_for(root_fd), 0)
+        while stack:
+            directory_fd, prefix, names, position = stack[-1]
+            if position >= len(names):
+                stack.pop()
+                os.close(directory_fd)
+                continue
+            name = names[position]
+            stack[-1] = (directory_fd, prefix, names, position + 1)
             try:
                 name.encode("utf-8")
             except UnicodeEncodeError as exc:
@@ -177,11 +225,22 @@ def _scan_markdown(bound: Path, first_scope_hash: str) -> tuple[tuple[tuple[Any,
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
             if stat.S_ISDIR(entry.st_mode):
                 trees.append((relative, "directory", entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, entry.st_mode))
-                child = os.open(name, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
                 try:
-                    walk(child, relative_parts)
-                finally:
+                    child = os.open(name, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+                except OSError as exc:
+                    raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
+                try:
+                    opened = os.fstat(child)
+                    if not stat.S_ISDIR(opened.st_mode):
+                        raise _failure("completion_claims_tree_unsafe", first_scope_hash)
+                    if _identity(opened) != _identity(entry):
+                        raise _failure("completion_claims_tree_changed", first_scope_hash)
+                    if len(stack) >= MAX_TREE_DEPTH:
+                        raise _failure("completion_claims_tree_depth_exceeded", first_scope_hash)
+                    stack.append((child, relative_parts, names_for(child), 0))
+                except Exception:
                     os.close(child)
+                    raise
                 continue
             if not stat.S_ISREG(entry.st_mode):
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
@@ -189,7 +248,7 @@ def _scan_markdown(bound: Path, first_scope_hash: str) -> tuple[tuple[tuple[Any,
                 trees.append((relative, "regular", entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, entry.st_mode))
                 continue
             try:
-                data, identity = _read_regular(directory_fd, name)
+                data, identity = _read_regular(directory_fd, name, entry)
                 text = data.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise _failure("completion_claims_markdown_invalid_utf8", first_scope_hash) from exc
@@ -200,14 +259,23 @@ def _scan_markdown(bound: Path, first_scope_hash: str) -> tuple[tuple[tuple[Any,
             if relative not in GENERATED_VIEWS:
                 count = len(CLAIM_TOKEN.findall(text))
                 if count:
-                    path_hash = "sha256:" + hashlib.sha256(PATH_DOMAIN + first_scope_hash.encode("ascii") + b"\0" + relative.encode("utf-8")).hexdigest()
+                    path_hash = "sha256:" + hashlib.sha256(
+                        PATH_DOMAIN + first_scope_hash.encode("ascii") + b"\0"
+                        + genesis_record_hash.encode("ascii") + b"\0" + relative.encode("utf-8")
+                    ).hexdigest()
                     claims.append((path_hash, "sha256:" + content_hash, count))
-
+    except UnicodeEncodeError as exc:
+        raise _failure("completion_claims_tree_path_invalid", first_scope_hash) from exc
     try:
-        walk(root_fd, ())
+        return tuple(trees), tuple(claims)
     finally:
-        os.close(root_fd)
-    return tuple(trees), tuple(claims)
+        # A failing child open leaves its parent frame live; close every still-owned descriptor.
+        while stack:
+            fd, _prefix, _names, _position = stack.pop()
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _bound_file_digest(bound: Path, name: str, scope_hash: str) -> str:
@@ -240,7 +308,7 @@ def _dry_review_current(state: dict[str, Any], events: list[dict[str, Any]]) -> 
     return bool(review and review.get("event_type") == "review.coverage_completed" and review.get("payload", {}).get("verdict") == "coverage_dry")
 
 
-def assert_completion_claims_clear_bound(engagement: Path) -> dict[str, Any]:
+def assert_completion_claims_clear_bound(engagement: Path) -> CompletionClaimsAdmission:
     """Assert completion prose is justified, returning the reducer state used by a writer.
 
     ``engagement`` must be the exact root alias produced by an existing kernel lock.
@@ -250,22 +318,27 @@ def assert_completion_claims_clear_bound(engagement: Path) -> dict[str, Any]:
     if inspect_quarantine(engagement)["quarantined"]:
         raise _failure("completion_claims_quarantined")
     try:
-        first = reduce_engagement(engagement)
         events = read_ledger(engagement, "event")
         first_scope = events[0]["payload"]["scope_hash"]
-    except (OSError, IndexError, KeyError, RecordError) as exc:
+        genesis_record_hash = events[0]["record_hash"]
+        if not isinstance(first_scope, str) or not HEX.fullmatch(first_scope) or not isinstance(genesis_record_hash, str) or not HEX.fullmatch(genesis_record_hash):
+            raise ValueError("invalid genesis")
+    except (OSError, IndexError, KeyError, ValueError, RecordError) as exc:
         raise _failure("completion_claims_state_invalid") from exc
     try:
+        # Scan first so an intentionally deep/hostile source has a stable completion-claims
+        # failure rather than reaching recursive legacy reducer helpers.
         manifest_one, manifest_identity_one = _manifest_bytes()
         pins = _parse_pins(manifest_one)
-        tree_one, claims_one = _scan_markdown(engagement, first_scope)
+        tree_one, claims_one = _scan_markdown(engagement, first_scope, genesis_record_hash)
+        first = reduce_engagement(engagement)
         state_one = canonical_json_bytes(first)
         events_one = _bound_file_digest(engagement, "events.jsonl", first_scope)
         second = reduce_engagement(engagement)
         # This reducer-valid event list is captured as part of snapshot two and is the only
         # evidence examined for the terminal review linkage below.
         events_two_records = read_ledger(engagement, "event")
-        tree_two, claims_two = _scan_markdown(engagement, first_scope)
+        tree_two, claims_two = _scan_markdown(engagement, first_scope, genesis_record_hash)
         state_two = canonical_json_bytes(second)
         events_two = _bound_file_digest(engagement, "events.jsonl", first_scope)
         manifest_two, manifest_identity_two = _manifest_bytes()
@@ -284,10 +357,50 @@ def assert_completion_claims_clear_bound(engagement: Path) -> dict[str, Any]:
         for path_hash, content_hash, count in claims_two:
             if pins.get(path_hash) != (content_hash, count):
                 raise _failure("completion_claims_unjustified", first_scope, path_hash)
-    return second
+    token = CompletionClaimsToken(
+        scope_hash=first_scope,
+        genesis_record_hash=genesis_record_hash,
+        tree=tree_two,
+        claims=claims_two,
+        state_bytes=state_two,
+        events_digest=events_two,
+        manifest_bytes=manifest_two,
+        manifest_identity=manifest_identity_two,
+    )
+    return CompletionClaimsAdmission(state=second, token=token)
 
 
-def assert_completion_claims_clear(engagement: Path) -> dict[str, Any]:
+def assert_completion_claims_token_current_bound(engagement: Path, token: CompletionClaimsToken) -> dict[str, Any]:
+    """Revalidate an admitted snapshot immediately before a sanctioned writer mutation."""
+    if not _is_bound(engagement):
+        raise _failure("completion_claims_bound_alias_required", token.scope_hash)
+    if inspect_quarantine(engagement)["quarantined"]:
+        raise _failure("completion_claims_quarantined", token.scope_hash)
+    try:
+        state = reduce_engagement(engagement)
+        events = read_ledger(engagement, "event")
+        if (not events or events[0].get("payload", {}).get("scope_hash") != token.scope_hash
+                or events[0].get("record_hash") != token.genesis_record_hash):
+            raise ValueError("genesis changed")
+        tree, found = _scan_markdown(engagement, token.scope_hash, token.genesis_record_hash)
+        events_digest = _bound_file_digest(engagement, "events.jsonl", token.scope_hash)
+        manifest, identity = _manifest_bytes()
+        if (tree != token.tree or found != token.claims or canonical_json_bytes(state) != token.state_bytes
+                or events_digest != token.events_digest or manifest != token.manifest_bytes
+                or identity != token.manifest_identity):
+            raise _failure("completion_claims_admission_stale", token.scope_hash)
+        if inspect_quarantine(engagement)["quarantined"]:
+            raise _failure("completion_claims_quarantined", token.scope_hash)
+        return state
+    except RecordError as exc:
+        if exc.code.startswith("completion_claims_"):
+            raise
+        raise _failure("completion_claims_source_unavailable", token.scope_hash) from exc
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise _failure("completion_claims_admission_stale", token.scope_hash) from exc
+
+
+def assert_completion_claims_clear(engagement: Path) -> CompletionClaimsAdmission:
     """Read-only public entrypoint.  It never creates a kernel lock or changes the tree."""
     try:
         with bound_engagement_source(engagement, allow_ungoverned=False) as bound:

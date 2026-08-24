@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -17,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import completion_claims as claims  # noqa: E402
 from engagement_records import RecordError, build_reference_index, canonical_json_bytes, sha256_file
-from engagement_state import _append_kernel_event, base_event, compute_review_input_hash, engagement_lock, initialize_engagement, persist_scope_snapshot, read_ledger, reduce_engagement
+from engagement_state import _append_kernel_event, atomic_write, base_event, compute_review_input_hash, engagement_lock, initialize_engagement, persist_scope_snapshot, read_ledger, reduce_engagement
+from engagement_views import write_views
 from memory_disposition import close_engagement, record_memory_disposition
 
 
@@ -59,6 +61,7 @@ class CompletionClaimsTest(unittest.TestCase):
         self.root.mkdir()
         (self.root / "scope.md").write_text(SCOPE, encoding="utf-8")
         self.initial_scope = initialize_engagement(self.root, "2026-08-24T00:00:00Z")["scope_hash"]
+        self.genesis_hash = read_ledger(self.root, "event")[0]["record_hash"]
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -70,7 +73,12 @@ class CompletionClaimsTest(unittest.TestCase):
 
     def _claim_rows(self) -> tuple[tuple[str, str, int], ...]:
         with engagement_lock(self.root) as bound:
-            return claims._scan_markdown(bound, self.initial_scope)[1]
+            return claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)[1]
+
+    def _claim_rows_for(self, root: Path) -> tuple[tuple[str, str, int], ...]:
+        events = read_ledger(root, "event")
+        with engagement_lock(root) as bound:
+            return claims._scan_markdown(bound, events[0]["payload"]["scope_hash"], events[0]["record_hash"])[1]
 
     def _pin_manifest(self, rows: tuple[tuple[str, str, int], ...]) -> Path:
         path = Path(self.temporary.name) / "pins.json"
@@ -156,14 +164,15 @@ class CompletionClaimsTest(unittest.TestCase):
 
     def test_13_scope_salts_path_digest(self) -> None:
         relative = b"notes.md"
-        a = hashlib.sha256(claims.PATH_DOMAIN + b"sha256:" + b"a" * 64 + b"\0" + relative).hexdigest()
-        b = hashlib.sha256(claims.PATH_DOMAIN + b"sha256:" + b"b" * 64 + b"\0" + relative).hexdigest()
+        genesis = b"sha256:" + b"c" * 64
+        a = hashlib.sha256(claims.PATH_DOMAIN + b"sha256:" + b"a" * 64 + b"\0" + genesis + b"\0" + relative).hexdigest()
+        b = hashlib.sha256(claims.PATH_DOMAIN + b"sha256:" + b"b" * 64 + b"\0" + genesis + b"\0" + relative).hexdigest()
         self.assertNotEqual(a, b)
 
     def test_14_generated_view_is_not_a_claim_but_is_snapshotted(self) -> None:
         (self.root / "progress.md").write_text("coverage_dry\n", encoding="utf-8")
         with engagement_lock(self.root) as bound:
-            tree, found = claims._scan_markdown(bound, self.initial_scope)
+            tree, found = claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)
         self.assertEqual(found, ())
         self.assertTrue(any(row[0] == "progress.md" for row in tree))
 
@@ -263,7 +272,115 @@ class CompletionClaimsTest(unittest.TestCase):
 
     def test_28_surrogate_markdown_path_fails_closed(self) -> None:
         with engagement_lock(self.root) as bound, mock.patch.object(claims.os, "listdir", return_value=["\udcff.MD"]):
-            self.assertEqual(self._error(lambda: claims._scan_markdown(bound, self.initial_scope)), "completion_claims_tree_path_invalid")
+            self.assertEqual(self._error(lambda: claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)), "completion_claims_tree_path_invalid")
+
+    def test_29_pin_binds_genesis_but_byte_identical_clone_retains_it(self) -> None:
+        note = self.root / "notes.md"; note.write_text("coverage_dry\n", encoding="utf-8")
+        manifest = self._pin_manifest(self._claim_rows())
+        clone = Path(self.temporary.name) / "clone"; shutil.copytree(self.root, clone)
+        other = Path(self.temporary.name) / "other"; other.mkdir(); (other / "scope.md").write_text(SCOPE, encoding="utf-8")
+        initialize_engagement(other, "2026-08-24T00:00:00Z")
+        (other / "notes.md").write_text("coverage_dry\n", encoding="utf-8")
+        self.assertNotEqual(self._claim_rows(), self._claim_rows_for(other))
+        with mock.patch.object(claims, "MANIFEST_PATH", manifest):
+            self.assertEqual(claims.assert_completion_claims_clear(clone)["coverage"], "active")
+            self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(other)), "completion_claims_unjustified")
+
+    def test_30_descriptor_swap_after_lstat_fails_closed(self) -> None:
+        (self.root / "child").mkdir(); (self.root / "replacement").mkdir()
+        real_open = claims.os.open
+        swapped = False
+
+        def race_open(name, flags, *args, **kwargs):
+            nonlocal swapped
+            if name == "child" and not swapped:
+                swapped = True
+                os.rename(self.root / "child", self.root / "old")
+                os.rename(self.root / "replacement", self.root / "child")
+            return real_open(name, flags, *args, **kwargs)
+
+        with engagement_lock(self.root) as bound, mock.patch.object(claims.os, "open", side_effect=race_open):
+            self.assertEqual(self._error(lambda: claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)), "completion_claims_tree_changed")
+
+    def test_31_deep_tree_cli_is_iterative_and_sanitized(self) -> None:
+        root_fd = os.open(self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        fds = [root_fd]
+        try:
+            os.mkdir("deep", dir_fd=root_fd)
+            child = os.open("deep", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0), dir_fd=root_fd); fds.append(child)
+            for _ in range(claims.MAX_TREE_DEPTH + 2):
+                os.mkdir("d", dir_fd=fds[-1])
+                fds.append(os.open("d", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0), dir_fd=fds[-1]))
+            result = subprocess.run([sys.executable, str(ROOT / "tools" / "completion_claims.py"), "--engagement", str(self.root)], capture_output=True, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'"code":"completion_claims_tree_depth_exceeded"', result.stdout)
+            self.assertNotIn(b"Traceback", result.stdout + result.stderr)
+            self.assertNotIn(str(self.root).encode(), result.stdout + result.stderr)
+        finally:
+            for index in range(len(fds) - 1, 0, -1):
+                os.close(fds[index])
+                os.rmdir("d" if index > 1 else "deep", dir_fd=fds[index - 1])
+            os.close(fds[0])
+
+    def test_32_post_admission_mutation_blocks_render_before_write(self) -> None:
+        before = (self.root / "progress.md").read_bytes()
+        with engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            (self.root / "after-final-scan.txt").write_text("race\n", encoding="utf-8")
+            self.assertEqual(
+                self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                "completion_claims_admission_stale",
+            )
+        self.assertEqual((self.root / "progress.md").read_bytes(), before)
+
+    def test_33_cooperating_writer_runs_after_lock_and_next_gate_rejects(self) -> None:
+        started = threading.Event(); acquired = threading.Event()
+
+        def writer() -> None:
+            started.set()
+            with engagement_lock(self.root) as bound:
+                acquired.set()
+                atomic_write(bound / "later.md", b"coverage_dry\n")
+
+        with engagement_lock(self.root):
+            worker = threading.Thread(target=writer)
+            worker.start()
+            self.assertTrue(started.wait(1))
+            self.assertFalse(acquired.wait(0.15))
+        self.assertTrue(acquired.wait(2))
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(self.root)), "completion_claims_unjustified")
+
+    def test_34_stale_close_token_writes_no_ledger_or_view_bytes(self) -> None:
+        self._real_dry()
+        state = reduce_engagement(self.root)
+        disposition = {
+            "schema_version": 1, "disposition_id": "memory-token-close", "engagement_id": self.root.name,
+            "recorded_at": "2026-08-24T00:01:10Z", "scope_hash": state["scope_hash"],
+            "disposition": "no_novel_lesson", "lesson_kind": "none", "lesson_summary": None,
+            "rationale": "Synthetic operator review found no reusable lesson.", "candidate_refs": [],
+            "source_refs": {key: [] for key in ("event_refs", "candidate_refs", "hypothesis_refs", "attempt_refs", "artifact_refs", "review_refs", "finding_refs", "environment_refs")},
+            "sanitization": {"status": "not_applicable", "secret_scan_status": "clean", "target_identifiers_removed": True, "credential_values_removed": True, "harmful_recipe_removed": True, "target_terms_checked": [], "notes": "No lesson body exists to promote."},
+            "human_review": {"reviewer": {"role": "operator", "id": "operator-test"}, "reviewed_at": "2026-08-24T00:01:10Z", "decision": "no_novel_lesson", "rationale": "No novel lesson survived review.", "source_material_compared": True, "abstraction_only": True, "plane1_pr_required": True},
+            "reopening_condition": None, "provenance": {"actor": {"role": "operator", "id": "operator-test"}},
+        }
+        proposal_path = Path(self.temporary.name) / "memory-token.json"; proposal_path.write_bytes(canonical_json_bytes(disposition))
+        record_memory_disposition(self.root, proposal_path, "operator-test")
+        with engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            atomic_write(bound / "after-close-admission.md", b"coverage_dry\n")
+            close_event = base_event(
+                event_id="event-close-token", engagement_id=self.root.name, recorded_at="2026-08-24T00:01:11Z",
+                actor_role="operator", actor_id="operator-test", event_type="engagement.closed",
+                rationale="Synthetic closure guarded by the admission token.",
+                payload={"entity_id": self.root.name, "status": "closed", "scope_hash": state["scope_hash"], "operator_id": "operator-test", "disposition_ref": "memory-token-close", "disposition_digest": reduce_engagement(bound)["memory_disposition"]["disposition_digest"]},
+                entity_refs=["memory-token-close"], state_changes=[{"dimension": "engagement", "entity_id": self.root.name, "previous": "active", "current": "closed"}],
+            )
+            before = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+            self.assertEqual(self._error(lambda: _append_kernel_event(bound, close_event, lock_held=True, completion_claims_token=admission.token)), "completion_claims_admission_stale")
+            after = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

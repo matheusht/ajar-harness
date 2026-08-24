@@ -110,7 +110,9 @@ def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_a
                 if change["dimension"] == "engagement" and change["entity_id"] == state["engagement_id"]: prior = change["current"]
         if prior == "closed": raise RecordError("engagement_already_closed", state["engagement_id"])
         # This is deliberately the final admission before irreversible closure append.
-        state = assert_completion_claims_clear_bound(engagement)
+        admission = assert_completion_claims_clear_bound(engagement)
+        state = admission.state
         event = base_event(event_id=f"event-{state['engagement_id']}-closed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker" if authority_request_ref else "operator", actor_id=executor_id if authority_request_ref else operator_id, event_type="engagement.closed", rationale=reason, payload={"entity_id": state["engagement_id"], "status": "closed", "scope_hash": state["scope_hash"], "operator_id": operator_id, "disposition_ref": memory["disposition_ref"], "disposition_digest": memory["disposition_digest"], **({"authority_request_ref": authority_request_ref} if authority_request_ref else {})}, entity_refs=[memory["disposition_ref"]], state_changes=[{"dimension": "engagement", "entity_id": state["engagement_id"], "previous": prior, "current": "closed"}], session_id=session_id, operation_class="authority" if authority_request_ref else None)
-        append_event(engagement, event, lock_held=True)
+        # The private append revalidates this under its transaction before any possible write.
+        append_event(engagement, event, lock_held=True, completion_claims_token=admission.token)
         return reduce_engagement(engagement)

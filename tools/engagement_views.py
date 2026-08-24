@@ -111,7 +111,16 @@ Disposition recorded: `{str(snapshot['cleanup']['recorded']).lower()}`.
     }
 
 
-def write_views(engagement: Path, snapshot: dict[str, Any]) -> None:
+def write_views(engagement: Path, snapshot: dict[str, Any], *, completion_claims_token: object | None = None) -> None:
+    """Publish deterministic views.
+
+    A completion-claim token is checked at the final admission boundary before the
+    multi-file publication sequence.  The kernel lock serializes cooperating writers;
+    POSIX has no atomic multi-file replace against a writer that ignores that lock.
+    """
+    if completion_claims_token is not None:
+        from completion_claims import assert_completion_claims_token_current_bound
+        assert_completion_claims_token_current_bound(engagement, completion_claims_token)
     for relative, data in render_views(snapshot).items():
         atomic_write(engagement / relative, data)
 

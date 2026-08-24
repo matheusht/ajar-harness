@@ -1459,10 +1459,10 @@ def command_clear_ledger_quarantine(args: argparse.Namespace) -> int:
 def command_render(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute()
     with engagement_lock(engagement) as bound_engagement:
-        # The returned snapshot is the same atomically admitted state we render.
-        snapshot = assert_completion_claims_clear_bound(bound_engagement)
-        write_views(bound_engagement, snapshot)
-    emit({"ok": True, "views": sorted(render_views(snapshot))})
+        # The returned snapshot is lock-coordinated with the publication token we render.
+        admission = assert_completion_claims_clear_bound(bound_engagement)
+        write_views(bound_engagement, admission.state, completion_claims_token=admission.token)
+    emit({"ok": True, "views": sorted(render_views(admission.state))})
     return 0
 
 

@@ -107,6 +107,404 @@ TRANSITIONS = {
     "queue": {"active": {"parked"}, "parked": {"active"}},
 }
 
+WORK_QUEUE_CLASS_ORDER = (
+    "hypothesis_ran_unadjudicated",
+    "hypothesis_unrouted",
+    "hypothesis_open_route",
+    "hypothesis_unresolved_question",
+    "claim_unadjudicated",
+    "finding_revision_pending",
+    "finding_unproved",
+    "review_obligation_open",
+    "candidate_undisposed",
+    "deferred_candidate_unreviewed",
+    "control_candidate_unverified",
+    "awaiting_operator",
+    "coverage_review_missing",
+)
+WORK_QUEUE_RULES = {
+    "hypothesis_ran_unadjudicated": (
+        "a matching attempt_id is absent from experiment_refs and control_refs",
+        "every matching attempt_id is present in experiment_refs or control_refs",
+    ),
+    "hypothesis_unrouted": (
+        "status in {queued, selected}",
+        "status is outside {queued, selected}",
+    ),
+    "hypothesis_open_route": (
+        "next_route is not null",
+        "next_route is null",
+    ),
+    "hypothesis_unresolved_question": (
+        "unresolved_questions contains this exact question",
+        "this exact question is absent from unresolved_questions",
+    ),
+    "claim_unadjudicated": (
+        "effective claim status in {needs_review, supported}",
+        "effective claim status in {confirmed, contaminated, refuted}",
+    ),
+    "finding_revision_pending": (
+        "latest fileable claim adjudication is not reflected by its expected finding revision",
+        "the expected finding revision reflects the latest adjudication, or a newer adjudication supersedes it",
+    ),
+    "finding_unproved": (
+        "status in {supported, confirmed} and the current revision has no verified proof review",
+        "the current revision has a proof review with terminal_status verified or status is outside {supported, confirmed}",
+    ),
+    "review_obligation_open": (
+        "review_ref is present in outstanding_reviews",
+        "review_ref is absent from outstanding_reviews",
+    ),
+    "candidate_undisposed": (
+        "status is selected and no hypothesis cites this candidate as origin",
+        "a hypothesis has origin_type candidate and origin_ref equal to this candidate id, or candidate status changes",
+    ),
+    "deferred_candidate_unreviewed": (
+        "status is deferred",
+        "status is not deferred",
+    ),
+    "control_candidate_unverified": (
+        "status is likely_held and no control-kind attempt references this routing event",
+        "a negative_control or positive_control attempt has experiment_ref equal to this routing event id",
+    ),
+    "awaiting_operator": (
+        "status is pending_authority",
+        "status is not pending_authority",
+    ),
+    "coverage_review_missing": (
+        "coverage is active and no other work queue item exists",
+        "coverage is not active",
+    ),
+}
+
+FILEABLE_CLAIM_STATES = {"supported", "confirmed", "contaminated", "refuted"}
+REVISE_FINDING_V2_ACTION_KEYS = {"action_kind", "action_version", "lane_id", "executor_id", "session_id", "file_digest", "operator_id", "proposal", "target"}
+REVISE_FINDING_V2_TARGET_KEYS = {"type", "id", "expected_revision", "claim_state", "adjudication_event_ref", "adjudication_review_ref", "resolves_review_refs", "file_digest"}
+
+
+def finding_revision_lane_id(target: dict[str, Any]) -> str:
+    """Return the code-owned lane for one exact v2 finding filing generation."""
+
+    material = {
+        "namespace": "llm-redteam-harness:revise-finding:v2",
+        "finding_id": target.get("id"),
+        "expected_revision": target.get("expected_revision"),
+        "adjudication_event_ref": target.get("adjudication_event_ref"),
+        "adjudication_review_ref": target.get("adjudication_review_ref"),
+        "resolves_review_refs": sorted(target.get("resolves_review_refs", [])),
+        "proposal_digest": target.get("file_digest"),
+    }
+    return "finding:" + sha256_bytes(canonical_json_bytes(material)).removeprefix("sha256:")
+
+
+def _filing_ready_review_refs(state: dict[str, Any], finding_id: str) -> list[str]:
+    latest_claim_exists = finding_id in state.get("claim_adjudications", {})
+    ready: list[str] = []
+    for item in state.get("outstanding_reviews", []):
+        if item.get("entity_ref") != finding_id:
+            continue
+        review_type, status = item.get("review_type"), item.get("status")
+        if (
+            (review_type == "legacy_adjudication" and status == "pending" and latest_claim_exists)
+            or (review_type == "regrade" and status in {"correction_required", "evidence_collected"})
+            or (review_type == "regrade_escalation" and status == "evidence_collected")
+            or (review_type == "pocinator" and status == "correction_required")
+        ):
+            ready.append(item["review_ref"])
+    return sorted(ready)
+
+
+def _filing_blocking_review_error(state: dict[str, Any], finding_id: str) -> str | None:
+    """Preserve the pre-v2 gates for regrade work that is not filing-ready."""
+
+    reviews = [item for item in state.get("outstanding_reviews", []) if item.get("entity_ref") == finding_id]
+    if any(item.get("review_type") == "regrade_escalation" and item.get("status") in {"pending", "routed", "correction_required"} for item in reviews):
+        return "escalation_evidence_not_collected"
+    if any(item.get("review_type") == "regrade" and item.get("status") in {"pending", "routed"} for item in reviews):
+        return "regrade_correction_not_resolved"
+    return None
+
+
+def revise_finding_target_is_current(state: dict[str, Any], request: dict[str, Any], proposal: dict[str, Any]) -> bool:
+    target = request.get("target")
+    if request.get("action_kind") != "revise-finding" or not isinstance(target, dict) or set(target) != REVISE_FINDING_V2_TARGET_KEYS:
+        return False
+    finding_id = target.get("id")
+    latest = state.get("claim_adjudications", {}).get(finding_id)
+    prior = state.get("findings", {}).get(finding_id)
+    expected_revision = 1 if prior is None else prior.get("revision", 0) + 1
+    digest = sha256_bytes(canonical_json_bytes(proposal))
+    return bool(
+        latest is not None
+        and latest.get("status") in FILEABLE_CLAIM_STATES
+        and target.get("expected_revision") == latest.get("expected_filing_revision") == expected_revision
+        and target.get("claim_state") == latest.get("status")
+        and target.get("adjudication_event_ref") == latest.get("event_ref")
+        and target.get("adjudication_review_ref") == latest.get("review_ref")
+        and _filing_blocking_review_error(state, finding_id) is None
+        and target.get("resolves_review_refs") == _filing_ready_review_refs(state, finding_id)
+        and target.get("file_digest") == digest
+        and request.get("lane_id") == finding_revision_lane_id(target)
+        and proposal.get("finding_id") == finding_id
+        and proposal.get("revision") == expected_revision
+        and proposal.get("supersedes_revision") == (None if prior is None else prior.get("revision"))
+        and proposal.get("claim_state") == target.get("claim_state")
+        and proposal.get("adjudication", {}).get("review_ref") == target.get("adjudication_review_ref")
+    )
+
+
+def _validate_revise_finding_v2_action(
+    action: dict[str, Any],
+    *,
+    state: dict[str, Any],
+    engagement: Path,
+    index: dict[str, list[dict[str, Any]]],
+    committed_entity_ids: set[str],
+    seen_events: dict[str, dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]],
+    requested_at: str,
+    context: str,
+) -> dict[str, Any]:
+    """Validate a digest-bound v2 filing proposal up to approval and commit."""
+
+    target = action.get("target")
+    proposal = action.get("proposal")
+    if set(action) != REVISE_FINDING_V2_ACTION_KEYS or action.get("action_kind") != "revise-finding" or action.get("action_version") != 2 or not isinstance(target, dict) or set(target) != REVISE_FINDING_V2_TARGET_KEYS or not isinstance(proposal, dict):
+        raise RecordError("revise_finding_v2_action_invalid", context)
+    resolutions = target.get("resolves_review_refs")
+    if not isinstance(resolutions, list) or any(not isinstance(item, str) for item in resolutions) or resolutions != sorted(set(resolutions)):
+        raise RecordError("revise_finding_v2_resolutions_invalid", context)
+    proposal_digest = sha256_bytes(canonical_json_bytes(proposal))
+    if action.get("file_digest") != proposal_digest or target.get("file_digest") != proposal_digest or action.get("lane_id") != finding_revision_lane_id(target):
+        raise RecordError("revise_finding_v2_digest_or_lane_invalid", context)
+    finding_id = target.get("id")
+    latest = state.get("claim_adjudications", {}).get(finding_id)
+    if target.get("type") != "finding" or latest is None or latest.get("status") not in FILEABLE_CLAIM_STATES or target.get("expected_revision") != latest.get("expected_filing_revision") or target.get("claim_state") != latest.get("status") or target.get("adjudication_event_ref") != latest.get("event_ref") or target.get("adjudication_review_ref") != latest.get("review_ref"):
+        raise RecordError("revise_finding_v2_target_stale", context)
+    prior = state.get("findings", {}).get(finding_id)
+    expected_revision = 1 if prior is None else prior["revision"] + 1
+    expected_supersedes = None if prior is None else prior["revision"]
+    if target.get("expected_revision") != expected_revision:
+        raise RecordError("revise_finding_v2_revision_not_contiguous", context)
+    current_review_refs = _filing_ready_review_refs(state, finding_id)
+    blocking_review_error = _filing_blocking_review_error(state, finding_id)
+    if blocking_review_error is not None:
+        raise RecordError(blocking_review_error, context)
+    if resolutions != current_review_refs:
+        raise RecordError("revise_finding_v2_review_set_invalid", context)
+    schema_errors = validate_record(proposal, "finding-v3")
+    reference_errors = validate_record_references(proposal, "finding-v3", index)
+    if schema_errors or reference_errors:
+        raise RecordError("revise_finding_v2_proposal_invalid", context, [*schema_errors, *reference_errors])
+    proposal_recorded_at = proposal.get("recorded_at")
+    if not isinstance(proposal_recorded_at, str) or datetime.fromisoformat(proposal_recorded_at.replace("Z", "+00:00")) > datetime.fromisoformat(requested_at.replace("Z", "+00:00")):
+        raise RecordError("revise_finding_v2_proposal_from_future", context)
+    proposal_time = datetime.fromisoformat(proposal_recorded_at.replace("Z", "+00:00"))
+    for reference in set(_iter_internal_refs(proposal)):
+        entries = [entry for entry in index.get(reference, []) if entry.get("engagement_id") == state["engagement_id"]]
+        if any(entry["type"] in {"review", "finding", "environment", "memory-disposition"} for entry in entries) and reference not in committed_entity_ids:
+            raise RecordError("revise_finding_v2_reference_precedes_commit", f"{context}:{reference}")
+        temporal_entries = [entry for entry in entries if entry.get("recorded_at")]
+        if temporal_entries and all(datetime.fromisoformat(entry["recorded_at"].replace("Z", "+00:00")) > proposal_time for entry in temporal_entries):
+            raise RecordError("revise_finding_v2_reference_from_future", f"{context}:{reference}")
+    if proposal.get("engagement_id") != state.get("engagement_id") or proposal.get("finding_id") != finding_id or proposal.get("revision") != expected_revision or proposal.get("supersedes_revision") != expected_supersedes or proposal.get("claim_state") != target.get("claim_state") or proposal.get("adjudication", {}).get("review_ref") != target.get("adjudication_review_ref") or proposal.get("scope_provenance", {}).get("scope_hash") != state.get("scope_hash") or proposal.get("scope_provenance", {}).get("environment_ref") != state.get("active_environment_ref"):
+        raise RecordError("revise_finding_v2_proposal_binding_invalid", context)
+    destination = engagement / f"findings/{finding_id}/rev-{expected_revision}.json"
+    existing_destination_digest = _governed_optional_regular_digest(destination)
+    if existing_destination_digest is not None and existing_destination_digest != proposal_digest:
+        raise RecordError("revise_finding_v2_conflicting_unactivated_revision", context)
+    adjudication_event = seen_events.get(target["adjudication_event_ref"])
+    if adjudication_event is None or adjudication_event.get("event_type") != "claim.adjudicated" or adjudication_event.get("payload", {}).get("entity_id") != finding_id or adjudication_event.get("payload", {}).get("status") != target.get("claim_state") or adjudication_event.get("payload", {}).get("review_ref") != target.get("adjudication_review_ref"):
+        raise RecordError("revise_finding_v2_adjudication_invalid", context)
+    review_entry = _index_entry(index, target["adjudication_review_ref"], "review", state["engagement_id"])
+    review = load_json(engagement / review_entry["path"]) if review_entry is not None else {}
+    if review_entry is None or target["adjudication_review_ref"] not in committed_entity_ids or review.get("review_type") != "claim_adjudication" or review.get("proposed_finding_id") != finding_id or review.get("entity_ref") != finding_id or review.get("finding_revision") != expected_supersedes or review.get("verdict") != target.get("claim_state") or proposal.get("scope_provenance", {}).get("provenance", {}).get("actor", {}).get("id") != review.get("independence", {}).get("reviewer_id"):
+        raise RecordError("revise_finding_v2_review_binding_invalid", context)
+
+    attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+    artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
+    proof = proposal["proof"]
+    primary_ids = set(proof["primary_attempt_refs"]); negative_ids = set(proof["negative_control_refs"]); positive_ids = set(proof["positive_control_refs"]); replay_ids = set(proof["replay_refs"])
+    primary_attempts = [attempt_by_id[reference] for reference in primary_ids]
+    claim_evidence_refs = set(proposal["claims"]["mechanism"]["evidence_refs"]) | set(proposal["claims"]["reachability"]["evidence_refs"]) | {reference for impact in proposal["claims"]["impact_claims"] for reference in impact["evidence_refs"]}
+    proof_attempt_ids = primary_ids | negative_ids | positive_ids | replay_ids | {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in attempt_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["attempt_refs"] + mapping["control_refs"] + mapping["replay_refs"]}
+    if not primary_attempts or any(item["kind"] != "primary" or item["assessment"] != "suspected_signal" for item in primary_attempts) or all(item["observation"]["source"] == "model_report" for item in primary_attempts):
+        raise RecordError("revise_finding_v2_primary_proof_invalid", context)
+    if any(attempt_by_id[reference]["scope_hash"] != state["scope_hash"] or attempt_by_id[reference]["environment_ref"] != state["active_environment_ref"] or attempt_by_id[reference]["contamination"]["status"] != "none_observed" for reference in proof_attempt_ids):
+        raise RecordError("revise_finding_v2_proof_provenance_invalid", context)
+    proof_artifact_ids = {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in artifact_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["artifact_refs"]}
+    if any(artifact_by_id[reference].get("environment_ref") != state["active_environment_ref"] for reference in proof_artifact_ids):
+        raise RecordError("revise_finding_v2_artifact_environment_invalid", context)
+    applicability = proof["control_applicability"]
+    for policy, references, expected_kind, assessments in (("negative", negative_ids, "negative_control", {"no_signal", "held"}), ("positive", positive_ids, "positive_control", {"suspected_signal"}), ("replay", replay_ids, "replay", {"suspected_signal"})):
+        if applicability[policy] == "required" and not references:
+            raise RecordError("revise_finding_v2_required_proof_stage_missing", f"{context}:{policy}")
+        for reference in references:
+            item = attempt_by_id[reference]
+            if item["kind"] != expected_kind or item["assessment"] not in assessments or not primary_ids.intersection(item["control_of"]):
+                raise RecordError("revise_finding_v2_proof_stage_linkage_invalid", f"{context}:{reference}")
+    required_controls = (negative_ids if applicability["negative"] == "required" else set()) | (positive_ids if applicability["positive"] == "required" else set())
+    required_replays = replay_ids if applicability["replay"] == "required" else set()
+    for mapping in proof["claim_proofs"]:
+        mapping_attempts = set(mapping["attempt_refs"]); mapping_controls = set(mapping["control_refs"]); mapping_replays = set(mapping["replay_refs"])
+        if not mapping_attempts or not mapping_attempts.issubset(primary_ids) or any(attempt_by_id[reference]["kind"] != "primary" for reference in mapping_attempts) or all(attempt_by_id[reference]["observation"]["source"] == "model_report" for reference in mapping_attempts):
+            raise RecordError("revise_finding_v2_atomic_claim_invalid", f"{context}:{mapping['claim_id']}")
+        if mapping_controls != required_controls or mapping_replays != required_replays or any(not mapping_attempts.intersection(attempt_by_id[reference]["control_of"]) for reference in mapping_controls | mapping_replays):
+            raise RecordError("revise_finding_v2_atomic_claim_stage_invalid", f"{context}:{mapping['claim_id']}")
+    return copy.deepcopy(target)
+
+
+def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project deterministic outstanding work from already validated reducer inputs."""
+
+    items: list[dict[str, Any]] = []
+
+    def add(item_class: str, entity_type: str, entity_id: str, detail: str | None = None) -> None:
+        predicate, closes_when = WORK_QUEUE_RULES[item_class]
+        items.append({
+            "class": item_class,
+            "entity": {"type": entity_type, "id": entity_id, "detail": detail},
+            "blocking": item_class != "awaiting_operator",
+            "predicate": predicate,
+            "closes_when": closes_when,
+        })
+
+    attempts_by_hypothesis: dict[str, set[str]] = {}
+    for attempt in attempts:
+        hypothesis_ref = attempt.get("hypothesis_ref")
+        attempt_id = attempt.get("attempt_id")
+        if hypothesis_ref is not None and attempt_id is not None:
+            attempts_by_hypothesis.setdefault(hypothesis_ref, set()).add(attempt_id)
+    verified_control_refs = {
+        attempt.get("experiment_ref")
+        for attempt in attempts
+        if attempt.get("kind") in {"negative_control", "positive_control"}
+    }
+    hypotheses = state.get("hypotheses", {})
+    cited_candidates = {
+        hypothesis.get("origin_ref")
+        for hypothesis in hypotheses.values()
+        if hypothesis.get("origin_type") == "candidate"
+    }
+
+    for hypothesis_id, hypothesis in hypotheses.items():
+        status = hypothesis.get("status")
+        adjudicated_attempts = set(hypothesis.get("experiment_refs", [])) | set(hypothesis.get("control_refs", []))
+        if attempts_by_hypothesis.get(hypothesis_id, set()) - adjudicated_attempts:
+            add("hypothesis_ran_unadjudicated", "hypothesis", hypothesis_id)
+        if status in {"queued", "selected"}:
+            add("hypothesis_unrouted", "hypothesis", hypothesis_id)
+        if hypothesis.get("next_route") is not None:
+            add("hypothesis_open_route", "hypothesis", hypothesis_id, hypothesis["next_route"])
+        for question in set(hypothesis.get("unresolved_questions", [])):
+            add("hypothesis_unresolved_question", "hypothesis", hypothesis_id, question)
+
+    findings = state.get("findings", {})
+    adjudications = state.get("claim_adjudications", {})
+    filing_pending: dict[str, dict[str, Any]] = {}
+    for finding_id in set(findings) | set(adjudications):
+        finding = findings.get(finding_id)
+        latest = adjudications.get(finding_id)
+        reflected = bool(
+            finding is not None
+            and latest is not None
+            and finding.get("revision") == latest.get("expected_filing_revision")
+            and finding.get("status") == latest.get("status")
+            and finding.get("adjudication_review_ref") == latest.get("review_ref")
+            and finding.get("adjudication_event_ref") == latest.get("event_ref")
+        )
+        if latest is not None and latest.get("status") in FILEABLE_CLAIM_STATES and not reflected:
+            filing_pending[finding_id] = latest
+
+    matching_pending_targets: dict[str, list[dict[str, Any]]] = {}
+    approved_generations: set[tuple[Any, ...]] = set()
+    for request in state.get("authority_requests", {}).values():
+        target = request.get("target")
+        if request.get("action_kind") != "revise-finding" or not isinstance(target, dict) or target.get("type") != "finding":
+            continue
+        generation = (target.get("id"), target.get("expected_revision"), target.get("adjudication_event_ref"), target.get("adjudication_review_ref"))
+        if request.get("status") == "approved":
+            approved_generations.add(generation)
+        if request.get("status") == "pending_authority":
+            latest = filing_pending.get(target.get("id"))
+            current_review_refs = _filing_ready_review_refs(state, target.get("id")) if isinstance(target.get("id"), str) else []
+            target_current = (
+                latest is not None
+                and target.get("expected_revision") == latest.get("expected_filing_revision")
+                and target.get("claim_state") == latest.get("status")
+                and target.get("adjudication_event_ref") == latest.get("event_ref")
+                and target.get("adjudication_review_ref") == latest.get("review_ref")
+                and _filing_blocking_review_error(state, target["id"]) is None
+                and target.get("resolves_review_refs") == current_review_refs
+                and isinstance(target.get("file_digest"), str)
+                and request.get("lane_id") == finding_revision_lane_id(target)
+            )
+            if target_current:
+                matching_pending_targets.setdefault(target["id"], []).append(target)
+    for finding_id, targets in list(matching_pending_targets.items()):
+        latest = filing_pending[finding_id]
+        generation = (finding_id, latest.get("expected_filing_revision"), latest.get("event_ref"), latest.get("review_ref"))
+        if generation in approved_generations:
+            matching_pending_targets.pop(finding_id)
+
+    suppressed_reviews = {
+        (review_ref, finding_id)
+        for finding_id, targets in matching_pending_targets.items()
+        for target in targets
+        for review_ref in target.get("resolves_review_refs", [])
+    }
+    for finding_id in sorted(set(findings) | set(adjudications)):
+        finding = findings.get(finding_id)
+        latest = adjudications.get(finding_id)
+        if latest is not None:
+            if latest.get("status") == "needs_review":
+                add("claim_unadjudicated", "finding", finding_id)
+            elif latest.get("status") == "supported":
+                add("claim_unadjudicated", "finding", finding_id)
+        elif finding is not None and finding.get("status") in {"needs_review", "supported"}:
+            add("claim_unadjudicated", "finding", finding_id)
+        if finding_id in filing_pending:
+            if finding_id not in matching_pending_targets:
+                add("finding_revision_pending", "finding", finding_id)
+            continue
+        if finding is not None:
+            status = finding.get("status")
+            proof = state.get("proof_reviews", {}).get(f"{finding_id}:r{finding.get('revision')}")
+            if status in {"supported", "confirmed"} and (proof is None or proof.get("terminal_status") != "verified"):
+                add("finding_unproved", "finding", finding_id)
+
+    for review in state.get("outstanding_reviews", []):
+        if (review["review_ref"], review["entity_ref"]) not in suppressed_reviews:
+            add("review_obligation_open", "review_obligation", review["review_ref"], review["entity_ref"])
+
+    for candidate_id, candidate in state.get("candidates", {}).items():
+        if candidate.get("status") == "selected" and candidate_id not in cited_candidates:
+            add("candidate_undisposed", "candidate", candidate_id)
+        if candidate.get("status") == "deferred":
+            add("deferred_candidate_unreviewed", "candidate", candidate_id)
+
+    for control_candidate in state.get("control_candidates", []):
+        routing_event_id = control_candidate.get("routing_event_id")
+        if control_candidate.get("status") == "likely_held" and routing_event_id not in verified_control_refs:
+            add("control_candidate_unverified", "control_candidate", routing_event_id)
+
+    for request in state.get("authority_requests", {}).values():
+        if request.get("status") == "pending_authority":
+            add("awaiting_operator", "authority_request", request["request_id"])
+
+    if state.get("coverage") == "active" and not items:
+        add("coverage_review_missing", "engagement", state["engagement_id"])
+
+    ranks = {item_class: rank for rank, item_class in enumerate(WORK_QUEUE_CLASS_ORDER)}
+    return sorted(items, key=lambda item: (
+        ranks[item["class"]],
+        item["entity"]["type"],
+        item["entity"]["id"],
+        item["entity"]["detail"] is not None,
+        item["entity"]["detail"] or "",
+    ))
+
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -252,6 +650,17 @@ def _governed_file_exists(path: Path) -> bool:
 
 def _governed_sha256_file(path: Path) -> str:
     return sha256_bytes(read_governed_file(path))
+
+
+def _governed_optional_regular_digest(path: Path) -> str | None:
+    """Return an exact digest for a safe regular leaf, or None only when a safe path is absent."""
+
+    try:
+        return _governed_sha256_file(path)
+    except FileNotFoundError:
+        return None
+    except (OSError, RecordError) as exc:
+        raise RecordError("unsafe_governed_optional_path", str(path)) from exc
 
 
 def _governed_text(path: Path) -> str:
@@ -1412,8 +1821,8 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "schema_version": 1, "engagement_id": engagement_id, "scope_hash": scope_hash,
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
-        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "coverage_counts": None, "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "reports": {}, "report_refs": [], "submission_refs": [],
+        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
+        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "coverage_counts": None, "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
 
@@ -1465,11 +1874,13 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         validate_event_semantics(event)
         validate_temporal_search_reference(event, seen_events, index, engagement)
         payload = event["payload"]
+        authority_request_target: dict[str, Any] | None = None
         request = state["authority_requests"].get(payload.get("authority_request_ref")) if payload.get("authority_request_ref") else None
         expected_authority_action = {"environment.review_recorded": "review-preflight", "report.generated": "generate-report", "operator.review_recorded": "accept-report", "submission.recorded": "record-submission", "memory.disposition_recorded": "record-memory", "engagement.closed": "close", "finding.revised": "revise-finding", "scope.attested": "reattest-scope", "cleanup.updated": "record-cleanup", "operator_prior.recorded": "record-operator-prior", "engagement.reopened": "reopen", "migration.apply_authorized": "apply-migration"}.get(event["event_type"])
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "ledger_tail_repair" and payload.get("authority_request_ref"): expected_authority_action = "repair-ledger-tail"
         event_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
-        broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request["environment_ref"] == state["active_environment_ref"] and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
+        request_environment_matches = bool(request and (request["environment_ref"] == state["active_environment_ref"] or (event["event_type"] == "finding.revised" and request.get("target") is None and request["environment_ref"] is None)))
+        broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request_environment_matches and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
         if event["event_type"] in {"operator_stop.recorded", "operator_resume.recorded"} and (event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("operator_id") != active_scope_operator):
             raise RecordError("operator_queue_control_not_scope_authorized", event["event_id"])
         validate_reference_precedence(event, index, committed_entity_ids)
@@ -1555,7 +1966,17 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 raise RecordError("authority_request_invalid", event["event_id"])
             if event["actor"]["role"] == "broker":
                 expected_action_path = f"authority/requests/{request_id}.action.json"; action_path = engagement / str(payload.get("action_path", ""))
-                if payload.get("action_path") != expected_action_path or not _governed_file_exists(action_path) or sha256_bytes(read_governed_file(action_path)) != payload["action_digest"] or detect_secret_classes(read_governed_file(action_path)): raise RecordError("authority_action_record_invalid", event["event_id"])
+                action_bytes = read_governed_file(action_path) if payload.get("action_path") == expected_action_path and _governed_file_exists(action_path) else b""
+                if payload.get("action_path") != expected_action_path or sha256_bytes(action_bytes) != payload["action_digest"] or detect_secret_classes(action_bytes): raise RecordError("authority_action_record_invalid", event["event_id"])
+                action = load_json(action_path)
+                if action.get("action_kind") == "revise-finding" and "action_version" in action:
+                    if action_bytes != canonical_json_bytes(action) or payload.get("environment_ref") != state["active_environment_ref"] or action.get("lane_id") != payload.get("lane_id") or action.get("executor_id") != event["actor"]["id"] or action.get("session_id") != event.get("provenance", {}).get("session_id") or action.get("operator_id") != active_scope_operator:
+                        raise RecordError("revise_finding_v2_principal_binding_invalid", event["event_id"])
+                    authority_request_target = _validate_revise_finding_v2_action(action, state=state, engagement=engagement, index=index, committed_entity_ids=committed_entity_ids, seen_events=seen_events, attempts=attempts, artifacts=artifacts, requested_at=event["recorded_at"], context=event["event_id"])
+                    generation = (authority_request_target["id"], authority_request_target["expected_revision"], authority_request_target["adjudication_event_ref"], authority_request_target["adjudication_review_ref"])
+                    duplicate = next((prior_request for prior_request in state["authority_requests"].values() if prior_request.get("status") in {"pending_authority", "approved"} and isinstance(prior_request.get("target"), dict) and (prior_request.get("lane_id") == payload["lane_id"] or (prior_request["target"].get("id"), prior_request["target"].get("expected_revision"), prior_request["target"].get("adjudication_event_ref"), prior_request["target"].get("adjudication_review_ref")) == generation)), None)
+                    if duplicate is not None:
+                        raise RecordError("duplicate_active_finding_revision_request", event["event_id"])
             if payload.get("expires_at") is not None and datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")) <= datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")):
                 raise RecordError("authority_request_expiry_invalid", event["event_id"])
         if event["event_type"] == "authority.resolved":
@@ -1671,18 +2092,47 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             prior = state["findings"].get(finding_id)
             expected_revision = 1 if prior is None else prior["revision"] + 1
             expected_supersedes = None if prior is None else prior["revision"]
-            finding_action = {"action_kind": "revise-finding", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "file_digest": payload["finding_digest"], "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
+            v2_target = request.get("target") if request else None
+            if isinstance(v2_target, dict):
+                finding_action = load_json(engagement / str(request.get("action_path", "")))
+                v2_binding = (
+                    finding_action.get("action_version") == 2
+                    and revise_finding_target_is_current(state, request, finding_action.get("proposal", {}))
+                    and finding_action.get("executor_id") == event["actor"]["id"]
+                    and finding_action.get("session_id") == event.get("provenance", {}).get("session_id")
+                    and finding_action.get("operator_id") == payload.get("operator_id")
+                    and finding_action.get("lane_id") == request.get("lane_id")
+                    and finding_action.get("file_digest") == payload.get("finding_digest")
+                    and finding_action.get("proposal", {}).get("change_reason") == payload.get("change_reason")
+                    and v2_target.get("id") == finding_id
+                    and v2_target.get("expected_revision") == revision
+                    and v2_target.get("claim_state") == payload.get("status")
+                    and v2_target.get("adjudication_event_ref") == payload.get("adjudication_event_ref")
+                    and v2_target.get("adjudication_review_ref") == payload.get("adjudication_review_ref")
+                    and v2_target.get("resolves_review_refs") == sorted(payload.get("resolves_review_refs", []))
+                )
+            else:
+                finding_action = {"action_kind": "revise-finding", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "file_digest": payload["finding_digest"], "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
+                v2_binding = True
+            latest_adjudication = state["claim_adjudications"].get(finding_id)
+            latest_adjudication_exact = bool(latest_adjudication and latest_adjudication.get("status") == payload.get("status") and latest_adjudication.get("event_ref") == payload.get("adjudication_event_ref") and latest_adjudication.get("review_ref") == payload.get("adjudication_review_ref") and latest_adjudication.get("expected_filing_revision") == revision)
             finding_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, finding_action)
-            if not finding_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id", active_scope_operator) != active_scope_operator:
+            if not v2_binding or not finding_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id", active_scope_operator) != active_scope_operator:
                 raise RecordError("finding_filing_not_scope_operator", event["event_id"])
-            regrade_obligations = [item for item in state["outstanding_reviews"] if item["review_type"] in {"regrade_escalation", "regrade"} and item["entity_ref"] == finding_id and item["status"] in {"pending", "routed", "evidence_collected", "correction_required"}]
             resolutions = set(payload.get("resolves_review_refs", []))
-            if any(item["review_type"] == "regrade_escalation" and item["status"] != "evidence_collected" for item in regrade_obligations):
-                raise RecordError("escalation_evidence_not_collected", event["event_id"])
-            if any(item["review_ref"] not in resolutions for item in regrade_obligations):
+            filing_ready = set(_filing_ready_review_refs(state, finding_id))
+            blocking_review_error = _filing_blocking_review_error(state, finding_id)
+            if blocking_review_error is not None:
+                raise RecordError(blocking_review_error, event["event_id"])
+            required_regrade = {item["review_ref"] for item in state["outstanding_reviews"] if item["entity_ref"] == finding_id and item["review_type"] in {"regrade_escalation", "regrade"} and item["review_ref"] in filing_ready}
+            if not resolutions.issubset(filing_ready):
+                raise RecordError("finding_review_resolution_not_filing_ready", event["event_id"])
+            if not required_regrade.issubset(resolutions):
                 raise RecordError("regrade_correction_not_resolved", event["event_id"])
             if revision != expected_revision or payload["supersedes_revision"] != expected_supersedes:
                 raise RecordError("finding_revision_not_contiguous", event["event_id"])
+            if not latest_adjudication_exact:
+                raise RecordError("finding_adjudication_event_mismatch", event["event_id"])
             if commitment is None or finding_entry is None or commitment["record_revision"] != revision or commitment["record_digest"] != payload["finding_digest"]:
                 raise RecordError("finding_revision_not_committed", event["event_id"])
             finding = load_json(engagement / finding_entry["path"])
@@ -1796,7 +2246,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 for request in state["authority_requests"].values():
                     if request["status"] in {"pending_authority", "approved"}: request["status"] = "superseded"
         elif event_type == "authority.requested":
-            state["authority_requests"][payload["request_id"]] = {"request_id": payload["request_id"], "request_event_ref": event["event_id"], "action_kind": payload["action_kind"], "action_digest": payload["action_digest"], "action_path": payload.get("action_path"), "lane_id": payload["lane_id"], "status": "pending_authority", "requested_at": event["recorded_at"], "scope_hash": payload["scope_hash"], "environment_ref": payload["environment_ref"], "expires_at": payload["expires_at"], "resolved_at": None, "resolution_event_ref": None}
+            state["authority_requests"][payload["request_id"]] = {"request_id": payload["request_id"], "request_event_ref": event["event_id"], "action_kind": payload["action_kind"], "action_digest": payload["action_digest"], "action_path": payload.get("action_path"), "lane_id": payload["lane_id"], "status": "pending_authority", "requested_at": event["recorded_at"], "scope_hash": payload["scope_hash"], "environment_ref": payload["environment_ref"], "expires_at": payload["expires_at"], "resolved_at": None, "resolution_event_ref": None, "target": authority_request_target}
         elif event_type == "authority.resolved":
             request = state["authority_requests"][payload["request_id"]]; request["status"] = payload["resolution"]; request["resolved_at"] = payload["resolved_at"]; request["resolution_event_ref"] = event["event_id"]
         elif event_type == "scope.amendment_proposed":
@@ -1860,6 +2310,17 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                         evidence_is_new = all(any(entry.get("recorded_at") and datetime.fromisoformat(entry["recorded_at"].replace("Z", "+00:00")) > opened_at for entry in index.get(reference, []) if entry.get("engagement_id") == engagement_id) for reference in payload["supporting_evidence_refs"])
                         if evidence_is_new:
                             item["status"] = "evidence_collected"
+        elif event_type == "claim.adjudicated":
+            review_entry = _index_entry(index, payload["review_ref"], "review", engagement_id)
+            adjudication_review = load_json(engagement / review_entry["path"])
+            reviewed_revision = adjudication_review.get("finding_revision")
+            state["claim_adjudications"][payload["entity_id"]] = {
+                "status": payload["status"],
+                "event_ref": event["event_id"],
+                "review_ref": payload["review_ref"],
+                "reviewed_revision": reviewed_revision,
+                "expected_filing_revision": 1 if reviewed_revision is None else reviewed_revision + 1,
+            }
         elif event_type == "review.regrade_completed":
             if payload["verdict"] == "escalation_found":
                 state["outstanding_reviews"].append({"review_type": "regrade_escalation", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "pending", "hypothesis_ref": None, "opened_at": event["recorded_at"]})
@@ -1882,10 +2343,10 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 state["outstanding_reviews"].append({"review_type": "pocinator", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "blocked" if terminal == "blocked" else "correction_required", "hypothesis_ref": None, "opened_at": event["recorded_at"]})
         elif event_type == "legacy.record_imported" and payload.get("imported_finding_id") is not None:
             commitment=committed_records[payload["imported_finding_id"]]
-            state["findings"][payload["imported_finding_id"]]={"revision":payload["imported_revision"],"status":"needs_review","digest":commitment["record_digest"],"adjudication_review_ref":None,"change_reason":"initial legacy reconstruction"}
+            state["findings"][payload["imported_finding_id"]]={"revision":payload["imported_revision"],"status":"needs_review","digest":commitment["record_digest"],"adjudication_review_ref":None,"adjudication_event_ref":None,"change_reason":"initial legacy reconstruction"}
             state["outstanding_reviews"].append({"review_type":"legacy_adjudication","entity_ref":payload["imported_finding_id"],"review_ref":event["event_id"],"reason":"Legacy finding requires independent adjudication before any authority or report acceptance.","status":"pending","hypothesis_ref":None,"opened_at":event["recorded_at"]})
         elif event_type == "finding.revised":
-            state["findings"][payload["finding_id"]] = {"revision": payload["finding_revision"], "status": payload["status"], "digest": payload["finding_digest"], "adjudication_review_ref": payload["adjudication_review_ref"], "change_reason": payload["change_reason"]}
+            state["findings"][payload["finding_id"]] = {"revision": payload["finding_revision"], "status": payload["status"], "digest": payload["finding_digest"], "adjudication_review_ref": payload["adjudication_review_ref"], "adjudication_event_ref": payload["adjudication_event_ref"], "change_reason": payload["change_reason"]}
             resolved = set(payload.get("resolves_review_refs", []))
             state["outstanding_reviews"] = [item for item in state["outstanding_reviews"] if item["review_ref"] not in resolved]
         elif event_type == "report.generated":
@@ -1932,6 +2393,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         name: sha256_bytes(read_governed_file(engagement / name))
         for name in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl")
     }
+    state["work_queue"] = compute_work_queue(state, attempts)
     errors = validate_record(state, "state-snapshot")
     if errors:
         raise RecordError("snapshot_schema_invalid", "reducer emitted invalid state", errors)

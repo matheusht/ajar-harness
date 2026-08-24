@@ -32,11 +32,20 @@ Usage:
 
 import argparse
 import datetime as dt
-import glob
 import json
 import os
+import stat
 import subprocess
 import sys
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_state import (
+    _open_parent_fd,
+    _relative_regular_files,
+    bound_engagement_source,
+    read_governed_file,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -60,7 +69,20 @@ def classify(gate, detail):
     return "unclassified"
 
 
-def run_gates(pkg, engagement):
+def run_gates(pkg, engagement, snapshot=None, package_relative=None):
+    if snapshot is not None:
+        from finding_lifecycle import run_gates as evaluate_gates
+
+        gates, _ = evaluate_gates(
+            pkg,
+            engagement,
+            snapshot=snapshot,
+            package_relative=package_relative,
+        )
+        return {
+            "decision": "blocked" if gates.blocked else "clear",
+            "gates": gates.rows,
+        }
     out = subprocess.run(
         [sys.executable, os.path.join(ROOT, "tools", "finding_lifecycle.py"), "gates",
          "--engagement", engagement, "--json", pkg],
@@ -71,13 +93,22 @@ def run_gates(pkg, engagement):
         return None
 
 
-def kernel_start(engagement):
+def kernel_start(engagement, snapshot=None):
     """First scope.attested / preflight event. Packages older than this predate the kernel."""
-    p = os.path.join(engagement, "events.jsonl")
-    if not os.path.isfile(p):
-        return None
+    if snapshot is None:
+        with bound_engagement_source(
+            Path(engagement), allow_ungoverned=True
+        ) as bound:
+            try:
+                data = read_governed_file(bound / "events.jsonl")
+            except FileNotFoundError:
+                return None
+    else:
+        data = snapshot.get("events.jsonl")
+        if not isinstance(data, bytes):
+            return None
     stamps = []
-    for line in open(p):
+    for line in data.decode("utf-8", errors="replace").splitlines():
         if line.strip():
             r = json.loads(line)
             ts = r.get("recorded_at")
@@ -86,9 +117,45 @@ def kernel_start(engagement):
     return min(stamps) if stamps else None
 
 
-def newest_mtime(pkg):
-    ts = [os.path.getmtime(f) for f in glob.glob(os.path.join(pkg, "*")) if os.path.isfile(f)]
+def newest_mtime(engagement: Path, package_relative: str, regular_files: set[str]):
+    prefix = package_relative.rstrip("/") + "/"
+    ts = []
+    for relative in regular_files:
+        below = relative[len(prefix):] if relative.startswith(prefix) else ""
+        if not below or len(Path(below).parts) != 1:
+            continue
+        parts = tuple(Path(relative).parts)
+        parent_fd, name = _open_parent_fd(engagement, parts, create=False)
+        try:
+            entry = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISREG(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                ts.append(entry.st_mtime)
+        finally:
+            os.close(parent_fd)
     return dt.datetime.fromtimestamp(max(ts), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
+
+
+def _package_names(engagement: Path) -> list[str]:
+    parts = engagement.parts
+    if not (len(parts) == 4 and parts[1:3] == ("dev", "fd") and parts[3].isdigit()):
+        raise RecordError("bound_engagement_required", "gate audit source is not bound")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory_fd = os.open("unproven", flags, dir_fd=int(parts[3]))
+    except FileNotFoundError:
+        return []
+    try:
+        names = []
+        for name in sorted(os.listdir(directory_fd)):
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                names.append(name)
+        return names
+    finally:
+        os.close(directory_fd)
 
 
 def main():
@@ -100,30 +167,48 @@ def main():
     args = ap.parse_args()
 
     eng = args.engagement
-    ks = args.kernel_start or kernel_start(eng)
-    pkgs = sorted(glob.glob(os.path.join(eng, "unproven", "*/")))
-    rows, tally = [], {"paperwork": 0, "substance": 0, "unclassified": 0}
-    clear = 0
+    try:
+        with bound_engagement_source(
+            Path(eng), allow_ungoverned=True
+        ) as bound:
+            from finding_lifecycle import _snapshot_engagement
 
-    for pkg in pkgs:
-        j = run_gates(pkg, eng)
-        if j is None:
-            continue
-        name = os.path.basename(pkg.rstrip("/"))
-        blocks = [(g["gate"], g.get("detail", "")) for g in j.get("gates", []) if not g.get("ok")]
-        if not blocks:
-            clear += 1
-        cls = {}
-        for gate, detail in blocks:
-            c = classify(gate, detail)
-            cls[gate] = c
-            tally[c] += 1
-        rows.append({
-            "package": name,
-            "packaged": os.path.isfile(os.path.join(pkg, "finding.json")),
-            "blocks": cls,
-            "newest_artifact": newest_mtime(pkg),
-        })
+            snapshot = _snapshot_engagement(bound)
+            regular_files = _relative_regular_files(bound)
+            ks = args.kernel_start or kernel_start(bound, snapshot)
+            rows, tally = [], {"paperwork": 0, "substance": 0, "unclassified": 0}
+            clear = 0
+
+            for name in _package_names(bound):
+                package_relative = f"unproven/{name}"
+                pkg = bound / package_relative
+                j = run_gates(
+                    str(pkg),
+                    str(bound),
+                    snapshot=snapshot,
+                    package_relative=package_relative,
+                )
+                blocks = [(g["gate"], g.get("detail", "")) for g in j.get("gates", []) if not g.get("ok")]
+                if not blocks:
+                    clear += 1
+                cls = {}
+                for gate, detail in blocks:
+                    c = classify(gate, detail)
+                    cls[gate] = c
+                    tally[c] += 1
+                rows.append({
+                    "package": name,
+                    "packaged": f"{package_relative}/finding.json" in snapshot,
+                    "blocks": cls,
+                    "newest_artifact": newest_mtime(bound, package_relative, regular_files),
+                })
+    except (RecordError, OSError, ValueError, json.JSONDecodeError) as exc:
+        status = "quarantined" if isinstance(exc, RecordError) and exc.code == "engagement_quarantined" else "source-unavailable"
+        if args.json:
+            print(json.dumps({"status": status, "rows": []}, sort_keys=True))
+        else:
+            print("engagement evidence is quarantined" if status == "quarantined" else "engagement source is unavailable")
+        return 1
 
     # "Fair chance" means the kernel was ACTUALLY IN USE for this package, and the only honest
     # evidence of that is the package citing an attempt that resolves in the ledger. The first

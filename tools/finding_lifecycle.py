@@ -67,12 +67,27 @@ import argparse
 import json
 import os
 import re
-import shutil
+import stat
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
+from engagement_quarantine import (
+    inspect_quarantine,
+    is_quarantined,
+    quarantined_ancestor,
+    require_safe_offline_input,
+)
+from engagement_records import RecordError
+from engagement_state import (
+    _relative_regular_files,
+    bound_engagement_source,
+    engagement_lock,
+    find_engagement_root,
+    read_governed_file,
+)
 
 UNPROVEN = "unproven"
 PROVEN = "findings"
@@ -106,6 +121,64 @@ def load_json(path):
         return None
 
 
+def _snapshot_engagement(engagement):
+    """Capture gate-readable files from one lock-bound engagement inode."""
+
+    snapshot = {}
+    for relative in sorted(_relative_regular_files(Path(engagement))):
+        if Path(relative).suffix.lower() not in {".json", ".jsonl", ".md", ".txt"}:
+            snapshot[relative] = None
+            continue
+        try:
+            snapshot[relative] = read_governed_file(Path(engagement) / relative)
+        except OSError:
+            # A file that disappears or ceases to be regular while the snapshot is built is not a
+            # usable input. Omitting it makes the corresponding existence/reference gate fail.
+            continue
+    return snapshot
+
+
+def _require_bound_package_current(logical, bound, *, portable):
+    """Final pre-report admission check for a snapshot's bound source inode."""
+
+    try:
+        root_fd = int(Path(bound).parts[3])
+        opened = os.fstat(root_fd)
+        named = os.stat(logical, follow_symlinks=False)
+    except (OSError, ValueError, IndexError) as exc:
+        raise RecordError("engagement_source_changed", "gate source changed") from exc
+    if (
+        stat.S_ISLNK(named.st_mode)
+        or not stat.S_ISDIR(named.st_mode)
+        or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        or inspect_quarantine(Path(bound))["quarantined"]
+        or inspect_quarantine(Path(logical))["quarantined"]
+    ):
+        raise RecordError("engagement_source_changed", "gate source changed")
+    if portable:
+        try:
+            require_safe_offline_input(Path(logical))
+        except ValueError as exc:
+            raise RecordError("engagement_source_changed", "gate source changed") from exc
+
+
+def _snapshot_json(snapshot, relative):
+    try:
+        return json.loads(snapshot[relative].decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _package_docs(snapshot, package_relative):
+    prefix = package_relative.rstrip("/") + "/"
+    docs = {}
+    for relative, data in snapshot.items():
+        if not relative.startswith(prefix) or Path(relative).suffix.lower() not in {".md", ".txt", ".json"}:
+            continue
+        docs[relative[len(prefix):]] = data.decode("utf-8", errors="replace")
+    return docs
+
+
 def dig(obj, *paths):
     """First present value among dotted paths."""
     for p in paths:
@@ -129,35 +202,41 @@ def _refs(value):
     return [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
 
 
-def _attempt_index(engagement):
+def _attempt_index(engagement, snapshot=None):
     """Read just enough of attempts.jsonl for referential checks.
 
     This deliberately does not print or return attempt inputs/outputs. Older engagements use
     ``id``/``verdict`` while the governed record uses ``attempt_id``/``assessment``; the gate reads
     both so a lifecycle migration does not silently discard evidence.
     """
-    path = os.path.join(engagement, "attempts.jsonl")
     rows = {}
     try:
-        with open(path) as fh:
-            for lineno, line in enumerate(fh, 1):
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                if not isinstance(record, dict):
-                    return None, f"attempts.jsonl line {lineno} is not an object"
-                attempt_id = record.get("attempt_id") or record.get("id")
-                if not isinstance(attempt_id, str) or not attempt_id.strip():
-                    # Some pre-lifecycle research journals are also named attempts.jsonl but do
-                    # not contain addressable attempt records. They cannot satisfy a v3 proof ref.
-                    continue
-                attempt_id = attempt_id.strip()
-                if attempt_id in rows:
-                    return None, f"attempts.jsonl contains duplicate id {attempt_id}"
-                rows[attempt_id] = record
+        if snapshot is None:
+            with open(os.path.join(engagement, "attempts.jsonl"), "rb") as handle:
+                data = handle.read()
+        else:
+            data = snapshot["attempts.jsonl"]
+        for lineno, raw_line in enumerate(data.splitlines(), 1):
+            line = raw_line.decode("utf-8")
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                return None, f"attempts.jsonl line {lineno} is not an object"
+            attempt_id = record.get("attempt_id") or record.get("id")
+            if not isinstance(attempt_id, str) or not attempt_id.strip():
+                # Some pre-lifecycle research journals are also named attempts.jsonl but do
+                # not contain addressable attempt records. They cannot satisfy a v3 proof ref.
+                continue
+            attempt_id = attempt_id.strip()
+            if attempt_id in rows:
+                return None, f"attempts.jsonl contains duplicate id {attempt_id}"
+            rows[attempt_id] = record
+    except KeyError:
+        return None, "attempt ledger unavailable: FileNotFoundError"
     except OSError as exc:
         return None, f"attempt ledger unavailable: {exc.__class__.__name__}"
-    except ValueError:
+    except (UnicodeDecodeError, ValueError):
         return None, "attempts.jsonl contains invalid JSON"
     return rows, None
 
@@ -176,8 +255,24 @@ class Gates:
 
 # --- the gates ----------------------------------------------------------------
 
-def g0_existence(pkg, g):
+def g0_existence(pkg, g, docs=None, package_files=None):
     from score_finding import check_existence, load_package, Result
+    if docs is not None:
+        from score_finding import PATH_RE
+        files = set(package_files or docs)
+        names = {os.path.basename(value) for value in files}
+        failures = []
+        for name, text in docs.items():
+            for match in PATH_RE.finditer(text):
+                relative = match.group(1)
+                if relative.startswith(("http", "//")) or " " in relative:
+                    continue
+                local = str(Path(name).parent / relative)
+                hit = relative in files or local in files or os.path.basename(relative) in names
+                if not hit and not re.match(r"^(src|lib|core|kvm|engine|skills|tools|cmd|pkg|x)/", relative):
+                    failures.append(f"{name}: {relative} not found in the package")
+        g.add("G0", not failures, "every cited path exists", "; ".join(failures[:4]))
+        return
     docs = load_package(pkg)
     res = Result()
     if not docs:
@@ -189,7 +284,7 @@ def g0_existence(pkg, g):
           "; ".join(c["detail"] or c["label"] for c in bad[:4]))
 
 
-def g1_real_path(finding, attest, g, engagement=None):
+def g1_real_path(finding, attest, g, engagement=None, snapshot=None):
     """The primary attempt must be named, attested, AND resolve to a real execution that signalled.
 
     G1 was attestable-only: it checked that a ref existed and that a boolean was set. Both are
@@ -219,7 +314,7 @@ def g1_real_path(finding, attest, g, engagement=None):
               "(supply --engagement with a v3 package for the computable check)")
         return
 
-    attempts, error = _attempt_index(engagement)
+    attempts, error = _attempt_index(engagement, snapshot)
     if error:
         g.add("G1", False, "a primary attempt is named, resolved, and attested", error)
         return
@@ -269,7 +364,7 @@ def g1_real_path(finding, attest, g, engagement=None):
           f"{len(prim)} primary attempt(s) resolve to a non-control record with a signalling outcome")
 
 
-def g2_control(finding, attest, g, engagement=None):
+def g2_control(finding, attest, g, engagement=None, snapshot=None):
     neg = _refs(dig(finding, "proof.negative_control_refs", "control_attempt_id"))
     primary = _refs(dig(finding, "proof.primary_attempt_refs", "attempt_id"))
     replay = _refs(dig(finding, "proof.replay_refs", "replay_attempt_refs"))
@@ -297,7 +392,7 @@ def g2_control(finding, attest, g, engagement=None):
               "(supply --engagement with a v3 package for the computable check)")
         return
 
-    attempts, error = _attempt_index(engagement)
+    attempts, error = _attempt_index(engagement, snapshot)
     if error:
         g.add("G2", False, "a distinct negative control is named, resolved, and attested", error)
         return
@@ -383,7 +478,31 @@ def g3_privilege(finding, attest, g):
           f"a proof run at more privilege than the attacker holds does not establish reach")
 
 
-def g4_adjudication(pkg, engagement, g):
+def _snapshot_reviews(snapshot, prefix=""):
+    reviews = []
+    seen = set()
+    for relative, data in sorted(snapshot.items()):
+        if prefix and not relative.startswith(prefix.rstrip("/") + "/"):
+            continue
+        if not relative.endswith(".json"):
+            continue
+        try:
+            value = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        for record in value if isinstance(value, list) else [value]:
+            if not isinstance(record, dict) or record.get("review_type") != "claim_adjudication":
+                continue
+            review_id = record.get("review_id")
+            if review_id and review_id in seen:
+                continue
+            if review_id:
+                seen.add(review_id)
+            reviews.append(record)
+    return reviews
+
+
+def g4_adjudication(pkg, engagement, g, snapshot=None, package_relative=None):
     """The synthetic signature is a property of the review CORPUS, not of one review.
 
     A package usually carries the single review that adjudicated it, and one review can never show
@@ -394,8 +513,11 @@ def g4_adjudication(pkg, engagement, g):
     Found 2026-08-10 by running the gates over the eleven spotify findings: G4 passed on all eleven
     while the engagement's 15-review corpus audited `synthetic`."""
     from adjudication_audit import audit, load_reviews
-    rdir = os.path.join(pkg, "reviews")
-    reviews = load_reviews(rdir) if os.path.isdir(rdir) else []
+    if snapshot is None:
+        rdir = os.path.join(pkg, "reviews")
+        reviews = load_reviews(rdir) if os.path.isdir(rdir) else []
+    else:
+        reviews = _snapshot_reviews(snapshot, f"{package_relative}/reviews")
     if not reviews:
         g.add("G4", False, "an independent adjudication review exists",
               "no claim_adjudication review found under reviews/")
@@ -412,7 +534,7 @@ def g4_adjudication(pkg, engagement, g):
         # `<package>/reviews/`. So this arm silently found nothing and contributed nothing for the
         # whole of its existence. The fixture hid it: fixtures/lifecycle-corpus was built with a
         # top-level reviews/ dir, shaped to the code instead of to the world.
-        corpus = load_reviews(engagement)
+        corpus = load_reviews(engagement) if snapshot is None else _snapshot_reviews(snapshot)
         if not corpus:
             # The package under test lives inside the engagement and carries at least one review
             # (checked above), so a recursive walk that finds none means the walk is broken. Fail
@@ -434,7 +556,7 @@ def g4_adjudication(pkg, engagement, g):
 SEV_WORDS = {"critical", "high", "medium", "low", "informational", "none"}
 
 
-def g5_severity(pkg, finding, g):
+def g5_severity(pkg, finding, g, docs=None):
     from score_finding import CVSS_RE, cvss31_base, load_package
     label = dig(finding, "classification.severity.label", "severity")
     if isinstance(label, dict):
@@ -442,7 +564,7 @@ def g5_severity(pkg, finding, g):
     if not label or str(label).lower() not in SEV_WORDS:
         g.add("G5", True, "no severity claimed, so no vector required")
         return
-    blob = "\n".join(load_package(pkg).values())
+    blob = "\n".join((load_package(pkg) if docs is None else docs).values())
     vector = dig(finding, "classification.severity.vector") or ""
     hits = list(CVSS_RE.finditer(blob + "\n" + str(vector)))
     if not hits:
@@ -471,7 +593,7 @@ STATE_MODES = {STATE_REAL_PATH, STATE_NONE_REQUIRED, STATE_SYNTHESIZED, NOT_ESTA
 STATE_PASSING = {STATE_REAL_PATH, STATE_NONE_REQUIRED}
 
 
-def g6_state_provenance(attest, g, engagement=None):
+def g6_state_provenance(attest, g, engagement=None, snapshot=None):
     """The state the proof depends on must have been REACHED, not written.
 
     obyte-2026-08-004 passed all five earlier gates and promoted. Its PoC ran, its negative control
@@ -554,7 +676,7 @@ def g6_state_provenance(attest, g, engagement=None):
               f"{len(setup)} seeded setup element(s), each with a reachability basis")
 
     if engagement and looks_like_ref:
-        attempts, error = _attempt_index(engagement)
+        attempts, error = _attempt_index(engagement, snapshot)
         if error:
             g.add("G6", False, "the impact-bearing state was reached through the real path", error)
             return
@@ -594,7 +716,7 @@ def g6_state_provenance(attest, g, engagement=None):
 KERNEL_WAIVER = "HARNESS_KERNEL_WAIVER"
 
 
-def kernel_state(engagement):
+def kernel_state(engagement, snapshot=None):
     """Return (attested, detail). A kernel that starts mid-run cannot cover the work before it.
 
     exodus-2026-08 initialized its kernel on day 3 of a three-day run. 16 of its 19 packages could
@@ -607,12 +729,17 @@ def kernel_state(engagement):
     """
     if not engagement:
         return None, "no engagement given, so the kernel cannot be checked"
-    path = os.path.join(engagement, "events.jsonl")
-    if not os.path.isfile(path):
+    try:
+        data = (
+            snapshot["events.jsonl"]
+            if snapshot is not None
+            else read_governed_file(Path(engagement) / "events.jsonl")
+        )
+    except (KeyError, FileNotFoundError, OSError):
         return False, "no events.jsonl: the record kernel was never initialized"
     stamps = []
-    for line in open(path):
-        line = line.strip()
+    for raw_line in data.splitlines():
+        line = raw_line.decode("utf-8", errors="replace").strip()
         if not line:
             continue
         try:
@@ -628,8 +755,8 @@ def kernel_state(engagement):
     return True, f"kernel active from {first}"
 
 
-def gk_kernel(engagement, g):
-    ok, detail = kernel_state(engagement)
+def gk_kernel(engagement, g, snapshot=None):
+    ok, detail = kernel_state(engagement, snapshot)
     if ok is None:
         return
     if not ok and os.environ.get(KERNEL_WAIVER):
@@ -642,32 +769,294 @@ def gk_kernel(engagement, g):
           f"{KERNEL_WAIVER}=1 to record an explicit, visible waiver.")
 
 
-def run_gates(pkg, engagement=None):
+def _run_gates_snapshot(pkg, engagement=None, snapshot=None, package_relative=None):
     g = Gates()
-    finding = load_json(os.path.join(pkg, "finding.json")) or {}
-    attest = load_json(os.path.join(pkg, "attest.json")) or {}
-    gk_kernel(engagement, g)
-    g0_existence(pkg, g)
-    g1_real_path(finding, attest, g, engagement)
-    g2_control(finding, attest, g, engagement)
+    if snapshot is None and (quarantined_ancestor(Path(pkg)) or (engagement and is_quarantined(Path(engagement)))):
+        g.add("GQ", False, "the source engagement is admissible", "engagement evidence is quarantined")
+        return g, {}
+    if snapshot is None:
+        finding = load_json(os.path.join(pkg, "finding.json")) or {}
+        attest = load_json(os.path.join(pkg, "attest.json")) or {}
+        docs = None
+        package_files = None
+    else:
+        finding = _snapshot_json(snapshot, f"{package_relative}/finding.json") or {}
+        attest = _snapshot_json(snapshot, f"{package_relative}/attest.json") or {}
+        docs = _package_docs(snapshot, package_relative)
+        prefix = package_relative.rstrip("/") + "/"
+        package_files = {relative[len(prefix):] for relative in snapshot if relative.startswith(prefix)}
+    gk_kernel(engagement, g, snapshot)
+    g0_existence(pkg, g, docs, package_files)
+    g1_real_path(finding, attest, g, engagement, snapshot)
+    g2_control(finding, attest, g, engagement, snapshot)
     g3_privilege(finding, attest, g)
-    g4_adjudication(pkg, engagement, g)
-    g5_severity(pkg, finding, g)
-    g6_state_provenance(attest, g, engagement)
+    g4_adjudication(pkg, engagement, g, snapshot, package_relative)
+    g5_severity(pkg, finding, g, docs)
+    g6_state_provenance(attest, g, engagement, snapshot)
     return g, finding
+
+
+def run_gates(pkg, engagement=None, snapshot=None, package_relative=None):
+    """Evaluate gates only from an admitted snapshot for standalone package calls.
+
+    Internal promotion/corpus callers that already supply a snapshot retain their exact behavior.
+    The historic public ``run_gates(pkg)`` seam now performs the same inferred-engagement or
+    portable-package binding as the CLI before any finding detail can reach a returned gate row.
+    """
+
+    if snapshot is not None:
+        return _run_gates_snapshot(pkg, engagement, snapshot, package_relative)
+
+    package = Path(pkg).absolute()
+    if engagement is not None:
+        logical = Path(engagement).absolute()
+        try:
+            relative = package.relative_to(logical)
+        except ValueError:
+            g = Gates()
+            g.add(
+                "GQ",
+                False,
+                "the source engagement is admissible",
+                "source package could not be admitted",
+            )
+            return g, {}
+        portable = find_engagement_root(logical) is None
+        try:
+            with bound_engagement_source(
+                logical, allow_ungoverned=portable
+            ) as bound:
+                admitted = _snapshot_engagement(bound)
+                result = _run_gates_snapshot(
+                    pkg, bound, admitted, relative.as_posix()
+                )
+                _require_bound_package_current(logical, bound, portable=portable)
+                return result
+        except (OSError, RecordError, ValueError):
+            g = Gates()
+            g.add(
+                "GQ",
+                False,
+                "the source engagement is admissible",
+                "source package could not be admitted",
+            )
+            return g, {}
+
+    located = find_engagement_root(package)
+    try:
+        if located is not None:
+            logical, relative = located
+            relative_name = Path(*relative).as_posix()
+            with bound_engagement_source(logical) as bound:
+                admitted = _snapshot_engagement(bound)
+                result = _run_gates_snapshot(
+                    pkg, bound, admitted, relative_name
+                )
+                _require_bound_package_current(logical, bound, portable=False)
+                return result
+
+        with bound_engagement_source(package, allow_ungoverned=True) as bound:
+            prefix = "portable-package"
+            admitted = {
+                f"{prefix}/{relative}": data
+                for relative, data in _snapshot_engagement(bound).items()
+            }
+            result = _run_gates_snapshot(
+                pkg, snapshot=admitted, package_relative=prefix
+            )
+            _require_bound_package_current(package, bound, portable=True)
+            return result
+    except (OSError, RecordError, ValueError):
+        g = Gates()
+        g.add(
+            "GQ",
+            False,
+            "the source engagement is admissible",
+            "source package could not be admitted",
+        )
+        return g, {}
 
 
 # --- movement -----------------------------------------------------------------
 
-def append_log(engagement, record):
-    with open(os.path.join(engagement, LOG), "a") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\n")
+def _bound_root_fd(engagement):
+    parts = Path(engagement).parts
+    if not (len(parts) == 4 and parts[1:3] == ("dev", "fd") and parts[3].isdigit()):
+        raise ValueError("lifecycle mutation requires a bound engagement")
+    return int(parts[3])
+
+
+def _open_state_directory(root_fd, name, *, create=False):
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if create:
+        try:
+            os.mkdir(name, 0o700, dir_fd=root_fd)
+        except FileExistsError:
+            pass
+    return os.open(name, flags, dir_fd=root_fd)
+
+
+def _bound_move(engagement, source_state, destination_state, finding_id):
+    if not finding_id or finding_id in {".", ".."} or "/" in finding_id:
+        raise ValueError("invalid finding id")
+    root_fd = _bound_root_fd(engagement)
+    source_fd = _open_state_directory(root_fd, source_state)
+    try:
+        destination_fd = _open_state_directory(root_fd, destination_state, create=True)
+        try:
+            source = os.stat(finding_id, dir_fd=source_fd, follow_symlinks=False)
+            if stat.S_ISLNK(source.st_mode) or not stat.S_ISDIR(source.st_mode):
+                raise ValueError("finding package is not a regular directory")
+            try:
+                os.stat(finding_id, dir_fd=destination_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                return False
+            os.rename(
+                finding_id,
+                finding_id,
+                src_dir_fd=source_fd,
+                dst_dir_fd=destination_fd,
+            )
+            os.fsync(source_fd)
+            os.fsync(destination_fd)
+            return True
+        finally:
+            os.close(destination_fd)
+    finally:
+        os.close(source_fd)
+
+
+def _append_log_bound(engagement, record):
+    root_fd = _bound_root_fd(engagement)
+    fd = os.open(
+        LOG,
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=root_fd,
+    )
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("lifecycle log is not a regular file")
+        original_size = before.st_size
+        data = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+        try:
+            view = memoryview(data)
+            written = 0
+            while written < len(view):
+                count = os.write(fd, view[written:])
+                if count <= 0:
+                    raise OSError("lifecycle append made no progress")
+                written += count
+            os.fsync(fd)
+        except Exception:
+            os.ftruncate(fd, original_size)
+            os.fsync(fd)
+            raise
+    finally:
+        os.close(fd)
+
+
+def _bound_finding_rows(engagement):
+    rows = []
+    root_fd = _bound_root_fd(engagement)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    for state_name in (UNPROVEN, PROVEN):
+        try:
+            directory_fd = os.open(state_name, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            continue
+        try:
+            for name in sorted(os.listdir(directory_fd)):
+                try:
+                    entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if stat.S_ISDIR(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                    rows.append({"finding_id": name, "state": state_name})
+        finally:
+            os.close(directory_fd)
+    return rows
 
 
 def cmd_gates(args):
-    g, _ = run_gates(args.package, getattr(args, "engagement", None))
-    report(args, g, args.package, moved=None)
-    return 1 if g.blocked else 0
+    engagement_arg = getattr(args, "engagement", None)
+    if engagement_arg:
+        original = Path(engagement_arg).absolute()
+        try:
+            package_relative = Path(args.package).absolute().relative_to(original).as_posix()
+        except ValueError:
+            g = Gates(); g.add("GQ", False, "the package belongs to the locked engagement", "package is outside the engagement")
+            report(args, g, args.package, moved=None)
+            return 1
+        portable = find_engagement_root(original) is None
+        try:
+            with bound_engagement_source(
+                original, allow_ungoverned=portable
+            ) as engagement:
+                snapshot = _snapshot_engagement(engagement)
+                g, _ = run_gates(
+                    args.package, engagement, snapshot, package_relative
+                )
+                _require_bound_package_current(
+                    original, engagement, portable=portable
+                )
+                report(args, g, args.package, moved=None)
+                return 1 if g.blocked else 0
+        except (OSError, RecordError, ValueError):
+            g = Gates()
+            g.add(
+                "GQ",
+                False,
+                "the source engagement is admissible",
+                "source package could not be admitted",
+            )
+            report(args, g, args.package, moved=None)
+            return 1
+
+    package = Path(args.package).absolute()
+    located = find_engagement_root(package)
+    try:
+        if located is not None:
+            logical, relative = located
+            package_relative = Path(*relative).as_posix()
+            with bound_engagement_source(logical) as engagement:
+                snapshot = _snapshot_engagement(engagement)
+                g, _ = run_gates(
+                    args.package, engagement, snapshot, package_relative
+                )
+                _require_bound_package_current(logical, engagement, portable=False)
+                report(args, g, args.package, moved=None)
+                return 1 if g.blocked else 0
+
+        # Scope-less packages are portable inputs, not implicit engagements. Keep one root FD
+        # through snapshot, gates, and the irreversible report, and reject if the package is moved
+        # under governed/quarantined evidence while the decision is being assembled.
+        with bound_engagement_source(package, allow_ungoverned=True) as bound_package:
+            package_snapshot = _snapshot_engagement(bound_package)
+            prefix = "portable-package"
+            snapshot = {
+                f"{prefix}/{relative}": data
+                for relative, data in package_snapshot.items()
+            }
+            g, _ = run_gates(
+                args.package, snapshot=snapshot, package_relative=prefix
+            )
+            _require_bound_package_current(package, bound_package, portable=True)
+            report(args, g, args.package, moved=None)
+            return 1 if g.blocked else 0
+    except (OSError, RecordError, ValueError):
+        g = Gates()
+        g.add(
+            "GQ",
+            False,
+            "the source engagement is admissible",
+            "source package could not be admitted",
+        )
+        report(args, g, args.package, moved=None)
+        return 1
 
 
 def cmd_preflight(args):
@@ -679,45 +1068,72 @@ def cmd_preflight(args):
 
     Run this as the first line of Round 0, before recon, before the first attempt.
     """
-    ok, detail = kernel_state(args.engagement)
-    if ok:
-        print(f"PREFLIGHT: OK  -- {detail}")
-        return 0
-    print(f"PREFLIGHT: REFUSED  -- {detail}")
-    print()
-    print("Start the record kernel before any attempt, recon note, or finding package:")
-    print(f"    ./.venv/bin/python tools/run-engagement.py init --engagement {args.engagement} ...")
-    print()
-    print("Work done before the kernel cannot cite a ledger row, so it can never clear G1 or G2.")
-    print("exodus-2026-08 initialized on day 3 of a three-day run and stranded 16 of 19 packages")
-    print("that way -- real work, controls named with file:line, permanently unpromotable.")
-    return 1
+    def refuse_uninitialized(detail):
+        print(f"PREFLIGHT: REFUSED  -- {detail}")
+        print()
+        print("Start the record kernel before any attempt, recon note, or finding package:")
+        print(f"    ./.venv/bin/python tools/run-engagement.py init --engagement {args.engagement} ...")
+        print()
+        print("Work done before the kernel cannot cite a ledger row, so it can never clear G1 or G2.")
+        print("exodus-2026-08 initialized on day 3 of a three-day run and stranded 16 of 19 packages")
+        print("that way -- real work, controls named with file:line, permanently unpromotable.")
+        return 1
+
+    original = Path(args.engagement).absolute()
+    try:
+        with bound_engagement_source(original) as engagement:
+            ok, detail = kernel_state(engagement)
+            _require_bound_package_current(original, engagement, portable=False)
+            if ok:
+                print(f"PREFLIGHT: OK  -- {detail}")
+                return 0
+            return refuse_uninitialized(detail)
+    except RecordError as exc:
+        if exc.code == "engagement_coordination_unavailable":
+            detail = "no events.jsonl: the record kernel was never initialized"
+            return refuse_uninitialized(detail)
+        print("PREFLIGHT: REFUSED  -- engagement evidence is quarantined")
+        return 1
+    except (OSError, ValueError):
+        print("PREFLIGHT: REFUSED  -- engagement evidence is quarantined")
+        return 1
 
 
 def cmd_promote(args):
+    original = Path(args.engagement).absolute()
+    try:
+        package_relative = Path(args.package).absolute().relative_to(original)
+    except ValueError:
+        g = Gates(); g.add("source", False, f"the package is promoted out of {UNPROVEN}/", "package is outside the engagement")
+        report(args, g, args.package, moved=False)
+        return 1
+    with engagement_lock(original) as engagement:
+        return _cmd_promote_unlocked(args, engagement, package_relative)
+
+
+def _cmd_promote_unlocked(args, engagement, package_relative):
     pkg = os.path.abspath(args.package)
-    fid = os.path.basename(pkg.rstrip("/"))
-    g, _ = run_gates(pkg, args.engagement)
+    fid = package_relative.name
+    snapshot = _snapshot_engagement(engagement)
+    g, _ = run_gates(pkg, engagement, snapshot, package_relative.as_posix())
     # Promotion must be a MOVE OUT OF unproven/, not a blessing applied wherever the package sits.
     # Version 1 moved any path it was handed, so the default-reject design rested entirely on the
     # operating agent's discipline: a package created straight in findings/ was never promoted and
     # so never gated. Measured on obyte-ocore-2026-08 (2026-08-11): the flow was followed, but
     # nothing enforced it.
     want_parent = os.path.abspath(os.path.join(args.engagement, UNPROVEN))
-    if os.path.dirname(pkg.rstrip("/")) != want_parent:
+    if package_relative.parts != (UNPROVEN, fid):
         g.add("source", False, f"the package is promoted out of {UNPROVEN}/",
               f"package sits at {pkg}, expected a child of {want_parent} — a finding that was never "
               f"in {UNPROVEN}/ was never gated on its way in")
     dest = os.path.join(args.engagement, PROVEN, fid)
     moved = False
     if not g.blocked:
-        os.makedirs(os.path.join(args.engagement, PROVEN), exist_ok=True)
-        if os.path.exists(dest):
+        if not _bound_move(engagement, UNPROVEN, PROVEN, fid):
             g.add("move", False, "destination is free", f"{dest} already exists")
         else:
-            shutil.move(pkg, dest)
             moved = True
-    append_log(args.engagement, {
+    _append_log_bound(engagement, {
         "recorded_at": now(), "action": "promote", "finding_id": fid, "actor": args.actor,
         "result": "promoted" if moved else "blocked",
         "gates": [{"gate": r["gate"], "ok": r["ok"]} for r in g.rows],
@@ -727,17 +1143,30 @@ def cmd_promote(args):
 
 
 def cmd_demote(args):
+    with engagement_lock(Path(args.engagement).absolute()) as engagement:
+        return _cmd_demote_unlocked(args, engagement)
+
+
+def _cmd_demote_unlocked(args, engagement):
     src = os.path.join(args.engagement, PROVEN, args.finding_id)
     dest = os.path.join(args.engagement, UNPROVEN, args.finding_id)
-    if not os.path.isdir(src):
+    root_fd = _bound_root_fd(engagement)
+    try:
+        proven_fd = _open_state_directory(root_fd, PROVEN)
+        try:
+            source = os.stat(args.finding_id, dir_fd=proven_fd, follow_symlinks=False)
+            source_exists = stat.S_ISDIR(source.st_mode) and not stat.S_ISLNK(source.st_mode)
+        finally:
+            os.close(proven_fd)
+    except (FileNotFoundError, ValueError):
+        source_exists = False
+    if not source_exists:
         print(f"not promoted: {src} does not exist")
         return 1
-    os.makedirs(os.path.join(args.engagement, UNPROVEN), exist_ok=True)
-    if os.path.exists(dest):
+    if not _bound_move(engagement, PROVEN, UNPROVEN, args.finding_id):
         print(f"cannot demote: {dest} already exists")
         return 1
-    shutil.move(src, dest)
-    append_log(args.engagement, {
+    _append_log_bound(engagement, {
         "recorded_at": now(), "action": "demote", "finding_id": args.finding_id,
         "actor": args.actor, "result": "demoted", "reason": args.reason})
     print(f"demoted {args.finding_id} -> {UNPROVEN}/")
@@ -746,34 +1175,45 @@ def cmd_demote(args):
 
 
 def cmd_status(args):
-    rows = []
-    for state in (UNPROVEN, PROVEN):
-        d = os.path.join(args.engagement, state)
-        if not os.path.isdir(d):
-            continue
-        for name in sorted(os.listdir(d)):
-            p = os.path.join(d, name)
-            if os.path.isdir(p):
-                rows.append({"finding_id": name, "state": state})
-    if args.json:
-        json.dump({"engagement": args.engagement, "findings": rows}, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-    else:
-        if not rows:
-            print("no findings")
-        for r in rows:
-            mark = "PROVEN  " if r["state"] == PROVEN else "unproven"
-            print(f"  {mark} {r['finding_id']}")
-        print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} proven, "
-              f"{sum(1 for r in rows if r['state']==UNPROVEN)} unproven")
-    return 0
+    original = Path(args.engagement).absolute()
+    try:
+        with bound_engagement_source(original) as engagement:
+            rows = _bound_finding_rows(engagement)
+            _require_bound_package_current(original, engagement, portable=False)
+            if args.json:
+                json.dump({"engagement": args.engagement, "findings": rows}, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+            else:
+                if not rows:
+                    print("no findings")
+                for r in rows:
+                    mark = "PROVEN  " if r["state"] == PROVEN else "unproven"
+                    print(f"  {mark} {r['finding_id']}")
+                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} proven, "
+                      f"{sum(1 for r in rows if r['state']==UNPROVEN)} unproven")
+            return 0
+    except (OSError, RecordError, ValueError):
+        if args.json:
+            json.dump({"status": "quarantined", "findings": []}, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            print("engagement evidence is quarantined")
+        return 1
 
 
 def report(args, g, pkg, moved, dest=None):
+    quarantined = any(row.get("gate") == "GQ" for row in g.rows)
     if getattr(args, "json", False):
-        json.dump({"package": pkg, "decision": "blocked" if g.blocked else "clear",
-                   "moved_to": dest, "gates": g.rows}, sys.stdout, indent=2)
+        payload = {"decision": "blocked" if g.blocked else "clear", "gates": g.rows}
+        if not quarantined:
+            payload.update({"package": pkg, "moved_to": dest})
+        json.dump(payload, sys.stdout, indent=2)
         sys.stdout.write("\n")
+        return
+    if quarantined:
+        print("engagement evidence is quarantined")
+        print(f"\n{len(g.rows)} gates, {len(g.blocked)} blocking")
+        print("NOT PROMOTED — the finding stays unproven.")
         return
     print(f"package: {pkg}")
     for r in g.rows:
@@ -824,7 +1264,36 @@ def main():
     p.set_defaults(fn=cmd_status)
 
     args = ap.parse_args()
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except RecordError as exc:
+        if exc.code != "engagement_quarantined":
+            raise
+        if args.cmd == "status" and args.json:
+            json.dump({"status": "quarantined", "findings": []}, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        elif args.cmd in {"gates", "promote"} and getattr(args, "json", False):
+            json.dump(
+                {
+                    "decision": "blocked",
+                    "gates": [
+                        {
+                            "gate": "GQ",
+                            "ok": False,
+                            "label": "the source engagement is admissible",
+                            "detail": "engagement evidence is quarantined",
+                        }
+                    ],
+                },
+                sys.stdout,
+                indent=2,
+            )
+            sys.stdout.write("\n")
+        elif args.cmd == "preflight":
+            print("PREFLIGHT: REFUSED  -- engagement evidence is quarantined")
+        else:
+            print("engagement evidence is quarantined")
+        return 1
 
 
 if __name__ == "__main__":

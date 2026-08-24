@@ -2,8 +2,9 @@
 """Build and verify a frozen package + entrypoint denominator from pinned npm tarballs.
 
 This is an offline syntactic instrument. It executes neither package code nor a model. The output is
-an engagement-local TSV with one row per (package, entrypoint) pair and a JSON freeze sidecar that is
-compatible with tools/hash-campaign-inputs.py --check.
+an external offline TSV with one row per (package, entrypoint) pair and a JSON freeze sidecar that is
+compatible with tools/hash-campaign-inputs.py --check. Register reviewed outputs through the normal
+engagement artifact path; this command never writes directly into governed engagement evidence.
 
 Usage:
   python3 tools/corpus_enumeration.py build --pins package-pins.tsv --tarballs tarballs/ \
@@ -16,13 +17,13 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import importlib.metadata
 import json
 import os
 import re
 import sys
 import tarfile
-import tempfile
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -30,8 +31,14 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from frozen_inputs import check_manifest as check_frozen_inputs
-from frozen_inputs import emit_named, sha256_file
+from frozen_inputs import sha256_file
+from engagement_quarantine import (
+    atomic_write_offline,
+    quarantined_ancestor,
+    read_safe_offline_file,
+    read_safe_offline_tree,
+    require_safe_offline_output,
+)
 
 try:
     import tree_sitter_javascript
@@ -107,6 +114,7 @@ class Pin:
 class Archive:
     pin: Pin
     path: Path
+    source_bytes: bytes
     files: dict[str, bytes]
     manifest: dict[str, Any]
 
@@ -173,21 +181,17 @@ def _parsers() -> dict[str, Any]:
     return _PARSERS
 
 
-def _sha1_file(path: Path) -> str:
-    digest = hashlib.sha1(usedforsecurity=False)
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _sha1_bytes(data: bytes) -> str:
+    return hashlib.sha1(data, usedforsecurity=False).hexdigest()
 
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def read_pins(path: Path) -> list[Pin]:
+def read_pins(path: Path, data: bytes | None = None) -> list[Pin]:
     try:
-        with path.open(newline="") as handle:
+        with io.StringIO((read_safe_offline_file(path) if data is None else data).decode("utf-8"), newline="") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
             if reader.fieldnames != PIN_COLUMNS:
                 raise EnumerationError(
@@ -215,8 +219,8 @@ def read_pins(path: Path) -> list[Pin]:
                     raise EnumerationError(f"duplicate package pin: {package}@{version}")
                 seen.add(identity)
                 pins.append(Pin(status, package, version, tarball_sha1))
-    except OSError as error:
-        raise EnumerationError(f"cannot read package pins {path}: {error}") from error
+    except (OSError, UnicodeDecodeError, ValueError) as error:
+        raise EnumerationError("cannot read package pins") from error
     if not pins:
         raise EnumerationError("package pin file is empty")
     return pins
@@ -234,11 +238,11 @@ def _archive_member_path(name: str) -> str | None:
     return PurePosixPath(*parts[1:]).as_posix()
 
 
-def _read_archive(path: Path) -> tuple[dict[str, bytes], dict[str, Any]]:
+def _read_archive(path: Path, data: bytes) -> tuple[dict[str, bytes], dict[str, Any]]:
     files: dict[str, bytes] = {}
     total_size = 0
     try:
-        with tarfile.open(path, "r:*") as archive:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
             members = archive.getmembers()
             if len(members) > MAX_ARCHIVE_MEMBERS:
                 raise EnumerationError(f"tarball has too many members: {path}")
@@ -270,19 +274,25 @@ def _read_archive(path: Path) -> tuple[dict[str, bytes], dict[str, Any]]:
     return files, manifest
 
 
-def discover_archives(pins: list[Pin], directory: Path) -> list[Archive]:
-    if not directory.is_dir():
-        raise EnumerationError(f"tarball directory does not exist: {directory}")
+def discover_archives(
+    pins: list[Pin], directory: Path, tree: dict[str, bytes] | None = None
+) -> list[Archive]:
+    try:
+        tree = read_safe_offline_tree(directory) if tree is None else tree
+    except (OSError, ValueError) as error:
+        raise EnumerationError("cannot snapshot tarball directory") from error
     paths = sorted(
-        path for path in directory.rglob("*")
-        if path.is_file() and (path.name.endswith(".tgz") or path.name.endswith(".tar.gz"))
+        relative for relative in tree
+        if relative.endswith(".tgz") or relative.endswith(".tar.gz")
     )
     if not paths:
-        raise EnumerationError(f"tarball directory contains no .tgz or .tar.gz files: {directory}")
+        raise EnumerationError("tarball directory contains no .tgz or .tar.gz files")
 
-    by_identity: dict[tuple[str, str], tuple[Path, dict[str, bytes], dict[str, Any]]] = {}
-    for path in paths:
-        files, manifest = _read_archive(path)
+    by_identity: dict[tuple[str, str], tuple[Path, bytes, dict[str, bytes], dict[str, Any]]] = {}
+    for relative in paths:
+        path = directory / relative
+        source_bytes = tree[relative]
+        files, manifest = _read_archive(path, source_bytes)
         name = manifest.get("name")
         version = manifest.get("version")
         if not isinstance(name, str) or not isinstance(version, str):
@@ -290,7 +300,7 @@ def discover_archives(pins: list[Pin], directory: Path) -> list[Archive]:
         identity = (name, version)
         if identity in by_identity:
             raise EnumerationError(f"multiple tarballs resolve to {name}@{version}")
-        by_identity[identity] = (path, files, manifest)
+        by_identity[identity] = (path, source_bytes, files, manifest)
 
     expected = {(pin.package, pin.version) for pin in pins}
     extra = sorted(set(by_identity) - expected)
@@ -302,14 +312,14 @@ def discover_archives(pins: list[Pin], directory: Path) -> list[Archive]:
 
     archives = []
     for pin in pins:
-        path, files, manifest = by_identity[(pin.package, pin.version)]
-        actual_sha1 = _sha1_file(path)
+        path, source_bytes, files, manifest = by_identity[(pin.package, pin.version)]
+        actual_sha1 = _sha1_bytes(source_bytes)
         if actual_sha1 != pin.tarball_sha1:
             raise EnumerationError(
                 f"tarball pin mismatch for {pin.package}@{pin.version}: "
                 f"expected {pin.tarball_sha1}, got {actual_sha1}"
             )
-        archives.append(Archive(pin, path.resolve(), files, manifest))
+        archives.append(Archive(pin, path.resolve(strict=False), source_bytes, files, manifest))
     return archives
 
 
@@ -624,79 +634,54 @@ def _validate_freeze(document: dict[str, Any]) -> list[str]:
     ]
 
 
-def _temporary_file(path: Path, content: bytes) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_name = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, prefix=f".{path.name}.", delete=False
-        ) as handle:
-            temporary_name = handle.name
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        return temporary_name
-    except OSError:
-        if temporary_name is not None and os.path.exists(temporary_name):
-            os.unlink(temporary_name)
-        raise
-
-
 def _write_new(path: Path, content: bytes) -> None:
-    temporary_name = _temporary_file(path, content)
     try:
-        os.link(temporary_name, path)
-    except FileExistsError as error:
-        raise EnumerationError(f"refusing to replace existing frozen artifact: {path}") from error
-    finally:
-        if temporary_name and os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+        atomic_write_offline(path, content, overwrite=False)
+    except ValueError as error:
+        raise EnumerationError("refusing unsafe or existing frozen artifact") from error
 
 
 def _write_pair(output: Path, artifact: bytes, freeze: Path, manifest: bytes) -> None:
-    """Publish the TSV then its commit marker, rolling back handled second-link failures.
+    """Publish the TSV then its commit marker.
 
-    A process interruption between links is recoverable: build accepts an output without a freeze
-    only when its bytes exactly equal a fresh syntactic enumeration of the still-pinned inputs.
+    A process interruption between publications deliberately leaves the immutable TSV in place.
+    Build resumes only when those bytes exactly equal a fresh enumeration of still-pinned inputs;
+    avoiding a rollback unlink also prevents a stale parent FD from deleting governed evidence.
     """
-    output_temp = _temporary_file(output, artifact)
-    try:
-        freeze_temp = _temporary_file(freeze, manifest)
-    except OSError:
-        os.unlink(output_temp)
-        raise
-    output_linked = False
-    try:
-        os.link(output_temp, output)
-        output_linked = True
-        os.link(freeze_temp, freeze)
-    except FileExistsError as error:
-        if output_linked:
-            output.unlink()
-        raise EnumerationError(
-            f"refusing to replace existing frozen output: {output if not output_linked else freeze}"
-        ) from error
-    except OSError:
-        if output_linked and output.exists():
-            output.unlink()
-        raise
-    finally:
-        for temporary_name in (output_temp, freeze_temp):
-            if os.path.exists(temporary_name):
-                os.unlink(temporary_name)
+    _write_new(output, artifact)
+    _write_new(freeze, manifest)
 
 
-def _manifest(rows: list[Row], output: Path, artifact_sha256: str, freeze: Path, pins: Path,
-              tarballs: Path, archives: list[Archive]) -> dict[str, Any]:
+def _manifest(
+    rows: list[Row],
+    output: Path,
+    artifact_sha256: str,
+    freeze: Path,
+    pins: Path,
+    pins_bytes: bytes,
+    tarballs: Path,
+    archives: list[Archive],
+) -> dict[str, Any]:
     base = freeze.resolve().parent
-    named_inputs: dict[str, Path] = {
-        "package-pins": pins.resolve(),
-        "enumerator": TOOL_PATH,
-        "schema": SCHEMA_PATH,
+    frozen_inputs = {
+        "package-pins": {
+            "path": _relative(pins, base),
+            "sha256": _sha256_bytes(pins_bytes),
+        },
+        "enumerator": {
+            "path": _relative(TOOL_PATH, base),
+            "sha256": sha256_file(TOOL_PATH),
+        },
+        "schema": {
+            "path": _relative(SCHEMA_PATH, base),
+            "sha256": sha256_file(SCHEMA_PATH),
+        },
     }
     for index, archive in enumerate(archives, 1):
-        named_inputs[f"tarball:{index:04d}"] = archive.path
-    frozen_inputs = emit_named(named_inputs, base)
+        frozen_inputs[f"tarball:{index:04d}"] = {
+            "path": _relative(archive.path, base),
+            "sha256": _sha256_bytes(archive.source_bytes),
+        }
     frozen_inputs["corpus-enumeration"] = {
         "path": _relative(output, base),
         "sha256": artifact_sha256,
@@ -742,6 +727,7 @@ def _manifest(rows: list[Row], output: Path, artifact_sha256: str, freeze: Path,
 def build(args: argparse.Namespace) -> int:
     output = Path(args.output)
     freeze = Path(args.freeze)
+    require_safe_offline_output(output);require_safe_offline_output(freeze)
     if output.resolve() == freeze.resolve():
         raise EnumerationError("artifact and freeze paths must differ")
     if output.is_symlink() or freeze.is_symlink():
@@ -751,20 +737,46 @@ def build(args: argparse.Namespace) -> int:
         raise EnumerationError(f"refusing to replace existing frozen output: {existing}")
     pins_path = Path(args.pins).resolve()
     tarballs_path = Path(args.tarballs).resolve()
-    pins = read_pins(pins_path)
-    archives = discover_archives(pins, tarballs_path)
+    if quarantined_ancestor(pins_path) or quarantined_ancestor(tarballs_path):
+        raise EnumerationError("source evidence is quarantined")
+    try:
+        pins_bytes = read_safe_offline_file(pins_path)
+        tarball_tree = read_safe_offline_tree(tarballs_path)
+    except (OSError, ValueError) as error:
+        raise EnumerationError("source evidence is unavailable or governed") from error
+    pins = read_pins(pins_path, pins_bytes)
+    archives = discover_archives(pins, tarballs_path, tarball_tree)
     rows = enumerate_rows(archives)
     artifact = render_tsv(rows)
     recovering = output.exists()
-    if recovering and (not output.is_file() or output.read_bytes() != artifact):
+    if recovering and (
+        not output.is_file()
+        or read_safe_offline_file(output) != artifact
+    ):
         raise EnumerationError(
             "refusing to freeze a pre-existing artifact that differs from fresh syntactic enumeration"
         )
     artifact_sha256 = _sha256_bytes(artifact)
     document = _manifest(
-        rows, output, artifact_sha256, freeze, pins_path, tarballs_path, archives
+        rows,
+        output,
+        artifact_sha256,
+        freeze,
+        pins_path,
+        pins_bytes,
+        tarballs_path,
+        archives,
     )
     manifest = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode()
+    try:
+        sources_unchanged = (
+            read_safe_offline_file(pins_path) == pins_bytes
+            and read_safe_offline_tree(tarballs_path) == tarball_tree
+        )
+    except (OSError, ValueError):
+        sources_unchanged = False
+    if not sources_unchanged:
+        raise EnumerationError("source evidence became quarantined during enumeration")
     if recovering:
         _write_new(freeze, manifest)
     else:
@@ -776,11 +788,11 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_artifact(path: Path) -> list[Row]:
+def _read_artifact(path: Path, data: bytes | None = None) -> list[Row]:
     try:
-        lines = path.read_text().splitlines()
-    except OSError as error:
-        raise EnumerationError(f"cannot read enumeration artifact {path}: {error}") from error
+        lines = (read_safe_offline_file(path) if data is None else data).decode("utf-8").splitlines()
+    except (OSError, UnicodeDecodeError, ValueError) as error:
+        raise EnumerationError("cannot read enumeration artifact") from error
     if not lines or lines[0] != CAVEAT:
         raise EnumerationError("enumeration artifact is missing the visitation-not-understanding caveat")
     reader = csv.DictReader(lines[1:], delimiter="\t")
@@ -812,10 +824,13 @@ def _read_artifact(path: Path) -> list[Row]:
 
 def verify(args: argparse.Namespace) -> int:
     freeze = Path(args.freeze).resolve()
+    if quarantined_ancestor(freeze):
+        raise EnumerationError("frozen source evidence is quarantined")
     try:
-        document = json.loads(freeze.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise EnumerationError(f"cannot read freeze manifest {freeze}: {error}") from error
+        freeze_bytes = read_safe_offline_file(freeze)
+        document = json.loads(freeze_bytes)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise EnumerationError("cannot read freeze manifest") from error
     problems = _validate_freeze(document)
     if problems:
         raise EnumerationError(f"freeze manifest is schema-invalid: {problems}")
@@ -825,8 +840,28 @@ def verify(args: argparse.Namespace) -> int:
     pins_path = (base / document["source"]["pins_path"]).resolve()
     tarballs_path = (base / document["source"]["tarballs_path"]).resolve()
     frozen = document["frozen_inputs"]
+    linked_inputs = [freeze, artifact_path, pins_path, tarballs_path]
+    for spec in frozen.values():
+        if isinstance(spec, dict) and isinstance(spec.get("path"), str):
+            linked_inputs.append((base / spec["path"]).resolve())
+    if any(quarantined_ancestor(path) for path in linked_inputs):
+        raise EnumerationError("frozen source evidence is quarantined")
 
-    drift = check_frozen_inputs(freeze)
+    stable_inputs: dict[str, bytes] = {}
+    drift = []
+    for name, spec in frozen.items():
+        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+            drift.append(f"{name}: malformed frozen input")
+            continue
+        source_path = (base / spec["path"]).resolve(strict=False)
+        try:
+            source_bytes = read_safe_offline_file(source_path)
+        except (OSError, ValueError):
+            drift.append(f"{name}: input unavailable or governed")
+            continue
+        stable_inputs[name] = source_bytes
+        if _sha256_bytes(source_bytes) != spec.get("sha256"):
+            drift.append(f"{name}: hash mismatch")
     for item in drift:
         print(f"DRIFT {item}")
     if drift:
@@ -834,9 +869,9 @@ def verify(args: argparse.Namespace) -> int:
 
     expected_links = {
         "corpus-enumeration": (document["artifact"]["path"], document["artifact"]["sha256"]),
-        "package-pins": (_relative(pins_path, base), sha256_file(pins_path)),
+        "package-pins": (_relative(pins_path, base), _sha256_bytes(stable_inputs["package-pins"])),
         "enumerator": (_relative(TOOL_PATH, base), document["generated_by"]["tool_sha256"]),
-        "schema": (_relative(SCHEMA_PATH, base), sha256_file(SCHEMA_PATH)),
+        "schema": (_relative(SCHEMA_PATH, base), _sha256_bytes(stable_inputs["schema"])),
     }
     for name, (path, digest) in expected_links.items():
         if frozen[name] != {"path": path, "sha256": digest}:
@@ -848,9 +883,15 @@ def verify(args: argparse.Namespace) -> int:
             f"parser version drift: expected {expected_versions}, got {_parser_versions()}"
         )
 
-    artifact_rows = _read_artifact(artifact_path)
-    pins = read_pins(pins_path)
-    archives = discover_archives(pins, tarballs_path)
+    artifact_bytes = stable_inputs["corpus-enumeration"]
+    pins_bytes = stable_inputs["package-pins"]
+    artifact_rows = _read_artifact(artifact_path, artifact_bytes)
+    pins = read_pins(pins_path, pins_bytes)
+    try:
+        tarball_tree = read_safe_offline_tree(tarballs_path)
+    except (OSError, ValueError) as error:
+        raise EnumerationError("cannot snapshot tarball directory") from error
+    archives = discover_archives(pins, tarballs_path, tarball_tree)
     frozen_tarballs = sorted(
         spec["path"] for name, spec in frozen.items() if name.startswith("tarball:")
     )
@@ -865,6 +906,17 @@ def verify(args: argparse.Namespace) -> int:
     package_count = len({(row.package, row.version) for row in artifact_rows})
     if document["artifact"]["package_count"] != package_count:
         raise EnumerationError("frozen package_count does not match artifact")
+    try:
+        inputs_unchanged = (
+            read_safe_offline_file(freeze) == freeze_bytes
+            and read_safe_offline_file(artifact_path) == artifact_bytes
+            and read_safe_offline_file(pins_path) == pins_bytes
+            and read_safe_offline_tree(tarballs_path) == tarball_tree
+        )
+    except (OSError, ValueError):
+        inputs_unchanged = False
+    if not inputs_unchanged:
+        raise EnumerationError("frozen source evidence became quarantined during verification")
     print(f"frozen corpus enumeration: intact ({len(artifact_rows)} entrypoints, {package_count} packages)")
     print("coverage semantics: visitation, not understanding")
     return 0
@@ -876,8 +928,8 @@ def parser() -> argparse.ArgumentParser:
     build_parser = commands.add_parser("build", help="enumerate pinned local npm tarballs and freeze the result")
     build_parser.add_argument("--pins", required=True, help="TSV: status, package, version, dist.shasum")
     build_parser.add_argument("--tarballs", required=True, help="directory containing exactly the pinned npm tarballs")
-    build_parser.add_argument("--output", required=True, help="new engagement-local corpus-enumeration.tsv")
-    build_parser.add_argument("--freeze", required=True, help="new engagement-local JSON freeze sidecar")
+    build_parser.add_argument("--output", required=True, help="new external offline corpus-enumeration.tsv; register it separately")
+    build_parser.add_argument("--freeze", required=True, help="new external offline JSON freeze sidecar; register it separately")
     verify_parser = commands.add_parser("verify", help="verify hashes and syntactically reproduce a frozen artifact")
     verify_parser.add_argument("--freeze", required=True, help="corpus-enumeration freeze sidecar")
     return root

@@ -31,9 +31,17 @@ Commands:
 """
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
+import stat
 import sys
+from pathlib import Path
+
+from engagement_quarantine import quarantined_ancestor, require_safe_offline_output
+from engagement_state import bound_engagement_lock
+from ledger_health import probe_ledger_health
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KB_PATH = os.path.join(ROOT, "memory", "kb.jsonl")
@@ -44,19 +52,305 @@ DELTA = {"winner": +1, "loser": -1}
 DELTA_FLOOR, DELTA_CEIL = -1, +1
 
 
-def load_kb(path=KB_PATH):
-    if not os.path.isfile(path):
-        return []
+def _inside(path, directory):
+    try:
+        Path(path).resolve(strict=True).relative_to(Path(directory).resolve(strict=True))
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _require_input_admissible(path, *, source_engagement=None, offline_only=False):
+    """Keep portable KB inputs out of quarantined or unrelated governed evidence.
+
+    A local source engagement is the one intentional exception: its operator-authorized promotion
+    is serialized by ``bound_engagement_lock`` in ``cmd_add``. Explicit synthetic/public inputs
+    and the portable KB itself must remain outside every engagement tree.
+    """
+
+    candidate = Path(os.path.abspath(path))
+    if quarantined_ancestor(candidate):
+        raise ValueError("knowledge-base input is quarantined")
+    if offline_only or source_engagement is None or not _inside(candidate, source_engagement):
+        # This helper is also the common governed-boundary predicate. It performs no write.
+        require_safe_offline_output(candidate)
+
+
+def _read_bound_relative(root_fd, relative):
+    parts = Path(relative).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("knowledge-base source-relative path is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    parent_fd = os.dup(root_fd)
+    try:
+        for component in parts[:-1]:
+            child = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child
+        fd = os.open(
+            parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd
+        )
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("knowledge-base input is not a regular file")
+            chunks = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(fd)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                raise ValueError("knowledge-base input changed during read")
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _read_stable_bytes(
+    path, *, source_engagement=None, source_fd=None, offline_only=False
+):
+    """Read one regular file without following its leaf and recheck its source boundary."""
+
+    absolute = Path(os.path.abspath(path))
+    _require_input_admissible(
+        absolute, source_engagement=source_engagement, offline_only=offline_only
+    )
+    if source_fd is not None and source_engagement is not None and _inside(
+        absolute, source_engagement
+    ):
+        try:
+            relative = absolute.resolve(strict=True).relative_to(
+                Path(source_engagement).resolve(strict=True)
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("knowledge-base source-relative path is unsafe") from exc
+        data = _read_bound_relative(source_fd, relative)
+        _require_input_admissible(absolute, source_engagement=source_engagement)
+        return data
+    try:
+        terminal = absolute.lstat()
+        if stat.S_ISLNK(terminal.st_mode) or not stat.S_ISREG(terminal.st_mode):
+            raise ValueError("knowledge-base input is not a regular file")
+        parent = absolute.parent.resolve(strict=True)
+        parent_fd = os.open(
+            parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ValueError("knowledge-base input could not be opened safely") from exc
+    try:
+        fd = os.open(
+            absolute.name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_fd,
+        )
+        try:
+            before = os.fstat(fd)
+            named = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_ISLNK(named.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            ):
+                raise ValueError("knowledge-base input identity is unsafe")
+            chunks = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(fd)
+            current = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)
+            ):
+                raise ValueError("knowledge-base input changed during read")
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+    _require_input_admissible(
+        absolute, source_engagement=source_engagement, offline_only=offline_only
+    )
+    return b"".join(chunks)
+
+
+def _load_json_file(path, *, source_engagement=None, source_fd=None):
+    try:
+        return json.loads(
+            _read_stable_bytes(
+                path, source_engagement=source_engagement, source_fd=source_fd
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("knowledge-base JSON input is malformed") from exc
+
+
+def _open_kb_for_append(path):
+    """Open a portable KB sink through one stable parent directory descriptor."""
+
+    absolute = Path(os.path.abspath(path))
+    require_safe_offline_output(absolute)
+    try:
+        parent = absolute.parent.resolve(strict=True)
+        parent_entry = parent.lstat()
+        if stat.S_ISLNK(parent_entry.st_mode) or not stat.S_ISDIR(parent_entry.st_mode):
+            raise ValueError("knowledge-base output parent is unsafe")
+        parent_fd = os.open(
+            parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise ValueError("knowledge-base output parent must already exist") from exc
+    fd = -1
+    try:
+        parent_identity = os.fstat(parent_fd)
+        fd = os.open(
+            absolute.name,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=parent_fd,
+        )
+        leaf = os.fstat(fd)
+        named = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(leaf.st_mode)
+            or stat.S_ISLNK(named.st_mode)
+            or not stat.S_ISREG(named.st_mode)
+            or (leaf.st_dev, leaf.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            os.close(fd)
+            raise ValueError("knowledge base is not a safely bound regular file")
+        return absolute, parent, parent_fd, parent_identity, fd
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        os.close(parent_fd)
+        raise
+
+
+def _require_kb_output_current(absolute, parent, parent_fd, parent_identity, fd):
+    require_safe_offline_output(absolute)
+    require_safe_offline_output(parent / absolute.name)
+    current_parent = parent.lstat()
+    current_leaf = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+    bound_leaf = os.fstat(fd)
+    if (
+        stat.S_ISLNK(current_parent.st_mode)
+        or not stat.S_ISDIR(current_parent.st_mode)
+        or (current_parent.st_dev, current_parent.st_ino)
+        != (parent_identity.st_dev, parent_identity.st_ino)
+        or stat.S_ISLNK(current_leaf.st_mode)
+        or not stat.S_ISREG(current_leaf.st_mode)
+        or (current_leaf.st_dev, current_leaf.st_ino) != (bound_leaf.st_dev, bound_leaf.st_ino)
+    ):
+        raise ValueError("knowledge-base output identity changed")
+
+
+def _open_bound_source(path):
+    """Open one source directory and retain its canonical pathname identity."""
+
+    source = Path(os.path.abspath(path))
+    fd = -1
+    try:
+        terminal = source.lstat()
+        if stat.S_ISLNK(terminal.st_mode) or not stat.S_ISDIR(terminal.st_mode):
+            raise ValueError("source engagement is not a regular directory")
+        canonical = source.resolve(strict=True)
+        fd = os.open(
+            source,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        identity = os.fstat(fd)
+        current = canonical.lstat()
+        if (
+            not stat.S_ISDIR(identity.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or (identity.st_dev, identity.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise ValueError("source engagement identity changed while opening")
+        return fd, canonical, identity
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        raise
+
+
+def _require_bound_source_current(path, fd, identity):
+    """Fail closed if the canonical pathname no longer names the opened source."""
+
+    bound = os.fstat(fd)
+    current = path.lstat()
+    expected = (identity.st_dev, identity.st_ino)
+    if (
+        (bound.st_dev, bound.st_ino) != expected
+        or not stat.S_ISDIR(bound.st_mode)
+        or stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or (current.st_dev, current.st_ino) != expected
+    ):
+        raise ValueError("source engagement identity changed during promotion")
+
+
+def _parse_kb_bytes(data):
     out = []
-    for n, line in enumerate(open(path), 1):
+    for line in data.decode("utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         try:
             out.append(json.loads(line))
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"{path}:{n}: {exc}")
+            raise ValueError("knowledge base is malformed") from exc
     return out
+
+
+def _read_kb_fd(fd):
+    os.lseek(fd, 0, os.SEEK_SET)
+    before = os.fstat(fd)
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("knowledge base is not a regular file")
+    chunks = []
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    after = os.fstat(fd)
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+        after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+    ):
+        raise ValueError("knowledge base changed during read")
+    try:
+        return _parse_kb_bytes(b"".join(chunks))
+    except UnicodeDecodeError as exc:
+        raise ValueError("knowledge base is malformed") from exc
+
+
+def load_kb(path=KB_PATH):
+    try:
+        data = _read_stable_bytes(path, offline_only=True)
+    except FileNotFoundError:
+        return []
+    try:
+        return _parse_kb_bytes(data)
+    except UnicodeDecodeError as exc:
+        raise ValueError("knowledge base is malformed") from exc
 
 
 def validate(entry):
@@ -165,38 +459,156 @@ def ablate(entry, fixture, kb=None):
 
 
 def cmd_add(args):
-    entry = json.load(open(args.file))
+    source_engagement = getattr(args, "source_engagement", None)
+    source_kind = getattr(args, "source_kind", None)
+    if bool(source_engagement) == bool(source_kind):
+        print("REJECTED: choose exactly one local --source-engagement or explicit --source-kind synthetic/public.")
+        return 1
+    try:
+        if source_engagement:
+            source_fd, source, source_identity = _open_bound_source(source_engagement)
+            try:
+                # The lock, health read, and append all refer to one opened directory inode. A
+                # pathname ABA therefore cannot substitute a healthy stale copy for a quarantined
+                # source during the authorization check.
+                with bound_engagement_lock(source_fd, create=False):
+                    health = probe_ledger_health(Path(f"/dev/fd/{source_fd}"))
+                    if health.get("status") != "healthy":
+                        print("REJECTED: source engagement is not healthy and admissible.")
+                        return 1
+                    _require_bound_source_current(source, source_fd, source_identity)
+                    return _cmd_add_authorized(
+                        args,
+                        source_engagement=source,
+                        source_fd=source_fd,
+                        source_guard=lambda: _require_bound_source_current(
+                            source, source_fd, source_identity
+                        ),
+                    )
+            finally:
+                os.close(source_fd)
+        return _cmd_add_authorized(args)
+    except Exception:
+        # Record, parser, and filesystem failures are deliberately collapsed: a portable KB
+        # command must not echo target-local paths, parser details, or identifiers.
+        if source_engagement:
+            print("REJECTED: source engagement could not be verified as healthy and admissible.")
+        else:
+            print("REJECTED: knowledge-base entry could not be safely appended.")
+        return 1
+
+
+def _cmd_add_authorized(
+    args, *, source_engagement=None, source_fd=None, source_guard=None
+):
+    entry = _load_json_file(
+        args.file, source_engagement=source_engagement, source_fd=source_fd
+    )
     problems = validate(entry)
     if problems:
         print("REJECTED:")
         for p in problems:
             print("  -", p)
         return 1
-    kb = load_kb(args.kb)
-    if any(e["id"] == entry["id"] for e in kb):
-        print(f"REJECTED: {entry['id']} already exists. The KB is append-only.")
+    if source_engagement is not None and (
+        "engagement" in entry
+        or ("ablation_fixture" in entry and not args.fixture)
+    ):
+        # The local engagement is an authorization source, never portable provenance. The
+        # command owns ablation_fixture derivation so a target-local path cannot arrive through
+        # a pre-populated entry when no fixture was actually checked.
+        print("REJECTED: source-derived entry contains non-portable provenance.")
         return 1
-
+    fixture_bytes = None
+    fixture = None
     if args.fixture:
-        fx = json.load(open(args.fixture))
-        changed, detail = ablate(entry, fx, kb)
-        if not changed:
-            print("REJECTED by the ablation gate: the entry changes no routing decision.")
-            print(f"  order without: {detail['without']}")
-            print(f"  order with   : {detail['with']}")
-            print("  An entry that changes nothing is noise. Drop it, or write a fixture that "
-                  "shows what it actually moves.")
+        fixture_bytes = _read_stable_bytes(
+            args.fixture, source_engagement=source_engagement, source_fd=source_fd
+        )
+        try:
+            fixture = json.loads(fixture_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("knowledge-base JSON input is malformed") from exc
+    absolute, parent, parent_fd, parent_identity, lock_fd = _open_kb_for_append(args.kb)
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    try:
+        _require_kb_output_current(absolute, parent, parent_fd, parent_identity, lock_fd)
+        kb = _read_kb_fd(lock_fd)
+        if any(e["id"] == entry["id"] for e in kb):
+            print(f"REJECTED: {entry['id']} already exists. The KB is append-only.")
             return 1
-        entry["ablation_fixture"] = os.path.relpath(args.fixture, ROOT)
-        print(f"ablation gate: PASS  {detail['without']} -> {detail['with']}")
-    elif not args.no_fixture:
-        print("REJECTED: pass --fixture (the B.3 gate) or --no-fixture with a reason recorded "
-              "in the entry's writer.note.")
-        return 1
 
-    os.makedirs(os.path.dirname(args.kb), exist_ok=True)
-    with open(args.kb, "a") as fh:
-        fh.write(json.dumps(entry, sort_keys=True) + "\n")
+        if fixture is not None:
+            changed, detail = ablate(entry, fixture, kb)
+            if not changed:
+                print("REJECTED by the ablation gate: the entry changes no routing decision.")
+                print(f"  order without: {detail['without']}")
+                print(f"  order with   : {detail['with']}")
+                print("  An entry that changes nothing is noise. Drop it, or write a fixture that "
+                      "shows what it actually moves.")
+                return 1
+            fixture_path = Path(os.path.abspath(args.fixture))
+            try:
+                portable_relative = fixture_path.resolve(strict=True).relative_to(
+                    (Path(ROOT) / "fixtures").resolve(strict=True)
+                )
+            except (OSError, RuntimeError, ValueError):
+                # Target-local paths are disclosure-sensitive. Preserve only the opaque content
+                # commitment needed to identify the exact ablation input.
+                entry["ablation_fixture"] = "sha256:" + hashlib.sha256(
+                    fixture_bytes
+                ).hexdigest()
+            else:
+                entry["ablation_fixture"] = (Path("fixtures") / portable_relative).as_posix()
+            print(f"ablation gate: PASS  {detail['without']} -> {detail['with']}")
+        elif not args.no_fixture:
+            print("REJECTED: pass --fixture (the B.3 gate) or --no-fixture with a reason recorded "
+                  "in the entry's writer.note.")
+            return 1
+
+        original_size = os.lseek(lock_fd, 0, os.SEEK_END)
+        data = (json.dumps(entry, sort_keys=True) + "\n").encode("utf-8")
+        try:
+            _require_input_admissible(
+                args.file, source_engagement=source_engagement
+            )
+            if args.fixture:
+                _require_input_admissible(
+                    args.fixture, source_engagement=source_engagement
+                )
+            if source_guard is not None:
+                source_guard()
+            _require_kb_output_current(
+                absolute, parent, parent_fd, parent_identity, lock_fd
+            )
+            view = memoryview(data)
+            written = 0
+            while written < len(view):
+                count = os.write(lock_fd, view[written:])
+                if count <= 0:
+                    raise OSError("append made no progress")
+                written += count
+            os.fsync(lock_fd)
+            _require_input_admissible(
+                args.file, source_engagement=source_engagement
+            )
+            if args.fixture:
+                _require_input_admissible(
+                    args.fixture, source_engagement=source_engagement
+                )
+            if source_guard is not None:
+                source_guard()
+            _require_kb_output_current(
+                absolute, parent, parent_fd, parent_identity, lock_fd
+            )
+        except Exception:
+            os.ftruncate(lock_fd, original_size)
+            os.fsync(lock_fd)
+            raise
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+        os.close(parent_fd)
     print(f"added {entry['id']} ({entry['kind']}, {entry['transfer_scope']}, {entry['boundedness']})")
     return 0
 
@@ -209,6 +621,7 @@ def cmd_query(args):
         hits = [e for e in hits if args.family in e.get("family", [])]
     if args.kind:
         hits = [e for e in hits if e["kind"] == args.kind]
+    _require_input_admissible(args.kb, offline_only=True)
     if args.json:
         print(json.dumps(hits, indent=2, sort_keys=True))
         return 0
@@ -228,9 +641,11 @@ def cmd_query(args):
 
 
 def cmd_route(args):
-    fx = json.load(open(args.fixture))
+    fx = _load_json_file(args.fixture)
     kb = load_kb(args.kb)
     rows = route(fx["base"], fx["context"], kb)
+    _require_input_admissible(args.fixture)
+    _require_input_admissible(args.kb, offline_only=True)
     if args.json:
         print(json.dumps(rows, indent=2, sort_keys=True))
         return 0
@@ -247,9 +662,12 @@ def cmd_route(args):
 
 
 def cmd_ablate(args):
-    entry = json.load(open(args.file))
-    fx = json.load(open(args.fixture))
+    entry = _load_json_file(args.file)
+    fx = _load_json_file(args.fixture)
     changed, detail = ablate(entry, fx, load_kb(args.kb))
+    _require_input_admissible(args.file)
+    _require_input_admissible(args.fixture)
+    _require_input_admissible(args.kb, offline_only=True)
     print(f"without: {detail['without']}")
     print(f"with   : {detail['with']}")
     print("ABLATION:", "PASS (changes a routing decision)" if changed else "FAIL (changes nothing)")
@@ -354,6 +772,9 @@ def main():
 
     a = sub.add_parser("add"); common(a)
     a.add_argument("--file", required=True); a.add_argument("--fixture")
+    source = a.add_mutually_exclusive_group(required=True)
+    source.add_argument("--source-engagement", type=Path)
+    source.add_argument("--source-kind", choices=["synthetic", "public"])
     a.add_argument("--no-fixture", action="store_true"); a.set_defaults(fn=cmd_add)
 
     q = sub.add_parser("query"); common(q)

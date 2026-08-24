@@ -76,46 +76,46 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_quarantine import read_safe_offline_file
+from engagement_state import (
+    _open_absolute_directory,
+    _relative_regular_files,
+    bound_engagement_source,
+    find_engagement_root,
+    read_governed_file,
+)
 
 NULL_HASH = "sha256:" + "0" * 64
 DEFAULT_MIN = 3
 DEFAULT_TYPE = "claim_adjudication"
 
 
-def load_reviews(path, review_type=DEFAULT_TYPE):
-    """Load review records from a directory tree, a .jsonl, or a single .json.
+def _load_review_bytes(files, review_type=DEFAULT_TYPE, *, strict_json=False):
+    """Parse already-bound ``(relative_name, bytes)`` review candidates."""
 
-    Directories are walked RECURSIVELY. Version 1 used os.listdir, so pointing this at an engagement
-    root found nothing and printed `VERDICT: CLEAR` over zero reviews — absence of input read as a
-    pass. Real engagements keep reviews at `<engagement>/<unproven|findings>/<id>/reviews/*.json`,
-    never at the root, so the corpus arm of G4 had never once executed on real data. Found
-    2026-08-11 while measuring obyte-ocore-2026-08 against its preregistration.
-
-    Callers that need "no reviews found" to be an error must check the returned length. This
-    function reports what it finds; it does not decide what an empty set means."""
     out = []
-    if os.path.isdir(path):
-        for dirpath, dirnames, filenames in os.walk(path):
-            # Hidden dirs are scratch DB state (.kp-f3-data, .labdata-*), never review records.
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-            for fn in sorted(filenames):
-                if not fn.endswith(".json"):
-                    continue
-                try:
-                    obj = json.load(open(os.path.join(dirpath, fn)))
-                except (OSError, ValueError):
-                    continue
-                out.extend(obj if isinstance(obj, list) else [obj])
-    elif path.endswith(".jsonl"):
-        for line in open(path, errors="replace"):
-            if line.strip():
-                try:
-                    out.append(json.loads(line))
-                except ValueError:
-                    pass
-    else:
-        obj = json.load(open(path))
-        out = obj if isinstance(obj, list) else [obj]
+    for name, data in files:
+        if name.endswith(".jsonl"):
+            for line in data.decode("utf-8", errors="replace").splitlines():
+                if line.strip():
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+            continue
+        try:
+            obj = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            if strict_json:
+                raise RecordError(
+                    "review_source_invalid", "review source is invalid JSON"
+                ) from exc
+            continue
+        out.extend(obj if isinstance(obj, list) else [obj])
+
     out = [r for r in out if isinstance(r, dict)]
     if review_type:
         out = [r for r in out if r.get("review_type") == review_type]
@@ -131,6 +131,76 @@ def load_reviews(path, review_type=DEFAULT_TYPE):
             seen.add(key)
         deduped.append(r)
     return deduped
+
+
+def _load_bound_reviews(root: Path, relative: tuple[str, ...], review_type):
+    regular_files = _relative_regular_files(root)
+    target = Path(*relative).as_posix() if relative else ""
+    if target in regular_files:
+        return _load_review_bytes(
+            [(target, read_governed_file(root / target))],
+            review_type,
+            strict_json=not target.endswith(".jsonl"),
+        )
+
+    directory = root / Path(*relative) if relative else root
+    try:
+        fd = _open_absolute_directory(directory)
+    except OSError:
+        # Preserve the old single-file failure for a path that is neither a directory nor a
+        # regular source file.
+        read_governed_file(root / target)
+        raise AssertionError("unreachable")
+    else:
+        os.close(fd)
+
+    prefix = target.rstrip("/") + "/" if target else ""
+    candidates = []
+    for name in sorted(regular_files):
+        if not name.startswith(prefix) or not name.endswith(".json"):
+            continue
+        below = Path(name[len(prefix):])
+        # Hidden dirs are scratch DB state (.kp-f3-data, .labdata-*), never review records.
+        if any(part.startswith(".") for part in below.parts[:-1]):
+            continue
+        candidates.append((name, read_governed_file(root / name)))
+    return _load_review_bytes(candidates, review_type)
+
+
+def load_reviews(path, review_type=DEFAULT_TYPE):
+    """Load review records from a directory tree, a .jsonl, or a single .json.
+
+    Directories are walked RECURSIVELY. Version 1 used os.listdir, so pointing this at an engagement
+    root found nothing and printed `VERDICT: CLEAR` over zero reviews — absence of input read as a
+    pass. Real engagements keep reviews at `<engagement>/<unproven|findings>/<id>/reviews/*.json`,
+    never at the root, so the corpus arm of G4 had never once executed on real data. Found
+    2026-08-11 while measuring obyte-ocore-2026-08 against its preregistration.
+
+    Callers that need "no reviews found" to be an error must check the returned length. This
+    function reports what it finds; it does not decide what an empty set means."""
+    source = Path(os.path.abspath(path))
+    located = find_engagement_root(source)
+    if located is not None:
+        engagement, relative = located
+        with bound_engagement_source(engagement) as bound:
+            return _load_bound_reviews(bound, relative, review_type)
+
+    # Portable fixture directories use the same inode-bound walker, without manufacturing a
+    # record-kernel lock. Individual portable files use the offline file boundary helper.
+    if source.is_dir():
+        with bound_engagement_source(source, allow_ungoverned=True) as bound:
+            return _load_bound_reviews(bound, (), review_type)
+    try:
+        data = read_safe_offline_file(source)
+    except ValueError as exc:
+        raise RecordError(
+            "review_source_unavailable", "review source is governed or unavailable"
+        ) from exc
+    return _load_review_bytes(
+        [(source.name, data)],
+        review_type,
+        strict_json=source.suffix != ".jsonl",
+    )
 
 
 HEX_RE = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
@@ -303,7 +373,16 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    reviews = load_reviews(args.path, args.type or None)
+    try:
+        reviews = load_reviews(args.path, args.type or None)
+    except (RecordError, OSError) as exc:
+        verdict = "quarantined" if isinstance(exc, RecordError) and exc.code == "engagement_quarantined" else "source-unavailable"
+        if args.json:
+            json.dump({"verdict": verdict, "stats": {"reviews": 0}, "signals": []}, sys.stdout)
+            sys.stdout.write("\n")
+        else:
+            print("engagement evidence is quarantined" if verdict == "quarantined" else "review source is unavailable")
+        return 1
     verdict, signals, stats = audit(reviews, args.min)
 
     if args.json:

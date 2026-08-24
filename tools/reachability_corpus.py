@@ -11,10 +11,8 @@ cases actually exist, in what language, and how many are even dataflow-shaped?
 
 Three exclusions, each of which would otherwise inflate the corpus:
 
-  QUARANTINED   spotify-backstage-2026-07's adjudications were produced by a script with the
-                verdict already decided (see its QUARANTINE-synthetic-adjudication.md). Measuring
-                an engine's agreement with a fabrication measures nothing. This is the single
-                largest exclusion and dropping it is not optional.
+  QUARANTINED   a target-local marker makes the entire engagement inadmissible. The marker is
+                checked dynamically and no command-line override can make its rows authoritative.
   NO-TUPLE      the package records no source and no sink, so no query can be written from it.
                 This is currently EVERY non-quarantined package, and the cause is structural:
                 `schemas/finding.schema.json` has no `source` or `sink` field. The claim exists in
@@ -28,7 +26,7 @@ configuration" because its prose mentions permissions. A classifier that decides
 be better than the thing it is measuring.
 
 Usage:
-  python3 tools/reachability_corpus.py [--json] [--include-quarantined]
+  python3 tools/reachability_corpus.py [--json]
 """
 
 import argparse
@@ -36,16 +34,19 @@ import glob
 import json
 import os
 import re
+import stat
 import sys
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_quarantine import is_quarantined
+from engagement_state import (
+    _relative_regular_files,
+    bound_engagement_source,
+    read_governed_file,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Engagements whose adjudications cannot serve as ground truth, with the reason.
-QUARANTINED = {
-    "spotify-backstage-2026-07":
-        "adjudication was script-generated with the verdict pre-decided "
-        "(QUARANTINE-synthetic-adjudication.md)",
-}
 
 LANG_PATTERNS = [
     ("typescript", [r"\.ts\b", r"\.mts\b", r"typescript"]),
@@ -88,38 +89,87 @@ def extract_tuple(doc):
     return (src, snk) if (src or snk) else (None, None)
 
 
-def scan(include_quarantined=False):
+def _bound_child_directories(root: Path, name: str) -> list[str]:
+    parts = root.parts
+    if not (len(parts) == 4 and parts[1:3] == ("dev", "fd") and parts[3].isdigit()):
+        raise RecordError("bound_engagement_required", "scanner source is not bound")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory_fd = os.open(name, flags, dir_fd=int(parts[3]))
+    except FileNotFoundError:
+        return []
+    try:
+        result = []
+        for child_name in sorted(os.listdir(directory_fd)):
+            try:
+                child = os.stat(child_name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(child.st_mode) and not stat.S_ISLNK(child.st_mode):
+                result.append(child_name)
+        return result
+    finally:
+        os.close(directory_fd)
+
+
+def scan(root=ROOT):
     rows = []
-    for eng_dir in sorted(glob.glob(os.path.join(ROOT, "engagements", "*/"))):
-        eng = os.path.basename(eng_dir.rstrip("/"))
-        for verdict, sub in (("confirmed", "findings"), ("adjudicated-negative", "unproven")):
-            for pkg in sorted(glob.glob(os.path.join(eng_dir, sub, "*/"))):
-                name = os.path.basename(pkg.rstrip("/"))
-                if sub == "unproven" and not re.search(r"REFUT|DEMOT", name, re.I):
-                    continue        # an open partial is not an adjudicated negative
-                fj = os.path.join(pkg, "finding.json")
-                blob = ""
-                doc = {}
-                if os.path.isfile(fj):
-                    try:
-                        doc = json.load(open(fj))
-                        blob = json.dumps(doc).lower()
-                    except Exception:
-                        pass
-                if not blob:
-                    for md in glob.glob(os.path.join(pkg, "*.md")):
-                        blob += open(md, errors="ignore").read().lower()[:8000]
-                usable, why = True, None
-                if eng in QUARANTINED and not include_quarantined:
-                    usable, why = False, "QUARANTINED: " + QUARANTINED[eng]
-                src, snk = extract_tuple(doc)
-                if usable and not (src or snk):
-                    usable, why = False, ("NO-TUPLE: the package records no source and no sink -- "
-                                          "schemas/finding.schema.json has no field for either")
-                rows.append({"engagement": eng, "package": name, "verdict": verdict,
-                             "language": classify_language(blob), "usable": usable,
-                             "excluded_because": why, "shape_hint": shape_hint(blob),
-                             "source": src, "sink": snk, "fields": sorted(doc)[:20]})
+    for eng_dir in sorted(glob.glob(os.path.join(root, "engagements", "*/"))):
+        engagement_path = Path(eng_dir)
+        try:
+            with bound_engagement_source(
+                engagement_path, allow_ungoverned=True
+            ) as bound:
+                # Retained as an explicit hook for the quarantine race regression; the authoritative
+                # checks in the context manager are also bound to this same directory inode.
+                if is_quarantined(bound):
+                    raise RecordError(
+                        "engagement_quarantined", "engagement evidence is quarantined"
+                    )
+                engagement_rows = []
+                regular_files = _relative_regular_files(bound)
+                eng = engagement_path.name
+                for verdict, sub in (("confirmed", "findings"), ("adjudicated-negative", "unproven")):
+                    for name in _bound_child_directories(bound, sub):
+                        if sub == "unproven" and not re.search(r"REFUT|DEMOT", name, re.I):
+                            continue        # an open partial is not an adjudicated negative
+                        prefix = f"{sub}/{name}/"
+                        fj = prefix + "finding.json"
+                        blob = ""
+                        doc = {}
+                        if fj in regular_files:
+                            try:
+                                doc = json.loads(read_governed_file(bound / fj).decode("utf-8"))
+                                blob = json.dumps(doc).lower()
+                            except Exception:
+                                pass
+                        if not blob:
+                            for md in sorted(
+                                value for value in regular_files
+                                if value.startswith(prefix)
+                                and len(Path(value[len(prefix):]).parts) == 1
+                                and value.endswith(".md")
+                            ):
+                                blob += read_governed_file(bound / md).decode(
+                                    "utf-8", errors="ignore"
+                                ).lower()[:8000]
+                        usable, why = True, None
+                        src, snk = extract_tuple(doc)
+                        if usable and not (src or snk):
+                            usable, why = False, ("NO-TUPLE: the package records no source and no sink -- "
+                                                  "schemas/finding.schema.json has no field for either")
+                        engagement_rows.append({"engagement": eng, "package": name, "verdict": verdict,
+                                                "language": classify_language(blob), "usable": usable,
+                                                "excluded_because": why, "shape_hint": shape_hint(blob),
+                                                "source": src, "sink": snk, "fields": sorted(doc)[:20]})
+                if is_quarantined(bound):
+                    raise RecordError(
+                        "engagement_quarantined", "engagement evidence is quarantined"
+                    )
+            # Context exit is the admission point: it rechecks the public path identity and GQ.
+            rows.extend(engagement_rows)
+        except (RecordError, OSError):
+            continue
     return rows
 
 
@@ -127,9 +177,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--include-quarantined", action="store_true")
     args = ap.parse_args()
-    rows = scan(args.include_quarantined)
+    rows = scan()
 
     if args.json:
         print(json.dumps(rows, indent=2, sort_keys=True))
@@ -151,8 +200,7 @@ def main():
                              for r in rows if not r["usable"]).most_common():
         print(f"  {reason:14s} {n}")
     print("\nshape hints (reported, never used to exclude)")
-    for k, v in Counter(r["shape_hint"] for r in rows
-                        if r["engagement"] not in QUARANTINED).most_common():
+    for k, v in Counter(r["shape_hint"] for r in rows).most_common():
         print(f"  {v:3d}  {k}")
 
     print("\nusable positives by language")

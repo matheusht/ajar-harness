@@ -21,6 +21,7 @@
         "review_required": {"blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation_event", "escalation_confirmation", "cleanup_obligation"], "tier": "real_world"}
       }
     },
+    "clear-ledger-quarantine": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["fresh_operator_console", "healthy_underlying_ledger", "exact_quarantine_marker"], "tier": "authority"},
     "close": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["approved_authority_request", "closure_gates"], "tier": "authority"},
     "create-artifact": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation", "bound_classification", "planned_digest", "cleanup"], "tier": "real_world"},
     "confirm-zone2": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["fresh_operator_console", "signed_scope", "active_environment", "cleanup_obligation"], "tier": "real_world"},
@@ -43,6 +44,7 @@
     "migrate-kernel": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope_draft", "fresh_operator_console"], "tier": "authority"},
     "normalize-runtime": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "preflight": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "session_provenance"], "tier": "notebook"},
+    "quarantine-ledger": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["trusted_scope_prefix", "pinned_operator_signer", "fresh_operator_console"], "tier": "authority"},
     "review-preflight": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "immutable_preflight", "operator_review"], "tier": "authority"},
     "propose-scope": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["active_signed_scope", "draft_digest", "session_provenance"], "tier": "notebook"},
     "reattest-scope": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "signed_scope_draft"], "tier": "authority"},

@@ -12,6 +12,8 @@ import importlib.metadata
 import json
 import os
 import re
+import stat
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -118,8 +120,71 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _read_bound_regular_file(path: os.PathLike[str] | str) -> bytes | None:
+    """Read ``/dev/fd/N/<relative>`` with openat on macOS.
+
+    macOS exposes the directory descriptor itself at ``/dev/fd/N`` but ordinary pathname
+    traversal below it returns ENOENT. Transaction callers intentionally use this alias to prevent
+    directory ABA; dropping back to the original pathname would undo that protection.
+    """
+
+    absolute = Path(os.path.abspath(path))
+    parts = absolute.parts
+    if not (
+        len(parts) >= 5
+        and parts[1:3] == ("dev", "fd")
+        and parts[3].isdigit()
+    ):
+        return None
+    relative = parts[4:]
+    if any(part in {"", ".", ".."} for part in relative):
+        raise OSError("unsafe bound relative path")
+    directory_fd = os.dup(int(parts[3]))
+    directory_flags = (
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+            raise OSError("bound root is not a directory")
+        for component in relative[:-1]:
+            child = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = child
+        fd = os.open(
+            relative[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise OSError("bound input is not a regular file")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(fd)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                raise OSError("bound input changed during read")
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(directory_fd)
+
+
 def load_json(path: os.PathLike[str] | str) -> Any:
     try:
+        bound = _read_bound_regular_file(path)
+        if bound is not None:
+            return json.loads(bound.decode("utf-8"), object_pairs_hook=_reject_duplicate_pairs)
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle, object_pairs_hook=_reject_duplicate_pairs)
     except RecordError:
@@ -137,6 +202,9 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def sha256_file(path: os.PathLike[str] | str) -> str:
+    bound = _read_bound_regular_file(path)
+    if bound is not None:
+        return sha256_bytes(bound)
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -458,53 +526,145 @@ def _record_identity(record: dict[str, Any]) -> tuple[str, str, int | None] | No
 
 
 def build_reference_index(engagement_dir: os.PathLike[str] | str) -> dict[str, list[dict[str, Any]]]:
-    root = Path(engagement_dir).resolve()
-    index: dict[str, list[dict[str, Any]]] = {}
-    paths = sorted(set(root.glob("**/*.json")) | set(root.glob("*.jsonl")))
-    for path in paths:
-        relative_parts = path.relative_to(root).parts
-        if (
-            path.name in {"state.snapshot.json", "records.index.json"}
-            or relative_parts[:1] == ("upstream",)
-            or relative_parts[:2] == ("legacy", "zone2-pending")
-            or (path.name.endswith(".action.json") and "authority" in path.parts and "requests" in path.parts)
-        ):
-            continue
-        records: list[Any]
-        if path.suffix == ".jsonl":
-            records = []
-            for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if not line.strip():
-                    continue
-                try:
-                    records.append(json.loads(line, object_pairs_hook=_reject_duplicate_pairs))
-                except (json.JSONDecodeError, RecordError) as exc:
-                    raise RecordError("invalid_jsonl", f"{path}:{line_number}: {exc}") from exc
-        else:
-            records = [load_json(path)]
-        for record in records:
-            if not isinstance(record, dict):
+    root = Path(os.path.abspath(engagement_dir))
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if len(root.parts) == 4 and root.parts[1:3] == ("dev", "fd") and root.parts[3].isdigit():
+        root_fd = os.dup(int(root.parts[3]))
+    else:
+        try:
+            terminal = root.lstat()
+            if stat.S_ISLNK(terminal.st_mode) or not stat.S_ISDIR(terminal.st_mode):
+                raise RecordError("unsafe_engagement_path", "engagement root must be a directory")
+            parent = root.parent.resolve(strict=True)
+            root_fd = os.open(parent / root.name, flags)
+        except OSError as exc:
+            raise RecordError("unsafe_engagement_path", "engagement root could not be opened") from exc
+
+    def read_relative(relative: str) -> bytes:
+        parts = Path(relative).parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            raise RecordError("unsafe_governed_path", relative)
+        parent_fd = os.dup(root_fd)
+        try:
+            for component in parts[:-1]:
+                child = os.open(component, flags, dir_fd=parent_fd)
+                os.close(parent_fd)
+                parent_fd = child
+            fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+            try:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode):
+                    raise RecordError("unsafe_governed_path", relative)
+                chunks: list[bytes] = []
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                after = os.fstat(fd)
+                if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+                ):
+                    raise RecordError("governed_file_changed_during_read", relative)
+                return b"".join(chunks)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+
+    paths: list[str] = []
+
+    def enumerate_records(directory_fd: int, prefix: tuple[str, ...]) -> None:
+        """Walk one opened tree with *at syscalls.
+
+        macOS exposes an opened directory as ``/dev/fd/N`` but does not support traversing
+        children through that pathname (``os.fwalk`` therefore returns no rows). Keep every
+        descent bound to directory descriptors instead of silently producing an empty index.
+        """
+
+        for name in sorted(os.listdir(directory_fd)):
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError:
                 continue
-            identity = _record_identity(record)
-            if identity:
-                entity_id, kind, revision = identity
-                entry = {"type": kind, "engagement_id": record.get("engagement_id") or record.get("engagement"), "revision": revision, "path": path.relative_to(root).as_posix(), "recorded_at": record.get("recorded_at") or record.get("created_at")}
-                index.setdefault(entity_id, []).append(entry)
-            if record.get("event_type") == "scope.attested" and isinstance(record.get("engagement_id"), str):
-                entries = index.setdefault(record["engagement_id"], [])
-                if not any(entry["type"] == "engagement" for entry in entries):
-                    entries.append({"type": "engagement", "engagement_id": record["engagement_id"], "revision": None, "path": path.relative_to(root).as_posix(), "recorded_at": record.get("recorded_at")})
-            if record.get("event_type") == "authority.requested":
-                request_id = record.get("payload", {}).get("request_id")
-                if isinstance(request_id, str):
-                    index.setdefault(request_id, []).append({"type": "authority-request", "engagement_id": record.get("engagement_id"), "revision": None, "path": path.relative_to(root).as_posix(), "recorded_at": record.get("recorded_at")})
-            if record.get("event_type") in {"candidate.proposed", "hypothesis.created"}:
-                payload = record.get("payload", {})
-                key = "candidate_id" if record["event_type"] == "candidate.proposed" else "hypothesis_id"
-                entity_id = payload.get(key) if isinstance(payload, dict) else None
-                if isinstance(entity_id, str):
-                    kind = "candidate" if record["event_type"] == "candidate.proposed" else "hypothesis"
-                    index.setdefault(entity_id, []).append({"type": kind, "engagement_id": record.get("engagement_id"), "revision": None, "path": path.relative_to(root).as_posix(), "recorded_at": record.get("recorded_at")})
+            relative_parts = (*prefix, name)
+            if stat.S_ISDIR(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                child_fd = os.open(name, flags, dir_fd=directory_fd)
+                try:
+                    enumerate_records(child_fd, relative_parts)
+                finally:
+                    os.close(child_fd)
+                continue
+            if not stat.S_ISREG(entry.st_mode) or stat.S_ISLNK(entry.st_mode):
+                continue
+            relative = Path(*relative_parts)
+            if relative.suffix == ".json" or (len(prefix) == 0 and relative.suffix == ".jsonl"):
+                paths.append(relative.as_posix())
+
+    try:
+        enumerate_records(root_fd, ())
+    except Exception:
+        os.close(root_fd)
+        raise
+
+    index: dict[str, list[dict[str, Any]]] = {}
+    try:
+        for relative in sorted(set(paths)):
+            relative_path = Path(relative)
+            relative_parts = relative_path.parts
+            if (
+                relative_path.name in {"state.snapshot.json", "records.index.json", "lifecycle.jsonl"}
+                or relative_parts[:1] == ("upstream",)
+                or relative_parts[:2] == ("legacy", "zone2-pending")
+                or relative_parts[:3] == ("legacy", "quarantine", "ledger-quarantined.json")
+                or (relative_path.name.endswith(".action.json") and "authority" in relative_parts and "requests" in relative_parts)
+            ):
+                continue
+            try:
+                data = read_relative(relative)
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise RecordError("invalid_json", relative) from exc
+            records: list[Any]
+            if relative_path.suffix == ".jsonl":
+                records = []
+                for line_number, line in enumerate(text.splitlines(), 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        records.append(json.loads(line, object_pairs_hook=_reject_duplicate_pairs))
+                    except (json.JSONDecodeError, RecordError) as exc:
+                        raise RecordError("invalid_jsonl", f"{relative}:{line_number}: {exc}") from exc
+            else:
+                try:
+                    records = [json.loads(text, object_pairs_hook=_reject_duplicate_pairs)]
+                except (json.JSONDecodeError, RecordError) as exc:
+                    raise RecordError("invalid_json", relative) from exc
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                identity = _record_identity(record)
+                if identity:
+                    entity_id, kind, revision = identity
+                    entry = {"type": kind, "engagement_id": record.get("engagement_id") or record.get("engagement"), "revision": revision, "path": relative, "recorded_at": record.get("recorded_at") or record.get("created_at")}
+                    index.setdefault(entity_id, []).append(entry)
+                if record.get("event_type") == "scope.attested" and isinstance(record.get("engagement_id"), str):
+                    entries = index.setdefault(record["engagement_id"], [])
+                    if not any(entry["type"] == "engagement" for entry in entries):
+                        entries.append({"type": "engagement", "engagement_id": record["engagement_id"], "revision": None, "path": relative, "recorded_at": record.get("recorded_at")})
+                if record.get("event_type") == "authority.requested":
+                    request_id = record.get("payload", {}).get("request_id")
+                    if isinstance(request_id, str):
+                        index.setdefault(request_id, []).append({"type": "authority-request", "engagement_id": record.get("engagement_id"), "revision": None, "path": relative, "recorded_at": record.get("recorded_at")})
+                if record.get("event_type") in {"candidate.proposed", "hypothesis.created"}:
+                    payload = record.get("payload", {})
+                    key = "candidate_id" if record["event_type"] == "candidate.proposed" else "hypothesis_id"
+                    entity_id = payload.get(key) if isinstance(payload, dict) else None
+                    if isinstance(entity_id, str):
+                        kind = "candidate" if record["event_type"] == "candidate.proposed" else "hypothesis"
+                        index.setdefault(entity_id, []).append({"type": kind, "engagement_id": record.get("engagement_id"), "revision": None, "path": relative, "recorded_at": record.get("recorded_at")})
+    finally:
+        os.close(root_fd)
     for entity_id, entries in index.items():
         types = {entry["type"] for entry in entries}
         if len(types) > 1:
@@ -699,14 +859,103 @@ def _legacy_violation_codes(record: Any, schema_errors: list[dict[str, Any]]) ->
     return sorted(codes)
 
 
+@contextmanager
+def _bound_legacy_inventory_source(engagement: Path):
+    """Bind one legacy inventory root without manufacturing coordination state.
+
+    Initialized roots take their existing kernel lock in no-create mode.  The tracked pre-kernel
+    benchmark corpus is the explicit compatibility class: it has a regular scope but no lock, so it
+    is scanned through one root FD with bound GQ, public-name identity, and no-midscan-lock checks.
+    """
+
+    # Delayed imports avoid the engagement_records <-> engagement_state module cycle.
+    from engagement_quarantine import inspect_quarantine
+    from engagement_state import _open_absolute_directory, bound_engagement_lock
+
+    logical = Path(os.path.abspath(engagement))
+    root_fd = _open_absolute_directory(logical)
+    bound = Path(f"/dev/fd/{root_fd}")
+    opened = os.fstat(root_fd)
+
+    def require_public_identity() -> None:
+        try:
+            named = os.stat(logical, follow_symlinks=False)
+        except OSError as exc:
+            raise RecordError(
+                "engagement_source_changed", "inventory source directory changed"
+            ) from exc
+        if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            raise RecordError(
+                "engagement_source_changed", "inventory source directory changed"
+            )
+
+    try:
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError(
+                "engagement_quarantined", "engagement evidence is quarantined"
+            )
+        require_public_identity()
+        try:
+            lock_entry = os.stat(
+                ".record-kernel.lock", dir_fd=root_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            lock_entry = None
+        if lock_entry is not None and (
+            stat.S_ISLNK(lock_entry.st_mode) or not stat.S_ISREG(lock_entry.st_mode)
+        ):
+            raise RecordError(
+                "unsafe_governed_path", "inventory coordination entry is unsafe"
+            )
+
+        if lock_entry is not None:
+            with bound_engagement_lock(root_fd, create=False) as locked:
+                yield locked
+                if inspect_quarantine(locked)["quarantined"]:
+                    raise RecordError(
+                        "engagement_quarantined", "engagement evidence is quarantined"
+                    )
+                current_lock = os.stat(
+                    ".record-kernel.lock", dir_fd=root_fd, follow_symlinks=False
+                )
+                if (lock_entry.st_dev, lock_entry.st_ino) != (
+                    current_lock.st_dev,
+                    current_lock.st_ino,
+                ):
+                    raise RecordError(
+                        "engagement_source_changed",
+                        "inventory coordination changed during scan",
+                    )
+                require_public_identity()
+            return
+
+        # No-lock legacy compatibility: a newly appearing coordination file means the source
+        # changed class during the scan and none of its buffered rows are admissible.
+        yield bound
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError(
+                "engagement_quarantined", "engagement evidence is quarantined"
+            )
+        try:
+            os.stat(".record-kernel.lock", dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise RecordError(
+                "engagement_coordination_changed",
+                "inventory source acquired coordination during scan",
+            )
+        require_public_identity()
+    finally:
+        os.close(root_fd)
+
+
 def legacy_finding_inventory(root: os.PathLike[str] | str) -> dict[str, Any]:
     """Read and hash local Plane-3 findings without modifying or importing them."""
+    from engagement_state import _relative_regular_files, read_governed_file
+
     root_path = Path(root).resolve()
     engagement_root = root_path / "engagements"
-    paths = sorted(
-        path for path in engagement_root.glob("**/findings/**/*.json")
-        if "_TEMPLATE" not in path.parts and path.is_file()
-    )
     files: list[dict[str, Any]] = []
     counts = {
         "total": 0,
@@ -716,26 +965,54 @@ def legacy_finding_inventory(root: os.PathLike[str] | str) -> dict[str, Any]:
         "legacy_schema_invalid": 0,
         "parse_error": 0,
     }
-    for path in paths:
-        rel = path.relative_to(root_path).as_posix()
-        item: dict[str, Any] = {"path": rel, "sha256": sha256_file(path), "size": path.stat().st_size}
-        counts["total"] += 1
+    for engagement in sorted(path for path in engagement_root.iterdir() if path.is_dir()):
+        if engagement.name == "_TEMPLATE":
+            continue
         try:
-            record = load_json(path)
-            errors = validate_record(record, "finding-v2-legacy")
-            violations = _legacy_violation_codes(record, errors)
-            if isinstance(record, dict) and record.get("schema_version") == 2:
-                counts["schema_version_2"] += 1
-            for key in ("forbidden_base_model", "unsupported_scope_class", "legacy_schema_invalid"):
-                if key in violations:
-                    counts[key] += 1
-            item["schema_version"] = record.get("schema_version") if isinstance(record, dict) else None
-            item["violations"] = violations
-        except RecordError as exc:
-            counts["parse_error"] += 1
-            item["violations"] = ["parse_error"]
-            item["error"] = exc.message
-        files.append(item)
+            with _bound_legacy_inventory_source(engagement) as bound:
+                engagement_files: list[dict[str, Any]] = []
+                engagement_counts = {key: 0 for key in counts}
+                for relative in sorted(_relative_regular_files(bound)):
+                    parts = Path(relative).parts
+                    if (
+                        len(parts) < 2
+                        or parts[0] != "findings"
+                        or Path(relative).suffix.lower() != ".json"
+                    ):
+                        continue
+                    data = read_governed_file(bound / relative)
+                    rel = (Path("engagements") / engagement.name / relative).as_posix()
+                    item: dict[str, Any] = {
+                        "path": rel,
+                        "sha256": sha256_bytes(data),
+                        "size": len(data),
+                    }
+                    engagement_counts["total"] += 1
+                    try:
+                        record = json.loads(
+                            data.decode("utf-8"),
+                            object_pairs_hook=_reject_duplicate_pairs,
+                        )
+                        errors = validate_record(record, "finding-v2-legacy")
+                        violations = _legacy_violation_codes(record, errors)
+                        if isinstance(record, dict) and record.get("schema_version") == 2:
+                            engagement_counts["schema_version_2"] += 1
+                        for key in ("forbidden_base_model", "unsupported_scope_class", "legacy_schema_invalid"):
+                            if key in violations:
+                                engagement_counts[key] += 1
+                        item["schema_version"] = record.get("schema_version") if isinstance(record, dict) else None
+                        item["violations"] = violations
+                    except (UnicodeDecodeError, json.JSONDecodeError, RecordError):
+                        engagement_counts["parse_error"] += 1
+                        item["violations"] = ["parse_error"]
+                        item["error"] = "legacy finding is invalid JSON"
+                    engagement_files.append(item)
+        except (OSError, RecordError):
+            continue
+        # The source context's final public-identity/GQ check is the admission point.
+        files.extend(engagement_files)
+        for key, value in engagement_counts.items():
+            counts[key] += value
     corpus_material = b"".join(
         f"{item['path']}\0{item['sha256']}\0{item['size']}\n".encode("utf-8") for item in files
     )
@@ -749,9 +1026,9 @@ def legacy_finding_inventory(root: os.PathLike[str] | str) -> dict[str, Any]:
 
 
 def write_canonical_json(path: os.PathLike[str] | str, value: Any) -> None:
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(canonical_json_bytes(value))
+    from engagement_quarantine import atomic_write_offline
+
+    atomic_write_offline(Path(path), canonical_json_bytes(value))
 
 
 def summarize_errors(errors: Iterable[dict[str, Any]]) -> str:

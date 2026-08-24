@@ -550,6 +550,18 @@ def check_casebooks(pattern_ids):
         unknown = sorted(r for r in refs if r not in pattern_ids)
         record(not unknown, f"casebooks/{name}: pattern refs resolve",
                f"unknown: {unknown}" if unknown else "")
+    provenance = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "tools", "casebook-provenance-test.py")],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    record(
+        provenance.returncode == 0,
+        "casebooks: provenance, local resolution, and dynamic quarantine self-test",
+        (provenance.stdout + provenance.stderr)[-500:],
+    )
 
 
 SECRET_PATTERNS = [

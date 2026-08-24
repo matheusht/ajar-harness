@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from decision6_capabilities import classify_command, classify_event, load_capability_matrix, validate_capability_matrix
+from engagement_quarantine import atomic_write_offline
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_ROOT = ROOT / "evals" / "research-kernel" / "decision6"
@@ -194,7 +195,11 @@ def main() -> int:
     old_gate = replay_old(); new_gate = replay_new(); result = {"valid": not problems, "problems": problems, "old_gate": old_gate, "new_gate": new_gate, "comparison": {"gates_held": old_gate["gates_held"] and new_gate["gates_held"], "notebook_improper_stall_delta": new_gate["notebook"]["improper_stalls"] - old_gate["notebook"]["improper_stalls"], "required_gate_delta": new_gate["required_gates"]["blocked"] - old_gate["required_gates"]["blocked"], "trace_coverage_complete": old_gate["trace_coverage"]["measured"] == old_gate["trace_coverage"]["records"] == new_gate["trace_coverage"]["measured"] == new_gate["trace_coverage"]["records"]}}
     payload = json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
     if args.output:
-        args.output.write_text(payload, encoding="utf-8")
+        try:
+            atomic_write_offline(args.output, payload.encode("utf-8"))
+        except ValueError:
+            print("ERROR: offline output destination is governed or unsafe", file=sys.stderr)
+            return 1
     if args.self_test:
         print(f"DECISION-0006 FROZEN REPLAY: {'PASS' if not problems else 'FAIL'}")
         for problem in problems:

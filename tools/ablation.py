@@ -46,6 +46,14 @@ import importlib.util
 import json
 import os
 import sys
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_state import (
+    _relative_regular_files,
+    bound_engagement_source,
+    read_governed_file,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE_ROOT = os.path.join(ROOT, "fixtures", "ablation")
@@ -160,18 +168,41 @@ def fixture_index():
     return idx
 
 
-def promote_dispositions():
+def promote_dispositions(root=ROOT):
     out = []
-    for dirpath, _, files in os.walk(os.path.join(ROOT, "engagements")):
-        for fn in files:
-            if fn.startswith("memory-disposition") and fn.endswith(".json"):
-                p = os.path.join(dirpath, fn)
-                try:
-                    doc = json.load(open(p))
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if doc.get("disposition") == "promote":
-                    out.append((os.path.relpath(p, ROOT), doc))
+    engagement_root = Path(root) / "engagements"
+    if not engagement_root.is_dir():
+        return out
+    for engagement in sorted(path for path in engagement_root.iterdir() if path.is_dir() and path.name != "_TEMPLATE"):
+        try:
+            with bound_engagement_source(
+                engagement, allow_ungoverned=True
+            ) as bound:
+                engagement_rows = []
+                for relative in sorted(_relative_regular_files(bound)):
+                    name = Path(relative).name
+                    if not (
+                        name.startswith("memory-disposition")
+                        and name.endswith(".json")
+                    ):
+                        continue
+                    try:
+                        doc = json.loads(
+                            read_governed_file(bound / relative).decode("utf-8")
+                        )
+                    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+                        continue
+                    if doc.get("disposition") == "promote":
+                        engagement_rows.append(
+                            (
+                                os.path.relpath(engagement / relative, root),
+                                doc,
+                            )
+                        )
+            # Nothing is admitted until the bound scanner rechecks identity and quarantine.
+            out.extend(engagement_rows)
+        except (RecordError, OSError):
+            continue
     return sorted(out)
 
 

@@ -28,25 +28,47 @@ Commands:
 """
 
 import argparse
+from contextlib import ExitStack
 import glob
 import json
 import os
 import re
+import stat
 import sys
+from pathlib import Path, PurePosixPath
+
+from engagement_quarantine import (
+    _current_directory_path,
+    atomic_write_offline,
+    is_quarantined,
+    quarantined_ancestor,
+    read_safe_offline_file,
+    require_safe_offline_output,
+)
+from engagement_records import RecordError
+from engagement_state import bound_engagement_lock, require_not_quarantined
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PREREG = os.path.join(ROOT, "fixtures", "preregistration", "phase5-q02-prompt-ablation.json")
 
 
-def read_threshold(prereg_path=PREREG):
-    """Pull the >=N finding gap out of the frozen rule. Never hardcode it here."""
-    with open(prereg_path) as fh:
-        doc = json.load(fh)
+def _stable_regular_bytes(path):
+    return read_safe_offline_file(Path(path))
+
+
+def _threshold_from_bytes(data):
+    """Pull the >=N finding gap out of frozen bytes. Never hardcode it here."""
+
+    doc = json.loads(data)
     rule = doc["decision_rule"]["prompt_earns_its_keep_if"]
     m = re.search(r"M1\(A\)\s*-\s*M1\(B\)\s*>=\s*(\d+)", rule)
     if not m:
-        raise SystemExit(f"cannot read the threshold out of {prereg_path}; refusing to guess it")
+        raise ValueError("cannot read the preregistered threshold")
     return int(m.group(1)), doc
+
+
+def read_threshold(prereg_path=PREREG):
+    return _threshold_from_bytes(_stable_regular_bytes(prereg_path))
 
 
 def count_packages(arm, sub):
@@ -102,6 +124,135 @@ def measure_arm(arm):
     }
 
 
+def _snapshot_bound_tree(root_fd):
+    """Snapshot one locked arm without reopening its public pathname."""
+
+    result = {}
+
+    def visit(directory_fd, prefix):
+        current_path = _current_directory_path(directory_fd)
+        if current_path is not None and quarantined_ancestor(current_path):
+            raise RecordError("engagement_quarantined", "ablation source is quarantined")
+        before_directory = os.fstat(directory_fd)
+        names = sorted(os.listdir(directory_fd))
+        for name in names:
+            if name == ".record-kernel.lock":
+                continue
+            entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            relative = (*prefix, name)
+            if stat.S_ISLNK(entry.st_mode):
+                raise RecordError("q02_source_unsafe", "ablation source contains a symbolic link")
+            if stat.S_ISDIR(entry.st_mode):
+                child = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=directory_fd,
+                )
+                try:
+                    visit(child, relative)
+                finally:
+                    os.close(child)
+                continue
+            if not stat.S_ISREG(entry.st_mode):
+                raise RecordError("q02_source_unsafe", "ablation source contains a non-regular entry")
+            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+            try:
+                before = os.fstat(fd)
+                chunks = []
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                after = os.fstat(fd)
+                if (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                ) != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                ):
+                    raise RecordError("q02_source_changed", "ablation source changed during read")
+            finally:
+                os.close(fd)
+            result["/".join(relative)] = b"".join(chunks)
+        after_directory = os.fstat(directory_fd)
+        if (
+            before_directory.st_dev,
+            before_directory.st_ino,
+            before_directory.st_mtime_ns,
+            before_directory.st_ctime_ns,
+        ) != (
+            after_directory.st_dev,
+            after_directory.st_ino,
+            after_directory.st_mtime_ns,
+            after_directory.st_ctime_ns,
+        ) or names != sorted(os.listdir(directory_fd)):
+            raise RecordError("q02_source_changed", "ablation source changed during read")
+        current_path = _current_directory_path(directory_fd)
+        if current_path is not None and quarantined_ancestor(current_path):
+            raise RecordError("engagement_quarantined", "ablation source is quarantined")
+
+    visit(root_fd, ())
+    return result
+
+
+def _jsonl_count_bytes(data):
+    if data is None:
+        return 0
+    return len([json.loads(line) for line in data.splitlines() if line.strip()])
+
+
+def _measure_arm_snapshot(tree, display_path):
+    def package_ids(directory):
+        return sorted(
+            {
+                parts[1]
+                for relative in tree
+                if len(parts := PurePosixPath(relative).parts) >= 3 and parts[0] == directory
+            }
+        )
+
+    severity = {}
+    for relative, data in tree.items():
+        parts = PurePosixPath(relative).parts
+        if len(parts) != 3 or parts[0] != "findings" or parts[2] != "finding.json":
+            continue
+        try:
+            band = (json.loads(data).get("severity") or {})
+            band = band.get("band") if isinstance(band, dict) else band
+        except Exception:
+            band = None
+        severity[band or "unstated"] = severity.get(band or "unstated", 0) + 1
+    progress = tree.get("progress.md")
+    subagents = None
+    if progress is not None:
+        try:
+            text = progress.decode("utf-8")
+        except UnicodeDecodeError:
+            text = ""
+        numbers = [
+            int(value)
+            for value in re.findall(
+                r"(?:subagents?|agents?)[^0-9\n]{0,20}(\d{1,3})", text, re.I
+            )
+        ]
+        subagents = sum(numbers) if numbers else None
+    return {
+        "path": display_path,
+        "M1_findings": package_ids("findings"),
+        "M2_candidates": package_ids("unproven"),
+        "M3_severity": severity,
+        "M5_attempts": _jsonl_count_bytes(tree.get("attempts.jsonl")),
+        "M5_events": _jsonl_count_bytes(tree.get("events.jsonl")),
+        "M5_subagents": subagents,
+    }
+
+
 WORKSHEET = {
     "_instructions": "Filled by an adjudicator who ran NEITHER arm, judging packages with arm "
                      "labels, paths and timestamps stripped. See the preregistration's "
@@ -123,22 +274,104 @@ WORKSHEET = {
 
 
 def cmd_measure(args):
-    a, b = os.path.join(args.engagement, "arm-a"), os.path.join(args.engagement, "arm-b")
-    for p in (a, b):
-        if not os.path.isdir(p):
-            raise SystemExit(f"missing arm directory: {p}")
-    out = {"engagement": os.path.relpath(args.engagement, ROOT),
-           "arm_a": measure_arm(a), "arm_b": measure_arm(b),
-           "computed_only": "M6 and M7 are judged, not computed. Fill the worksheet."}
-    print(json.dumps(out, indent=2, sort_keys=True))
     if args.worksheet:
-        if os.path.exists(args.worksheet) and not args.force:
-            raise SystemExit(f"{args.worksheet} exists; pass --force to overwrite")
-        with open(args.worksheet, "w") as fh:
-            json.dump(WORKSHEET, fh, indent=2)
-            fh.write("\n")
-        sys.stderr.write(f"\nworksheet written to {args.worksheet}\n")
-    return 0
+        try:
+            require_safe_offline_output(Path(args.worksheet))
+        except ValueError:
+            raise SystemExit("worksheet destination is quarantined or reserved")
+    engagement_path = Path(args.engagement).absolute()
+    root_fd = -1
+    arm_fds = []
+    try:
+        root_fd = os.open(
+            engagement_path,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        root_identity = os.fstat(root_fd)
+        with bound_engagement_lock(root_fd, create=False) as bound_engagement:
+            for arm_name in ("arm-a", "arm-b"):
+                try:
+                    arm_fds.append(
+                        os.open(
+                            arm_name,
+                            os.O_RDONLY
+                            | getattr(os, "O_DIRECTORY", 0)
+                            | getattr(os, "O_NOFOLLOW", 0),
+                            dir_fd=root_fd,
+                        )
+                    )
+                except OSError as error:
+                    raise SystemExit("missing ablation arm directory") from error
+            with ExitStack() as locks:
+                bound_arms = [
+                    locks.enter_context(bound_engagement_lock(fd, create=False)) for fd in arm_fds
+                ]
+                trees = [_snapshot_bound_tree(fd) for fd in arm_fds]
+                require_not_quarantined(bound_engagement)
+                for bound_arm in bound_arms:
+                    require_not_quarantined(bound_arm)
+                try:
+                    current_root = os.stat(engagement_path, follow_symlinks=False)
+                except OSError as error:
+                    raise SystemExit("ablation evidence changed during measurement") from error
+                if (
+                    stat.S_ISLNK(current_root.st_mode)
+                    or (current_root.st_dev, current_root.st_ino)
+                    != (root_identity.st_dev, root_identity.st_ino)
+                ):
+                    raise SystemExit("ablation evidence changed during measurement")
+                out = {
+                    "engagement": os.path.relpath(args.engagement, ROOT),
+                    "arm_a": _measure_arm_snapshot(
+                        trees[0], os.path.relpath(os.path.join(args.engagement, "arm-a"), ROOT)
+                    ),
+                    "arm_b": _measure_arm_snapshot(
+                        trees[1], os.path.relpath(os.path.join(args.engagement, "arm-b"), ROOT)
+                    ),
+                    "computed_only": "M6 and M7 are judged, not computed. Fill the worksheet.",
+                }
+                # Admission and every publication share the source locks. A signed quarantine
+                # marker that wins before this point is excluded; one waiting on these locks is
+                # ordered after the measurement has been emitted.
+                require_not_quarantined(bound_engagement)
+                for bound_arm in bound_arms:
+                    require_not_quarantined(bound_arm)
+                try:
+                    final_root = os.stat(engagement_path, follow_symlinks=False)
+                except OSError as error:
+                    raise SystemExit("ablation evidence changed during measurement") from error
+                if (
+                    stat.S_ISLNK(final_root.st_mode)
+                    or (final_root.st_dev, final_root.st_ino)
+                    != (root_identity.st_dev, root_identity.st_ino)
+                ):
+                    raise SystemExit("ablation evidence changed during measurement")
+                if args.worksheet:
+                    try:
+                        require_safe_offline_output(Path(args.worksheet))
+                    except ValueError:
+                        raise SystemExit("worksheet destination is quarantined or reserved")
+                    if os.path.exists(args.worksheet) and not args.force:
+                        raise SystemExit(f"{args.worksheet} exists; pass --force to overwrite")
+                    atomic_write_offline(
+                        Path(args.worksheet),
+                        (json.dumps(WORKSHEET, indent=2) + "\n").encode("utf-8"),
+                    )
+                print(json.dumps(out, indent=2, sort_keys=True))
+                if args.worksheet:
+                    sys.stderr.write(f"\nworksheet written to {args.worksheet}\n")
+                return 0
+    except RecordError as error:
+        if error.code in {"engagement_quarantined", "engagement_coordination_unavailable"}:
+            raise SystemExit("ablation evidence is quarantined or uncoordinated") from error
+        raise
+    except OSError as error:
+        raise SystemExit("ablation evidence is unavailable or unsafe") from error
+    finally:
+        for fd in arm_fds:
+            os.close(fd)
+        if root_fd >= 0:
+            os.close(root_fd)
 
 
 def decide(m, w, threshold):
@@ -189,10 +422,23 @@ def decide(m, w, threshold):
 
 
 def cmd_verdict(args):
-    threshold, doc = read_threshold(args.prereg)
-    m = json.load(open(args.measurements))
-    w = json.load(open(args.worksheet))
+    sources = tuple(Path(path) for path in (args.measurements, args.worksheet, args.prereg))
+    if any(quarantined_ancestor(path) for path in sources):
+        raise SystemExit("ablation evidence is quarantined")
+    try:
+        measurement_bytes, worksheet_bytes, prereg_bytes = (
+            _stable_regular_bytes(path) for path in sources
+        )
+        threshold, doc = _threshold_from_bytes(prereg_bytes)
+        m = json.loads(measurement_bytes)
+        w = json.loads(worksheet_bytes)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        raise SystemExit("cannot read ablation evidence")
+    if any(quarantined_ancestor(path) for path in sources):
+        raise SystemExit("ablation evidence became quarantined during adjudication")
     verdict, reasons, blockers = decide(m, w, threshold)
+    if any(quarantined_ancestor(path) for path in sources):
+        raise SystemExit("ablation evidence became quarantined during adjudication")
     print(f"preregistration: {doc['preregistration_id']}")
     print(f"VERDICT: {verdict}\n")
     for r in reasons:

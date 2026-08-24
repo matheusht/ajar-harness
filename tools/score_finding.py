@@ -39,6 +39,17 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_quarantine import read_safe_offline_file
+from engagement_state import (
+    _open_absolute_directory,
+    _relative_regular_files,
+    bound_engagement_source,
+    find_engagement_root,
+    read_governed_file,
+)
 
 # --- CVSS 3.1 base score ------------------------------------------------------
 
@@ -79,17 +90,55 @@ def cvss31_base(av, ac, pr, ui, s, c, i, a):
 TEXT_EXT = {".md", ".txt", ".json"}
 
 
+def _load_package_bound(
+    bound_root: Path, relative: tuple[str, ...]
+) -> tuple[dict[str, str], set[str]]:
+    source = bound_root / Path(*relative) if relative else bound_root
+    try:
+        directory_fd = _open_absolute_directory(source)
+    except (OSError, RecordError):
+        return {}, set()
+    else:
+        os.close(directory_fd)
+
+    prefix = Path(*relative).as_posix().rstrip("/") if relative else ""
+    prefix = prefix + "/" if prefix else ""
+    docs: dict[str, str] = {}
+    files: set[str] = set()
+    for absolute_relative in sorted(_relative_regular_files(bound_root)):
+        if not absolute_relative.startswith(prefix):
+            continue
+        package_relative = absolute_relative[len(prefix):]
+        parts = Path(package_relative).parts
+        if any(part in {".git", "node_modules", "out", "cache"} for part in parts[:-1]):
+            continue
+        files.add(package_relative)
+        if Path(package_relative).suffix.lower() not in TEXT_EXT:
+            continue
+        try:
+            docs[package_relative] = read_governed_file(
+                bound_root / absolute_relative
+            ).decode("utf-8", errors="replace")
+        except OSError:
+            pass
+    return docs, files
+
+
+def _load_package_snapshot(root) -> tuple[dict[str, str], set[str]]:
+    source = Path(os.path.abspath(root))
+    located = find_engagement_root(source)
+    if located is not None:
+        engagement, relative = located
+        with bound_engagement_source(engagement) as bound:
+            return _load_package_bound(bound, relative)
+    if not source.is_dir():
+        return {}, set()
+    with bound_engagement_source(source, allow_ungoverned=True) as bound:
+        return _load_package_bound(bound, ())
+
+
 def load_package(root):
-    docs = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", "out", "cache"}]
-        for fn in filenames:
-            if os.path.splitext(fn)[1].lower() in TEXT_EXT:
-                p = os.path.join(dirpath, fn)
-                try:
-                    docs[os.path.relpath(p, root)] = open(p, errors="replace").read()
-                except OSError:
-                    pass
+    docs, _ = _load_package_snapshot(root)
     return docs
 
 
@@ -135,17 +184,22 @@ def _packaged_anywhere(root, rel, _cache={}):
     return os.path.basename(rel) in _cache[key]
 
 
-def check_existence(root, docs, res):
+def check_existence(root, docs, res, package_files=None):
     """Every package-relative path a document cites must exist in the package."""
     for name, text in docs.items():
         for m in PATH_RE.finditer(text):
             rel = m.group(1)
             if rel.startswith(("http", "//")) or " " in rel:
                 continue
-            hit = (os.path.isfile(os.path.join(root, rel))
-                   or any(os.path.basename(k) == os.path.basename(rel) for k in docs)
-                   or os.path.isfile(os.path.join(root, os.path.dirname(name), rel))
-                   or _packaged_anywhere(root, rel))
+            if package_files is None:
+                hit = (os.path.isfile(os.path.join(root, rel))
+                       or any(os.path.basename(k) == os.path.basename(rel) for k in docs)
+                       or os.path.isfile(os.path.join(root, os.path.dirname(name), rel))
+                       or _packaged_anywhere(root, rel))
+            else:
+                local = (Path(name).parent / rel).as_posix()
+                names = {os.path.basename(value) for value in package_files}
+                hit = rel in package_files or local in package_files or os.path.basename(rel) in names
             # A path that clearly points at the TARGET's source tree is not a package artifact.
             if not hit and not re.match(r"^(src|lib|core|kvm|engine|skills|tools|cmd|pkg|x)/", rel):
                 res.add(False, "existence", "computable",
@@ -312,19 +366,46 @@ def check_attestations(docs, attest, res):
 # --- driver -------------------------------------------------------------------
 
 def score(root, attest=None):
-    docs = load_package(root)
+    docs, package_files = _load_package_snapshot(root)
     res = Result()
     if not docs:
         res.add(False, "existence", "computable", "package contains readable documents",
                 f"no .md/.txt/.json under {root}")
         return res, docs
-    check_existence(root, docs, res)
+    check_existence(root, docs, res, package_files)
     check_recompute(docs, res)
     check_cross_doc(docs, res)
     check_pin_version(docs, res)
     check_adjudication(docs, attest, res)
     check_attestations(docs, attest, res)
     return res, docs
+
+
+def _load_attestation(path: Path):
+    source = Path(os.path.abspath(path))
+    located = find_engagement_root(source)
+    if located is not None:
+        engagement, relative = located
+        if not relative:
+            raise RecordError(
+                "attestation_source_unavailable", "attestation source is not a regular file"
+            )
+        with bound_engagement_source(engagement) as bound:
+            data = read_governed_file(bound / Path(*relative))
+    else:
+        try:
+            data = read_safe_offline_file(source)
+        except ValueError as exc:
+            raise RecordError(
+                "attestation_source_unavailable",
+                "attestation source is governed or unavailable",
+            ) from exc
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise RecordError(
+            "attestation_source_invalid", "attestation source is invalid JSON"
+        ) from exc
 
 
 def main():
@@ -336,8 +417,17 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    attest = json.load(open(args.attest)) if args.attest else None
-    res, docs = score(args.package, attest)
+    try:
+        attest = _load_attestation(Path(args.attest)) if args.attest else None
+        res, docs = score(args.package, attest)
+    except (RecordError, OSError) as exc:
+        decision = "quarantined" if isinstance(exc, RecordError) and exc.code == "engagement_quarantined" else "source-unavailable"
+        if args.json:
+            json.dump({"decision": decision, "documents": 0, "checks": []}, sys.stdout)
+            sys.stdout.write("\n")
+        else:
+            print("package evidence is quarantined" if decision == "quarantined" else "package source is unavailable")
+        return 1
     decision = "block" if res.failures else "pass"
 
     if args.json:

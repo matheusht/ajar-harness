@@ -2,12 +2,22 @@
 """Deterministic complete-funnel telemetry export and conservative offline scoring."""
 from __future__ import annotations
 
+import os
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from engagement_records import RecordError, build_reference_index, canonical_json_bytes, load_json, validate_record
-from engagement_state import atomic_write, read_ledger, reduce_engagement
+from engagement_state import bound_engagement_source, read_ledger, reduce_engagement
+from engagement_quarantine import (
+    _open_directory,
+    _require_bound_parent_safe,
+    atomic_write_offline,
+    inspect_quarantine,
+    read_safe_offline_file,
+    require_safe_offline_output,
+)
 
 COST_FIELDS = ("wall_seconds", "model_seconds", "tool_seconds", "target_calls", "model_calls", "input_tokens", "output_tokens", "cost_usd", "human_review_seconds")
 ZERO_COST = {field: None for field in COST_FIELDS}
@@ -30,19 +40,94 @@ def _sum_cost(records: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _records_of_type(engagement: Path, kind: str) -> list[dict[str, Any]]:
+def _records_of_type(engagement: Path, kind: str, engagement_id: str) -> list[dict[str, Any]]:
     index = build_reference_index(engagement); records: list[dict[str, Any]] = []
     for entries in index.values():
         for entry in entries:
-            if entry["type"] == kind and entry.get("engagement_id") == engagement.name:
+            if entry["type"] == kind and entry.get("engagement_id") == engagement_id:
                 records.append(load_json(engagement / entry["path"]))
     identities = {"review": "review_id", "finding": "finding_id"}
     key = identities.get(kind)
     return sorted(records, key=lambda item: (item.get(key, ""), item.get("revision", 0)))
 
 
-def export_telemetry(engagement: Path, output: Path | None = None) -> dict[str, Any]:
-    engagement = engagement.resolve(); state = reduce_engagement(engagement); events = read_ledger(engagement, "event"); attempts = read_ledger(engagement, "attempt")
+def _require_named_source(logical: Path, bound: Path) -> None:
+    """Reject a public-name replacement before admitting a derived export."""
+
+    try:
+        if (
+            len(bound.parts) == 4
+            and bound.parts[1:3] == ("dev", "fd")
+            and bound.parts[3].isdigit()
+        ):
+            opened = os.fstat(int(bound.parts[3]))
+        else:
+            opened = os.stat(bound, follow_symlinks=False)
+        named = os.stat(logical, follow_symlinks=False)
+    except OSError as exc:
+        raise RecordError("engagement_source_changed", "telemetry source changed") from exc
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or stat.S_ISLNK(named.st_mode)
+        or not stat.S_ISDIR(named.st_mode)
+        or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        or inspect_quarantine(bound)["quarantined"]
+        or inspect_quarantine(logical)["quarantined"]
+    ):
+        raise RecordError("engagement_source_changed", "telemetry source changed")
+
+
+def _remove_published_output(path: Path, expected: bytes) -> None:
+    """Best-effort exact-leaf rollback after source admission fails post-publication."""
+
+    absolute = Path(os.path.abspath(path))
+    require_safe_offline_output(absolute)
+    resolved_parent = absolute.parent.resolve(strict=True)
+    parent_fd = _open_directory(resolved_parent)
+    try:
+        _require_bound_parent_safe(parent_fd, resolved_parent, absolute.name, output=True)
+        fd = os.open(
+            absolute.name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_fd,
+        )
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                return
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(fd)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ) or b"".join(chunks) != expected:
+                return
+        finally:
+            os.close(fd)
+        current = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino):
+            return
+        os.unlink(absolute.name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+        _require_bound_parent_safe(parent_fd, resolved_parent, absolute.name, output=True)
+    finally:
+        os.close(parent_fd)
+
+
+def _export_bound_telemetry(engagement: Path) -> dict[str, Any]:
+    state = reduce_engagement(engagement); events = read_ledger(engagement, "event"); attempts = read_ledger(engagement, "attempt")
     proposals = [event for event in events if event["event_type"] == "candidate.proposed"]
     candidate_events: dict[str, list[dict[str, Any]]] = {}
     for event in events:
@@ -54,7 +139,7 @@ def export_telemetry(engagement: Path, output: Path | None = None) -> dict[str, 
         if event["event_type"] == "hypothesis.created" and payload.get("origin_type") == "candidate": hypothesis_to_candidate[payload["hypothesis_id"]] = payload["origin_ref"]
         hypothesis_id = payload.get("hypothesis_id")
         if hypothesis_id: hypothesis_events.setdefault(hypothesis_id, []).append(event)
-    reviews = _records_of_type(engagement, "review"); findings = _records_of_type(engagement, "finding")
+    reviews = _records_of_type(engagement, "review", state["engagement_id"]); findings = _records_of_type(engagement, "finding", state["engagement_id"])
     current_findings = {finding_id: finding for finding_id, current in state["findings"].items() for finding in findings if finding["finding_id"] == finding_id and finding["revision"] == current["revision"]}
     rows: list[dict[str, Any]] = []
     for proposal in proposals:
@@ -101,8 +186,43 @@ def export_telemetry(engagement: Path, output: Path | None = None) -> dict[str, 
     export = {"schema_version": 1, "export_id": f"telemetry-{state['engagement_id']}", "engagement_id": state["engagement_id"], "classification": "calibration" if core_eligible else "telemetry", "source_hashes": state["source_hashes"], "denominator": {"eligible_count": len(proposals), "exported_count": len(rows), "complete": denominator_complete}, "candidates": rows, "cost_totals": _sum_cost(cost_records), "cost_coverage": {"attempt_count": len(attempts), "attempts_with_cost": sum("cost" in attempt for attempt in attempts), "review_count": len(reviews), "reviews_with_cost": sum("review_cost" in review for review in reviews)}, "cost_dimension_coverage": cost_dimension_coverage, "calibration_eligibility": {"eligible": core_eligible, "reasons": sorted(reasons)}, "policy": {"automatic_card_deletion": False, "automatic_prompt_change": False, "bandit_enabled": False}}
     errors = validate_record(export, "research-telemetry")
     if errors: raise RecordError("telemetry_export_invalid", "derived telemetry failed schema", errors)
-    if output is not None: atomic_write(output, canonical_json_bytes(export))
     return export
+
+
+def export_telemetry(engagement: Path, output: Path | None = None) -> dict[str, Any]:
+    logical = Path(os.path.abspath(engagement))
+    output_before: bytes | None = None
+    output_existed = False
+    if output is not None:
+        require_safe_offline_output(output)
+        try:
+            os.stat(output, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            output_before = read_safe_offline_file(output)
+            output_existed = True
+
+    published: bytes | None = None
+    try:
+        with bound_engagement_source(logical) as bound:
+            export = _export_bound_telemetry(bound)
+            _require_named_source(logical, bound)
+            if output is not None:
+                published = canonical_json_bytes(export)
+                atomic_write_offline(output, published)
+            return export
+    except Exception:
+        if output is not None and published is not None:
+            try:
+                if output_existed and output_before is not None:
+                    if read_safe_offline_file(output) == published:
+                        atomic_write_offline(output, output_before)
+                else:
+                    _remove_published_output(output, published)
+            except (FileNotFoundError, OSError, ValueError):
+                pass
+        raise
 
 
 def score_telemetry(export: dict[str, Any]) -> dict[str, Any]:

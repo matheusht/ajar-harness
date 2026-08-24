@@ -48,8 +48,17 @@ import argparse
 import glob
 import json
 import os
+import stat
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+from engagement_records import RecordError
+from engagement_state import (
+    _relative_regular_files,
+    bound_engagement_source,
+    read_governed_file,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = "dispositions.jsonl"
@@ -73,17 +82,39 @@ def now():
 def load_all(root):
     """Every disposition under root, tagged with the file it came from."""
     out = []
-    for path in sorted(glob.glob(os.path.join(root, "*", LEDGER))):
-        for n, line in enumerate(open(path, errors="replace"), 1):
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                print(f"  ! {path}:{n} is not valid JSON — skipped", file=sys.stderr)
-                continue
-            rec["_path"] = f"{path}:{n}"
-            out.append(rec)
+    for engagement_name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        engagement = Path(root) / engagement_name
+        try:
+            with bound_engagement_source(
+                engagement, allow_ungoverned=True
+            ) as bound:
+                regular_files = _relative_regular_files(bound)
+                if LEDGER not in regular_files:
+                    continue
+                data = read_governed_file(bound / LEDGER).decode(
+                    "utf-8", errors="replace"
+                )
+                engagement_records = []
+                warnings = []
+                public_path = engagement / LEDGER
+                for n, line in enumerate(data.splitlines(), 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        warnings.append(
+                            f"  ! {public_path}:{n} is not valid JSON — skipped"
+                        )
+                        continue
+                    rec["_path"] = f"{public_path}:{n}"
+                    engagement_records.append(rec)
+        except (RecordError, OSError):
+            continue
+        # Buffer diagnostics too: a source rejected at context exit contributes no path or row.
+        out.extend(engagement_records)
+        for warning in warnings:
+            print(warning, file=sys.stderr)
     return out
 
 
@@ -122,9 +153,41 @@ def cmd_record(args):
     if args.bounty is not None:
         rec["bounty_usd"] = args.bounty
 
+    from engagement_state import _governed_root, _open_parent_fd, engagement_lock
     path = os.path.join(eng, LEDGER)
-    with open(path, "a") as fh:
-        fh.write(json.dumps(rec, sort_keys=True) + "\n")
+    try:
+        with engagement_lock(Path(eng)) as bound_engagement:
+            governed_path = bound_engagement / LEDGER
+            root, parts = _governed_root(governed_path)
+            parent_fd, name = _open_parent_fd(root, parts, create=False)
+            try:
+                fd = os.open(
+                    name,
+                    os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        raise OSError("disposition ledger is not a regular file")
+                    data = (json.dumps(rec, sort_keys=True) + "\n").encode("utf-8")
+                    view = memoryview(data)
+                    written = 0
+                    while written < len(view):
+                        count = os.write(fd, view[written:])
+                        if count <= 0:
+                            raise OSError("disposition append made no progress")
+                        written += count
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            finally:
+                os.close(parent_fd)
+    except Exception as exc:
+        if isinstance(exc, RecordError) and exc.code == "engagement_quarantined":
+            print("engagement evidence is quarantined; disposition recording refused", file=sys.stderr)
+            return 2
+        raise
     d = delta(rec)
     print(f"recorded -> {path}")
     print(f"  {rec['finding_ref']}: we said {rec['our_severity']}, "
@@ -215,22 +278,41 @@ def cmd_todo(args):
     """Filed findings with no disposition recorded. The gap between what we know and what we wrote."""
     recs = load_all(args.root)
     have = {(r.get("engagement"), str(r.get("finding_ref"))) for r in recs}
-    print("Engagements with report drafts but no recorded external disposition:")
-    print("(each is ground truth the harness cannot currently use)\n")
-    n = 0
+    rows = []
     for eng_dir in sorted(glob.glob(os.path.join(args.root, "*"))):
-        if not os.path.isdir(eng_dir):
+        engagement = Path(eng_dir)
+        try:
+            with bound_engagement_source(
+                engagement, allow_ungoverned=True
+            ) as bound:
+                regular_files = _relative_regular_files(bound)
+                draft_count = sum(
+                    1
+                    for relative in regular_files
+                    if (
+                        len(Path(relative).parts) == 2
+                        and (
+                            (
+                                Path(relative).parts[0] == "reports"
+                                and Path(relative).suffix == ".md"
+                            )
+                            or Path(relative).parts[0] == "submissions"
+                        )
+                    )
+                )
+        except (RecordError, OSError):
             continue
-        eng = os.path.basename(eng_dir)
-        drafts = (glob.glob(os.path.join(eng_dir, "reports", "*.md"))
-                  + glob.glob(os.path.join(eng_dir, "submissions", "*")))
-        if not drafts:
+        if not draft_count:
             continue
+        eng = engagement.name
         recorded = sum(1 for e, _ in have if e == eng)
         if recorded == 0:
-            n += 1
-            print(f"  {eng:34} {len(drafts):>3} report artifact(s), 0 dispositions")
-    print(f"\n{n} engagement(s) with unrecorded outcomes.")
+            rows.append((eng, draft_count))
+    print("Engagements with report drafts but no recorded external disposition:")
+    print("(each is ground truth the harness cannot currently use)\n")
+    for eng, count in rows:
+        print(f"  {eng:34} {count:>3} report artifact(s), 0 dispositions")
+    print(f"\n{len(rows)} engagement(s) with unrecorded outcomes.")
     print("Record each with: disposition_ledger.py record --engagement engagements/<id> ...")
     return 0
 

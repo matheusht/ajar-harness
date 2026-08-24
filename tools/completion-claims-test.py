@@ -75,6 +75,23 @@ class CompletionClaimsTest(unittest.TestCase):
             function()
         return caught.exception.code
 
+    @staticmethod
+    def _legacy_identity(item: os.stat_result) -> tuple[int, int, int, int, int]:
+        """The restorable identity fields used before ctime became part of admission."""
+        return (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_mode)
+
+    @staticmethod
+    def _identity_without_directory_ctime(item: os.stat_result) -> claims.FileIdentity:
+        """Test-only isolation: retain ctime for files while neutralizing directory ctime."""
+        return (
+            item.st_dev,
+            item.st_ino,
+            item.st_size,
+            item.st_mtime_ns,
+            0 if stat.S_ISDIR(item.st_mode) else item.st_ctime_ns,
+            item.st_mode,
+        )
+
     def _claim_rows(self) -> tuple[tuple[str, str, int], ...]:
         with engagement_lock(self.root) as bound:
             return claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)[1]
@@ -158,7 +175,7 @@ class CompletionClaimsTest(unittest.TestCase):
                 os.rename(child, moved)
                 os.rename(replacement, child)
                 os.utime(child.parent, ns=(parent_opened.st_atime_ns, parent_opened.st_mtime_ns))
-                self.assertEqual(claims._identity(child.parent.stat()), claims._identity(parent_opened))
+                self.assertEqual(self._legacy_identity(child.parent.stat()), self._legacy_identity(parent_opened))
                 state["swapped"] = True
             return data
 
@@ -169,6 +186,9 @@ class CompletionClaimsTest(unittest.TestCase):
     def _add_root_entry_after_last_file_eof(self, target: Path):
         self.assertEqual(target.read_bytes(), b"safe-content\n")
         opened = target.stat()
+        root_opened = self.root.stat()
+        placeholder = self.root / "late-claim.placeholder"
+        self.assertTrue(placeholder.is_file())
         target_identity = (opened.st_dev, opened.st_ino)
         real_read = os.read
         state = {"added": False}
@@ -177,8 +197,62 @@ class CompletionClaimsTest(unittest.TestCase):
             data = real_read(fd, amount)
             current = os.fstat(fd)
             if not data and not state["added"] and (current.st_dev, current.st_ino) == target_identity:
-                (self.root / "late-claim.md").write_bytes(b"coverage_dry\n")
+                os.rename(placeholder, self.root / "late-claim.md")
+                os.utime(self.root, ns=(root_opened.st_atime_ns, root_opened.st_mtime_ns))
+                self.assertEqual(self._legacy_identity(self.root.stat()), self._legacy_identity(root_opened))
                 state["added"] = True
+            return data
+
+        with mock.patch.object(claims.os, "read", side_effect=race_read):
+            yield state
+
+    @contextmanager
+    def _mutate_same_inode_after_eof(self, target: Path, replacement: bytes, *, occurrence: int = 1):
+        opened = target.stat()
+        self.assertEqual(len(replacement), opened.st_size)
+        target_identity = (opened.st_dev, opened.st_ino)
+        real_read = os.read
+        state = {"eof_count": 0, "mutated": False}
+
+        def race_read(fd: int, amount: int) -> bytes:
+            data = real_read(fd, amount)
+            current = os.fstat(fd)
+            if not data and (current.st_dev, current.st_ino) == target_identity:
+                state["eof_count"] += 1
+                if state["eof_count"] == occurrence:
+                    target.write_bytes(replacement)
+                    os.chmod(target, stat.S_IMODE(opened.st_mode))
+                    os.utime(target, ns=(opened.st_atime_ns, opened.st_mtime_ns))
+                    changed = target.stat()
+                    self.assertEqual(self._legacy_identity(changed), self._legacy_identity(opened))
+                    self.assertNotEqual(changed.st_ctime_ns, opened.st_ctime_ns)
+                    state["mutated"] = True
+            return data
+
+        with mock.patch.object(claims.os, "read", side_effect=race_read):
+            yield state
+
+    @contextmanager
+    def _swap_non_markdown_after_trigger_eof(self, backing: Path, trigger: Path):
+        opened = backing.stat()
+        root_opened = self.root.stat()
+        replacement = Path(self.temporary.name) / "backing.replacement.json"
+        replacement.write_bytes(b'{"safe":"no "}\n')
+        self.assertEqual(replacement.stat().st_size, opened.st_size)
+        os.chmod(replacement, stat.S_IMODE(opened.st_mode))
+        os.utime(replacement, ns=(opened.st_atime_ns, opened.st_mtime_ns))
+        trigger_identity = (trigger.stat().st_dev, trigger.stat().st_ino)
+        real_read = os.read
+        state = {"swapped": False}
+
+        def race_read(fd: int, amount: int) -> bytes:
+            data = real_read(fd, amount)
+            current = os.fstat(fd)
+            if not data and not state["swapped"] and (current.st_dev, current.st_ino) == trigger_identity:
+                os.replace(replacement, backing)
+                os.utime(self.root, ns=(root_opened.st_atime_ns, root_opened.st_mtime_ns))
+                self.assertEqual(self._legacy_identity(self.root.stat()), self._legacy_identity(root_opened))
+                state["swapped"] = True
             return data
 
         with mock.patch.object(claims.os, "read", side_effect=race_read):
@@ -710,32 +784,122 @@ class CompletionClaimsTest(unittest.TestCase):
         for index, relative in enumerate(generated):
             atomic_write(self.root / relative, f"child-race-sentinel-{index}\n".encode("utf-8"))
         before = {relative: (self.root / relative).read_bytes() for relative in generated}
-        with engagement_lock(self.root) as bound:
-            admission = claims.assert_completion_claims_clear_bound(bound)
-            with self._swap_child_after_last_file_eof(child) as race:
-                self.assertEqual(
-                    self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
-                    "completion_claims_tree_changed",
-                )
+        with mock.patch.object(claims, "_identity", side_effect=self._identity_without_directory_ctime):
+            with engagement_lock(self.root) as bound:
+                admission = claims.assert_completion_claims_clear_bound(bound)
+                with self._swap_child_after_last_file_eof(child) as race:
+                    self.assertEqual(
+                        self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                        "completion_claims_tree_changed",
+                    )
         self.assertTrue(race["swapped"])
         self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
 
     def test_47_late_root_addition_blocks_render_publication(self) -> None:
         target = self.root / "zz-last.md"
         target.write_bytes(b"safe-content\n")
+        (self.root / "late-claim.placeholder").write_bytes(b"coverage_dry\n")
         generated = tuple(render_views(reduce_engagement(self.root)))
         for index, relative in enumerate(generated):
             atomic_write(self.root / relative, f"root-race-sentinel-{index}\n".encode("utf-8"))
         before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        with mock.patch.object(claims, "_identity", side_effect=self._identity_without_directory_ctime):
+            with engagement_lock(self.root) as bound:
+                admission = claims.assert_completion_claims_clear_bound(bound)
+                with self._add_root_entry_after_last_file_eof(target) as race:
+                    self.assertEqual(
+                        self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                        "completion_claims_tree_changed",
+                    )
+        self.assertTrue(race["added"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_48_same_inode_markdown_mutation_with_restored_mtime_blocks_render(self) -> None:
+        target = self.root / "ordinary.md"
+        target.write_bytes(b"safe-content\n")
+        generated = tuple(render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"ctime-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
         with engagement_lock(self.root) as bound:
             admission = claims.assert_completion_claims_clear_bound(bound)
-            with self._add_root_entry_after_last_file_eof(target) as race:
+            with self._mutate_same_inode_after_eof(target, b"coverage_dry\n") as race:
                 self.assertEqual(
                     self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
                     "completion_claims_tree_changed",
                 )
-        self.assertTrue(race["added"])
+        self.assertTrue(race["mutated"])
         self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_49_non_markdown_same_name_swap_blocks_render_publication(self) -> None:
+        backing = self.root / "backing.json"
+        backing.write_bytes(b'{"safe":"yes"}\n')
+        trigger = self.root / "zz-trigger.md"
+        trigger.write_bytes(b"safe-content\n")
+        generated = tuple(render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"backing-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        with mock.patch.object(claims, "_identity", side_effect=self._identity_without_directory_ctime):
+            with engagement_lock(self.root) as bound:
+                admission = claims.assert_completion_claims_clear_bound(bound)
+                with self._swap_non_markdown_after_trigger_eof(backing, trigger) as race:
+                    self.assertEqual(
+                        self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                        "completion_claims_tree_changed",
+                    )
+        self.assertTrue(race["swapped"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_50_manifest_same_inode_mutation_with_restored_mtime_fails_closed(self) -> None:
+        original = canonical_json_bytes({
+            "schema_version": 1,
+            "pins": [{
+                "path_sha256": "sha256:" + "a" * 64,
+                "content_sha256": "sha256:" + "b" * 64,
+                "claim_count": 1,
+            }],
+        })
+        replacement = original.replace(b"sha256:bbbb", b"sha256:cbcb", 1)
+        self.assertEqual(len(replacement), len(original))
+        manifest = Path(self.temporary.name) / "manifest.json"
+        manifest.write_bytes(original)
+        with mock.patch.object(claims, "MANIFEST_PATH", manifest):
+            with self._mutate_same_inode_after_eof(manifest, replacement) as race:
+                self.assertEqual(
+                    self._error(claims._manifest_bytes),
+                    "completion_claims_manifest_invalid",
+                )
+        self.assertTrue(race["mutated"])
+
+    def test_51_public_admission_rejects_genesis_replacement_after_initial_capture(self) -> None:
+        replacement_parent = Path(self.temporary.name) / "replacement-parent"
+        replacement = replacement_parent / self.root.name
+        replacement_parent.mkdir()
+        replacement.mkdir()
+        (replacement / "scope.md").write_text(SCOPE, encoding="utf-8")
+        initialize_engagement(replacement, "2026-08-24T00:00:01Z")
+        replacement_events = (replacement / "events.jsonl").read_bytes()
+        self.assertNotEqual(
+            read_ledger(self.root, "event")[0]["record_hash"],
+            read_ledger(replacement, "event")[0]["record_hash"],
+        )
+        real_read_ledger = claims.read_ledger
+        state = {"swapped": False}
+
+        def swap_after_initial_capture(engagement: Path, kind: str):
+            captured = real_read_ledger(engagement, kind)
+            if not state["swapped"]:
+                (self.root / "events.jsonl").write_bytes(replacement_events)
+                state["swapped"] = True
+            return captured
+
+        with mock.patch.object(claims, "read_ledger", side_effect=swap_after_initial_capture):
+            self.assertEqual(
+                self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                "completion_claims_snapshot_changed",
+            )
+        self.assertTrue(state["swapped"])
 
 
 if __name__ == "__main__":

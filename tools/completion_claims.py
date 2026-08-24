@@ -31,6 +31,18 @@ GENERATED_VIEWS = frozenset({
 CLAIM_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9_-])(?:covered-dry|coverage_dry)(?![A-Za-z0-9_-])")
 HEX = re.compile(r"sha256:[0-9a-f]{64}\Z")
 MAX_TREE_DEPTH = 512
+FileIdentity = tuple[int, int, int, int, int, int]
+
+
+def _identity(item: os.stat_result) -> FileIdentity:
+    return (
+        item.st_dev,
+        item.st_ino,
+        item.st_size,
+        item.st_mtime_ns,
+        item.st_ctime_ns,
+        item.st_mode,
+    )
 
 
 @dataclass(frozen=True)
@@ -44,7 +56,7 @@ class CompletionClaimsToken:
     state_bytes: bytes
     events_digest: str
     manifest_bytes: bytes
-    manifest_identity: tuple[int, int, int, int, int]
+    manifest_identity: FileIdentity
 
 
 @dataclass(frozen=True)
@@ -99,7 +111,7 @@ def _json_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _manifest_bytes() -> tuple[bytes, tuple[int, int, int, int, int]]:
+def _manifest_bytes() -> tuple[bytes, FileIdentity]:
     """Read the fixed manifest once without following it, retaining its exact identity."""
     try:
         fd = os.open(MANIFEST_PATH, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -116,8 +128,8 @@ def _manifest_bytes() -> tuple[bytes, tuple[int, int, int, int, int]]:
             raw = b"".join(raw_parts)
             after = os.fstat(fd)
             named = os.stat(MANIFEST_PATH, follow_symlinks=False)
-            identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode)
-            if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode) or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino):
+            identity = _identity(before)
+            if identity != _identity(after) or identity != _identity(named):
                 raise ValueError("changed")
             return raw, identity
         finally:
@@ -158,10 +170,6 @@ def load_pins() -> dict[str, tuple[str, int]]:
     return _parse_pins(raw)
 
 
-def _identity(item: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_mode)
-
-
 @dataclass
 class _DirectoryFrame:
     """One owned directory descriptor in the iterative Markdown walk."""
@@ -169,19 +177,20 @@ class _DirectoryFrame:
     fd: int
     prefix: tuple[str, ...]
     names: list[str]
-    identity: tuple[int, int, int, int, int]
+    entries: dict[str, FileIdentity]
+    identity: FileIdentity
     position: int = 0
     parent_fd: int | None = None
     entry_name: str | None = None
 
 
-def _read_regular(parent_fd: int, name: str, expected: os.stat_result | None = None) -> tuple[bytes, tuple[int, int, int, int, int]]:
+def _read_regular(parent_fd: int, name: str, expected: FileIdentity | None = None) -> tuple[bytes, FileIdentity]:
     fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
             raise _failure("completion_claims_tree_unsafe")
-        if expected is not None and _identity(before) != _identity(expected):
+        if expected is not None and _identity(before) != expected:
             raise _failure("completion_claims_tree_changed")
         chunks: list[bytes] = []
         while True:
@@ -216,6 +225,21 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
         except OSError as exc:
             raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
 
+    def snapshot_entries(directory_fd: int) -> tuple[list[str], dict[str, FileIdentity]]:
+        names = names_for(directory_fd)
+        entries: dict[str, FileIdentity] = {}
+        for name in names:
+            try:
+                name.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise _failure("completion_claims_tree_path_invalid", first_scope_hash) from exc
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
+            entries[name] = _identity(entry)
+        return names, entries
+
     # Frames, rather than recursive calls, prevent a hostile/deep tree from exhausting Python's
     # interpreter stack.  Each child descriptor is identity-checked against its lstat before use.
     stack: list[_DirectoryFrame] = []
@@ -228,20 +252,38 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
             if not stat.S_ISDIR(root_opened.st_mode):
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
             root_identity = _identity(root_opened)
-            root_names = names_for(root_fd)
+            root_names, root_entries = snapshot_entries(root_fd)
         except Exception:
             os.close(root_fd)
             raise
-        stack.append(_DirectoryFrame(root_fd, (), root_names, root_identity))
+        stack.append(_DirectoryFrame(root_fd, (), root_names, root_entries, root_identity))
         while stack:
             frame = stack[-1]
             directory_fd, prefix = frame.fd, frame.prefix
             if frame.position >= len(frame.names):
                 try:
+                    names_after = sorted(os.listdir(directory_fd))
                     opened_after = os.fstat(directory_fd)
                 except OSError as exc:
                     raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
-                if frame.identity != _identity(opened_after):
+                if names_after != frame.names or frame.identity != _identity(opened_after):
+                    raise _failure("completion_claims_tree_changed", first_scope_hash)
+                for entry_name in frame.names:
+                    try:
+                        entry_after = os.stat(
+                            entry_name,
+                            dir_fd=directory_fd,
+                            follow_symlinks=False,
+                        )
+                    except OSError as exc:
+                        raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
+                    if frame.entries[entry_name] != _identity(entry_after):
+                        raise _failure("completion_claims_tree_changed", first_scope_hash)
+                try:
+                    opened_final = os.fstat(directory_fd)
+                except OSError as exc:
+                    raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
+                if frame.identity != _identity(opened_final):
                     raise _failure("completion_claims_tree_changed", first_scope_hash)
                 if frame.parent_fd is not None:
                     if frame.entry_name is None:
@@ -261,20 +303,14 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                 continue
             name = frame.names[frame.position]
             frame.position += 1
-            try:
-                name.encode("utf-8")
-            except UnicodeEncodeError as exc:
-                raise _failure("completion_claims_tree_path_invalid", first_scope_hash) from exc
             relative_parts = (*prefix, name)
             relative = "/".join(relative_parts)
-            try:
-                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            except OSError as exc:
-                raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
-            if stat.S_ISLNK(entry.st_mode):
+            entry = frame.entries[name]
+            entry_mode = entry[-1]
+            if stat.S_ISLNK(entry_mode):
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
-            if stat.S_ISDIR(entry.st_mode):
-                trees.append((relative, "directory", entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, entry.st_mode))
+            if stat.S_ISDIR(entry_mode):
+                trees.append((relative, "directory", *entry))
                 try:
                     child = os.open(name, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
                 except OSError as exc:
@@ -283,15 +319,17 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                     opened = os.fstat(child)
                     if not stat.S_ISDIR(opened.st_mode):
                         raise _failure("completion_claims_tree_unsafe", first_scope_hash)
-                    if _identity(opened) != _identity(entry):
+                    if _identity(opened) != entry:
                         raise _failure("completion_claims_tree_changed", first_scope_hash)
                     if len(stack) >= MAX_TREE_DEPTH:
                         raise _failure("completion_claims_tree_depth_exceeded", first_scope_hash)
                     child_identity = _identity(opened)
+                    child_names, child_entries = snapshot_entries(child)
                     stack.append(_DirectoryFrame(
                         child,
                         relative_parts,
-                        names_for(child),
+                        child_names,
+                        child_entries,
                         child_identity,
                         parent_fd=directory_fd,
                         entry_name=name,
@@ -300,10 +338,10 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                     os.close(child)
                     raise
                 continue
-            if not stat.S_ISREG(entry.st_mode):
+            if not stat.S_ISREG(entry_mode):
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
             if not name.lower().endswith(".md"):
-                trees.append((relative, "regular", entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, entry.st_mode))
+                trees.append((relative, "regular", *entry))
                 continue
             try:
                 data, identity = _read_regular(directory_fd, name, entry)
@@ -395,6 +433,10 @@ def assert_completion_claims_clear_bound(engagement: Path) -> CompletionClaimsAd
         # This reducer-valid event list is captured as part of snapshot two and is the only
         # evidence examined for the terminal review linkage below.
         events_two_records = read_ledger(engagement, "event")
+        if (not events_two_records
+                or events_two_records[0].get("payload", {}).get("scope_hash") != first_scope
+                or events_two_records[0].get("record_hash") != genesis_record_hash):
+            raise _failure("completion_claims_snapshot_changed", first_scope)
         tree_two, claims_two = _scan_markdown(engagement, first_scope, genesis_record_hash)
         state_two = canonical_json_bytes(second)
         events_two = _bound_file_digest(engagement, "events.jsonl", first_scope)

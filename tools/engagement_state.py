@@ -1016,6 +1016,12 @@ def initialize_engagement(
             active_scope = next(event["payload"]["scope_hash"] for event in reversed(existing) if event["event_type"] == "scope.attested")
             if first["event_type"] != "scope.attested" or active_scope != metadata["scope_hash"]:
                 raise RecordError("engagement_already_initialized", "existing ledger is bound to different scope bytes")
+            from completion_claims import assert_completion_claims_clear_bound, assert_completion_claims_token_current_bound
+            admission = assert_completion_claims_clear_bound(engagement)
+            snapshot = admission.state
+            # Idempotent initialization is a projection writer. Validate once immediately
+            # before publishing both filesets under this already-held cooperative lock.
+            assert_completion_claims_token_current_bound(engagement, admission.token)
         else:
             operator_id = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
             scope_snapshot_path = persist_scope_snapshot(engagement, metadata["scope_hash"])
@@ -1032,7 +1038,8 @@ def initialize_engagement(
                 ],
             )
             append_ledger_record(engagement, "event", proposal, lock_held=True)
-        snapshot = reduce_engagement(engagement)
+            # First-time bootstrap has no pre-existing kernel against which admission can run.
+            snapshot = reduce_engagement(engagement)
         write_snapshot(engagement, snapshot)
         from engagement_views import write_views
         write_views(engagement, snapshot)

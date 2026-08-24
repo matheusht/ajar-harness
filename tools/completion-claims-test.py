@@ -403,6 +403,25 @@ class CompletionClaimsTest(unittest.TestCase):
         after = len(os.listdir("/dev/fd"))
         self.assertLessEqual(after, before + 1)
 
+    def test_36_token_bound_close_refuses_unrecorded_pinned_scope_drift(self) -> None:
+        # The old scope remains reducer-valid while the drifted bytes are pin-admitted prose.
+        (self.root / "scope.md").write_text(SCOPE + "\ncoverage_dry\n", encoding="utf-8")
+        manifest = self._pin_manifest(self._claim_rows())
+        with mock.patch.object(claims, "MANIFEST_PATH", manifest), engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            close_event = base_event(
+                event_id="event-close-drift-token", engagement_id=self.root.name, recorded_at="2026-08-24T00:01:00Z",
+                actor_role="operator", actor_id="operator-test", event_type="engagement.closed",
+                rationale="Synthetic token-bound closure with unrecorded scope drift.",
+                payload={"entity_id": self.root.name, "status": "closed", "scope_hash": self.initial_scope, "operator_id": "operator-test", "disposition_ref": "memory-none", "disposition_digest": "sha256:" + "0" * 64},
+                entity_refs=["memory-none"], state_changes=[{"dimension": "engagement", "entity_id": self.root.name, "previous": "active", "current": "closed"}],
+            )
+            before = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+            self.assertEqual(self._error(lambda: _append_kernel_event(bound, close_event, lock_held=True, completion_claims_token=admission.token)), "completion_claims_scope_drift_unproposed")
+            after = {path.relative_to(self.root).as_posix(): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / "scope-drafts").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2060,6 +2060,10 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         if proposal.get("event_type") not in {"scope.attested", "scope.amendment_proposed"}:
             draft_bytes = read_governed_file(engagement/"scope.md"); draft_digest = sha256_bytes(draft_bytes)
             if draft_digest != latest_scope_hash and not any(event["event_type"] == "scope.amendment_proposed" and event["payload"].get("draft_digest") == draft_digest for event in current_events):
+                if completion_claims_token is not None:
+                    # Token-bound closure may not consume a sanctioned writer path to preserve
+                    # unrecorded drift.  Propose the draft in a separate prior transaction.
+                    raise RecordError("completion_claims_scope_drift_unproposed", "token-bound append requires prior scope proposal")
                 if not draft_bytes or detect_secret_classes(draft_bytes): raise RecordError("scope_draft_invalid", "drifted scope bytes are empty or secret-shaped")
                 relative = f"scope-drafts/{draft_digest.removeprefix('sha256:')}.md"; destination = engagement/relative
                 if _governed_file_exists(destination) and read_governed_file(destination) != draft_bytes: raise RecordError("scope_draft_collision", relative)

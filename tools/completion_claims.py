@@ -162,6 +162,19 @@ def _identity(item: os.stat_result) -> tuple[int, int, int, int, int]:
     return (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_mode)
 
 
+@dataclass
+class _DirectoryFrame:
+    """One owned directory descriptor in the iterative Markdown walk."""
+
+    fd: int
+    prefix: tuple[str, ...]
+    names: list[str]
+    identity: tuple[int, int, int, int, int]
+    position: int = 0
+    parent_fd: int | None = None
+    entry_name: str | None = None
+
+
 def _read_regular(parent_fd: int, name: str, expected: os.stat_result | None = None) -> tuple[bytes, tuple[int, int, int, int, int]]:
     fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
     try:
@@ -177,10 +190,16 @@ def _read_regular(parent_fd: int, name: str, expected: os.stat_result | None = N
                 break
             chunks.append(chunk)
         after = os.fstat(fd)
-        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        identity = _identity(before)
+        try:
+            named_after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError as exc:
+            # The opened inode is not enough: a rename can leave the descriptor readable while
+            # replacing or removing the directory entry that the snapshot claims to describe.
+            raise _failure("completion_claims_tree_changed") from exc
+        if identity != _identity(after) or identity != _identity(named_after):
             raise _failure("completion_claims_tree_changed")
-        return b"".join(chunks), (*identity, before.st_mode)
+        return b"".join(chunks), identity
     finally:
         os.close(fd)
 
@@ -199,18 +218,49 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
 
     # Frames, rather than recursive calls, prevent a hostile/deep tree from exhausting Python's
     # interpreter stack.  Each child descriptor is identity-checked against its lstat before use.
-    stack: list[tuple[int, tuple[str, ...], list[str], int]] = []
+    stack: list[_DirectoryFrame] = []
     try:
-        stack.append((root_fd, (), [], 0))
-        stack[-1] = (root_fd, (), names_for(root_fd), 0)
+        try:
+            try:
+                root_opened = os.fstat(root_fd)
+            except OSError as exc:
+                raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
+            if not stat.S_ISDIR(root_opened.st_mode):
+                raise _failure("completion_claims_tree_unsafe", first_scope_hash)
+            root_identity = _identity(root_opened)
+            root_names = names_for(root_fd)
+        except Exception:
+            os.close(root_fd)
+            raise
+        stack.append(_DirectoryFrame(root_fd, (), root_names, root_identity))
         while stack:
-            directory_fd, prefix, names, position = stack[-1]
-            if position >= len(names):
+            frame = stack[-1]
+            directory_fd, prefix = frame.fd, frame.prefix
+            if frame.position >= len(frame.names):
+                try:
+                    opened_after = os.fstat(directory_fd)
+                except OSError as exc:
+                    raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
+                if frame.identity != _identity(opened_after):
+                    raise _failure("completion_claims_tree_changed", first_scope_hash)
+                if frame.parent_fd is not None:
+                    if frame.entry_name is None:
+                        raise _failure("completion_claims_tree_changed", first_scope_hash)
+                    try:
+                        named_after = os.stat(
+                            frame.entry_name,
+                            dir_fd=frame.parent_fd,
+                            follow_symlinks=False,
+                        )
+                    except OSError as exc:
+                        raise _failure("completion_claims_tree_changed", first_scope_hash) from exc
+                    if frame.identity != _identity(named_after):
+                        raise _failure("completion_claims_tree_changed", first_scope_hash)
                 stack.pop()
                 os.close(directory_fd)
                 continue
-            name = names[position]
-            stack[-1] = (directory_fd, prefix, names, position + 1)
+            name = frame.names[frame.position]
+            frame.position += 1
             try:
                 name.encode("utf-8")
             except UnicodeEncodeError as exc:
@@ -237,7 +287,15 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                         raise _failure("completion_claims_tree_changed", first_scope_hash)
                     if len(stack) >= MAX_TREE_DEPTH:
                         raise _failure("completion_claims_tree_depth_exceeded", first_scope_hash)
-                    stack.append((child, relative_parts, names_for(child), 0))
+                    child_identity = _identity(opened)
+                    stack.append(_DirectoryFrame(
+                        child,
+                        relative_parts,
+                        names_for(child),
+                        child_identity,
+                        parent_fd=directory_fd,
+                        entry_name=name,
+                    ))
                 except Exception:
                     os.close(child)
                     raise
@@ -270,7 +328,7 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
     finally:
         # A failing child open leaves its parent frame live; close every still-owned descriptor.
         while stack:
-            fd, _prefix, _names, _position = stack.pop()
+            fd = stack.pop().fd
             try:
                 os.close(fd)
             except OSError:

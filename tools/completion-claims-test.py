@@ -2,15 +2,19 @@
 """Hermetic regression checks for the completion-claim admission boundary."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
+import runpy
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -89,6 +93,149 @@ class CompletionClaimsTest(unittest.TestCase):
     def _load_manifest(self, path: Path) -> dict[str, tuple[str, int]]:
         with mock.patch.object(claims, "MANIFEST_PATH", path):
             return claims.load_pins()
+
+    @contextmanager
+    def _swap_named_entry_after_eof(self, target: Path, *, occurrence: int = 1, replace: bool = True):
+        """Replace ``target`` after its open descriptor reaches EOF.
+
+        The replacement has the same size, mode, and mtime as the opened file, so only the
+        directory-entry/inode binding can detect the swap.  Callers choose the EOF occurrence to
+        place it at an external command's final admission rather than its initial two scans.
+        """
+        replacement = Path(self.temporary.name) / f"{target.name}.replacement"
+        moved = Path(self.temporary.name) / f"{target.name}.opened"
+        if not target.exists():
+            target.write_bytes(b"safe-content\n")
+        self.assertEqual(target.read_bytes(), b"safe-content\n")
+        opened = target.stat()
+        if replace:
+            replacement.write_bytes(b"coverage_dry\n")
+            os.chmod(replacement, stat.S_IMODE(opened.st_mode))
+            os.utime(replacement, ns=(opened.st_atime_ns, opened.st_mtime_ns))
+        target_identity = (opened.st_dev, opened.st_ino)
+        real_read = os.read
+        state = {"eof_count": 0, "swapped": False}
+
+        def race_read(fd: int, amount: int) -> bytes:
+            data = real_read(fd, amount)
+            current = os.fstat(fd)
+            if not data and (current.st_dev, current.st_ino) == target_identity:
+                state["eof_count"] += 1
+                if state["eof_count"] == occurrence:
+                    os.rename(target, moved)
+                    if replace:
+                        os.rename(replacement, target)
+                    state["swapped"] = True
+            return data
+
+        with mock.patch.object(claims.os, "read", side_effect=race_read):
+            yield state
+
+    @contextmanager
+    def _swap_child_after_last_file_eof(self, child: Path):
+        moved = Path(self.temporary.name) / f"{child.name}.opened"
+        replacement = Path(self.temporary.name) / f"{child.name}.replacement"
+        replacement.mkdir()
+        replacement_file = replacement / "last.md"
+        replacement_file.write_bytes(b"coverage_dry\n")
+        target = child / "last.md"
+        self.assertEqual(target.read_bytes(), b"safe-content\n")
+        opened = target.stat()
+        child_opened = child.stat()
+        parent_opened = child.parent.stat()
+        os.chmod(replacement_file, stat.S_IMODE(opened.st_mode))
+        os.utime(replacement_file, ns=(opened.st_atime_ns, opened.st_mtime_ns))
+        os.chmod(replacement, stat.S_IMODE(child_opened.st_mode))
+        os.utime(replacement, ns=(child_opened.st_atime_ns, child_opened.st_mtime_ns))
+        target_identity = (opened.st_dev, opened.st_ino)
+        real_read = os.read
+        state = {"swapped": False}
+
+        def race_read(fd: int, amount: int) -> bytes:
+            data = real_read(fd, amount)
+            current = os.fstat(fd)
+            if not data and not state["swapped"] and (current.st_dev, current.st_ino) == target_identity:
+                os.rename(child, moved)
+                os.rename(replacement, child)
+                os.utime(child.parent, ns=(parent_opened.st_atime_ns, parent_opened.st_mtime_ns))
+                self.assertEqual(claims._identity(child.parent.stat()), claims._identity(parent_opened))
+                state["swapped"] = True
+            return data
+
+        with mock.patch.object(claims.os, "read", side_effect=race_read):
+            yield state
+
+    @contextmanager
+    def _add_root_entry_after_last_file_eof(self, target: Path):
+        self.assertEqual(target.read_bytes(), b"safe-content\n")
+        opened = target.stat()
+        target_identity = (opened.st_dev, opened.st_ino)
+        real_read = os.read
+        state = {"added": False}
+
+        def race_read(fd: int, amount: int) -> bytes:
+            data = real_read(fd, amount)
+            current = os.fstat(fd)
+            if not data and not state["added"] and (current.st_dev, current.st_ino) == target_identity:
+                (self.root / "late-claim.md").write_bytes(b"coverage_dry\n")
+                state["added"] = True
+            return data
+
+        with mock.patch.object(claims.os, "read", side_effect=race_read):
+            yield state
+
+    def _record_no_lesson(self) -> dict[str, object]:
+        state = reduce_engagement(self.root)
+        disposition = {
+            "schema_version": 1, "disposition_id": "memory-token-close", "engagement_id": self.root.name,
+            "recorded_at": "2026-08-24T00:01:10Z", "scope_hash": state["scope_hash"],
+            "disposition": "no_novel_lesson", "lesson_kind": "none", "lesson_summary": None,
+            "rationale": "Synthetic operator review found no reusable lesson.", "candidate_refs": [],
+            "source_refs": {key: [] for key in ("event_refs", "candidate_refs", "hypothesis_refs", "attempt_refs", "artifact_refs", "review_refs", "finding_refs", "environment_refs")},
+            "sanitization": {"status": "not_applicable", "secret_scan_status": "clean", "target_identifiers_removed": True, "credential_values_removed": True, "harmful_recipe_removed": True, "target_terms_checked": [], "notes": "No lesson body exists to promote."},
+            "human_review": {"reviewer": {"role": "operator", "id": "operator-test"}, "reviewed_at": "2026-08-24T00:01:10Z", "decision": "no_novel_lesson", "rationale": "No novel lesson survived review.", "source_material_compared": True, "abstraction_only": True, "plane1_pr_required": True},
+            "reopening_condition": None, "provenance": {"actor": {"role": "operator", "id": "operator-test"}},
+        }
+        proposal_path = Path(self.temporary.name) / "memory-token.json"
+        proposal_path.write_bytes(canonical_json_bytes(disposition))
+        record_memory_disposition(self.root, proposal_path, "operator-test")
+        return state
+
+    def _record_terminal_cleanup(self) -> None:
+        state = reduce_engagement(self.root)
+        _append_kernel_event(
+            self.root,
+            base_event(
+                event_id="event-cleanup-na",
+                engagement_id=self.root.name,
+                recorded_at="2026-08-24T00:01:04Z",
+                actor_role="operator",
+                actor_id="operator-test",
+                event_type="cleanup.updated",
+                rationale="No live fixture cleanup exists.",
+                payload={
+                    "entity_id": "cleanup-none",
+                    "status": "not_applicable",
+                    "scope_hash": state["scope_hash"],
+                    "operator_id": "operator-test",
+                    "updated_at": "2026-08-24T00:01:04Z",
+                    "cleanup_obligations": [{
+                        "obligation_id": "cleanup-none",
+                        "kind": "no_live_artifacts",
+                        "status": "not_applicable",
+                        "artifact_refs": [],
+                        "rationale": "The synthetic engagement created no live artifacts.",
+                        "closed_at": "2026-08-24T00:01:04Z",
+                    }],
+                },
+                state_changes=[{
+                    "dimension": "cleanup",
+                    "entity_id": "cleanup-none",
+                    "previous": None,
+                    "current": "not_applicable",
+                }],
+            ),
+        )
 
     def _real_dry(self) -> None:
         state = reduce_engagement(self.root)
@@ -366,19 +513,7 @@ class CompletionClaimsTest(unittest.TestCase):
 
     def test_34_stale_close_token_writes_no_ledger_or_view_bytes(self) -> None:
         self._real_dry()
-        state = reduce_engagement(self.root)
-        disposition = {
-            "schema_version": 1, "disposition_id": "memory-token-close", "engagement_id": self.root.name,
-            "recorded_at": "2026-08-24T00:01:10Z", "scope_hash": state["scope_hash"],
-            "disposition": "no_novel_lesson", "lesson_kind": "none", "lesson_summary": None,
-            "rationale": "Synthetic operator review found no reusable lesson.", "candidate_refs": [],
-            "source_refs": {key: [] for key in ("event_refs", "candidate_refs", "hypothesis_refs", "attempt_refs", "artifact_refs", "review_refs", "finding_refs", "environment_refs")},
-            "sanitization": {"status": "not_applicable", "secret_scan_status": "clean", "target_identifiers_removed": True, "credential_values_removed": True, "harmful_recipe_removed": True, "target_terms_checked": [], "notes": "No lesson body exists to promote."},
-            "human_review": {"reviewer": {"role": "operator", "id": "operator-test"}, "reviewed_at": "2026-08-24T00:01:10Z", "decision": "no_novel_lesson", "rationale": "No novel lesson survived review.", "source_material_compared": True, "abstraction_only": True, "plane1_pr_required": True},
-            "reopening_condition": None, "provenance": {"actor": {"role": "operator", "id": "operator-test"}},
-        }
-        proposal_path = Path(self.temporary.name) / "memory-token.json"; proposal_path.write_bytes(canonical_json_bytes(disposition))
-        record_memory_disposition(self.root, proposal_path, "operator-test")
+        state = self._record_no_lesson()
         with engagement_lock(self.root) as bound:
             admission = claims.assert_completion_claims_clear_bound(bound)
             atomic_write(bound / "after-close-admission.md", b"coverage_dry\n")
@@ -503,6 +638,104 @@ class CompletionClaimsTest(unittest.TestCase):
                 continue
             occurrences += len(claims.CLAIM_TOKEN.findall(path.read_text(encoding="utf-8")))
         self.assertEqual(occurrences, 0)
+
+    def test_42_named_entry_swap_after_open_blocks_render_publication(self) -> None:
+        target = self.root / "ordinary.md"
+        target.write_bytes(b"safe-content\n")
+        generated = tuple(render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"render-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        with engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            with self._swap_named_entry_after_eof(target) as race:
+                self.assertEqual(
+                    self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                    "completion_claims_tree_changed",
+                )
+        self.assertTrue(race["swapped"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_43_named_entry_swap_after_open_blocks_reduce_publication(self) -> None:
+        target = self.root / "ordinary.md"
+        generated = ("state.snapshot.json", *render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"reduce-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        namespace = runpy.run_path(str(ROOT / "tools" / "run-engagement.py"), run_name="completion_claims_reduce_race_test")
+        command = namespace["command_reduce"]
+        command.__globals__["emit"] = lambda _value: self.fail("failed reduce must not emit success")
+        with self._swap_named_entry_after_eof(target, occurrence=3) as race:
+            self.assertEqual(
+                self._error(lambda: command(argparse.Namespace(engagement=self.root))),
+                "completion_claims_tree_changed",
+            )
+        self.assertTrue(race["swapped"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_44_named_entry_swap_after_open_blocks_close_publication(self) -> None:
+        self._real_dry()
+        self._record_terminal_cleanup()
+        self._record_no_lesson()
+        target = self.root / "ordinary.md"
+        published = ("events.jsonl", "state.snapshot.json", *render_views(reduce_engagement(self.root)))
+        before = {relative: (self.root / relative).read_bytes() for relative in published}
+        with self._swap_named_entry_after_eof(target, occurrence=3) as race:
+            self.assertEqual(
+                self._error(lambda: close_engagement(
+                    self.root,
+                    "operator-test",
+                    "Synthetic close must retain the final completion-claim boundary.",
+                    "2026-08-24T00:01:11Z",
+                )),
+                "completion_claims_tree_changed",
+            )
+        self.assertTrue(race["swapped"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in published}, before)
+
+    def test_45_named_entry_disappearance_after_open_fails_tree_changed(self) -> None:
+        target = self.root / "ordinary.md"
+        with self._swap_named_entry_after_eof(target, replace=False) as race, engagement_lock(self.root) as bound:
+            self.assertEqual(
+                self._error(lambda: claims._scan_markdown(bound, self.initial_scope, self.genesis_hash)),
+                "completion_claims_tree_changed",
+            )
+        self.assertTrue(race["swapped"])
+
+    def test_46_child_rebinding_after_walk_blocks_render_publication(self) -> None:
+        child = self.root / "child"
+        child.mkdir()
+        (child / "last.md").write_bytes(b"safe-content\n")
+        generated = tuple(render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"child-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        with engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            with self._swap_child_after_last_file_eof(child) as race:
+                self.assertEqual(
+                    self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                    "completion_claims_tree_changed",
+                )
+        self.assertTrue(race["swapped"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
+
+    def test_47_late_root_addition_blocks_render_publication(self) -> None:
+        target = self.root / "zz-last.md"
+        target.write_bytes(b"safe-content\n")
+        generated = tuple(render_views(reduce_engagement(self.root)))
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"root-race-sentinel-{index}\n".encode("utf-8"))
+        before = {relative: (self.root / relative).read_bytes() for relative in generated}
+        with engagement_lock(self.root) as bound:
+            admission = claims.assert_completion_claims_clear_bound(bound)
+            with self._add_root_entry_after_last_file_eof(target) as race:
+                self.assertEqual(
+                    self._error(lambda: write_views(bound, admission.state, completion_claims_token=admission.token)),
+                    "completion_claims_tree_changed",
+                )
+        self.assertTrue(race["added"])
+        self.assertEqual({relative: (self.root / relative).read_bytes() for relative in generated}, before)
 
 
 if __name__ == "__main__":

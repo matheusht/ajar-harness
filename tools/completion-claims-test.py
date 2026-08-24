@@ -438,6 +438,24 @@ class CompletionClaimsTest(unittest.TestCase):
         self.assertIn(b'"code":"completion_claims_unjustified"', result.stdout)
         self.assertEqual(after, before)
 
+    def test_38_reduce_success_publishes_current_snapshot_and_every_generated_view(self) -> None:
+        expected = reduce_engagement(self.root)
+        expected_views = render_views(expected)
+        generated = ("state.snapshot.json", *expected_views)
+        for index, relative in enumerate(generated):
+            atomic_write(self.root / relative, f"stale-{index}\n".encode("utf-8"))
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "run-engagement.py"), "reduce", "--engagement", str(self.root)],
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "state.snapshot.json").read_bytes(), canonical_json_bytes(expected))
+        self.assertEqual(
+            {relative: (self.root / relative).read_bytes() for relative in expected_views},
+            expected_views,
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1997,16 +1997,7 @@ def require_approved_authority(engagement: Path, request_id: str, action_kind: s
     return request
 
 
-def write_snapshot(
-    engagement: Path,
-    snapshot: dict[str, Any],
-    *,
-    completion_claims_token: Any | None = None,
-) -> None:
-    """Publish the deterministic state snapshot after any bound claim revalidation."""
-    if completion_claims_token is not None:
-        from completion_claims import assert_completion_claims_token_current_bound
-        assert_completion_claims_token_current_bound(engagement, completion_claims_token)
+def write_snapshot(engagement: Path, snapshot: dict[str, Any]) -> None:
     atomic_write(engagement / "state.snapshot.json", canonical_json_bytes(snapshot))
 
 

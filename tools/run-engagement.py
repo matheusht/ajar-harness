@@ -84,7 +84,7 @@ from environment_preflight import collect_preflight as collect_agent_preflight, 
 from finding_review import claim_tuple_hash, render_claim_proof
 from ledger_health import probe_ledger_health
 from memory_disposition import _validate_promotable_abstraction, close_engagement, record_memory_disposition
-from completion_claims import assert_completion_claims_clear, assert_completion_claims_clear_bound
+from completion_claims import assert_completion_claims_clear, assert_completion_claims_clear_bound, assert_completion_claims_token_current_bound
 from reporting import accept_report, generate_report, record_submission
 from research_telemetry import _remove_published_output, export_telemetry, score_telemetry
 from decision6_capabilities import artifact_variant, classify_command, classify_event, load_capability_matrix, require_actor
@@ -1348,8 +1348,12 @@ def command_reduce(args: argparse.Namespace) -> int:
     with engagement_lock(engagement) as bound_engagement:
         admission = assert_completion_claims_clear_bound(bound_engagement)
         snapshot = admission.state
-        write_snapshot(bound_engagement, snapshot, completion_claims_token=admission.token)
-        write_views(bound_engagement, snapshot, completion_claims_token=admission.token)
+        # Validate once at the final boundary. Both projection writes then share this held
+        # cooperative lock; validating again after the snapshot write would reject our own
+        # intentional tree mutation before the generated views could be published.
+        assert_completion_claims_token_current_bound(bound_engagement, admission.token)
+        write_snapshot(bound_engagement, snapshot)
+        write_views(bound_engagement, snapshot)
     emit({"ok": True, "event_count": snapshot["event_count"], "ledger_hash": snapshot["ledger_hash"]})
     return 0
 

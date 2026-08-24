@@ -32,7 +32,8 @@ the one thing that must not be copied.
 It works by making "I found nothing" an unacceptable answer. It makes it unacceptable by making it
 **false by construction**. Point that at a clean codebase and the run cannot terminate honestly: the only
 reachable exit is the one it was told to expect, so it manufactures one. Our targets are frequently
-clean, and `covered-dry` is a correct and valuable product for us. It is not for a vendor blog.
+clean, and a kernel-backed, independently reviewed exhaustion result is a correct and valuable product
+for us. It is not for a vendor blog.
 
 We keep the persistence and drop the bias with three moves.
 
@@ -44,7 +45,7 @@ the lazy one:
 > the same work. You may not return until you have proven one. **"I did not find anything" proves
 > neither and is not a terminal state.**
 
-`covered-dry` carries a payload (Part 12). A model cannot reach it by getting tired.
+That exhaustion result carries a payload (Part 12). A model cannot reach it by getting tired.
 
 **2. Bias placement by lane — the prior is allowed where it is cheap.**
 
@@ -366,8 +367,9 @@ Allowed terminal verdicts — nothing else:
 - **`chained`** — a multi-step impact chain with every edge verified and a named realistic consumer.
 - **`real-but-capped`** — the primitive is real and its limiting control is **demonstrated**, not
   assumed.
-- **`covered-dry`** — the surface is bounded, enumerated, and every material route is exhausted or
-  closed by evidence.
+- **kernel-backed reviewed exhaustion** — use the canonical state defined in
+  `engine/persistence.md`; the surface is bounded, enumerated, and every material route is exhausted
+  or closed by evidence.
 - **`blocked`** — an external gate or unavailable environment prevents completion; name the exact
   missing condition.
 
@@ -382,7 +384,8 @@ evidence; 6. quantitative impact with its negative control; 7. reproduction comm
 output; 8. independent review results; 9. novelty, attribution, and reachability status; 10. strongest
 honest severity and the demonstrated cap; 11. cleanup disposition; 12. unresolved caveats.
 
-**If the result is `covered-dry`**, return — this is a deliverable, not a surrender:
+**If the result is kernel-backed reviewed exhaustion**, return — this is a deliverable, not a
+surrender:
 
 1. the bounded surface and sink inventory, with counts; 2. the family registry with terminal
 dispositions; 3. all strong and negative activation signals; 4. the most credible refuted candidates
@@ -392,9 +395,9 @@ covered, and why; 7. evidence of the active-research time spent; 8. cleanup and 
 **Do not file, submit, publish, email, open an issue, open a pull request, or contact the vendor.**
 Filing is operator-only; the operator personally reviews and re-authors any submission.
 
-**The product of this run is rigor, not a finding count.** A conservative, reproducible `covered-dry`
-beats a dramatic result that needs a raised limit, a non-default option, a hand-built input that skips
-the real parser, or a differential no real system relies on.
+**The product of this run is rigor, not a finding count.** A conservative, reproducible reviewed
+exhaustion result beats a dramatic result that needs a raised limit, a non-default option, a hand-built
+input that skips the real parser, or a differential no real system relies on.
 
 ---
 

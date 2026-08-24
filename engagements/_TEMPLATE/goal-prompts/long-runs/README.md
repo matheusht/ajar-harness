@@ -32,8 +32,8 @@ bug, a flag at a known path. That does not survive contact with a real program.
 That is sound for a planted-bug test and is a reward-hack here: a run told to expect a finding does
 not terminate until it produces one, and on a clean codebase what it produces is fabricated.
 `engine/multi-round-orchestration.md` §5 records this as the one change we made to the method, and it
-is the reason our covered-dry verdicts are worth anything. **State the surface; let the evidence
-decide.**
+is the reason our independently reviewed exhaustion verdicts are worth anything. **State the surface;
+let the evidence decide.**
 
 **2. The blanket ban on changelogs, CVE databases and patched-version diffs is wrong here.** It is
 correct for a planted bug — the answer is in the diff — and backwards for VRP work, where a duplicate
@@ -50,7 +50,7 @@ patched version to locate its bug.
   authorization rather than by evidence.
 - A stopping contract with a **blind-round** condition, so "no new family for K=2 rounds" is what ends
   a run — not fatigue, and not the source method's "never give up".
-- `budget-bounded` as a terminal state distinct from `covered-dry`.
+- `budget-bounded` as a terminal state distinct from kernel-backed reviewed exhaustion.
 
 ## Before building on this
 

@@ -16,7 +16,8 @@ consensus, availability, data, auth>. IN: <EXACT SURFACES: dirs, files, modules,
 OUT/KILL before deep work (program-policy.md + recon-signals.md): <EXPLICIT EXCLUSIONS: generated code,
 third-party deps, already-fixed hardening wave as positive controls only — check for INCOMPLETE fixes,
 don't re-hunt; dependency CVEs without a <TARGET>-specific PoC; previously-disclosed; any live
-<NETWORK>/production>. Work to covered-dry OR a surviving finding, per subsystem, laddered. Binding:
+<NETWORK>/production>. Work to the kernel-backed, independently reviewed exhaustion terminal OR a
+surviving finding, per subsystem, laddered. Binding:
 CLAUDE.md, scope.md (signed <DATE> — <ZONE-2 LEVEL>), program-policy.md,
 engine/{whitebox-analysis,persistence,regrade,pocinator,chainability,escalation}.md. Read
 recon-signals.md + progress.md FIRST.
@@ -57,7 +58,7 @@ real vs fake BEFORE verifying, and give a one-sentence "why it's real" per survi
 MODEL> = planning, triaging, finding candidates, writing the pipeline, debugging issues; <EXECUTION
 MODEL> = the long-horizon grunt (<DOMAIN-SPECIFIC PoCs>, fuzzers, instrumentation, private-net sims —
 tens of thousands of lines when required). Don't invert. RUN LONG: up to <N> subagents, 6+ hours
-straight, no check-in until covered-dry or a surviving finding; document every
+straight, no check-in until the kernel-backed exhaustion terminal or a surviving finding; document every
 hypothesis/escalation/chain/kill; 100% exhaustion of enumerated leads — no shortcuts, "it's possible, if
 you give up you're not trying hard enough"; a held vector is a wrong turn to revisit, not a dry verdict.
 Be more stubborn than the developer was careful.

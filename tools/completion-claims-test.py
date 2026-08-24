@@ -483,6 +483,16 @@ class CompletionClaimsTest(unittest.TestCase):
             expected_views,
         )
 
+    def test_41_copied_template_inputs_reserve_completion_tokens_for_outputs(self) -> None:
+        template = ROOT / "engagements" / "_TEMPLATE"
+        occurrences = 0
+        for path in template.rglob("*.md"):
+            relative = path.relative_to(template).as_posix()
+            if relative in claims.GENERATED_VIEWS:
+                continue
+            occurrences += len(claims.CLAIM_TOKEN.findall(path.read_text(encoding="utf-8")))
+        self.assertEqual(occurrences, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

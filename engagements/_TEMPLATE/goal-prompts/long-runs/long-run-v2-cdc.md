@@ -165,6 +165,6 @@ Stop when **all** of these hold, and record each:
 5. `ceiling-requests.md` records every lane blocked by authorization rather than by evidence.
 
 Running out of ideas is not a stop condition — backtrack and redo recon. Running out of budget is,
-and it records as **budget-bounded**, never as **covered-dry**.
+and it records as **budget-bounded**, never as kernel-backed reviewed exhaustion.
 
 Time floor: **{{HOURS}} hours** of active orchestration. That governs effort, never a verdict.

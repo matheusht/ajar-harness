@@ -146,6 +146,7 @@
     "routing.assessed": {"allowed_roles": ["orchestrator", "reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["observation"], "tier": "notebook"},
     "scope.amendment_proposed": {"allowed_roles": ["orchestrator", "hunter", "broker"], "blocking_scope": "none", "required_evidence": ["draft_digest"], "tier": "notebook"},
     "scope.attested": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope", "fresh_operator_console"], "tier": "authority"},
+    "session.end_checked": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["reduced_state", "queue_digest", "session_streak"], "tier": "notebook"},
     "submission.recorded": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "accepted_report"], "tier": "authority"}
   },
   "matrix_id": "decision6-operation-capabilities-v1",

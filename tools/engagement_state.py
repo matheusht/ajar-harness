@@ -64,6 +64,7 @@ EVENT_STATE_RULES = {
     "review.pocinator_completed": (set(), set()),
     "coverage.reopened": ({"coverage"}, {"coverage"}),
     "coverage.status_changed": ({"coverage"}, {"coverage"}),
+    "session.end_checked": (set(), set()),
     "operator_stop.recorded": ({"queue"}, {"queue"}),
     "operator_resume.recorded": ({"queue"}, {"queue"}),
     "report.generated": ({"report"}, {"report"}),
@@ -891,6 +892,48 @@ def engagement_lock(engagement: Path) -> Iterator[Path]:
 
 
 @contextmanager
+def existing_engagement_transaction(engagement: Path) -> Iterator[Path]:
+    """Lock an existing kernel for mutation while preserving the named directory identity.
+
+    Unlike :func:`engagement_lock`, this entrypoint never creates the coordination file.  Unlike
+    :func:`bound_engagement_source`, it is explicitly a mutation transaction.  The public pathname
+    must still name the opened inode before and after the transaction, so rename-and-replace cannot
+    redirect either the decision or its record.
+    """
+
+    logical = Path(os.path.abspath(engagement))
+    root_fd = _open_absolute_directory(logical)
+    opened = os.fstat(root_fd)
+
+    def require_named_identity(when: str) -> None:
+        try:
+            named = os.stat(logical, follow_symlinks=False)
+        except OSError as exc:
+            raise RecordError(
+                "engagement_source_changed",
+                f"transaction source changed {when}",
+            ) from exc
+        if (
+            stat.S_ISLNK(named.st_mode)
+            or not stat.S_ISDIR(named.st_mode)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise RecordError(
+                "engagement_source_changed",
+                f"transaction source changed {when}",
+            )
+
+    try:
+        require_named_identity("before lock")
+        with bound_engagement_lock(root_fd, create=False) as bound:
+            require_named_identity("after lock")
+            yield bound
+            require_named_identity("during transaction")
+    finally:
+        os.close(root_fd)
+
+
+@contextmanager
 def bound_engagement_lock(root_fd: int, *, create: bool = True) -> Iterator[Path]:
     """Lock an already identity-bound engagement directory without reopening its path."""
 
@@ -1650,6 +1693,50 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         reason = payload.get("reason")
         if event.get("actor") != {"role": "operator", "id": payload.get("operator_id")} or payload.get("entity_id") != engagement_id or payload.get("status") != expected_status or not isinstance(reason, str) or not reason.strip() or reason != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") != expected_previous or change.get("current") != expected_status:
             raise RecordError("operator_queue_control_invalid", event.get("event_id", "unknown"))
+    if event_type == "session.end_checked":
+        decision = payload.get("decision")
+        reason_code = payload.get("reason_code")
+        streak = payload.get("confirmed_consecutive_blocks")
+        blocking = payload.get("blocking_work_count")
+        remaining = payload.get("remaining_work_count")
+        counts_are_coherent = (
+            type(blocking) is int
+            and type(remaining) is int
+            and 0 <= blocking <= remaining
+        )
+        coherent_block = (
+            counts_are_coherent
+            and decision == "block"
+            and reason_code == "blocking_work_remaining"
+            and type(streak) is int
+            and 1 <= streak <= 6
+            and blocking > 0
+        )
+        coherent_release = (
+            counts_are_coherent
+            and decision == "release"
+            and (
+                (reason_code == "block_budget_exhausted" and streak == 6 and blocking > 0)
+                or (
+                    reason_code == "reentrant_state_unmatched"
+                    and streak == 0
+                )
+            )
+        )
+        if (
+            event.get("actor")
+            != {"role": "broker", "id": "session-end-backstop"}
+            or event.get("operation_class") != "notebook"
+            or event.get("provenance", {}).get("session_id")
+            != payload.get("session_ref")
+            or event.get("state_changes")
+            or any(
+                event.get(field)
+                for field in ("entity_refs", "evidence_refs", "review_refs", "finding_refs")
+            )
+            or not (coherent_block or coherent_release)
+        ):
+            raise RecordError("session_end_check_invalid", event.get("event_id", "unknown"))
     if event_type == "authority.expired" and (event.get("actor", {}).get("role") != "broker" or payload.get("status") != "expired" or event.get("state_changes")):
         raise RecordError("authority_expiry_event_invalid", event.get("event_id", "unknown"))
 

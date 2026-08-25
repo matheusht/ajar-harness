@@ -81,6 +81,7 @@
         "review.coverage_completed",
         "coverage.reopened",
         "coverage.status_changed",
+        "session.end_checked",
         "report.generated",
         "operator.review_recorded",
         "operator_stop.recorded",
@@ -784,6 +785,38 @@
             "null"
           ],
           "minLength": 1
+        },
+        "session_ref": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "decision": {
+          "enum": ["block", "release"]
+        },
+        "reason_code": {
+          "enum": [
+            "blocking_work_remaining",
+            "block_budget_exhausted",
+            "reentrant_state_unmatched"
+          ]
+        },
+        "confirmed_consecutive_blocks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "blocking_work_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining_work_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queue_digest": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "observed_state_hash": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
         }
       }
     },
@@ -1683,6 +1716,68 @@
                     "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "session.end_checked"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["operation_class"],
+        "properties": {
+          "operation_class": {"const": "notebook"},
+          "actor": {
+            "properties": {
+              "role": {"const": "broker"},
+              "id": {"const": "session-end-backstop"}
+            }
+          },
+          "entity_refs": {"maxItems": 0},
+          "evidence_refs": {"maxItems": 0},
+          "review_refs": {"maxItems": 0},
+          "finding_refs": {"maxItems": 0},
+          "state_changes": {"maxItems": 0},
+          "payload": {
+            "additionalProperties": false,
+            "required": [
+              "session_ref",
+              "decision",
+              "reason_code",
+              "confirmed_consecutive_blocks",
+              "blocking_work_count",
+              "remaining_work_count",
+              "queue_digest",
+              "observed_state_hash"
+            ],
+            "properties": {
+              "session_ref": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+              },
+              "decision": {"enum": ["block", "release"]},
+              "reason_code": {
+                "enum": [
+                  "blocking_work_remaining",
+                  "block_budget_exhausted",
+                  "reentrant_state_unmatched"
+                ]
+              },
+              "confirmed_consecutive_blocks": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 6
+              },
+              "blocking_work_count": {"type": "integer", "minimum": 0},
+              "remaining_work_count": {"type": "integer", "minimum": 0},
+              "queue_digest": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+              },
+              "observed_state_hash": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
               }
             }
           }

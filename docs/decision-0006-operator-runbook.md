@@ -17,6 +17,10 @@ principal; they do not make an agent the signed operator.
 non-interactive when their capability evidence is complete. Unknown commands/events/variants fail
 closed. Preflight collection cannot assert operator review. `review-preflight` is separate.
 
+`tools/run-work-queue.py run` is classified once as the external broker Notebook operation
+`run-work-queue`. Its evidence is an exact target-local workspace, one reducer-owned action at a
+time, and an outer budget; none of those controls is delegated to the launched model session.
+
 ## 3. Request exact authority
 
 1. Write a canonical JSON action containing `action_kind`, `lane_id`, broker executor/session, and

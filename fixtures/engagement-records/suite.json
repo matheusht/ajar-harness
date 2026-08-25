@@ -2095,6 +2095,7 @@
         },
         "control_candidates": [],
         "coverage": "active",
+        "coverage_relevant_event_ref": "event-scope-1",
         "coverage_relevant_sequence": 1,
         "engagement_id": "eng-1",
         "environment_preflights": {},
@@ -2110,6 +2111,7 @@
         "outstanding_reviews": [],
         "proof_reviews": {},
         "regrade_reviews": {},
+        "reviewer_run_models": {},
         "queue_control": {
           "last_resume": null,
           "last_stop": null,
@@ -2128,6 +2130,10 @@
             "predicate": "coverage is active and no other work queue item exists"
           }
         ],
+        "work_queue_context": {
+          "artifacts": {},
+          "pending_attempts": {}
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,
@@ -2176,6 +2182,8 @@
             "input_refs": [],
             "recorded_at": "2026-07-10T00:00:00Z",
             "review_ref": "review-1",
+            "reviewer_run_id": "run-review-1",
+            "reviewer_signer_fingerprint": null,
             "reviewed_revision": null,
             "status": "needs_review"
           }
@@ -2187,6 +2195,7 @@
         },
         "control_candidates": [],
         "coverage": "blocked",
+        "coverage_relevant_event_ref": "event-scope-1",
         "coverage_relevant_sequence": 5,
         "engagement_id": "eng-1",
         "environment_preflights": {},
@@ -2278,6 +2287,9 @@
         ],
         "proof_reviews": {},
         "regrade_reviews": {},
+        "reviewer_run_models": {
+          "run-review-1": "claude-fixture-reviewer-20260710"
+        },
         "queue_control": {
           "last_resume": null,
           "last_stop": {
@@ -2312,6 +2324,10 @@
             "predicate": "review_ref is present in outstanding_reviews"
           }
         ],
+        "work_queue_context": {
+          "artifacts": {},
+          "pending_attempts": {}
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,

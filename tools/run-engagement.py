@@ -7,8 +7,12 @@ This command records and validates research state. It never drives a target.
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+import ctypes
+import errno
 import json
+import math
 import os
 import re
 import runpy
@@ -18,7 +22,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import ExitStack, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -58,7 +64,7 @@ from engagement_state import (
     atomic_write,
     append_ledger_record,
     assert_resume_current,
-    base_event,
+    base_event as _base_event,
     compute_work_queue,
     compute_record_hash,
     compute_review_input_hash,
@@ -82,6 +88,7 @@ from engagement_state import (
     require_repair_authority_from_intact_prefix,
     require_scope_zone2_authorized,
     revise_finding_target_is_current,
+    _validate_revise_finding_v2_action,
     _filing_blocking_review_error,
     register_artifact,
     _register_legacy_artifact,
@@ -106,10 +113,74 @@ from work_queue_actions import (
     queue_command_payload,
     queue_gate_exit,
 )
+from driver_action_admission import consume_action_admission, forward_action_to_broker
+
+
+_EMIT_BUFFER: ContextVar[bytearray | None] = ContextVar("run_engagement_emit_buffer", default=None)
+_AUTHENTICATED_RUNTIME: ContextVar[dict[str, object] | None] = ContextVar(
+    "run_engagement_authenticated_runtime", default=None
+)
+REVIEW_SIGNATURE_MAX_BYTES = 256 * 1024
+REVIEW_ALLOWED_SIGNERS_MAX_BYTES = 1024 * 1024
+SSH_VERIFY_TIMEOUT_SECONDS = 5.0
+REVIEW_STAGING_TIMEOUT_SECONDS = 10.0
+REVIEW_STAGING_MAX_ENTRIES = 10_000
+REVIEW_STAGING_MAX_ALLOCATED_BYTES = 512 * 1024 * 1024
+REVIEW_STAGING_MAX_DEPTH = 64
+
+
+def base_event(*args: object, **kwargs: object) -> dict[str, object]:
+    """Build an event and, inside the trusted broker, stamp its authenticated producer."""
+
+    event = _base_event(*args, **kwargs)  # type: ignore[arg-type]
+    runtime = _AUTHENTICATED_RUNTIME.get()
+    if isinstance(runtime, dict):
+        runtime_session_ref = runtime.get("runtime_session_ref")
+        runtime_model = runtime.get("model")
+        if not isinstance(runtime_session_ref, str) or not runtime_session_ref:
+            raise RecordError("driver_authenticated_runtime_invalid", "runtime_session_ref")
+        if not isinstance(runtime_model, str) or not runtime_model:
+            raise RecordError("driver_authenticated_runtime_invalid", "model")
+        provenance = event["provenance"]
+        provenance["runtime_session_ref"] = runtime_session_ref
+        provenance["model"] = runtime_model
+        provenance["provider"] = runtime.get("provider")
+    return event
 
 
 def emit(value: object) -> None:
-    sys.stdout.buffer.write(canonical_json_bytes(value))
+    data = canonical_json_bytes(value)
+    buffer = _EMIT_BUFFER.get()
+    if buffer is None:
+        sys.stdout.buffer.write(data)
+    else:
+        buffer.extend(data)
+
+
+def _command_json(args: argparse.Namespace, attribute: str) -> dict[str, object]:
+    admitted = getattr(args, "_driver_admitted_documents", {})
+    if isinstance(admitted, dict) and attribute in admitted:
+        value = admitted[attribute].get("value")
+        if not isinstance(value, dict):
+            raise RecordError("driver_action_predicate_input_invalid", attribute)
+        return copy.deepcopy(value)
+    return load_json(getattr(args, attribute))
+
+
+def _command_bytes(
+    args: argparse.Namespace, attribute: str, *, max_bytes: int | None = None
+) -> bytes:
+    admitted = getattr(args, "_driver_admitted_documents", {})
+    if isinstance(admitted, dict) and attribute in admitted:
+        value = admitted[attribute].get("bytes")
+        if not isinstance(value, bytes) or (
+            max_bytes is not None and len(value) > max_bytes
+        ):
+            raise RecordError("driver_action_predicate_input_invalid", attribute)
+        return bytes(value)
+    return _read_regular_file_once(
+        Path(getattr(args, attribute)), max_bytes=max_bytes
+    )[0]
 
 
 def _require_offline_output(path: Path) -> None:
@@ -465,18 +536,28 @@ def _authority_action(action_kind: str, **fields: object) -> dict[str, object]:
     return {"action_kind": action_kind, **fields}
 
 
-def _read_regular_file_once(path: Path) -> tuple[bytes, os.stat_result]:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)); chunks: list[bytes] = []
+def _read_regular_file_once(
+    path: Path, *, max_bytes: int | None = None
+) -> tuple[bytes, os.stat_result]:
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)); data = bytearray()
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode): raise RecordError("bound_input_not_regular", str(path))
+        if max_bytes is not None and before.st_size > max_bytes:
+            raise RecordError("bound_input_oversize", str(path))
         while True:
-            chunk = os.read(fd, 1024 * 1024)
+            remaining = None if max_bytes is None else max_bytes - len(data)
+            chunk = os.read(
+                fd,
+                1024 * 1024 if remaining is None else min(1024 * 1024, remaining + 1),
+            )
             if not chunk: break
-            chunks.append(chunk)
+            data.extend(chunk)
+            if max_bytes is not None and len(data) > max_bytes:
+                raise RecordError("bound_input_oversize", str(path))
         after = os.fstat(fd)
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns): raise RecordError("bound_input_changed_during_read", str(path))
-        return b"".join(chunks), after
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns): raise RecordError("bound_input_changed_during_read", str(path))
+        return bytes(data), after
     finally: os.close(fd)
 
 
@@ -669,13 +750,15 @@ def _enforce_mutation(capability: dict[str, object], engagement: Path, actor_rol
 
 
 def command_append_event(args: argparse.Namespace) -> int:
-    proposal = load_json(args.file)
+    proposal = _command_json(args, "file")
     capability = classify_event(proposal.get("event_type", ""), proposal.get("payload", {}))
     actor = proposal.get("actor", {})
     if capability["tier"] != "notebook":
         raise RecordError("canonical_authority_command_required", proposal.get("event_type", "unknown"))
     if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "authority.expired", "coverage.reopened"}:
         raise RecordError("canonical_notebook_command_required", proposal.get("event_type", "unknown"))
+    if proposal.get("event_type") == "coverage.status_changed" and proposal.get("payload", {}).get("status") == "budget_bounded":
+        raise RecordError("external_driver_budget_boundary_required", "budget_bounded")
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-event:{proposal.get('event_type','event')}:{proposal.get('event_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
     if proposal.get("operation_class") != capability["tier"]:
         raise RecordError("event_operation_class_mismatch", proposal.get("event_type", "unknown"))
@@ -1151,7 +1234,7 @@ def command_operator_resume(args: argparse.Namespace) -> int:
 
 
 def command_request_authority(args: argparse.Namespace) -> int:
-    action = load_json(args.action_file)
+    action = _command_json(args, "action_file")
     if not isinstance(action, dict) or action.get("action_kind") != args.action_kind or action.get("lane_id") != args.lane_id or detect_secret_classes(canonical_json_bytes(action)):
         raise RecordError("authority_action_invalid", args.request_id)
     _require_local_provenance(args.actor_role, args.actor_id, args.session_id)
@@ -1162,6 +1245,36 @@ def command_request_authority(args: argparse.Namespace) -> int:
     with engagement_lock(engagement) as bound_engagement:
         state = reduce_engagement(bound_engagement)
         if action.get("action_kind") == "revise-finding" and action.get("action_version") == 2 and isinstance(action.get("target"), dict):
+            locked_events = read_ledger(bound_engagement, "event")
+            signed_operator = next(
+                event["payload"]["operator_id"]
+                for event in reversed(locked_events)
+                if event["event_type"] == "scope.attested"
+            )
+            if (
+                action.get("executor_id") != args.actor_id
+                or action.get("session_id") != args.session_id
+                or action.get("operator_id") != signed_operator
+            ):
+                raise RecordError("revise_finding_v2_principal_binding_invalid", args.request_id)
+            committed_entity_ids = {
+                event.get("payload", {}).get("record_id")
+                for event in locked_events
+                if event.get("event_type") == "record.committed"
+                and isinstance(event.get("payload", {}).get("record_id"), str)
+            }
+            _validate_revise_finding_v2_action(
+                action,
+                state=state,
+                engagement=bound_engagement,
+                index=build_reference_index(bound_engagement),
+                committed_entity_ids=committed_entity_ids,
+                seen_events={event["event_id"]: event for event in locked_events},
+                attempts=read_ledger(bound_engagement, "attempt"),
+                artifacts=read_ledger(bound_engagement, "artifact"),
+                requested_at=args.recorded_at,
+                context=f"event-authority-request-{args.request_id}",
+            )
             target = action["target"]
             generation = (target.get("id"), target.get("expected_revision"), target.get("adjudication_event_ref"), target.get("adjudication_review_ref"))
             duplicate = next((request for request in state["authority_requests"].values() if request.get("status") in {"pending_authority", "approved"} and isinstance(request.get("target"), dict) and (request.get("lane_id") == args.lane_id or (request["target"].get("id"), request["target"].get("expected_revision"), request["target"].get("adjudication_event_ref"), request["target"].get("adjudication_review_ref")) == generation)), None)
@@ -1223,8 +1336,6 @@ def command_settle_approved_revision(args: argparse.Namespace) -> int:
             or not isinstance(request.get("target"), dict)
             or not isinstance(application, dict)
             or request.get("lane_id") != args.lane_id
-            or application.get("executor_id") != args.executor_id
-            or application.get("session_id") != args.session_id
             or application.get("operator_id") != args.operator_id
         ):
             raise RecordError("approved_revision_settlement_invalid", args.authority_request_id)
@@ -1426,7 +1537,7 @@ def command_register_artifact(args: argparse.Namespace) -> int:
 
 
 def command_append_attempt(args: argparse.Namespace) -> int:
-    proposal = load_json(args.file)
+    proposal = _command_json(args, "file")
     capability = classify_command("append-attempt")
     actor = proposal.get("provenance", {}).get("actor", {})
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-attempt:{proposal.get('attempt_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
@@ -1693,31 +1804,429 @@ def command_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
-def _verify_review_signature(engagement: Path, review_bytes: bytes, reviewer_id: str, signature_path: Path, allowed_signers_path: Path) -> None:
+def _verify_review_signature(
+    engagement: Path,
+    review_bytes: bytes,
+    reviewer_id: str,
+    signature_bytes: bytes,
+    allowed_signers_bytes: bytes,
+    *,
+    timeout_seconds: float = SSH_VERIFY_TIMEOUT_SECONDS,
+) -> str:
     state = reduce_engagement(engagement.absolute()); latest_scope = next(event for event in reversed(read_ledger(engagement.absolute(), "event")) if event["event_type"] == "scope.attested"); scope_path = engagement.absolute()/latest_scope["payload"]["scope_snapshot_path"]
-    try: scope_bytes, _ = _read_regular_file_once(scope_path)
+    try: scope_bytes = read_governed_file(scope_path)
     except (OSError, RecordError): raise RecordError("reviewer_signature_invalid", reviewer_id)
     if sha256_bytes(scope_bytes) != state["scope_hash"]: raise RecordError("reviewer_signature_invalid", reviewer_id)
     try: scope_text = scope_bytes.decode("utf-8")
     except UnicodeDecodeError: raise RecordError("reviewer_signature_invalid", reviewer_id)
     match = re.search(r"Reviewer allowed signers SHA256:\s*(sha256:[0-9a-f]{64})", scope_text)
-    if match is None or signature_path.is_symlink() or allowed_signers_path.is_symlink() or not signature_path.is_file() or not allowed_signers_path.is_file(): raise RecordError("reviewer_signature_invalid", reviewer_id)
-    signature_bytes = signature_path.read_bytes(); allowed_signers_bytes = allowed_signers_path.read_bytes()
+    if (
+        match is None
+        or not isinstance(signature_bytes, bytes)
+        or not isinstance(allowed_signers_bytes, bytes)
+        or len(signature_bytes) > REVIEW_SIGNATURE_MAX_BYTES
+        or len(allowed_signers_bytes) > REVIEW_ALLOWED_SIGNERS_MAX_BYTES
+        or not isinstance(timeout_seconds, (int, float))
+        or isinstance(timeout_seconds, bool)
+        or timeout_seconds <= 0
+    ): raise RecordError("reviewer_signature_invalid", reviewer_id)
     if sha256_bytes(allowed_signers_bytes) != match.group(1): raise RecordError("reviewer_signature_invalid", reviewer_id)
     with tempfile.TemporaryDirectory(prefix="review-signature-") as temporary:
         temporary_root = Path(temporary); signature_copy = temporary_root / "review.sig"; signers_copy = temporary_root / "allowed_signers"; signature_copy.write_bytes(signature_bytes); signers_copy.write_bytes(allowed_signers_bytes)
         command = ["/usr/bin/ssh-keygen", "-Y", "verify", "-f", str(signers_copy), "-I", reviewer_id, "-n", "llm-redteam-harness-review-v1", "-s", str(signature_copy)]
-        result = subprocess.run(command, input=review_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False)
+        try:
+            result = subprocess.run(command, input=review_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RecordError("reviewer_signature_invalid", reviewer_id) from exc
     if result.returncode != 0: raise RecordError("reviewer_signature_invalid", reviewer_id)
+    fingerprint_match = re.search(rb"\bkey\s+SHA256:([A-Za-z0-9+/=]+)\s*$", result.stdout.strip())
+    if fingerprint_match is None:
+        raise RecordError("reviewer_signature_identity_unavailable", reviewer_id)
+    encoded = fingerprint_match.group(1)
+    try:
+        digest = base64.b64decode(encoded + b"=" * (-len(encoded) % 4), validate=True)
+    except ValueError as exc:
+        raise RecordError("reviewer_signature_identity_unavailable", reviewer_id) from exc
+    if len(digest) != 32:
+        raise RecordError("reviewer_signature_identity_unavailable", reviewer_id)
+    return "sha256:" + digest.hex()
+
+
+def _copy_engagement_for_review_staging(
+    source: Path, destination: Path, *, deadline: float | None = None
+) -> None:
+    """Copy one locked engagement without following any source filesystem alias."""
+
+    if deadline is None:
+        deadline = time.monotonic() + REVIEW_STAGING_TIMEOUT_SECONDS
+    if (
+        not isinstance(deadline, (int, float))
+        or isinstance(deadline, bool)
+        or not math.isfinite(float(deadline))
+        or deadline <= time.monotonic()
+    ):
+        raise RecordError("record_review_staging_budget_exceeded", "staging deadline")
+    entry_count = 0
+    allocated_bytes = 0
+
+    def require_budget(detail: str) -> None:
+        if time.monotonic() >= deadline:
+            raise RecordError("record_review_staging_budget_exceeded", detail)
+
+    def account_allocation(value: os.stat_result, detail: str) -> None:
+        nonlocal allocated_bytes
+        blocks = max(0, int(getattr(value, "st_blocks", 0)))
+        allocated_bytes += blocks * 512
+        if allocated_bytes > REVIEW_STAGING_MAX_ALLOCATED_BYTES:
+            raise RecordError("record_review_staging_budget_exceeded", detail)
+
+    def bounded_names(directory_fd: int, detail: str) -> list[str]:
+        nonlocal entry_count
+        names: list[str] = []
+        require_budget(detail)
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                require_budget(detail)
+                entry_count += 1
+                if entry_count > REVIEW_STAGING_MAX_ENTRIES:
+                    raise RecordError("record_review_staging_budget_exceeded", detail)
+                names.append(entry.name)
+        names.sort()
+        return names
+
+    def require_same_names(
+        directory_fd: int, expected: list[str], detail: str
+    ) -> None:
+        current: list[str] = []
+        require_budget(detail)
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                if len(current) > len(expected):
+                    raise RecordError("record_review_staging_source_changed", detail)
+                current.append(entry.name)
+        if sorted(current) != expected:
+            raise RecordError("record_review_staging_source_changed", detail)
+
+    source = source.absolute()
+    if (
+        len(source.parts) == 4
+        and source.parts[1:3] == ("dev", "fd")
+        and source.parts[3].isdigit()
+    ):
+        source_fd = os.dup(int(source.parts[3]))
+    else:
+        source_fd = os.open(
+            source,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    source_root_stat = os.fstat(source_fd)
+    if not stat.S_ISDIR(source_root_stat.st_mode):
+        os.close(source_fd)
+        raise RecordError(
+            "record_review_staging_source_unsafe",
+            "engagement source is not a directory",
+        )
+    account_allocation(source_root_stat, ".")
+
+    destination.mkdir(mode=0o700)
+    destination_fd = os.open(
+        destination,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+    )
+
+    def identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    fclonefileat = None
+    if sys.platform == "darwin":
+        try:
+            candidate = getattr(ctypes.CDLL(None, use_errno=True), "fclonefileat")
+            candidate.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+            candidate.restype = ctypes.c_int
+            fclonefileat = candidate
+        except (AttributeError, OSError):
+            fclonefileat = None
+
+    def write_all(file_fd: int, data: bytes) -> None:
+        remaining = memoryview(data)
+        while remaining:
+            written = os.write(file_fd, remaining)
+            if written <= 0:
+                raise OSError("short staging write")
+            remaining = remaining[written:]
+
+    def copy_bytes(source_file_fd: int, destination_file_fd: int, count: int) -> None:
+        remaining = count
+        while remaining:
+            require_budget("source bytes")
+            chunk = os.read(source_file_fd, min(1024 * 1024, remaining))
+            if not chunk:
+                raise RecordError(
+                    "record_review_staging_source_changed",
+                    "source file shortened during staging",
+                )
+            write_all(destination_file_fd, chunk)
+            remaining -= len(chunk)
+
+    def copy_sparse_or_stream(source_file_fd: int, destination_file_fd: int, size: int) -> None:
+        """Bound memory and preserve sparse holes when a CoW clone is unavailable."""
+
+        require_budget("sparse source")
+        os.ftruncate(destination_file_fd, size)
+        seek_data = getattr(os, "SEEK_DATA", None)
+        seek_hole = getattr(os, "SEEK_HOLE", None)
+        first_data: int | None = None
+        sparse_supported = seek_data is not None and seek_hole is not None
+        if sparse_supported and size:
+            try:
+                first_data = os.lseek(source_file_fd, 0, seek_data)
+            except OSError as exc:
+                if exc.errno == errno.ENXIO:
+                    return
+                if exc.errno in {errno.EINVAL, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}:
+                    sparse_supported = False
+                else:
+                    raise
+        if not sparse_supported:
+            os.lseek(source_file_fd, 0, os.SEEK_SET)
+            os.lseek(destination_file_fd, 0, os.SEEK_SET)
+            copy_bytes(source_file_fd, destination_file_fd, size)
+            return
+        data_offset = first_data
+        while data_offset is not None and data_offset < size:
+            require_budget("sparse source")
+            try:
+                hole_offset = min(os.lseek(source_file_fd, data_offset, seek_hole), size)
+            except OSError as exc:
+                if exc.errno != errno.ENXIO:
+                    raise
+                hole_offset = size
+            os.lseek(source_file_fd, data_offset, os.SEEK_SET)
+            os.lseek(destination_file_fd, data_offset, os.SEEK_SET)
+            copy_bytes(source_file_fd, destination_file_fd, hole_offset - data_offset)
+            if hole_offset >= size:
+                break
+            try:
+                data_offset = os.lseek(source_file_fd, hole_offset, seek_data)
+            except OSError as exc:
+                if exc.errno != errno.ENXIO:
+                    raise
+                data_offset = None
+
+    def clone_file(source_file_fd: int, destination_directory_fd: int, name: str) -> bool:
+        require_budget(name)
+        if fclonefileat is None:
+            return False
+        ctypes.set_errno(0)
+        # CLONE_NOFOLLOW | CLONE_NOOWNERCOPY: the source is already a no-follow fd and the
+        # staging copy must not require ownership replication privileges.
+        if fclonefileat(source_file_fd, destination_directory_fd, os.fsencode(name), 0x0003) == 0:
+            return True
+        error = ctypes.get_errno()
+        try:
+            failed_entry = os.stat(name, dir_fd=destination_directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            failed_entry = None
+        if failed_entry is not None:
+            if not stat.S_ISREG(failed_entry.st_mode) or stat.S_ISLNK(failed_entry.st_mode):
+                raise RecordError("record_review_staging_destination_unsafe", name)
+            os.unlink(name, dir_fd=destination_directory_fd)
+        unsupported = {
+            errno.EINVAL,
+            errno.ENOSYS,
+            errno.ENOTSUP,
+            errno.EPERM,
+            errno.EXDEV,
+            getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+        }
+        if error in unsupported:
+            return False
+        raise OSError(error, os.strerror(error), name)
+
+    def copy_directory(source_directory_fd: int, destination_directory_fd: int, prefix: tuple[str, ...]) -> None:
+        detail = Path(*prefix).as_posix() or "."
+        if len(prefix) > REVIEW_STAGING_MAX_DEPTH:
+            raise RecordError("record_review_staging_budget_exceeded", detail)
+        names = bounded_names(source_directory_fd, detail)
+        for name in names:
+            relative = Path(*prefix, name).as_posix()
+            require_budget(relative)
+            before = os.stat(name, dir_fd=source_directory_fd, follow_symlinks=False)
+            account_allocation(before, relative)
+            if stat.S_ISDIR(before.st_mode) and not stat.S_ISLNK(before.st_mode):
+                child_source_fd = os.open(
+                    name,
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=source_directory_fd,
+                )
+                opened = os.fstat(child_source_fd)
+                if not stat.S_ISDIR(opened.st_mode) or identity(opened) != identity(before):
+                    os.close(child_source_fd)
+                    raise RecordError("record_review_staging_source_changed", relative)
+                os.mkdir(name, 0o700, dir_fd=destination_directory_fd)
+                child_destination_fd = os.open(
+                    name,
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=destination_directory_fd,
+                )
+                try:
+                    copy_directory(child_source_fd, child_destination_fd, (*prefix, name))
+                    named_after = os.stat(name, dir_fd=source_directory_fd, follow_symlinks=False)
+                    if (named_after.st_dev, named_after.st_ino) != (opened.st_dev, opened.st_ino):
+                        raise RecordError("record_review_staging_source_changed", relative)
+                    os.fsync(child_destination_fd)
+                finally:
+                    os.close(child_destination_fd)
+                    os.close(child_source_fd)
+                continue
+            if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+                raise RecordError("record_review_staging_source_unsafe", relative)
+            source_file_fd = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=source_directory_fd,
+            )
+            try:
+                opened = os.fstat(source_file_fd)
+                if not stat.S_ISREG(opened.st_mode) or identity(opened) != identity(before):
+                    raise RecordError("record_review_staging_source_changed", relative)
+                if not clone_file(source_file_fd, destination_directory_fd, name):
+                    destination_file_fd = os.open(
+                        name,
+                        os.O_RDWR
+                        | os.O_CREAT
+                        | os.O_EXCL
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=destination_directory_fd,
+                    )
+                    try:
+                        copy_sparse_or_stream(source_file_fd, destination_file_fd, opened.st_size)
+                        os.fsync(destination_file_fd)
+                    finally:
+                        os.close(destination_file_fd)
+                after = os.fstat(source_file_fd)
+                named_after = os.stat(name, dir_fd=source_directory_fd, follow_symlinks=False)
+                if identity(opened) != identity(after) or identity(after) != identity(named_after):
+                    raise RecordError("record_review_staging_source_changed", relative)
+            finally:
+                os.close(source_file_fd)
+            destination_file_fd = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=destination_directory_fd,
+            )
+            try:
+                staged = os.fstat(destination_file_fd)
+                if (
+                    not stat.S_ISREG(staged.st_mode)
+                    or staged.st_size != opened.st_size
+                    or (staged.st_dev, staged.st_ino) == (opened.st_dev, opened.st_ino)
+                ):
+                    raise RecordError("record_review_staging_destination_unsafe", relative)
+            finally:
+                os.close(destination_file_fd)
+        require_same_names(source_directory_fd, names, detail)
+
+    try:
+        copy_directory(source_fd, destination_fd, ())
+        require_budget("staging fsync")
+        os.fsync(destination_fd)
+    finally:
+        os.close(destination_fd)
+        os.close(source_fd)
+
+
+def _apply_record_review_transaction(
+    engagement: Path,
+    *,
+    relative: str,
+    data: bytes,
+    commit: dict[str, object],
+    event: dict[str, object],
+) -> dict[str, object]:
+    """Apply the exact idempotent review transaction to one already locked tree."""
+
+    destination = engagement / relative
+    prior_bytes = _governed_regular_bytes_or_none(destination)
+    if prior_bytes is not None and prior_bytes != data:
+        raise RecordError("review_id_collision", str(event.get("payload", {}).get("review_ref", "unknown")))
+    if prior_bytes is None:
+        atomic_write(destination, data)
+    commit_event = next(
+        (
+            candidate
+            for candidate in read_ledger(engagement, "event")
+            if candidate.get("event_id") == commit["event_id"]
+        ),
+        None,
+    )
+    if commit_event is None or commit_event.get("payload", {}).get("record_digest") != commit["payload"]["record_digest"]:
+        _append_kernel_event_idempotent(engagement, commit, lock_held=True)
+    applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+    snapshot = reduce_engagement(engagement)
+    write_snapshot(engagement, snapshot)
+    write_views(engagement, snapshot)
+    assert_views_current(engagement, snapshot)
+    if read_governed_file(engagement / "state.snapshot.json") != canonical_json_bytes(snapshot):
+        raise RecordError("record_review_staging_projection_invalid", str(event.get("event_id", "unknown")))
+    return applied
+
+
+def _record_review_prewrite_deadline(args: argparse.Namespace) -> float:
+    """Return the earlier local staging bound or trusted outer-driver wall deadline."""
+
+    now = time.monotonic()
+    deadline = now + REVIEW_STAGING_TIMEOUT_SECONDS
+    authenticated_runtime = getattr(args, "_driver_authenticated_runtime", None)
+    if isinstance(authenticated_runtime, dict):
+        outer = authenticated_runtime.get("deadline_monotonic")
+        if outer is not None:
+            if (
+                not isinstance(outer, (int, float))
+                or isinstance(outer, bool)
+                or not math.isfinite(float(outer))
+                or outer <= now
+            ):
+                raise RecordError(
+                    "record_review_staging_budget_exceeded", "outer driver deadline"
+                )
+            deadline = min(deadline, float(outer))
+    return deadline
+
+
+def _require_record_review_prewrite_time(deadline: float, detail: str) -> None:
+    if time.monotonic() >= deadline:
+        raise RecordError("record_review_staging_budget_exceeded", detail)
 
 
 def command_record_review(args: argparse.Namespace) -> int:
     _require_decision6_kernel(args.engagement)
-    _require_local_provenance("broker", args.actor_id, args.session_id); review = load_json(args.file); event = load_json(args.event)
+    _require_local_provenance("broker", args.actor_id, args.session_id); review = _command_json(args, "file"); event = _command_json(args, "event")
     mapping = {"claim_adjudication": "claim.adjudicated", "coverage": "review.coverage_completed", "regrade": "review.regrade_completed", "pocinator": "review.pocinator_completed"}
     expected_event = mapping.get(review.get("review_type")); reviewer_id = review.get("independence", {}).get("reviewer_id"); reviewer_session = review.get("independence", {}).get("reviewer_session_id")
     if not isinstance(reviewer_session, str) or not reviewer_session: raise RecordError("reviewer_session_unbound", str(reviewer_id or "unknown"))
-    _verify_review_signature(args.engagement, canonical_json_bytes(review), str(reviewer_id or ""), args.signature, args.allowed_signers)
+    authenticated_runtime = getattr(args, "_driver_authenticated_runtime", None)
+    if isinstance(authenticated_runtime, dict) and (
+        reviewer_session != authenticated_runtime.get("runtime_session_ref")
+        or review.get("independence", {}).get("reviewer_model") != authenticated_runtime.get("model")
+    ):
+        raise RecordError("driver_reviewer_runtime_binding_mismatch", str(review.get("review_id", "unknown")))
     review_secret_classes = detect_secret_classes(canonical_json_bytes(review))
     event_secret_classes = detect_secret_classes(canonical_json_bytes(event))
     if (review_secret_classes or event_secret_classes) and not args.attest_synthetic:
@@ -1728,23 +2237,61 @@ def command_record_review(args: argparse.Namespace) -> int:
     if review_errors: raise RecordError("canonical_review_invalid", review.get("review_id", "unknown"), review_errors)
     relative = f"reviews/{review['review_id']}.json"; data = canonical_json_bytes(review)
     with engagement_lock(args.engagement.absolute()) as bound_engagement:
-        destination = bound_engagement / relative
         state = reduce_engagement(bound_engagement, allowed_record_orphans={relative})
         if review.get("engagement_id") != state["engagement_id"] or event.get("engagement_id") != state["engagement_id"]: raise RecordError("cross_engagement_review", review.get("review_id", "unknown"))
-        prior_bytes = _governed_regular_bytes_or_none(destination)
-        if prior_bytes is not None and prior_bytes != data: raise RecordError("review_id_collision", review["review_id"])
-        if prior_bytes is None: atomic_write(destination, data)
+        deadline = _record_review_prewrite_deadline(args)
+        try:
+            signature_bytes = _command_bytes(
+                args, "signature", max_bytes=REVIEW_SIGNATURE_MAX_BYTES
+            )
+            allowed_signers_bytes = _command_bytes(
+                args,
+                "allowed_signers",
+                max_bytes=REVIEW_ALLOWED_SIGNERS_MAX_BYTES,
+            )
+        except (OSError, RecordError) as exc:
+            raise RecordError("reviewer_signature_invalid", str(reviewer_id or "")) from exc
+        _require_record_review_prewrite_time(deadline, "signature input")
+        verified_signer_fingerprint = _verify_review_signature(
+            bound_engagement,
+            data,
+            str(reviewer_id or ""),
+            signature_bytes,
+            allowed_signers_bytes,
+            timeout_seconds=min(
+                SSH_VERIFY_TIMEOUT_SECONDS,
+                max(0.001, deadline - time.monotonic()),
+            ),
+        )
+        _require_record_review_prewrite_time(deadline, "signature verification")
+        proposed_signer_fingerprint = review.get("independence", {}).get("reviewer_signer_fingerprint")
+        if proposed_signer_fingerprint is not None and proposed_signer_fingerprint != verified_signer_fingerprint:
+            raise RecordError("reviewer_signature_identity_mismatch", str(reviewer_id or "unknown"))
         commit = base_event(event_id=f"event-{review['review_id']}-commit", engagement_id=state["engagement_id"], recorded_at=event["recorded_at"], actor_role="broker", actor_id=args.actor_id, event_type="record.committed", rationale="Commit immutable externally-produced independent review.", payload={"record_path": relative, "record_digest": sha256_bytes(data), "record_type": "review", "record_id": review["review_id"], "record_revision": None}, session_id=args.session_id, operation_class="notebook")
-        commit_events = [c for c in read_ledger(bound_engagement, "event")
-                         if c.get("event_id") == commit["event_id"]]
-        if commit_events and commit_events[0].get("payload", {}).get("record_digest") == commit["payload"]["record_digest"]:
-            # Crash-resume: the review was already committed with identical bytes; skip re-committing
-            # (the prior run may have used different broker provenance) and only append the
-            # adjudication event.
-            _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
-            applied = next(e for e in read_ledger(bound_engagement, "event") if e.get("event_id") == event["event_id"])
-        else:
-            _append_kernel_event_idempotent(bound_engagement, commit, lock_held=True); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
+        engagement_id = str(state["engagement_id"])
+        if Path(engagement_id).name != engagement_id or engagement_id in {"", ".", ".."}:
+            raise RecordError("record_review_staging_engagement_id_invalid", engagement_id)
+        with tempfile.TemporaryDirectory(prefix="record-review-transaction-") as temporary:
+            staged_engagement = Path(temporary) / engagement_id
+            _copy_engagement_for_review_staging(
+                bound_engagement, staged_engagement, deadline=deadline
+            )
+            with engagement_lock(staged_engagement) as bound_staged_engagement:
+                _apply_record_review_transaction(
+                    bound_staged_engagement,
+                    relative=relative,
+                    data=data,
+                    commit=commit,
+                    event=event,
+                )
+        _require_record_review_prewrite_time(deadline, "live commit")
+        applied = _apply_record_review_transaction(
+            bound_engagement,
+            relative=relative,
+            data=data,
+            commit=commit,
+            event=event,
+        )
     emit({"valid": True, "review_id": review["review_id"], "event_id": applied["event_id"], "claim_truth_self_accepted": False}); return 0
 
 
@@ -1924,7 +2471,7 @@ def command_migrate(args: argparse.Namespace) -> int:
 
 
 def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False, evaluated_at: datetime | None = None) -> dict[str, object]:
-    finding = load_json(args.file); raw_digest = sha256_file(args.file); canonical_digest = sha256_bytes(canonical_json_bytes(finding)); engagement = args.engagement.absolute()
+    finding = _command_json(args, "file"); raw_digest = sha256_bytes(_command_bytes(args, "file")); canonical_digest = sha256_bytes(canonical_json_bytes(finding)); engagement = args.engagement.absolute()
     pre_state = reduce_engagement(engagement); request = pre_state["authority_requests"].get(args.authority_request_id); target = request.get("target") if request else None
     explicit_resolutions = getattr(args, "resolve_review", None)
     if isinstance(target, dict):
@@ -1932,7 +2479,20 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
         if not revise_finding_target_is_current(pre_state, request, finding): raise RecordError("finding_revision_authority_stale", finding.get("finding_id", "unknown"))
         resolutions = target["resolves_review_refs"]
         if explicit_resolutions is not None and (explicit_resolutions != sorted(set(explicit_resolutions)) or explicit_resolutions != resolutions): raise RecordError("finding_revision_resolution_set_mismatch", finding.get("finding_id", "unknown"))
-        action = _authority_action("revise-finding", action_version=2, lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, file_digest=digest, operator_id=args.operator_id, proposal=finding, target=target)
+        stored_action_path = request.get("action_path") if isinstance(request, dict) else None
+        stored_action = load_json(engagement / stored_action_path) if isinstance(stored_action_path, str) and stored_action_path else {}
+        if (
+            not isinstance(stored_action, dict)
+            or stored_action.get("action_kind") != "revise-finding"
+            or stored_action.get("action_version") != 2
+            or stored_action.get("lane_id") != args.lane_id
+            or stored_action.get("operator_id") != args.operator_id
+            or stored_action.get("file_digest") != digest
+            or stored_action.get("target") != target
+            or stored_action.get("proposal") != finding
+        ):
+            raise RecordError("approved_revision_action_record_invalid", str(args.authority_request_id))
+        action = stored_action
     else:
         digest = raw_digest
         if explicit_resolutions: raise RecordError("legacy_finding_authority_cannot_bind_resolutions", finding.get("finding_id", "unknown"))
@@ -1958,7 +2518,17 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
         if current_is_v2:
             stored_action_path = (current_request or {}).get("action_path")
             action_record_valid = bool(isinstance(stored_action_path, str) and stored_action_path and _governed_file_exists(bound_engagement / stored_action_path) and _governed_sha256_file(bound_engagement / stored_action_path) == action_digest)
-        locked_authority_valid = bool(current_request and current_request["status"] == "approved" and current_request["action_kind"] == "revise-finding" and current_request["action_digest"] == action_digest and current_request["lane_id"] == args.lane_id and current_request["scope_hash"] == state["scope_hash"] and request_environment_valid and resolved_at is not None and applied_at >= resolved_at and (expires_at is None or (applied_at <= expires_at and now <= expires_at)) and not authority_consumed and action_record_valid and action.get("executor_id") == args.executor_id and action.get("session_id") == args.session_id and action.get("operator_id") == args.operator_id == signed_operator)
+        application = current_request.get("application") if current_request else None
+        historical_principal_valid = bool(
+            not current_is_v2
+            or (
+                isinstance(application, dict)
+                and action.get("executor_id") == application.get("executor_id")
+                and action.get("session_id") == application.get("session_id")
+                and action.get("operator_id") == application.get("operator_id")
+            )
+        )
+        locked_authority_valid = bool(current_request and current_request["status"] == "approved" and current_request["action_kind"] == "revise-finding" and current_request["action_digest"] == action_digest and current_request["lane_id"] == args.lane_id and current_request["scope_hash"] == state["scope_hash"] and request_environment_valid and resolved_at is not None and applied_at >= resolved_at and (expires_at is None or (applied_at <= expires_at and now <= expires_at)) and not authority_consumed and action_record_valid and historical_principal_valid and action.get("operator_id") == args.operator_id == signed_operator)
         if not locked_authority_valid: raise RecordError("approved_authority_request_required", args.authority_request_id)
         if isinstance(target, dict) and (current_request is None or not revise_finding_target_is_current(state, current_request, finding)): raise RecordError("finding_revision_authority_stale", finding_id)
         existing_destination_digest = _governed_optional_regular_digest(destination)
@@ -1967,6 +2537,67 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
         if review_entry is None or adjudication is None or finding.get("engagement_id") != state["engagement_id"]: raise RecordError("finding_adjudication_missing", finding_id)
         latest_adjudication = state["claim_adjudications"].get(finding_id)
         if latest_adjudication is None or latest_adjudication.get("event_ref") != adjudication["event_id"] or latest_adjudication.get("review_ref") != review_id or latest_adjudication.get("status") != finding.get("claim_state") or latest_adjudication.get("expected_filing_revision") != revision: raise RecordError("finding_revision_adjudication_stale", finding_id)
+        adjudication_review = load_json(bound_engagement / review_entry["path"])
+        review_independence = adjudication_review.get("independence", {})
+        review_provenance = adjudication_review.get("provenance", {})
+        finding_provenance = finding.get("scope_provenance", {}).get("provenance", {})
+        activation_runtime_session = review_independence.get("reviewer_session_id")
+        activation_model = review_independence.get("reviewer_model")
+        activation_provider = review_provenance.get("provider")
+        if (
+            not isinstance(activation_runtime_session, str)
+            or not activation_runtime_session
+            or not isinstance(activation_model, str)
+            or not activation_model
+            or finding_provenance.get("actor")
+            != {"role": "reviewer", "id": review_independence.get("reviewer_id")}
+            or finding_provenance.get("session_id")
+            != review_independence.get("reviewer_session_id")
+            or finding_provenance.get("model") != activation_model
+            or finding_provenance.get("provider") != activation_provider
+        ):
+            raise RecordError("finding_revision_review_provenance_invalid", finding_id)
+
+        def activation_event() -> dict[str, object]:
+            event = base_event(
+                event_id=f"event-{finding_id}-revision-{revision}",
+                engagement_id=state["engagement_id"],
+                recorded_at=args.recorded_at,
+                actor_role="broker",
+                actor_id=args.executor_id,
+                event_type="finding.revised",
+                rationale=finding["change_reason"],
+                payload={
+                    "finding_id": finding_id,
+                    "finding_revision": revision,
+                    "status": finding["claim_state"],
+                    "finding_digest": digest,
+                    "adjudication_review_ref": review_id,
+                    "adjudication_review_digest": sha256_bytes(
+                        read_governed_file(bound_engagement / review_entry["path"])
+                    ),
+                    "adjudication_event_ref": adjudication["event_id"],
+                    "supersedes_revision": finding["supersedes_revision"],
+                    "change_reason": finding["change_reason"],
+                    "resolves_review_refs": resolutions,
+                    "operator_id": args.operator_id,
+                    "authority_request_ref": args.authority_request_id,
+                },
+                entity_refs=[finding_id, adjudication["event_id"]],
+                finding_refs=[finding_id],
+                review_refs=[review_id],
+                session_id=args.session_id,
+                operation_class="authority",
+                model=activation_model,
+                provider=activation_provider,
+            )
+            # The broker/parent is the recorder, but the reviewed finding content belongs to the
+            # independently authenticated claim reviewer.  Regrade independence binds to that
+            # author, not to the later authority-settlement runtime.
+            event["provenance"]["runtime_session_ref"] = activation_runtime_session
+            event["provenance"]["model"] = activation_model
+            event["provenance"]["provider"] = activation_provider
+            return event
         data = canonical_json_bytes(finding)
         existing_commit = next((c for c in read_ledger(bound_engagement, "event")
                                 if c.get("event_id") == f"event-{finding_id}-r{revision}-commit"), None)
@@ -1992,10 +2623,10 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
         if commit_events and commit_events[0].get("payload", {}).get("record_digest") == digest:
             # Crash-resume: the finding revision was already committed with identical bytes; skip
             # re-committing and only append the missing finding.revised activation event.
-            event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_bytes(read_governed_file(bound_engagement / review_entry["path"])), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "resolves_review_refs": resolutions, "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
+            event = activation_event(); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
         else:
             _append_kernel_event_idempotent(bound_engagement, commit, lock_held=True)
-            event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_bytes(read_governed_file(bound_engagement / review_entry["path"])), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "resolves_review_refs": resolutions, "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
+            event = activation_event(); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
     return {"valid": True, "finding_id": finding_id, "revision": revision, "event_id": applied["event_id"], "adjudication_separate": True}
 
 
@@ -2298,14 +2929,28 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             "entity-hypothesis_open_route": {"status": "running", "next_route": "detail", "unresolved_questions": []},
             "entity-hypothesis_unresolved_question": {"status": "running", "next_route": None, "unresolved_questions": ["detail"]},
         }
+        synthetic_queue_state["work_queue_context"] = {
+            "artifacts": {},
+            "pending_attempts": {
+                "entity-hypothesis_ran_unadjudicated": [
+                    {
+                        "attempt_id": "attempt-synthetic-unadjudicated",
+                        "kind": "primary",
+                        "recorded_at": "2026-07-10T00:00:01Z",
+                        "evidence": [],
+                    }
+                ]
+            }
+        }
         synthetic_queue_state["findings"] = {
             "entity-claim_unadjudicated": {"revision": 1, "status": "needs_review"},
             "entity-finding_revision_pending": {"revision": 1, "status": "confirmed"},
-            "entity-finding_unproved": {"revision": 1, "status": "confirmed"},
+            "entity-finding_unproved": {"revision": 1, "status": "confirmed", "claim_tuple_hash": "sha256:" + "2" * 64, "revision_event_ref": "event-entity-finding-unproved-revision"},
         }
         synthetic_queue_state["claim_adjudications"] = {
-            "entity-claim_unadjudicated": {"status": "needs_review", "event_ref": "event-claim-needs-review", "review_ref": "review-claim-needs-review", "reviewed_revision": 1, "expected_filing_revision": 2},
-            "entity-finding_revision_pending": {"status": "confirmed", "event_ref": "event-claim-confirmed", "review_ref": "review-claim-confirmed", "reviewed_revision": 1, "expected_filing_revision": 2},
+            "entity-claim_unadjudicated": {"status": "needs_review", "event_ref": "event-claim-needs-review", "review_ref": "review-claim-needs-review", "reviewer_run_id": "run-claim-needs-review", "reviewed_revision": 1, "expected_filing_revision": 2},
+            "entity-finding_revision_pending": {"status": "confirmed", "event_ref": "event-claim-confirmed", "review_ref": "review-claim-confirmed", "reviewer_run_id": "run-claim-confirmed", "reviewed_revision": 1, "expected_filing_revision": 2},
+            "entity-finding_unproved": {"status": "confirmed", "event_ref": "event-claim-unproved", "review_ref": "review-claim-unproved", "reviewer_run_id": "run-claim-unproved", "reviewed_revision": 1, "expected_filing_revision": 2},
         }
         synthetic_queue_state["outstanding_reviews"] = [{
             "review_type": "regrade",
@@ -2404,8 +3049,8 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("fresh independent actions record outcome-open reviews rather than prescribing favorable verdicts", all(fragment not in independent_action_text for fragment in ("verdict is confirmed", "verdict is verified", "verdict is reward_hacked", "verdict is coverage_dry")), independent_action_text))
 
         poc_blocked_state = copy.deepcopy(synthetic_queue_state)
-        poc_blocked_state["findings"]["finding-poc-blocked"] = {"revision": 1, "status": "confirmed"}
-        poc_blocked_state["outstanding_reviews"] = [{"review_type": "pocinator", "entity_ref": "finding-poc-blocked", "review_ref": "event-poc-blocked", "reason": "Fresh proof review could not run.", "status": "blocked", "hypothesis_ref": None, "opened_at": "2026-07-10T00:00:00Z"}]
+        poc_blocked_state["findings"]["finding-poc-blocked"] = {"revision": 1, "status": "confirmed", "claim_tuple_hash": "sha256:" + "3" * 64, "revision_event_ref": "event-finding-poc-blocked-revision"}
+        poc_blocked_state["outstanding_reviews"] = [{"review_type": "pocinator", "entity_ref": "finding-poc-blocked", "review_ref": "event-poc-blocked", "reason": "Fresh proof review could not run.", "status": "blocked", "hypothesis_ref": None, "opened_at": "2026-07-10T00:00:00Z", "opening_reviewer_run_id": "run-poc-blocked"}]
         poc_blocked_item = {"class": "review_obligation_open", "entity": {"type": "review_obligation", "id": "event-poc-blocked", "detail": "finding-poc-blocked"}, "blocking": True, "predicate": WORK_QUEUE_RULES["review_obligation_open"][0], "closes_when": WORK_QUEUE_RULES["review_obligation_open"][1]}
         poc_blocked_action = decorate_work_queue_item(poc_blocked_item, poc_blocked_state, engagement.absolute())["next_action"]
         checks.append(("blocked Pocinator debt maps to exact prior-run supersession without prescribing its outcome", poc_blocked_action["action_id"] == "supersede_blocked_review_obligation" and "event-poc-blocked" in str(poc_blocked_action["required_inputs"]) and all(fragment not in str(poc_blocked_action["required_inputs"]) for fragment in ("verdict is verified", "verdict is reward_hacked")), str(poc_blocked_action)))
@@ -2975,27 +3620,40 @@ def state_self_test() -> list[tuple[str, bool, str]]:
 
         budget_bounded = root / "budget-bounded"; shutil.copytree(engagement, budget_bounded); budget_broker_id, budget_broker_session = _local_identity("broker")
         budget_event = base_event(event_id="event-budget-bounded", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:01Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.status_changed", rationale="The configured ceiling fired after disposing three of five enumerated work items.", payload={"entity_id": engagement.name, "status": "budget_bounded", "disposed_count": 3, "enumerated_count": 5}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "budget_bounded"}], session_id=budget_broker_session, operation_class="notebook")
-        budget_proposal_path = root / "budget-bounded-event.json"; budget_proposal_path.write_bytes(canonical_json_bytes(budget_event)); budget_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(budget_bounded), "--file", str(budget_proposal_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        budget_reached = False; budget_state = None; budget_detail = budget_cli.stdout + budget_cli.stderr
-        if budget_cli.returncode == 0:
+        budget_state = None; budget_detail = ""
+        try:
+            _append_kernel_event(budget_bounded, budget_event)
             budget_state = reduce_engagement(budget_bounded); budget_progress = (budget_bounded / "progress.md").read_text(encoding="utf-8")
             budget_reached = budget_state["coverage"] == "budget_bounded" and budget_state["coverage_counts"] == {"disposed_count": 3, "enumerated_count": 5} and "Coverage: `budget_bounded`" in budget_progress and "Coverage fraction: `3/5` work items disposed (closes on visitation, not understanding)" in budget_progress
             budget_detail = str(budget_state)
+        except RecordError as exc:
+            budget_reached = False; budget_detail = exc.code
         checks.append(("budget-bounded coverage records the disposed/enumerated fraction without a review", budget_reached, budget_detail))
         checks.append(("run exhaustion does not fabricate an operator stop or park the queue", budget_state is not None and budget_state["queue_control"] == {"status": "active", "last_stop": None, "last_resume": None}, str((budget_state or {}).get("queue_control"))))
+
+        generic_budget = root / "budget-generic-public"; shutil.copytree(engagement, generic_budget); budget_proposal_path = root / "budget-bounded-event.json"; budget_proposal_path.write_bytes(canonical_json_bytes(budget_event)); budget_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(generic_budget), "--file", str(budget_proposal_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try: generic_budget_code = json.loads(budget_cli.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError): generic_budget_code = None
+        checks.append(("generic model-reachable append cannot set the outer driver's budget boundary", budget_cli.returncode != 0 and generic_budget_code == "external_driver_budget_boundary_required" and reduce_engagement(generic_budget)["coverage"] == "blocked", budget_cli.stdout + budget_cli.stderr))
 
         missing_count_refusals = []
         for missing_field in ("disposed_count", "enumerated_count"):
             missing_counts = root / f"budget-missing-{missing_field}"; shutil.copytree(engagement, missing_counts)
-            invalid_budget = json.loads(json.dumps(budget_event)); invalid_budget["event_id"] = f"event-budget-missing-{missing_field}"; invalid_budget["payload"].pop(missing_field); invalid_path = root / f"budget-missing-{missing_field}.json"; invalid_path.write_bytes(canonical_json_bytes(invalid_budget))
-            invalid_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(missing_counts), "--file", str(invalid_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False); missing_count_refusals.append(invalid_cli.returncode != 0 and reduce_engagement(missing_counts)["coverage"] == "blocked")
+            invalid_budget = json.loads(json.dumps(budget_event)); invalid_budget["event_id"] = f"event-budget-missing-{missing_field}"; invalid_budget["payload"].pop(missing_field)
+            try: _append_kernel_event(missing_counts, invalid_budget); invalid_code = None
+            except RecordError as exc: invalid_code = exc.code
+            missing_count_refusals.append(invalid_code is not None and reduce_engagement(missing_counts)["coverage"] == "blocked")
         checks.append(("budget-bounded coverage refuses either missing count", all(missing_count_refusals), str(missing_count_refusals)))
 
-        incoherent_counts = root / "budget-incoherent-counts"; shutil.copytree(engagement, incoherent_counts); incoherent_budget = json.loads(json.dumps(budget_event)); incoherent_budget["event_id"] = "event-budget-incoherent-counts"; incoherent_budget["payload"].update({"disposed_count": 6, "enumerated_count": 5}); incoherent_path = root / "budget-incoherent-counts.json"; incoherent_path.write_bytes(canonical_json_bytes(incoherent_budget)); incoherent_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(incoherent_counts), "--file", str(incoherent_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        checks.append(("budget-bounded disposed count cannot exceed its enumerated denominator", incoherent_cli.returncode != 0 and reduce_engagement(incoherent_counts)["coverage"] == "blocked", incoherent_cli.stdout + incoherent_cli.stderr))
+        incoherent_counts = root / "budget-incoherent-counts"; shutil.copytree(engagement, incoherent_counts); incoherent_budget = json.loads(json.dumps(budget_event)); incoherent_budget["event_id"] = "event-budget-incoherent-counts"; incoherent_budget["payload"].update({"disposed_count": 6, "enumerated_count": 5})
+        try: _append_kernel_event(incoherent_counts, incoherent_budget); incoherent_code = None
+        except RecordError as exc: incoherent_code = exc.code
+        checks.append(("budget-bounded disposed count cannot exceed its enumerated denominator", incoherent_code == "budget_bounded_counts_invalid" and reduce_engagement(incoherent_counts)["coverage"] == "blocked", str(incoherent_code)))
 
-        active_budget = root / "budget-active"; active_budget.mkdir(); active_budget.joinpath("scope.md").write_text(scope.replace("self-test", "budget-active"), encoding="utf-8"); initialize_engagement(active_budget, "2026-07-10T00:02:00Z"); active_event = json.loads(json.dumps(budget_event)); active_event["event_id"] = "event-budget-from-active"; active_event["engagement_id"] = active_budget.name; active_event["payload"].update({"entity_id": active_budget.name, "disposed_count": 0, "enumerated_count": 1}); active_event["state_changes"] = [{"dimension": "coverage", "entity_id": active_budget.name, "previous": "active", "current": "budget_bounded"}]; active_path = root / "budget-from-active.json"; active_path.write_bytes(canonical_json_bytes(active_event)); active_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(active_budget), "--file", str(active_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        checks.append(("active coverage can end budget-bounded", active_cli.returncode == 0 and reduce_engagement(active_budget)["coverage_counts"] == {"disposed_count": 0, "enumerated_count": 1}, active_cli.stdout + active_cli.stderr))
+        active_budget = root / "budget-active"; active_budget.mkdir(); active_budget.joinpath("scope.md").write_text(scope.replace("self-test", "budget-active"), encoding="utf-8"); initialize_engagement(active_budget, "2026-07-10T00:02:00Z"); active_event = json.loads(json.dumps(budget_event)); active_event["event_id"] = "event-budget-from-active"; active_event["engagement_id"] = active_budget.name; active_event["payload"].update({"entity_id": active_budget.name, "disposed_count": 0, "enumerated_count": 1}); active_event["state_changes"] = [{"dimension": "coverage", "entity_id": active_budget.name, "previous": "active", "current": "budget_bounded"}]
+        try: _append_kernel_event(active_budget, active_event); active_code = None
+        except RecordError as exc: active_code = exc.code
+        checks.append(("active coverage can end budget-bounded", active_code is None and reduce_engagement(active_budget)["coverage_counts"] == {"disposed_count": 0, "enumerated_count": 1}, str(active_code)))
 
         identity_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "runtime-identity", "--role", "orchestrator"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: orchestrator_identity = json.loads(identity_cli.stdout)
@@ -3293,7 +3951,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("pending review routes through a bound hypothesis and only fresh cited evidence reaches evidence_collected", escalation_row["status"] == "evidence_collected" and escalation_row["resolution_input_refs"] == ["attempt-escalation", "artifact-escalation"], str(escalation_row)))
 
         def poc_review(review_id: str, recorded_at: str, reviewer_id: str, run_id: str, verdict: str, prior_runs: list[str], mismatches: list[str], reward_indicators: list[str]) -> dict:
-            value = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "pocinator", "proposed_finding_id": "F-selftest", "recorded_at": recorded_at, "entity_ref": "F-selftest", "finding_revision": 2, "input_refs": ["F-selftest", "artifact-selftest"], "input_hash": "sha256:" + "0" * 64, "evidence_refs": ["artifact-selftest"], "rationale": f"Pocinator outcome: {verdict}.", "conflicting_evidence": [], "verdict": verdict, "corrections": mismatches, "required_next_actions": ["route back without changing finding truth"] if verdict != "verified" else [], "independence": {"reviewer_id": reviewer_id, "reviewer_run_id": run_id, "reviewer_model": "pocinator-reviewer", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Break the exact claim tuple and composition.", "originating_run_id": "event-finding-revision-2"}, "claim_tuple_hash": tuple_hash, "high_value": True, "proof_profile_ref": "artifact-selftest", "claim_mismatches": mismatches, "reward_hack_indicators": reward_indicators, "module_level_only": True, "end_to_end_composition_reviewed": False, "blocked_reason": None, "prior_review_run_ids": prior_runs}
+            value = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "pocinator", "proposed_finding_id": "F-selftest", "recorded_at": recorded_at, "entity_ref": "F-selftest", "finding_revision": 2, "input_refs": ["F-selftest", "artifact-selftest"], "input_hash": "sha256:" + "0" * 64, "evidence_refs": ["artifact-selftest"], "rationale": f"Pocinator outcome: {verdict}.", "conflicting_evidence": [], "verdict": verdict, "corrections": mismatches, "required_next_actions": ["route back without changing finding truth"] if verdict != "verified" else [], "independence": {"reviewer_id": reviewer_id, "reviewer_run_id": run_id, "reviewer_signer_fingerprint": sha256_bytes(reviewer_id.encode("utf-8")), "reviewer_model": "pocinator-reviewer", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Break the exact claim tuple and composition.", "originating_run_id": "event-finding-revision-2"}, "claim_tuple_hash": tuple_hash, "high_value": True, "proof_profile_ref": "artifact-selftest", "claim_mismatches": mismatches, "reward_hack_indicators": reward_indicators, "module_level_only": True, "end_to_end_composition_reviewed": False, "blocked_reason": None, "prior_review_run_ids": prior_runs}
             value["input_hash"] = compute_review_input_hash(engagement, value, build_reference_index(engagement)); return value
         poc_specs = [
             ("review-poc-mismatch", "2026-07-10T00:15:42Z", "poc-reviewer", "run-poc-mismatch", "claim_mismatch", ["run-regrade-selftest"], ["Proof demonstrates only the module-level mechanism."], []),
@@ -3626,7 +4284,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         except RecordError as exc: unsafe_promotion_blocked = exc.code == "memory_abstraction_not_sanitized"
         checks.append(("promote scrubbing covers every retained human text field", unsafe_promotion_blocked, "unsafe review rationale passed promotion scrub"))
         proposal_path = root / "memory-proposal.json"; write_canonical_json(proposal_path, memory_proposal); recorded_memory = record_memory_disposition(closure, proposal_path, "operator-selftest"); retry_count = reduce_engagement(closure)["event_count"]; record_memory_disposition(closure, proposal_path, "operator-selftest")
-        budget_closure = root / "budget-closure"; shutil.copytree(closure, budget_closure); append_event(budget_closure, base_event(event_id="event-budget-closure-bounded", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.500000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.status_changed", rationale="The bounded closure records two disposed work items from an enumerated set of three.", payload={"entity_id": closure.name, "status": "budget_bounded", "disposed_count": 2, "enumerated_count": 3}, state_changes=[{"dimension": "coverage", "entity_id": closure.name, "previous": "blocked", "current": "budget_bounded"}])); budget_closed = close_engagement(budget_closure, "operator-selftest", "Cleanup, budget-bounded coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
+        budget_closure = root / "budget-closure"; shutil.copytree(closure, budget_closure); _append_kernel_event(budget_closure, base_event(event_id="event-budget-closure-bounded", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.500000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.status_changed", rationale="The bounded closure records two disposed work items from an enumerated set of three.", payload={"entity_id": closure.name, "status": "budget_bounded", "disposed_count": 2, "enumerated_count": 3}, state_changes=[{"dimension": "coverage", "entity_id": closure.name, "previous": "blocked", "current": "budget_bounded"}])); budget_closed = close_engagement(budget_closure, "operator-selftest", "Cleanup, budget-bounded coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
         checks.append(("budget-bounded is terminal coverage accepted by the unchanged operator closure gate", budget_closed["coverage"] == "budget_bounded" and budget_closed["coverage_counts"] == {"disposed_count": 2, "enumerated_count": 3}, str(budget_closed)))
         closed = close_engagement(closure, "operator-selftest", "Cleanup, blocked coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
         checks.append(("closure requires one operator-reviewed memory disposition and accepts no_novel_lesson", missing_memory_blocked and recorded_memory["disposition"] == "no_novel_lesson" and retry_count + 1 == closed["event_count"] and closed["memory_disposition"]["disposition"] == "no_novel_lesson", str(closed)))
@@ -3652,7 +4310,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         # slower hosts. Bind the synthetic filing request to its actual application time instead of
         # reusing the earlier review timestamp.
         now_text = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        canonical_finding = json.loads(json.dumps(finding1)); canonical_finding.update({"finding_id": "F-canonical-public", "revision": 1, "supersedes_revision": None, "recorded_at": now_text, "change_reason": "File the separately adjudicated canonical review.", "claim_state": "supported"}); canonical_finding["adjudication"] = {"review_ref": canonical_review["review_id"], "justification": "Canonical independent review supports the bounded claim."}; canonical_finding["scope_provenance"]["provenance"]["actor"] = {"role": "reviewer", "id": "reviewer-external-canonical"}; canonical_finding["scope_provenance"]["environment_ref"] = current_environment
+        canonical_finding = json.loads(json.dumps(finding1)); canonical_finding.update({"finding_id": "F-canonical-public", "revision": 1, "supersedes_revision": None, "recorded_at": now_text, "change_reason": "File the separately adjudicated canonical review.", "claim_state": "supported"}); canonical_finding["adjudication"] = {"review_ref": canonical_review["review_id"], "justification": "Canonical independent review supports the bounded claim."}; canonical_finding["scope_provenance"]["provenance"].update({"actor": {"role": "reviewer", "id": "reviewer-external-canonical"}, "session_id": canonical_review["independence"]["reviewer_session_id"], "model": canonical_review["independence"]["reviewer_model"], "provider": canonical_review.get("provenance", {}).get("provider")}); canonical_finding["scope_provenance"]["environment_ref"] = current_environment
         for claim_name in ("mechanism", "reachability"): canonical_finding["claims"][claim_name]["evidence_refs"] = ["artifact-canonical-public"]
         for impact in canonical_finding["claims"]["impact_claims"]: impact["evidence_refs"] = ["artifact-canonical-public"]
         canonical_finding["proof"].update({"primary_attempt_refs": ["attempt-canonical-primary"], "negative_control_refs": ["attempt-canonical-negative"], "positive_control_refs": ["attempt-canonical-positive"], "replay_refs": ["attempt-canonical-replay"], "evidence_refs": ["artifact-canonical-public"]})
@@ -3749,7 +4407,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         v2_wrong_operator = root / "v2-finding-wrong-operator"; shutil.copytree(v2_source, v2_wrong_operator); wrong_operator_action, _, wrong_operator_request = prepare_v2_request(v2_wrong_operator, "request-v2-wrong-operator", canonical_finding, v2_request_time); append_event(v2_wrong_operator, wrong_operator_request); append_event(v2_wrong_operator, base_event(event_id="event-resolution-v2-wrong-operator", engagement_id=reduce_engagement(v2_wrong_operator)["engagement_id"], recorded_at=v2_resolution_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve the exact v2 proposal for principal binding testing.", payload={"request_id": "request-v2-wrong-operator", "request_event_ref": wrong_operator_request["event_id"], "action_digest": sha256_bytes(canonical_json_bytes(wrong_operator_action)), "resolution": "approved", "resolved_at": v2_resolution_time}, entity_refs=[wrong_operator_request["event_id"]], session_id=broker_session, operation_class="authority")); wrong_operator_before = len(read_ledger(v2_wrong_operator, "event")); wrong_operator_blocked = False
         try:
             with patch(f"{__name__}._require_async_authority", return_value=None): command_revise_finding(argparse.Namespace(engagement=v2_wrong_operator, file=canonical_finding_path, resolve_review=None, operator_id="operator-impossible", recorded_at=v2_apply_time, authority_request_id="request-v2-wrong-operator", lane_id=wrong_operator_action["lane_id"], executor_id=broker_id, session_id=broker_session))
-        except RecordError as exc: wrong_operator_blocked = exc.code == "approved_authority_request_required"
+        except RecordError as exc: wrong_operator_blocked = exc.code in {"approved_authority_request_required", "approved_revision_action_record_invalid"}
         checks.append(("revise-finding binds the active signed-scope operator under lock before mutation", wrong_operator_blocked and not (v2_wrong_operator / "findings/F-canonical-public/rev-1.json").exists() and len(read_ledger(v2_wrong_operator, "event")) == wrong_operator_before, "wrong operator wrote or committed a revision"))
 
         v2_conflict = root / "v2-finding-conflict"; shutil.copytree(v2_source, v2_conflict); conflicting_finding = copy.deepcopy(canonical_finding); conflicting_finding["change_reason"] = "Pre-existing unactivated bytes conflict with the requested proposal."; conflicting_path = v2_conflict / "findings/F-canonical-public/rev-1.json"; atomic_write(conflicting_path, canonical_json_bytes(conflicting_finding)); conflict_state = reduce_engagement(v2_conflict, allowed_record_orphans={"findings/F-canonical-public/rev-1.json"}); append_event(v2_conflict, base_event(event_id="event-v2-conflicting-commit", engagement_id=conflict_state["engagement_id"], recorded_at=v2_request_time, actor_role="broker", actor_id=broker_id, event_type="record.committed", rationale="Commit an unactivated conflicting revision for admission testing.", payload={"record_path": "findings/F-canonical-public/rev-1.json", "record_digest": sha256_bytes(canonical_json_bytes(conflicting_finding)), "record_type": "finding-v3", "record_id": "F-canonical-public", "record_revision": 1}, session_id=broker_session, operation_class="authority")); _, _, conflict_request = prepare_v2_request(v2_conflict, "request-v2-conflict", canonical_finding, v2_request_time); conflict_code = None
@@ -4017,12 +4675,8 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
-def main() -> int:
-    args = parser().parse_args()
-    try:
-        if args.self_test:
-            return self_test()
-        commands = {
+def _command_handlers() -> dict[str, object]:
+    return {
             "validate": command_validate,
             "runtime-identity": command_runtime_identity,
             "init": command_init,
@@ -4069,20 +4723,97 @@ def main() -> int:
             "render-proof": command_render_proof,
             "check-resume": command_check_resume,
         }
-        if args.command in commands:
-            engagement_argument = getattr(args, "engagement", None)
-            if engagement_argument is not None and args.command not in {
-                "ledger-health", "quarantine-ledger", "clear-ledger-quarantine", "check-completion-claims", *QUEUE_INSPECTION_COMMANDS
-            }:
-                require_not_quarantined(engagement_argument.absolute())
-            matrix = load_capability_matrix()
-            if args.command not in matrix["commands"]:
-                raise RecordError("operation_unclassified", f"command:{args.command}")
-            if matrix["commands"][args.command]["tier"] not in {"event_dispatch", "variant_dispatch"}:
-                classify_command(args.command, matrix=matrix)
-            return commands[args.command](args)
+
+
+def _dispatch_parsed_command(
+    args: argparse.Namespace,
+    *,
+    arguments: list[str],
+    admission_already_consumed: bool,
+) -> int:
+    commands = _command_handlers()
+    if args.command not in commands:
         parser().print_help()
         return 2
+    engagement_argument = getattr(args, "engagement", None)
+    if engagement_argument is not None and args.command not in {
+        "ledger-health",
+        "quarantine-ledger",
+        "clear-ledger-quarantine",
+        "check-completion-claims",
+        *QUEUE_INSPECTION_COMMANDS,
+    }:
+        require_not_quarantined(engagement_argument.absolute())
+    matrix = load_capability_matrix()
+    if args.command not in matrix["commands"]:
+        raise RecordError("operation_unclassified", f"command:{args.command}")
+    if matrix["commands"][args.command]["tier"] not in {"event_dispatch", "variant_dispatch"}:
+        classify_command(args.command, matrix=matrix)
+    if engagement_argument is not None and not admission_already_consumed:
+        consume_action_admission(
+            engagement=engagement_argument,
+            command=args.command,
+            arguments=arguments,
+            namespace=args,
+        )
+    handler = commands[args.command]
+    return handler(args)  # type: ignore[operator]
+
+
+def execute_broker_command(
+    *,
+    command: str,
+    arguments: list[str],
+    admitted_documents: dict[str, dict[str, object]],
+    authenticated_runtime: dict[str, object],
+) -> tuple[int, bytes]:
+    """Execute one parent-admitted mutation without exposing authority to the model process."""
+
+    output = bytearray()
+    token = _EMIT_BUFFER.set(output)
+    runtime_token = _AUTHENTICATED_RUNTIME.set(copy.deepcopy(authenticated_runtime))
+    try:
+        try:
+            args = parser().parse_args([command, *arguments])
+            setattr(args, "_driver_admitted_documents", copy.deepcopy(admitted_documents))
+            setattr(args, "_driver_authenticated_runtime", copy.deepcopy(authenticated_runtime))
+            returncode = _dispatch_parsed_command(
+                args,
+                arguments=arguments,
+                admission_already_consumed=True,
+            )
+        except RecordError as exc:
+            if command in QUEUE_INSPECTION_COMMANDS:
+                emit(queue_command_error_payload(command, exc))
+            else:
+                emit({"valid": False, "error": exc.as_dict()})
+            returncode = 1
+        return returncode, bytes(output)
+    finally:
+        _AUTHENTICATED_RUNTIME.reset(runtime_token)
+        _EMIT_BUFFER.reset(token)
+
+
+def main() -> int:
+    args = parser().parse_args()
+    try:
+        if args.self_test:
+            return self_test()
+        engagement_argument = getattr(args, "engagement", None)
+        if engagement_argument is not None and isinstance(args.command, str):
+            forwarded = forward_action_to_broker(
+                command=args.command,
+                arguments=sys.argv[2:],
+            )
+            if forwarded is not None:
+                returncode, output = forwarded
+                sys.stdout.buffer.write(output)
+                return returncode
+        return _dispatch_parsed_command(
+            args,
+            arguments=sys.argv[2:],
+            admission_already_consumed=False,
+        )
     except RecordError as exc:
         if getattr(args, "command", None) in QUEUE_INSPECTION_COMMANDS:
             emit(queue_command_error_payload(args.command, exc))

@@ -547,6 +547,31 @@
           "type": "integer",
           "minimum": 1
         },
+        "driver_run_ref": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        "driver_state_hash": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "budget_kind": {
+          "enum": ["max_sessions", "max_wall_seconds"]
+        },
+        "max_sessions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_wall_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "sessions_started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
         "decisive_falsifiers": {
           "type": "array",
           "minItems": 1,

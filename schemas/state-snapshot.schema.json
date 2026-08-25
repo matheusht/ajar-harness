@@ -25,11 +25,14 @@
     "outstanding_reviews",
     "proof_reviews",
     "regrade_reviews",
+    "reviewer_run_models",
     "latest_coverage_review",
     "coverage",
     "coverage_relevant_sequence",
+    "coverage_relevant_event_ref",
     "queue_control",
     "work_queue",
+    "work_queue_context",
     "reports",
     "report_refs",
     "submission_refs",
@@ -391,6 +394,18 @@
           "change_reason": {
             "type": "string",
             "minLength": 1
+          },
+          "claim_tuple_hash": {
+            "oneOf": [
+              {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+              {"type": "null"}
+            ]
+          },
+          "revision_event_ref": {
+            "oneOf": [
+              {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+              {"type": "null"}
+            ]
           }
         }
       }
@@ -400,11 +415,18 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["status", "event_ref", "review_ref", "reviewed_revision", "expected_filing_revision", "recorded_at", "event_sequence", "input_refs"],
+        "required": ["status", "event_ref", "review_ref", "reviewer_run_id", "reviewer_signer_fingerprint", "reviewed_revision", "expected_filing_revision", "recorded_at", "event_sequence", "input_refs"],
         "properties": {
           "status": {"enum": ["needs_review", "supported", "confirmed", "contaminated", "refuted"]},
           "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "reviewer_run_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "reviewer_signer_fingerprint": {
+            "oneOf": [
+              {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+              {"type": "null"}
+            ]
+          },
           "reviewed_revision": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
           "expected_filing_revision": {"type": "integer", "minimum": 1},
           "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
@@ -462,6 +484,9 @@
           "opened_at": {
             "type": "string"
           },
+          "opening_reviewer_run_id": {
+            "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+          },
           "required_claim_status": {
             "const": "refuted"
           },
@@ -485,6 +510,12 @@
     "coverage_relevant_sequence": {
       "type": "integer",
       "minimum": 0
+    },
+    "coverage_relevant_event_ref": {
+      "oneOf": [
+        {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+        {"type": "null"}
+      ]
     },
     "coverage_counts": {
       "oneOf": [
@@ -1044,6 +1075,71 @@
         }
       ]
     },
+    "work_queue_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_attempts", "artifacts"],
+      "properties": {
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["created_at", "environment_ref"],
+            "properties": {
+              "created_at": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+              },
+              "environment_ref": {
+                "oneOf": [
+                  {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+                  {"type": "null"}
+                ]
+              }
+            }
+          }
+        },
+        "pending_attempts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["attempt_id", "kind", "recorded_at", "evidence"],
+              "properties": {
+                "attempt_id": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                },
+                "kind": {
+                  "enum": ["primary", "negative_control", "positive_control", "replay", "environment_check", "source_trace"]
+                },
+                "recorded_at": {
+                  "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["reference", "recorded_at"],
+                    "properties": {
+                      "reference": {
+                        "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+                      },
+                      "recorded_at": {
+                        "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "source_hashes": {
       "type": "object",
       "additionalProperties": false,
@@ -1122,6 +1218,7 @@
           "review_refs",
           "reviewer_ids",
           "reviewer_run_ids",
+          "reviewer_signer_fingerprints",
           "terminal_status"
         ],
         "properties": {
@@ -1161,6 +1258,15 @@
             "items": {
               "type": "string"
             }
+          },
+          "reviewer_signer_fingerprints": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+                {"type": "null"}
+              ]
+            }
           }
         }
       }
@@ -1170,13 +1276,25 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["event_ref", "review_ref", "reviewer_run_id", "verdict"],
+        "required": ["event_ref", "review_ref", "reviewer_run_id", "reviewer_signer_fingerprint", "verdict"],
         "properties": {
           "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "reviewer_run_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "reviewer_signer_fingerprint": {
+            "oneOf": [
+              {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+              {"type": "null"}
+            ]
+          },
           "verdict": {"enum": ["confirmed", "confirmed_with_correction", "needs_more_evidence", "escalation_found", "blocked", "refuted"]}
         }
+      }
+    },
+    "reviewer_run_models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "null"]
       }
     },
     "latest_coverage_review": {

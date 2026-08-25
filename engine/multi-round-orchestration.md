@@ -131,6 +131,12 @@ defined in `persistence.md` and `loop.md`:
   and the reduced queue is empty. A non-empty operator-only queue pauses rather than completes.
   Registry exhaustion, un-attempted compositions, and a recent blind round that produced no new
   family are evidence supplied to that review, not alternate stop rules.
+- **The outer driver dispatches; the model does not loop.** `tools/run-work-queue.py` launches one
+  fresh session for one reducer-selected action, then recomputes. Required session-count and wall-time
+  admission ceilings live outside the session. Reaching one before another action is admitted records
+  `budget_bounded`, which is a resumable non-completion verdict; an already-admitted trusted record
+  transaction quiesces before the reducer decides terminal state, with any wall overrun exposed in
+  the driver result. Operator-only and operator-parked states pause without polling.
 - **The persistence bar scales with evidence.** A confirmed primitive, a `strong` routing signal, a
   ghsa-fix-diff anchor, or an operator prior expands or sharpens the bounded work represented in the
   queue and forbids an early dry verdict (a held vector = wrong turn). It does not create a second

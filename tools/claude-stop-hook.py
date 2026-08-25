@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
+from driver_action_admission import BROKER_ENDPOINT_ENV, forward_stop_check_to_broker
 from engagement_state import (
     _reduce_engagement_unchecked,
     append_event,
@@ -52,6 +53,7 @@ class ReleaseTurn(Exception):
 class HookInput:
     session_ref: str
     stop_hook_active: bool
+    request_ref: str
 
 
 @dataclass(frozen=True)
@@ -118,11 +120,16 @@ def parse_hook_input() -> HookInput:
         raise ReleaseTurn
 
     # The whitelist ends here. In particular transcript_path, last_assistant_message, cwd,
-    # background_tasks, session_crons, and all unknown fields are never returned to the caller.
+    # background_tasks, session_crons, and all unknown fields are never returned or persisted.
+    # Only a domain-separated digest of the exact delivery crosses to the ephemeral parent cache,
+    # allowing transport retries to be idempotent without retaining model content.
     session_ref = sha256_bytes(SESSION_NAMESPACE + session_id.encode("utf-8"))
     return HookInput(
         session_ref=session_ref,
         stop_hook_active=incoming["stop_hook_active"],
+        request_ref=sha256_bytes(
+            b"llm-redteam-harness:session-end-request:v1:" + raw
+        ),
     )
 
 
@@ -428,6 +435,15 @@ def output_for(decision: EndDecision, gate: GateView) -> dict[str, Any]:
 
 def run_hook() -> dict[str, Any]:
     hook_input = parse_hook_input()
+    if os.environ.get(BROKER_ENDPOINT_ENV):
+        # A driver-scoped model cannot write the target.  The hook therefore forwards only its
+        # opaque, parent-bound session digest and re-entrancy bit; the trusted parent derives the
+        # queue, appends the audit event, and returns the small Claude Stop response.
+        return forward_stop_check_to_broker(
+            hook_session_ref=hook_input.session_ref,
+            stop_hook_active=hook_input.stop_hook_active,
+            request_ref=hook_input.request_ref,
+        )
     baseline = scoped_session_baseline()
     logical_engagement = active_engagement_path()
     with existing_engagement_transaction(logical_engagement) as engagement:

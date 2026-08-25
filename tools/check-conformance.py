@@ -145,6 +145,40 @@ def check_completion_claims():
     record(result.returncode == 0, "completion-claims: hermetic-only synthetic regression suite", (result.stdout + result.stderr).strip())
 
 
+def check_external_work_queue_driver():
+    """The Strategy-B local driver and its bounded session launcher are harness contracts."""
+    print("\n[external-work-queue] target-local driver and session launcher")
+    driver_label = "external work-queue driver regression suite"
+    if sys.platform != "darwin":
+        driver_label = (
+            "portable external work-queue driver regression suite "
+            "(Darwin launcher integrations not exercised)"
+        )
+    scripts = [
+        ("record-review-atomicity-test.py", "signed record-review transaction regression suite"),
+        ("work-queue-admission-test.py", "work-queue admission predicate regression suite"),
+        ("work-queue-driver-test.py", driver_label),
+    ]
+    if sys.platform == "darwin":
+        scripts.insert(
+            0,
+            ("claude-work-session-test.py", "bounded Claude work-session regression suite"),
+        )
+    else:
+        print(
+            "  skip bounded Claude work-session regression suite "
+            f"(unsupported on {sys.platform}; Darwin launcher integration not exercised)"
+        )
+    for script, label in scripts:
+        result = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "tools", script)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        record(result.returncode == 0, label, (result.stdout + result.stderr).strip())
+
+
 def check_routes_to(name, subdir, fm, pattern_ids):
     line = re.search(r"^routes_to:\s*(\[[^\]]*\])", fm, re.MULTILINE)
     if not line:
@@ -1865,6 +1899,7 @@ def main():
     check_capability_scope_flags()
     check_capability_must_reject()
     check_completion_claims()
+    check_external_work_queue_driver()
     check_tool_family_manifests()
     check_tool_family_must_reject()
     check_payload_proposals()

@@ -36,6 +36,60 @@ run, blocking work continues the loop and a non-empty queue containing only oper
 Pending authority likewise pauses agent work; none of those states is a coverage verdict.
 A dry round is a round that enqueued no new work. It is an observation, not permission to stop.
 
+### External queue driver
+
+`tools/run-work-queue.py` owns repetition outside model sessions. It reads the reducer's exact
+`next` action, launches one fresh no-persistence session in the target repository, and recomputes
+the ledger before selecting again. The model receives one item and has no completion verb: terminal
+completion remains the reducer-owned `coverage_dry` plus empty-queue pair.
+
+Both outer admission ceilings are mandatory. A typical target-local invocation is:
+
+```sh
+./.venv/bin/python tools/run-work-queue.py run \
+  --workspace /absolute/path/to/target \
+  --engagement /absolute/path/to/target/engagements/<id> \
+  --runtime claude-code --model <worker-model> \
+  --reviewer-model <reviewer-model-a> \
+  --reviewer-model <reviewer-model-b> \
+  --reviewer-model <reviewer-model-c> \
+  --max-sessions 12 --max-wall-seconds 3600 \
+  --session-timeout-seconds 600
+```
+
+The driver never discovers or mounts target workspaces centrally. It binds the supplied target-local
+directories, holds one nonblocking target-local driver lock for the run, strips operator-signature
+material from child sessions, freezes the ordered repeated `--reviewer-model` pool, and installs the
+ledger-aware Stop hook. For each fresh review it chooses the first pool entry unequal to the ordinary
+model, the exact subject-origin model, and every reviewer model in the action's required prior-run
+lineage. If none is available, it returns `reviewer_model_unavailable` before launching anything;
+that is an operator-visible pause, not a budget retry. The session remains the action's cognitive
+principal; canonical Notebook writes use the action's separate process-bound broker execution
+principal. Reaching either outer budget before another action is admitted atomically records
+`budget_bounded`; it is non-completion. Once a trusted record transaction is admitted, cancellation
+would make its commit state unknowable, so the broker must quiesce it even if that crosses the wall
+deadline. The reducer is recomputed afterward and terminal state takes precedence; the result
+exposes total `wall_seconds` and nonzero `wall_deadline_overrun_seconds` rather than claiming a hard
+wall. A typed operator stop wins before the next admission and parks the queue. An operator-only
+queue pauses without spinning. A process signal stops
+after the current bounded session and reports `interrupted_unrecorded`; resume from the unchanged
+ledger or use the typed operator stop/resume commands when a durable park is intended.
+
+The Darwin launcher denies model filesystem writes except beneath a temporary, intended-ephemeral
+session scratch directory. On cleanup and parent death it drains the original process group and every same-UID
+process still holding the inherited sentinel vnode; this covers ordinary `setsid`/double-fork
+descendants. It also inherits a conservative `RLIMIT_CPU`. It does **not** discover a deliberate
+daemon that closes the sentinel descriptor before detaching, and the profile still permits reads
+and network. Its writable scratch also has no aggregate byte/file quota, so CPU, output, and time
+limits do not bound total disk consumption. The configured wall timeout therefore bounds the
+leader/well-behaved descendants, not that adversarial residual. Read isolation is tracked by #82;
+stronger lifecycle, network, and storage containment is tracked by #83. Do not describe the current
+launcher as a universal wall-time or aggregate-resource security boundary.
+
+Cleanup itself has explicit time, entry, depth, and work bounds. A bound or filesystem-invariant
+failure is fail-closed: a `.cleanup-failed` marker remains in the temp parent, the exact private
+scratch may remain for operator cleanup, and the session does not report successful cleanup.
+
 ## Ladder (default order; reorder by winners per engagement)
 1. `direct` — also serves as the **negative control** (should refuse)
 2. `decomposition`

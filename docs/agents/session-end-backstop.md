@@ -43,19 +43,26 @@ The scoped-session driver additionally exports the exact pre-session record head
 - `HARNESS_EXPECTED_SOURCE_HASHES` is a JSON object containing exactly the reduced
   `events.jsonl`, `attempts.jsonl`, and `artifacts.jsonl` source hashes.
 
-Both variables are required together. While holding the record-kernel lock, the hook verifies the
-event prefix and both non-event ledgers against that head. It ignores only trailing
-`session.end_checked` events for the same opaque Claude session. Any other event or source change
-releases immediately, without appending another check, so the outer driver can recompute after one
-substantive `next` action. Sessions not launched by that driver omit both variables and retain the
-generic behavior described below.
+Both variables are required together. A driver-scoped hook does not write the target: it sends a
+separate `session_end_check` request to the parent broker containing only the authenticated runtime
+UUID, the one-way hash of the hook session id, `stop_hook_active`, and a one-way digest of the exact
+hook delivery. The broker authenticates the Unix peer's exact OS session, retains the engagement
+inode, and rechecks the source head, scope bytes, canonical queue gate, and any schema-valid
+`session.end_checked` tail for that same hook hash under the record-kernel lock. Exact delivery
+retries return the cached response without another append. A runtime gets at most the documented
+six blocking appends plus one release, and consumption permits only one release for the stale
+session. This audit RPC never consumes, rearms, or substitutes the one selected work action. A
+replaced endpoint can cause only a release/denial, never a target mutation. Sessions not launched by
+that driver omit the endpoint and retain the generic behavior described below.
 
 ## Recorded behavior
 
 When active blocking work remains, reduction, streak derivation, the typed
 `session.end_checked` append, and the post-append invariant check share one existing target-local
-record-kernel lock. The event contains only opaque session/turn references, counts, and state/queue
-digests. Raw stdin, transcript paths, and assistant messages are neither retained nor logged.
+record-kernel lock. In driver mode the trusted parent performs that transaction; outside driver mode
+the hook performs the same generic transaction directly. The event contains only opaque session/turn
+references, counts, and state/queue digests. Raw stdin, transcript paths, and assistant messages are
+neither retained nor logged.
 
 The first six consecutive blocking responses use the exact documented top-level shape
 `{"decision":"block","reason":"..."}`. The seventh releases, records
@@ -63,7 +70,10 @@ The first six consecutive blocking responses use the exact documented top-level 
 `systemMessage` field. It never uses Stop `additionalContext` for a release because that field
 continues the conversation and spends another continuation. The message directs the operator to
 the canonical `next` command. Every non-hook-forced delivery starts a new streak;
-`stop_hook_active: true` without a matching opaque session record releases.
+`stop_hook_active: true` without a matching opaque session record releases. Once the selected driver
+action has been consumed, a blocking queue produces one audit-only release at the outer-driver
+boundary instead of continuing inside the stale session; the outer driver then reduces and selects
+again.
 
 Clean releases (inactive, parked, terminal/empty, and operator-only queues) do not append session
 events. This keeps the backstop from becoming queue machinery or review-freshness noise.

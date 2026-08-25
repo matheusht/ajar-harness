@@ -63,6 +63,7 @@ NEW_SCHEMA_FILES = (
     "ab-study-evidence.schema.json",
     "migration-artifact-review.schema.json",
     "flow-telemetry.schema.json",
+    "work-queue-driver.schema.json",
 )
 SECRET_PATTERNS = {
     "authorization_header": re.compile(rb"authorization\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
@@ -107,6 +108,7 @@ RECORD_SCHEMA_FILES = {
     "ab-study-evidence": "ab-study-evidence.schema.json",
     "migration-artifact-review": "migration-artifact-review.schema.json",
     "flow-telemetry": "flow-telemetry.schema.json",
+    "work-queue-driver": "work-queue-driver.schema.json",
     "finding-v2-legacy": "finding.schema.json",
 }
 

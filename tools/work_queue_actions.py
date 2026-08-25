@@ -11,6 +11,7 @@ from typing import Any
 
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import WORK_QUEUE_CLASS_ORDER, _filing_blocking_review_error, finding_revision_lane_id, hypothesis_dispositions_hash
+from work_queue_admission import build_action_admission
 
 
 SESSION_KINDS = frozenset({"ordinary_bounded", "fresh_independent_reviewer", "operator_required"})
@@ -225,12 +226,14 @@ def _settle_approved_revision_action(engagement: Path, request: dict[str, Any]) 
             "--recorded-at", "<recorded-at>",
             "--authority-request-id", str(request["request_id"]),
             "--lane-id", str(request["lane_id"]),
-            "--executor-id", str(application["executor_id"]),
-            "--session-id", str(application["session_id"]),
+            "--executor-id", "<broker-id>",
+            "--session-id", "<broker-session-id>",
         ],
         [
             _required_input("proposal_file", "path", "<approved-finding-proposal-json>", f"canonical bytes equal proposal inside {application['action_path']}", f"sha256 is exact approved target digest {target['file_digest']}"),
             _required_input("recorded_at", "rfc3339", "<recorded-at>", "fresh current command time", "the atomic command applies while authority is live or records objective expiry after the recorded deadline"),
+            _required_input("broker_id", "string", "<broker-id>", "current runtime-identity broker actor id; the original requester remains immutable provenance only"),
+            _required_input("broker_session_id", "string", "<broker-session-id>", "current runtime-identity broker session id; settlement may run in a fresh bounded session"),
         ],
         session_kind="ordinary_bounded",
         principal="broker",
@@ -566,5 +569,7 @@ def decorate_work_queue_item(item: dict[str, Any], state: dict[str, Any], engage
             action = _review_action("record_cold_coverage_review", engagement, review_type="coverage", entity_type=entity_type, entity_id=entity_id, requirements=["fresh cold review binds every current hypothesis disposition", "records whichever schema-valid outcome the cold review reaches: continue, coverage_dry, or blocked", "budget_bounded is reserved to the outer driver"], effect="conditional")
     else:  # pragma: no cover - guarded by the closed order
         raise RecordError("work_queue_item_unmapped", str(item_class))
+    if action.get("launchable") is True:
+        action["admission"] = build_action_admission(item, action, state, engagement)
     result["next_action"] = action
     return result

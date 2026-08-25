@@ -96,6 +96,7 @@
         "engagement.reopened",
         "engagement.closed",
         "authority.requested",
+        "authority.expired",
         "authority.resolved",
         "scope.amendment_proposed",
         "artifact.classified"
@@ -1690,11 +1691,24 @@
     },
     {
       "if": {
-        "properties": {"event_type": {"enum": ["authority.requested", "authority.resolved", "scope.amendment_proposed", "artifact.classified"]}},
+        "properties": {"event_type": {"enum": ["authority.requested", "authority.expired", "authority.resolved", "scope.amendment_proposed", "artifact.classified"]}},
         "required": ["event_type"]
       },
       "then": {
         "required": ["operation_class"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "authority.expired"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["request_id", "request_event_ref", "action_digest", "expires_at", "status"]
+          }
+        }
       }
     },
     {

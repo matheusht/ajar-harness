@@ -28,9 +28,11 @@
     "confirm-zone2": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["fresh_operator_console", "signed_scope", "active_environment", "cleanup_obligation"], "tier": "real_world"},
     "export-flow": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "export-telemetry": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
+    "gate": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": ["reduced_state", "state_source_hashes"], "tier": "notebook"},
     "generate-report": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "filed_finding_revision"], "tier": "authority"},
     "init": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope", "fresh_operator_console"], "tier": "authority"},
     "ledger-health": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
+    "list": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": ["reduced_state", "state_source_hashes"], "tier": "notebook"},
     "migrate": {
       "allowed_roles": ["migration", "operator", "broker"],
       "blocking_scope": "variant_dispatch",
@@ -43,6 +45,7 @@
       }
     },
     "migrate-kernel": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["signed_scope_draft", "fresh_operator_console"], "tier": "authority"},
+    "next": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": ["reduced_state", "state_source_hashes"], "tier": "notebook"},
     "normalize-runtime": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "preflight": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "session_provenance"], "tier": "notebook"},
     "quarantine-ledger": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["trusted_scope_prefix", "pinned_operator_signer", "fresh_operator_console"], "tier": "authority"},
@@ -78,6 +81,7 @@
     "resolve-authority": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["fresh_operator_console", "exact_request_digest"], "tier": "authority"},
     "revise-finding": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication"], "tier": "authority"},
     "score-telemetry": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
+    "settle-approved-revision": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication", "recorded_expiry", "fresh_current_time", "session_provenance"], "tier": "authority"},
     "validate": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"}
   },
   "events": {
@@ -92,6 +96,7 @@
       }
     },
     "authority.requested": {"allowed_roles": ["orchestrator", "hunter", "reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["action_digest", "lane_id"], "tier": "notebook"},
+    "authority.expired": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["approved_authority_request", "recorded_expiry", "fresh_current_time", "session_provenance"], "tier": "notebook"},
     "authority.resolved": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["exact_request_digest", "fresh_operator_console"], "tier": "authority"},
     "candidate.deferred": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["candidate"], "tier": "notebook"},
     "candidate.proposed": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["observation", "routing_assessment", "ex_ante"], "tier": "notebook"},

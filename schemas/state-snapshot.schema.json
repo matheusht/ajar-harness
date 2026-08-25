@@ -24,7 +24,10 @@
     "claim_adjudications",
     "outstanding_reviews",
     "proof_reviews",
+    "regrade_reviews",
+    "latest_coverage_review",
     "coverage",
+    "coverage_relevant_sequence",
     "queue_control",
     "work_queue",
     "reports",
@@ -397,13 +400,20 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["status", "event_ref", "review_ref", "reviewed_revision", "expected_filing_revision"],
+        "required": ["status", "event_ref", "review_ref", "reviewed_revision", "expected_filing_revision", "recorded_at", "event_sequence", "input_refs"],
         "properties": {
           "status": {"enum": ["needs_review", "supported", "confirmed", "contaminated", "refuted"]},
           "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "reviewed_revision": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
-          "expected_filing_revision": {"type": "integer", "minimum": 1}
+          "expected_filing_revision": {"type": "integer", "minimum": 1},
+          "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
+          "event_sequence": {"type": "integer", "minimum": 1},
+          "input_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          }
         }
       }
     },
@@ -451,6 +461,15 @@
           },
           "opened_at": {
             "type": "string"
+          },
+          "required_claim_status": {
+            "const": "refuted"
+          },
+          "source_review_ref": {
+            "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+          },
+          "resolution_input_refs": {
+            "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
           }
         }
       }
@@ -462,6 +481,10 @@
         "coverage_dry",
         "budget_bounded"
       ]
+    },
+    "coverage_relevant_sequence": {
+      "type": "integer",
+      "minimum": 0
     },
     "coverage_counts": {
       "oneOf": [
@@ -1055,7 +1078,9 @@
           "source_observation_ref",
           "card_ids",
           "status",
-          "rationale"
+          "rationale",
+          "hypothesis_ref",
+          "primary_attempt_ref"
         ],
         "properties": {
           "routing_event_id": {
@@ -1075,6 +1100,12 @@
           },
           "rationale": {
             "type": "string"
+          },
+          "hypothesis_ref": {
+            "type": ["string", "null"]
+          },
+          "primary_attempt_ref": {
+            "type": ["string", "null"]
           }
         }
       }
@@ -1090,6 +1121,7 @@
           "verdict",
           "review_refs",
           "reviewer_ids",
+          "reviewer_run_ids",
           "terminal_status"
         ],
         "properties": {
@@ -1123,9 +1155,46 @@
             "items": {
               "type": "string"
             }
+          },
+          "reviewer_run_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
+    },
+    "regrade_reviews": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event_ref", "review_ref", "reviewer_run_id", "verdict"],
+        "properties": {
+          "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "reviewer_run_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "verdict": {"enum": ["confirmed", "confirmed_with_correction", "needs_more_evidence", "escalation_found", "blocked", "refuted"]}
+        }
+      }
+    },
+    "latest_coverage_review": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_ref", "event_sequence", "review_refs", "verdict", "hypothesis_dispositions_hash"],
+          "properties": {
+            "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "event_sequence": {"type": "integer", "minimum": 1},
+            "review_refs": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"},
+            "verdict": {"enum": ["continue", "coverage_dry", "blocked"]},
+            "hypothesis_dispositions_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
+          }
+        }
+      ]
     },
     "reports": {
       "type": "object",
@@ -1172,7 +1241,7 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["request_id", "request_event_ref", "action_kind", "action_digest", "lane_id", "status", "requested_at", "scope_hash", "environment_ref", "expires_at", "resolved_at", "resolution_event_ref", "target"],
+        "required": ["request_id", "request_event_ref", "action_kind", "action_digest", "lane_id", "status", "requested_at", "scope_hash", "environment_ref", "expires_at", "resolved_at", "resolution_event_ref", "target", "application"],
         "properties": {
           "request_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
           "request_event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
@@ -1186,8 +1255,8 @@
           "environment_ref": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}, {"type": "null"}]},
           "expires_at": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"}, {"type": "null"}]},
           "resolved_at": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"}, {"type": "null"}]},
-          "resolution_event_ref": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}, {"type": "null"}]}
-          ,"target": {
+          "resolution_event_ref": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}, {"type": "null"}]},
+          "target": {
             "oneOf": [
               {"type": "null"},
               {
@@ -1207,6 +1276,22 @@
                     "uniqueItems": true
                   },
                   "file_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
+                }
+              }
+            ]
+          },
+          "application": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["action_path", "executor_id", "session_id", "operator_id"],
+                "properties": {
+                  "action_path": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"},
+                  "executor_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+                  "session_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+                  "operator_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}
                 }
               }
             ]

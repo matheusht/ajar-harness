@@ -711,7 +711,7 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             (("precreation_classification_event_ref",), {"event"}), (("supersedes_artifact_id",), {"artifact"}),
         ],
         "review": [
-            (("input_refs",), {"attempt", "finding", "artifact", "review", "environment", "report"}),
+            (("input_refs",), {"attempt", "finding", "artifact", "review", "environment", "report", "event"}),
             (("evidence_refs",), {"attempt", "artifact"}), (("conflicting_evidence",), {"attempt", "artifact"}),
         ],
         "engagement-event": [

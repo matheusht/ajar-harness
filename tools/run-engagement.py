@@ -18,7 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,6 +44,8 @@ from engagement_records import (
     write_canonical_json,
 )
 from engagement_state import (
+    WORK_QUEUE_CLASS_ORDER,
+    WORK_QUEUE_RULES,
     append_attempt,
     append_event,
     _append_kernel_event,
@@ -61,6 +63,7 @@ from engagement_state import (
     compute_record_hash,
     compute_review_input_hash,
     finding_revision_lane_id,
+    hypothesis_dispositions_hash,
     bound_engagement_lock,
     bound_engagement_source,
     engagement_lock,
@@ -79,6 +82,7 @@ from engagement_state import (
     require_repair_authority_from_intact_prefix,
     require_scope_zone2_authorized,
     revise_finding_target_is_current,
+    _filing_blocking_review_error,
     register_artifact,
     _register_legacy_artifact,
     repair_ledger_tail,
@@ -95,6 +99,13 @@ from reporting import accept_report, generate_report, record_submission
 from research_telemetry import _remove_published_output, export_telemetry, score_telemetry
 from decision6_capabilities import artifact_variant, classify_command, classify_event, load_capability_matrix, require_actor
 from engagement_quarantine import QUARANTINE_REASONS, _open_directory, _require_bound_parent_safe, atomic_publish_offline_tree, atomic_write_offline, clear_marker_exact, create_marker_exclusive, inspect_quarantine, quarantined_ancestor, read_safe_offline_file, read_safe_offline_tree, require_safe_offline_input, require_safe_offline_output
+from work_queue_actions import (
+    QUEUE_INSPECTION_COMMANDS,
+    decorate_work_queue_item,
+    queue_command_error_payload,
+    queue_command_payload,
+    queue_gate_exit,
+)
 
 
 def emit(value: object) -> None:
@@ -663,7 +674,7 @@ def command_append_event(args: argparse.Namespace) -> int:
     actor = proposal.get("actor", {})
     if capability["tier"] != "notebook":
         raise RecordError("canonical_authority_command_required", proposal.get("event_type", "unknown"))
-    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "coverage.reopened"}:
+    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "authority.expired", "coverage.reopened"}:
         raise RecordError("canonical_notebook_command_required", proposal.get("event_type", "unknown"))
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-event:{proposal.get('event_type','event')}:{proposal.get('event_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
     if proposal.get("operation_class") != capability["tier"]:
@@ -1187,6 +1198,86 @@ def command_resolve_authority(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_settle_approved_revision(args: argparse.Namespace) -> int:
+    """Atomically apply a live approved revision or record its objective expiry."""
+
+    capability = classify_command("settle-approved-revision")
+    require_actor(capability, "broker")
+    _require_decision6_kernel(args.engagement)
+    _require_local_provenance("broker", args.executor_id, args.session_id)
+    try:
+        recorded = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RecordError("authority_settlement_time_invalid", args.authority_request_id) from exc
+    engagement = args.engagement.absolute()
+    with engagement_lock(engagement) as bound_engagement:
+        now = datetime.now(timezone.utc)
+        if recorded.tzinfo is None or abs((recorded - now).total_seconds()) > 60:
+            raise RecordError("authority_settlement_time_not_current", args.authority_request_id)
+        state = reduce_engagement(bound_engagement)
+        request = state["authority_requests"].get(args.authority_request_id)
+        application = request.get("application") if isinstance(request, dict) else None
+        if (
+            request is None
+            or request.get("action_kind") != "revise-finding"
+            or not isinstance(request.get("target"), dict)
+            or not isinstance(application, dict)
+            or request.get("lane_id") != args.lane_id
+            or application.get("executor_id") != args.executor_id
+            or application.get("session_id") != args.session_id
+            or application.get("operator_id") != args.operator_id
+        ):
+            raise RecordError("approved_revision_settlement_invalid", args.authority_request_id)
+        expiry_event_id = f"event-authority-expired-{args.authority_request_id}"
+        if request.get("status") == "expired":
+            existing = next((event for event in read_ledger(bound_engagement, "event") if event["event_id"] == expiry_event_id), None)
+            if (
+                not isinstance(existing, dict)
+                or request.get("resolution_event_ref") != expiry_event_id
+                or existing.get("recorded_at") != args.recorded_at
+                or existing.get("actor") != {"role": "broker", "id": args.executor_id}
+                or existing.get("provenance", {}).get("session_id") != args.session_id
+                or existing.get("payload", {}).get("request_id") != args.authority_request_id
+            ):
+                raise RecordError("approved_revision_settlement_replay_invalid", args.authority_request_id)
+            result: dict[str, object] = {"ok": True, "request_id": args.authority_request_id, "status": "expired", "event_ref": existing["event_id"], "replayed": True}
+        elif request.get("status") != "approved":
+            raise RecordError("approved_revision_settlement_invalid", args.authority_request_id)
+        else:
+            expires_at = datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00")) if request.get("expires_at") is not None else None
+            if expires_at is not None and now > expires_at:
+                if recorded <= expires_at:
+                    raise RecordError("authority_settlement_time_invalid", args.authority_request_id)
+                event = base_event(
+                    event_id=expiry_event_id,
+                    engagement_id=state["engagement_id"],
+                    recorded_at=args.recorded_at,
+                    actor_role="broker",
+                    actor_id=args.executor_id,
+                    event_type="authority.expired",
+                    rationale="Approved authority passed its recorded expiry before application.",
+                    payload={
+                        "request_id": args.authority_request_id,
+                        "request_event_ref": request["request_event_ref"],
+                        "action_digest": request["action_digest"],
+                        "expires_at": request["expires_at"],
+                        "status": "expired",
+                    },
+                    entity_refs=[request["request_event_ref"]],
+                    session_id=args.session_id,
+                    operation_class="notebook",
+                )
+                record = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
+                result = {"ok": True, "request_id": args.authority_request_id, "status": "expired", "event_ref": record["event_id"], "replayed": False}
+            else:
+                if expires_at is not None and recorded > expires_at:
+                    raise RecordError("authority_settlement_time_invalid", args.authority_request_id)
+                result = _apply_finding_revision(argparse.Namespace(**{**vars(args), "engagement": bound_engagement}), lock_held=True, evaluated_at=now)
+                result = {**result, "request_id": args.authority_request_id, "status": "applied"}
+    emit(result)
+    return 0
+
+
 def command_confirm_zone2(args: argparse.Namespace) -> int:
     proposal = load_json(args.file); plan = load_json(args.plan)
     capability = classify_command("confirm-zone2"); state = reduce_engagement(args.engagement.absolute())
@@ -1353,6 +1444,18 @@ def command_repair_tail(args: argparse.Namespace) -> int:
     result = repair_ledger_tail(args.engagement.absolute(), args.ledger, args.operator_id, args.reason, args.recorded_at, args.authority_request_id, args.executor_id, args.session_id)
     emit({"ok": True, **result})
     return 0
+
+
+def command_queue_inspection(args: argparse.Namespace) -> int:
+    """Reduce once under the kernel's read lock and emit only that bound state."""
+
+    try:
+        state = reduce_engagement(args.engagement.absolute())
+    except OSError as exc:
+        raise RecordError("queue_record_unavailable", "queue record source is unavailable") from exc
+    payload = queue_command_payload(args.command, state, args.engagement.absolute())
+    emit(payload)
+    return queue_gate_exit(payload) if args.command == "gate" else 0
 
 
 def command_reduce(args: argparse.Namespace) -> int:
@@ -1820,7 +1923,7 @@ def command_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_revise_finding(args: argparse.Namespace) -> int:
+def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False, evaluated_at: datetime | None = None) -> dict[str, object]:
     finding = load_json(args.file); raw_digest = sha256_file(args.file); canonical_digest = sha256_bytes(canonical_json_bytes(finding)); engagement = args.engagement.absolute()
     pre_state = reduce_engagement(engagement); request = pre_state["authority_requests"].get(args.authority_request_id); target = request.get("target") if request else None
     explicit_resolutions = getattr(args, "resolve_review", None)
@@ -1835,15 +1938,17 @@ def command_revise_finding(args: argparse.Namespace) -> int:
         if explicit_resolutions: raise RecordError("legacy_finding_authority_cannot_bind_resolutions", finding.get("finding_id", "unknown"))
         resolutions = []
         action = _authority_action("revise-finding", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, file_digest=digest, operator_id=args.operator_id, recorded_at=args.recorded_at)
-    _require_async_authority(args, action, args.recorded_at)
+    if not lock_held:
+        _require_async_authority(args, action, args.recorded_at)
     errors = validate_record_with_references(finding, "finding-v3", args.engagement)
     if errors: raise RecordError("finding_revision_invalid", finding.get("finding_id", "unknown"), errors)
     finding_id = finding["finding_id"]; revision = finding["revision"]; relative = f"findings/{finding_id}/rev-{revision}.json"; review_id = finding["adjudication"]["review_ref"]
-    with engagement_lock(engagement) as bound_engagement:
+    transaction = nullcontext(engagement) if lock_held else engagement_lock(engagement)
+    with transaction as bound_engagement:
         destination = bound_engagement / relative
         state = reduce_engagement(bound_engagement, allowed_record_orphans={relative}); index = build_reference_index(bound_engagement); review_entry = next((item for item in index.get(review_id, []) if item["type"] == "review" and item.get("engagement_id") == state["engagement_id"]), None)
         current_request = state["authority_requests"].get(args.authority_request_id)
-        action_digest = sha256_bytes(canonical_json_bytes(action)); applied_at = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")); now = datetime.now(timezone.utc)
+        action_digest = sha256_bytes(canonical_json_bytes(action)); applied_at = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")); now = evaluated_at or datetime.now(timezone.utc)
         expires_at = datetime.fromisoformat(current_request["expires_at"].replace("Z", "+00:00")) if current_request and current_request.get("expires_at") else None; resolved_at = datetime.fromisoformat(current_request["resolved_at"].replace("Z", "+00:00")) if current_request and current_request.get("resolved_at") else None
         locked_events = read_ledger(bound_engagement, "event"); authority_consumed = any(item.get("event_type") != "record.committed" and item.get("payload", {}).get("authority_request_ref") == args.authority_request_id for item in locked_events)
         signed_operator = next(item["payload"]["operator_id"] for item in reversed(locked_events) if item["event_type"] == "scope.attested")
@@ -1891,7 +1996,12 @@ def command_revise_finding(args: argparse.Namespace) -> int:
         else:
             _append_kernel_event_idempotent(bound_engagement, commit, lock_held=True)
             event = base_event(event_id=f"event-{finding_id}-revision-{revision}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="finding.revised", rationale=finding["change_reason"], payload={"finding_id": finding_id, "finding_revision": revision, "status": finding["claim_state"], "finding_digest": digest, "adjudication_review_ref": review_id, "adjudication_review_digest": sha256_bytes(read_governed_file(bound_engagement / review_entry["path"])), "adjudication_event_ref": adjudication["event_id"], "supersedes_revision": finding["supersedes_revision"], "change_reason": finding["change_reason"], "resolves_review_refs": resolutions, "operator_id": args.operator_id, "authority_request_ref": args.authority_request_id}, entity_refs=[finding_id, adjudication["event_id"]], finding_refs=[finding_id], review_refs=[review_id], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
-    emit({"valid": True, "finding_id": finding_id, "revision": revision, "event_id": applied["event_id"], "adjudication_separate": True}); return 0
+    return {"valid": True, "finding_id": finding_id, "revision": revision, "event_id": applied["event_id"], "adjudication_separate": True}
+
+
+def command_revise_finding(args: argparse.Namespace) -> int:
+    emit(_apply_finding_revision(args))
+    return 0
 
 
 def command_accept_report(args: argparse.Namespace) -> int:
@@ -2059,6 +2169,296 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         }
         checks.append(("reducer projects the work queue without appending a ledger event", initial_reduction["work_queue"] == [expected_coverage_item] and (engagement / "events.jsonl").read_bytes() == initial_event_bytes and len(read_ledger(engagement, "event")) == 1, str(initial_reduction.get("work_queue"))))
 
+        queue_cli_results: dict[str, tuple[subprocess.CompletedProcess[str], dict[str, object]]] = {}
+        for queue_command, expected_returncode in (("next", 0), ("list", 0), ("gate", 3)):
+            process = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), queue_command, "--engagement", str(engagement)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            try:
+                payload = json.loads(process.stdout)
+            except json.JSONDecodeError:
+                payload = {}
+            queue_cli_results[queue_command] = (process, payload)
+            common_ok = (
+                process.returncode == expected_returncode
+                and payload.get("schema_version") == 1
+                and payload.get("command") == queue_command
+                and payload.get("ok") is True
+                and payload.get("engagement_id") == engagement.name
+                and payload.get("state_hash") == sha256_bytes(canonical_json_bytes(initial_reduction))
+                and payload.get("ledger_hash") == initial_reduction["ledger_hash"]
+                and payload.get("source_hashes") == initial_reduction["source_hashes"]
+                and payload.get("queue") == {
+                    "blocking_count": 1,
+                    "control_status": "active",
+                    "coverage_status": "active",
+                    "decision": "block",
+                    "has_blocking_work": True,
+                    "nonblocking_count": 0,
+                    "should_block": True,
+                    "total_count": 1,
+                }
+                and process.stdout.encode() == canonical_json_bytes(payload)
+                and process.stderr == ""
+            )
+            checks.append((f"{queue_command} emits the canonical read-only queue envelope and documented exit", common_ok, process.stdout + process.stderr))
+        next_payload = queue_cli_results["next"][1]
+        list_payload = queue_cli_results["list"][1]
+        gate_payload = queue_cli_results["gate"][1]
+        coverage_action = next_payload.get("item", {}).get("next_action", {})
+        checks.append(("next returns exactly the first queue item plus one reducer-valid next action", isinstance(next_payload.get("item"), dict) and next_payload["item"]["class"] == "coverage_review_missing" and coverage_action.get("action_id") == "record_cold_coverage_review" and coverage_action.get("effect") == "conditional" and coverage_action.get("recompute_after") is True and "closure" not in next_payload["item"] and "items" not in next_payload, str(next_payload)))
+        checks.append(("list mirrors raw reducer truth in exact order without stale lower-ranked actions, and gate duplicates no item data", [item["class"] for item in list_payload.get("items", [])] == [item["class"] for item in initial_reduction["work_queue"]] and all("next_action" not in item for item in list_payload.get("items", [])) and "items" not in gate_payload, str((list_payload, gate_payload))))
+        checks.append(("queue inspection never mutates the ledger", (engagement / "events.jsonl").read_bytes() == initial_event_bytes and len(read_ledger(engagement, "event")) == 1, "queue inspection changed the event ledger"))
+
+        caller_order = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "next", "--engagement", str(engagement), "--class", "awaiting_operator"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        checks.append(("next exposes no caller-controlled class, filter, or ordering knob", caller_order.returncode == 2 and caller_order.stdout == "", caller_order.stdout + caller_order.stderr))
+
+        corrupted = root / "eng-corrupted-queue-cli"
+        shutil.copytree(engagement, corrupted)
+        (corrupted / "attempts.jsonl").write_text("{\n", encoding="utf-8")
+        corrupt_gate = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "gate", "--engagement", str(corrupted)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        try:
+            corrupt_payload = json.loads(corrupt_gate.stdout)
+        except json.JSONDecodeError:
+            corrupt_payload = {}
+        checks.append(("gate returns exit 1 with a sanitized machine error for an invalid record", corrupt_gate.returncode == 1 and corrupt_payload.get("schema_version") == 1 and corrupt_payload.get("command") == "gate" and corrupt_payload.get("ok") is False and set(corrupt_payload.get("error", {})) == {"code"} and str(corrupted) not in corrupt_gate.stdout and corrupt_gate.stderr == "", corrupt_gate.stdout + corrupt_gate.stderr))
+
+        unavailable_gate = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "gate", "--engagement", str(root / "missing-engagement")],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        try:
+            unavailable_payload = json.loads(unavailable_gate.stdout)
+        except json.JSONDecodeError:
+            unavailable_payload = {}
+        checks.append(("gate keeps an unavailable source machine-readable and path-sanitized", unavailable_gate.returncode == 1 and unavailable_payload == {"schema_version": 1, "command": "gate", "ok": False, "error": {"code": "queue_record_unavailable"}} and str(root) not in unavailable_gate.stdout and unavailable_gate.stderr == "", unavailable_gate.stdout + unavailable_gate.stderr))
+
+        forged_expiry = base_event(
+            event_id="event-forged-authority-expiry",
+            engagement_id=engagement.name,
+            recorded_at="2099-01-01T00:00:00Z",
+            actor_role="broker",
+            actor_id="broker-forged",
+            event_type="authority.expired",
+            rationale="A future-dated generic append must not expire authority.",
+            payload={"request_id": "request-forged", "request_event_ref": "event-request-forged", "action_digest": "sha256:" + "0" * 64, "expires_at": "2098-01-01T00:00:00Z", "status": "expired"},
+            entity_refs=["event-request-forged"],
+            session_id="session-forged",
+            operation_class="notebook",
+        )
+        forged_expiry_path = root / "forged-authority-expiry.json"
+        forged_expiry_path.write_bytes(canonical_json_bytes(forged_expiry))
+        forged_expiry_cli = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(engagement), "--file", str(forged_expiry_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        try:
+            forged_expiry_cli_code = json.loads(forged_expiry_cli.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError):
+            forged_expiry_cli_code = None
+        from engagement_state import append_event as public_append_event
+        try:
+            public_append_event(engagement, forged_expiry)
+            forged_expiry_helper_code = None
+        except RecordError as exc:
+            forged_expiry_helper_code = exc.code
+        checks.append(("generic CLI and public notebook append boundaries cannot future-forge objective authority expiry", forged_expiry_cli.returncode == 1 and forged_expiry_cli_code == "canonical_notebook_command_required" and forged_expiry_helper_code == "canonical_notebook_command_required", forged_expiry_cli.stdout + forged_expiry_cli.stderr + str(forged_expiry_helper_code)))
+
+        synthetic_queue_state = copy.deepcopy(initial_reduction)
+        synthetic_queue_state["hypotheses"] = {
+            "entity-hypothesis_ran_unadjudicated": {"status": "running", "next_route": None, "unresolved_questions": []},
+            "entity-hypothesis_unrouted": {"status": "selected", "next_route": None, "unresolved_questions": []},
+            "entity-hypothesis_open_route": {"status": "running", "next_route": "detail", "unresolved_questions": []},
+            "entity-hypothesis_unresolved_question": {"status": "running", "next_route": None, "unresolved_questions": ["detail"]},
+        }
+        synthetic_queue_state["findings"] = {
+            "entity-claim_unadjudicated": {"revision": 1, "status": "needs_review"},
+            "entity-finding_revision_pending": {"revision": 1, "status": "confirmed"},
+            "entity-finding_unproved": {"revision": 1, "status": "confirmed"},
+        }
+        synthetic_queue_state["claim_adjudications"] = {
+            "entity-claim_unadjudicated": {"status": "needs_review", "event_ref": "event-claim-needs-review", "review_ref": "review-claim-needs-review", "reviewed_revision": 1, "expected_filing_revision": 2},
+            "entity-finding_revision_pending": {"status": "confirmed", "event_ref": "event-claim-confirmed", "review_ref": "review-claim-confirmed", "reviewed_revision": 1, "expected_filing_revision": 2},
+        }
+        synthetic_queue_state["outstanding_reviews"] = [{
+            "review_type": "regrade",
+            "entity_ref": "finding-review-obligation",
+            "review_ref": "review-obligation-open",
+            "reason": "Synthetic workflow mapping test.",
+            "status": "pending",
+            "hypothesis_ref": None,
+            "opened_at": "2026-07-10T00:00:00Z",
+        }]
+        synthetic_queue_state["candidates"] = {
+            "entity-candidate_undisposed": {"status": "selected"},
+            "entity-deferred_candidate_unreviewed": {"status": "deferred"},
+        }
+        synthetic_queue_state["control_candidates"] = [{"routing_event_id": "entity-control_candidate_unverified", "source_observation_ref": "event-observation-control", "card_ids": ["card-control"], "status": "likely_held", "rationale": "Synthetic control.", "hypothesis_ref": None, "primary_attempt_ref": None}]
+        synthetic_queue_state["regrade_reviews"] = {}
+        synthetic_queue_state["latest_coverage_review"] = None
+        entity_types = {
+            "hypothesis_ran_unadjudicated": "hypothesis",
+            "hypothesis_unrouted": "hypothesis",
+            "hypothesis_open_route": "hypothesis",
+            "hypothesis_unresolved_question": "hypothesis",
+            "claim_unadjudicated": "finding",
+            "finding_revision_pending": "finding",
+            "finding_unproved": "finding",
+            "review_obligation_open": "review_obligation",
+            "candidate_undisposed": "candidate",
+            "deferred_candidate_unreviewed": "candidate",
+            "control_candidate_unverified": "control_candidate",
+            "awaiting_operator": "authority_request",
+            "coverage_review_missing": "engagement",
+        }
+        entity_ids = {item_class: f"entity-{item_class}" for item_class in WORK_QUEUE_CLASS_ORDER}
+        entity_ids["review_obligation_open"] = "review-obligation-open"
+        expected_actions = {
+            "hypothesis_ran_unadjudicated": "record_hypothesis_disposition",
+            "hypothesis_unrouted": "record_hypothesis_disposition",
+            "hypothesis_open_route": "record_hypothesis_disposition",
+            "hypothesis_unresolved_question": "record_hypothesis_disposition",
+            "claim_unadjudicated": "record_claim_adjudication",
+            "finding_revision_pending": "request_finding_revision_authority",
+            "finding_unproved": "record_current_revision_regrade",
+            "review_obligation_open": "route_review_obligation",
+            "candidate_undisposed": "create_candidate_hypothesis",
+            "deferred_candidate_unreviewed": "record_candidate_skipped",
+            "control_candidate_unverified": "create_control_hypothesis",
+            "awaiting_operator": "operator_resolve_authority",
+            "coverage_review_missing": "record_cold_coverage_review",
+        }
+        raw_items = []
+        mapped_items = []
+        for item_class in WORK_QUEUE_CLASS_ORDER:
+            predicate, closes_when = WORK_QUEUE_RULES[item_class]
+            raw_item = {
+                "class": item_class,
+                "entity": {"type": entity_types[item_class], "id": entity_ids[item_class], "detail": "detail" if item_class in {"hypothesis_open_route", "hypothesis_unresolved_question"} else None},
+                "blocking": item_class != "awaiting_operator",
+                "predicate": predicate,
+                "closes_when": closes_when,
+            }
+            raw_items.append(raw_item)
+            mapped_items.append(decorate_work_queue_item(raw_item, synthetic_queue_state, engagement.absolute()))
+        matrix_commands = load_capability_matrix()["commands"]
+        actions_ok = all(
+            item["next_action"]["action_id"] == expected_actions[item["class"]]
+            and item["next_action"]["command"] in matrix_commands
+            and item["next_action"]["operation"] == {"tool": "run-engagement", "command": item["next_action"]["command"]}
+            and item["next_action"]["arguments"][:2] == ["--engagement", str(engagement.absolute())]
+            and item["next_action"]["local_invocation"]["schema_version"] == 1
+            and item["next_action"]["local_invocation"]["argv"][2] == item["next_action"]["command"]
+            and item["next_action"]["session_kind"] in {"ordinary_bounded", "fresh_independent_reviewer", "operator_required"}
+            and item["next_action"]["principal"] in {"orchestrator", "hunter", "broker", "independent_reviewer", "operator_only"}
+            and item["next_action"]["execution_principal"] in {"broker", "operator_only"}
+            and item["next_action"]["execution_principal"] == ("broker" if item["next_action"]["launchable"] else "operator_only")
+            and item["next_action"]["effect"] in {"closes_item", "advances_item", "conditional"}
+            and isinstance(item["next_action"]["required_inputs"], list)
+            and item["next_action"]["recompute_after"] is True
+            and "closure" not in item
+            for item in mapped_items
+        )
+        operator_action = next(item["next_action"] for item in mapped_items if item["class"] == "awaiting_operator")
+        checks.append(("every reducer queue class maps to one closed-shape capability-classified next action", actions_ok and len(mapped_items) == len(WORK_QUEUE_CLASS_ORDER) and operator_action["session_kind"] == "operator_required" and operator_action["principal"] == "operator_only" and operator_action["execution_principal"] == "operator_only" and operator_action["launchable"] is False, str([(item["class"], item["next_action"]["action_id"]) for item in mapped_items])))
+
+        attempt_stage_state = copy.deepcopy(synthetic_queue_state)
+        attempt_stage_state["control_candidates"][0]["hypothesis_ref"] = "entity-hypothesis_ran_unadjudicated"
+        attempt_stage_state["hypotheses"]["entity-hypothesis_ran_unadjudicated"]["status"] = "running"
+        mediated_attempt = decorate_work_queue_item(raw_items[WORK_QUEUE_CLASS_ORDER.index("control_candidate_unverified")], attempt_stage_state, engagement.absolute())["next_action"]
+        checks.append(("broker-mediated actions keep the cognitive producer distinct from the process-bound recorder", mediated_attempt["principal"] == "hunter" and mediated_attempt["execution_principal"] == "broker" and "process-bound broker recorder identity" in str(mediated_attempt["required_inputs"]), str(mediated_attempt)))
+        independent_action_text = " ".join(
+            requirement
+            for item in mapped_items
+            if item["next_action"]["session_kind"] == "fresh_independent_reviewer"
+            for required_input in item["next_action"]["required_inputs"]
+            for requirement in required_input["requirements"]
+        )
+        checks.append(("fresh independent actions record outcome-open reviews rather than prescribing favorable verdicts", all(fragment not in independent_action_text for fragment in ("verdict is confirmed", "verdict is verified", "verdict is reward_hacked", "verdict is coverage_dry")), independent_action_text))
+
+        poc_blocked_state = copy.deepcopy(synthetic_queue_state)
+        poc_blocked_state["findings"]["finding-poc-blocked"] = {"revision": 1, "status": "confirmed"}
+        poc_blocked_state["outstanding_reviews"] = [{"review_type": "pocinator", "entity_ref": "finding-poc-blocked", "review_ref": "event-poc-blocked", "reason": "Fresh proof review could not run.", "status": "blocked", "hypothesis_ref": None, "opened_at": "2026-07-10T00:00:00Z"}]
+        poc_blocked_item = {"class": "review_obligation_open", "entity": {"type": "review_obligation", "id": "event-poc-blocked", "detail": "finding-poc-blocked"}, "blocking": True, "predicate": WORK_QUEUE_RULES["review_obligation_open"][0], "closes_when": WORK_QUEUE_RULES["review_obligation_open"][1]}
+        poc_blocked_action = decorate_work_queue_item(poc_blocked_item, poc_blocked_state, engagement.absolute())["next_action"]
+        checks.append(("blocked Pocinator debt maps to exact prior-run supersession without prescribing its outcome", poc_blocked_action["action_id"] == "supersede_blocked_review_obligation" and "event-poc-blocked" in str(poc_blocked_action["required_inputs"]) and all(fragment not in str(poc_blocked_action["required_inputs"]) for fragment in ("verdict is verified", "verdict is reward_hacked")), str(poc_blocked_action)))
+
+        target_like_cwd = root / "target-like-cwd"; target_like_cwd.mkdir()
+        local_prefix = coverage_action["local_invocation"]["argv"][:2]
+        local_help = subprocess.run([*local_prefix, "--help"], cwd=target_like_cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        checks.append(("local invocation preserves the active venv and executes from a target-repo cwd while semantics stay tool-relative", local_help.returncode == 0 and local_prefix[0] == str(Path(sys.executable).absolute()) and coverage_action["operation"] == {"tool": "run-engagement", "command": "record-review"} and coverage_action["arguments"][0] == "--engagement", local_help.stdout + local_help.stderr))
+
+        coverage_fresh_state = copy.deepcopy(initial_reduction)
+        coverage_fresh_state["hypotheses"] = {"hypothesis-terminal": {"status": "closed"}}
+        coverage_fresh_state["event_count"] = 12
+        coverage_fresh_state["coverage_relevant_sequence"] = 11
+        coverage_fresh_state["latest_coverage_review"] = {
+            "event_ref": "event-coverage-review-current",
+            "event_sequence": 11,
+            "review_refs": ["review-coverage-current"],
+            "verdict": "coverage_dry",
+            "hypothesis_dispositions_hash": hypothesis_dispositions_hash(coverage_fresh_state["hypotheses"]),
+        }
+        coverage_item = next(item for item in raw_items if item["class"] == "coverage_review_missing")
+        neutral_end_action = decorate_work_queue_item(coverage_item, coverage_fresh_state, engagement.absolute())["next_action"]
+        coverage_stale_state = copy.deepcopy(coverage_fresh_state)
+        coverage_stale_state["coverage_relevant_sequence"] = 12
+        substantive_action = decorate_work_queue_item(coverage_item, coverage_stale_state, engagement.absolute())["next_action"]
+        checks.append(("neutral session end checks preserve a current cold review while any later substantive event invalidates it", neutral_end_action["action_id"] == "record_coverage_dry" and substantive_action["action_id"] == "record_cold_coverage_review", str((neutral_end_action, substantive_action))))
+
+        coverage_continue_state = copy.deepcopy(coverage_fresh_state)
+        coverage_continue_state["latest_coverage_review"]["verdict"] = "continue"
+        coverage_continue_action = decorate_work_queue_item(coverage_item, coverage_continue_state, engagement.absolute())["next_action"]
+        checks.append(("a current continue verdict advances through one exact cold-review-grounded hypothesis instead of confirmation-shopping or re-reviewing", coverage_continue_action["action_id"] == "create_coverage_followup_hypothesis" and coverage_continue_action["effect"] == "advances_item" and "review-coverage-current" in str(coverage_continue_action["required_inputs"]) and coverage_continue_action["session_kind"] == "ordinary_bounded" and coverage_continue_action["principal"] == "orchestrator", str(coverage_continue_action)))
+
+        first_blocking_state = copy.deepcopy(synthetic_queue_state)
+        first_blocking_state["work_queue"] = [
+            next(item for item in raw_items if item["class"] == "awaiting_operator"),
+            next(item for item in raw_items if item["class"] == "hypothesis_unrouted"),
+        ]
+        first_blocking = queue_command_payload("next", first_blocking_state, engagement.absolute())
+        operator_only_state = copy.deepcopy(initial_reduction)
+        operator_only_state["work_queue"] = [next(item for item in raw_items if item["class"] == "awaiting_operator")]
+        operator_only_gate = queue_command_payload("gate", operator_only_state, engagement.absolute())
+        parked_blocking_state = copy.deepcopy(first_blocking_state)
+        parked_blocking_state["queue_control"]["status"] = "parked"
+        parked_blocking_gate = queue_command_payload("gate", parked_blocking_state, engagement.absolute())
+        terminal_coverage_gates = {}
+        for coverage_status in ("budget_bounded", "blocked", "coverage_dry"):
+            terminal_state = copy.deepcopy(first_blocking_state)
+            terminal_state["coverage"] = coverage_status
+            terminal_coverage_gates[coverage_status] = queue_command_payload("gate", terminal_state, engagement.absolute())
+        checks.append(("next chooses the first blocking item and active blocking work exits 3", first_blocking["item"]["class"] == "hypothesis_unrouted" and first_blocking["queue"]["has_blocking_work"] is True and first_blocking["queue"]["should_block"] is True and first_blocking["queue"]["decision"] == "block" and queue_gate_exit(first_blocking) == 3, str(first_blocking)))
+        checks.append(("gate releases operator-only and signed parked queues without hiding blocking record truth", operator_only_gate["queue"]["has_blocking_work"] is False and operator_only_gate["queue"]["decision"] == "release" and queue_gate_exit(operator_only_gate) == 0 and parked_blocking_gate["queue"]["control_status"] == "parked" and parked_blocking_gate["queue"]["blocking_count"] == 1 and parked_blocking_gate["queue"]["has_blocking_work"] is True and parked_blocking_gate["queue"]["should_block"] is False and parked_blocking_gate["queue"]["decision"] == "release" and queue_gate_exit(parked_blocking_gate) == 0, str((operator_only_gate, parked_blocking_gate))))
+        checks.append(("terminal and blocked coverage release without hiding invariant-violating queue rows", all(payload["queue"]["coverage_status"] == coverage_status and payload["queue"]["blocking_count"] == 1 and payload["queue"]["has_blocking_work"] is True and payload["queue"]["should_block"] is False and payload["queue"]["decision"] == "release" and queue_gate_exit(payload) == 0 for coverage_status, payload in terminal_coverage_gates.items()), str(terminal_coverage_gates)))
+
         queue_state = {
             "engagement_id": "eng-queue-selftest",
             "coverage": "active",
@@ -2127,10 +2527,10 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             {"class": "hypothesis_unresolved_question", "entity": {"type": "hypothesis", "id": "hypothesis-route", "detail": "question-a"}, "blocking": True, "predicate": "unresolved_questions contains this exact question", "closes_when": "this exact question is absent from unresolved_questions"},
             {"class": "hypothesis_unresolved_question", "entity": {"type": "hypothesis", "id": "hypothesis-route", "detail": "question-z"}, "blocking": True, "predicate": "unresolved_questions contains this exact question", "closes_when": "this exact question is absent from unresolved_questions"},
             {"class": "claim_unadjudicated", "entity": {"type": "finding", "id": "finding-claim", "detail": None}, "blocking": True, "predicate": "effective claim status in {needs_review, supported}", "closes_when": "effective claim status in {confirmed, contaminated, refuted}"},
-            {"class": "finding_revision_pending", "entity": {"type": "finding", "id": "finding-filing", "detail": None}, "blocking": True, "predicate": "latest fileable claim adjudication is not reflected by its expected finding revision", "closes_when": "the expected finding revision reflects the latest adjudication, or a newer adjudication supersedes it"},
-            {"class": "finding_unproved", "entity": {"type": "finding", "id": "finding-proof", "detail": None}, "blocking": True, "predicate": "status in {supported, confirmed} and the current revision has no verified proof review", "closes_when": "the current revision has a proof review with terminal_status verified or status is outside {supported, confirmed}"},
             expected_review_a,
             expected_review_z,
+            {"class": "finding_revision_pending", "entity": {"type": "finding", "id": "finding-filing", "detail": None}, "blocking": True, "predicate": "latest fileable claim adjudication is not reflected by its expected finding revision", "closes_when": "the expected finding revision reflects the latest adjudication, or a newer adjudication supersedes it"},
+            {"class": "finding_unproved", "entity": {"type": "finding", "id": "finding-proof", "detail": None}, "blocking": True, "predicate": "status in {supported, confirmed} and the current revision has no verified proof review", "closes_when": "the current revision has a proof review with terminal_status verified or status is outside {supported, confirmed}"},
             {"class": "candidate_undisposed", "entity": {"type": "candidate", "id": "candidate-selected", "detail": None}, "blocking": True, "predicate": "status is selected and no hypothesis cites this candidate as origin", "closes_when": "a hypothesis has origin_type candidate and origin_ref equal to this candidate id, or candidate status changes"},
             {"class": "deferred_candidate_unreviewed", "entity": {"type": "candidate", "id": "candidate-deferred", "detail": None}, "blocking": True, "predicate": "status is deferred", "closes_when": "status is not deferred"},
             {"class": "control_candidate_unverified", "entity": {"type": "control_candidate", "id": "event-control-candidate", "detail": None}, "blocking": True, "predicate": "status is likely_held and no control-kind attempt references this routing event", "closes_when": "a negative_control or positive_control attempt has experiment_ref equal to this routing event id"},
@@ -2158,40 +2558,90 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         initial_supported = {**stage_base, "claim_adjudications": {"finding-initial": {"status": "supported", "event_ref": "event-claim-initial", "review_ref": "review-claim-initial", "reviewed_revision": None, "expected_filing_revision": 1}}}
         initial_needs_review = {**stage_base, "claim_adjudications": {"finding-needs-review": {"status": "needs_review", "event_ref": "event-claim-needs-review-new", "review_ref": "review-needs-review-new", "reviewed_revision": None, "expected_filing_revision": 1}}}
         reflected_supported = {**initial_supported, "findings": {"finding-initial": {"revision": 1, "status": "supported", "adjudication_review_ref": "review-claim-initial", "adjudication_event_ref": "event-claim-initial"}}}
-        newer_confirmed = {**stage_base, "findings": {"finding-current": {"revision": 1, "status": "supported", "adjudication_review_ref": "review-old", "adjudication_event_ref": "event-old"}}, "claim_adjudications": {"finding-current": {"status": "confirmed", "event_ref": "event-claim-new", "review_ref": "review-new", "reviewed_revision": 1, "expected_filing_revision": 2}}}
+        newer_confirmed = {**stage_base, "findings": {"finding-current": {"revision": 1, "status": "supported", "adjudication_review_ref": "review-old", "adjudication_event_ref": "event-old"}}, "claim_adjudications": {"finding-current": {"status": "confirmed", "event_ref": "event-claim-new", "review_ref": "review-new", "reviewed_revision": 1, "expected_filing_revision": 2, "recorded_at": "2026-07-10T00:00:10Z", "event_sequence": 10}}}
         reflected_confirmed = {**newer_confirmed, "findings": {"finding-current": {"revision": 2, "status": "confirmed", "adjudication_review_ref": "review-new", "adjudication_event_ref": "event-claim-new"}}}
         stage_classes = lambda snapshot: [(item["class"], item["entity"]["id"]) for item in compute_work_queue(snapshot, [])]
         checks.append(("claim stage distinguishes initial review, filing, reflected review, and current-revision proof debt", stage_classes(initial_needs_review) == [("claim_unadjudicated", "finding-needs-review")] and stage_classes(initial_supported) == [("claim_unadjudicated", "finding-initial"), ("finding_revision_pending", "finding-initial")] and stage_classes(reflected_supported) == [("claim_unadjudicated", "finding-initial"), ("finding_unproved", "finding-initial")] and stage_classes(newer_confirmed) == [("finding_revision_pending", "finding-current")] and stage_classes(reflected_confirmed) == [("finding_unproved", "finding-current")], str([stage_classes(item) for item in (initial_needs_review, initial_supported, reflected_supported, newer_confirmed, reflected_confirmed)])))
 
+        legacy_overlap = copy.deepcopy(reflected_supported)
+        legacy_overlap["outstanding_reviews"] = [{"review_type": "legacy_adjudication", "entity_ref": "finding-initial", "review_ref": "event-legacy-import", "reason": "Imported claim needs exact review.", "status": "pending", "hypothesis_ref": None, "opened_at": "2026-07-10T00:00:01Z"}]
+        legacy_claim_item = next(item for item in compute_work_queue(legacy_overlap, []) if item["class"] == "claim_unadjudicated")
+        legacy_claim_action = decorate_work_queue_item(legacy_claim_item, legacy_overlap, engagement.absolute())["next_action"]
+        refuted_overlap = copy.deepcopy(reflected_supported)
+        refuted_overlap["outstanding_reviews"] = [{"review_type": "regrade", "entity_ref": "finding-initial", "review_ref": "event-regrade-refuted", "reason": "Independent regrade refuted the claim.", "status": "correction_required", "hypothesis_ref": None, "opened_at": "2026-07-10T00:00:02Z", "required_claim_status": "refuted"}]
+        refuted_claim_item = next(item for item in compute_work_queue(refuted_overlap, []) if item["class"] == "claim_unadjudicated")
+        refuted_claim_action = decorate_work_queue_item(refuted_claim_item, refuted_overlap, engagement.absolute())["next_action"]
+        legacy_requirements = " ".join(requirement for value in legacy_claim_action["required_inputs"] for requirement in value["requirements"])
+        refuted_requirements = " ".join(requirement for value in refuted_claim_action["required_inputs"] for requirement in value["requirements"])
+        checks.append(("claim-first overlap actions bind exact legacy and refuted review debt", "event-legacy-import" in legacy_requirements and "event-regrade-refuted" in refuted_requirements and "verdict is exactly refuted" in refuted_requirements, str((legacy_claim_action, refuted_claim_action))))
+
         eligible_reviews = [
-            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-correction", "status": "correction_required"},
-            {"review_type": "regrade_escalation", "entity_ref": "finding-current", "review_ref": "review-escalation", "status": "evidence_collected"},
-            {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-poc", "status": "correction_required"},
-            {"review_type": "legacy_adjudication", "entity_ref": "finding-current", "review_ref": "review-legacy", "status": "pending"},
+            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-correction", "status": "correction_required", "opened_at": "2026-07-10T00:00:01Z"},
+            {"review_type": "regrade_escalation", "entity_ref": "finding-current", "review_ref": "review-escalation", "status": "evidence_collected", "opened_at": "2026-07-10T00:00:02Z"},
+            {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-poc", "status": "correction_required", "opened_at": "2026-07-10T00:00:03Z"},
+            {"review_type": "legacy_adjudication", "entity_ref": "finding-current", "review_ref": "review-legacy", "status": "pending", "opened_at": "2026-07-10T00:00:04Z"},
         ]
         blocking_regrade_reviews = [
-            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-pending", "status": "pending"},
-            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-routed", "status": "routed"},
+            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-pending", "status": "pending", "opened_at": "2026-07-10T00:00:05Z"},
+            {"review_type": "regrade", "entity_ref": "finding-current", "review_ref": "review-routed", "status": "routed", "opened_at": "2026-07-10T00:00:06Z"},
         ]
         ineligible_reviews = [
-            {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-blocked", "status": "blocked"},
+            {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-blocked", "status": "blocked", "opened_at": "2026-07-10T00:00:07Z"},
         ]
         target = {"type": "finding", "id": "finding-current", "expected_revision": 2, "claim_state": "confirmed", "adjudication_event_ref": "event-claim-new", "adjudication_review_ref": "review-new", "resolves_review_refs": sorted(item["review_ref"] for item in eligible_reviews), "file_digest": "sha256:" + "7" * 64}
         pending_request = {"request_id": "request-v2-pending", "action_kind": "revise-finding", "status": "pending_authority", "lane_id": finding_revision_lane_id(target), "target": target}
-        pending_filing = {**newer_confirmed, "outstanding_reviews": [*eligible_reviews, *ineligible_reviews], "authority_requests": {"request-v2-pending": pending_request}}
+        pending_filing = copy.deepcopy({**newer_confirmed, "outstanding_reviews": eligible_reviews, "authority_requests": {"request-v2-pending": pending_request}})
+        pending_filing["claim_adjudications"]["finding-current"]["input_refs"] = sorted(item["review_ref"] for item in eligible_reviews)
         pending_keys = stage_classes(pending_filing)
         past_deadline_pending = copy.deepcopy(pending_filing); past_deadline_pending["authority_requests"]["request-v2-pending"]["expires_at"] = "2000-01-01T00:00:00Z"
-        checks.append(("current v2 pending authority suppresses only exact filing-ready rows and expiry remains explicit record state", pending_keys == [("review_obligation_open", "review-blocked"), ("awaiting_operator", "request-v2-pending")] and stage_classes(past_deadline_pending) == pending_keys, str(pending_keys)))
+        checks.append(("current v2 pending authority suppresses its exact filing-ready rows and expiry remains explicit record state", pending_keys == [("awaiting_operator", "request-v2-pending")] and stage_classes(past_deadline_pending) == pending_keys, str(pending_keys)))
+        blocked_poc_filing = {**pending_filing, "outstanding_reviews": [*eligible_reviews, *ineligible_reviews]}
+        blocked_poc_keys = stage_classes(blocked_poc_filing)
+        checks.append(("blocked pocinator debt prevents filing suppression and remains ahead of revision work", ("finding_revision_pending", "finding-current") in blocked_poc_keys and ("review_obligation_open", "review-blocked") in blocked_poc_keys and blocked_poc_keys.index(("review_obligation_open", "review-blocked")) < blocked_poc_keys.index(("finding_revision_pending", "finding-current")), str(blocked_poc_keys)))
         blocked_filing = {**pending_filing, "outstanding_reviews": [*pending_filing["outstanding_reviews"], *blocking_regrade_reviews]}
         blocked_keys = stage_classes(blocked_filing)
-        checks.append(("pending and routed regrade debt blocks filing and cannot be hidden by a v2 pending target", ("finding_revision_pending", "finding-current") in blocked_keys and all(("review_obligation_open", item["review_ref"]) in blocked_keys for item in blocking_regrade_reviews), str(blocked_keys)))
-        new_eligible = {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-new-debt", "status": "correction_required"}
+        blocked_filing["work_queue"] = compute_work_queue(blocked_filing, [])
+        blocked_list = queue_command_payload("list", blocked_filing, engagement.absolute())
+        checks.append(("pending and routed regrade debt blocks filing and list never advertises a stale lower-ranked authority action", ("finding_revision_pending", "finding-current") in blocked_keys and all(("review_obligation_open", item["review_ref"]) in blocked_keys for item in blocking_regrade_reviews) and all("next_action" not in item for item in blocked_list["items"]), str((blocked_keys, blocked_list))))
+        new_eligible = {"review_type": "pocinator", "entity_ref": "finding-current", "review_ref": "review-new-debt", "status": "correction_required", "opened_at": "2026-07-10T00:00:11Z"}
         stale_review_set = {**pending_filing, "outstanding_reviews": [*pending_filing["outstanding_reviews"], new_eligible]}
         stale_adjudication = copy.deepcopy(pending_filing); stale_adjudication["claim_adjudications"]["finding-current"] = {**stale_adjudication["claim_adjudications"]["finding-current"], "event_ref": "event-claim-newer", "review_ref": "review-newer"}
         wrong_lane = copy.deepcopy(pending_filing); wrong_lane["authority_requests"]["request-v2-pending"]["lane_id"] = "caller-controlled-lane"
-        approved_overlap = copy.deepcopy(pending_filing); approved_overlap["authority_requests"]["request-v2-approved"] = {**pending_request, "request_id": "request-v2-approved", "status": "approved"}
+        approved_overlap = copy.deepcopy(pending_filing); approved_overlap["authority_requests"] = {"request-v2-approved": {
+            **pending_request,
+            "request_id": "request-v2-approved",
+            "status": "approved",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "application": {"action_path": "authority/requests/request-v2-approved.action.json", "executor_id": "broker-approved", "session_id": "session-approved", "operator_id": "operator-approved"},
+        }}
         explicitly_expired = copy.deepcopy(pending_filing); explicitly_expired["authority_requests"]["request-v2-pending"]["status"] = "expired"
         checks.append(("stale adjudication, changed filing-ready debt, wrong lane, approved overlap, and explicit expiry all re-expose filing debt", all(("finding_revision_pending", "finding-current") in stage_classes(item) for item in (stale_review_set, stale_adjudication, wrong_lane, approved_overlap, explicitly_expired)), str([stage_classes(item) for item in (stale_review_set, stale_adjudication, wrong_lane, approved_overlap, explicitly_expired)])))
+        approved_overlap["work_queue"] = compute_work_queue(approved_overlap, [])
+        approved_review_item = next(item for item in approved_overlap["work_queue"] if item["class"] == "review_obligation_open")
+        approved_finding_item = next(item for item in approved_overlap["work_queue"] if item["class"] == "finding_revision_pending")
+
+        class _EarlyQueueClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 1, 1, tzinfo=tz)
+
+        class _LateQueueClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2100, 1, 1, tzinfo=tz)
+
+        from unittest.mock import patch
+        with patch("work_queue_actions.datetime", _EarlyQueueClock):
+            early_approved_action = decorate_work_queue_item(approved_review_item, approved_overlap, engagement.absolute())["next_action"]
+        with patch("work_queue_actions.datetime", _LateQueueClock):
+            late_approved_action = decorate_work_queue_item(approved_review_item, approved_overlap, engagement.absolute())["next_action"]
+        approved_finding_action = decorate_work_queue_item(approved_finding_item, approved_overlap, engagement.absolute())["next_action"]
+        checks.append(("approved revision actions are identical across wall time and route both higher review debt and revision work through one atomic settlement", canonical_json_bytes(early_approved_action) == canonical_json_bytes(late_approved_action) and early_approved_action["action_id"] == approved_finding_action["action_id"] == "settle_approved_finding_revision" and early_approved_action["command"] == "settle-approved-revision" and early_approved_action["effect"] == "conditional", str((early_approved_action, late_approved_action, approved_finding_action))))
+        stale_filing = copy.deepcopy(pending_filing)
+        stale_filing["claim_adjudications"]["finding-current"].update({"recorded_at": "2026-07-10T00:00:01Z", "input_refs": []})
+        stale_review_item = next(item for item in compute_work_queue(stale_filing, []) if item["class"] == "review_obligation_open")
+        stale_review_action = decorate_work_queue_item(stale_review_item, stale_filing, engagement.absolute())["next_action"]
+        checks.append(("a pre-opening or input-unbound adjudication never advances review debt to revision authority", _filing_blocking_review_error(stale_filing, "finding-current") in {"review_adjudication_not_fresh", "review_adjudication_inputs_missing"} and stale_review_action["action_id"] == "record_claim_adjudication", str(stale_review_action)))
         current_proposal = {"finding_id": "finding-current", "revision": 2, "supersedes_revision": 1, "claim_state": "confirmed", "adjudication": {"review_ref": "review-new"}}
         current_target = {**target, "resolves_review_refs": [], "file_digest": sha256_bytes(canonical_json_bytes(current_proposal))}; current_request = {**pending_request, "lane_id": finding_revision_lane_id(current_target), "target": current_target}; current_target_state = {**newer_confirmed, "outstanding_reviews": []}
         stale_same_status_state = copy.deepcopy(current_target_state); stale_same_status_state["claim_adjudications"]["finding-current"].update({"event_ref": "event-confirmed-newer", "review_ref": "review-confirmed-newer"})
@@ -2436,6 +2886,48 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         append_event(engagement, prior)
         search_state = reduce_engagement(engagement)
         checks.append(("candidate→selection→hypothesis lifecycle preserves separate search/claim/coverage state", search_state["candidates"]["candidate-c1"]["status"] == "selected" and search_state["hypotheses"]["hypothesis-h1"]["status"] == "running" and len(search_state["operator_priors"]) == 1 and len(search_state["control_candidates"]) == 1 and search_state["findings"] == {} and search_state["coverage"] == "active", str(search_state)))
+
+        mediation_case = root / "queue-action-broker-mediation"; shutil.copytree(engagement, mediation_case)
+        # Attempts are admissible only against an environment that was active at
+        # their immutable recorded time.  Keep this action-contract fixture
+        # self-contained instead of relying on the main lifecycle's later
+        # preflight setup.
+        mediation_package = root / "mediation-package-fixture.bin"; mediation_package.write_bytes(b"broker mediation fixture\n")
+        mediation_runtime = Path(sys.executable).resolve()
+        collect_preflight(mediation_case, preflight_id="preflight-broker-mediation", mode="package", target=mediation_package, expected_identity=sha256_file(mediation_package), runtime=mediation_runtime, reproduction_argv=[str(mediation_runtime), "-c", "pass"], operator_id="operator-selftest", recorded_at="2026-07-10T00:01:38.500000Z", operator_redaction_attested=True, endpoint_identity="local", account_role="owner")
+        mediation_broker_id, mediation_broker_session = _local_identity("broker")
+        def execute_emitted_file_action(action: dict[str, Any], proposal_path: Path) -> subprocess.CompletedProcess[str]:
+            argv = list(action["local_invocation"]["argv"])
+            argv[argv.index("--file") + 1] = str(proposal_path)
+            return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+
+        mediation_state = reduce_engagement(mediation_case)
+        mediation_control_item = next(item for item in mediation_state["work_queue"] if item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative")
+        mediation_create_action = decorate_work_queue_item(mediation_control_item, mediation_state, mediation_case)["next_action"]
+        mediation_hypothesis = base_event(event_id="event-control-hypothesis-created", engagement_id=engagement.name, recorded_at="2026-07-10T00:01:39Z", actor_role="broker", actor_id=mediation_broker_id, event_type="hypothesis.created", rationale="Broker records the orchestrator's bounded matched-control hypothesis.", payload={"hypothesis_id": "hypothesis-control", "origin_type": "reviewer_challenge", "origin_ref": "event-routing-negative", "hypothesis_statement": "The likely-held route should remain held under one matched bounded control.", "suspected_invariant": "The negative route's guard should reject the matched primary condition.", "trust_boundary": "owned fixture input to guarded branch", "attacker_path": ["owned fixture", "guarded branch"], "impact_ceiling": "owned fixture only", "bounded_space": "One matched primary and one negative control.", "lens_ids": ["authorization"], "card_ids": ["card-control"], "expected_confirming_evidence": [{"evidence_type": "control", "description": "matched control remains held", "required": True}], "decisive_falsifiers": ["matched control exhibits the primary signal"], "cost_estimate": zero_cost, "constraints": ["local only"], "next_experiment": "record matched primary then negative control", "completion_criteria": ["primary and linked control recorded"], "status": "queued"}, entity_refs=["event-routing-negative"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-control", "previous": None, "current": "queued"}], session_id=mediation_broker_session, operation_class="notebook")
+        mediation_create_path = root / "mediation-control-hypothesis.json"; mediation_create_path.write_bytes(canonical_json_bytes(mediation_hypothesis)); mediation_create_cli = execute_emitted_file_action(mediation_create_action, mediation_create_path)
+
+        mediation_stage_results = []
+        for status, previous, recorded_at in (("selected", "queued", "2026-07-10T00:01:40Z"), ("running", "selected", "2026-07-10T00:01:41Z")):
+            mediation_state = reduce_engagement(mediation_case)
+            mediation_hypothesis_item = next(item for item in mediation_state["work_queue"] if item["class"] == "hypothesis_unrouted" and item["entity"]["id"] == "hypothesis-control")
+            mediation_stage_action = decorate_work_queue_item(mediation_hypothesis_item, mediation_state, mediation_case)["next_action"]
+            mediation_transition = base_event(event_id=f"event-control-hypothesis-{status}", engagement_id=engagement.name, recorded_at=recorded_at, actor_role="broker", actor_id=mediation_broker_id, event_type="hypothesis.status_changed", rationale=f"Broker records bounded control hypothesis {status}.", payload={"hypothesis_id": "hypothesis-control", "status": status, "reason": "bounded control progression", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "Advance only the current matched-control stage.", "unresolved_questions": [], "next_route": "matched control"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-control", "previous": previous, "current": status}], session_id=mediation_broker_session, operation_class="notebook")
+            mediation_transition_path = root / f"mediation-control-{status}.json"; mediation_transition_path.write_bytes(canonical_json_bytes(mediation_transition)); mediation_stage_results.append(execute_emitted_file_action(mediation_stage_action, mediation_transition_path))
+
+        def mediated_control_attempt(attempt_id: str, recorded_at: str, kind: str, assessment: str, control_of: list[str]) -> dict[str, Any]:
+            return {"schema_version": 2, "attempt_id": attempt_id, "engagement_id": engagement.name, "recorded_at": recorded_at, "actor": {"role": "broker", "id": mediation_broker_id}, "operation_class": "notebook", "provenance": {"actor": {"role": "broker", "id": mediation_broker_id}, "provider": "selftest", "model": "broker-recorder", "prompt_version": "queue-action-selftest", "tool_versions": ["source-inspection-v1"], "card_versions": ["card-control"], "session_id": mediation_broker_session}, "scope_hash": mediation_state["scope_hash"], "environment_ref": mediation_state["active_environment_ref"], "escalation_confirmation_event_ref": None, "hypothesis_ref": "hypothesis-control", "experiment_ref": "event-routing-negative", "surface": "owned local fixture", "action_summary": "Record one bounded matched-control observation.", "redaction_attestation": True, "observation": {"source": "broker", "statement": "Matched control observation recorded by the broker from the bounded hunter result."}, "evidence_refs": [], "kind": kind, "control_of": control_of, "assessment": assessment, "contamination": {"status": "none_observed", "sources": [], "note": ""}, "cost": {**zero_cost, "wall_seconds": 1, "tool_seconds": 1}}
+
+        mediation_state = reduce_engagement(mediation_case)
+        mediation_control_item = next(item for item in mediation_state["work_queue"] if item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative")
+        mediation_primary_action = decorate_work_queue_item(mediation_control_item, mediation_state, mediation_case)["next_action"]
+        mediation_primary = mediated_control_attempt("attempt-control-primary", "2026-07-10T00:01:42Z", "primary", "suspected_signal", []); mediation_primary_path = root / "mediation-control-primary.json"; mediation_primary_path.write_bytes(canonical_json_bytes(mediation_primary)); mediation_primary_cli = execute_emitted_file_action(mediation_primary_action, mediation_primary_path)
+        mediation_state = reduce_engagement(mediation_case)
+        mediation_control_item = next(item for item in mediation_state["work_queue"] if item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative")
+        mediation_control_action = decorate_work_queue_item(mediation_control_item, mediation_state, mediation_case)["next_action"]
+        mediation_control = mediated_control_attempt("attempt-control-negative", "2026-07-10T00:01:43Z", "negative_control", "held", ["attempt-control-primary"]); mediation_control_path = root / "mediation-control-negative.json"; mediation_control_path.write_bytes(canonical_json_bytes(mediation_control)); mediation_control_cli = execute_emitted_file_action(mediation_control_action, mediation_control_path)
+        mediation_final_state = reduce_engagement(mediation_case)
+        checks.append(("advertised staged control actions execute under broker mediation while retaining orchestrator and hunter cognitive principals", mediation_create_cli.returncode == 0 and all(result.returncode == 0 for result in mediation_stage_results) and mediation_primary_cli.returncode == 0 and mediation_control_cli.returncode == 0 and mediation_create_action["principal"] == "orchestrator" and mediation_create_action["execution_principal"] == "broker" and mediation_primary_action["principal"] == "hunter" and mediation_primary_action["execution_principal"] == "broker" and mediation_control_action["principal"] == "hunter" and not any(item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative" for item in mediation_final_state["work_queue"]), str({"create": mediation_create_cli.stdout + mediation_create_cli.stderr, "stages": [(item.returncode, item.stdout, item.stderr) for item in mediation_stage_results], "primary": mediation_primary_cli.stdout + mediation_primary_cli.stderr, "control": mediation_control_cli.stdout + mediation_control_cli.stderr, "queue": mediation_final_state["work_queue"]})))
 
         blocked = base_event(event_id="event-blocked", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:00Z", actor_role="operator", actor_id="operator-selftest", event_type="engagement.blocked", rationale="Self-test blocker.", payload={"entity_id": engagement.name, "status": "blocked", "reason": "fixture"}, state_changes=[{"dimension": "engagement", "entity_id": engagement.name, "previous": "active", "current": "blocked"}, {"dimension": "coverage", "entity_id": engagement.name, "previous": "active", "current": "blocked"}])
         append_event(engagement, blocked)
@@ -2786,9 +3278,19 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         escalation_hypothesis = base_event(event_id="event-hypothesis-escalation", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:38Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Route reviewer escalation into bounded evidence collection.", payload={"hypothesis_id": "hypothesis-escalation", "origin_type": "reviewer_challenge", "origin_ref": "event-regrade-escalation", "hypothesis_statement": "The adjacent owned transition composes with the confirmed primitive.", "suspected_invariant": "Primitive output must not cross the adjacent boundary.", "trust_boundary": "primitive to adjacent owned transition", "attacker_path": ["primitive", "adjacent transition"], "impact_ceiling": "owned fixture only", "bounded_space": "One adjacent transition.", "lens_ids": ["composition"], "card_ids": ["card-selftest"], "expected_confirming_evidence": [{"evidence_type": "trace", "description": "end-to-end composition trace", "required": True}], "decisive_falsifiers": ["adjacent transition rejects primitive output"], "cost_estimate": zero_cost, "constraints": ["offline fixture"], "next_experiment": "trace composition", "completion_criteria": ["trace or decisive rejection"], "status": "queued"}, entity_refs=["event-regrade-escalation"], finding_refs=["F-selftest"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-escalation", "previous": None, "current": "queued"}]); append_event(engagement, escalation_hypothesis)
         escalation_evidence_path = engagement / "evidence" / "escalation.txt"; escalation_evidence_path.write_text("new bounded escalation trace\n", encoding="utf-8")
         escalation_artifact = json.loads(json.dumps(artifact_metadata)); escalation_artifact.update({"artifact_id": "artifact-escalation", "created_at": "2026-07-10T00:15:40.500000Z", "acquisition_method": "source_inspection"}); _register_legacy_artifact(engagement, escalation_evidence_path, escalation_artifact)
-        for status, previous, timestamp in (("selected", "queued", "2026-07-10T00:15:39Z"), ("running", "selected", "2026-07-10T00:15:40Z"), ("held", "running", "2026-07-10T00:15:41Z")):
-            support = ["artifact-escalation"] if status == "held" else []
-            transition = base_event(event_id=f"event-escalation-{status}", engagement_id=engagement.name, recorded_at=timestamp, actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale=f"Escalation hypothesis {status}.", payload={"hypothesis_id": "hypothesis-escalation", "status": status, "reason": "bounded escalation evidence route", "experiment_refs": ["attempt-primary"] if status == "held" else [], "control_refs": ["attempt-negative"] if status == "held" else [], "supporting_evidence_refs": support, "conflicting_evidence_refs": [], "disposition_rationale": "Bounded evidence route recorded without changing finding truth.", "unresolved_questions": ["composition impact remains unproven"] if status == "held" else [], "next_route": "independent composition trace"}, evidence_refs=support, state_changes=[{"dimension": "search", "entity_id": "hypothesis-escalation", "previous": previous, "current": status}]); append_event(engagement, transition)
+        for status, previous, timestamp in (("selected", "queued", "2026-07-10T00:15:39Z"), ("running", "selected", "2026-07-10T00:15:40Z")):
+            transition = base_event(event_id=f"event-escalation-{status}", engagement_id=engagement.name, recorded_at=timestamp, actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale=f"Escalation hypothesis {status}.", payload={"hypothesis_id": "hypothesis-escalation", "status": status, "reason": "bounded escalation evidence route", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "Bounded evidence route recorded without changing finding truth.", "unresolved_questions": [], "next_route": "independent composition trace"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-escalation", "previous": previous, "current": status}]); append_event(engagement, transition)
+        escalation_attempt = attempt_proposal("attempt-escalation", "2026-07-10T00:15:40.600000Z", "primary", "suspected_signal", "Fresh bounded trace exercises the reviewer-routed adjacent composition.", [])
+        escalation_attempt.update({"hypothesis_ref": "hypothesis-escalation", "experiment_ref": "event-regrade-escalation", "evidence_refs": ["artifact-escalation"]})
+        append_attempt(engagement, escalation_attempt)
+        escalation_attempt_state = reduce_engagement(engagement)
+        escalation_attempt_item = next(item for item in escalation_attempt_state["work_queue"] if item["class"] == "hypothesis_ran_unadjudicated" and item["entity"]["id"] == "hypothesis-escalation")
+        escalation_attempt_action = decorate_work_queue_item(escalation_attempt_item, escalation_attempt_state, engagement.absolute())["next_action"]
+        checks.append(("routed review evidence progression exposes the fresh attempt as required supporting evidence", "includes every fresh matching attempt in supporting_evidence_refs" in str(escalation_attempt_action["required_inputs"]), str(escalation_attempt_action)))
+        escalation_held = base_event(event_id="event-escalation-held", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:41Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Escalation hypothesis held with fresh bounded evidence.", payload={"hypothesis_id": "hypothesis-escalation", "status": "held", "reason": "bounded escalation evidence route", "experiment_refs": ["attempt-escalation"], "control_refs": [], "supporting_evidence_refs": ["attempt-escalation", "artifact-escalation"], "conflicting_evidence_refs": [], "disposition_rationale": "Bounded evidence route recorded without changing finding truth.", "unresolved_questions": ["composition impact remains unproven"], "next_route": "independent composition trace"}, evidence_refs=["attempt-escalation", "artifact-escalation"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-escalation", "previous": "running", "current": "held"}]); append_event(engagement, escalation_held)
+        escalation_evidence_state = reduce_engagement(engagement)
+        escalation_row = next(item for item in escalation_evidence_state["outstanding_reviews"] if item["review_ref"] == "event-regrade-escalation")
+        checks.append(("pending review routes through a bound hypothesis and only fresh cited evidence reaches evidence_collected", escalation_row["status"] == "evidence_collected" and escalation_row["resolution_input_refs"] == ["attempt-escalation", "artifact-escalation"], str(escalation_row)))
 
         def poc_review(review_id: str, recorded_at: str, reviewer_id: str, run_id: str, verdict: str, prior_runs: list[str], mismatches: list[str], reward_indicators: list[str]) -> dict:
             value = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "pocinator", "proposed_finding_id": "F-selftest", "recorded_at": recorded_at, "entity_ref": "F-selftest", "finding_revision": 2, "input_refs": ["F-selftest", "artifact-selftest"], "input_hash": "sha256:" + "0" * 64, "evidence_refs": ["artifact-selftest"], "rationale": f"Pocinator outcome: {verdict}.", "conflicting_evidence": [], "verdict": verdict, "corrections": mismatches, "required_next_actions": ["route back without changing finding truth"] if verdict != "verified" else [], "independence": {"reviewer_id": reviewer_id, "reviewer_run_id": run_id, "reviewer_model": "pocinator-reviewer", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Break the exact claim tuple and composition.", "originating_run_id": "event-finding-revision-2"}, "claim_tuple_hash": tuple_hash, "high_value": True, "proof_profile_ref": "artifact-selftest", "claim_mismatches": mismatches, "reward_hack_indicators": reward_indicators, "module_level_only": True, "end_to_end_composition_reviewed": False, "blocked_reason": None, "prior_review_run_ids": prior_runs}
@@ -2799,15 +3301,23 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             ("review-poc-reward-2", "2026-07-10T00:15:48Z", "poc-reward-reviewer-2", "run-poc-reward-2", "reward_hacked", ["run-poc-reward-1"], [], ["Independent reviewer confirms reward-only optimization."]),
         ]
         mismatch_state = None
+        reward_one_state = None
+        reward_one_action = None
         for offset, spec in enumerate(poc_specs):
             review_value = poc_review(*spec); review_path = reviews_dir / f"{spec[0]}.json"; review_path.write_bytes(canonical_json_bytes(review_value))
             commit_time = ["2026-07-10T00:15:43Z", "2026-07-10T00:15:46Z", "2026-07-10T00:15:49Z"][offset]; event_time = ["2026-07-10T00:15:44Z", "2026-07-10T00:15:47Z", "2026-07-10T00:15:50Z"][offset]
             commit = base_event(event_id=f"event-{spec[0]}-commit", engagement_id=engagement.name, recorded_at=commit_time, actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit typed Pocinator review.", payload={"record_path": f"reviews/{spec[0]}.json", "record_digest": sha256_file(review_path), "record_type": "review", "record_id": spec[0], "record_revision": None}); append_event(engagement, commit)
             reviewed = base_event(event_id=f"event-{spec[0]}", engagement_id=engagement.name, recorded_at=event_time, actor_role="reviewer", actor_id=spec[2], event_type="review.pocinator_completed", rationale="Pocinator result routes proof state only.", payload={"review_ref": spec[0], "finding_id": "F-selftest", "finding_revision": 2, "verdict": spec[4], "claim_tuple_hash": tuple_hash, "high_value": True}, review_refs=[spec[0]], finding_refs=["F-selftest"]); append_event(engagement, reviewed)
             if offset == 0: mismatch_state = reduce_engagement(engagement)
+            if offset == 1:
+                reward_one_state = reduce_engagement(engagement)
+                reward_one_row = next(item for item in reward_one_state["work_queue"] if item["class"] == "review_obligation_open" and item["entity"]["id"] == "event-review-poc-reward-1")
+                reward_one_action = decorate_work_queue_item(reward_one_row, reward_one_state, engagement.absolute())["next_action"]
         typed_state = reduce_engagement(engagement); proof_review = typed_state["proof_reviews"]["F-selftest:r2"]
         checks.append(("claim_mismatch routes correction without refuting finding", mismatch_state is not None and mismatch_state["findings"]["F-selftest"]["status"] == "confirmed" and mismatch_state["proof_reviews"]["F-selftest:r2"]["terminal_status"] == "route_back", str(mismatch_state)))
-        checks.append(("definite high-value reward_hacked requires two independent reviewers", proof_review["terminal_status"] == "second_review_confirmed" and len(proof_review["reviewer_ids"]) == 2 and typed_state["findings"]["F-selftest"]["status"] == "confirmed", str(proof_review)))
+        checks.append(("first high-value reward_hacked blocks filing and requests one distinct independent second review", reward_one_state is not None and reward_one_state["proof_reviews"]["F-selftest:r2"]["terminal_status"] == "pending_second_review" and _filing_blocking_review_error(reward_one_state, "F-selftest") == "pocinator_second_review_pending" and reward_one_action is not None and reward_one_action["action_id"] == "record_distinct_pocinator_second_review" and "run-poc-reward-1" in str(reward_one_action["required_inputs"]), str((reward_one_state, reward_one_action))))
+        reward_one_row_after_second = next(item for item in typed_state["outstanding_reviews"] if item["review_ref"] == "event-review-poc-reward-1")
+        checks.append(("definite high-value reward_hacked requires two independent reviewers and binds the second review as correction evidence", proof_review["terminal_status"] == "second_review_confirmed" and proof_review["reviewer_run_ids"] == ["run-poc-reward-1", "run-poc-reward-2"] and reward_one_row_after_second.get("resolution_input_refs") == ["review-poc-reward-2"] and typed_state["findings"]["F-selftest"]["status"] == "confirmed", str((proof_review, reward_one_row_after_second))))
         report_manifest = generate_report(engagement, "F-selftest", 2, ["claim-mechanism", "claim-reach", "claim-impact"], [], "operator-selftest", "2026-07-10T00:15:50.500000Z")
         report_state = reduce_engagement(engagement); checks.append(("report generation binds exact finding revision, review, claims, proof matrix, and bytes", report_state["reports"][report_manifest["report_id"]]["status"] == "draft" and (engagement / report_manifest["report_path"]).is_file(), str(report_manifest)))
 
@@ -2816,15 +3326,19 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         correction_commit = base_event(event_id="event-regrade-correction-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:52Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit correction regrade.", payload={"record_path": "reviews/regrade-correction.json", "record_digest": sha256_file(correction_path), "record_type": "review", "record_id": "review-regrade-correction", "record_revision": None}); append_event(engagement, correction_commit)
         correction_event = base_event(event_id="event-regrade-correction", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:53Z", actor_role="reviewer", actor_id="correction-reviewer", event_type="review.regrade_completed", rationale="Correction must become a contiguous revision before closure.", payload={"review_ref": "review-regrade-correction", "finding_id": "F-selftest", "finding_revision": 2, "verdict": "confirmed_with_correction", "claim_tuple_hash": tuple_hash}, review_refs=["review-regrade-correction"], finding_refs=["F-selftest"]); append_event(engagement, correction_event)
         unresolved_correction = copy.deepcopy(filing2); unresolved_correction["event_id"] = "event-unresolved-correction"; unresolved_correction["recorded_at"] = "2026-07-10T00:15:53.500000Z"; unresolved_correction["payload"]["finding_revision"] = 3; unresolved_correction["payload"]["supersedes_revision"] = 2
-        correction_blocked = False
+        correction_block_code = None
         try:
             append_event(engagement, unresolved_correction)
         except RecordError as exc:
-            correction_blocked = exc.code == "regrade_correction_not_resolved"
-        checks.append(("confirmed_with_correction blocks filing until explicitly revision-bound", correction_blocked, "unresolved correction allowed finding revision"))
-        review3_path = reviews_dir / "review-claim-3.json"; review3 = claim_review("review-claim-3", "2026-07-10T00:15:54Z", "confirmed", "F-selftest", 2, "event-regrade-correction"); review3["input_hash"] = compute_review_input_hash(engagement, review3, build_reference_index(engagement)); review3_path.write_bytes(canonical_json_bytes(review3))
+            correction_block_code = exc.code
+        checks.append(("confirmed_with_correction blocks filing until a fresh correction-bound adjudication", correction_block_code == "review_adjudication_not_fresh", str(correction_block_code or "unresolved correction allowed finding revision")))
+        review3_path = reviews_dir / "review-claim-3.json"; review3 = claim_review("review-claim-3", "2026-07-10T00:15:54Z", "confirmed", "F-selftest", 2, "event-regrade-correction"); review3["input_refs"].extend(["event-regrade-escalation", "attempt-escalation", "artifact-escalation", "event-regrade-correction", "event-review-poc-mismatch", "event-review-poc-reward-1", "review-poc-reward-2"]); review3["input_refs"] = sorted(set(review3["input_refs"])); review3["input_hash"] = compute_review_input_hash(engagement, review3, build_reference_index(engagement)); review3_path.write_bytes(canonical_json_bytes(review3))
         review3_commit = base_event(event_id="event-review-claim-3-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:55Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit correction adjudication.", payload={"record_path": "reviews/review-claim-3.json", "record_digest": sha256_file(review3_path), "record_type": "review", "record_id": "review-claim-3", "record_revision": None}); append_event(engagement, review3_commit)
         adjudication3 = base_event(event_id="event-claim-correction-confirmed", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:56Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Independent review confirms corrected bounded claim.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-3", "review_digest": sha256_file(review3_path)}, review_refs=["review-claim-3"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]); append_event(engagement, adjudication3)
+        adjudicated_correction_state = reduce_engagement(engagement)
+        missing_escalation_evidence = copy.deepcopy(adjudicated_correction_state); missing_escalation_evidence["claim_adjudications"]["F-selftest"]["input_refs"].remove("artifact-escalation")
+        missing_second_review = copy.deepcopy(adjudicated_correction_state); missing_second_review["claim_adjudications"]["F-selftest"]["input_refs"].remove("review-poc-reward-2")
+        checks.append(("filing adjudication binds both routed evidence and the distinct second Pocinator review", _filing_blocking_review_error(adjudicated_correction_state, "F-selftest") is None and _filing_blocking_review_error(missing_escalation_evidence, "F-selftest") == "review_adjudication_inputs_missing" and _filing_blocking_review_error(missing_second_review, "F-selftest") == "review_adjudication_inputs_missing", str(adjudicated_correction_state["outstanding_reviews"])))
         finding3 = json.loads(json.dumps(finding2)); finding3.update({"revision": 3, "supersedes_revision": 2, "recorded_at": "2026-07-10T00:15:57Z", "change_reason": "Resolve regrade correction and evidence-routed escalation.", "claim_state": "confirmed"}); finding3["claims"]["uncertainty"] = ["future versions not assessed"]; finding3["adjudication"] = {"review_ref": "review-claim-3", "justification": "Fresh review confirms the corrected bounded tuple."}
         finding3_path = finding_dir / "rev-3.json"; finding3_path.write_bytes(canonical_json_bytes(finding3)); finding3_commit = base_event(event_id="event-finding-3-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:57.500000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit corrected finding revision three.", payload={"record_path": "findings/F-selftest/rev-3.json", "record_digest": sha256_file(finding3_path), "record_type": "finding-v3", "record_id": "F-selftest", "record_revision": 3}); append_event(engagement, finding3_commit)
         filing3 = base_event(event_id="event-finding-revision-3", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:58Z", actor_role="operator", actor_id="operator-selftest", event_type="finding.revised", rationale="Operator files correction-bound contiguous revision.", payload={"finding_id": "F-selftest", "finding_revision": 3, "status": "confirmed", "finding_digest": sha256_file(finding3_path), "adjudication_review_ref": "review-claim-3", "adjudication_review_digest": sha256_file(review3_path), "adjudication_event_ref": "event-claim-correction-confirmed", "supersedes_revision": 2, "change_reason": "Resolve regrade correction and evidence-routed escalation.", "resolves_review_refs": ["event-regrade-escalation", "event-regrade-correction"]}, entity_refs=["F-selftest", "event-claim-correction-confirmed"], finding_refs=["F-selftest"], review_refs=["review-claim-3"]); append_event(engagement, filing3)
@@ -2832,10 +3346,54 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("correction review closes only through a contiguous adjudicated revision", corrected_state["findings"]["F-selftest"]["revision"] == 3 and not any(item["review_ref"] in {"event-regrade-escalation", "event-regrade-correction"} for item in corrected_state["outstanding_reviews"]), str(corrected_state["outstanding_reviews"])))
         checks.append(("finding revision makes prior report visibly historical", corrected_state["reports"][report_manifest["report_id"]]["status"] == "historical" and "revision 3" in corrected_state["reports"][report_manifest["report_id"]]["historical_reason"], str(corrected_state["reports"])))
 
-        tuple_hash3 = claim_tuple_hash(finding3); blocked_review = json.loads(json.dumps(correction)); blocked_review.update({"review_id": "review-regrade-blocked", "recorded_at": "2026-07-10T00:15:59Z", "finding_revision": 3, "verdict": "blocked", "rationale": "Pinned proof environment is unavailable; truth remains unchanged.", "corrections": [], "required_next_actions": ["restore pinned environment"], "claim_tuple_hash": tuple_hash3, "prior_review_run_ids": ["run-review-claim-3"], "escalation_claims": [], "blocked_reason": "Pinned proof environment unavailable."}); blocked_review["independence"].update({"reviewer_id": "blocked-reviewer", "reviewer_run_id": "run-regrade-blocked", "originating_run_id": "event-finding-revision-3"}); blocked_review["input_hash"] = compute_review_input_hash(engagement, blocked_review, build_reference_index(engagement)); blocked_path = reviews_dir / "regrade-blocked.json"; blocked_path.write_bytes(canonical_json_bytes(blocked_review))
+        tuple_hash3 = claim_tuple_hash(finding3)
+
+        refuted_case = root / "regrade-refuted-debt"; shutil.copytree(engagement, refuted_case); refuted_reviews = refuted_case / "reviews"
+        refuted_regrade = json.loads(json.dumps(correction)); refuted_regrade.update({"review_id": "review-regrade-refuted", "recorded_at": "2026-07-10T00:15:59Z", "finding_revision": 3, "verdict": "refuted", "rationale": "Independent regrade refutes the current bounded claim.", "corrections": ["Adjudicate the independent refutation before any revision."], "required_next_actions": ["record a fresh refutation-bound claim adjudication"], "claim_tuple_hash": tuple_hash3, "prior_review_run_ids": ["run-review-claim-3"], "escalation_claims": [], "blocked_reason": None}); refuted_regrade["independence"].update({"reviewer_id": "refutation-reviewer", "reviewer_run_id": "run-regrade-refuted", "originating_run_id": "event-finding-revision-3"}); refuted_regrade["input_hash"] = compute_review_input_hash(refuted_case, refuted_regrade, build_reference_index(refuted_case)); refuted_regrade_path = refuted_reviews / "regrade-refuted.json"; refuted_regrade_path.write_bytes(canonical_json_bytes(refuted_regrade))
+        _append_kernel_event(refuted_case, base_event(event_id="event-regrade-refuted-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.100000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit independent refutation.", payload={"record_path": "reviews/regrade-refuted.json", "record_digest": sha256_file(refuted_regrade_path), "record_type": "review", "record_id": "review-regrade-refuted", "record_revision": None}))
+        _append_kernel_event(refuted_case, base_event(event_id="event-regrade-refuted", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.200000Z", actor_role="reviewer", actor_id="refutation-reviewer", event_type="review.regrade_completed", rationale="Independent refutation becomes explicit filing debt.", payload={"review_ref": "review-regrade-refuted", "finding_id": "F-selftest", "finding_revision": 3, "verdict": "refuted", "claim_tuple_hash": tuple_hash3}, review_refs=["review-regrade-refuted"], finding_refs=["F-selftest"]))
+        refuted_open_state = reduce_engagement(refuted_case)
+        refuted_row = next(item for item in refuted_open_state["outstanding_reviews"] if item["review_ref"] == "event-regrade-refuted")
+
+        confirmation_shop = claim_review("review-claim-confirmation-shop", "2026-07-10T00:15:59.300000Z", "confirmed", "F-selftest", 3, "event-regrade-refuted"); confirmation_shop["input_refs"] = sorted({*review3["input_refs"], "event-regrade-refuted"}); confirmation_shop["input_hash"] = compute_review_input_hash(refuted_case, confirmation_shop, build_reference_index(refuted_case)); confirmation_shop_path = refuted_reviews / "claim-confirmation-shop.json"; confirmation_shop_path.write_bytes(canonical_json_bytes(confirmation_shop))
+        _append_kernel_event(refuted_case, base_event(event_id="event-claim-confirmation-shop-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.400000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit an adversarial later confirmation review.", payload={"record_path": "reviews/claim-confirmation-shop.json", "record_digest": sha256_file(confirmation_shop_path), "record_type": "review", "record_id": "review-claim-confirmation-shop", "record_revision": None}))
+        confirmation_shop_code = None
+        try:
+            _append_kernel_event(refuted_case, base_event(event_id="event-claim-confirmation-shop", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.500000Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="A later confirmation must not erase independent refutation debt.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-confirmation-shop", "review_digest": sha256_file(confirmation_shop_path)}, review_refs=["review-claim-confirmation-shop"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]))
+        except RecordError as exc:
+            confirmation_shop_code = exc.code
+
+        refutation_claim = claim_review("review-claim-refuted", "2026-07-10T00:15:59.600000Z", "refuted", "F-selftest", 3, "event-regrade-refuted"); refutation_claim["input_refs"] = sorted({*review3["input_refs"], "event-regrade-refuted"}); refutation_claim["input_hash"] = compute_review_input_hash(refuted_case, refutation_claim, build_reference_index(refuted_case)); refutation_claim_path = refuted_reviews / "claim-refuted.json"; refutation_claim_path.write_bytes(canonical_json_bytes(refutation_claim))
+        _append_kernel_event(refuted_case, base_event(event_id="event-claim-refuted-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.700000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit the refutation-bound claim review.", payload={"record_path": "reviews/claim-refuted.json", "record_digest": sha256_file(refutation_claim_path), "record_type": "review", "record_id": "review-claim-refuted", "record_revision": None}))
+        _append_kernel_event(refuted_case, base_event(event_id="event-claim-refuted", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.800000Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Fresh claim adjudication records the independent refutation.", payload={"entity_id": "F-selftest", "status": "refuted", "review_ref": "review-claim-refuted", "review_digest": sha256_file(refutation_claim_path)}, review_refs=["review-claim-refuted"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "refuted"}]))
+        refuted_adjudicated_state = reduce_engagement(refuted_case); refuted_queue_row = next(item for item in refuted_adjudicated_state["work_queue"] if item["class"] == "review_obligation_open" and item["entity"]["id"] == "event-regrade-refuted"); refuted_next_action = decorate_work_queue_item(refuted_queue_row, refuted_adjudicated_state, refuted_case)["next_action"]
+        checks.append(("refuted regrade becomes disposition-bound debt that rejects confirmation-shopping and advances only after a fresh exact refutation adjudication", refuted_row.get("required_claim_status") == "refuted" and confirmation_shop_code == "claim_review_obligation_disposition_mismatch" and refuted_adjudicated_state["claim_adjudications"]["F-selftest"]["status"] == "refuted" and _filing_blocking_review_error(refuted_adjudicated_state, "F-selftest") is None and refuted_next_action["action_id"] == "request_finding_revision_authority", str({"row": refuted_row, "shop": confirmation_shop_code, "action": refuted_next_action})))
+
+        blocked_review = json.loads(json.dumps(correction)); blocked_review.update({"review_id": "review-regrade-blocked", "recorded_at": "2026-07-10T00:15:59Z", "finding_revision": 3, "verdict": "blocked", "rationale": "Pinned proof environment is unavailable; truth remains unchanged.", "corrections": [], "required_next_actions": ["restore pinned environment"], "claim_tuple_hash": tuple_hash3, "prior_review_run_ids": ["run-review-claim-3"], "escalation_claims": [], "blocked_reason": "Pinned proof environment unavailable."}); blocked_review["independence"].update({"reviewer_id": "blocked-reviewer", "reviewer_run_id": "run-regrade-blocked", "originating_run_id": "event-finding-revision-3"}); blocked_review["input_hash"] = compute_review_input_hash(engagement, blocked_review, build_reference_index(engagement)); blocked_path = reviews_dir / "regrade-blocked.json"; blocked_path.write_bytes(canonical_json_bytes(blocked_review))
         blocked_commit = base_event(event_id="event-regrade-blocked-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.200000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit blocked regrade.", payload={"record_path": "reviews/regrade-blocked.json", "record_digest": sha256_file(blocked_path), "record_type": "review", "record_id": "review-regrade-blocked", "record_revision": None}); append_event(engagement, blocked_commit)
         blocked_event = base_event(event_id="event-regrade-blocked", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.500000Z", actor_role="reviewer", actor_id="blocked-reviewer", event_type="review.regrade_completed", rationale="Blocked review records no truth change.", payload={"review_ref": "review-regrade-blocked", "finding_id": "F-selftest", "finding_revision": 3, "verdict": "blocked", "claim_tuple_hash": tuple_hash3}, review_refs=["review-regrade-blocked"], finding_refs=["F-selftest"]); append_event(engagement, blocked_event)
-        blocked_state = reduce_engagement(engagement); checks.append(("typed blocked regrade preserves finding truth and names blocker", blocked_state["findings"]["F-selftest"]["status"] == "confirmed" and any(item["status"] == "blocked" for item in blocked_state["outstanding_reviews"]), str(blocked_state["outstanding_reviews"])))
+        blocked_state = reduce_engagement(engagement); checks.append(("typed blocked regrade preserves finding truth and names blocker", blocked_state["findings"]["F-selftest"]["status"] == "confirmed" and _filing_blocking_review_error(blocked_state, "F-selftest") == "regrade_review_blocked" and any(item["status"] == "blocked" for item in blocked_state["outstanding_reviews"]), str(blocked_state["outstanding_reviews"])))
+        blocked_source = root / "blocked-review-source"; shutil.copytree(engagement, blocked_source)
+        blocked_manual_filing = copy.deepcopy(filing3); blocked_manual_filing["event_id"] = "event-blocked-manual-filing"; blocked_manual_filing["recorded_at"] = "2026-07-10T00:16:00Z"; blocked_manual_filing["payload"].update({"finding_revision": 4, "supersedes_revision": 3, "resolves_review_refs": []})
+        try:
+            _append_kernel_event(blocked_source, blocked_manual_filing)
+            blocked_manual_code = None
+        except RecordError as exc:
+            blocked_manual_code = exc.code
+        blocked_queue_row = next(item for item in blocked_state["work_queue"] if item["class"] == "review_obligation_open" and item["entity"]["id"] == "event-regrade-blocked")
+        blocked_next_action = decorate_work_queue_item(blocked_queue_row, blocked_state, engagement.absolute())["next_action"]
+
+        def supersede_blocked_regrade(case: Path, suffix: str, verdict: str) -> dict[str, Any]:
+            fresh = json.loads(json.dumps(blocked_review)); fresh.update({"review_id": f"review-regrade-supersede-{suffix}", "recorded_at": "2026-07-10T00:16:00.100000Z", "verdict": verdict, "rationale": f"Fresh independent review records {verdict} without hiding prior debt.", "corrections": [], "required_next_actions": ["preserve the replacement blocker"] if verdict == "blocked" else [], "prior_review_run_ids": ["run-regrade-blocked"], "blocked_reason": "Fresh review remains blocked." if verdict == "blocked" else None}); fresh["independence"].update({"reviewer_id": f"superseding-reviewer-{suffix}", "reviewer_run_id": f"run-regrade-supersede-{suffix}", "originating_run_id": "event-finding-revision-3"}); fresh["input_hash"] = compute_review_input_hash(case, fresh, build_reference_index(case)); fresh_path = case / "reviews" / f"regrade-supersede-{suffix}.json"; fresh_path.write_bytes(canonical_json_bytes(fresh))
+            _append_kernel_event(case, base_event(event_id=f"event-regrade-supersede-{suffix}-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:16:00.200000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit fresh exact superseding regrade.", payload={"record_path": f"reviews/regrade-supersede-{suffix}.json", "record_digest": sha256_file(fresh_path), "record_type": "review", "record_id": fresh["review_id"], "record_revision": None}))
+            _append_kernel_event(case, base_event(event_id=f"event-regrade-supersede-{suffix}", engagement_id=engagement.name, recorded_at="2026-07-10T00:16:00.300000Z", actor_role="reviewer", actor_id=fresh["independence"]["reviewer_id"], event_type="review.regrade_completed", rationale="Explicitly supersede only the exact named blocked row.", payload={"review_ref": fresh["review_id"], "finding_id": "F-selftest", "finding_revision": 3, "verdict": verdict, "claim_tuple_hash": tuple_hash3, "resolves_review_refs": ["event-regrade-blocked"]}, review_refs=[fresh["review_id"]], finding_refs=["F-selftest"]))
+            return reduce_engagement(case)
+
+        supersede_confirmed_case = root / "blocked-review-superseded-confirmed"; shutil.copytree(blocked_source, supersede_confirmed_case); superseded_confirmed_state = supersede_blocked_regrade(supersede_confirmed_case, "confirmed", "confirmed")
+        supersede_blocked_case = root / "blocked-review-superseded-blocked"; shutil.copytree(blocked_source, supersede_blocked_case); superseded_blocked_state = supersede_blocked_regrade(supersede_blocked_case, "blocked", "blocked")
+        replacement_blocked_rows = [row for row in superseded_blocked_state["outstanding_reviews"] if row.get("review_type") == "regrade" and row.get("status") == "blocked"]
+        blocked_action_text = str(blocked_next_action["required_inputs"])
+        checks.append(("blocked review debt rejects filing and supports only exact prior-run supersession; blocked-to-blocked replaces rather than erases debt", blocked_manual_code == "regrade_review_blocked" and blocked_next_action["action_id"] == "supersede_blocked_review_obligation" and "event-regrade-blocked" in blocked_action_text and "verdict is confirmed" not in blocked_action_text and not any(row.get("review_ref") == "event-regrade-blocked" for row in superseded_confirmed_state["outstanding_reviews"]) and _filing_blocking_review_error(superseded_confirmed_state, "F-selftest") is None and superseded_confirmed_state["findings"]["F-selftest"]["status"] == "confirmed" and len(replacement_blocked_rows) == 1 and replacement_blocked_rows[0]["review_ref"] == "event-regrade-supersede-blocked" and superseded_blocked_state["findings"]["F-selftest"]["status"] == "confirmed", str({"manual": blocked_manual_code, "action": blocked_next_action, "confirmed": superseded_confirmed_state["outstanding_reviews"], "blocked": replacement_blocked_rows})))
         current_report = generate_report(engagement, "F-selftest", 3, ["claim-mechanism", "claim-reach", "claim-impact"], [], "operator-selftest", "2026-07-10T00:15:59.600000Z")
         accept_report(engagement, current_report["report_id"], "operator-selftest", "Claims and proof links match revision three.", "2026-07-10T00:15:59.700000Z")
         submission_path = engagement / "submissions" / "F-selftest.txt"; submission_path.write_text("Operator-authored external submission for F-selftest revision 3.\n", encoding="utf-8")
@@ -3102,22 +3660,59 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         canonical_finding_path = root / "canonical-finding.json"; canonical_finding_path.write_bytes(canonical_json_bytes(canonical_finding)); finding_digest = sha256_file(canonical_finding_path)
 
         v2_source = root / "v2-finding-source"; shutil.copytree(engagement, v2_source)
-        def prepare_v2_request(target_engagement: Path, request_name: str, proposal: dict[str, Any], request_time: str, *, action_executor: str | None = None, request_environment: object = ...) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def prepare_v2_request(target_engagement: Path, request_name: str, proposal: dict[str, Any], request_time: str, *, action_executor: str | None = None, request_environment: object = ..., expires_at: str | None = "2099-07-10T00:00:00Z") -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
             request_state = reduce_engagement(target_engagement); metadata = request_state["claim_adjudications"][proposal["finding_id"]]; proposal_digest = sha256_bytes(canonical_json_bytes(proposal))
             target_value = {"type": "finding", "id": proposal["finding_id"], "expected_revision": metadata["expected_filing_revision"], "claim_state": metadata["status"], "adjudication_event_ref": metadata["event_ref"], "adjudication_review_ref": metadata["review_ref"], "resolves_review_refs": [], "file_digest": proposal_digest}
             action_value = _authority_action("revise-finding", action_version=2, lane_id=finding_revision_lane_id(target_value), executor_id=action_executor or broker_id, session_id=broker_session, file_digest=proposal_digest, operator_id="operator-selftest", proposal=proposal, target=target_value)
             relative = f"authority/requests/{request_name}.action.json"; atomic_write(target_engagement / relative, canonical_json_bytes(action_value)); action_value_digest = sha256_bytes(canonical_json_bytes(action_value))
             environment_value = request_state["active_environment_ref"] if request_environment is ... else request_environment
-            request_event = base_event(event_id=f"event-{request_name}", engagement_id=request_state["engagement_id"], recorded_at=request_time, actor_role="broker", actor_id=broker_id, event_type="authority.requested", rationale="Request one fully bound v2 finding revision.", payload={"request_id": request_name, "action_kind": "revise-finding", "action_digest": action_value_digest, "action_path": relative, "lane_id": action_value["lane_id"], "request_status": "pending_authority", "scope_hash": request_state["scope_hash"], "environment_ref": environment_value, "expires_at": "2099-07-10T00:00:00Z"}, session_id=broker_session, operation_class="notebook")
+            request_event = base_event(event_id=f"event-{request_name}", engagement_id=request_state["engagement_id"], recorded_at=request_time, actor_role="broker", actor_id=broker_id, event_type="authority.requested", rationale="Request one fully bound v2 finding revision.", payload={"request_id": request_name, "action_kind": "revise-finding", "action_digest": action_value_digest, "action_path": relative, "lane_id": action_value["lane_id"], "request_status": "pending_authority", "scope_hash": request_state["scope_hash"], "environment_ref": environment_value, "expires_at": expires_at}, session_id=broker_session, operation_class="notebook")
             return action_value, target_value, request_event
 
         v2_clock = datetime.now(timezone.utc); v2_request_time = v2_clock.isoformat(timespec="seconds").replace("+00:00", "Z"); v2_resolution_time = (v2_clock + timedelta(seconds=1)).isoformat(timespec="seconds").replace("+00:00", "Z"); v2_apply_time = (v2_clock + timedelta(seconds=2)).isoformat(timespec="seconds").replace("+00:00", "Z")
-        v2_valid = root / "v2-finding-valid"; shutil.copytree(v2_source, v2_valid); v2_action, v2_target, v2_request_event = prepare_v2_request(v2_valid, "request-v2-finding", canonical_finding, v2_request_time); append_event(v2_valid, v2_request_event); v2_pending_state = reduce_engagement(v2_valid)
+        v2_valid = root / "v2-finding-valid"; shutil.copytree(v2_source, v2_valid); v2_action, v2_target, v2_request_event = prepare_v2_request(v2_valid, "request-v2-finding", canonical_finding, v2_request_time, expires_at=None); append_event(v2_valid, v2_request_event); v2_pending_state = reduce_engagement(v2_valid)
         v2_pending_classes = [(item["class"], item["entity"]["id"]) for item in v2_pending_state["work_queue"]]
         v2_digest = sha256_bytes(canonical_json_bytes(v2_action)); append_event(v2_valid, base_event(event_id="event-resolution-v2-finding", engagement_id=v2_pending_state["engagement_id"], recorded_at=v2_resolution_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve the exact v2 proposal after its request time.", payload={"request_id": "request-v2-finding", "request_event_ref": v2_request_event["event_id"], "action_digest": v2_digest, "resolution": "approved", "resolved_at": v2_resolution_time}, entity_refs=[v2_request_event["event_id"]], session_id=broker_session, operation_class="authority"))
         v2_partial_path = v2_valid / "findings/F-canonical-public/rev-1.json"; atomic_write(v2_partial_path, canonical_json_bytes(canonical_finding)); append_event(v2_valid, base_event(event_id="event-F-canonical-public-r1-commit", engagement_id=v2_pending_state["engagement_id"], recorded_at=v2_apply_time, actor_role="broker", actor_id=broker_id, event_type="record.committed", rationale="Simulate a same-digest v2 crash after commit but before activation.", payload={"record_path": "findings/F-canonical-public/rev-1.json", "record_digest": v2_target["file_digest"], "record_type": "finding-v3", "record_id": "F-canonical-public", "record_revision": 1, "authority_request_ref": "request-v2-finding"}, session_id=broker_session, operation_class="authority"))
-        command_revise_finding(argparse.Namespace(engagement=v2_valid, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=v2_apply_time, authority_request_id="request-v2-finding", lane_id=v2_action["lane_id"], executor_id=broker_id, session_id=broker_session)); v2_applied_state = reduce_engagement(v2_valid); v2_applied_event = read_ledger(v2_valid, "event")[-1]
-        checks.append(("v2 revise target is projected, delayed approval and same-digest crash resume stay applicable, and public filing propagates exact resolutions", v2_pending_state["authority_requests"]["request-v2-finding"]["target"] == v2_target and ("finding_revision_pending", "F-canonical-public") not in v2_pending_classes and ("claim_unadjudicated", "F-canonical-public") in v2_pending_classes and ("awaiting_operator", "request-v2-finding") in v2_pending_classes and v2_applied_state["findings"]["F-canonical-public"]["adjudication_event_ref"] == v2_target["adjudication_event_ref"] and v2_applied_event["payload"].get("resolves_review_refs") == [], str({"pending": v2_pending_classes, "finding": v2_applied_state["findings"].get("F-canonical-public")})))
+        command_settle_approved_revision(argparse.Namespace(engagement=v2_valid, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=v2_apply_time, authority_request_id="request-v2-finding", lane_id=v2_action["lane_id"], executor_id=broker_id, session_id=broker_session)); v2_applied_state = reduce_engagement(v2_valid); v2_applied_event = read_ledger(v2_valid, "event")[-1]
+        checks.append(("atomic settlement applies a live nullable-expiry v2 target, resumes a same-digest partial commit, and propagates exact resolutions", v2_pending_state["authority_requests"]["request-v2-finding"]["target"] == v2_target and v2_pending_state["authority_requests"]["request-v2-finding"]["expires_at"] is None and ("finding_revision_pending", "F-canonical-public") not in v2_pending_classes and ("claim_unadjudicated", "F-canonical-public") in v2_pending_classes and ("awaiting_operator", "request-v2-finding") in v2_pending_classes and v2_applied_state["findings"]["F-canonical-public"]["adjudication_event_ref"] == v2_target["adjudication_event_ref"] and v2_applied_event["payload"].get("resolves_review_refs") == [], str({"pending": v2_pending_classes, "finding": v2_applied_state["findings"].get("F-canonical-public")})))
+
+        expiry_deadline_dt = v2_clock + timedelta(seconds=3)
+        expiry_deadline = expiry_deadline_dt.isoformat(timespec="seconds").replace("+00:00", "Z")
+        expiry_settlement_dt = v2_clock + timedelta(seconds=120)
+        expiry_settlement_time = expiry_settlement_dt.isoformat(timespec="seconds").replace("+00:00", "Z")
+        v2_expired = root / "v2-finding-expired"; shutil.copytree(v2_source, v2_expired)
+        expiry_action, _, expiry_request = prepare_v2_request(v2_expired, "request-v2-expired", canonical_finding, v2_request_time, expires_at=expiry_deadline)
+        append_event(v2_expired, expiry_request)
+        append_event(v2_expired, base_event(event_id="event-resolution-v2-expired", engagement_id=reduce_engagement(v2_expired)["engagement_id"], recorded_at=v2_resolution_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve the exact revision until its objective deadline.", payload={"request_id": "request-v2-expired", "request_event_ref": expiry_request["event_id"], "action_digest": sha256_bytes(canonical_json_bytes(expiry_action)), "resolution": "approved", "resolved_at": v2_resolution_time}, entity_refs=[expiry_request["event_id"]], session_id=broker_session, operation_class="authority"))
+        early_expiry_event = base_event(event_id="event-authority-expired-request-v2-expired-early", engagement_id=reduce_engagement(v2_expired)["engagement_id"], recorded_at=v2_apply_time, actor_role="broker", actor_id=broker_id, event_type="authority.expired", rationale="An approval cannot expire before its recorded deadline.", payload={"request_id": "request-v2-expired", "request_event_ref": expiry_request["event_id"], "action_digest": sha256_bytes(canonical_json_bytes(expiry_action)), "expires_at": expiry_deadline, "status": "expired"}, entity_refs=[expiry_request["event_id"]], session_id=broker_session, operation_class="notebook")
+        try:
+            _append_kernel_event(v2_expired, early_expiry_event)
+            early_expiry_code = None
+        except RecordError as exc:
+            early_expiry_code = exc.code
+
+        class _ExpiredSettlementClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return expiry_settlement_dt
+
+        expired_args = argparse.Namespace(engagement=v2_expired, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=expiry_settlement_time, authority_request_id="request-v2-expired", lane_id=expiry_action["lane_id"], executor_id=broker_id, session_id=broker_session)
+        with patch(f"{__name__}.datetime", _ExpiredSettlementClock), patch(f"{__name__}.emit"):
+            stale_settlement_code = None
+            try:
+                command_settle_approved_revision(argparse.Namespace(**{**vars(expired_args), "recorded_at": v2_apply_time}))
+            except RecordError as exc:
+                stale_settlement_code = exc.code
+            before_expiry_events = len(read_ledger(v2_expired, "event"))
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                settlement_results = list(executor.map(lambda _: command_settle_approved_revision(expired_args), range(2)))
+        expired_state = reduce_engagement(v2_expired)
+        expiry_events = [event for event in read_ledger(v2_expired, "event") if event["event_type"] == "authority.expired" and event["payload"].get("request_id") == "request-v2-expired"]
+        expired_revision_item = next(item for item in expired_state["work_queue"] if item["class"] == "finding_revision_pending" and item["entity"]["id"] == "F-canonical-public")
+        after_expiry_action = decorate_work_queue_item(expired_revision_item, expired_state, v2_expired)["next_action"]
+        checks.append(("atomic settlement rejects early and stale-time expiry, serializes concurrent retries to one event, writes no finding bytes, and reopens a new request action", early_expiry_code == "approved_authority_expiry_invalid" and stale_settlement_code == "authority_settlement_time_not_current" and settlement_results == [0, 0] and len(expiry_events) == 1 and len(read_ledger(v2_expired, "event")) == before_expiry_events + 1 and expired_state["authority_requests"]["request-v2-expired"]["status"] == "expired" and not (v2_expired / "findings/F-canonical-public/rev-1.json").exists() and after_expiry_action["action_id"] == "request_finding_revision_authority", str({"early": early_expiry_code, "stale": stale_settlement_code, "results": settlement_results, "events": expiry_events, "next": after_expiry_action})))
 
         v2_duplicate = root / "v2-finding-duplicate"; shutil.copytree(v2_source, v2_duplicate); duplicate_first_action, _, duplicate_first_event = prepare_v2_request(v2_duplicate, "request-v2-first", canonical_finding, v2_request_time); append_event(v2_duplicate, duplicate_first_event); changed_proposal = copy.deepcopy(canonical_finding); changed_proposal["change_reason"] = "A different digest cannot open the same active generation."; _, _, duplicate_second_event = prepare_v2_request(v2_duplicate, "request-v2-second", changed_proposal, v2_request_time); duplicate_replay_blocked = False
         try: append_event(v2_duplicate, duplicate_second_event)
@@ -3166,6 +3761,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         append_event(legacy_null, base_event(event_id="event-request-legacy-null-fields", engagement_id=legacy_state["engagement_id"], recorded_at=legacy_apply_time, actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="authority.requested", rationale="Exercise the pre-v2 nullable authority fields.", payload={"request_id": legacy_request_id, "action_kind": "revise-finding", "action_digest": legacy_action_digest, "lane_id": legacy_lane, "request_status": "pending_authority", "scope_hash": legacy_state["scope_hash"], "environment_ref": None, "expires_at": None}, session_id="session-legacy-null-fields", operation_class="notebook")); append_event(legacy_null, base_event(event_id="event-resolution-legacy-null-fields", engagement_id=legacy_state["engagement_id"], recorded_at=legacy_apply_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve the exact legacy finding action.", payload={"request_id": legacy_request_id, "request_event_ref": "event-request-legacy-null-fields", "action_digest": legacy_action_digest, "resolution": "approved", "resolved_at": legacy_apply_time}, entity_refs=["event-request-legacy-null-fields"], session_id=broker_session, operation_class="authority")); command_revise_finding(argparse.Namespace(engagement=legacy_null, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=legacy_apply_time, authority_request_id=legacy_request_id, lane_id=legacy_lane, executor_id=broker_id, session_id=broker_session)); legacy_null_state = reduce_engagement(legacy_null)
         checks.append(("legacy target-null revise authority retains nullable action path, environment, and expiry compatibility", legacy_null_state["authority_requests"][legacy_request_id]["target"] is None and legacy_null_state["findings"]["F-canonical-public"]["revision"] == 1, str(legacy_null_state["authority_requests"][legacy_request_id])))
 
+        now_text = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         action = _authority_action("revise-finding", lane_id="lane-canonical-finding", executor_id=broker_id, session_id=broker_session, file_digest=finding_digest, operator_id="operator-selftest", recorded_at=now_text); action_digest = sha256_bytes(canonical_json_bytes(action)); canonical_action_relative = "authority/requests/request-canonical-finding.action.json"; atomic_write(engagement / canonical_action_relative, canonical_json_bytes(action)); scope_hash = reduce_engagement(engagement)["scope_hash"]; request_id = "request-canonical-finding"
         append_event(engagement, base_event(event_id="event-request-canonical-finding", engagement_id=engagement.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, event_type="authority.requested", rationale="Request filing of one exact separately adjudicated revision.", payload={"request_id": request_id, "action_kind": "revise-finding", "action_digest": action_digest, "action_path": canonical_action_relative, "lane_id": "lane-canonical-finding", "request_status": "pending_authority", "scope_hash": scope_hash, "environment_ref": reduce_engagement(engagement)["active_environment_ref"], "expires_at": None}, session_id=broker_session, operation_class="notebook"))
         append_event(engagement, base_event(event_id="event-resolution-canonical-finding", engagement_id=engagement.name, recorded_at=now_text, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve only the digest-bound canonical revision.", payload={"request_id": request_id, "request_event_ref": "event-request-canonical-finding", "action_digest": action_digest, "resolution": "approved", "resolved_at": now_text}, entity_refs=["event-request-canonical-finding"], session_id=broker_session, operation_class="authority"))
@@ -3362,6 +3958,8 @@ def parser() -> argparse.ArgumentParser:
     request_authority.add_argument("--engagement", type=Path, required=True); request_authority.add_argument("--request-id", required=True); request_authority.add_argument("--action-kind", required=True); request_authority.add_argument("--action-file", type=Path, required=True); request_authority.add_argument("--lane-id", required=True); request_authority.add_argument("--actor-role", choices=["broker"], required=True); request_authority.add_argument("--actor-id", required=True); request_authority.add_argument("--session-id", required=True); request_authority.add_argument("--recorded-at", required=True); request_authority.add_argument("--expires-at", required=True); request_authority.add_argument("--reason", required=True)
     resolve_authority = subcommands.add_parser("resolve-authority", help="operator-resolve one exact pending authority request")
     resolve_authority.add_argument("--engagement", type=Path, required=True); resolve_authority.add_argument("--request-id", required=True); resolve_authority.add_argument("--resolution", choices=["approved", "rejected", "expired", "superseded"], required=True); resolve_authority.add_argument("--operator-id", required=True); resolve_authority.add_argument("--session-id", required=True); resolve_authority.add_argument("--recorded-at", required=True); resolve_authority.add_argument("--reason", required=True)
+    settle_revision = subcommands.add_parser("settle-approved-revision", help="atomically apply one live approved finding revision or record its objective expiry")
+    settle_revision.add_argument("--engagement", type=Path, required=True); settle_revision.add_argument("--file", type=Path, required=True); settle_revision.add_argument("--resolve-review", action="append"); settle_revision.add_argument("--operator-id", required=True); settle_revision.add_argument("--recorded-at", required=True); settle_revision.add_argument("--authority-request-id", required=True); settle_revision.add_argument("--lane-id", required=True); settle_revision.add_argument("--executor-id", required=True); settle_revision.add_argument("--session-id", required=True)
     confirm_zone2 = subcommands.add_parser("confirm-zone2", help="record one fresh operator confirmation before one Zone-2 artifact is created")
     confirm_zone2.add_argument("--engagement", type=Path, required=True)
     confirm_zone2.add_argument("--file", type=Path, required=True)
@@ -3410,6 +4008,9 @@ def parser() -> argparse.ArgumentParser:
     proof.add_argument("--engagement", type=Path, required=True)
     proof.add_argument("--finding-id", required=True)
     proof.add_argument("--revision", type=int, required=True)
+    for name in ("next", "list", "gate"):
+        command = subcommands.add_parser(name, help=f"read the reducer-owned work queue ({name})")
+        command.add_argument("--engagement", type=Path, required=True)
     for name in ("reduce", "render", "check-resume", "check-completion-claims"):
         command = subcommands.add_parser(name, help=f"{name} deterministic engagement state")
         command.add_argument("--engagement", type=Path, required=True)
@@ -3442,9 +4043,13 @@ def main() -> int:
             "operator-resume": command_operator_resume,
             "request-authority": command_request_authority,
             "resolve-authority": command_resolve_authority,
+            "settle-approved-revision": command_settle_approved_revision,
             "confirm-zone2": command_confirm_zone2,
             "register-artifact": command_register_artifact,
             "repair-ledger-tail": command_repair_tail,
+            "next": command_queue_inspection,
+            "list": command_queue_inspection,
+            "gate": command_queue_inspection,
             "reduce": command_reduce,
             "render": command_render,
             "check-completion-claims": command_check_completion_claims,
@@ -3467,7 +4072,7 @@ def main() -> int:
         if args.command in commands:
             engagement_argument = getattr(args, "engagement", None)
             if engagement_argument is not None and args.command not in {
-                "ledger-health", "quarantine-ledger", "clear-ledger-quarantine", "check-completion-claims"
+                "ledger-health", "quarantine-ledger", "clear-ledger-quarantine", "check-completion-claims", *QUEUE_INSPECTION_COMMANDS
             }:
                 require_not_quarantined(engagement_argument.absolute())
             matrix = load_capability_matrix()
@@ -3479,7 +4084,10 @@ def main() -> int:
         parser().print_help()
         return 2
     except RecordError as exc:
-        emit({"valid": False, "error": exc.as_dict()})
+        if getattr(args, "command", None) in QUEUE_INSPECTION_COMMANDS:
+            emit(queue_command_error_payload(args.command, exc))
+        else:
+            emit({"valid": False, "error": exc.as_dict()})
         return 1
 
 

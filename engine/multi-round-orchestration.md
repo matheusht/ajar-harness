@@ -121,17 +121,21 @@ was made before the author knew it was true; he says he did not believe the resu
 persistence is powered by an asserted certainty, not an established one. Copy that and a clean codebase
 gets reward-hacked into a fake finding, because the run may not terminate until it produces the thing it
 was told to expect. **Never state that a vulnerability exists.** State the surface and let the evidence
-decide. Exit is governed by `persistence.md`:
+decide. Continuation is governed by the **computed work queue**, the single completion condition
+defined in `persistence.md` and `loop.md`:
 
-- **Exit = FOUND** when a candidate is confirmed **and executed to oracle** (Stage 4.25 with a negative
-  control) → hand to the reportability gate.
-- **Exit = COVERED-DRY** only when ALL hold: every registry family is `exhausted` or `blocked`
-  (no-new-mechanism); the primitive registry has no un-attempted composition; and a recent blind round
-  produced **no new family** — sustained for a bounded number of consecutive dry rounds (floor `K≈2`).
+- **FOUND is a transition, not a completion shortcut.** When a candidate is confirmed **and executed to
+  oracle** (Stage 4.25 with a negative control), hand it to the reportability gate and recompute the
+  queue.
+- **Exit = COVERED-DRY** only after the computed work queue's final cold coverage-review item is closed
+  and the reduced queue is empty. A non-empty operator-only queue pauses rather than completes.
+  Registry exhaustion, un-attempted compositions, and a recent blind round that produced no new
+  family are evidence supplied to that review, not alternate stop rules.
 - **The persistence bar scales with evidence.** A confirmed primitive, a `strong` routing signal, a
-  ghsa-fix-diff anchor, or an operator prior *raises* the round bound and forbids early dry (a held
-  vector = wrong turn). Absent such evidence, dry is allowed at the floor. Fishing is not persistence;
-  persistence is licensed by a signal that something is already wrong.
+  ghsa-fix-diff anchor, or an operator prior expands or sharpens the bounded work represented in the
+  queue and forbids an early dry verdict (a held vector = wrong turn). It does not create a second
+  counter-based stop. Fishing is not persistence; persistence is licensed by a signal that something
+  is already wrong.
 
 ## 6. What it deliberately does NOT touch
 It wraps Stages 0→3.5 only. Downstream is unchanged and non-negotiable:

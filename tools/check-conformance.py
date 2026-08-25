@@ -1481,6 +1481,155 @@ def check_doctrine_mirror():
            f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
 
 
+def check_queue_stop_doctrine():
+    """Keep the computed queue as the only completion predicate in active loop doctrine."""
+    print("\n[doctrine] computed queue is the single completion condition")
+    core_doctrine_paths = (
+        "engine/loop.md",
+        "engine/persistence.md",
+        "engine/multi-round-orchestration.md",
+    )
+    forbidden_stops = (
+        (re.compile(r"\bK\s*(?:≈|~=|~|=)\s*\d+\b", re.IGNORECASE), "numeric K dry-round constant"),
+        (re.compile(r"max(?:imum)?\s+dry\s+streak", re.IGNORECASE), "max dry-streak stop"),
+        (re.compile(r"consecutive\s+dry\s+rounds", re.IGNORECASE), "consecutive dry-round stop"),
+        (re.compile(r"\b\d+\s+(?:consecutive\s+)?dry\s+rounds?\b", re.IGNORECASE), "numeric dry-round stop"),
+        (re.compile(r"\b(?:\d+|one|two|three|four|five|six)\s+consecutive\s+(?:full\s+)?(?:coverage\s+)?(?:passes|rounds|iterations)\b", re.IGNORECASE), "consecutive coverage-pass stop"),
+        (re.compile(r"\b(?:round|dry[-_\s]+round)\s+(?:bound|floor)\b", re.IGNORECASE), "round bound or floor"),
+        (re.compile(r"\bfloor\s+applies\b", re.IGNORECASE), "implicit round floor"),
+    )
+    for relative in core_doctrine_paths:
+        path = os.path.join(ROOT, relative)
+        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        record(bool(text), f"queue stop doctrine: {relative} exists")
+        record("computed work queue" in text.lower(),
+               f"queue stop doctrine: {relative} names the computed work queue")
+        record("queue is empty" in text.lower() or "empty queue" in text.lower(),
+               f"queue stop doctrine: {relative} requires an empty queue for completion")
+
+    operational_paths = {"CLAUDE.md", "AGENTS.md", *core_doctrine_paths}
+    for relative_root in (
+        "engagements/_TEMPLATE/goal-prompts",
+        "skills",
+        ".pi/skills",
+    ):
+        absolute_root = os.path.join(ROOT, relative_root)
+        if not os.path.isdir(absolute_root):
+            continue
+        for directory, _, names in os.walk(absolute_root):
+            for name in names:
+                if name.endswith(".md"):
+                    operational_paths.add(os.path.relpath(os.path.join(directory, name), ROOT))
+    doctrine_offenders = []
+    for relative in sorted(operational_paths):
+        path = os.path.join(ROOT, relative)
+        if not os.path.isfile(path):
+            continue
+        text = open(path, encoding="utf-8", errors="replace").read()
+        for pattern, description in forbidden_stops:
+            match = pattern.search(text)
+            if match:
+                doctrine_offenders.append(f"{relative}: {description}: {match.group(0)}")
+    record(not doctrine_offenders,
+           "queue stop doctrine: active prompts, cards, and engine docs have no counter-based stop",
+           "; ".join(doctrine_offenders))
+    doctrine_regression_spellings = (
+        "K~3 dry rounds",
+        "K=2 consecutive dry rounds",
+        "two consecutive full coverage passes that add no material candidate",
+    )
+    missed_doctrine_spellings = [
+        spelling for spelling in doctrine_regression_spellings
+        if not any(pattern.search(spelling) for pattern, _ in forbidden_stops)
+    ]
+    record(not missed_doctrine_spellings,
+           "queue stop doctrine: guard recognizes numeric and semantic consecutive-pass stops",
+           ", ".join(missed_doctrine_spellings))
+
+    loop_text = open(os.path.join(ROOT, "engine/loop.md"), encoding="utf-8").read()
+    record("A dry round is a round that enqueued no new work." in loop_text,
+           "queue stop doctrine: a dry round is defined only as an observation")
+    record("single loop condition" in loop_text.lower(),
+           "queue stop doctrine: loop declares one computed loop condition")
+    record("if work: pause_objective" in loop_text and "complete_objective" in loop_text,
+           "queue stop doctrine: operator-only work pauses instead of completing")
+    ordered_loop_steps = (
+        "if reduced.queue_control.status == parked: exit_objective_noncompletion",
+        "if reduced.coverage in {budget_bounded, blocked}: exit_objective_noncompletion",
+        "if reduced.coverage == coverage_dry:",
+        "if work: record_state_invariant_error",
+        "complete_objective",
+        "if any(item.blocking for item in work): continue_objective",
+        "if work: pause_objective",
+    )
+    loop_step_positions = [loop_text.find(step) for step in ordered_loop_steps]
+    record(all(position >= 0 for position in loop_step_positions)
+           and loop_step_positions == sorted(loop_step_positions),
+           "queue stop doctrine: parked and terminal exits precede active work dispatch",
+           str(dict(zip(ordered_loop_steps, loop_step_positions))))
+
+    runtime_counter_patterns = (
+        re.compile(r"\bdry(?:_|-)?rounds?", re.IGNORECASE),
+        re.compile(r"\bdry(?:_|-)?streak", re.IGNORECASE),
+        re.compile(r"\bmax(?:_|-)?dry", re.IGNORECASE),
+        re.compile(r"\brounds?(?:_|-)?without(?:_|-)?(?:new(?:_|-)?)?work", re.IGNORECASE),
+        re.compile(r"\bno(?:_|-)?new(?:_|-)?work(?:_|-)?(?:rounds?|count|counter|streak)", re.IGNORECASE),
+    )
+    regression_spellings = (
+        "dry_round", "dry_round_count", "dryRoundCount", "--dry-round-count", "dry_streak",
+        "max-dry", "rounds_without_work", "roundsWithoutNewWork", "noNewWorkCount",
+        "no-new-work-counter",
+    )
+    missed_spellings = [
+        spelling for spelling in regression_spellings
+        if not any(pattern.search(spelling) for pattern in runtime_counter_patterns)
+    ]
+    record(not missed_spellings,
+           "queue stop doctrine: runtime guard recognizes snake, camel, kebab, and semantic counters",
+           ", ".join(missed_spellings))
+
+    offenders = []
+    code_extensions = (".py", ".sh", ".js", ".mjs", ".ts")
+    config_extensions = (".json", ".jsonl", ".yaml", ".yml", ".toml")
+    config_bases = {"hooks", ".claude", "schemas", "capabilities", ".github", "config", "engine"}
+    scanned_runtime_paths = set()
+    for base in ("tools", "hooks", ".claude", ".pi", "skills", "schemas", "capabilities", ".github", "config", "engine"):
+        root = os.path.join(ROOT, base)
+        if not os.path.isdir(root):
+            continue
+        for directory, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(directory, name)
+                is_code = name.endswith(code_extensions)
+                is_runtime_config = base in config_bases and name.endswith(config_extensions)
+                if not (is_code or is_runtime_config):
+                    continue
+                if os.path.samefile(path, __file__):
+                    continue
+                relative = os.path.relpath(path, ROOT)
+                scanned_runtime_paths.add(relative)
+                text = open(path, encoding="utf-8", errors="replace").read()
+                for pattern in runtime_counter_patterns:
+                    match = pattern.search(text)
+                    if match:
+                        offenders.append(f"{relative}: {match.group(0)}")
+                        break
+    expected_engine_configs = {
+        os.path.relpath(os.path.join(directory, name), ROOT)
+        for directory, _, names in os.walk(os.path.join(ROOT, "engine"))
+        for name in names
+        if name.endswith(config_extensions)
+    }
+    missing_engine_configs = sorted(expected_engine_configs - scanned_runtime_paths)
+    record(bool(expected_engine_configs),
+           "queue stop doctrine: engine runtime configuration surface exists")
+    record(not missing_engine_configs,
+           "queue stop doctrine: runtime traversal covers every engine configuration",
+           ", ".join(missing_engine_configs))
+    record(not offenders, "queue stop doctrine: code and runtime configuration read no dry-round counter",
+           ", ".join(sorted(offenders)))
+
+
 def check_cited_fixtures():
     """Every fixture directory a card cites must exist, or the card must declare it as planned.
 
@@ -1727,6 +1876,7 @@ def main():
     check_false_discovery_corpus()
     check_adversarial_candidates()
     check_doctrine_mirror()
+    check_queue_stop_doctrine()
     check_cited_fixtures()
     check_corpus_enumeration()
     check_ideation_mapper()

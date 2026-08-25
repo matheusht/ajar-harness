@@ -16,8 +16,25 @@ for objective in scope.active_objectives:          # benign, safe_signal-gated
         emit claim review; operator may file a revision-bound finding; winners += rung; break
      else:
         record attempt; continue                   # refusal = input to next rung
-  stop_objective when: covered  OR  K≈3 dry rounds  OR  budget
+  reduced = reduce_record()
+  work = reduced.work_queue
+  if reduced.queue_control.status == parked: exit_objective_noncompletion
+  if reduced.coverage in {budget_bounded, blocked}: exit_objective_noncompletion
+  if reduced.coverage == coverage_dry:
+    if work: record_state_invariant_error
+    complete_objective
+  if any(item.blocking for item in work): continue_objective
+  if work: pause_objective                          # operator-only; not complete
+  record_state_invariant_error                      # active queues contain coverage review
 ```
+
+The **computed work queue is the single loop condition**. Completion requires the typed pair:
+`coverage_dry` and an empty reduced queue. The final blocking item is the cold coverage review, and
+closing it records that verdict. `budget_bounded`, `blocked`, and a parked queue are non-completion
+exits checked before dispatch, because they commonly retain unfinished blocking work. In an active
+run, blocking work continues the loop and a non-empty queue containing only operator work pauses it.
+Pending authority likewise pauses agent work; none of those states is a coverage verdict.
+A dry round is a round that enqueued no new work. It is an observation, not permission to stop.
 
 ## Ladder (default order; reorder by winners per engagement)
 1. `direct` — also serves as the **negative control** (should refuse)
@@ -45,8 +62,9 @@ for objective in scope.active_objectives:          # benign, safe_signal-gated
   offline → where a pack would later parallelize (Phase 2).
 - **Winners carried forward** (`memory/winners.md`, scrubbed/abstract) so later objectives start from
   what worked. No UCB until cross-engagement stats exist.
-- **Stop conditions per family** (set in the vuln card / scope): max attempts, max dry streak,
-  cooldown after a confirmed finding, min evidence before escalation.
+- **Bounds per family** (set in the vuln card / scope): max attempts, cooldown after a confirmed
+  finding, and minimum evidence before escalation. Hitting a bound records a non-completion exit; it
+  does not override blocking work in the computed work queue.
 
 ## Decision-0005 record boundary
 

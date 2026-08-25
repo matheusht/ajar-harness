@@ -82,7 +82,7 @@ Use `[PLANNING_MODEL]` for planning, corpus triage, candidate prioritization, pi
 
 Activate persistence only for a confirmed primitive, strong activation signal, or explicit recorded operator prior. Bound each lead before grinding. Alternate zoom-in and zoom-out; a held vector is a wrong turn, while repeated variants of the same disproven path are tunnel vision.
 
-Do not stop merely because construction is difficult or lengthy. Do stop a sub-thread when its bounded variants and decisive falsifiers are exhausted, then move elsewhere. Coverage closure requires [TARGET-SPECIFIC DRY CRITERIA], independent cold review, and two consecutive full coverage passes that add no material candidate—not merely two prompt iterations.
+Do not stop merely because construction is difficult or lengthy. Do stop a sub-thread when its bounded variants and decisive falsifiers are exhausted, then move elsewhere. Represent [TARGET-SPECIFIC BOUNDED-COVERAGE EVIDENCE] in the computed work queue. The independent cold review is its final blocking item; coverage completes only when that review closes and the reduced queue is empty. A non-empty operator-only queue pauses, and a pass that adds no material candidate is only evidence for review—not a counter or completion rule.
 
 ## Escalation of confirmed findings
 

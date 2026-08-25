@@ -156,15 +156,18 @@ version to find its bug.
 
 ## 7. Stopping contract
 
-Stop when **all** of these hold, and record each:
+The following evidence must be represented in the computed work queue and recorded before its final
+cold review can close:
 
 1. Every family in the registry is `exhausted` or `blocked` with the missing mechanism named.
 2. The primitive registry has no un-attempted composition (`engine/chainability.md`, six angles).
-3. A recent blind round produced **no new family**, sustained for at least K=2 consecutive dry rounds.
+3. A recent blind round produced **no new family**; this is an observation supplied to the review,
+   never a counter or an alternate stop.
 4. Every `unproven/` package has its stages and `what_would_close_it` filled in.
 5. `ceiling-requests.md` records every lane blocked by authorization rather than by evidence.
 
-Running out of ideas is not a stop condition — backtrack and redo recon. Running out of budget is,
-and it records as **budget-bounded**, never as kernel-backed reviewed exhaustion.
+Completion requires an empty reduced queue after that cold review. A non-empty operator-only queue
+pauses. Running out of ideas is not a completion condition — backtrack and redo recon. Running out of
+budget records a **budget-bounded** non-completion exit, never kernel-backed reviewed exhaustion.
 
 Time floor: **{{HOURS}} hours** of active orchestration. That governs effort, never a verdict.

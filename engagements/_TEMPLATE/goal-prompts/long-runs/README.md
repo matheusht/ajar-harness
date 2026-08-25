@@ -48,8 +48,8 @@ patched version to locate its bug.
 - The kernel preflight, first, before any recon. A kernel started mid-run is retroactively fatal.
 - `unproven/` partials with `what_would_close_it`, and `ceiling-requests.md` for lanes blocked by
   authorization rather than by evidence.
-- A stopping contract with a **blind-round** condition, so "no new family for K=2 rounds" is what ends
-  a run — not fatigue, and not the source method's "never give up".
+- A stopping contract governed by the **computed work queue**. A blind round records that no new work
+  was enqueued and supplies evidence to the final cold review; it never ends a run by itself.
 - `budget-bounded` as a terminal state distinct from kernel-backed reviewed exhaustion.
 
 ## Before building on this

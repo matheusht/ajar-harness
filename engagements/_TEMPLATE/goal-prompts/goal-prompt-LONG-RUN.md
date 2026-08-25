@@ -342,12 +342,13 @@ zoom in: complete the real path, the controls, the measurement, the chain.
 
 **Persistence is evidence-licensed, not claim-licensed.** It raises effort; it must never raise
 confidence. A confirmed primitive, a `strong` routing signal, a fix-diff anchor, or an operator prior
-**raises** the round bound and forbids an early dry verdict. Absent such evidence, the floor applies.
-Fishing is not persistence. Several bounded families do not prove the asset safe, and several suspicious
+expands or sharpens the bounded work represented in the computed work queue and forbids a premature
+coverage review. Without that evidence, do not expand a cold search beyond its bounded work. Fishing
+is not persistence. Several bounded families do not prove the asset safe, and several suspicious
 shapes do not make a finding.
 
-Stop early **only** when a safety or authorization gate blocks all meaningful in-scope progress and
-needs the operator. Otherwise launch another round.
+A safety or authorization gate may pause the current session, and a budget may end it, but neither
+completes the queue. Otherwise execute the next blocking item selected by the reducer.
 
 If a candidate survives early, do **not** stop. Spend the remaining time attacking it: disprove its
 reachability, attack its cap, measure its scaling, sweep for sibling instances, look for alternate

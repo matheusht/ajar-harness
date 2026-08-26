@@ -9,13 +9,17 @@ unset scope environment from silently falling back to an ordinary unscoped comma
 
 from __future__ import annotations
 
-import copy
 import base64
+import binascii
+import copy
 import fcntl
+import hashlib
+import hmac
 import importlib.util
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import stat
@@ -53,6 +57,15 @@ _MODEL_JSON_LIMIT = _RPC_LIMIT
 _REVIEW_SIGNATURE_LIMIT = 256 * 1024
 _REVIEW_ALLOWED_SIGNERS_LIMIT = 1024 * 1024
 _BROKER_IO_TIMEOUT_SECONDS = 2.0
+_CONTAINER_SESSION_KEY_BYTES = 32
+_CONTAINER_NONCE_BYTES = 32
+_CONTAINER_FRAME_LIMIT = 12 * 1024 * 1024
+_CONTAINER_RAW_INPUT_LIMIT = _RPC_LIMIT
+_CONTAINER_ACTION_NONCE_BUDGET = 32
+_CONTAINER_REQUEST_DOMAIN = b"llm-redteam-harness:container-broker:request:v1\0"
+_CONTAINER_RESPONSE_DOMAIN = b"llm-redteam-harness:container-broker:response:v1\0"
+_CONTAINER_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
+_SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _STOP_BLOCK_BUDGET = 6
 _STOP_REQUEST_BUDGET = _STOP_BLOCK_BUDGET + 1
 _SESSION_AUDIT_STATE_KEYS = frozenset(
@@ -82,6 +95,7 @@ _ALLOWED_ADMISSION_KEYS = {
     "runtime_session_kind",
     "hook_session_ref",
     "os_session_id",
+    "runtime_identity",
     "engagement_identity",
     "state_binding",
     "item_ref",
@@ -98,8 +112,93 @@ def new_admission_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def new_container_broker_session_key() -> bytes:
+    """Return a fresh 256-bit key for exactly one Docker broker/runtime pair."""
+
+    return secrets.token_bytes(_CONTAINER_SESSION_KEY_BYTES)
+
+
 def _token_hash(token: str) -> str:
     return sha256_bytes(token.encode("utf-8"))
+
+
+def _posix_runtime_identity(os_session_id: int) -> dict[str, Any]:
+    if type(os_session_id) is not int or os_session_id <= 0:
+        raise RecordError("driver_action_os_session_invalid", str(os_session_id))
+    return {"kind": "posix_session", "os_session_id": os_session_id}
+
+
+def _docker_runtime_identity(
+    container_id: str, container_config_digest: str
+) -> dict[str, Any]:
+    if (
+        not isinstance(container_id, str)
+        or _CONTAINER_ID_RE.fullmatch(container_id) is None
+        or not isinstance(container_config_digest, str)
+        or _SHA256_RE.fullmatch(container_config_digest) is None
+    ):
+        raise RecordError("driver_action_container_identity_invalid", "docker container")
+    return {
+        "kind": "docker_container",
+        "container_id": container_id,
+        "container_config_digest": container_config_digest,
+    }
+
+
+def _active_runtime_identity(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Return one validated runtime identity, accepting legacy in-memory POSIX test records."""
+
+    identity = record.get("runtime_identity")
+    if identity is None:
+        legacy_session = record.get("os_session_id")
+        if type(legacy_session) is int and legacy_session > 0:
+            return _posix_runtime_identity(legacy_session)
+        return None
+    if not isinstance(identity, dict):
+        raise RecordError("driver_action_runtime_identity_invalid", "runtime identity")
+    if identity.get("kind") == "posix_session" and set(identity) == {
+        "kind",
+        "os_session_id",
+    }:
+        validated = _posix_runtime_identity(identity.get("os_session_id"))
+        if record.get("os_session_id") != validated["os_session_id"]:
+            raise RecordError("driver_action_runtime_identity_invalid", "POSIX identity")
+        return validated
+    if identity.get("kind") == "docker_container" and set(identity) == {
+        "kind",
+        "container_id",
+        "container_config_digest",
+    }:
+        if record.get("os_session_id") is not None:
+            raise RecordError("driver_action_runtime_identity_invalid", "Docker identity")
+        return _docker_runtime_identity(
+            identity.get("container_id"), identity.get("container_config_digest")
+        )
+    raise RecordError("driver_action_runtime_identity_invalid", "runtime identity")
+
+
+def _container_hmac(
+    key: bytes, domain: bytes, value: dict[str, Any]
+) -> bytes:
+    return hmac.new(
+        key, domain + canonical_json_bytes(value), hashlib.sha256
+    ).digest()
+
+
+def _deadline_ref(
+    *, admission: dict[str, Any], identity: dict[str, Any], deadline: float
+) -> str:
+    return sha256_bytes(
+        canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "runtime_session_ref": admission.get("runtime_session_ref"),
+                "action_id": admission.get("action_id"),
+                "runtime_identity": identity,
+                "deadline_monotonic_ns": int(deadline * 1_000_000_000),
+            }
+        )
+    )
 
 
 def _registry_root() -> Path:
@@ -197,7 +296,9 @@ def _read_regular_json_bytes(path: Path, *, error_code: str) -> tuple[dict[str, 
     )
     try:
         value = json.loads(raw, object_pairs_hook=_reject_duplicate_pairs)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+    except RecordError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise RecordError(error_code, path.name) from exc
     if not isinstance(value, dict):
         raise RecordError(error_code, path.name)
@@ -311,6 +412,7 @@ def arm_action_admission(
             b"llm-redteam-harness:session-end:v1:" + runtime_session_ref.encode("utf-8")
         ),
         "os_session_id": None,
+        "runtime_identity": None,
         "engagement_identity": {"device": opened.st_dev, "inode": opened.st_ino},
         "state_binding": {
             "ledger_hash": state.get("ledger_hash"),
@@ -354,25 +456,33 @@ def activate_action_admission(
 ) -> None:
     """Bind the armed record to the launched OS session before releasing its exec gate."""
 
-    if not isinstance(os_session_id, int) or os_session_id <= 0:
-        raise RecordError("driver_action_os_session_invalid", str(os_session_id))
+    runtime_identity = _posix_runtime_identity(os_session_id)
     with bound_engagement_lock(engagement_fd, create=False) as bound:
         record = _read_regular_json(bound / ADMISSION_FILE, error_code="driver_action_admission_invalid")
-        if record.get("status") != "armed" or record.get("token_hash") != _token_hash(token) or record.get("os_session_id") is not None:
+        if (
+            record.get("status") != "armed"
+            or record.get("token_hash") != _token_hash(token)
+            or record.get("os_session_id") is not None
+            or record.get("runtime_identity") is not None
+        ):
             raise RecordError("driver_action_admission_not_armed", str(record.get("action_id")))
         record["os_session_id"] = os_session_id
+        record["runtime_identity"] = runtime_identity
         atomic_write(bound / ADMISSION_FILE, canonical_json_bytes(record))
     if admission is not None:
         if (
             admission.get("status") != "armed"
             or admission.get("token_hash") != _token_hash(token)
             or admission.get("os_session_id") is not None
+            or admission.get("runtime_identity") is not None
         ):
             raise RecordError("driver_action_admission_not_armed", str(admission.get("action_id")))
         admission["os_session_id"] = os_session_id
+        admission["runtime_identity"] = runtime_identity
     registry = {
         "schema_version": 1,
         "os_session_id": os_session_id,
+        "runtime_identity": runtime_identity,
         "runtime_session_ref": record["runtime_session_ref"],
         "token_hash": record["token_hash"],
         "engagement_identity": record["engagement_identity"],
@@ -392,6 +502,45 @@ def activate_action_admission(
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def activate_docker_action_admission(
+    *,
+    engagement_fd: int,
+    token: str,
+    container_id: str,
+    container_config_digest: str,
+    admission: dict[str, Any] | None = None,
+) -> None:
+    """Bind an armed action to one exact Docker container without POSIX peer claims."""
+
+    runtime_identity = _docker_runtime_identity(container_id, container_config_digest)
+    with bound_engagement_lock(engagement_fd, create=False) as bound:
+        record = _read_regular_json(
+            bound / ADMISSION_FILE, error_code="driver_action_admission_invalid"
+        )
+        if (
+            record.get("status") != "armed"
+            or record.get("token_hash") != _token_hash(token)
+            or record.get("os_session_id") is not None
+            or record.get("runtime_identity") is not None
+        ):
+            raise RecordError(
+                "driver_action_admission_not_armed", str(record.get("action_id"))
+            )
+        record["runtime_identity"] = runtime_identity
+        atomic_write(bound / ADMISSION_FILE, canonical_json_bytes(record))
+    if admission is not None:
+        if (
+            admission.get("status") != "armed"
+            or admission.get("token_hash") != _token_hash(token)
+            or admission.get("os_session_id") is not None
+            or admission.get("runtime_identity") is not None
+        ):
+            raise RecordError(
+                "driver_action_admission_not_armed", str(admission.get("action_id"))
+            )
+        admission["runtime_identity"] = copy.deepcopy(runtime_identity)
 
 
 def disarm_action_admission(*, engagement_fd: int, token: str, os_session_id: int | None) -> None:
@@ -497,8 +646,67 @@ def _string_set(value: Any) -> set[str] | None:
     return result if len(result) == len(value) else None
 
 
+def _json_document_from_bytes(raw: bytes, *, error_code: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_pairs)
+    except RecordError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise RecordError(error_code, "inline JSON") from exc
+    if not isinstance(value, dict):
+        raise RecordError(error_code, "inline JSON")
+    return value
+
+
+def _expected_inline_inputs(record: dict[str, Any]) -> list[dict[str, Any]]:
+    predicate = record.get("predicate")
+    definitions = predicate.get("documents") if isinstance(predicate, dict) else None
+    if not isinstance(definitions, list) or not definitions:
+        raise RecordError("driver_action_predicate_invalid", "documents")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for definition in definitions:
+        if not isinstance(definition, dict) or set(definition) != {"name", "argument"}:
+            raise RecordError("driver_action_predicate_invalid", "document")
+        argument = definition.get("argument")
+        if (
+            not isinstance(argument, str)
+            or not argument.startswith("--")
+            or argument in seen
+        ):
+            raise RecordError("driver_action_predicate_invalid", "document argument")
+        seen.add(argument)
+        result.append(
+            {
+                "argument": argument,
+                "attribute": argument.removeprefix("--").replace("-", "_"),
+                "format": "json",
+                "max_bytes": _MODEL_JSON_LIMIT,
+            }
+        )
+    if record.get("command") == "record-review":
+        for argument, attribute, limit in (
+            ("--signature", "signature", _REVIEW_SIGNATURE_LIMIT),
+            ("--allowed-signers", "allowed_signers", _REVIEW_ALLOWED_SIGNERS_LIMIT),
+        ):
+            if argument in seen:
+                raise RecordError("driver_action_predicate_invalid", argument)
+            seen.add(argument)
+            result.append(
+                {
+                    "argument": argument,
+                    "attribute": attribute,
+                    "format": "bytes",
+                    "max_bytes": limit,
+                }
+            )
+    return result
+
+
 def _load_predicate_documents(
-    predicate: dict[str, Any], arguments: list[str]
+    predicate: dict[str, Any],
+    arguments: list[str],
+    inline_inputs: dict[str, bytes] | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     raw_values = _raw_argument_values(arguments)
     definitions = predicate.get("documents")
@@ -513,7 +721,17 @@ def _load_predicate_documents(
         paths = raw_values.get(argument, [])
         if not isinstance(name, str) or not isinstance(argument, str) or len(paths) != 1 or not paths[0]:
             raise RecordError("driver_action_predicate_input_missing", str(argument))
-        value, raw = _read_regular_json_bytes(Path(paths[0]), error_code="driver_action_predicate_input_invalid")
+        if inline_inputs is None:
+            value, raw = _read_regular_json_bytes(
+                Path(paths[0]), error_code="driver_action_predicate_input_invalid"
+            )
+        else:
+            raw = inline_inputs.get(argument)
+            if not isinstance(raw, bytes) or len(raw) > _MODEL_JSON_LIMIT:
+                raise RecordError("driver_action_predicate_input_invalid", str(argument))
+            value = _json_document_from_bytes(
+                raw, error_code="driver_action_predicate_input_invalid"
+            )
         result[name] = value
         attribute = argument.removeprefix("--").replace("-", "_")
         admitted[attribute] = {"value": value, "bytes": raw}
@@ -521,11 +739,15 @@ def _load_predicate_documents(
 
 
 def _evaluate_predicate(
-    predicate: dict[str, Any], arguments: list[str]
+    predicate: dict[str, Any],
+    arguments: list[str],
+    inline_inputs: dict[str, bytes] | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     if predicate.get("schema_version") != 1 or set(predicate) != {"schema_version", "documents", "constraints"}:
         raise RecordError("driver_action_predicate_invalid", "shape")
-    documents, admitted = _load_predicate_documents(predicate, arguments)
+    documents, admitted = _load_predicate_documents(
+        predicate, arguments, inline_inputs
+    )
     constraints = predicate.get("constraints")
     if not isinstance(constraints, list) or not constraints:
         raise RecordError("driver_action_predicate_invalid", "constraints")
@@ -819,6 +1041,93 @@ def _stamp_parent_recorder_documents(
     return stamped
 
 
+def _decode_container_inline_inputs(
+    record: dict[str, Any], value: Any
+) -> dict[str, bytes]:
+    """Decode the exact reducer-required input set without consulting host paths."""
+
+    if not isinstance(value, list):
+        raise RecordError("driver_action_broker_request_invalid", "inline inputs")
+    expected = {
+        spec["argument"]: spec for spec in _expected_inline_inputs(record)
+    }
+    decoded: dict[str, bytes] = {}
+    total = 0
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"argument", "size", "sha256", "content_base64"}
+            or not isinstance(item.get("argument"), str)
+            or type(item.get("size")) is not int
+            or item["size"] < 0
+            or not isinstance(item.get("sha256"), str)
+            or not isinstance(item.get("content_base64"), str)
+        ):
+            raise RecordError("driver_action_broker_request_invalid", "inline input shape")
+        argument = item["argument"]
+        spec = expected.get(argument)
+        if spec is None:
+            raise RecordError("driver_action_predicate_input_invalid", "extra inline input")
+        if argument in decoded:
+            raise RecordError("driver_action_predicate_input_invalid", "duplicate inline input")
+        try:
+            raw = base64.b64decode(item["content_base64"], validate=True)
+        except (binascii.Error, TypeError, ValueError) as exc:
+            raise RecordError(
+                "driver_action_predicate_input_invalid", argument
+            ) from exc
+        if (
+            len(raw) != item["size"]
+            or len(raw) > spec["max_bytes"]
+            or item["sha256"] != sha256_bytes(raw)
+        ):
+            raise RecordError("driver_action_predicate_input_invalid", argument)
+        total += len(raw)
+        if total > _CONTAINER_RAW_INPUT_LIMIT:
+            raise RecordError("driver_action_predicate_input_invalid", "aggregate oversize")
+        decoded[argument] = raw
+    if set(decoded) != set(expected):
+        raise RecordError("driver_action_predicate_input_missing", "inline input")
+    return decoded
+
+
+def _recv_exact(connection: socket.socket, size: int) -> bytes:
+    result = bytearray()
+    while len(result) < size:
+        chunk = connection.recv(size - len(result))
+        if not chunk:
+            raise RecordError("driver_action_broker_request_invalid", "short frame")
+        result.extend(chunk)
+    return bytes(result)
+
+
+def _recv_container_frame(connection: socket.socket) -> dict[str, Any]:
+    try:
+        length = struct.unpack("!I", _recv_exact(connection, 4))[0]
+    except struct.error as exc:
+        raise RecordError("driver_action_broker_request_invalid", "frame") from exc
+    if length <= 0 or length > _CONTAINER_FRAME_LIMIT:
+        raise RecordError("driver_action_broker_request_invalid", "oversize frame")
+    try:
+        value = json.loads(
+            _recv_exact(connection, length), object_pairs_hook=_reject_duplicate_pairs
+        )
+    except RecordError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise RecordError("driver_action_broker_request_invalid", "json") from exc
+    if not isinstance(value, dict):
+        raise RecordError("driver_action_broker_request_invalid", "shape")
+    return value
+
+
+def _send_container_frame(connection: socket.socket, value: dict[str, Any]) -> None:
+    data = canonical_json_bytes(value)
+    if len(data) > _CONTAINER_FRAME_LIMIT:
+        raise RecordError("driver_action_broker_response_invalid", "oversize frame")
+    connection.sendall(struct.pack("!I", len(data)) + data)
+
+
 _RUN_ENGAGEMENT_MODULE: Any | None = None
 _RUN_ENGAGEMENT_MODULE_LOCK = threading.Lock()
 
@@ -842,10 +1151,12 @@ def _run_engagement_module() -> Any:
 class DriverActionBroker:
     """Parent-resident, one-success broker for one immutable reducer action.
 
-    The model is given only a Unix endpoint.  It can request the selected mutation, or replace the
-    endpoint and cause denial, but it never receives the parent-held admission token and never
-    executes a mutation itself.  All authority used below is the in-memory record returned by
-    :func:`arm_action_admission`; target-local sidecars and registries are not consulted.
+    POSIX sessions use the existing peer-authenticated Unix endpoint by default.  A Docker caller
+    may instead supply one exact container identity and a fresh session key, selecting an
+    authenticated loopback TCP endpoint whose predicate inputs travel inline.  In both cases the
+    model never receives the parent-held admission token and never executes a mutation itself.
+    All authority used below is the in-memory record returned by :func:`arm_action_admission`;
+    target-local sidecars and registries are not consulted.
     """
 
     def __init__(
@@ -855,6 +1166,8 @@ class DriverActionBroker:
         logical_engagement: Path,
         admission: dict[str, Any],
         execution_deadline: float | None = None,
+        docker_identity: dict[str, str] | None = None,
+        docker_session_key: bytes | None = None,
     ) -> None:
         if execution_deadline is not None and (
             not isinstance(execution_deadline, (int, float))
@@ -879,22 +1192,81 @@ class DriverActionBroker:
         self._close_lock = threading.Lock()
         self._closed = False
         self._stop = threading.Event()
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._transport_kind = "unix"
+        self._docker_identity: dict[str, Any] | None = None
+        self._docker_session_key = b""
+        self._container_nonces: dict[str, str] = {}
+        self._container_nonce_lock = threading.Lock()
+        self._container_deadline_ref: str | None = None
+        self.tcp_endpoint: tuple[str, int] | None = None
         try:
-            root = _ensure_broker_root()
-            self.endpoint = root / f"b-{os.getpid()}-{secrets.token_hex(8)}.sock"
-            self._server.bind(str(self.endpoint))
+            if docker_identity is None and docker_session_key is None:
+                self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            elif docker_identity is not None and docker_session_key is not None:
+                if execution_deadline is None:
+                    raise RecordError(
+                        "driver_action_broker_deadline_invalid", "Docker deadline"
+                    )
+                if not isinstance(docker_identity, dict):
+                    raise RecordError(
+                        "driver_action_container_identity_invalid", "docker container"
+                    )
+                identity = _docker_runtime_identity(
+                    docker_identity.get("container_id"),
+                    docker_identity.get("container_config_digest"),
+                )
+                if (
+                    not isinstance(docker_session_key, bytes)
+                    or len(docker_session_key) != _CONTAINER_SESSION_KEY_BYTES
+                ):
+                    raise RecordError(
+                        "driver_action_broker_key_invalid", "Docker session key"
+                    )
+                self._transport_kind = "tcp_hmac_sha256"
+                self._docker_identity = identity
+                self._docker_session_key = bytes(docker_session_key)
+                self._container_deadline_ref = _deadline_ref(
+                    admission=self._admission,
+                    identity=identity,
+                    deadline=self._execution_deadline,
+                )
+                self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            else:
+                raise RecordError(
+                    "driver_action_broker_transport_invalid", "partial Docker transport"
+                )
+        except BaseException:
+            os.close(self._engagement_fd)
+            raise
+        try:
+            if self._transport_kind == "unix":
+                root = _ensure_broker_root()
+                self.endpoint: Path | None = root / (
+                    f"b-{os.getpid()}-{secrets.token_hex(8)}.sock"
+                )
+                self._server.bind(str(self.endpoint))
+            else:
+                self.endpoint = None
+                self._server.bind(("127.0.0.1", 0))
+                host, port = self._server.getsockname()[:2]
+                if host != "127.0.0.1" or type(port) is not int or port <= 0:
+                    raise RecordError(
+                        "driver_action_broker_unavailable", "unsafe TCP endpoint"
+                    )
+                self.tcp_endpoint = (host, port)
         except BaseException:
             self._server.close()
             os.close(self._engagement_fd)
             raise
         endpoint_identity: tuple[int, int] | None = None
         try:
-            os.chmod(self.endpoint, 0o600)
-            endpoint_stat = self.endpoint.lstat()
-            if not stat.S_ISSOCK(endpoint_stat.st_mode) or endpoint_stat.st_uid != os.getuid():
-                raise RecordError("driver_action_broker_unavailable", "unsafe endpoint")
-            endpoint_identity = (endpoint_stat.st_dev, endpoint_stat.st_ino)
+            if self._transport_kind == "unix":
+                assert self.endpoint is not None
+                os.chmod(self.endpoint, 0o600)
+                endpoint_stat = self.endpoint.lstat()
+                if not stat.S_ISSOCK(endpoint_stat.st_mode) or endpoint_stat.st_uid != os.getuid():
+                    raise RecordError("driver_action_broker_unavailable", "unsafe endpoint")
+                endpoint_identity = (endpoint_stat.st_dev, endpoint_stat.st_ino)
             self._endpoint_identity = endpoint_identity
             self._server.listen(8)
             self._server.settimeout(0.1)
@@ -910,31 +1282,92 @@ class DriverActionBroker:
         except BaseException:
             self._server.close()
             os.close(self._engagement_fd)
-            try:
-                entry = self.endpoint.lstat()
-            except FileNotFoundError:
-                pass
-            else:
-                if endpoint_identity is not None and (
-                    entry.st_dev,
-                    entry.st_ino,
-                ) == endpoint_identity:
-                    self.endpoint.unlink()
+            if self.endpoint is not None:
+                try:
+                    entry = self.endpoint.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    if endpoint_identity is not None and (
+                        entry.st_dev,
+                        entry.st_ino,
+                    ) == endpoint_identity:
+                        self.endpoint.unlink()
             raise
 
     def activate(self, os_session_id: int) -> None:
+        runtime_identity = _posix_runtime_identity(os_session_id)
         with self._lock:
-            if self._admission.get("status") != "armed" or self._admission.get("os_session_id") is not None:
+            if (
+                self._transport_kind != "unix"
+                or self._admission.get("status") != "armed"
+                or self._admission.get("os_session_id") is not None
+                or self._admission.get("runtime_identity") is not None
+            ):
                 raise RecordError(
                     "driver_action_admission_not_armed",
                     str(self._admission.get("action_id")),
                 )
             self._admission["os_session_id"] = os_session_id
+            self._admission["runtime_identity"] = runtime_identity
+
+    def activate_docker(self) -> None:
+        """Activate the broker for the exact constructor-bound Docker identity."""
+
+        with self._lock:
+            if (
+                self._transport_kind != "tcp_hmac_sha256"
+                or self._docker_identity is None
+                or self._admission.get("status") != "armed"
+                or self._admission.get("os_session_id") is not None
+                or self._admission.get("runtime_identity") is not None
+            ):
+                raise RecordError(
+                    "driver_action_admission_not_armed",
+                    str(self._admission.get("action_id")),
+                )
+            self._admission["runtime_identity"] = copy.deepcopy(
+                self._docker_identity
+            )
+
+    def container_manifest(self, *, advertised_host: str | None = None) -> dict[str, Any]:
+        """Return non-secret transport metadata for the exact Docker supervisor."""
+
+        if (
+            self._transport_kind != "tcp_hmac_sha256"
+            or self._docker_identity is None
+            or self.tcp_endpoint is None
+            or self._container_deadline_ref is None
+        ):
+            raise RecordError(
+                "driver_action_broker_transport_invalid", "not a Docker broker"
+            )
+        host = self.tcp_endpoint[0] if advertised_host is None else advertised_host
+        if not isinstance(host, str) or not host or "\x00" in host:
+            raise RecordError(
+                "driver_action_broker_transport_invalid", "advertised host"
+            )
+        return {
+            "schema_version": 1,
+            "transport": "tcp_hmac_sha256",
+            "endpoint": {"host": host, "port": self.tcp_endpoint[1]},
+            "runtime_identity": copy.deepcopy(self._docker_identity),
+            "runtime_session_ref": self._admission.get("runtime_session_ref"),
+            "action_id": self._admission.get("action_id"),
+            "deadline_ref": self._container_deadline_ref,
+            "inline_inputs": _expected_inline_inputs(self._admission),
+            "frame_limit": _CONTAINER_FRAME_LIMIT,
+            "raw_input_limit": _CONTAINER_RAW_INPUT_LIMIT,
+        }
 
     def _peer_is_runtime(self, connection: socket.socket) -> bool:
-        expected_session = self._admission.get("os_session_id")
-        if not isinstance(expected_session, int):
+        try:
+            identity = _active_runtime_identity(self._admission)
+        except RecordError:
             return False
+        if not isinstance(identity, dict) or identity.get("kind") != "posix_session":
+            return False
+        expected_session = identity["os_session_id"]
         peer_pid: int | None = None
         if hasattr(socket, "SO_PEERCRED"):
             try:
@@ -973,7 +1406,9 @@ class DriverActionBroker:
                 raise RecordError("driver_action_broker_request_invalid", "oversize")
         try:
             request = json.loads(b"".join(chunks), object_pairs_hook=_reject_duplicate_pairs)
-        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        except RecordError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
             raise RecordError("driver_action_broker_request_invalid", "json") from exc
         action_request = bool(
             isinstance(request, dict)
@@ -1010,7 +1445,11 @@ class DriverActionBroker:
             raise RecordError("driver_action_broker_request_invalid", "shape")
         return request
 
-    def _admit(self, request: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def _admit(
+        self,
+        request: dict[str, Any],
+        inline_inputs: dict[str, bytes] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         record = self._admission
         command = request["command"]
         arguments = request["arguments"]
@@ -1026,7 +1465,7 @@ class DriverActionBroker:
             )
         if (
             record.get("runtime_session_ref") != request.get("runtime_session_ref")
-            or not isinstance(record.get("os_session_id"), int)
+            or _active_runtime_identity(record) is None
         ):
             raise RecordError("driver_action_scope_mismatch", command)
         opened = os.fstat(self._engagement_fd)
@@ -1043,7 +1482,9 @@ class DriverActionBroker:
             if not _neutral_tail_is_allowed(record, state, bound):
                 raise RecordError("driver_action_state_changed", str(record.get("action_id")))
             _verify_current_selected_action(record, state, bound)
-            documents, admitted = _evaluate_predicate(record.get("predicate", {}), arguments)
+            documents, admitted = _evaluate_predicate(
+                record.get("predicate", {}), arguments, inline_inputs
+            )
         if command == "record-review":
             raw_values = _raw_argument_values(arguments)
             for option, attribute, limit in (
@@ -1057,13 +1498,19 @@ class DriverActionBroker:
                 paths = raw_values.get(option, [])
                 if len(paths) != 1 or not paths[0]:
                     raise RecordError("driver_action_predicate_input_missing", option)
-                admitted[attribute] = {
-                    "bytes": _read_regular_bytes(
+                if inline_inputs is None:
+                    raw = _read_regular_bytes(
                         Path(paths[0]),
                         max_bytes=limit,
                         error_code="driver_action_predicate_input_invalid",
                     )
-                }
+                else:
+                    raw = inline_inputs.get(option)
+                    if not isinstance(raw, bytes) or len(raw) > limit:
+                        raise RecordError(
+                            "driver_action_predicate_input_invalid", option
+                        )
+                admitted[attribute] = {"bytes": raw}
         if record.get("runtime_session_kind") == "fresh_independent_reviewer":
             review = documents.get("proposal")
             independence = review.get("independence") if isinstance(review, dict) else None
@@ -1098,7 +1545,7 @@ class DriverActionBroker:
             if (
                 request.get("runtime_session_ref") != record.get("runtime_session_ref")
                 or request.get("hook_session_ref") != record.get("hook_session_ref")
-                or not isinstance(record.get("os_session_id"), int)
+                or _active_runtime_identity(record) is None
                 or record.get("status") not in {"armed", "consumed"}
                 or not isinstance(self._stop_state_binding, dict)
             ):
@@ -1275,10 +1722,14 @@ class DriverActionBroker:
                             self._post_consumption_release_recorded = True
                 return result
 
-    def _execute(self, request: dict[str, Any]) -> tuple[int, bytes]:
+    def _execute(
+        self,
+        request: dict[str, Any],
+        inline_inputs: dict[str, bytes] | None = None,
+    ) -> tuple[int, bytes]:
         with self._lock:
             try:
-                admitted = self._admit(request)
+                admitted = self._admit(request, inline_inputs)
             except RecordError as exc:
                 return _broker_error(exc)
             # From here onward no retry is safe: a command can contain a multi-record transaction
@@ -1327,6 +1778,241 @@ class DriverActionBroker:
                     self._stop_state_binding = None
             return returncode, output
 
+    @staticmethod
+    def _container_nonce(value: Any) -> str:
+        if not isinstance(value, str):
+            raise RecordError("driver_action_broker_request_invalid", "nonce")
+        try:
+            raw = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise RecordError("driver_action_broker_request_invalid", "nonce") from exc
+        if (
+            len(raw) != _CONTAINER_NONCE_BYTES
+            or base64.b64encode(raw).decode("ascii") != value
+        ):
+            raise RecordError("driver_action_broker_request_invalid", "nonce")
+        return value
+
+    def _authenticate_container_request(
+        self, envelope: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, bytes] | None, str]:
+        expected_keys = {
+            "schema_version",
+            "message_kind",
+            "runtime_identity",
+            "runtime_session_ref",
+            "action_id",
+            "deadline_ref",
+            "nonce",
+            "payload_sha256",
+            "payload",
+            "mac_base64",
+        }
+        if set(envelope) != expected_keys:
+            raise RecordError("driver_action_broker_request_invalid", "envelope")
+        unsigned = dict(envelope)
+        raw_mac = unsigned.pop("mac_base64")
+        if not isinstance(raw_mac, str):
+            raise RecordError("driver_action_broker_request_invalid", "MAC")
+        try:
+            received_mac = base64.b64decode(raw_mac, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise RecordError("driver_action_broker_request_invalid", "MAC") from exc
+        try:
+            expected_mac = _container_hmac(
+                self._docker_session_key, _CONTAINER_REQUEST_DOMAIN, unsigned
+            )
+        except (
+            UnicodeError,
+            TypeError,
+            ValueError,
+            RecursionError,
+            OverflowError,
+        ) as exc:
+            raise RecordError(
+                "driver_action_broker_request_invalid", "canonical envelope"
+            ) from exc
+        if not hmac.compare_digest(received_mac, expected_mac):
+            raise RecordError("driver_action_broker_auth_invalid", "request MAC")
+        nonce = self._container_nonce(envelope.get("nonce"))
+        payload = envelope.get("payload")
+        try:
+            payload_digest = sha256_bytes(canonical_json_bytes(payload))
+        except (
+            UnicodeError,
+            TypeError,
+            ValueError,
+            RecursionError,
+            OverflowError,
+        ) as exc:
+            raise RecordError(
+                "driver_action_broker_request_invalid", "canonical payload"
+            ) from exc
+        if (
+            envelope.get("schema_version") != 1
+            or envelope.get("message_kind") != "request"
+            or envelope.get("runtime_identity") != self._docker_identity
+            or envelope.get("runtime_session_ref")
+            != self._admission.get("runtime_session_ref")
+            or envelope.get("action_id") != self._admission.get("action_id")
+            or envelope.get("deadline_ref") != self._container_deadline_ref
+            or not isinstance(payload, dict)
+            or envelope.get("payload_sha256") != payload_digest
+            or _active_runtime_identity(self._admission) != self._docker_identity
+        ):
+            raise RecordError("driver_action_scope_mismatch", "Docker envelope")
+        if (
+            self._execution_deadline is None
+            or time.monotonic() >= self._execution_deadline
+        ):
+            raise RecordError(
+                "driver_action_execution_deadline_exceeded",
+                str(self._admission.get("action_id")),
+            )
+        request_kind = payload.get("request_kind")
+        if request_kind == "action":
+            if (
+                set(payload)
+                != {
+                    "request_kind",
+                    "command",
+                    "arguments",
+                    "runtime_session_ref",
+                    "inline_inputs",
+                }
+                or not isinstance(payload.get("command"), str)
+                or not isinstance(payload.get("arguments"), list)
+                or any(not isinstance(value, str) for value in payload["arguments"])
+                or payload.get("runtime_session_ref")
+                != self._admission.get("runtime_session_ref")
+            ):
+                raise RecordError("driver_action_broker_request_invalid", "action")
+            inline_inputs = _decode_container_inline_inputs(
+                self._admission, payload.get("inline_inputs")
+            )
+            self._remember_container_nonce(nonce, "action")
+            return (
+                {
+                    "command": payload["command"],
+                    "arguments": payload["arguments"],
+                    "runtime_session_ref": payload["runtime_session_ref"],
+                },
+                inline_inputs,
+                nonce,
+            )
+        if request_kind == "session_end_check":
+            if (
+                set(payload)
+                != {
+                    "request_kind",
+                    "runtime_session_ref",
+                    "hook_session_ref",
+                    "stop_hook_active",
+                    "request_ref",
+                }
+                or payload.get("runtime_session_ref")
+                != self._admission.get("runtime_session_ref")
+                or not isinstance(payload.get("hook_session_ref"), str)
+                or payload.get("hook_session_ref")
+                != self._admission.get("hook_session_ref")
+                or type(payload.get("stop_hook_active")) is not bool
+                or not isinstance(payload.get("request_ref"), str)
+                or len(payload["request_ref"]) != 71
+                or not payload["request_ref"].startswith("sha256:")
+                or any(value not in "0123456789abcdef" for value in payload["request_ref"][7:])
+            ):
+                raise RecordError("driver_action_broker_request_invalid", "Stop")
+            self._remember_container_nonce(nonce, "session_end_check")
+            return copy.deepcopy(payload), None, nonce
+        raise RecordError("driver_action_broker_request_invalid", "request kind")
+
+    def _remember_container_nonce(self, nonce: str, request_kind: str) -> None:
+        budgets = {
+            "action": _CONTAINER_ACTION_NONCE_BUDGET,
+            "session_end_check": _STOP_REQUEST_BUDGET,
+        }
+        budget = budgets.get(request_kind)
+        if budget is None:
+            raise RecordError("driver_action_broker_request_invalid", "request kind")
+        with self._container_nonce_lock:
+            if nonce in self._container_nonces:
+                raise RecordError("driver_action_broker_replay", "nonce")
+            used = sum(
+                kind == request_kind for kind in self._container_nonces.values()
+            )
+            if used >= budget:
+                raise RecordError(
+                    "driver_action_broker_request_budget_exhausted", request_kind
+                )
+            self._container_nonces[nonce] = request_kind
+
+    def _container_response(
+        self, *, request_nonce: str, returncode: int, output: bytes
+    ) -> dict[str, Any]:
+        if (
+            type(returncode) is not int
+            or not 0 <= returncode <= 255
+            or not isinstance(output, bytes)
+            or len(output) > _RPC_LIMIT
+            or self._docker_identity is None
+            or self._container_deadline_ref is None
+        ):
+            returncode, output = _broker_error(
+                RecordError("driver_action_broker_response_invalid", "container response")
+            )
+        payload = {
+            "returncode": returncode,
+            "stdout_base64": base64.b64encode(output).decode("ascii"),
+        }
+        unsigned = {
+            "schema_version": 1,
+            "message_kind": "response",
+            "runtime_identity": copy.deepcopy(self._docker_identity),
+            "runtime_session_ref": self._admission.get("runtime_session_ref"),
+            "action_id": self._admission.get("action_id"),
+            "deadline_ref": self._container_deadline_ref,
+            "request_nonce": request_nonce,
+            "payload_sha256": sha256_bytes(canonical_json_bytes(payload)),
+            "payload": payload,
+        }
+        return {
+            **unsigned,
+            "mac_base64": base64.b64encode(
+                _container_hmac(
+                    self._docker_session_key,
+                    _CONTAINER_RESPONSE_DOMAIN,
+                    unsigned,
+                )
+            ).decode("ascii"),
+        }
+
+    def _serve_container_connection(self, connection: socket.socket) -> None:
+        envelope: dict[str, Any] | None = None
+        try:
+            envelope = _recv_container_frame(connection)
+            request, inline_inputs, nonce = self._authenticate_container_request(
+                envelope
+            )
+            if request.get("request_kind") == "session_end_check":
+                returncode, output = self._execute_stop(request)
+            else:
+                returncode, output = self._execute(request, inline_inputs)
+        except RecordError as exc:
+            if envelope is None:
+                return
+            try:
+                nonce = self._container_nonce(envelope.get("nonce"))
+            except RecordError:
+                return
+            returncode, output = _broker_error(exc)
+        response = self._container_response(
+            request_nonce=nonce, returncode=returncode, output=output
+        )
+        try:
+            _send_container_frame(connection, response)
+        except (OSError, RecordError):
+            pass
+
     def _serve(self) -> None:
         while not self._stop.is_set():
             try:
@@ -1337,6 +2023,23 @@ class DriverActionBroker:
                 return
             with connection:
                 connection.settimeout(_BROKER_IO_TIMEOUT_SECONDS)
+                if self._transport_kind == "tcp_hmac_sha256":
+                    try:
+                        self._serve_container_connection(connection)
+                    except (
+                        OSError,
+                        TimeoutError,
+                        UnicodeError,
+                        TypeError,
+                        ValueError,
+                        RecursionError,
+                        OverflowError,
+                    ):
+                        # A peer that stalls or truncates a frame has not supplied a request nonce,
+                        # so no authenticated response is possible.  Close only that connection;
+                        # malformed container traffic must never terminate the broker thread.
+                        pass
+                    continue
                 try:
                     if not self._peer_is_runtime(connection):
                         raise RecordError("driver_action_scope_mismatch", "peer session")
@@ -1389,13 +2092,16 @@ class DriverActionBroker:
             os.close(self._engagement_fd)
             self._engagement_fd = -1
             self._closed = True
-            try:
-                entry = self.endpoint.lstat()
-            except FileNotFoundError:
-                pass
-            else:
-                if (entry.st_dev, entry.st_ino) == self._endpoint_identity:
-                    self.endpoint.unlink()
+            endpoint = getattr(self, "endpoint", None)
+            if isinstance(endpoint, Path):
+                try:
+                    entry = endpoint.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    if (entry.st_dev, entry.st_ino) == self._endpoint_identity:
+                        endpoint.unlink()
+            self._docker_session_key = b""
 
     def __enter__(self) -> "DriverActionBroker":
         return self

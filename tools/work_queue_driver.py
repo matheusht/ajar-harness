@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import fcntl
 import json
 import math
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -16,10 +18,26 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Sequence
 
-from claude_work_session import SessionLaunchError, run_claude_session
+from claude_work_session import (
+    MODEL_AUTH_ENV_KEYS,
+    SessionLaunchError,
+    SessionResult,
+    _summary_from_output,
+    run_claude_session,
+)
+from docker_session_runtime import (
+    CONTROL_DESTINATION,
+    HARNESS_DESTINATION,
+    WORKSPACE_DESTINATION,
+    DockerRuntimeError,
+    DockerRuntimeLimits,
+    DockerRuntimeSpec,
+    DockerSessionIdentity,
+    prepare_docker_session,
+)
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import (
     _append_kernel_event_idempotent,
@@ -34,16 +52,25 @@ from driver_action_admission import (
     BROKER_ENDPOINT_ENV,
     SESSION_ENV,
     DriverActionBroker,
+    activate_docker_action_admission,
     activate_action_admission,
     arm_action_admission,
     disarm_action_admission,
     new_admission_token,
+    new_container_broker_session_key,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STOP_HOOK = ROOT / "tools" / "claude-stop-hook.py"
 IMMUTABLE_CLAUDE_MODEL = re.compile(r"^claude-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]{8}$")
+IMMUTABLE_DOCKER_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+DOCKER_STORAGE_EXIT_CODE = 73
+DOCKER_SESSION_FILE = "session.json"
+DOCKER_BROKER_MANIFEST_FILE = "broker-manifest.json"
+CONTAINER_SUPERVISOR = f"{HARNESS_DESTINATION}/tools/container_session_supervisor.py"
+CONTAINER_BROKER_CLIENT = f"{HARNESS_DESTINATION}/tools/container_broker_client.py"
+CONTAINER_STOP_HOOK = f"{HARNESS_DESTINATION}/tools/container_broker_client.py"
 NONCOMPLETION_STATUSES = frozenset(
     {
         "budget_spent",
@@ -61,6 +88,31 @@ class DriverError(Exception):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+def _is_immutable_docker_image(value: object) -> bool:
+    if not isinstance(value, str) or IMMUTABLE_DOCKER_IMAGE.fullmatch(value) is None:
+        return False
+    repository = value.rsplit("@sha256:", 1)[0]
+    return ":" not in repository.rsplit("/", 1)[-1]
+
+
+def _is_absolute_container_executable(value: object) -> bool:
+    if not isinstance(value, str) or "\x00" in value:
+        return False
+    try:
+        encoded = value.encode("utf-8")
+        normalized = PurePosixPath(value)
+    except (UnicodeError, TypeError, ValueError):
+        return False
+    return bool(
+        1 <= len(encoded) <= 4096
+        and normalized.is_absolute()
+        and not value.startswith("//")
+        and ".." not in normalized.parts
+        and normalized.name
+        and str(normalized) == value
+    )
 
 
 @dataclass(frozen=True)
@@ -103,6 +155,38 @@ class DriverBudget:
                 or self.session_max_budget_usd <= 0
             ):
                 raise DriverError("driver_session_budget_invalid")
+
+
+@dataclass(frozen=True)
+class DockerQueueBackend:
+    """Explicit, immutable parent-side configuration for the strong queue backend."""
+
+    image: str
+    python_executable: str
+    docker_executable: Path
+    limits: DockerRuntimeLimits
+    advertised_broker_host: str = "host.docker.internal"
+
+    def validate(self) -> None:
+        if (
+            not _is_immutable_docker_image(self.image)
+            or not _is_absolute_container_executable(self.python_executable)
+            or not isinstance(self.docker_executable, Path)
+            or not self.docker_executable.is_absolute()
+            or not isinstance(self.limits, DockerRuntimeLimits)
+            or self.advertised_broker_host != "host.docker.internal"
+        ):
+            raise DriverError("driver_docker_backend_invalid")
+        try:
+            self.limits.validate()
+        except DockerRuntimeError as exc:
+            raise DriverError(f"driver_{exc.code}") from exc
+
+
+@dataclass(frozen=True)
+class _QueueSessionExecution:
+    session: SessionResult
+    interrupted: bool
 
 
 def _named_identity_is_current(path: Path, fd: int) -> bool:
@@ -473,8 +557,8 @@ def load_stop_hook_settings() -> dict[str, Any]:
     return settings
 
 
-def _driver_scope(
-    state: dict[str, Any], *, broker_endpoint: Path, runtime_session_ref: str
+def _driver_binding_values(
+    state: dict[str, Any], *, runtime_session_ref: str
 ) -> dict[str, str]:
     sources = state.get("source_hashes")
     if not isinstance(sources, dict):
@@ -486,14 +570,22 @@ def _driver_scope(
     ledger_hash = state.get("ledger_hash")
     if not isinstance(ledger_hash, str):
         raise DriverError("driver_state_sources_invalid")
+    return {
+        "HARNESS_EXPECTED_LEDGER_HASH": ledger_hash,
+        "HARNESS_EXPECTED_SOURCE_HASHES": canonical_json_bytes(sources).decode("utf-8"),
+        SESSION_ENV: runtime_session_ref,
+    }
+
+
+def _driver_scope(
+    state: dict[str, Any], *, broker_endpoint: Path, runtime_session_ref: str
+) -> dict[str, str]:
     try:
         canonical_broker_endpoint = broker_endpoint.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise DriverError("driver_action_broker_unavailable") from exc
     return {
-        "HARNESS_EXPECTED_LEDGER_HASH": ledger_hash,
-        "HARNESS_EXPECTED_SOURCE_HASHES": canonical_json_bytes(sources).decode("utf-8"),
-        SESSION_ENV: runtime_session_ref,
+        **_driver_binding_values(state, runtime_session_ref=runtime_session_ref),
         BROKER_ENDPOINT_ENV: str(canonical_broker_endpoint),
     }
 
@@ -521,6 +613,266 @@ def _session_prompt(item: dict[str, Any], state: dict[str, Any], item_ref: str) 
         ],
     }
     return canonical_json_bytes(value).decode("utf-8")
+
+
+def _container_session_prompt(
+    item: dict[str, Any], state: dict[str, Any], item_ref: str, *, python_executable: str
+) -> str:
+    """Render the same reducer action with a container-local authenticated invocation hint."""
+
+    value = json.loads(_session_prompt(item, state, item_ref))
+    action = value.get("item", {}).get("next_action")
+    if not isinstance(action, dict):
+        raise DriverError("driver_next_action_invalid")
+    command = action.get("command")
+    arguments = action.get("arguments")
+    if not isinstance(command, str) or not isinstance(arguments, list):
+        raise DriverError("driver_next_action_invalid")
+    value["container_action_transport"] = {
+        "kind": "authenticated_supervisor_relay",
+        "python": python_executable,
+        "client": CONTAINER_BROKER_CLIENT,
+        "argv_template": [
+            python_executable,
+            CONTAINER_BROKER_CLIENT,
+            "action",
+            "--command",
+            command,
+            "--arguments-json",
+            "<JSON array matching next_action.arguments after resolving placeholders>",
+        ],
+    }
+    value["constraints"].insert(
+        1,
+        "Inside the container, use container_action_transport; host local_invocation paths are evidence only and are not executable here.",
+    )
+    return canonical_json_bytes(value).decode("utf-8")
+
+
+def _container_stop_hook_settings(python_executable: str) -> dict[str, Any]:
+    command = " ".join(
+        (
+            shlex.quote(python_executable),
+            shlex.quote(CONTAINER_STOP_HOOK),
+            "stop-hook",
+        )
+    )
+    return {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"command": command, "timeout": 10, "type": "command"}
+                    ]
+                }
+            ]
+        }
+    }
+
+
+def _container_engagement_path(bound: BoundRun) -> str:
+    return f"{WORKSPACE_DESTINATION}/engagements/{bound.engagement.name}"
+
+
+def _docker_session_bytes(
+    *,
+    bound: BoundRun,
+    backend: DockerQueueBackend,
+    executable: Path,
+    model: str,
+    prompt: str,
+    session_ref: str,
+    state: dict[str, Any],
+    max_budget_usd: float | None,
+) -> bytes:
+    executable_text = os.fspath(executable)
+    if not _is_absolute_container_executable(executable_text):
+        raise DriverError("driver_container_runtime_invalid")
+    settings = _container_stop_hook_settings(backend.python_executable)
+    command = [
+        executable_text,
+        "-p",
+        "--session-id",
+        session_ref,
+        "--no-session-persistence",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "dontAsk",
+        "--model",
+        model,
+        "--settings",
+        json.dumps(settings, sort_keys=True, separators=(",", ":")),
+    ]
+    if max_budget_usd is not None:
+        command.extend(["--max-budget-usd", str(max_budget_usd)])
+    command.append(prompt)
+    environment = {
+        **_driver_binding_values(state, runtime_session_ref=session_ref),
+        "HARNESS_ACTIVE_ENGAGEMENT": _container_engagement_path(bound),
+    }
+    raw = canonical_json_bytes({
+        "schema_version": 1,
+        "command": command,
+        "environment": environment,
+    })
+    if len(raw) > 512 * 1024:
+        raise DriverError("driver_container_session_invalid")
+    return raw
+
+
+def _model_auth_bootstrap(session_key: bytes) -> bytes:
+    if not isinstance(session_key, bytes) or len(session_key) != 32:
+        raise DriverError("driver_container_broker_key_invalid")
+    authority: dict[str, str] = {}
+    for key in sorted(MODEL_AUTH_ENV_KEYS):
+        value = os.environ.get(key)
+        if value is None or value == "":
+            continue
+        if (
+            not isinstance(value, str)
+            or "\x00" in value
+            or len(value.encode("utf-8")) > 32 * 1024
+        ):
+            raise DriverError("driver_model_auth_invalid")
+        authority[key] = value
+    raw = canonical_json_bytes(
+        {
+            "schema_version": 1,
+            "environment": authority,
+            "broker_session_key_base64": base64.b64encode(session_key).decode("ascii"),
+        }
+    )
+    if len(raw) > 64 * 1024:
+        raise DriverError("driver_model_auth_invalid")
+    return raw
+
+
+def _run_docker_queue_session(
+    *,
+    bound: BoundRun,
+    backend: DockerQueueBackend,
+    executable: Path,
+    model: str,
+    prompt: str,
+    session_ref: str,
+    state: dict[str, Any],
+    timeout_seconds: float,
+    max_budget_usd: float | None,
+    read_only_inputs: tuple[Path, ...],
+    admission: dict[str, Any],
+    admission_token: str,
+    execution_deadline: float,
+    stop_requested: Callable[[], bool],
+) -> _QueueSessionExecution:
+    session_bytes = _docker_session_bytes(
+        bound=bound,
+        backend=backend,
+        executable=executable,
+        model=model,
+        prompt=prompt,
+        session_ref=session_ref,
+        state=state,
+        max_budget_usd=max_budget_usd,
+    )
+    session_digest = sha256_bytes(session_bytes)
+    spec = DockerRuntimeSpec(
+        image=backend.image,
+        executable=backend.python_executable,
+        argv=(
+            CONTAINER_SUPERVISOR,
+            "--session",
+            f"{CONTROL_DESTINATION}/{DOCKER_SESSION_FILE}",
+            "--session-sha256",
+            session_digest,
+        ),
+        workspace=bound.workspace,
+        harness=ROOT,
+        read_only_inputs=read_only_inputs,
+        limits=backend.limits,
+        docker_executable=backend.docker_executable,
+        network_internal=False,
+        supervisor_write_broker=True,
+    )
+    try:
+        with prepare_docker_session(spec) as prepared:
+            identity = prepared.identity
+            docker_identity = {
+                "container_id": identity.container_id,
+                "container_config_digest": identity.config_digest,
+            }
+            session_key = new_container_broker_session_key()
+            auth_bootstrap = _model_auth_bootstrap(session_key)
+            with DriverActionBroker(
+                engagement_fd=bound.engagement_fd,
+                logical_engagement=bound.engagement,
+                admission=admission,
+                execution_deadline=execution_deadline,
+                docker_identity=docker_identity,
+                docker_session_key=session_key,
+            ) as broker:
+                manifest_bytes = canonical_json_bytes(
+                    broker.container_manifest(
+                        advertised_host=backend.advertised_broker_host
+                    )
+                )
+                prepared.write_control_file(DOCKER_SESSION_FILE, session_bytes)
+                prepared.write_control_file(
+                    DOCKER_BROKER_MANIFEST_FILE, manifest_bytes
+                )
+
+                def activate(current: DockerSessionIdentity) -> None:
+                    if current != identity or not _named_identity_is_current(
+                        bound.workspace, bound.workspace_fd
+                    ) or not _named_identity_is_current(
+                        bound.engagement, bound.engagement_fd
+                    ):
+                        raise DriverError("driver_target_identity_changed")
+                    activate_docker_action_admission(
+                        engagement_fd=bound.engagement_fd,
+                        token=admission_token,
+                        container_id=identity.container_id,
+                        container_config_digest=identity.config_digest,
+                        admission=admission,
+                    )
+                    broker.activate_docker()
+
+                result = prepared.start(
+                    timeout_seconds=timeout_seconds,
+                    on_process_started=activate,
+                    stop_requested=stop_requested,
+                    stdin_bytes=auth_bootstrap,
+                )
+    except DockerRuntimeError as exc:
+        raise DriverError(f"driver_{exc.code}") from exc
+
+    if result.returncode == DOCKER_STORAGE_EXIT_CODE and not (
+        result.timed_out or result.interrupted
+    ):
+        raise DriverError("driver_session_storage_exceeded")
+    if result.oom_killed:
+        raise DriverError("driver_session_oom_killed")
+    if result.timed_out:
+        session = SessionResult(session_ref, True, True, result.returncode, False, None, None)
+    elif result.output_truncated:
+        # A retained prefix is not a complete Claude result document even when that prefix happens
+        # to parse.  Queue truth still comes from the reducer, but runtime telemetry must not label
+        # truncated model output as a valid provider response.
+        session = SessionResult(
+            session_ref, True, False, result.returncode, False, None, None
+        )
+    else:
+        output_was_json, reported_error, cost = _summary_from_output(result.stdout)
+        session = SessionResult(
+            session_ref,
+            True,
+            False,
+            result.returncode,
+            output_was_json,
+            reported_error,
+            cost,
+        )
+    return _QueueSessionExecution(session=session, interrupted=result.interrupted)
 
 
 def _validate_action_binding(action: dict[str, Any], engagement: Path) -> None:
@@ -730,8 +1082,13 @@ def run_driver(
     budget: DriverBudget,
     read_only_inputs: Sequence[Path] = (),
     stop_requested: Callable[[], bool] = lambda: False,
+    docker_backend: DockerQueueBackend | None = None,
 ) -> dict[str, Any]:
     budget.validate()
+    if docker_backend is not None:
+        if not isinstance(docker_backend, DockerQueueBackend):
+            raise DriverError("driver_docker_backend_invalid")
+        docker_backend.validate()
     if isinstance(read_only_inputs, (str, bytes, os.PathLike)) or not isinstance(
         read_only_inputs, Sequence
     ):
@@ -851,7 +1208,7 @@ def run_driver(
             else:
                 raise DriverError("driver_session_kind_invalid")
             before_hash = sha256_bytes(canonical_json_bytes(state))
-            if settings is None:
+            if docker_backend is None and settings is None:
                 settings = load_stop_hook_settings()
             # Hook loading and operator activity may advance the ledger after selection. Recompute
             # before launch so a stale item is never knowingly dispatched.
@@ -868,6 +1225,7 @@ def run_driver(
             runtime_session_ref = str(uuid.uuid4())
             admission_token = new_admission_token()
             os_session_id: int | None = None
+            docker_interrupted = False
 
             try:
                 admission = arm_action_admission(
@@ -881,42 +1239,68 @@ def run_driver(
                     token=admission_token,
                 )
                 try:
-                    with DriverActionBroker(
-                        engagement_fd=bound.engagement_fd,
-                        logical_engagement=bound.engagement,
-                        admission=admission,
-                        execution_deadline=started_at + budget.max_wall_seconds,
-                    ) as broker:
-                        def activate(os_sid: int) -> None:
-                            nonlocal os_session_id
-                            os_session_id = os_sid
-                            activate_action_admission(
-                                engagement_fd=bound.engagement_fd,
-                                token=admission_token,
-                                os_session_id=os_sid,
-                                admission=admission,
-                            )
-                            broker.activate(os_sid)
-
-                        session = run_claude_session(
+                    if docker_backend is not None:
+                        execution = _run_docker_queue_session(
+                            bound=bound,
+                            backend=docker_backend,
                             executable=executable,
                             model=session_model,
-                            prompt=_session_prompt(item, state, item_ref),
-                            session_ref=runtime_session_ref,
-                            workspace=bound.workspace,
-                            workspace_fd=bound.workspace_fd,
-                            engagement=bound.engagement,
-                            settings=settings,
-                            driver_scope=_driver_scope(
+                            prompt=_container_session_prompt(
+                                item,
                                 state,
-                                broker_endpoint=broker.endpoint,
-                                runtime_session_ref=runtime_session_ref,
+                                item_ref,
+                                python_executable=docker_backend.python_executable,
                             ),
+                            session_ref=runtime_session_ref,
+                            state=state,
                             timeout_seconds=timeout,
                             max_budget_usd=budget.session_max_budget_usd,
                             read_only_inputs=frozen_read_only_inputs,
-                            on_process_started=activate,
+                            admission=admission,
+                            admission_token=admission_token,
+                            execution_deadline=started_at + budget.max_wall_seconds,
+                            stop_requested=stop_requested,
                         )
+                        session = execution.session
+                        docker_interrupted = execution.interrupted
+                    else:
+                        assert settings is not None
+                        with DriverActionBroker(
+                            engagement_fd=bound.engagement_fd,
+                            logical_engagement=bound.engagement,
+                            admission=admission,
+                            execution_deadline=started_at + budget.max_wall_seconds,
+                        ) as broker:
+                            def activate(os_sid: int) -> None:
+                                nonlocal os_session_id
+                                os_session_id = os_sid
+                                activate_action_admission(
+                                    engagement_fd=bound.engagement_fd,
+                                    token=admission_token,
+                                    os_session_id=os_sid,
+                                    admission=admission,
+                                )
+                                broker.activate(os_sid)
+
+                            session = run_claude_session(
+                                executable=executable,
+                                model=session_model,
+                                prompt=_session_prompt(item, state, item_ref),
+                                session_ref=runtime_session_ref,
+                                workspace=bound.workspace,
+                                workspace_fd=bound.workspace_fd,
+                                engagement=bound.engagement,
+                                settings=settings,
+                                driver_scope=_driver_scope(
+                                    state,
+                                    broker_endpoint=broker.endpoint,
+                                    runtime_session_ref=runtime_session_ref,
+                                ),
+                                timeout_seconds=timeout,
+                                max_budget_usd=budget.session_max_budget_usd,
+                                read_only_inputs=frozen_read_only_inputs,
+                                on_process_started=activate,
+                            )
                 finally:
                     disarm_action_admission(
                         engagement_fd=bound.engagement_fd,
@@ -929,21 +1313,50 @@ def run_driver(
                 raise DriverError(f"driver_{exc.code}") from exc
             sessions_started += 1
             state = _reduce(bound)
-            history.append(
-                {
-                    "ordinal": sessions_started,
-                    "item_ref": item_ref,
-                    "item_class": item.get("class"),
-                    "action_id": action.get("action_id"),
-                    "session_kind": action.get("session_kind"),
-                    "principal": action.get("principal"),
-                    "execution_principal": action.get("execution_principal"),
-                    "runtime_model": session_model,
-                    "before_state_hash": before_hash,
-                    "after_state_hash": sha256_bytes(canonical_json_bytes(state)),
-                    "runtime": session.as_dict(),
-                }
-            )
+            history_entry = {
+                "ordinal": sessions_started,
+                "item_ref": item_ref,
+                "item_class": item.get("class"),
+                "action_id": action.get("action_id"),
+                "session_kind": action.get("session_kind"),
+                "principal": action.get("principal"),
+                "execution_principal": action.get("execution_principal"),
+                "runtime_model": session_model,
+                "before_state_hash": before_hash,
+                "after_state_hash": sha256_bytes(canonical_json_bytes(state)),
+                "runtime": session.as_dict(),
+            }
+            terminal_status = _state_stop(state)
+            if terminal_status is not None:
+                history.append(history_entry)
+                return _result(
+                    run_ref=run_ref,
+                    status=terminal_status,
+                    budget_kind=None,
+                    budget=budget,
+                    sessions_started=sessions_started,
+                    started_at=started_at,
+                    state=state,
+                    seen_item_refs=seen_item_refs,
+                    history=history,
+                    model=model,
+                    reviewer_pool=reviewer_pool,
+                )
+            if docker_interrupted:
+                return _result(
+                    run_ref=run_ref,
+                    status="interrupted_unrecorded",
+                    budget_kind=None,
+                    budget=budget,
+                    sessions_started=sessions_started,
+                    started_at=started_at,
+                    state=state,
+                    seen_item_refs=seen_item_refs,
+                    history=history,
+                    model=model,
+                    reviewer_pool=reviewer_pool,
+                )
+            history.append(history_entry)
 
 
 class SignalStop:

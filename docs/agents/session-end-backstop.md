@@ -20,7 +20,18 @@ checkout. Its command resolves through `${CLAUDE_PROJECT_DIR}` and has a ten-sec
 timeout, missing executable, malformed input, reducer failure, or any unexpected exception releases
 the turn; the executable never exits with status 2.
 
-## Target-repository launch
+## Docker queue launch
+
+The public work-queue driver installs container-local additional settings itself. The registered
+command is the pinned image's Python interpreter plus
+`/harness/tools/container_broker_client.py stop-hook`. The model-side client talks only to the
+PID-1 Unix relay. PID 1 retains the broker session key and authenticates the exact request to the
+host broker, which binds it to the container ID, immutable configuration digest, engagement inode,
+runtime session, and delivery digest. The key is not exposed through the model environment or a
+container file. See [`docker-work-queue.md`](docker-work-queue.md) for the full activation and
+containment contract.
+
+## Manual or legacy host launch
 
 A session launched with a target repository as its cwd does not discover this harness checkout's
 project settings. The launcher must pass explicit additional settings while preserving the target's
@@ -46,14 +57,15 @@ The scoped-session driver additionally exports the exact pre-session record head
 Both variables are required together. A driver-scoped hook does not write the target: it sends a
 separate `session_end_check` request to the parent broker containing only the authenticated runtime
 UUID, the one-way hash of the hook session id, `stop_hook_active`, and a one-way digest of the exact
-hook delivery. The broker authenticates the Unix peer's exact OS session, retains the engagement
-inode, and rechecks the source head, scope bytes, canonical queue gate, and any schema-valid
-`session.end_checked` tail for that same hook hash under the record-kernel lock. Exact delivery
-retries return the cached response without another append. A runtime gets at most the documented
-six blocking appends plus one release, and consumption permits only one release for the stale
-session. This audit RPC never consumes, rearms, or substitutes the one selected work action. A
-replaced endpoint can cause only a release/denial, never a target mutation. Sessions not launched by
-that driver omit the endpoint and retain the generic behavior described below.
+hook delivery. The host launcher authenticates the Unix peer's exact OS session; the Docker launcher
+authenticates the PID-1 relay's HMAC request and exact container/configuration binding. In both cases
+the parent retains the engagement inode and rechecks the source head, scope bytes, canonical queue
+gate, and any schema-valid `session.end_checked` tail for that same hook hash under the record-kernel
+lock. Exact delivery retries return the cached response without another append. A runtime gets at
+most the documented six blocking appends plus one release, and consumption permits only one release
+for the stale session. This audit RPC never consumes, rearms, or substitutes the one selected work
+action. A replaced endpoint can cause only a release/denial, never a target mutation. Sessions not
+launched by that driver omit the endpoint and retain the generic behavior described below.
 
 ## Recorded behavior
 

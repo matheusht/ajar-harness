@@ -159,6 +159,26 @@ def check_external_work_queue_driver():
         ("record-review-atomicity-test.py", "signed record-review transaction regression suite"),
         ("work-queue-admission-test.py", "work-queue admission predicate regression suite"),
         ("work-queue-driver-test.py", driver_label),
+        (
+            "container-broker-protocol-test.py",
+            "container broker authentication and replay regression suite",
+        ),
+        (
+            "container-session-supervisor-test.py",
+            "container PID-1 relay and storage adjudication regression suite",
+        ),
+        (
+            "docker-session-runtime-test.py",
+            "Docker boundary unit suite (live Docker lane explicitly opt-in)",
+        ),
+        (
+            "docker-work-queue-integration-test.py",
+            "Docker queue integration suite (live Docker lane explicitly opt-in)",
+        ),
+        (
+            "docker-work-queue-drain-test.py",
+            "Docker reducer drain acceptance suite (live Docker lane explicitly opt-in)",
+        ),
     ]
     if sys.platform == "darwin":
         scripts.insert(

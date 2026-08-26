@@ -43,7 +43,7 @@
     },
     "checker:check-conformance": {
       "path": "tools/check-conformance.py",
-      "sha256": "17e19956dab2896220ec7fed595cfedd45caaca5ff2d1dbd03127c97d5135233"
+      "sha256": "a7757801cc9f66aa1c305782836046f452ae830fbb8f68eff6b30e758b2e5c71"
     },
     "adapter:researcher_adapter": {
       "path": "tools/researcher_adapter.py",

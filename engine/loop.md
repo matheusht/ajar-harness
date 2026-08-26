@@ -49,16 +49,28 @@ Both outer admission ceilings are mandatory. A typical target-local invocation i
 ./.venv/bin/python tools/run-work-queue.py run \
   --workspace /absolute/path/to/target \
   --engagement /absolute/path/to/target/engagements/<id> \
-  --runtime claude-code --model <worker-model> \
+  --runtime claude-code --session-backend docker \
+  --model claude-worker-20260826 \
   --reviewer-model <reviewer-model-a> \
   --reviewer-model <reviewer-model-b> \
   --reviewer-model <reviewer-model-c> \
-  --read-only-input /canonical/path/from/sys.prefix \
-  --read-only-input /canonical/path/from/sys.base_prefix \
+  --claude-executable /usr/local/bin/claude \
+  --docker-image operator/claude-runtime@sha256:<64-lowercase-hex> \
+  --docker-python-executable /usr/local/bin/python3 \
+  --docker-executable /usr/local/bin/docker \
+  --docker-memory-bytes 2147483648 --docker-cpus 2 \
+  --docker-pids 128 --docker-nofile 1024 \
+  --docker-scratch-bytes 268435456 --docker-scratch-inodes 16384 \
+  --docker-shm-bytes 16777216 --docker-shm-inodes 1024 \
   --read-only-input /absolute/path/to/required-input \
   --max-sessions 12 --max-wall-seconds 3600 \
   --session-timeout-seconds 600
 ```
+
+The image must already be cached under its exact immutable digest; the runtime uses `--pull never`.
+The current backend is deliberately limited to the fail-closed Apple-Silicon Docker Desktop profile.
+See [`docs/agents/docker-work-queue.md`](../docs/agents/docker-work-queue.md) for the complete
+host/image contract and qualification boundary.
 
 The driver never discovers or mounts target workspaces centrally. It binds the supplied target-local
 directories, holds one nonblocking target-local driver lock for the run, strips operator-signature
@@ -78,7 +90,9 @@ queue pauses without spinning. A process signal stops
 after the current bounded session and reports `interrupted_unrecorded`; resume from the unchanged
 ledger or use the typed operator stop/resume commands when a durable park is intended.
 
-The Darwin launcher denies filesystem reads by default. It admits only the bound target workspace,
+The public driver uses the Docker backend above. The direct Python API retains its older Darwin
+process launcher for compatibility and its regression corpus; that legacy adapter is not the #83
+containment boundary. It denies filesystem reads by default and admits only the bound target workspace,
 portable harness, intended-ephemeral session scratch, exact runtime and bounded dependency closure,
 a fixed audited operating-system subset, exact internal runtime endpoints, and repeated absolute
 `--read-only-input` files or directories. Each distinct canonical `sys.prefix` and `sys.base_prefix`
@@ -95,8 +109,8 @@ daemon that closes the sentinel descriptor before detaching, and Seatbelt does n
 Keychain, XPC, or other non-filesystem channels. Writable scratch also has no aggregate byte/file
 quota, so CPU, output, and time limits do not bound total disk consumption. The configured wall
 timeout therefore bounds the leader/well-behaved descendants, not that adversarial residual.
-Stronger lifecycle, network, credential-lifetime, and storage containment is tracked by #83. Do not
-describe the current launcher as a universal wall-time or aggregate-resource security boundary.
+Do not describe that legacy launcher as a universal wall-time or aggregate-resource security
+boundary, and do not substitute it for the public Docker backend.
 
 Cleanup itself has explicit time, entry, depth, and work bounds. A bound or filesystem-invariant
 failure is fail-closed: a `.cleanup-failed` marker remains in the temp parent, the exact private

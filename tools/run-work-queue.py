@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import signal
 from pathlib import Path
 
+from docker_session_runtime import DockerRuntimeLimits
 from engagement_records import canonical_json_bytes, validate_record
-from work_queue_driver import DriverBudget, DriverError, NONCOMPLETION_STATUSES, SignalStop, run_driver
+from work_queue_driver import (
+    DockerQueueBackend,
+    DriverBudget,
+    DriverError,
+    NONCOMPLETION_STATUSES,
+    SignalStop,
+    run_driver,
+)
 
 
 def emit(value: object) -> None:
@@ -30,6 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--engagement", type=Path, required=True, help="absolute target-local engagement root")
     run.add_argument("--runtime", choices=["claude-code"], required=True)
+    run.add_argument(
+        "--session-backend",
+        choices=["docker"],
+        required=True,
+        help="required strong isolation backend; no implicit host-process fallback",
+    )
     run.add_argument("--model", required=True, help="ordinary bounded-session model")
     run.add_argument(
         "--reviewer-model",
@@ -44,16 +57,35 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-wall-seconds", type=float, required=True)
     run.add_argument("--session-timeout-seconds", type=float, required=True)
     run.add_argument("--session-max-budget-usd", type=float)
-    run.add_argument("--claude-executable", type=Path)
+    run.add_argument(
+        "--claude-executable",
+        type=Path,
+        required=True,
+        help="absolute Claude executable path inside the pinned container image",
+    )
+    run.add_argument("--docker-image", required=True, help="immutable repository@sha256 image")
+    run.add_argument(
+        "--docker-python-executable",
+        required=True,
+        help="absolute Python executable path inside the pinned image",
+    )
+    run.add_argument("--docker-executable", type=Path, required=True)
+    run.add_argument("--docker-memory-bytes", type=int, required=True)
+    run.add_argument("--docker-cpus", type=float, required=True)
+    run.add_argument("--docker-pids", type=int, required=True)
+    run.add_argument("--docker-nofile", type=int, required=True)
+    run.add_argument("--docker-scratch-bytes", type=int, required=True)
+    run.add_argument("--docker-scratch-inodes", type=int, required=True)
+    run.add_argument("--docker-shm-bytes", type=int, required=True)
+    run.add_argument("--docker-shm-inodes", type=int, required=True)
     run.add_argument(
         "--read-only-input",
         type=Path,
         action="append",
         default=[],
         help=(
-            "absolute file or directory the launched session may read; include each distinct "
-            "canonical sys.prefix/sys.base_prefix of the active driver Python, then repeat for "
-            "any additional operator-declared input"
+            "canonical absolute regular file the container session may read; repeat in the "
+            "desired deterministic /inputs/000, /inputs/001, ... mount order"
         ),
     )
     return parser
@@ -61,13 +93,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    executable = args.claude_executable
-    if executable is None:
-        discovered = shutil.which("claude")
-        if discovered is None:
-            emit({"schema_version": 1, "ok": False, "error": {"code": "driver_runtime_unavailable"}})
-            return 1
-        executable = Path(discovered)
+    docker_backend = DockerQueueBackend(
+        image=args.docker_image,
+        python_executable=args.docker_python_executable,
+        docker_executable=args.docker_executable,
+        limits=DockerRuntimeLimits(
+            memory_bytes=args.docker_memory_bytes,
+            cpu_count=args.docker_cpus,
+            pids=args.docker_pids,
+            nofile=args.docker_nofile,
+            scratch_bytes=args.docker_scratch_bytes,
+            scratch_inodes=args.docker_scratch_inodes,
+            shm_bytes=args.docker_shm_bytes,
+            shm_inodes=args.docker_shm_inodes,
+        ),
+    )
 
     stop = SignalStop()
     prior_handlers: dict[int, object] = {}
@@ -77,7 +117,7 @@ def main() -> int:
         result = run_driver(
             workspace=args.workspace,
             engagement=args.engagement,
-            executable=executable,
+            executable=args.claude_executable,
             model=args.model,
             reviewer_model=args.reviewer_model,
             budget=DriverBudget(
@@ -88,6 +128,7 @@ def main() -> int:
             ),
             read_only_inputs=tuple(args.read_only_input),
             stop_requested=stop,
+            docker_backend=docker_backend,
         )
     except DriverError as exc:
         emit({"schema_version": 1, "ok": False, "error": {"code": exc.code}})

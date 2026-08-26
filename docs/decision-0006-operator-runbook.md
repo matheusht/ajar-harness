@@ -20,16 +20,20 @@ closed. Preflight collection cannot assert operator review. `review-preflight` i
 `tools/run-work-queue.py run` is classified once as the external broker Notebook operation
 `run-work-queue`. Its evidence is an exact target-local workspace, one reducer-owned action at a
 time, and an outer budget; none of those controls is delegated to the launched model session.
-On Darwin, filesystem reads are default-denied to the bound target workspace, portable harness,
-per-session scratch, resolved runtime closure, audited system subset, and exact internal endpoints.
-Declare every distinct canonical `sys.prefix` and `sys.base_prefix` for the active driver Python by
-repeating `--read-only-input`; the Stop hook and broker action clients execute with that interpreter
-inside the profile. Repeat the flag for every other required file or directory. Missing runtime
-roots, missing inputs, or unresolved runtime dependencies fail before model launch. This policy does
-not mount the target centrally and does not claim network, Keychain, XPC, descendant-lifetime, or
-aggregate-storage containment; those stronger controls remain #83.
-The workspace argument must be its canonical absolute path with no symlink components; an aliased
-workspace fails before activation rather than receiving mutable path authority.
+The public command requires the explicit Docker backend and has no host-process fallback. It accepts
+only the fail-closed Apple Silicon Docker Desktop profile, an already-cached immutable digest-pinned
+image, absolute in-image Claude/Python paths, and finite memory, CPU, PID, open-file, scratch, and
+shared-memory byte/inode limits. The target and harness are mounted directly and read-only; repeated
+`--read-only-input` values may add only canonical regular files. Optional directories and special
+files are rejected. The target is never collected beneath a central harness path.
+
+The stopped-container phase binds the exact image, mounts, limits, container/network IDs, immutable
+configuration digest, target inode, action, and deadlines before activation. PID 1 retains the
+broker key, relays only typed action/Stop operations, and owns all descendants. Timeout, interrupt,
+parent death, normal completion, and storage exhaustion remove the exact session resources. Read
+[`docs/agents/docker-work-queue.md`](agents/docker-work-queue.md) before operating this path; it is
+the canonical host/image contract and includes the full CLI template, descendant-wide storage
+error latch, syscall-tracing cost, and qualification limits.
 
 ## 3. Request exact authority
 

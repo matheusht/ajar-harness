@@ -8,7 +8,8 @@ of the original process group and same-UID descendants that retain the inherited
 On Darwin, filesystem reads default to denied outside a bounded runtime policy and writes default to
 denied outside per-session scratch. It does not claim to contain non-filesystem channels or a
 deliberate daemon that closes the sentinel descriptor before detaching; the wall timeout is not a
-security boundary for that residual (tracked by #83).
+security boundary for that residual. The public work-queue CLI therefore requires the Docker
+backend; this adapter remains only for direct-API compatibility and its regression corpus.
 """
 
 from __future__ import annotations

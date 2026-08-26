@@ -10,7 +10,7 @@ for objective in scope.active_objectives:          # benign, safe_signal-gated
      f = establish_foothold(pick from skills/personas/)   # load + engagement trigger
      assert f.engaged   # in-character + no refusal; else iterate persona / switch / do NOT push
   for rung in LADDER(winners_first):               # weakest -> strongest, INSIDE engaged persona
-     a = run_hunter(rung, bounded=True)            # live target, SERIALIZED -> emit attempt
+     a = run_hunter(rung, bounded=True)            # envelope (engine/hunter-envelope.md) -> attempt
      s = signal_oracle(a)
      if s and adjudication_oracle(a, controls, contamination, replay):
         emit claim review; operator may file a revision-bound finding; winners += rung; break
@@ -41,8 +41,9 @@ for objective in scope.active_objectives:          # benign, safe_signal-gated
   means "all N enumerated", keep enumerating vectors, and step back / redo recon rather than fixate.
   "Dry after one pass" over a surface evidence flagged is the failure mode, not the stop.
 - **Bounded chunks** — never "dump everything". Small asks accumulate.
-- **Only the live-run step touches the target and serializes.** Signal/adjudication/dedup are
-  offline → where a pack would later parallelize (Phase 2).
+- **Only the live-run step touches the target and serializes.** That step is the hunter envelope
+  (`engine/hunter-envelope.md`): orchestrator/oracle stay outside; artifacts come back. Signal/
+  adjudication/dedup remain offline → where a pack would later parallelize (Phase 2).
 - **Winners carried forward** (`memory/winners.md`, scrubbed/abstract) so later objectives start from
   what worked. No UCB until cross-engagement stats exist.
 - **Stop conditions per family** (set in the vuln card / scope): max attempts, max dry streak,

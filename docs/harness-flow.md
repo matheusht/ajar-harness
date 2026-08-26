@@ -53,7 +53,7 @@ oracle. Hunters may propose `suspected_success`; **only the orchestrator/oracle 
 ## Roles (cognition where the leverage is)
 
 - **Orchestrator** (you, top model) — plan, pick cards, validate vs oracle, score, enforce gates. *Never touches the target except to establish a session.*
-- **Hunter** (mid model) — drives the target, runs ONE card on a bounded brief, returns a structured `attempt`. May propose `suspected_success`.
+- **Hunter** (mid model) — drives the target, runs ONE card on a bounded brief, returns a structured `attempt`. May propose `suspected_success`. Live drive happens inside the hunter envelope (`engine/hunter-envelope.md`): withheld gold/findings, artifacts-only return.
 - **Helper** (cheap model) — offline only: DOM scrape, transcript diff, dedup. Never touches the target.
 
 > Prime directive: **the product is rigor, not findings.** If you can't say in one sentence why a

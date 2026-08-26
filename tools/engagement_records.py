@@ -61,6 +61,7 @@ NEW_SCHEMA_FILES = (
     "ab-study-evidence.schema.json",
     "migration-artifact-review.schema.json",
     "flow-telemetry.schema.json",
+    "hunter-run.schema.json",
 )
 SECRET_PATTERNS = {
     "authorization_header": re.compile(rb"authorization\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
@@ -105,8 +106,11 @@ RECORD_SCHEMA_FILES = {
     "ab-study-evidence": "ab-study-evidence.schema.json",
     "migration-artifact-review": "migration-artifact-review.schema.json",
     "flow-telemetry": "flow-telemetry.schema.json",
+    "hunter-run": "hunter-run.schema.json",
     "finding-v2-legacy": "finding.schema.json",
 }
+
+HUNTER_DEFAULT_WITHHELD_PREFIXES = ("evals/", "fixtures/", "casebooks/", "engagements/")
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -256,10 +260,37 @@ def _error_detail(error: Any) -> dict[str, Any]:
     }
 
 
+def _norm_rel_prefix(path: str) -> str:
+    text = str(path).replace("\\", "/").lstrip("./")
+    return text if text.endswith("/") else text + "/"
+
+
+def _path_under_prefix(path: str, prefix: str) -> bool:
+    return _norm_rel_prefix(path).startswith(_norm_rel_prefix(prefix))
+
+
+def _hunter_run_semantic_errors(record: dict[str, Any]) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    allowed = record.get("allowed_paths") or []
+    withheld = record.get("withheld_paths") or []
+    gold_hits = [path for path in allowed if any(_path_under_prefix(path, prefix) for prefix in (*HUNTER_DEFAULT_WITHHELD_PREFIXES, *withheld))]
+    if gold_hits:
+        errors.append({"code": "hunter_gold_path_allowed", "instance_path": "/allowed_paths", "schema_path": "/semantic", "message": "allowed_paths must not include withheld or gold trees: " + ",".join(gold_hits)})
+    missing_defaults = [prefix for prefix in HUNTER_DEFAULT_WITHHELD_PREFIXES if not any(_norm_rel_prefix(item) == _norm_rel_prefix(prefix) or _path_under_prefix(prefix, item) for item in withheld)]
+    if missing_defaults:
+        errors.append({"code": "hunter_defaults_not_withheld", "instance_path": "/withheld_paths", "schema_path": "/semantic", "message": "withheld_paths must cover evals/, fixtures/, casebooks/, engagements/"})
+    if record.get("isolation_unit") == "hypothesis" and not record.get("hypothesis_ref"):
+        errors.append({"code": "hunter_hypothesis_required", "instance_path": "/hypothesis_ref", "schema_path": "/semantic", "message": "hypothesis isolation_unit requires hypothesis_ref"})
+    return errors
+
+
 def _semantic_record_errors(record: Any, schema_name: str) -> list[dict[str, Any]]:
     if not isinstance(record, dict):
         return []
     errors: list[dict[str, Any]] = []
+    if schema_name == "hunter-run":
+        errors.extend(_hunter_run_semantic_errors(record))
+        return errors
     if schema_name == "review":
         independence = record.get("independence", {})
         if independence.get("reviewer_run_id") == independence.get("originating_run_id"):
@@ -390,6 +421,8 @@ def infer_schema_name(record: Any) -> str | None:
     if not isinstance(record, dict):
         return None
     version = record.get("schema_version")
+    if record.get("hunter_run_id") and version == 1:
+        return "hunter-run"
     if record.get("document_type") in {"runtime_observation", "flow_export"} and version == 1:
         return "flow-telemetry"
     if "finding_id" in record and version == 3:

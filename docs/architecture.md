@@ -6,7 +6,7 @@ engagement wiki). This is the standalone summary.
 ## Three planes (don't let them bleed)
 - **Plane 1 — methodology** (`skills/`): vuln × technique × oracle cards. Read-only, target-agnostic,
   never edited mid-engagement. Travels.
-- **Plane 2 — orchestration** (`engine/`): loop · roster · gates. Stateless re target, stateful re run.
+- **Plane 2 — orchestration** (`engine/`): loop · roster · hunter envelope · gates. Stateless re target, stateful re run.
 - **Plane 3 — engagement** (`engagements/_TEMPLATE/` → copied into the target's own repo): scope,
   progress, findings, evidence, memory, cleanup. Append-only. Born per engagement.
 

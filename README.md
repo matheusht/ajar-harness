@@ -33,8 +33,8 @@ Three zones, enforced structurally (not just documented):
 
 ```
 skills/         PLANE 1 — methodology (read-only): vulns/ · techniques/ · oracles/ · patterns/
-engine/         PLANE 2 — orchestration: loop · persistence · routing · roster · gates
-schemas/        the contracts: attempt · finding · pattern · technique-card
+engine/         PLANE 2 — orchestration: loop · persistence · routing · roster · hunter-envelope · gates
+schemas/        the contracts: attempt · finding · pattern · hunter-run · technique-card
 fixtures/       sanitized oracle-calibration + routing-activation ground truth
 casebooks/      PLANE 1 — scrubbed prior-engagement memory (routing + false-positive discipline)
 engagements/    PLANE 3 — _TEMPLATE copied OUT into each target's own project repo (append-only)

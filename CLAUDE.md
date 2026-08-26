@@ -26,7 +26,9 @@ over "confirmed".
 - **Orchestrator (you, top model):** plan, select cards, validate vs oracle, score, adapt, triage,
   enforce gates. **Never touches the target except to establish a session.**
 - **Hunter (mid model):** drive the target, run ONE card with a bounded brief, return a structured
-  `attempt`. May propose `suspected_success`; **only the orchestrator/oracle emits `confirmed`.**
+  `attempt`. Live drive uses the hunter envelope (`engine/hunter-envelope.md`) — gold/findings
+  withheld; artifacts only come back. May propose `suspected_success`; **only the orchestrator/oracle
+  emits `confirmed`.**
 - **Helper (cheap model):** offline only — DOM scrape, transcript diff, dedup. Never touches target.
 
 Single agent first. The shared browser serializes live work anyway; parallelism is a config knob

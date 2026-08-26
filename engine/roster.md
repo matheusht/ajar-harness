@@ -11,6 +11,10 @@ Put cognition where the leverage is; keep blast radius small.
 ## Rules
 - The hunter may propose `suspected_success`; **only the orchestrator/oracle emits `confirmed`.**
 - The hunter does **not** invent victory conditions — it runs the assigned card and reports.
+- Live hunter work runs inside the **hunter envelope** (`engine/hunter-envelope.md`): one
+  hypothesis or card+rung, allowlisted Plane-1 cards + brief + target handle only. Gold, fixtures,
+  casebooks, and engagement findings are withheld. `docker`/`harbor` provide OS isolation; `local`
+  is the context allowlist only. The envelope is not Zone-2 authorization.
 - The orchestrator never holds the target's live credentials in the same place model-generated code
   runs, where avoidable (blast-radius control, not just cost).
 - **Single agent first.** The shared browser serializes live work; parallelism is a config knob

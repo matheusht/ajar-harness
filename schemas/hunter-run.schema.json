@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-redteam-harness.local/schemas/hunter-run.schema.json",
+  "title": "Hunter execution envelope — isolated hunter run spec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "hunter_run_id",
+    "engagement_id",
+    "isolation_unit",
+    "hypothesis_ref",
+    "card_ids",
+    "brief_path",
+    "brief",
+    "target_handle",
+    "allowed_paths",
+    "withheld_paths",
+    "environment_ref",
+    "provider",
+    "artifact_out",
+    "network_policy",
+    "zone2_authorized"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "hunter_run_id": {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+    },
+    "engagement_id": {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+    },
+    "isolation_unit": {
+      "enum": ["hypothesis", "card_rung"]
+    },
+    "hypothesis_ref": {
+      "oneOf": [
+        {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "card_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/non_empty"
+      }
+    },
+    "brief_path": {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"
+    },
+    "brief": {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/non_empty"
+    },
+    "target_handle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "enum": ["url", "local_path", "none"]
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "allowed_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"
+      }
+    },
+    "withheld_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"
+      }
+    },
+    "environment_ref": {
+      "oneOf": [
+        {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provider": {
+      "enum": ["local", "docker", "harbor"]
+    },
+    "artifact_out": {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"
+    },
+    "network_policy": {
+      "enum": ["no-network", "allowlist", "scope"]
+    },
+    "zone2_authorized": {
+      "const": false
+    }
+  }
+}

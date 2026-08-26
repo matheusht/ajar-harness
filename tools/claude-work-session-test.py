@@ -19,11 +19,26 @@ from unittest import mock
 
 import claude_work_session as session_module
 import _session_watchdog as watchdog_module
-from claude_work_session import SessionLaunchError, run_claude_session
+from claude_work_session import SessionLaunchError, run_claude_session as _run_claude_session
 
 
-FAKE_RUNTIME = """#!/usr/bin/env python3
-import json
+# The production Claude runtime is a self-contained Mach-O binary. This fixture is intentionally a
+# Python script, so its import trees are additional declared inputs rather than ambient runtime
+# authority granted by the launcher.
+_FIXTURE_RUNTIME_READ_INPUTS = tuple(
+    dict.fromkeys((Path(sys.prefix), Path(sys.base_prefix)))
+)
+
+
+def run_claude_session(**kwargs: object):
+    declared = tuple(kwargs.pop("read_only_inputs", ()))
+    kwargs["read_only_inputs"] = tuple(
+        dict.fromkeys((*declared, *_FIXTURE_RUNTIME_READ_INPUTS))
+    )
+    return _run_claude_session(**kwargs)
+
+
+FAKE_RUNTIME = """import json
 import os
 import pathlib
 import signal
@@ -51,6 +66,35 @@ capture = {
         if key.startswith("HARNESS_DRIVER_") or key.startswith("HARNESS_EXPECTED_")
     },
 }
+read_probes = fixture.get("fixture_read_probes")
+if isinstance(read_probes, dict):
+    read_results = {}
+    for label, raw_path in read_probes.items():
+        try:
+            pathlib.Path(raw_path).read_bytes()
+        except OSError:
+            read_results[str(label)] = False
+        else:
+            read_results[str(label)] = True
+    scratch_probe = pathlib.Path(os.environ["HARNESS_DRIVER_SCRATCH"]) / "read-probe"
+    scratch_probe.write_text("scratch-readable", encoding="utf-8")
+    read_results["scratch"] = scratch_probe.read_text(encoding="utf-8") == "scratch-readable"
+    descendant_path = fixture.get("fixture_descendant_read_probe")
+    if descendant_path:
+        descendant = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import pathlib,sys; pathlib.Path(sys.argv[1]).read_bytes()",
+                str(descendant_path),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        read_results["descendant_outside"] = descendant.returncode == 0
+    capture["read_results"] = read_results
 signal_targets = fixture.get("fixture_signal_targets")
 signal_targets_file = fixture.get("fixture_signal_targets_file")
 if signal_targets_file:
@@ -196,13 +240,16 @@ print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.125, 
 
 class ClaudeWorkSessionTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="claude-work-session-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="cws-", dir="/tmp")
         self.root = Path(self.temporary.name).resolve()
         self.workspace = self.root / "target"
         self.engagement = self.workspace / "engagements" / "fixture"
         self.engagement.mkdir(parents=True)
         self.executable = self.root / "fixture-claude"
-        self.executable.write_text(FAKE_RUNTIME, encoding="utf-8")
+        self.executable.write_text(
+            f"#!{Path(sys.executable).resolve()}\n{FAKE_RUNTIME}",
+            encoding="utf-8",
+        )
         self.executable.chmod(self.executable.stat().st_mode | stat.S_IXUSR)
         self.workspace_fd = os.open(
             self.workspace,
@@ -292,6 +339,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                     model="fixture-model",
                     prompt=json.dumps({"queue_item": "fixture"}),
                     session_ref=session_ref,
+                    workspace=self.workspace,
                     workspace_fd=self.workspace_fd,
                     engagement=self.engagement,
                     settings=settings,
@@ -534,6 +582,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                 model="fixture-model",
                 prompt=json.dumps({"fixture_scratch_metadata_probes": True}),
                 session_ref=session_ref,
+                workspace=self.workspace,
                 workspace_fd=self.workspace_fd,
                 engagement=self.engagement,
                 settings={},
@@ -550,6 +599,160 @@ class ClaudeWorkSessionTest(unittest.TestCase):
         self.assertNotEqual(metadata["acl_returncode"], 0)
         self.assertFalse(Path(metadata["scratch_path"]).exists())
 
+    def test_launched_session_reads_only_approved_roots_and_descendants_inherit(self) -> None:
+        workspace_marker = self.workspace / "workspace-readable"
+        workspace_marker.write_text("workspace", encoding="utf-8")
+        outside_marker = self.root / "outside-denied"
+        outside_marker.write_text("outside", encoding="utf-8")
+        workspace_escape = self.workspace / "outside-link"
+        workspace_escape.symlink_to(outside_marker)
+        explicit_file = self.root / "explicit-readable"
+        explicit_file.write_text("explicit", encoding="utf-8")
+        explicit_directory = self.root / "explicit-directory"
+        explicit_directory.mkdir()
+        explicit_directory_marker = explicit_directory / "nested-readable"
+        explicit_directory_marker.write_text("directory", encoding="utf-8")
+        harness_marker = Path(__file__).resolve()
+        session_ref = "20202020-2020-4020-8020-202020202020"
+        emitted: list[dict[str, object]] = []
+        original_summary = session_module._summary_from_output
+
+        def capture_summary(raw: bytes) -> tuple[bool, bool | None, float | None]:
+            emitted.append(json.loads(raw))
+            return original_summary(raw)
+
+        prompt = json.dumps(
+            {
+                "fixture_read_probes": {
+                    "workspace": str(workspace_marker),
+                    "workspace_symlink_escape": str(workspace_escape),
+                    "harness": str(harness_marker),
+                    "runtime": str(self.executable),
+                    "explicit_file": str(explicit_file),
+                    "explicit_directory": str(explicit_directory_marker),
+                    "outside": str(outside_marker),
+                },
+                "fixture_descendant_read_probe": str(outside_marker),
+            }
+        )
+        with mock.patch.object(
+            session_module,
+            "_summary_from_output",
+            side_effect=capture_summary,
+        ):
+            result = run_claude_session(
+                executable=self.executable,
+                model="fixture-model",
+                prompt=prompt,
+                session_ref=session_ref,
+                workspace=self.workspace,
+                workspace_fd=self.workspace_fd,
+                engagement=self.engagement,
+                settings={},
+                driver_scope=self._driver_scope(session_ref),
+                timeout_seconds=5,
+                max_budget_usd=None,
+                read_only_inputs=(explicit_file, explicit_directory),
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.output_was_json)
+        self.assertEqual(
+            emitted[0]["fixture_capture"]["read_results"],
+            {
+                "workspace": True,
+                "workspace_symlink_escape": False,
+                "harness": True,
+                "runtime": True,
+                "explicit_file": True,
+                "explicit_directory": True,
+                "outside": False,
+                "scratch": True,
+                "descendant_outside": False,
+            },
+        )
+
+    def test_read_policy_failures_happen_before_process_activation(self) -> None:
+        activated: list[int] = []
+        session_ref = "21212121-2121-4121-8121-212121212121"
+        with self.assertRaises(SessionLaunchError) as undeclared_runtime:
+            _run_claude_session(
+                executable=self.executable,
+                model="fixture-model",
+                prompt="{}",
+                session_ref=session_ref,
+                workspace=self.workspace,
+                workspace_fd=self.workspace_fd,
+                engagement=self.engagement,
+                settings={},
+                driver_scope=self._driver_scope(session_ref),
+                timeout_seconds=5,
+                max_budget_usd=None,
+                on_process_started=activated.append,
+            )
+        self.assertEqual(undeclared_runtime.exception.code, "read_input_invalid")
+        self.assertEqual(activated, [])
+
+        missing = self.root / "missing-read-input"
+        with self.assertRaises(SessionLaunchError) as missing_error:
+            run_claude_session(
+                executable=self.executable,
+                model="fixture-model",
+                prompt="{}",
+                session_ref=session_ref,
+                workspace=self.workspace,
+                workspace_fd=self.workspace_fd,
+                engagement=self.engagement,
+                settings={},
+                driver_scope=self._driver_scope(session_ref),
+                timeout_seconds=5,
+                max_budget_usd=None,
+                read_only_inputs=(missing,),
+                on_process_started=activated.append,
+            )
+        self.assertEqual(missing_error.exception.code, "read_input_invalid")
+        self.assertEqual(activated, [])
+
+        certificate = self.root / "operator-ca.pem"
+        certificate.write_text("fixture certificate", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"SSL_CERT_FILE": str(certificate)}):
+            with self.assertRaises(SessionLaunchError) as undeclared_error:
+                run_claude_session(
+                    executable=self.executable,
+                    model="fixture-model",
+                    prompt="{}",
+                    session_ref=session_ref,
+                    workspace=self.workspace,
+                    workspace_fd=self.workspace_fd,
+                    engagement=self.engagement,
+                    settings={},
+                    driver_scope=self._driver_scope(session_ref),
+                    timeout_seconds=5,
+                    max_budget_usd=None,
+                    on_process_started=activated.append,
+                )
+        self.assertEqual(undeclared_error.exception.code, "read_input_invalid")
+        self.assertEqual(activated, [])
+
+    def test_workspace_name_must_still_select_the_bound_directory(self) -> None:
+        alias = self.root / "target-alias"
+        alias.symlink_to(self.workspace, target_is_directory=True)
+        with self.assertRaises(SessionLaunchError) as raised:
+            run_claude_session(
+                executable=self.executable,
+                model="fixture-model",
+                prompt="{}",
+                session_ref="23232323-2323-4323-8323-232323232323",
+                workspace=alias,
+                workspace_fd=self.workspace_fd,
+                engagement=self.engagement,
+                settings={},
+                driver_scope=self._driver_scope("23232323-2323-4323-8323-232323232323"),
+                timeout_seconds=5,
+                max_budget_usd=None,
+            )
+        self.assertEqual(raised.exception.code, "target_identity_changed")
+
     def test_timeout_kills_the_bounded_process_group(self) -> None:
         session_ref = "22222222-2222-4222-8222-222222222222"
         started_session_ids: list[int] = []
@@ -558,6 +761,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
             model="fixture-model",
             prompt=json.dumps({"fixture_sleep": 30}),
             session_ref=session_ref,
+            workspace=self.workspace,
             workspace_fd=self.workspace_fd,
             engagement=self.engagement,
             settings={},
@@ -600,6 +804,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                     }
                 ),
                 session_ref=session_ref,
+                workspace=self.workspace,
                 workspace_fd=self.workspace_fd,
                 engagement=self.engagement,
                 settings={},
@@ -621,7 +826,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
             signal.SIGUSR1,
             lambda signum, _frame: driver_hits.append(signum),
         )
-        signal_targets_file = self.root / "signal-targets.json"
+        signal_targets_file = self.workspace / "signal-targets.json"
         observed_watchdogs: list[int] = []
         emitted: list[dict[str, object]] = []
         canary_returncode_before_cleanup: int | None = None
@@ -664,6 +869,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                         }
                     ),
                     session_ref=session_ref,
+                    workspace=self.workspace,
                     workspace_fd=self.workspace_fd,
                     engagement=self.engagement,
                     settings={},
@@ -707,6 +913,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                 model="fixture-model",
                 prompt="{}",
                 session_ref=session_ref,
+                workspace=self.workspace,
                 workspace_fd=self.workspace_fd,
                 engagement=self.engagement,
                 settings={},
@@ -774,6 +981,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                         }
                     ),
                     session_ref=session_ref,
+                    workspace=self.workspace,
                     workspace_fd=self.workspace_fd,
                     engagement=self.engagement,
                     settings={},
@@ -796,9 +1004,8 @@ class ClaudeWorkSessionTest(unittest.TestCase):
     def test_inherited_sentinel_drains_double_fork_setsid_on_exit_and_timeout(self) -> None:
         for mode in ("normal", "timeout"):
             with self.subTest(mode=mode):
-                notify_path = (
-                    Path("/tmp")
-                    / f"cws-detached-{mode}-{os.getpid()}-{time.time_ns()}.sock"
+                notify_path = self.workspace / (
+                    f"cws-detached-{mode}-{os.getpid()}-{time.time_ns()}.sock"
                 )
                 listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 listener.bind(str(notify_path))
@@ -819,6 +1026,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                             if mode == "normal"
                             else "99999999-9999-4999-8999-999999999999"
                         ),
+                        workspace=self.workspace,
                         workspace_fd=self.workspace_fd,
                         engagement=self.engagement,
                         settings={},
@@ -846,7 +1054,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
 
     def test_process_start_callback_runs_before_child_gate_opens_and_failure_kills_child(self) -> None:
         callback_session_ids: list[int] = []
-        notify_path = Path("/tmp") / f"cws-gate-{os.getpid()}-{time.time_ns()}.sock"
+        notify_path = self.workspace / f"cws-gate-{os.getpid()}-{time.time_ns()}.sock"
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             listener.bind(str(notify_path))
@@ -868,6 +1076,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                 model="fixture-model",
                 prompt=json.dumps({"fixture_notify_socket": str(notify_path)}),
                 session_ref="55555555-5555-4555-8555-555555555555",
+                workspace=self.workspace,
                 workspace_fd=self.workspace_fd,
                 engagement=self.engagement,
                 settings={},
@@ -889,7 +1098,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
         self.assertGreater(callback_session_ids[0], 0)
 
         rejected_session_ids: list[int] = []
-        rejected_notify = Path("/tmp") / f"cws-reject-{os.getpid()}-{time.time_ns()}.sock"
+        rejected_notify = self.workspace / f"cws-reject-{os.getpid()}-{time.time_ns()}.sock"
         rejected_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             rejected_listener.bind(str(rejected_notify))
@@ -910,6 +1119,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                     model="fixture-model",
                     prompt=json.dumps({"fixture_notify_socket": str(rejected_notify)}),
                     session_ref="66666666-6666-4666-8666-666666666666",
+                    workspace=self.workspace,
                     workspace_fd=self.workspace_fd,
                     engagement=self.engagement,
                     settings={},
@@ -931,7 +1141,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
 
     def test_sigkill_of_session_parent_cannot_leave_claude_descendants(self) -> None:
         session_ref = "77777777-7777-4777-8777-777777777777"
-        notify_path = Path("/tmp") / f"cws-death-{os.getpid()}-{time.time_ns()}.sock"
+        notify_path = self.workspace / f"cws-death-{os.getpid()}-{time.time_ns()}.sock"
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             listener.bind(str(notify_path))
@@ -960,6 +1170,7 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                     model="fixture-model",
                     prompt=prompt,
                     session_ref=session_ref,
+                    workspace=self.workspace,
                     workspace_fd=self.workspace_fd,
                     engagement=self.engagement,
                     settings={},

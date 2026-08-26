@@ -486,11 +486,15 @@ def _driver_scope(
     ledger_hash = state.get("ledger_hash")
     if not isinstance(ledger_hash, str):
         raise DriverError("driver_state_sources_invalid")
+    try:
+        canonical_broker_endpoint = broker_endpoint.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise DriverError("driver_action_broker_unavailable") from exc
     return {
         "HARNESS_EXPECTED_LEDGER_HASH": ledger_hash,
         "HARNESS_EXPECTED_SOURCE_HASHES": canonical_json_bytes(sources).decode("utf-8"),
         SESSION_ENV: runtime_session_ref,
-        BROKER_ENDPOINT_ENV: str(broker_endpoint),
+        BROKER_ENDPOINT_ENV: str(canonical_broker_endpoint),
     }
 
 
@@ -724,9 +728,18 @@ def run_driver(
     model: str,
     reviewer_model: str | Sequence[str],
     budget: DriverBudget,
+    read_only_inputs: Sequence[Path] = (),
     stop_requested: Callable[[], bool] = lambda: False,
 ) -> dict[str, Any]:
     budget.validate()
+    if isinstance(read_only_inputs, (str, bytes, os.PathLike)) or not isinstance(
+        read_only_inputs, Sequence
+    ):
+        raise DriverError("driver_read_input_invalid")
+    try:
+        frozen_read_only_inputs = tuple(Path(value) for value in read_only_inputs)
+    except (TypeError, ValueError) as exc:
+        raise DriverError("driver_read_input_invalid") from exc
     model, reviewer_pool = _normalize_model_pool(model, reviewer_model)
     run_ref = "driver-" + uuid.uuid4().hex
     started_at = time.monotonic()
@@ -890,6 +903,7 @@ def run_driver(
                             model=session_model,
                             prompt=_session_prompt(item, state, item_ref),
                             session_ref=runtime_session_ref,
+                            workspace=bound.workspace,
                             workspace_fd=bound.workspace_fd,
                             engagement=bound.engagement,
                             settings=settings,
@@ -900,6 +914,7 @@ def run_driver(
                             ),
                             timeout_seconds=timeout,
                             max_budget_usd=budget.session_max_budget_usd,
+                            read_only_inputs=frozen_read_only_inputs,
                             on_process_started=activate,
                         )
                 finally:

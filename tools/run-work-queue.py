@@ -22,7 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     run = subcommands.add_parser("run", help="run one target-local queue under external budgets")
-    run.add_argument("--workspace", type=Path, required=True, help="absolute target repository root")
+    run.add_argument(
+        "--workspace",
+        type=Path,
+        required=True,
+        help="canonical absolute target repository root with no symlink components",
+    )
     run.add_argument("--engagement", type=Path, required=True, help="absolute target-local engagement root")
     run.add_argument("--runtime", choices=["claude-code"], required=True)
     run.add_argument("--model", required=True, help="ordinary bounded-session model")
@@ -40,6 +45,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--session-timeout-seconds", type=float, required=True)
     run.add_argument("--session-max-budget-usd", type=float)
     run.add_argument("--claude-executable", type=Path)
+    run.add_argument(
+        "--read-only-input",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "absolute file or directory the launched session may read; include each distinct "
+            "canonical sys.prefix/sys.base_prefix of the active driver Python, then repeat for "
+            "any additional operator-declared input"
+        ),
+    )
     return parser
 
 
@@ -70,6 +86,7 @@ def main() -> int:
                 session_timeout_seconds=args.session_timeout_seconds,
                 session_max_budget_usd=args.session_max_budget_usd,
             ),
+            read_only_inputs=tuple(args.read_only_input),
             stop_requested=stop,
         )
     except DriverError as exc:

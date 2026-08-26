@@ -797,6 +797,27 @@ def _open_absolute_directory(path: Path) -> int:
         except Exception:
             if "duplicate" in locals(): os.close(duplicate)
             raise
+    # A bounded work session starts in the already-open target workspace.  Prefer that inode as the
+    # traversal root when the requested directory is beneath the physical cwd: opening every
+    # ancestor from ``/`` would require granting read-data access to unrelated parent directories
+    # merely so nofollow traversal can reach an otherwise-approved target.  Each relative component
+    # remains nofollow and the cwd descriptor, rather than a pathname assertion, is the trust root.
+    try:
+        physical_cwd = Path(os.getcwd())
+        relative_to_cwd = absolute.relative_to(physical_cwd)
+    except (OSError, ValueError):
+        relative_to_cwd = None
+    if relative_to_cwd is not None and physical_cwd != Path("/"):
+        cwd_fd = os.open(".", flags)
+        try:
+            for component in relative_to_cwd.parts:
+                child = os.open(component, flags, dir_fd=cwd_fd)
+                os.close(cwd_fd)
+                cwd_fd = child
+            return cwd_fd
+        except Exception:
+            os.close(cwd_fd)
+            raise
     try:
         terminal = absolute.lstat()
         if stat.S_ISLNK(terminal.st_mode) or not stat.S_ISDIR(terminal.st_mode):

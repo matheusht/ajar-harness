@@ -41,6 +41,7 @@ from driver_action_admission import (
 )
 from engagement_state import (
     _append_kernel_event,
+    _open_absolute_directory,
     append_event,
     base_event,
     compute_review_input_hash,
@@ -1055,6 +1056,7 @@ class WorkQueueDriverTest(unittest.TestCase):
                 "claude-fixture-reviewer-two-20260824",
             ],
             budget=DriverBudget(4, 30.0, 10.0, None),
+            read_only_inputs=tuple(dict.fromkeys((Path(sys.prefix), Path(sys.base_prefix)))),
         )
 
         state = reduce_engagement(engagement)
@@ -1119,6 +1121,7 @@ class WorkQueueDriverTest(unittest.TestCase):
             model="claude-fixture-worker-20260825",
             reviewer_model="claude-fixture-reviewer-20260824",
             budget=DriverBudget(1, 30.0, 10.0, None),
+            read_only_inputs=tuple(dict.fromkeys((Path(sys.prefix), Path(sys.base_prefix)))),
         )
         state = reduce_engagement(self.engagement)
         event = json.loads(self.engagement.joinpath("events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
@@ -1305,6 +1308,29 @@ class WorkQueueDriverTest(unittest.TestCase):
             ):
                 pass
         self.assertEqual(raised.exception.code, "driver_target_unavailable")
+
+    def test_cwd_relative_governed_open_keeps_nofollow_traversal(self) -> None:
+        approved = self.workspace / "approved"
+        approved.mkdir()
+        outside = self.root / "outside-directory"
+        outside.mkdir()
+        (approved / "escape").symlink_to(outside, target_is_directory=True)
+        original_cwd_fd = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        approved_fd: int | None = None
+        try:
+            os.chdir(self.workspace)
+            approved_fd = _open_absolute_directory(approved)
+            self.assertEqual(
+                (os.fstat(approved_fd).st_dev, os.fstat(approved_fd).st_ino),
+                (approved.stat().st_dev, approved.stat().st_ino),
+            )
+            with self.assertRaises(OSError):
+                _open_absolute_directory(approved / "escape")
+        finally:
+            if approved_fd is not None:
+                os.close(approved_fd)
+            os.fchdir(original_cwd_fd)
+            os.close(original_cwd_fd)
 
     def test_portable_harness_tree_cannot_be_used_as_target_workspace(self) -> None:
         with self.assertRaises(DriverError) as raised:

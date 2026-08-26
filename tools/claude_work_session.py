@@ -5,8 +5,10 @@ The outer work-queue driver owns repetition and completion.  This adapter owns o
 it starts Claude in the already-bound target workspace, applies the harness Stop-hook settings,
 enforces a leader wall timeout, and returns a content-free execution summary. Cleanup proves absence
 of the original process group and same-UID descendants that retain the inherited sentinel vnode.
-It does not claim to contain a deliberate daemon that closes that descriptor before detaching; the
-wall timeout is not a security boundary for that residual (tracked by #83).
+On Darwin, filesystem reads default to denied outside a bounded runtime policy and writes default to
+denied outside per-session scratch. It does not claim to contain non-filesystem channels or a
+deliberate daemon that closes the sentinel descriptor before detaching; the wall timeout is not a
+security boundary for that residual (tracked by #83).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import math
 import os
 import select
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,8 +28,9 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
+from darwin_read_isolation import ReadIsolationError, build_read_policy
 from darwin_process_containment import (
     ContainmentUnavailable,
     create_sentinel,
@@ -81,6 +85,13 @@ MODEL_AUTH_ENV_KEYS = frozenset(
         "ANTHROPIC_BASE_URL",
     }
 )
+PATH_BEARING_RUNTIME_ENV_KEYS = frozenset(
+    {
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+    }
+)
 
 
 class SessionLaunchError(Exception):
@@ -89,6 +100,24 @@ class SessionLaunchError(Exception):
     def __init__(self, message: str, *, code: str = "session_start_failed"):
         super().__init__(message)
         self.code = code
+
+
+def _bound_directory_identity_is_current(path: Path, descriptor: int) -> bool:
+    """Check that an absolute, non-symlink directory name still selects the bound inode."""
+
+    if not isinstance(path, Path) or not path.is_absolute():
+        return False
+    try:
+        opened = os.fstat(descriptor)
+        named = os.stat(path, follow_symlinks=False)
+    except (OSError, TypeError, ValueError):
+        return False
+    return bool(
+        stat.S_ISDIR(opened.st_mode)
+        and stat.S_ISDIR(named.st_mode)
+        and not stat.S_ISLNK(named.st_mode)
+        and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
+    )
 
 
 @contextmanager
@@ -475,12 +504,14 @@ def run_claude_session(
     model: str,
     prompt: str,
     session_ref: str,
+    workspace: Path,
     workspace_fd: int,
     engagement: Path,
     settings: dict[str, Any],
     driver_scope: dict[str, str],
     timeout_seconds: float,
     max_budget_usd: float | None,
+    read_only_inputs: Sequence[Path] = (),
     on_process_started: Callable[[int], None] | None = None,
 ) -> SessionResult:
     """Run one Claude process in the inode-bound target workspace.
@@ -503,6 +534,12 @@ def run_claude_session(
         raise SessionLaunchError("session ref must be a canonical UUID")
     if on_process_started is not None and not callable(on_process_started):
         raise SessionLaunchError("process-start callback must be callable")
+    workspace = Path(workspace)
+    if not _bound_directory_identity_is_current(workspace, workspace_fd):
+        raise SessionLaunchError(
+            "Bound target workspace identity changed",
+            code="target_identity_changed",
+        )
     try:
         executable = executable.resolve(strict=True)
     except OSError as exc:
@@ -549,7 +586,10 @@ def run_claude_session(
     child_env.pop("PWD", None)
 
     if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file():
-        raise SessionLaunchError("target-write sandbox is unavailable")
+        raise SessionLaunchError(
+            "Darwin read isolation is unavailable",
+            code="read_isolation_unavailable",
+        )
 
     launcher = Path(__file__).with_name("_fd_exec.py").absolute()
     watchdog_launcher = Path(__file__).with_name("_session_watchdog.py").absolute()
@@ -566,11 +606,55 @@ def run_claude_session(
         child_env["TMP"] = str(scratch_path)
         child_env["TEMP"] = str(scratch_path)
         child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            read_policy = build_read_policy(
+                workspace=workspace,
+                harness=Path(__file__).resolve().parents[1],
+                scratch=scratch_path,
+                executable=executable,
+                python=python,
+                launcher=launcher,
+                containment_sentinel=containment_path,
+                internal_endpoints=(Path(driver_scope["HARNESS_DRIVER_ACTION_BROKER"]),),
+                explicit_inputs=read_only_inputs,
+            )
+        except ReadIsolationError as exc:
+            raise SessionLaunchError(
+                "Darwin read isolation could not be established",
+                code=exc.code,
+            ) from exc
+        try:
+            required_python_roots = {
+                Path(raw).resolve(strict=True)
+                for raw in (sys.prefix, sys.base_prefix)
+            }
+        except (OSError, RuntimeError) as exc:
+            raise SessionLaunchError(
+                "The Python runtime roots could not be resolved",
+                code="runtime_dependencies_unresolved",
+            ) from exc
+        if not required_python_roots.issubset(set(read_policy.explicit_directories)):
+            raise SessionLaunchError(
+                "Python runtime roots must be explicit read-only inputs",
+                code="read_input_invalid",
+            )
+        for key in PATH_BEARING_RUNTIME_ENV_KEYS:
+            raw_path = child_env.get(key)
+            if raw_path is None:
+                continue
+            if (
+                "\x00" in raw_path
+                or not Path(raw_path).is_absolute()
+                or not read_policy.is_explicitly_declared(Path(raw_path))
+            ):
+                raise SessionLaunchError(
+                    "A path-bearing runtime input was not explicitly declared",
+                    code="read_input_invalid",
+                )
         quoted_scratch = json.dumps(str(scratch_path))
         sandbox_profile = "\n".join(
             (
-                "(version 1)",
-                "(allow default)",
+                *read_policy.profile_lines,
                 "(deny file-write*)",
                 "(deny signal)",
                 f"(allow file-write* (literal {quoted_scratch}))",
@@ -584,6 +668,11 @@ def run_claude_session(
                 "(allow signal (target same-sandbox))",
             )
         )
+        if not _bound_directory_identity_is_current(workspace, workspace_fd):
+            raise SessionLaunchError(
+                "Bound target workspace identity changed",
+                code="target_identity_changed",
+            )
         gate_read_fd, gate_write_fd = os.pipe()
         lifetime_read_fd, lifetime_write_fd = os.pipe()
         ready_read_fd, ready_write_fd = os.pipe()

@@ -20,6 +20,16 @@ closed. Preflight collection cannot assert operator review. `review-preflight` i
 `tools/run-work-queue.py run` is classified once as the external broker Notebook operation
 `run-work-queue`. Its evidence is an exact target-local workspace, one reducer-owned action at a
 time, and an outer budget; none of those controls is delegated to the launched model session.
+On Darwin, filesystem reads are default-denied to the bound target workspace, portable harness,
+per-session scratch, resolved runtime closure, audited system subset, and exact internal endpoints.
+Declare every distinct canonical `sys.prefix` and `sys.base_prefix` for the active driver Python by
+repeating `--read-only-input`; the Stop hook and broker action clients execute with that interpreter
+inside the profile. Repeat the flag for every other required file or directory. Missing runtime
+roots, missing inputs, or unresolved runtime dependencies fail before model launch. This policy does
+not mount the target centrally and does not claim network, Keychain, XPC, descendant-lifetime, or
+aggregate-storage containment; those stronger controls remain #83.
+The workspace argument must be its canonical absolute path with no symlink components; an aliased
+workspace fails before activation rather than receiving mutable path authority.
 
 ## 3. Request exact authority
 

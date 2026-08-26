@@ -53,6 +53,9 @@ Both outer admission ceilings are mandatory. A typical target-local invocation i
   --reviewer-model <reviewer-model-a> \
   --reviewer-model <reviewer-model-b> \
   --reviewer-model <reviewer-model-c> \
+  --read-only-input /canonical/path/from/sys.prefix \
+  --read-only-input /canonical/path/from/sys.base_prefix \
+  --read-only-input /absolute/path/to/required-input \
   --max-sessions 12 --max-wall-seconds 3600 \
   --session-timeout-seconds 600
 ```
@@ -75,16 +78,25 @@ queue pauses without spinning. A process signal stops
 after the current bounded session and reports `interrupted_unrecorded`; resume from the unchanged
 ledger or use the typed operator stop/resume commands when a durable park is intended.
 
-The Darwin launcher denies model filesystem writes except beneath a temporary, intended-ephemeral
-session scratch directory. On cleanup and parent death it drains the original process group and every same-UID
+The Darwin launcher denies filesystem reads by default. It admits only the bound target workspace,
+portable harness, intended-ephemeral session scratch, exact runtime and bounded dependency closure,
+a fixed audited operating-system subset, exact internal runtime endpoints, and repeated absolute
+`--read-only-input` files or directories. Each distinct canonical `sys.prefix` and `sys.base_prefix`
+for the active driver Python is a mandatory explicit input because Stop and broker action clients
+run inside the profile; pass a shared root only once. Descendants inherit that profile. Missing inputs,
+unresolved dependencies, and unsupported hosts fail before model launch; target workspaces remain
+target-local and are never centrally mounted. Filesystem writes are denied except beneath scratch.
+Supply the workspace as a canonical absolute path with no symlink components. An aliased workspace
+is rejected before activation rather than being granted mutable read authority.
+On cleanup and parent death it drains the original process group and every same-UID
 process still holding the inherited sentinel vnode; this covers ordinary `setsid`/double-fork
 descendants. It also inherits a conservative `RLIMIT_CPU`. It does **not** discover a deliberate
-daemon that closes the sentinel descriptor before detaching, and the profile still permits reads
-and network. Its writable scratch also has no aggregate byte/file quota, so CPU, output, and time
-limits do not bound total disk consumption. The configured wall timeout therefore bounds the
-leader/well-behaved descendants, not that adversarial residual. Read isolation is tracked by #82;
-stronger lifecycle, network, and storage containment is tracked by #83. Do not describe the current
-launcher as a universal wall-time or aggregate-resource security boundary.
+daemon that closes the sentinel descriptor before detaching, and Seatbelt does not close network,
+Keychain, XPC, or other non-filesystem channels. Writable scratch also has no aggregate byte/file
+quota, so CPU, output, and time limits do not bound total disk consumption. The configured wall
+timeout therefore bounds the leader/well-behaved descendants, not that adversarial residual.
+Stronger lifecycle, network, credential-lifetime, and storage containment is tracked by #83. Do not
+describe the current launcher as a universal wall-time or aggregate-resource security boundary.
 
 Cleanup itself has explicit time, entry, depth, and work bounds. A bound or filesystem-invariant
 failure is fail-closed: a `.cleanup-failed` marker remains in the temp parent, the exact private

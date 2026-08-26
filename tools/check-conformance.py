@@ -155,19 +155,20 @@ def check_external_work_queue_driver():
             "(Darwin launcher integrations not exercised)"
         )
     scripts = [
+        ("darwin-read-isolation-test.py", "read-isolation policy regression suite"),
         ("record-review-atomicity-test.py", "signed record-review transaction regression suite"),
         ("work-queue-admission-test.py", "work-queue admission predicate regression suite"),
         ("work-queue-driver-test.py", driver_label),
     ]
     if sys.platform == "darwin":
         scripts.insert(
-            0,
+            1,
             ("claude-work-session-test.py", "bounded Claude work-session regression suite"),
         )
     else:
         print(
-            "  skip bounded Claude work-session regression suite "
-            f"(unsupported on {sys.platform}; Darwin launcher integration not exercised)"
+            "  run portable read-isolation checks; skip bounded Claude work-session regression "
+            f"suite (unsupported on {sys.platform}; Darwin launcher integration not exercised)"
         )
     for script, label in scripts:
         result = subprocess.run(

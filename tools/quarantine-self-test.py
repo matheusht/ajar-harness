@@ -849,7 +849,10 @@ def main() -> int:
         q02_race_root = root / "q02-race-prereg"
         q02_race_root.mkdir()
         q02_race_prereg = q02_race_root / "prereg.json"
-        q02_race_prereg.write_bytes(q02_prereg.read_bytes())
+        q02_race_prereg.write_bytes(
+            (TOOLS.parent / "fixtures" / "preregistration" /
+             "phase5-q02-prompt-ablation-portable.json").read_bytes()
+        )
         q02_module = runpy.run_path(str(TOOLS / "q02_compare.py"), run_name="q02_quarantine_test")
         q02_original_ancestor = q02_module["cmd_verdict"].__globals__["quarantined_ancestor"]
         q02_race_checks = 0

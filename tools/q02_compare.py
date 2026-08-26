@@ -18,8 +18,11 @@ tool emits a worksheet for them and REFUSES to issue a verdict until a blinded a
 in. A tool that guessed M6 would be the harness grading its own homework, which is the failure mode
 the whole preregistration exists to prevent.
 
-The threshold is read out of the frozen preregistration, never hardcoded here, so this tool cannot
-drift away from the rule that was fixed before the data existed.
+The threshold and licensing boundary are read from a frozen portable decision-rule checkpoint,
+never hardcoded here. Its source rule's pre-data status is operator-attested, not Git-proven. The
+tracked checkpoint is deliberately not a portable copy of the engagement outcome: it contains only
+the target-agnostic fields this adjudicator consumes and opaque hashes of complete local sources
+whose current location and resolution this repository does not establish.
 
 Commands:
   measure   compute what is computable; emit the judged-metric worksheet
@@ -30,6 +33,7 @@ Commands:
 import argparse
 from contextlib import ExitStack
 import glob
+import hashlib
 import json
 import os
 import re
@@ -49,22 +53,163 @@ from engagement_records import RecordError
 from engagement_state import bound_engagement_lock, require_not_quarantined
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREREG = os.path.join(ROOT, "fixtures", "preregistration", "phase5-q02-prompt-ablation.json")
+PREREG = os.path.join(
+    ROOT,
+    "fixtures",
+    "preregistration",
+    "phase5-q02-prompt-ablation-portable.json",
+)
+
+_TOP_LEVEL_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "checkpoint_id",
+    "checkpointed_at",
+    "source_preregistration_id",
+    "source_pins",
+    "portable_boundary",
+    "decision_rule",
+}
+_SOURCE_PIN_KEYS = {
+    "complete_preregistration_sha256",
+    "complete_outcome_sha256",
+    "resolution",
+    "historical_provenance",
+}
+_BOUNDARY_KEYS = {
+    "complete_preregistration_included",
+    "outcome_content_included",
+    "target_or_engagement_details_included",
+}
+_DECISION_RULE_KEYS = {
+    "m1_gap_threshold",
+    "threshold_expression",
+    "maximum_license_if_decisive",
+    "maximum_license_text_if_decisive",
+    "inconclusive_license_text",
+}
+_LICENSE_SCOPE_KEYS = {
+    "hypothesis_and_second_target",
+    "doctrine_change",
+    "candidate_promotion",
+}
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_FROZEN_CHECKPOINT_SHA256 = "f69a2258f4c939005781d5882caabd48888ae0cada7646d73ddfd71aa21d78d6"
 
 
 def _stable_regular_bytes(path):
     return read_safe_offline_file(Path(path))
 
 
+def _reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _require_exact_keys(value, expected, label):
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError(f"{label} has missing or unexpected fields")
+
+
+def _validate_portable_prereg(doc):
+    """Validate the portable boundary before consuming any rule field."""
+
+    _require_exact_keys(doc, _TOP_LEVEL_KEYS, "portable checkpoint")
+    if type(doc["schema_version"]) is not int or doc["schema_version"] != 1:
+        raise ValueError("unsupported portable checkpoint schema")
+    if doc["artifact_kind"] != "q02_portable_decision_rule":
+        raise ValueError("wrong portable checkpoint kind")
+    if doc["checkpoint_id"] != "Q02-PROMPT-ABLATION-PORTABLE-v1":
+        raise ValueError("wrong portable checkpoint id")
+    if not isinstance(doc["checkpointed_at"], str) or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}",
+        doc["checkpointed_at"],
+    ):
+        raise ValueError("portable checkpoint has no bounded timestamp")
+    if doc["source_preregistration_id"] != "PREREG-20260816-phase5-q02-prompt-ablation":
+        raise ValueError("wrong operator-attested source id")
+
+    source_pins = doc["source_pins"]
+    _require_exact_keys(source_pins, _SOURCE_PIN_KEYS, "source pins")
+    hashes = (
+        source_pins["complete_preregistration_sha256"],
+        source_pins["complete_outcome_sha256"],
+    )
+    if any(not isinstance(value, str) or not _SHA256.fullmatch(value) for value in hashes):
+        raise ValueError("source pin is not a lowercase SHA-256 digest")
+    if hashes[0] == hashes[1]:
+        raise ValueError("distinct source records cannot share one opaque pin")
+    if source_pins["resolution"] != "opaque_local_unresolved":
+        raise ValueError("portable checkpoint overstates source resolution")
+    if source_pins["historical_provenance"] != "operator_attested_not_git_proven":
+        raise ValueError("portable checkpoint overstates historical provenance")
+
+    boundary = doc["portable_boundary"]
+    _require_exact_keys(boundary, _BOUNDARY_KEYS, "portable boundary")
+    if any(type(boundary[key]) is not bool or boundary[key] for key in _BOUNDARY_KEYS):
+        raise ValueError("portable checkpoint claims to include non-portable content")
+
+    rule = doc["decision_rule"]
+    _require_exact_keys(rule, _DECISION_RULE_KEYS, "decision rule")
+    threshold = rule["m1_gap_threshold"]
+    if type(threshold) is not int or not 1 <= threshold <= 99:
+        raise ValueError("invalid preregistered threshold")
+    expression = rule["threshold_expression"]
+    if not isinstance(expression, str):
+        raise ValueError("threshold expression is not text")
+    match = re.fullmatch(r"M1\(A\)\s*-\s*M1\(B\)\s*>=\s*(\d+)", expression)
+    if not match or int(match.group(1)) != threshold:
+        raise ValueError("threshold fields disagree")
+
+    license_scope = rule["maximum_license_if_decisive"]
+    _require_exact_keys(license_scope, _LICENSE_SCOPE_KEYS, "license scope")
+    if license_scope != {
+        "hypothesis_and_second_target": True,
+        "doctrine_change": False,
+        "candidate_promotion": False,
+    }:
+        raise ValueError("portable checkpoint grants a stronger license")
+    decisive_text = rule["maximum_license_text_if_decisive"]
+    inconclusive_text = rule["inconclusive_license_text"]
+    for license_text in (decisive_text, inconclusive_text):
+        if (
+            not isinstance(license_text, str)
+            or license_text != license_text.strip()
+            or not 80 <= len(license_text) <= 1000
+            or any(ord(character) < 32 for character in license_text)
+        ):
+            raise ValueError("invalid licensing text")
+    normalized_license = decisive_text.casefold()
+    if not all(
+        marker in normalized_license
+        for marker in (
+            "n=1",
+            "decisive result",
+            "hypothesis",
+            "second target",
+            "does not license",
+        )
+    ):
+        raise ValueError("licensing text contradicts the bounded license scope")
+    if not all(
+        marker in inconclusive_text.casefold()
+        for marker in ("no prompt conclusion", "candidate promotion", "vendor filing")
+    ):
+        raise ValueError("inconclusive licensing text grants a prompt conclusion")
+    return threshold, doc
+
+
 def _threshold_from_bytes(data):
     """Pull the >=N finding gap out of frozen bytes. Never hardcode it here."""
 
-    doc = json.loads(data)
-    rule = doc["decision_rule"]["prompt_earns_its_keep_if"]
-    m = re.search(r"M1\(A\)\s*-\s*M1\(B\)\s*>=\s*(\d+)", rule)
-    if not m:
-        raise ValueError("cannot read the preregistered threshold")
-    return int(m.group(1)), doc
+    if hashlib.sha256(data).hexdigest() != _FROZEN_CHECKPOINT_SHA256:
+        raise ValueError("portable checkpoint does not match its repository trust anchor")
+    doc = json.loads(data, object_pairs_hook=_reject_duplicate_keys)
+    return _validate_portable_prereg(doc)
 
 
 def read_threshold(prereg_path=PREREG):
@@ -421,6 +566,13 @@ def decide(m, w, threshold):
     return "inconclusive", reasons + ["no preregistered branch matched"], []
 
 
+def _license_text_for_verdict(doc, verdict):
+    rule = doc["decision_rule"]
+    if verdict == "inconclusive":
+        return rule["inconclusive_license_text"]
+    return rule["maximum_license_text_if_decisive"]
+
+
 def cmd_verdict(args):
     sources = tuple(Path(path) for path in (args.measurements, args.worksheet, args.prereg))
     if any(quarantined_ancestor(path) for path in sources):
@@ -439,7 +591,7 @@ def cmd_verdict(args):
     verdict, reasons, blockers = decide(m, w, threshold)
     if any(quarantined_ancestor(path) for path in sources):
         raise SystemExit("ablation evidence became quarantined during adjudication")
-    print(f"preregistration: {doc['preregistration_id']}")
+    print(f"portable checkpoint: {doc['checkpoint_id']}")
     print(f"VERDICT: {verdict}\n")
     for r in reasons:
         print("  -", r)
@@ -447,7 +599,7 @@ def cmd_verdict(args):
         print("\nblocked by:")
         for b in blockers:
             print("  !", b)
-    print("\nlicenses: " + doc["decision_rule"]["what_this_can_and_cannot_license"][:220] + "...")
+    print("\nlicenses: " + _license_text_for_verdict(doc, verdict))
     return 0
 
 
@@ -470,21 +622,125 @@ def _w(**kw):
 
 def self_test():
     ok = True
-    th, _ = read_threshold()
+    th, prereg = read_threshold()
 
     def check(name, cond, detail=""):
         nonlocal ok
         ok &= bool(cond)
         print(f"  {'ok  ' if cond else 'FAIL'} {name}" + (f"  -> {detail}" if not cond else ""))
 
-    print(f"[self-test] threshold is read from the frozen preregistration (got {th})")
+    print(f"[self-test] threshold is read from the frozen portable checkpoint (got {th})")
     check("threshold is 2", th == 2)
+
+    print("[self-test] malformed or non-portable checkpoints fail closed")
+
+    def rejected(name, mutate):
+        candidate = json.loads(json.dumps(prereg))
+        mutate(candidate)
+        try:
+            _threshold_from_bytes(json.dumps(candidate).encode("utf-8"))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            check(name, True)
+        else:
+            check(name, False, "checkpoint was accepted")
+
+    def rejected_bytes(name, data):
+        try:
+            _threshold_from_bytes(data)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            check(name, True)
+        else:
+            check(name, False, "checkpoint was accepted")
+
+    rejected_bytes("malformed JSON is rejected", b"{")
+    rejected_bytes(
+        "duplicate JSON keys are rejected",
+        b'{"schema_version":1,"schema_version":1}',
+    )
+    rejected("unknown fields are rejected", lambda doc: doc.update({"target": "hidden"}))
+    rejected(
+        "malformed source pins are rejected",
+        lambda doc: doc["source_pins"].update({"complete_outcome_sha256": "not-a-hash"}),
+    )
+    rejected(
+        "different well-formed source pins are rejected",
+        lambda doc: doc["source_pins"].update(
+            {
+                "complete_preregistration_sha256": "a" * 64,
+                "complete_outcome_sha256": "b" * 64,
+            }
+        ),
+    )
+    rejected(
+        "one pin cannot stand for both source records",
+        lambda doc: doc["source_pins"].update(
+            {
+                "complete_outcome_sha256": doc["source_pins"][
+                    "complete_preregistration_sha256"
+                ]
+            }
+        ),
+    )
+    rejected(
+        "historical provenance cannot be strengthened",
+        lambda doc: doc["source_pins"].update({"historical_provenance": "git_proven"}),
+    )
+    rejected(
+        "inconsistent threshold fields are rejected",
+        lambda doc: doc["decision_rule"].update({"threshold_expression": "M1(A) - M1(B) >= 3"}),
+    )
+    rejected(
+        "coordinated threshold changes are rejected",
+        lambda doc: doc["decision_rule"].update(
+            {"m1_gap_threshold": 3, "threshold_expression": "M1(A) - M1(B) >= 3"}
+        ),
+    )
+    rejected(
+        "non-portable content claims are rejected",
+        lambda doc: doc["portable_boundary"].update({"outcome_content_included": True}),
+    )
+    rejected(
+        "candidate-promotion licenses are rejected",
+        lambda doc: doc["decision_rule"]["maximum_license_if_decisive"].update(
+            {"candidate_promotion": True}
+        ),
+    )
+    rejected(
+        "missing licensing text is rejected",
+        lambda doc: doc["decision_rule"].pop("maximum_license_text_if_decisive"),
+    )
+    rejected(
+        "target-specific licensing text is rejected",
+        lambda doc: doc["decision_rule"].update(
+            {
+                "maximum_license_text_if_decisive": doc["decision_rule"][
+                    "maximum_license_text_if_decisive"
+                ]
+                + " Hidden engagement mechanism: engagements/private/secret-workflow."
+            }
+        ),
+    )
+    rejected(
+        "contradictory promotion wording is rejected",
+        lambda doc: doc["decision_rule"].update(
+            {
+                "maximum_license_text_if_decisive": doc["decision_rule"][
+                    "maximum_license_text_if_decisive"
+                ]
+                + " Candidate promotion and vendor filing are licensed."
+            }
+        ),
+    )
 
     print("[self-test] the three preregistered outcomes")
     v, _, _ = decide(_m(5, 2), _w(), th)
     check("gap >= 2 earns its keep", v == "prompt_earns_its_keep", v)
     v, _, _ = decide(_m(0, 0), _w(), th)
     check("both zero is inconclusive", v == "inconclusive", v)
+    check(
+        "an inconclusive verdict licenses no prompt conclusion",
+        "no prompt conclusion" in _license_text_for_verdict(prereg, v).casefold(),
+    )
     v, _, _ = decide(_m(2, 4), _w(), th)
     check("arm B ahead does not earn its keep", v == "prompt_does_not_earn_its_keep", v)
 

@@ -56,9 +56,11 @@ patched version to locate its bug.
 
 v2 is **unrun**. It is longer than the source prompts, and length is a cost: `docs/engineering/
 003-roadmap.md` records that this harness holds ~3 MB of prose and that more prose has not changed
-behaviour. The Q-02 prompt ablation came back **INCONCLUSIVE twice** (`fixtures/preregistration/
-phase5-q02-prompt-ablation-OUTCOME.md`), so we still have no evidence that a longer prompt beats a
-short one.
+behaviour. The operator-local Q-02 record says the prompt ablation was **INCONCLUSIVE twice**, so we
+still have no evidence that a longer prompt beats a short one. The portable repository deliberately
+carries only its target-agnostic [decision-rule checkpoint](../../../../fixtures/preregistration/phase5-q02-prompt-ablation-portable.json),
+not a copy of the engagement outcome. That checkpoint pins the complete local records opaquely and
+does not independently establish their outcome.
 
 Treat the surface and idiom tables as the part most likely to earn its length, and the prose around
 them as the part to cut first if a run shows it is not read.

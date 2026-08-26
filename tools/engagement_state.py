@@ -31,6 +31,7 @@ from engagement_records import (
 )
 from finding_review import claim_rows, claim_tuple_hash, render_claim_proof, render_internal_report
 from decision6_capabilities import artifact_variant, classify_event, require_actor
+from engagement_quarantine import inspect_quarantine, require_safe_offline_input
 
 LEDGERS = {
     "event": ("events.jsonl", "engagement-event", "event_id"),
@@ -40,12 +41,13 @@ LEDGERS = {
 STATE_VALUES = {
     "claim": {"needs_review", "supported", "confirmed", "contaminated", "refuted"},
     "search": {"queued", "selected", "running", "held", "exhausted", "deferred", "blocked", "closed"},
-    "coverage": {"active", "blocked", "coverage_dry"},
+    "coverage": {"active", "blocked", "coverage_dry", "budget_bounded"},
     "report": {"none", "draft", "accepted", "submitted"},
     "cleanup": {"open", "completed", "not_applicable", "blocked"},
     "memory": {"pending", "promote", "defer", "no_novel_lesson"},
     "engagement": {"active", "blocked", "closed"},
     "environment": {"ready", "blocked", "needs_review"},
+    "queue": {"active", "parked"},
 }
 EVENT_STATE_RULES = {
     "scope.attested": ({"engagement", "coverage", "memory"}, set()),
@@ -60,7 +62,11 @@ EVENT_STATE_RULES = {
     "finding.revised": (set(), set()),
     "review.regrade_completed": (set(), set()),
     "review.pocinator_completed": (set(), set()),
+    "coverage.reopened": ({"coverage"}, {"coverage"}),
     "coverage.status_changed": ({"coverage"}, {"coverage"}),
+    "session.end_checked": (set(), set()),
+    "operator_stop.recorded": ({"queue"}, {"queue"}),
+    "operator_resume.recorded": ({"queue"}, {"queue"}),
     "report.generated": ({"report"}, {"report"}),
     "operator.review_recorded": ({"report"}, {"report"}),
     "submission.recorded": ({"report"}, {"report"}),
@@ -70,6 +76,7 @@ EVENT_STATE_RULES = {
     "engagement.reopened": ({"engagement", "coverage"}, {"engagement", "coverage"}),
     "engagement.closed": ({"engagement"}, {"engagement"}),
     "authority.requested": (set(), set()),
+    "authority.expired": (set(), set()),
     "authority.resolved": (set(), set()),
     "scope.amendment_proposed": (set(), set()),
     "artifact.classified": (set(), set()),
@@ -93,13 +100,618 @@ COMMITTED_RECORD_SCHEMAS = {
 TRANSITIONS = {
     "claim": {None: {"needs_review", "supported"}, "needs_review": {"supported", "contaminated", "refuted"}, "supported": {"confirmed", "needs_review", "contaminated", "refuted"}, "confirmed": {"needs_review", "contaminated", "refuted"}, "contaminated": {"needs_review", "refuted"}, "refuted": {"needs_review"}},
     "search": {None: {"queued"}, "queued": {"selected", "deferred", "blocked", "closed"}, "selected": {"running", "deferred", "blocked"}, "running": {"queued", "held", "exhausted", "deferred", "blocked", "closed"}, "held": {"queued", "closed"}, "exhausted": {"queued", "closed"}, "deferred": {"queued", "closed"}, "blocked": {"queued", "deferred", "closed"}, "closed": {"queued"}},
-    "coverage": {None: {"active"}, "active": {"blocked", "coverage_dry"}, "blocked": {"active", "coverage_dry"}, "coverage_dry": {"active"}},
+    "coverage": {None: {"active"}, "active": {"blocked", "coverage_dry", "budget_bounded"}, "blocked": {"active", "coverage_dry", "budget_bounded"}, "coverage_dry": {"active"}, "budget_bounded": {"active"}},
     "report": {None: {"none", "draft"}, "none": {"draft"}, "draft": {"accepted", "none"}, "accepted": {"submitted", "draft"}, "submitted": {"draft"}},
     "cleanup": {None: {"open", "completed", "not_applicable", "blocked"}, "open": {"completed", "not_applicable", "blocked"}, "blocked": {"completed", "not_applicable"}, "completed": set(), "not_applicable": set()},
     "memory": {None: {"pending", "promote", "defer", "no_novel_lesson"}, "pending": {"promote", "defer", "no_novel_lesson"}, "promote": {"defer"}, "defer": {"promote", "no_novel_lesson"}, "no_novel_lesson": {"defer", "promote"}},
     "engagement": {None: {"active"}, "active": {"blocked", "closed"}, "blocked": {"active", "closed"}, "closed": set()},
     "environment": {None: {"ready", "blocked", "needs_review"}, "needs_review": {"ready", "blocked"}, "ready": {"blocked"}, "blocked": set()},
+    "queue": {"active": {"parked"}, "parked": {"active"}},
 }
+
+WORK_QUEUE_CLASS_ORDER = (
+    "hypothesis_ran_unadjudicated",
+    "hypothesis_unrouted",
+    "hypothesis_open_route",
+    "hypothesis_unresolved_question",
+    "claim_unadjudicated",
+    "review_obligation_open",
+    "finding_revision_pending",
+    "finding_unproved",
+    "candidate_undisposed",
+    "deferred_candidate_unreviewed",
+    "control_candidate_unverified",
+    "awaiting_operator",
+    "coverage_review_missing",
+)
+WORK_QUEUE_RULES = {
+    "hypothesis_ran_unadjudicated": (
+        "a matching attempt_id is absent from experiment_refs and control_refs",
+        "every matching attempt_id is present in experiment_refs or control_refs",
+    ),
+    "hypothesis_unrouted": (
+        "status in {queued, selected}",
+        "status is outside {queued, selected}",
+    ),
+    "hypothesis_open_route": (
+        "next_route is not null",
+        "next_route is null",
+    ),
+    "hypothesis_unresolved_question": (
+        "unresolved_questions contains this exact question",
+        "this exact question is absent from unresolved_questions",
+    ),
+    "claim_unadjudicated": (
+        "effective claim status in {needs_review, supported}",
+        "effective claim status in {confirmed, contaminated, refuted}",
+    ),
+    "finding_revision_pending": (
+        "latest fileable claim adjudication is not reflected by its expected finding revision",
+        "the expected finding revision reflects the latest adjudication, or a newer adjudication supersedes it",
+    ),
+    "finding_unproved": (
+        "status in {supported, confirmed} and the current revision has no verified proof review",
+        "the current revision has a proof review with terminal_status verified or status is outside {supported, confirmed}",
+    ),
+    "review_obligation_open": (
+        "review_ref is present in outstanding_reviews",
+        "review_ref is absent from outstanding_reviews",
+    ),
+    "candidate_undisposed": (
+        "status is selected and no hypothesis cites this candidate as origin",
+        "a hypothesis has origin_type candidate and origin_ref equal to this candidate id, or candidate status changes",
+    ),
+    "deferred_candidate_unreviewed": (
+        "status is deferred",
+        "status is not deferred",
+    ),
+    "control_candidate_unverified": (
+        "status is likely_held and no control-kind attempt references this routing event",
+        "a negative_control or positive_control attempt has experiment_ref equal to this routing event id",
+    ),
+    "awaiting_operator": (
+        "status is pending_authority",
+        "status is not pending_authority",
+    ),
+    "coverage_review_missing": (
+        "coverage is active and no other work queue item exists",
+        "coverage is not active",
+    ),
+}
+
+FILEABLE_CLAIM_STATES = {"supported", "confirmed", "contaminated", "refuted"}
+REVISE_FINDING_V2_ACTION_KEYS = {"action_kind", "action_version", "lane_id", "executor_id", "session_id", "file_digest", "operator_id", "proposal", "target"}
+REVISE_FINDING_V2_TARGET_KEYS = {"type", "id", "expected_revision", "claim_state", "adjudication_event_ref", "adjudication_review_ref", "resolves_review_refs", "file_digest"}
+
+
+def finding_revision_lane_id(target: dict[str, Any]) -> str:
+    """Return the code-owned lane for one exact v2 finding filing generation."""
+
+    material = {
+        "namespace": "llm-redteam-harness:revise-finding:v2",
+        "finding_id": target.get("id"),
+        "expected_revision": target.get("expected_revision"),
+        "adjudication_event_ref": target.get("adjudication_event_ref"),
+        "adjudication_review_ref": target.get("adjudication_review_ref"),
+        "resolves_review_refs": sorted(target.get("resolves_review_refs", [])),
+        "proposal_digest": target.get("file_digest"),
+    }
+    return "finding:" + sha256_bytes(canonical_json_bytes(material)).removeprefix("sha256:")
+
+
+def hypothesis_dispositions_hash(hypotheses: dict[str, Any]) -> str:
+    """Hash only the hypothesis truth a cold coverage review attests."""
+
+    dispositions = {
+        hypothesis_id: hypothesis.get("status")
+        for hypothesis_id, hypothesis in sorted(hypotheses.items())
+        if isinstance(hypothesis, dict)
+    }
+    return sha256_bytes(canonical_json_bytes(dispositions))
+
+
+def _filing_ready_review_refs(state: dict[str, Any], finding_id: str) -> list[str]:
+    latest_claim_exists = finding_id in state.get("claim_adjudications", {})
+    ready: list[str] = []
+    for item in state.get("outstanding_reviews", []):
+        if item.get("entity_ref") != finding_id:
+            continue
+        review_type, status = item.get("review_type"), item.get("status")
+        if (
+            (review_type == "legacy_adjudication" and status == "pending" and latest_claim_exists)
+            or (review_type == "regrade" and status in {"correction_required", "evidence_collected"})
+            or (review_type == "regrade_escalation" and status == "evidence_collected")
+            or (review_type == "pocinator" and status == "correction_required")
+        ):
+            ready.append(item["review_ref"])
+    return sorted(ready)
+
+
+def _project_pocinator_proof(
+    prior_proof: dict[str, Any] | None,
+    payload: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    """Project proof lineage while preventing reviewer aliases from reusing one signer."""
+
+    accumulate = (
+        isinstance(prior_proof, dict)
+        and prior_proof.get("verdict") == payload.get("verdict") == "reward_hacked"
+    )
+    prior_refs = prior_proof.get("review_refs", []) if accumulate else []
+    prior_ids = prior_proof.get("reviewer_ids", []) if accumulate else []
+    prior_run_ids = prior_proof.get("reviewer_run_ids", []) if accumulate else []
+    prior_fingerprints = (
+        prior_proof.get("reviewer_signer_fingerprints", []) if accumulate else []
+    )
+    fingerprint = review.get("independence", {}).get("reviewer_signer_fingerprint")
+
+    # Historical reviews may omit the optional fingerprint.  That preserves readable history,
+    # but incomplete lineage cannot satisfy the high-value two-reviewer gate.
+    if accumulate and payload.get("high_value") is True:
+        lineage_complete = (
+            isinstance(fingerprint, str)
+            and isinstance(prior_fingerprints, list)
+            and bool(prior_fingerprints)
+            and all(isinstance(value, str) for value in prior_fingerprints)
+        )
+        if not lineage_complete or fingerprint in prior_fingerprints:
+            raise RecordError(
+                "pocinator_reviewer_signer_not_distinct",
+                str(payload.get("finding_id", "unknown")),
+            )
+
+    review_ref = payload["review_ref"]
+    refs = (
+        [*prior_refs, review_ref]
+        if accumulate and review_ref not in prior_refs
+        else ([review_ref] if not accumulate else list(prior_refs))
+    )
+    reviewer_id = review["independence"]["reviewer_id"]
+    reviewer_ids = (
+        [*prior_ids, reviewer_id]
+        if accumulate and reviewer_id not in prior_ids
+        else ([reviewer_id] if not accumulate else list(prior_ids))
+    )
+    reviewer_run_id = review["independence"]["reviewer_run_id"]
+    reviewer_run_ids = (
+        [*prior_run_ids, reviewer_run_id]
+        if accumulate and reviewer_run_id not in prior_run_ids
+        else ([reviewer_run_id] if not accumulate else list(prior_run_ids))
+    )
+    reviewer_signer_fingerprints = (
+        [*prior_fingerprints, fingerprint]
+        if accumulate and fingerprint not in prior_fingerprints
+        else ([fingerprint] if not accumulate else list(prior_fingerprints))
+    )
+
+    if payload["verdict"] == "verified":
+        terminal = "verified"
+    elif payload["verdict"] == "blocked":
+        terminal = "blocked"
+    elif payload["verdict"] == "reward_hacked" and payload["high_value"]:
+        fingerprint_gate = (
+            len(reviewer_signer_fingerprints) >= 2
+            and all(isinstance(value, str) for value in reviewer_signer_fingerprints)
+            and len(set(reviewer_signer_fingerprints)) >= 2
+        )
+        terminal = (
+            "second_review_confirmed"
+            if len(refs) >= 2 and len(reviewer_ids) >= 2 and fingerprint_gate
+            else "pending_second_review"
+        )
+    else:
+        terminal = "route_back"
+
+    return {
+        "finding_revision": payload["finding_revision"],
+        "claim_tuple_hash": payload["claim_tuple_hash"],
+        "verdict": payload["verdict"],
+        "review_refs": refs,
+        "reviewer_ids": reviewer_ids,
+        "reviewer_run_ids": reviewer_run_ids,
+        "reviewer_signer_fingerprints": reviewer_signer_fingerprints,
+        "terminal_status": terminal,
+    }
+
+
+def _filing_blocking_review_error(state: dict[str, Any], finding_id: str) -> str | None:
+    """Preserve the pre-v2 gates for regrade work that is not filing-ready."""
+
+    reviews = [item for item in state.get("outstanding_reviews", []) if item.get("entity_ref") == finding_id]
+    finding = state.get("findings", {}).get(finding_id)
+    proof = state.get("proof_reviews", {}).get(f"{finding_id}:r{finding.get('revision')}") if isinstance(finding, dict) else None
+    if isinstance(proof, dict) and proof.get("terminal_status") == "pending_second_review":
+        return "pocinator_second_review_pending"
+    if any(item.get("review_type") == "regrade" and item.get("status") == "blocked" for item in reviews):
+        return "regrade_review_blocked"
+    if any(item.get("review_type") == "pocinator" and item.get("status") == "blocked" for item in reviews):
+        return "pocinator_review_blocked"
+    # Escalation rows are reducer-reachable only as pending -> routed -> evidence_collected.
+    # Correction verdicts open ordinary regrade rows, so do not imply a nonexistent escape path.
+    if any(item.get("review_type") == "regrade_escalation" and item.get("status") in {"pending", "routed"} for item in reviews):
+        return "escalation_evidence_not_collected"
+    if any(item.get("review_type") == "regrade" and item.get("status") in {"pending", "routed"} for item in reviews):
+        return "regrade_correction_not_resolved"
+    filing_ready = set(_filing_ready_review_refs(state, finding_id))
+    if filing_ready:
+        latest = state.get("claim_adjudications", {}).get(finding_id)
+        latest_time = latest.get("recorded_at") if isinstance(latest, dict) else None
+        ready_rows = [item for item in reviews if item.get("review_ref") in filing_ready]
+        try:
+            adjudication_is_fresh = bool(
+                isinstance(latest_time, str)
+                and all(isinstance(item.get("opened_at"), str) for item in ready_rows)
+                and all(
+                    datetime.fromisoformat(latest_time.replace("Z", "+00:00")) > datetime.fromisoformat(item["opened_at"].replace("Z", "+00:00"))
+                    for item in ready_rows
+                )
+            )
+        except ValueError:
+            adjudication_is_fresh = False
+        if not adjudication_is_fresh:
+            return "review_adjudication_not_fresh"
+        input_refs = set(latest.get("input_refs", [])) if isinstance(latest, dict) else set()
+        required_inputs = filing_ready | {
+            reference
+            for item in ready_rows
+            for reference in item.get("resolution_input_refs", [])
+        }
+        if not required_inputs.issubset(input_refs):
+            return "review_adjudication_inputs_missing"
+        required_statuses = {item.get("required_claim_status") for item in ready_rows if item.get("required_claim_status") is not None}
+        if required_statuses and (len(required_statuses) != 1 or latest.get("status") not in required_statuses):
+            return "review_adjudication_disposition_mismatch"
+    return None
+
+
+def _typed_review_supersession_refs(
+    *,
+    event: dict[str, Any],
+    review: dict[str, Any],
+    state: dict[str, Any],
+    engagement: Path,
+    index: dict[str, list[dict[str, Any]]],
+    seen_events: dict[str, dict[str, Any]],
+) -> set[str]:
+    """Validate exact append-only supersession of otherwise uncloseable review debt."""
+
+    payload = event["payload"]
+    raw_refs = payload.get("resolves_review_refs", [])
+    if not isinstance(raw_refs, list) or any(not isinstance(reference, str) for reference in raw_refs) or raw_refs != sorted(set(raw_refs)):
+        raise RecordError("typed_review_supersession_invalid", event["event_id"])
+    if not raw_refs:
+        return set()
+
+    expected_type = "regrade" if event["event_type"] == "review.regrade_completed" else "pocinator"
+    allowed_rows = (
+        {("regrade", "blocked")}
+        if expected_type == "regrade"
+        else {("pocinator", "blocked")}
+    )
+    rows = {
+        item.get("review_ref"): item
+        for item in state.get("outstanding_reviews", [])
+        if isinstance(item, dict)
+    }
+    prior_run_ids = set(review.get("prior_review_run_ids", []))
+    fresh_time = datetime.fromisoformat(review["recorded_at"].replace("Z", "+00:00"))
+    for reference in raw_refs:
+        row = rows.get(reference)
+        if (
+            row is None
+            or row.get("entity_ref") != payload.get("finding_id")
+            or (row.get("review_type"), row.get("status")) not in allowed_rows
+        ):
+            raise RecordError("typed_review_supersession_invalid", event["event_id"])
+        opening = seen_events.get(reference)
+        opening_type = "review.pocinator_completed" if row["review_type"] == "pocinator" else "review.regrade_completed"
+        if (
+            opening is None
+            or opening.get("event_type") != opening_type
+            or opening.get("payload", {}).get("finding_id") != payload.get("finding_id")
+            or opening.get("payload", {}).get("finding_revision") != payload.get("finding_revision")
+            or datetime.fromisoformat(row["opened_at"].replace("Z", "+00:00")) >= fresh_time
+        ):
+            raise RecordError("typed_review_supersession_invalid", event["event_id"])
+        opening_review_ref = opening.get("payload", {}).get("review_ref")
+        opening_review_entry = _index_entry(index, opening_review_ref, "review", state["engagement_id"])
+        opening_review = load_json(engagement / opening_review_entry["path"]) if opening_review_entry is not None else {}
+        opening_run_id = opening_review.get("independence", {}).get("reviewer_run_id")
+        if (
+            opening_review_entry is None
+            or opening_review.get("review_type") != ("pocinator" if row["review_type"] == "pocinator" else "regrade")
+            or opening_review.get("entity_ref") != payload.get("finding_id")
+            or opening_review.get("finding_revision") != payload.get("finding_revision")
+            or not isinstance(opening_run_id, str)
+            or opening_run_id not in prior_run_ids
+        ):
+            raise RecordError("typed_review_supersession_prior_run_missing", event["event_id"])
+    return set(raw_refs)
+
+
+def revise_finding_target_is_current(state: dict[str, Any], request: dict[str, Any], proposal: dict[str, Any]) -> bool:
+    target = request.get("target")
+    if request.get("action_kind") != "revise-finding" or not isinstance(target, dict) or set(target) != REVISE_FINDING_V2_TARGET_KEYS:
+        return False
+    finding_id = target.get("id")
+    latest = state.get("claim_adjudications", {}).get(finding_id)
+    prior = state.get("findings", {}).get(finding_id)
+    expected_revision = 1 if prior is None else prior.get("revision", 0) + 1
+    digest = sha256_bytes(canonical_json_bytes(proposal))
+    return bool(
+        latest is not None
+        and latest.get("status") in FILEABLE_CLAIM_STATES
+        and target.get("expected_revision") == latest.get("expected_filing_revision") == expected_revision
+        and target.get("claim_state") == latest.get("status")
+        and target.get("adjudication_event_ref") == latest.get("event_ref")
+        and target.get("adjudication_review_ref") == latest.get("review_ref")
+        and _filing_blocking_review_error(state, finding_id) is None
+        and target.get("resolves_review_refs") == _filing_ready_review_refs(state, finding_id)
+        and target.get("file_digest") == digest
+        and request.get("lane_id") == finding_revision_lane_id(target)
+        and proposal.get("finding_id") == finding_id
+        and proposal.get("revision") == expected_revision
+        and proposal.get("supersedes_revision") == (None if prior is None else prior.get("revision"))
+        and proposal.get("claim_state") == target.get("claim_state")
+        and proposal.get("adjudication", {}).get("review_ref") == target.get("adjudication_review_ref")
+    )
+
+
+def _validate_revise_finding_v2_action(
+    action: dict[str, Any],
+    *,
+    state: dict[str, Any],
+    engagement: Path,
+    index: dict[str, list[dict[str, Any]]],
+    committed_entity_ids: set[str],
+    seen_events: dict[str, dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]],
+    requested_at: str,
+    context: str,
+) -> dict[str, Any]:
+    """Validate a digest-bound v2 filing proposal up to approval and commit."""
+
+    target = action.get("target")
+    proposal = action.get("proposal")
+    if set(action) != REVISE_FINDING_V2_ACTION_KEYS or action.get("action_kind") != "revise-finding" or action.get("action_version") != 2 or not isinstance(target, dict) or set(target) != REVISE_FINDING_V2_TARGET_KEYS or not isinstance(proposal, dict):
+        raise RecordError("revise_finding_v2_action_invalid", context)
+    resolutions = target.get("resolves_review_refs")
+    if not isinstance(resolutions, list) or any(not isinstance(item, str) for item in resolutions) or resolutions != sorted(set(resolutions)):
+        raise RecordError("revise_finding_v2_resolutions_invalid", context)
+    proposal_digest = sha256_bytes(canonical_json_bytes(proposal))
+    if action.get("file_digest") != proposal_digest or target.get("file_digest") != proposal_digest or action.get("lane_id") != finding_revision_lane_id(target):
+        raise RecordError("revise_finding_v2_digest_or_lane_invalid", context)
+    finding_id = target.get("id")
+    latest = state.get("claim_adjudications", {}).get(finding_id)
+    if target.get("type") != "finding" or latest is None or latest.get("status") not in FILEABLE_CLAIM_STATES or target.get("expected_revision") != latest.get("expected_filing_revision") or target.get("claim_state") != latest.get("status") or target.get("adjudication_event_ref") != latest.get("event_ref") or target.get("adjudication_review_ref") != latest.get("review_ref"):
+        raise RecordError("revise_finding_v2_target_stale", context)
+    prior = state.get("findings", {}).get(finding_id)
+    expected_revision = 1 if prior is None else prior["revision"] + 1
+    expected_supersedes = None if prior is None else prior["revision"]
+    if target.get("expected_revision") != expected_revision:
+        raise RecordError("revise_finding_v2_revision_not_contiguous", context)
+    current_review_refs = _filing_ready_review_refs(state, finding_id)
+    blocking_review_error = _filing_blocking_review_error(state, finding_id)
+    if blocking_review_error is not None:
+        raise RecordError(blocking_review_error, context)
+    if resolutions != current_review_refs:
+        raise RecordError("revise_finding_v2_review_set_invalid", context)
+    schema_errors = validate_record(proposal, "finding-v3")
+    reference_errors = validate_record_references(proposal, "finding-v3", index)
+    if schema_errors or reference_errors:
+        raise RecordError("revise_finding_v2_proposal_invalid", context, [*schema_errors, *reference_errors])
+    proposal_recorded_at = proposal.get("recorded_at")
+    if not isinstance(proposal_recorded_at, str) or datetime.fromisoformat(proposal_recorded_at.replace("Z", "+00:00")) > datetime.fromisoformat(requested_at.replace("Z", "+00:00")):
+        raise RecordError("revise_finding_v2_proposal_from_future", context)
+    proposal_time = datetime.fromisoformat(proposal_recorded_at.replace("Z", "+00:00"))
+    for reference in set(_iter_internal_refs(proposal)):
+        entries = [entry for entry in index.get(reference, []) if entry.get("engagement_id") == state["engagement_id"]]
+        if any(entry["type"] in {"review", "finding", "environment", "memory-disposition"} for entry in entries) and reference not in committed_entity_ids:
+            raise RecordError("revise_finding_v2_reference_precedes_commit", f"{context}:{reference}")
+        temporal_entries = [entry for entry in entries if entry.get("recorded_at")]
+        if temporal_entries and all(datetime.fromisoformat(entry["recorded_at"].replace("Z", "+00:00")) > proposal_time for entry in temporal_entries):
+            raise RecordError("revise_finding_v2_reference_from_future", f"{context}:{reference}")
+    if proposal.get("engagement_id") != state.get("engagement_id") or proposal.get("finding_id") != finding_id or proposal.get("revision") != expected_revision or proposal.get("supersedes_revision") != expected_supersedes or proposal.get("claim_state") != target.get("claim_state") or proposal.get("adjudication", {}).get("review_ref") != target.get("adjudication_review_ref") or proposal.get("scope_provenance", {}).get("scope_hash") != state.get("scope_hash") or proposal.get("scope_provenance", {}).get("environment_ref") != state.get("active_environment_ref"):
+        raise RecordError("revise_finding_v2_proposal_binding_invalid", context)
+    destination = engagement / f"findings/{finding_id}/rev-{expected_revision}.json"
+    existing_destination_digest = _governed_optional_regular_digest(destination)
+    if existing_destination_digest is not None and existing_destination_digest != proposal_digest:
+        raise RecordError("revise_finding_v2_conflicting_unactivated_revision", context)
+    adjudication_event = seen_events.get(target["adjudication_event_ref"])
+    if adjudication_event is None or adjudication_event.get("event_type") != "claim.adjudicated" or adjudication_event.get("payload", {}).get("entity_id") != finding_id or adjudication_event.get("payload", {}).get("status") != target.get("claim_state") or adjudication_event.get("payload", {}).get("review_ref") != target.get("adjudication_review_ref"):
+        raise RecordError("revise_finding_v2_adjudication_invalid", context)
+    review_entry = _index_entry(index, target["adjudication_review_ref"], "review", state["engagement_id"])
+    review = load_json(engagement / review_entry["path"]) if review_entry is not None else {}
+    proposal_provenance = proposal.get("scope_provenance", {}).get("provenance", {})
+    review_independence = review.get("independence", {})
+    expected_provider = review.get("provenance", {}).get("provider")
+    if review_entry is None or target["adjudication_review_ref"] not in committed_entity_ids or review.get("review_type") != "claim_adjudication" or review.get("proposed_finding_id") != finding_id or review.get("entity_ref") != finding_id or review.get("finding_revision") != expected_supersedes or review.get("verdict") != target.get("claim_state") or proposal_provenance.get("actor") != {"role": "reviewer", "id": review_independence.get("reviewer_id")} or proposal_provenance.get("session_id") != review_independence.get("reviewer_session_id") or proposal_provenance.get("model") != review_independence.get("reviewer_model") or proposal_provenance.get("provider") != expected_provider:
+        raise RecordError("revise_finding_v2_review_binding_invalid", context)
+
+    attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+    artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
+    proof = proposal["proof"]
+    primary_ids = set(proof["primary_attempt_refs"]); negative_ids = set(proof["negative_control_refs"]); positive_ids = set(proof["positive_control_refs"]); replay_ids = set(proof["replay_refs"])
+    primary_attempts = [attempt_by_id[reference] for reference in primary_ids]
+    claim_evidence_refs = set(proposal["claims"]["mechanism"]["evidence_refs"]) | set(proposal["claims"]["reachability"]["evidence_refs"]) | {reference for impact in proposal["claims"]["impact_claims"] for reference in impact["evidence_refs"]}
+    proof_attempt_ids = primary_ids | negative_ids | positive_ids | replay_ids | {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in attempt_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["attempt_refs"] + mapping["control_refs"] + mapping["replay_refs"]}
+    if not primary_attempts or any(item["kind"] != "primary" or item["assessment"] != "suspected_signal" for item in primary_attempts) or all(item["observation"]["source"] == "model_report" for item in primary_attempts):
+        raise RecordError("revise_finding_v2_primary_proof_invalid", context)
+    if any(attempt_by_id[reference]["scope_hash"] != state["scope_hash"] or attempt_by_id[reference]["environment_ref"] != state["active_environment_ref"] or attempt_by_id[reference]["contamination"]["status"] != "none_observed" for reference in proof_attempt_ids):
+        raise RecordError("revise_finding_v2_proof_provenance_invalid", context)
+    proof_artifact_ids = {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in artifact_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["artifact_refs"]}
+    if any(artifact_by_id[reference].get("environment_ref") != state["active_environment_ref"] for reference in proof_artifact_ids):
+        raise RecordError("revise_finding_v2_artifact_environment_invalid", context)
+    applicability = proof["control_applicability"]
+    for policy, references, expected_kind, assessments in (("negative", negative_ids, "negative_control", {"no_signal", "held"}), ("positive", positive_ids, "positive_control", {"suspected_signal"}), ("replay", replay_ids, "replay", {"suspected_signal"})):
+        if applicability[policy] == "required" and not references:
+            raise RecordError("revise_finding_v2_required_proof_stage_missing", f"{context}:{policy}")
+        for reference in references:
+            item = attempt_by_id[reference]
+            if item["kind"] != expected_kind or item["assessment"] not in assessments or not primary_ids.intersection(item["control_of"]):
+                raise RecordError("revise_finding_v2_proof_stage_linkage_invalid", f"{context}:{reference}")
+    required_controls = (negative_ids if applicability["negative"] == "required" else set()) | (positive_ids if applicability["positive"] == "required" else set())
+    required_replays = replay_ids if applicability["replay"] == "required" else set()
+    for mapping in proof["claim_proofs"]:
+        mapping_attempts = set(mapping["attempt_refs"]); mapping_controls = set(mapping["control_refs"]); mapping_replays = set(mapping["replay_refs"])
+        if not mapping_attempts or not mapping_attempts.issubset(primary_ids) or any(attempt_by_id[reference]["kind"] != "primary" for reference in mapping_attempts) or all(attempt_by_id[reference]["observation"]["source"] == "model_report" for reference in mapping_attempts):
+            raise RecordError("revise_finding_v2_atomic_claim_invalid", f"{context}:{mapping['claim_id']}")
+        if mapping_controls != required_controls or mapping_replays != required_replays or any(not mapping_attempts.intersection(attempt_by_id[reference]["control_of"]) for reference in mapping_controls | mapping_replays):
+            raise RecordError("revise_finding_v2_atomic_claim_stage_invalid", f"{context}:{mapping['claim_id']}")
+    return copy.deepcopy(target)
+
+
+def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project deterministic outstanding work from already validated reducer inputs."""
+
+    items: list[dict[str, Any]] = []
+
+    def add(item_class: str, entity_type: str, entity_id: str, detail: str | None = None) -> None:
+        predicate, closes_when = WORK_QUEUE_RULES[item_class]
+        items.append({
+            "class": item_class,
+            "entity": {"type": entity_type, "id": entity_id, "detail": detail},
+            "blocking": item_class != "awaiting_operator",
+            "predicate": predicate,
+            "closes_when": closes_when,
+        })
+
+    attempts_by_hypothesis: dict[str, set[str]] = {}
+    for attempt in attempts:
+        hypothesis_ref = attempt.get("hypothesis_ref")
+        attempt_id = attempt.get("attempt_id")
+        if hypothesis_ref is not None and attempt_id is not None:
+            attempts_by_hypothesis.setdefault(hypothesis_ref, set()).add(attempt_id)
+    verified_control_refs = {
+        attempt.get("experiment_ref")
+        for attempt in attempts
+        if attempt.get("kind") in {"negative_control", "positive_control"}
+    }
+    hypotheses = state.get("hypotheses", {})
+    cited_candidates = {
+        hypothesis.get("origin_ref")
+        for hypothesis in hypotheses.values()
+        if hypothesis.get("origin_type") == "candidate"
+    }
+
+    for hypothesis_id, hypothesis in hypotheses.items():
+        status = hypothesis.get("status")
+        adjudicated_attempts = set(hypothesis.get("experiment_refs", [])) | set(hypothesis.get("control_refs", []))
+        if attempts_by_hypothesis.get(hypothesis_id, set()) - adjudicated_attempts:
+            add("hypothesis_ran_unadjudicated", "hypothesis", hypothesis_id)
+        if status in {"queued", "selected"}:
+            add("hypothesis_unrouted", "hypothesis", hypothesis_id)
+        if hypothesis.get("next_route") is not None:
+            add("hypothesis_open_route", "hypothesis", hypothesis_id, hypothesis["next_route"])
+        for question in set(hypothesis.get("unresolved_questions", [])):
+            add("hypothesis_unresolved_question", "hypothesis", hypothesis_id, question)
+
+    findings = state.get("findings", {})
+    adjudications = state.get("claim_adjudications", {})
+    filing_pending: dict[str, dict[str, Any]] = {}
+    for finding_id in set(findings) | set(adjudications):
+        finding = findings.get(finding_id)
+        latest = adjudications.get(finding_id)
+        reflected = bool(
+            finding is not None
+            and latest is not None
+            and finding.get("revision") == latest.get("expected_filing_revision")
+            and finding.get("status") == latest.get("status")
+            and finding.get("adjudication_review_ref") == latest.get("review_ref")
+            and finding.get("adjudication_event_ref") == latest.get("event_ref")
+        )
+        if latest is not None and latest.get("status") in FILEABLE_CLAIM_STATES and not reflected:
+            filing_pending[finding_id] = latest
+
+    matching_pending_targets: dict[str, list[dict[str, Any]]] = {}
+    approved_generations: set[tuple[Any, ...]] = set()
+    for request in state.get("authority_requests", {}).values():
+        target = request.get("target")
+        if request.get("action_kind") != "revise-finding" or not isinstance(target, dict) or target.get("type") != "finding":
+            continue
+        generation = (target.get("id"), target.get("expected_revision"), target.get("adjudication_event_ref"), target.get("adjudication_review_ref"))
+        if request.get("status") == "approved":
+            approved_generations.add(generation)
+        if request.get("status") == "pending_authority":
+            latest = filing_pending.get(target.get("id"))
+            current_review_refs = _filing_ready_review_refs(state, target.get("id")) if isinstance(target.get("id"), str) else []
+            target_current = (
+                latest is not None
+                and target.get("expected_revision") == latest.get("expected_filing_revision")
+                and target.get("claim_state") == latest.get("status")
+                and target.get("adjudication_event_ref") == latest.get("event_ref")
+                and target.get("adjudication_review_ref") == latest.get("review_ref")
+                and _filing_blocking_review_error(state, target["id"]) is None
+                and target.get("resolves_review_refs") == current_review_refs
+                and isinstance(target.get("file_digest"), str)
+                and request.get("lane_id") == finding_revision_lane_id(target)
+            )
+            if target_current:
+                matching_pending_targets.setdefault(target["id"], []).append(target)
+    for finding_id, targets in list(matching_pending_targets.items()):
+        latest = filing_pending[finding_id]
+        generation = (finding_id, latest.get("expected_filing_revision"), latest.get("event_ref"), latest.get("review_ref"))
+        if generation in approved_generations:
+            matching_pending_targets.pop(finding_id)
+
+    suppressed_reviews = {
+        (review_ref, finding_id)
+        for finding_id, targets in matching_pending_targets.items()
+        for target in targets
+        for review_ref in target.get("resolves_review_refs", [])
+    }
+    for finding_id in sorted(set(findings) | set(adjudications)):
+        finding = findings.get(finding_id)
+        latest = adjudications.get(finding_id)
+        if latest is not None:
+            if latest.get("status") == "needs_review":
+                add("claim_unadjudicated", "finding", finding_id)
+            elif latest.get("status") == "supported":
+                add("claim_unadjudicated", "finding", finding_id)
+        elif finding is not None and finding.get("status") in {"needs_review", "supported"}:
+            add("claim_unadjudicated", "finding", finding_id)
+        if finding_id in filing_pending:
+            if finding_id not in matching_pending_targets:
+                add("finding_revision_pending", "finding", finding_id)
+            continue
+        if finding is not None:
+            status = finding.get("status")
+            proof = state.get("proof_reviews", {}).get(f"{finding_id}:r{finding.get('revision')}")
+            if status in {"supported", "confirmed"} and (proof is None or proof.get("terminal_status") != "verified"):
+                add("finding_unproved", "finding", finding_id)
+
+    for review in state.get("outstanding_reviews", []):
+        if (review["review_ref"], review["entity_ref"]) not in suppressed_reviews:
+            add("review_obligation_open", "review_obligation", review["review_ref"], review["entity_ref"])
+
+    for candidate_id, candidate in state.get("candidates", {}).items():
+        if candidate.get("status") == "selected" and candidate_id not in cited_candidates:
+            add("candidate_undisposed", "candidate", candidate_id)
+        if candidate.get("status") == "deferred":
+            add("deferred_candidate_unreviewed", "candidate", candidate_id)
+
+    for control_candidate in state.get("control_candidates", []):
+        routing_event_id = control_candidate.get("routing_event_id")
+        if control_candidate.get("status") == "likely_held" and routing_event_id not in verified_control_refs:
+            add("control_candidate_unverified", "control_candidate", routing_event_id)
+
+    for request in state.get("authority_requests", {}).values():
+        if request.get("status") == "pending_authority":
+            add("awaiting_operator", "authority_request", request["request_id"])
+
+    if state.get("coverage") == "active" and not items:
+        add("coverage_review_missing", "engagement", state["engagement_id"])
+
+    ranks = {item_class: rank for rank, item_class in enumerate(WORK_QUEUE_CLASS_ORDER)}
+    return sorted(items, key=lambda item: (
+        ranks[item["class"]],
+        item["entity"]["type"],
+        item["entity"]["id"],
+        item["entity"]["detail"] is not None,
+        item["entity"]["detail"] or "",
+    ))
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -123,6 +735,14 @@ def compute_record_hash(record: dict[str, Any]) -> str:
 
 def _governed_root(path: Path) -> tuple[Path, tuple[str, ...]]:
     absolute = Path(os.path.abspath(path))
+    if (
+        len(absolute.parts) > 4
+        and absolute.parts[1:3] == ("dev", "fd")
+        and absolute.parts[3].isdigit()
+    ):
+        relative = absolute.parts[4:]
+        if relative and all(part not in {"", ".", ".."} for part in relative):
+            return Path("/dev/fd") / absolute.parts[3], relative
     for candidate in (absolute.parent, *absolute.parents[1:]):
         try:
             scope_stat = (candidate / "scope.md").lstat()
@@ -134,12 +754,80 @@ def _governed_root(path: Path) -> tuple[Path, tuple[str, ...]]:
     return absolute.parent, (absolute.name,)
 
 
+def find_engagement_root(path: Path) -> tuple[Path, tuple[str, ...]] | None:
+    """Locate the nearest lexical engagement root and the source path below it.
+
+    This is discovery only.  A caller must subsequently use :func:`bound_engagement_source`,
+    which re-opens and verifies the selected root before any bytes are admitted.  Keeping those
+    operations separate lets a pathname replacement change *which* healthy inode is selected, but
+    never lets bytes from the previously named inode leak into that selection.
+    """
+
+    absolute = Path(os.path.abspath(path))
+    for candidate in (absolute, *absolute.parents):
+        try:
+            scope = os.stat(candidate / "scope.md", follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISREG(scope.st_mode) or stat.S_ISLNK(scope.st_mode):
+            continue
+        try:
+            relative = absolute.relative_to(candidate)
+        except ValueError:
+            continue
+        if all(part not in {"", ".", ".."} for part in relative.parts):
+            return candidate, relative.parts
+    return None
+
+
 def _open_absolute_directory(path: Path) -> int:
     absolute = Path(os.path.abspath(path))
     if not absolute.is_absolute(): raise RecordError("unsafe_governed_path", str(path))
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0); fd = os.open("/", flags)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if len(absolute.parts) >= 4 and absolute.parts[1:3] == ("dev", "fd") and absolute.parts[3].isdigit():
+        try:
+            duplicate = os.dup(int(absolute.parts[3]))
+            if not stat.S_ISDIR(os.fstat(duplicate).st_mode):
+                raise RecordError("unsafe_governed_path", str(path))
+            for component in absolute.parts[4:]:
+                child = os.open(component, flags, dir_fd=duplicate)
+                os.close(duplicate)
+                duplicate = child
+            return duplicate
+        except Exception:
+            if "duplicate" in locals(): os.close(duplicate)
+            raise
+    # A bounded work session starts in the already-open target workspace.  Prefer that inode as the
+    # traversal root when the requested directory is beneath the physical cwd: opening every
+    # ancestor from ``/`` would require granting read-data access to unrelated parent directories
+    # merely so nofollow traversal can reach an otherwise-approved target.  Each relative component
+    # remains nofollow and the cwd descriptor, rather than a pathname assertion, is the trust root.
     try:
-        for component in absolute.parts[1:]:
+        physical_cwd = Path(os.getcwd())
+        relative_to_cwd = absolute.relative_to(physical_cwd)
+    except (OSError, ValueError):
+        relative_to_cwd = None
+    if relative_to_cwd is not None and physical_cwd != Path("/"):
+        cwd_fd = os.open(".", flags)
+        try:
+            for component in relative_to_cwd.parts:
+                child = os.open(component, flags, dir_fd=cwd_fd)
+                os.close(cwd_fd)
+                cwd_fd = child
+            return cwd_fd
+        except Exception:
+            os.close(cwd_fd)
+            raise
+    try:
+        terminal = absolute.lstat()
+        if stat.S_ISLNK(terminal.st_mode) or not stat.S_ISDIR(terminal.st_mode):
+            raise RecordError("unsafe_governed_path", str(path))
+        resolved_parent = absolute.parent.resolve(strict=True)
+    except OSError:
+        raise
+    fd = os.open("/", flags)
+    try:
+        for component in (*resolved_parent.parts[1:], absolute.name):
             child = os.open(component, flags, dir_fd=fd); os.close(fd); fd = child
         return fd
     except Exception: os.close(fd); raise
@@ -179,6 +867,71 @@ def read_governed_file(path: Path) -> bytes:
     finally: os.close(parent_fd)
 
 
+def _governed_file_exists(path: Path) -> bool:
+    try:
+        read_governed_file(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except (OSError, RecordError):
+        return False
+
+
+def _governed_sha256_file(path: Path) -> str:
+    return sha256_bytes(read_governed_file(path))
+
+
+def _governed_optional_regular_digest(path: Path) -> str | None:
+    """Return an exact digest for a safe regular leaf, or None only when a safe path is absent."""
+
+    try:
+        return _governed_sha256_file(path)
+    except FileNotFoundError:
+        return None
+    except (OSError, RecordError) as exc:
+        raise RecordError("unsafe_governed_optional_path", str(path)) from exc
+
+
+def _governed_text(path: Path) -> str:
+    try:
+        return read_governed_file(path).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RecordError("governed_file_invalid_utf8", str(path)) from exc
+
+
+def _relative_regular_files(root: Path) -> set[str]:
+    """Enumerate regular files through one opened root FD, never a reopened pathname."""
+
+    root_fd = _open_absolute_directory(root)
+    result: set[str] = set()
+
+    def visit(directory_fd: int, prefix: tuple[str, ...]) -> None:
+        for name in sorted(os.listdir(directory_fd)):
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            relative = (*prefix, name)
+            if stat.S_ISDIR(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                child = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=directory_fd,
+                )
+                try:
+                    visit(child, relative)
+                finally:
+                    os.close(child)
+            elif stat.S_ISREG(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
+                result.add(Path(*relative).as_posix())
+
+    try:
+        visit(root_fd, ())
+        return result
+    finally:
+        os.close(root_fd)
+
+
 def load_json(path: Path) -> Any:
     try: return json.loads(read_governed_file(path), object_pairs_hook=_reject_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc: raise RecordError("governed_json_invalid", str(path), [str(exc)]) from exc
@@ -200,15 +953,304 @@ def atomic_write(path: Path, data: bytes) -> None:
         os.close(parent_fd)
 
 
+def unlink_governed_file(path: Path, *, missing_ok: bool = False) -> None:
+    """Unlink one regular governed leaf through its already-bound parent directory."""
+
+    root, parts = _governed_root(path)
+    try:
+        parent_fd, name = _open_parent_fd(root, parts, create=False)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    try:
+        try:
+            entry = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return
+            raise
+        if stat.S_ISLNK(entry.st_mode) or not stat.S_ISREG(entry.st_mode):
+            raise RecordError("unsafe_governed_path", str(path))
+        os.unlink(name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
 @contextmanager
-def engagement_lock(engagement: Path) -> Iterator[None]:
+def engagement_lock(engagement: Path) -> Iterator[Path]:
+    """Lock one opened engagement inode and yield its bound directory alias.
+
+    Callers must perform every transaction read and write through the yielded path. Holding a
+    lock file from one directory while reopening the caller's pathname permits a directory ABA to
+    redirect the transaction into a different (possibly quarantined) engagement.
+    """
+
     engagement = engagement.absolute(); root_fd = _open_absolute_directory(engagement)
+    bound = Path(f"/dev/fd/{root_fd}")
+    if inspect_quarantine(bound)["quarantined"]:
+        os.close(root_fd)
+        raise RecordError("engagement_quarantined", "engagement evidence is quarantined")
     fd = os.open(".record-kernel.lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=root_fd)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode): raise RecordError("unsafe_governed_path", ".record-kernel.lock")
-        fcntl.flock(fd, fcntl.LOCK_EX); yield
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError("engagement_quarantined", "engagement evidence is quarantined")
+        yield bound
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN); os.close(fd); os.close(root_fd)
+
+
+@contextmanager
+def existing_engagement_transaction(engagement: Path) -> Iterator[Path]:
+    """Lock an existing kernel for mutation while preserving the named directory identity.
+
+    Unlike :func:`engagement_lock`, this entrypoint never creates the coordination file.  Unlike
+    :func:`bound_engagement_source`, it is explicitly a mutation transaction.  The public pathname
+    must still name the opened inode before and after the transaction, so rename-and-replace cannot
+    redirect either the decision or its record.
+    """
+
+    logical = Path(os.path.abspath(engagement))
+    root_fd = _open_absolute_directory(logical)
+    opened = os.fstat(root_fd)
+
+    def require_named_identity(when: str) -> None:
+        try:
+            named = os.stat(logical, follow_symlinks=False)
+        except OSError as exc:
+            raise RecordError(
+                "engagement_source_changed",
+                f"transaction source changed {when}",
+            ) from exc
+        if (
+            stat.S_ISLNK(named.st_mode)
+            or not stat.S_ISDIR(named.st_mode)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise RecordError(
+                "engagement_source_changed",
+                f"transaction source changed {when}",
+            )
+
+    try:
+        require_named_identity("before lock")
+        with bound_engagement_lock(root_fd, create=False) as bound:
+            require_named_identity("after lock")
+            yield bound
+            require_named_identity("during transaction")
+    finally:
+        os.close(root_fd)
+
+
+@contextmanager
+def bound_engagement_lock(root_fd: int, *, create: bool = True) -> Iterator[Path]:
+    """Lock an already identity-bound engagement directory without reopening its path."""
+
+    if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
+        raise RecordError("unsafe_governed_path", "bound engagement directory")
+    bound = Path(f"/dev/fd/{root_fd}")
+    if inspect_quarantine(bound)["quarantined"]:
+        raise RecordError("engagement_quarantined", "engagement evidence is quarantined")
+    flags = (os.O_RDWR | os.O_CREAT) if create else os.O_RDONLY
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(".record-kernel.lock", flags, 0o600, dir_fd=root_fd)
+    except FileNotFoundError as exc:
+        raise RecordError(
+            "engagement_coordination_unavailable",
+            "read-only source has no existing record-kernel coordination lock",
+        ) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode): raise RecordError("unsafe_governed_path", ".record-kernel.lock")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError("engagement_quarantined", "engagement evidence is quarantined")
+        yield bound
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN); os.close(fd)
+
+
+@contextmanager
+def bound_engagement_source(
+    engagement: Path, *, allow_ungoverned: bool = False
+) -> Iterator[Path]:
+    """Bind a read-only source tree to one directory inode for its whole admission pass.
+
+    A real engagement (a root with a regular ``scope.md``) must already have the record-kernel
+    coordination lock.  The scanner never creates that lock: legacy/uninitialized governed
+    evidence is unavailable rather than read through a fail-open pathname fallback.  The yielded
+    ``/dev/fd`` alias is the only path callers may walk or read.
+
+    ``allow_ungoverned`` exists for portable synthetic fixture trees.  Those trees are still
+    inode-bound, checked for a direct marker before and after the scan, and rejected if their
+    original pathname stops naming the opened inode or they acquire a ``scope.md`` mid-scan.
+    """
+
+    logical = Path(os.path.abspath(engagement))
+    root_fd = _open_absolute_directory(logical)
+    bound = Path(f"/dev/fd/{root_fd}")
+    opened_identity = os.fstat(root_fd)
+
+    def require_named_identity(when: str) -> None:
+        try:
+            named = os.stat(logical, follow_symlinks=False)
+        except OSError as exc:
+            raise RecordError(
+                "engagement_source_changed", f"source directory changed {when} scan"
+            ) from exc
+        if (opened_identity.st_dev, opened_identity.st_ino) != (
+            named.st_dev,
+            named.st_ino,
+        ):
+            raise RecordError(
+                "engagement_source_changed", f"source directory changed {when} scan"
+            )
+
+    try:
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError(
+                "engagement_quarantined", "engagement evidence is quarantined"
+            )
+        require_named_identity("before")
+        try:
+            scope_entry = os.stat("scope.md", dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            scope_entry = None
+        if scope_entry is not None and (
+            stat.S_ISLNK(scope_entry.st_mode) or not stat.S_ISREG(scope_entry.st_mode)
+        ):
+            raise RecordError(
+                "unsafe_engagement_path", "engagement scope entry is not a regular file"
+            )
+
+        if scope_entry is not None:
+            # No compatibility fallback is permitted once the source declares itself governed.
+            with bound_engagement_lock(root_fd, create=False) as locked:
+                scope_before = read_governed_file(locked / "scope.md")
+                yield locked
+                if inspect_quarantine(locked)["quarantined"]:
+                    raise RecordError(
+                        "engagement_quarantined", "engagement evidence is quarantined"
+                    )
+                if read_governed_file(locked / "scope.md") != scope_before:
+                    raise RecordError(
+                        "engagement_source_changed", "engagement scope changed during scan"
+                    )
+                # A marked replacement at the public pathname has a different lock inode.  The
+                # bound source is internally stable, but it is no longer the source the operator
+                # named, so admission must still fail.
+                require_named_identity("during")
+            return
+
+        if not allow_ungoverned:
+            raise RecordError(
+                "engagement_scope_missing",
+                "read-only engagement source has no regular scope.md",
+            )
+
+        # Synthetic compatibility trees have no cooperative writer to lock.  Bind the directory
+        # name as well as the descriptor so a rename-and-replace cannot admit the moved inode.
+        try:
+            require_safe_offline_input(logical)
+        except ValueError as exc:
+            raise RecordError(
+                "engagement_source_governed",
+                "uncoordinated source is governed or quarantined",
+            ) from exc
+        yield bound
+        if inspect_quarantine(bound)["quarantined"]:
+            raise RecordError(
+                "engagement_quarantined", "engagement evidence is quarantined"
+            )
+        try:
+            final_scope = os.stat("scope.md", dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            final_scope = None
+        if final_scope is not None:
+            raise RecordError(
+                "engagement_coordination_changed",
+                "source became engagement-governed during scan",
+            )
+        try:
+            require_safe_offline_input(logical)
+        except ValueError as exc:
+            raise RecordError(
+                "engagement_source_governed",
+                "uncoordinated source became governed or quarantined",
+            ) from exc
+        require_named_identity("during")
+    finally:
+        os.close(root_fd)
+
+
+@contextmanager
+def quarantine_control_lock(engagement: Path) -> Iterator[Path]:
+    """Coordinate signed marker create/retry/clear without mutating already-marked evidence."""
+
+    root_fd = _open_absolute_directory(engagement.absolute())
+    bound = Path(f"/dev/fd/{root_fd}")
+    marked = inspect_quarantine(bound)["quarantined"]
+    try:
+        try:
+            fd = os.open(
+                ".record-kernel.lock",
+                os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_fd,
+            )
+        except FileNotFoundError:
+            if marked:
+                # A directory-FD flock serializes control operations without adding a byte to
+                # legacy evidence that was already quarantined before the kernel lock existed.
+                fd = os.dup(root_fd)
+            else:
+                fd = os.open(
+                    ".record-kernel.lock",
+                    os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=root_fd,
+                )
+        if not (stat.S_ISREG(os.fstat(fd).st_mode) or stat.S_ISDIR(os.fstat(fd).st_mode)):
+            raise RecordError("unsafe_governed_path", ".record-kernel.lock")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield bound
+    finally:
+        if "fd" in locals():
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        os.close(root_fd)
+
+
+# Backwards-readable name for the clear path; create and clear intentionally share one control
+# lock so concurrent exact retries linearize on the same directory inode.
+quarantine_recovery_lock = quarantine_control_lock
+
+
+def _engagement_transaction(engagement: Path, lock_held: bool):
+    """Return a context yielding the only path permitted for transaction I/O."""
+
+    engagement = engagement.absolute()
+    if not lock_held:
+        return engagement_lock(engagement)
+    if not (
+        len(engagement.parts) == 4
+        and engagement.parts[1:3] == ("dev", "fd")
+        and engagement.parts[3].isdigit()
+    ):
+        raise RecordError(
+            "bound_engagement_required",
+            "lock_held transactions require an opened /dev/fd engagement alias",
+        )
+    return nullcontext(engagement)
+
+
+def require_not_quarantined(engagement: Path) -> None:
+    """Fail closed on a valid or malformed target-local quarantine marker."""
+
+    if inspect_quarantine(engagement)["quarantined"]:
+        raise RecordError("engagement_quarantined", "engagement evidence is quarantined")
 
 
 def _parse_ledger_data(data: bytes, relative: str, schema: str, identity: str) -> list[dict[str, Any]]:
@@ -289,7 +1331,8 @@ def materialize_ledger_record(kind: str, proposal: dict[str, Any], records: list
 
 def append_ledger_record(engagement: Path, kind: str, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
     relative, _, _ = LEDGERS[kind]
-    with (nullcontext() if lock_held else engagement_lock(engagement)):
+    with _engagement_transaction(engagement, lock_held) as engagement:
+        require_not_quarantined(engagement)
         records = read_ledger(engagement, kind)
         record = materialize_ledger_record(kind, proposal, records)
         line = canonical_json_bytes(record)
@@ -314,18 +1357,37 @@ def append_ledger_record(engagement: Path, kind: str, proposal: dict[str, Any], 
         return record
 
 
+def _truncate_governed_file(path: Path, size: int) -> None:
+    """Rollback one already-bound regular ledger without following a replacement path."""
+
+    root, parts = _governed_root(path)
+    parent_fd, name = _open_parent_fd(root, parts, create=False)
+    try:
+        fd = os.open(name, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RecordError("unsafe_ledger_path", name)
+            os.ftruncate(fd, size)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+
+
 def repair_ledger_tail(engagement: Path, kind: str, operator_id: str, reason: str, recorded_at: str | None = None, authority_request_ref: str | None = None, executor_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
     if kind not in LEDGERS or not reason.strip():
         raise RecordError("tail_repair_input_invalid", "known ledger and non-empty reason required")
     engagement = engagement.absolute()
     relative, schema, identity = LEDGERS[kind]
-    marker_path = engagement / "legacy" / "tail-repair.pending.json"
-    with engagement_lock(engagement):
+    with engagement_lock(engagement) as engagement:
+        marker_path = engagement / "legacy" / "tail-repair.pending.json"
+        require_not_quarantined(engagement)
         event_bytes = read_governed_file(engagement / "events.jsonl"); event_boundary = event_bytes.rfind(b"\n") + 1 if event_bytes and not event_bytes.endswith(b"\n") else len(event_bytes); intact_events = _parse_ledger_data(event_bytes[:event_boundary], "events.jsonl", "engagement-event", "event_id")
         signed_operator = next(event["payload"]["operator_id"] for event in reversed(intact_events) if event["event_type"] == "scope.attested")
         if operator_id != signed_operator:
             raise RecordError("tail_repair_operator_mismatch", "repair operator must match the active attested scope")
-        if marker_path.exists():
+        if _governed_file_exists(marker_path):
             marker = json.loads(read_governed_file(marker_path))
             if marker.get("operator_id") != operator_id or marker.get("ledger_kind") != kind:
                 raise RecordError("tail_repair_pending_conflict", str(marker_path))
@@ -370,7 +1432,7 @@ def repair_ledger_tail(engagement: Path, kind: str, operator_id: str, reason: st
         write_snapshot(engagement, snapshot)
         from engagement_views import write_views
         write_views(engagement, snapshot)
-        marker_path.unlink(missing_ok=True)
+        unlink_governed_file(marker_path, missing_ok=True)
         return {"event_id": event_id, "quarantine_path": marker["quarantine_path"], "quarantine_digest": marker["quarantine_digest"]}
 
 
@@ -421,9 +1483,10 @@ def verify_file_authority(engagement: Path, events: list[dict[str, Any]], artifa
             raise RecordError("duplicate_file_commit", relative)
         validate_committed_payload(engagement, payload)
         committed[relative] = payload
+    all_files = _relative_regular_files(engagement)
     governed_files: set[str] = set()
     for pattern in COMMITTED_RECORD_LAYOUT.values():
-        governed_files.update(path.relative_to(engagement).as_posix() for path in engagement.glob(pattern) if path.is_file())
+        governed_files.update(relative for relative in all_files if Path(relative).match(pattern))
     orphan_records = sorted(governed_files - set(committed) - (allowed_record_orphans or set()))
     if orphan_records:
         raise RecordError("orphan_immutable_record", ", ".join(orphan_records))
@@ -432,11 +1495,14 @@ def verify_file_authority(engagement: Path, events: list[dict[str, Any]], artifa
         if payload["record_type"] == "report-manifest":
             bound_reports.add(load_json(engagement / relative)["report_path"])
     for relative in allowed_record_orphans or set():
-        if relative.endswith(".manifest.json") and (engagement / relative).is_file():
+        if relative.endswith(".manifest.json") and _governed_file_exists(engagement / relative):
             value = load_json(engagement / relative)
             if value.get("report_path"):
                 bound_reports.add(value["report_path"])
-    report_files = {path.relative_to(engagement).as_posix() for path in (engagement / "reports").glob("**/*.md") if path.is_file()}
+    report_files = {
+        relative for relative in all_files
+        if relative.startswith("reports/") and relative.endswith(".md")
+    }
     orphan_reports = sorted(report_files - bound_reports)
     if orphan_reports:
         raise RecordError("orphan_report_file", ", ".join(orphan_reports))
@@ -447,12 +1513,13 @@ def verify_file_authority(engagement: Path, events: list[dict[str, Any]], artifa
         if relative in artifact_paths:
             raise RecordError("duplicate_artifact_path", relative)
         path = _safe_engagement_file(engagement, relative)
-        if path.stat().st_size != artifact["size"] or sha256_file(path) != artifact["sha256"]:
+        artifact_bytes = read_governed_file(path)
+        if len(artifact_bytes) != artifact["size"] or sha256_bytes(artifact_bytes) != artifact["sha256"]:
             raise RecordError("artifact_file_digest_mismatch", relative)
         artifact_paths.add(relative)
     evidence_files = {
-        path.relative_to(engagement).as_posix() for path in (engagement / "evidence").glob("**/*")
-        if path.is_file() and path.name != ".gitkeep"
+        relative for relative in all_files
+        if relative.startswith("evidence/") and Path(relative).name != ".gitkeep"
     }
     orphan_artifacts = sorted(evidence_files - artifact_paths - (allowed_artifact_orphans or set()))
     if orphan_artifacts:
@@ -500,7 +1567,7 @@ def persist_scope_snapshot(engagement: Path, scope_hash: str) -> str:
         raise RecordError("scope_snapshot_source_mismatch", "scope.md does not match attested hash")
     relative = f"scope-attestations/{scope_hash.removeprefix('sha256:')}.md"
     destination = engagement / relative
-    if destination.exists():
+    if _governed_file_exists(destination):
         if read_governed_file(destination) != data:
             raise RecordError("scope_snapshot_collision", relative)
     else:
@@ -518,6 +1585,60 @@ def validate_scope_event_snapshot(engagement: Path, event: dict[str, Any]) -> No
     signed_operator = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
     if metadata["scope_hash"] != payload["scope_hash"] or metadata["date"] != payload.get("signed_date") or metadata["record_kernel"] != payload.get("record_kernel") or event["actor"] != {"role": "operator", "id": signed_operator} or payload.get("operator_id") != signed_operator:
         raise RecordError("historical_scope_attestation_mismatch", event["event_id"])
+
+
+def quarantine_authority_context(engagement: Path) -> dict[str, Any]:
+    """Recover only a previously ledger-bound operator trust root from the valid prefix.
+
+    Quarantine exists precisely for ledgers that may not reduce.  Creation can therefore
+    authenticate against the last valid scope attestation in the hash-chained prefix, but it
+    must never accept the current ``scope.md`` or caller-supplied signer material as a new trust
+    root.  A ledger with no such prefix cannot be quarantined by this command until an operator
+    provisions authority through a separately approved path.
+    """
+
+    engagement = engagement.absolute()
+    try:
+        event_bytes = read_governed_file(engagement / "events.jsonl")
+    except (OSError, RecordError) as exc:
+        raise RecordError("quarantine_authority_unavailable", "no readable trusted event prefix") from exc
+    prefix = b""
+    trusted_events: list[dict[str, Any]] = []
+    for line in event_bytes.splitlines(keepends=True):
+        if not line.endswith(b"\n"):
+            break
+        candidate = prefix + line
+        try:
+            parsed = _parse_ledger_data(candidate, "events.jsonl", "engagement-event", "event_id")
+        except RecordError:
+            break
+        prefix = candidate
+        trusted_events = parsed
+    attestation = next((event for event in reversed(trusted_events) if event.get("event_type") == "scope.attested"), None)
+    if attestation is None:
+        raise RecordError("quarantine_authority_unavailable", "no trusted scope attestation in the valid ledger prefix")
+    try:
+        validate_scope_event_snapshot(engagement, attestation)
+        scope_bytes = read_governed_file(engagement / attestation["payload"]["scope_snapshot_path"])
+    except (OSError, RecordError) as exc:
+        raise RecordError("quarantine_authority_unavailable", "trusted scope snapshot is unavailable") from exc
+    signer_pin = re.search(rb"^\s*-\s*Operator allowed signers SHA256:\s*(sha256:[0-9a-f]{64})\s*$", scope_bytes, re.MULTILINE)
+    if signer_pin is None:
+        raise RecordError("quarantine_authority_unavailable", "trusted scope has no operator signer pin")
+    raw_digests: dict[str, str] = {}
+    for kind, (relative, _schema, _identity) in LEDGERS.items():
+        try:
+            raw_digests[kind] = sha256_bytes(read_governed_file(engagement / relative))
+        except (OSError, RecordError):
+            raw_digests[kind] = "unreadable"
+    return {
+        "engagement_id": attestation["engagement_id"],
+        "operator_id": attestation["payload"]["operator_id"],
+        "scope_hash": attestation["payload"]["scope_hash"],
+        "scope_bytes": scope_bytes,
+        "signer_pin": signer_pin.group(1).decode("ascii"),
+        "record_fingerprint": sha256_bytes(canonical_json_bytes(raw_digests)),
+    }
 
 
 def base_event(*, event_id: str, engagement_id: str, recorded_at: str, actor_role: str, actor_id: str, event_type: str, rationale: str, payload: dict[str, Any], entity_refs: list[str] | None = None, evidence_refs: list[str] | None = None, review_refs: list[str] | None = None, finding_refs: list[str] | None = None, state_changes: list[dict[str, Any]] | None = None, session_id: str | None = None, operation_class: str | None = None, model: str | None = None, provider: str | None = None, tool_versions: list[str] | None = None) -> dict[str, Any]:
@@ -544,49 +1665,64 @@ def base_event(*, event_id: str, engagement_id: str, recorded_at: str, actor_rol
     return result
 
 
-def initialize_engagement(engagement: Path, recorded_at: str | None = None) -> dict[str, Any]:
+def initialize_engagement(
+    engagement: Path,
+    recorded_at: str | None = None,
+    *,
+    lock_held: bool = False,
+    engagement_id: str | None = None,
+) -> dict[str, Any]:
     engagement = engagement.absolute()
-    root_fd = _open_absolute_directory(engagement)
-    try:
+    logical_engagement_id = engagement_id or engagement.name
+    with _engagement_transaction(engagement, lock_held) as engagement:
+        require_not_quarantined(engagement)
         metadata = _scope_metadata(engagement / "scope.md")
-        engagement_id = engagement.name
-        directories = ("reviews", "reports", "submissions", "environment", "evidence", "findings", "legacy", "memory", "scope-attestations")
-        for name in directories:
-            try: os.mkdir(name, 0o700, dir_fd=root_fd)
-            except FileExistsError: pass
-            child = os.open(name, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=root_fd); os.close(child)
-        for ledger in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl"):
-            fd = os.open(ledger, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=root_fd)
-            if not stat.S_ISREG(os.fstat(fd).st_mode): os.close(fd); raise RecordError("unsafe_ledger_path", ledger)
-            os.close(fd)
-    finally: os.close(root_fd)
-    existing = read_ledger(engagement, "event")
-    if existing:
-        first = existing[0]
-        active_scope = next(event["payload"]["scope_hash"] for event in reversed(existing) if event["event_type"] == "scope.attested")
-        if first["event_type"] != "scope.attested" or active_scope != metadata["scope_hash"]:
-            raise RecordError("engagement_already_initialized", "existing ledger is bound to different scope bytes")
-    else:
-        operator_id = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
-        scope_snapshot_path = persist_scope_snapshot(engagement, metadata["scope_hash"])
-        proposal = base_event(
-            event_id=f"event-scope-{metadata['scope_hash'][-12:]}", engagement_id=engagement_id,
-            recorded_at=recorded_at or utc_now(), actor_role="operator", actor_id=operator_id,
-            event_type="scope.attested", rationale="Operator-signed scope bytes attested for the Decision 0005 record kernel.",
-            payload={"scope_hash": metadata["scope_hash"], "scope_snapshot_path": scope_snapshot_path, "operator_id": operator_id, "signed_date": metadata["date"], "record_kernel": metadata["record_kernel"], "supersedes_scope_hash": None},
-            entity_refs=[engagement_id],
-            state_changes=[
-                {"dimension": "engagement", "entity_id": engagement_id, "previous": None, "current": "active"},
-                {"dimension": "coverage", "entity_id": engagement_id, "previous": None, "current": "active"},
-                {"dimension": "memory", "entity_id": engagement_id, "previous": None, "current": "pending"},
-            ],
-        )
-        append_ledger_record(engagement, "event", proposal)
-    snapshot = reduce_engagement(engagement)
-    write_snapshot(engagement, snapshot)
-    from engagement_views import write_views
-    write_views(engagement, snapshot)
-    return snapshot
+        existing = read_ledger(engagement, "event")
+        if existing:
+            first = existing[0]
+            active_scope = next(event["payload"]["scope_hash"] for event in reversed(existing) if event["event_type"] == "scope.attested")
+            if first["event_type"] != "scope.attested" or active_scope != metadata["scope_hash"]:
+                raise RecordError("engagement_already_initialized", "existing ledger is bound to different scope bytes")
+            from completion_claims import assert_completion_claims_clear_bound, assert_completion_claims_token_current_bound
+            admission = assert_completion_claims_clear_bound(engagement)
+            snapshot = admission.state
+            # Idempotent initialization may repair scaffolding and publish projections. Validate
+            # before its first mutation under this already-held cooperative lock.
+            assert_completion_claims_token_current_bound(engagement, admission.token)
+        root_fd = _open_absolute_directory(engagement)
+        try:
+            directories = ("reviews", "reports", "submissions", "environment", "evidence", "findings", "legacy", "memory", "scope-attestations")
+            for name in directories:
+                try: os.mkdir(name, 0o700, dir_fd=root_fd)
+                except FileExistsError: pass
+                child = os.open(name, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0), dir_fd=root_fd); os.close(child)
+            for ledger in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl"):
+                fd = os.open(ledger, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=root_fd)
+                if not stat.S_ISREG(os.fstat(fd).st_mode): os.close(fd); raise RecordError("unsafe_ledger_path", ledger)
+                os.close(fd)
+        finally: os.close(root_fd)
+        if not existing:
+            operator_id = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
+            scope_snapshot_path = persist_scope_snapshot(engagement, metadata["scope_hash"])
+            proposal = base_event(
+                event_id=f"event-scope-{metadata['scope_hash'][-12:]}", engagement_id=logical_engagement_id,
+                recorded_at=recorded_at or utc_now(), actor_role="operator", actor_id=operator_id,
+                event_type="scope.attested", rationale="Operator-signed scope bytes attested for the Decision 0005 record kernel.",
+                payload={"scope_hash": metadata["scope_hash"], "scope_snapshot_path": scope_snapshot_path, "operator_id": operator_id, "signed_date": metadata["date"], "record_kernel": metadata["record_kernel"], "supersedes_scope_hash": None},
+                entity_refs=[logical_engagement_id],
+                state_changes=[
+                    {"dimension": "engagement", "entity_id": logical_engagement_id, "previous": None, "current": "active"},
+                    {"dimension": "coverage", "entity_id": logical_engagement_id, "previous": None, "current": "active"},
+                    {"dimension": "memory", "entity_id": logical_engagement_id, "previous": None, "current": "pending"},
+                ],
+            )
+            append_ledger_record(engagement, "event", proposal, lock_held=True)
+            # First-time bootstrap has no pre-existing kernel against which admission can run.
+            snapshot = reduce_engagement(engagement)
+        write_snapshot(engagement, snapshot)
+        from engagement_views import write_views
+        write_views(engagement, snapshot)
+        return snapshot
 
 
 def validate_event_semantics(event: dict[str, Any]) -> None:
@@ -603,6 +1739,8 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         raise RecordError("duplicate_event_state_dimension", event["event_id"])
     payload = event.get("payload", {})
     engagement_id = event.get("engagement_id")
+    if event_type == "engagement.blocked" and event.get("actor", {}).get("role") != "operator":
+        raise RecordError("engagement_block_not_operator", event.get("event_id", "unknown"))
     capability = classify_event(event_type, payload)
     if event.get("operation_class") is not None:
         require_actor(capability, event.get("actor", {}).get("role", ""))
@@ -648,6 +1786,110 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
     if event_type == "review.coverage_completed":
         if event.get("actor", {}).get("role") not in ({"reviewer", "broker"} if payload.get("reviewer_id") else {"reviewer"}) or not event.get("review_refs") or payload.get("review_type") != "coverage" or payload.get("verdict") not in {"continue", "coverage_dry", "blocked"}:
             raise RecordError("coverage_review_event_invalid", event.get("event_id", "unknown"))
+    if event_type == "coverage.reopened":
+        change = by_dimension.get("coverage")
+        if event.get("actor", {}).get("role") != "orchestrator" or payload.get("entity_id") != engagement_id or payload.get("status") != "active" or not isinstance(payload.get("reason"), str) or not payload["reason"].strip() or payload["reason"] != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") not in {"coverage_dry", "budget_bounded"} or change.get("current") != "active":
+            raise RecordError("coverage_reopen_invalid", event.get("event_id", "unknown"))
+    if event_type == "coverage.status_changed":
+        change = by_dimension.get("coverage")
+        if change is not None and change.get("previous") in {"coverage_dry", "budget_bounded"} and change.get("current") == "active":
+            raise RecordError("coverage_reopen_event_required", event.get("event_id", "unknown"))
+    driver_fields = {
+        "driver_run_ref",
+        "driver_state_hash",
+        "budget_kind",
+        "max_sessions",
+        "max_wall_seconds",
+        "sessions_started",
+        "wall_seconds",
+    }
+    present_driver_fields = driver_fields.intersection(payload)
+    is_driver_budget_event = event_type == "coverage.status_changed" and payload.get("status") == "budget_bounded"
+    if present_driver_fields and not is_driver_budget_event:
+        raise RecordError("driver_budget_metadata_wrong_event", event.get("event_id", "unknown"))
+    if is_driver_budget_event:
+        disposed_count = payload.get("disposed_count")
+        enumerated_count = payload.get("enumerated_count")
+        if not isinstance(disposed_count, int) or isinstance(disposed_count, bool) or not isinstance(enumerated_count, int) or isinstance(enumerated_count, bool) or enumerated_count < 1 or disposed_count < 0 or disposed_count > enumerated_count:
+            raise RecordError("budget_bounded_counts_invalid", event.get("event_id", "unknown"))
+        if present_driver_fields:
+            if present_driver_fields != driver_fields:
+                raise RecordError("driver_budget_metadata_incomplete", event.get("event_id", "unknown"))
+            budget_kind = payload.get("budget_kind")
+            sessions_started = payload.get("sessions_started")
+            max_sessions = payload.get("max_sessions")
+            wall_seconds = payload.get("wall_seconds")
+            max_wall_seconds = payload.get("max_wall_seconds")
+            valid_boundary = (
+                budget_kind == "max_sessions" and sessions_started == max_sessions
+            ) or (
+                budget_kind == "max_wall_seconds"
+                and isinstance(wall_seconds, (int, float))
+                and not isinstance(wall_seconds, bool)
+                and isinstance(max_wall_seconds, (int, float))
+                and not isinstance(max_wall_seconds, bool)
+                and wall_seconds >= max_wall_seconds
+            )
+            if (
+                event.get("actor", {}).get("role") != "broker"
+                or not re.fullmatch(r"local-uid-[0-9]+:broker", str(event.get("actor", {}).get("id", "")))
+                or event.get("operation_class") != "notebook"
+                or not valid_boundary
+            ):
+                raise RecordError("driver_budget_metadata_invalid", event.get("event_id", "unknown"))
+    if event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+        change = by_dimension.get("queue")
+        expected_status = "parked" if event_type == "operator_stop.recorded" else "active"
+        expected_previous = "active" if expected_status == "parked" else "parked"
+        reason = payload.get("reason")
+        if event.get("actor") != {"role": "operator", "id": payload.get("operator_id")} or payload.get("entity_id") != engagement_id or payload.get("status") != expected_status or not isinstance(reason, str) or not reason.strip() or reason != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") != expected_previous or change.get("current") != expected_status:
+            raise RecordError("operator_queue_control_invalid", event.get("event_id", "unknown"))
+    if event_type == "session.end_checked":
+        decision = payload.get("decision")
+        reason_code = payload.get("reason_code")
+        streak = payload.get("confirmed_consecutive_blocks")
+        blocking = payload.get("blocking_work_count")
+        remaining = payload.get("remaining_work_count")
+        counts_are_coherent = (
+            type(blocking) is int
+            and type(remaining) is int
+            and 0 <= blocking <= remaining
+        )
+        coherent_block = (
+            counts_are_coherent
+            and decision == "block"
+            and reason_code == "blocking_work_remaining"
+            and type(streak) is int
+            and 1 <= streak <= 6
+            and blocking > 0
+        )
+        coherent_release = (
+            counts_are_coherent
+            and decision == "release"
+            and (
+                (reason_code == "block_budget_exhausted" and streak == 6 and blocking > 0)
+                or (
+                    reason_code == "reentrant_state_unmatched"
+                    and streak == 0
+                )
+            )
+        )
+        if (
+            event.get("actor")
+            != {"role": "broker", "id": "session-end-backstop"}
+            or event.get("operation_class") != "notebook"
+            or event.get("provenance", {}).get("session_id")
+            != payload.get("session_ref")
+            or event.get("state_changes")
+            or any(
+                event.get(field)
+                for field in ("entity_refs", "evidence_refs", "review_refs", "finding_refs")
+            )
+            or not (coherent_block or coherent_release)
+        ):
+            raise RecordError("session_end_check_invalid", event.get("event_id", "unknown"))
+    if event_type == "authority.expired" and (event.get("actor", {}).get("role") != "broker" or payload.get("status") != "expired" or event.get("state_changes")):
+        raise RecordError("authority_expiry_event_invalid", event.get("event_id", "unknown"))
 
     if event_type == "scope.attested":
         if event.get("actor", {}).get("role") != "operator" or event.get("actor", {}).get("id") != payload.get("operator_id"):
@@ -672,8 +1914,12 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         binding = ("claim", payload.get("entity_id"), payload.get("status"))
     elif event_type == "finding.revised":
         binding = None
+    elif event_type == "coverage.reopened":
+        binding = ("coverage", engagement_id, "active")
     elif event_type == "coverage.status_changed":
         binding = ("coverage", engagement_id, payload.get("status"))
+    elif event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+        binding = ("queue", engagement_id, payload.get("status"))
     elif event_type == "report.generated":
         binding = ("report", payload.get("report_ref"), "draft")
     elif event_type == "operator.review_recorded":
@@ -864,7 +2110,7 @@ def _indexed_record(engagement: Path, entry: dict[str, Any], entity_id: str) -> 
     path = engagement / entry["path"]
     if path.suffix != ".jsonl":
         return load_json(path)
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in _governed_text(path).splitlines():
         record = json.loads(line)
         identity_values = {record.get(key) for key in ("event_id", "attempt_id", "artifact_id")}
         payload = record.get("payload", {})
@@ -885,7 +2131,7 @@ def compute_review_input_hash(engagement: Path, review: dict[str, Any], index: d
             raise RecordError("review_input_unresolved", f"{review['review_id']}:{reference}:{index.get(reference, [])}")
         entry = max(candidates, key=lambda item: (item.get("revision") or 0, item.get("recorded_at") or ""))
         record = _indexed_record(engagement, entry, reference)
-        digest = record.get("record_hash") or sha256_file(engagement / entry["path"])
+        digest = record.get("record_hash") or _governed_sha256_file(engagement / entry["path"])
         committed_inputs.append({"ref": reference, "digest": digest})
     return sha256_bytes(canonical_json_bytes(committed_inputs))
 
@@ -931,13 +2177,13 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "schema_version": 1, "engagement_id": engagement_id, "scope_hash": scope_hash,
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
-        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "coverage": "active", "reports": {}, "report_refs": [], "submission_refs": [],
+        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
+        "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
 
 
-def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
+def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
     engagement = engagement.absolute()
     events = read_ledger(engagement, "event")
     if not events or events[0]["event_type"] != "scope.attested":
@@ -961,6 +2207,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
     verify_file_authority(engagement, events, artifacts, allowed_record_orphans=allowed_record_orphans, allowed_artifact_orphans=allowed_artifact_orphans)
     state = _initial_snapshot(engagement_id, scope_hash)
     states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
+    states["queue"][engagement_id] = "active"
     seen_events: dict[str, dict[str, Any]] = {}
     committed_entity_ids: set[str] = set()
     committed_records: dict[str, dict[str, Any]] = {}
@@ -983,11 +2230,17 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
         validate_event_semantics(event)
         validate_temporal_search_reference(event, seen_events, index, engagement)
         payload = event["payload"]
+        typed_review_resolutions: set[str] = set()
+        authority_request_target: dict[str, Any] | None = None
+        authority_request_application: dict[str, Any] | None = None
         request = state["authority_requests"].get(payload.get("authority_request_ref")) if payload.get("authority_request_ref") else None
         expected_authority_action = {"environment.review_recorded": "review-preflight", "report.generated": "generate-report", "operator.review_recorded": "accept-report", "submission.recorded": "record-submission", "memory.disposition_recorded": "record-memory", "engagement.closed": "close", "finding.revised": "revise-finding", "scope.attested": "reattest-scope", "cleanup.updated": "record-cleanup", "operator_prior.recorded": "record-operator-prior", "engagement.reopened": "reopen", "migration.apply_authorized": "apply-migration"}.get(event["event_type"])
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "ledger_tail_repair" and payload.get("authority_request_ref"): expected_authority_action = "repair-ledger-tail"
         event_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
-        broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request["environment_ref"] == state["active_environment_ref"] and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
+        request_environment_matches = bool(request and (request["environment_ref"] == state["active_environment_ref"] or (event["event_type"] == "finding.revised" and request.get("target") is None and request["environment_ref"] is None)))
+        broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request_environment_matches and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
+        if event["event_type"] in {"operator_stop.recorded", "operator_resume.recorded"} and (event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("operator_id") != active_scope_operator):
+            raise RecordError("operator_queue_control_not_scope_authorized", event["event_id"])
         validate_reference_precedence(event, index, committed_entity_ids)
         if event["event_type"] == "record.committed":
             validate_committed_record_precedence(engagement, event, index, committed_entity_ids)
@@ -1006,10 +2259,12 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                     relevant_revisions.add(review["finding_revision"] - 1)
                 permitted_prior_types = {"claim_adjudication", "regrade"} if review["review_type"] == "regrade" else ({"regrade", "pocinator"} if review["review_type"] == "pocinator" else set())
                 prior_subjects_match = all(review_run_subjects.get(prior, (None, None, "", ""))[0] == review.get("proposed_finding_id") and review_run_subjects.get(prior, (None, None, "", ""))[1] in relevant_revisions and review_run_subjects.get(prior, (None, None, "", ""))[2] in permitted_prior_types and review_run_subjects.get(prior, (None, None, "", ""))[3] == review.get("entity_ref") for prior in prior_run_ids) if prior_run_ids else True
-                independence_required = review["review_type"] in {"claim_adjudication", "regrade", "pocinator", "coverage"}; strict_independence = independence_required and event["actor"]["role"] == "broker"; reviewer_session = independence.get("reviewer_session_id"); reviewer_model = independence.get("reviewer_model"); origin_session = origin_provenance.get("session_id"); origin_model = origin_provenance.get("model"); origin_time = datetime.fromisoformat(origin_record["recorded_at"].replace("Z", "+00:00")) if origin_record else None; review_time = datetime.fromisoformat(review["recorded_at"].replace("Z", "+00:00")); origin_precedes = bool(origin_time and (origin_time < review_time <= event_time if strict_independence else origin_time <= event_time)); same_principal = strict_independence and (independence.get("reviewer_id") == origin_actor.get("id") or reviewer_session == origin_session); same_model = strict_independence and reviewer_model == origin_model
-                if run_id in reviewer_run_ids or run_id in prior_run_ids or not prior_run_ids.issubset(reviewer_run_ids) or not prior_subjects_match or (review["review_type"] in {"regrade", "pocinator"} and not prior_run_ids) or not origin_entries or origin_record is None or not origin_precedes or (strict_independence and (not reviewer_session or not origin_session or not reviewer_model or not origin_model)) or same_principal or same_model or independence.get("prior_verdict_visible") is not False:
+                independence_required = review["review_type"] in {"claim_adjudication", "regrade", "pocinator", "coverage"}; strict_independence = independence_required and event["actor"]["role"] == "broker"; reviewer_session = independence.get("reviewer_session_id"); reviewer_model = independence.get("reviewer_model"); origin_runtime_session = origin_provenance.get("runtime_session_ref"); legacy_origin_session = origin_provenance.get("session_id") if origin_actor.get("role") != "broker" else None; origin_session = origin_runtime_session or legacy_origin_session; origin_model = origin_provenance.get("model"); origin_time = datetime.fromisoformat(origin_record["recorded_at"].replace("Z", "+00:00")) if origin_record else None; review_time = datetime.fromisoformat(review["recorded_at"].replace("Z", "+00:00")); origin_precedes = bool(origin_time and (origin_time < review_time <= event_time if strict_independence else origin_time <= event_time)); same_principal = strict_independence and (independence.get("reviewer_id") == origin_actor.get("id") or reviewer_session == origin_session); same_model = strict_independence and reviewer_model == origin_model
+                signer_fingerprint_missing = strict_independence and review["review_type"] in {"regrade", "pocinator"} and not isinstance(independence.get("reviewer_signer_fingerprint"), str)
+                if run_id in reviewer_run_ids or run_id in prior_run_ids or not prior_run_ids.issubset(reviewer_run_ids) or not prior_subjects_match or (review["review_type"] in {"regrade", "pocinator"} and not prior_run_ids) or not origin_entries or origin_record is None or not origin_precedes or (strict_independence and (not reviewer_session or not origin_session or not reviewer_model or not origin_model)) or signer_fingerprint_missing or same_principal or same_model or independence.get("prior_verdict_visible") is not False:
                     raise RecordError("review_freshness_not_bound", review["review_id"])
                 reviewer_run_ids.add(run_id)
+                state["reviewer_run_models"][run_id] = reviewer_model
                 review_run_subjects[run_id] = (review.get("proposed_finding_id"), review.get("finding_revision"), review["review_type"], review["entity_ref"])
         if event["event_type"] == "scope.attested" and event["sequence"] > 1 and payload.get("authority_request_ref"):
             scope_action = {"action_kind": "reattest-scope", "lane_id": request.get("lane_id") if request else None, "executor_id": payload.get("executor_id"), "session_id": event.get("provenance", {}).get("session_id"), "draft_digest": payload.get("scope_hash"), "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
@@ -1018,7 +2273,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             repair_action = {"action_kind": "repair-ledger-tail", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "ledger": str(payload.get("entity_id", "")).removesuffix("-ledger"), "operator_id": payload.get("operator_id"), "reason": payload.get("reason"), "recorded_at": event["recorded_at"]}
             if not broker_authorized or not consume_exact_authority(event, request, repair_action): raise RecordError("ledger_repair_authority_invalid", event["event_id"])
         if event["event_type"] == "migration.apply_authorized":
-            action_path = engagement / str(request.get("action_path", "")) if request else engagement/"missing"; stored_action = load_json(action_path) if action_path.is_file() and not action_path.is_symlink() else {}
+            action_path = engagement / str(request.get("action_path", "")) if request else engagement/"missing"; stored_action = load_json(action_path) if _governed_file_exists(action_path) else {}
             migration_exact = bool(request and payload.get("action_digest") == request["action_digest"] and stored_action.get("proposal_digest") == payload.get("proposal_digest") and sha256_bytes(str(stored_action.get("destination", "")).encode()) == payload.get("destination_digest") and consume_exact_authority(event, request, stored_action))
             if not broker_authorized or not migration_exact or payload.get("status") != "authorized": raise RecordError("migration_apply_authority_invalid", event["event_id"])
         if event["event_type"] == "cleanup.updated":
@@ -1032,7 +2287,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             disposition = load_json(engagement / entry["path"])
             memory_action = {"action_kind": "record-memory", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "file_digest": payload.get("disposition_digest"), "operator_id": payload.get("operator_id")}
             memory_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, memory_action)
-            if not memory_authority_exact or state["memory_disposition"] is not None or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or disposition["disposition"] != payload.get("memory_disposition") or disposition["scope_hash"] != state["scope_hash"] or disposition["human_review"]["reviewer"] != {"role": "operator", "id": active_scope_operator} or sha256_file(engagement / entry["path"]) != payload.get("disposition_digest"):
+            if not memory_authority_exact or state["memory_disposition"] is not None or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or disposition["disposition"] != payload.get("memory_disposition") or disposition["scope_hash"] != state["scope_hash"] or disposition["human_review"]["reviewer"] != {"role": "operator", "id": active_scope_operator} or _governed_sha256_file(engagement / entry["path"]) != payload.get("disposition_digest"):
                 raise RecordError("memory_disposition_binding_invalid", event["event_id"])
         if event["event_type"] == "engagement.closed":
             memory = state["memory_disposition"]
@@ -1042,7 +2297,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             memory_bound = memory is not None and payload.get("disposition_ref") == memory["disposition_ref"] and payload.get("disposition_digest") == memory["disposition_digest"]
             close_action = {"action_kind": "close", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "reason": event["rationale"], "recorded_at": event["recorded_at"]}
             close_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action)
-            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or states["coverage"].get(engagement_id, "active") not in {"coverage_dry", "blocked"} or pending_reviews or not reports_current:
+            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or states["coverage"].get(engagement_id, "active") not in {"coverage_dry", "budget_bounded", "blocked"} or pending_reviews or not reports_current:
                 raise RecordError("engagement_closure_gate_failed", event["event_id"])
         if event["event_type"] == "escalation.confirmed":
             require_scope_zone2_authorized(engagement, state["scope_hash"]); confirmation_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")); expires_at = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")); cleanup_event = seen_events.get(payload["cleanup_obligation_ref"]); bounded = payload.get("confirmation", {})
@@ -1058,11 +2313,11 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             reopen_action = {"action_kind": "reopen", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"], "reason": event["rationale"]}
             reopen_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, reopen_action)
             if not reopen_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id", active_scope_operator) != active_scope_operator: raise RecordError("engagement_reopen_authority_invalid", event["event_id"])
-        if event["event_type"] in {"authority.requested", "authority.resolved", "scope.amendment_proposed", "artifact.classified"} and not event.get("provenance", {}).get("session_id"):
+        if event["event_type"] in {"authority.requested", "authority.expired", "authority.resolved", "scope.amendment_proposed", "artifact.classified"} and not event.get("provenance", {}).get("session_id"):
             raise RecordError("session_provenance_required", event["event_id"])
         if event["event_type"] == "scope.amendment_proposed":
             expected_draft = f"scope-drafts/{payload['draft_digest'].removeprefix('sha256:')}.md"; draft_path = engagement / str(payload.get("draft_path", ""))
-            if payload.get("draft_path") != expected_draft or payload.get("supersedes_scope_hash") != state["scope_hash"] or not draft_path.is_file() or draft_path.is_symlink() or sha256_bytes(read_governed_file(draft_path)) != payload["draft_digest"]: raise RecordError("scope_draft_binding_invalid", event["event_id"])
+            if payload.get("draft_path") != expected_draft or payload.get("supersedes_scope_hash") != state["scope_hash"] or not _governed_file_exists(draft_path) or sha256_bytes(read_governed_file(draft_path)) != payload["draft_digest"]: raise RecordError("scope_draft_binding_invalid", event["event_id"])
         if event["event_type"] == "authority.resolved" and event["actor"] != {"role": "operator", "id": active_scope_operator}:
             raise RecordError("authority_resolution_operator_invalid", event["event_id"])
         if event["event_type"] == "authority.requested":
@@ -1071,7 +2326,23 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 raise RecordError("authority_request_invalid", event["event_id"])
             if event["actor"]["role"] == "broker":
                 expected_action_path = f"authority/requests/{request_id}.action.json"; action_path = engagement / str(payload.get("action_path", ""))
-                if payload.get("action_path") != expected_action_path or not action_path.is_file() or action_path.is_symlink() or sha256_bytes(read_governed_file(action_path)) != payload["action_digest"] or detect_secret_classes(read_governed_file(action_path)): raise RecordError("authority_action_record_invalid", event["event_id"])
+                action_bytes = read_governed_file(action_path) if payload.get("action_path") == expected_action_path and _governed_file_exists(action_path) else b""
+                if payload.get("action_path") != expected_action_path or sha256_bytes(action_bytes) != payload["action_digest"] or detect_secret_classes(action_bytes): raise RecordError("authority_action_record_invalid", event["event_id"])
+                action = load_json(action_path)
+                if action.get("action_kind") == "revise-finding" and "action_version" in action:
+                    if action_bytes != canonical_json_bytes(action) or payload.get("environment_ref") != state["active_environment_ref"] or action.get("lane_id") != payload.get("lane_id") or action.get("executor_id") != event["actor"]["id"] or action.get("session_id") != event.get("provenance", {}).get("session_id") or action.get("operator_id") != active_scope_operator:
+                        raise RecordError("revise_finding_v2_principal_binding_invalid", event["event_id"])
+                    authority_request_target = _validate_revise_finding_v2_action(action, state=state, engagement=engagement, index=index, committed_entity_ids=committed_entity_ids, seen_events=seen_events, attempts=attempts, artifacts=artifacts, requested_at=event["recorded_at"], context=event["event_id"])
+                    authority_request_application = {
+                        "action_path": payload["action_path"],
+                        "executor_id": action["executor_id"],
+                        "session_id": action["session_id"],
+                        "operator_id": action["operator_id"],
+                    }
+                    generation = (authority_request_target["id"], authority_request_target["expected_revision"], authority_request_target["adjudication_event_ref"], authority_request_target["adjudication_review_ref"])
+                    duplicate = next((prior_request for prior_request in state["authority_requests"].values() if prior_request.get("status") in {"pending_authority", "approved"} and isinstance(prior_request.get("target"), dict) and (prior_request.get("lane_id") == payload["lane_id"] or (prior_request["target"].get("id"), prior_request["target"].get("expected_revision"), prior_request["target"].get("adjudication_event_ref"), prior_request["target"].get("adjudication_review_ref")) == generation)), None)
+                    if duplicate is not None:
+                        raise RecordError("duplicate_active_finding_revision_request", event["event_id"])
             if payload.get("expires_at") is not None and datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")) <= datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")):
                 raise RecordError("authority_request_expiry_invalid", event["event_id"])
         if event["event_type"] == "authority.resolved":
@@ -1081,6 +2352,18 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             expired_at_resolution = request["expires_at"] is not None and datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")) > datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))
             if payload["resolution"] == "approved" and expired_at_resolution:
                 raise RecordError("authority_approval_expired", event["event_id"])
+        if event["event_type"] == "authority.expired":
+            request = state["authority_requests"].get(payload["request_id"])
+            if (
+                request is None
+                or request["status"] != "approved"
+                or request["request_event_ref"] != payload.get("request_event_ref")
+                or request["action_digest"] != payload.get("action_digest")
+                or request.get("expires_at") is None
+                or request["expires_at"] != payload.get("expires_at")
+                or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))
+            ):
+                raise RecordError("approved_authority_expiry_invalid", event["event_id"])
         if event["event_type"] == "environment.review_recorded":
             current_environment = state["environment_preflights"].get(payload["environment_ref"]); review_entry = _index_entry(index, payload.get("review_ref"), "review", engagement_id)
             review = load_json(engagement / review_entry["path"]) if review_entry else {}; environment_entry = _index_entry(index, payload["environment_ref"], "environment", engagement_id); environment = load_json(engagement / environment_entry["path"]) if environment_entry else {}
@@ -1109,7 +2392,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             if payload["status"] == "ready" and (environment.get("fidelity_complete") is not True or environment.get("collector", {}).get("reproducible") is not True or environment.get("identity", {}).get("runtime_digest") is None or safety.get("advisory_zone") != "clear_local" or safety.get("zone2_authorization_granted") is not False or safety.get("secret_scan_status") != "clean" or safety.get("cleanup_open_count") != 0 or v2_ready_invalid):
                 raise RecordError("environment_preflight_not_usable", event["event_id"])
             latest_preflight_ref = environment_ref
-        if event["event_type"] in {"candidate.proposed", "candidate.selected", "hypothesis.created"} and (states["coverage"].get(engagement_id) == "coverage_dry" or states["engagement"].get(engagement_id) == "closed"):
+        if event["event_type"] in {"candidate.proposed", "candidate.selected", "hypothesis.created"} and (states["coverage"].get(engagement_id) in {"coverage_dry", "budget_bounded"} or states["engagement"].get(engagement_id) == "closed"):
             raise RecordError("search_material_after_closed_coverage", event["event_id"])
         if event["event_type"] == "report.generated":
             report_ref = payload["report_ref"]; commitment = committed_records.get(report_ref)
@@ -1124,7 +2407,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             review_entry = _index_entry(index, manifest["adjudication_review_ref"], "review", engagement_id)
             adjudication_review = load_json(engagement / review_entry["path"]) if review_entry else {}
             expected_prior_revision = None if payload["finding_revision"] == 1 else payload["finding_revision"] - 1
-            if manifest.get("finding_id") != payload["finding_id"] or manifest.get("finding_revision") != payload["finding_revision"] or manifest.get("finding_digest") != finding_commitment["record_digest"] or manifest.get("report_id") != report_ref or sha256_file(engagement / commitment["record_path"]) != payload["report_manifest_digest"] or not report_path.is_file() or sha256_file(report_path) != manifest["report_digest"] or report_path.read_bytes() != render_internal_report(finding, manifest["included_claim_ids"], manifest["omitted_claims"]).encode("utf-8") or sha256_bytes(render_claim_proof(finding).encode("utf-8")) != manifest["claim_proof_matrix_hash"] or review_entry is None or manifest["adjudication_review_ref"] != finding.get("adjudication", {}).get("review_ref") or adjudication_review.get("review_type") != "claim_adjudication" or adjudication_review.get("proposed_finding_id") != payload["finding_id"] or adjudication_review.get("finding_revision") != expected_prior_revision or sha256_file(engagement / review_entry["path"]) != manifest["adjudication_review_digest"] or included & omitted or included | omitted != claim_ids or not included:
+            if manifest.get("finding_id") != payload["finding_id"] or manifest.get("finding_revision") != payload["finding_revision"] or manifest.get("finding_digest") != finding_commitment["record_digest"] or manifest.get("report_id") != report_ref or _governed_sha256_file(engagement / commitment["record_path"]) != payload["report_manifest_digest"] or not _governed_file_exists(report_path) or _governed_sha256_file(report_path) != manifest["report_digest"] or read_governed_file(report_path) != render_internal_report(finding, manifest["included_claim_ids"], manifest["omitted_claims"]).encode("utf-8") or sha256_bytes(render_claim_proof(finding).encode("utf-8")) != manifest["claim_proof_matrix_hash"] or review_entry is None or manifest["adjudication_review_ref"] != finding.get("adjudication", {}).get("review_ref") or adjudication_review.get("review_type") != "claim_adjudication" or adjudication_review.get("proposed_finding_id") != payload["finding_id"] or adjudication_review.get("finding_revision") != expected_prior_revision or _governed_sha256_file(engagement / review_entry["path"]) != manifest["adjudication_review_digest"] or included & omitted or included | omitted != claim_ids or not included:
                 raise RecordError("report_manifest_binding_mismatch", event["event_id"])
         if event["event_type"] == "operator.review_recorded":
             report = state["reports"].get(payload["report_ref"]); review_entry = _index_entry(index, payload["review_ref"], "review", engagement_id)
@@ -1137,7 +2420,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             report = state["reports"].get(payload["report_ref"]); submission_path = (engagement / payload["submission_path"]).resolve(); submission_root = (engagement / "submissions").resolve()
             submission_action = {"action_kind": "record-submission", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "report_id": payload["report_ref"], "file_digest": payload["submission_digest"], "program": payload["program"], "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
             submission_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, submission_action)
-            if not submission_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or report is None or state["findings"].get(report.get("finding_id"), {}).get("revision") != report.get("finding_revision") or report["status"] != "accepted" or not submission_path.is_relative_to(submission_root) or not submission_path.is_file() or submission_path.is_symlink() or sha256_file(submission_path) != payload["submission_digest"] or active_scope_operator not in payload["authorship_note"]:
+            if not submission_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or report is None or state["findings"].get(report.get("finding_id"), {}).get("revision") != report.get("finding_revision") or report["status"] != "accepted" or not submission_path.is_relative_to(submission_root) or not _governed_file_exists(submission_path) or _governed_sha256_file(submission_path) != payload["submission_digest"] or active_scope_operator not in payload["authorship_note"]:
                 raise RecordError("submission_authority_invalid", event["event_id"])
         if event["event_type"] in {"review.regrade_completed", "review.pocinator_completed"}:
             review_ref = payload["review_ref"]
@@ -1150,6 +2433,14 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             expected_type = "regrade" if event["event_type"] == "review.regrade_completed" else "pocinator"
             if review.get("review_type") != expected_type or review.get("entity_ref") != payload["finding_id"] or review.get("finding_revision") != payload["finding_revision"] or review.get("verdict") != payload["verdict"] or review.get("independence", {}).get("reviewer_id") != payload.get("reviewer_id", event["actor"]["id"]) or review.get("claim_tuple_hash") != payload["claim_tuple_hash"] or payload["claim_tuple_hash"] != claim_tuple_hash(finding):
                 raise RecordError("typed_review_binding_mismatch", event["event_id"])
+            typed_review_resolutions = _typed_review_supersession_refs(
+                event=event,
+                review=review,
+                state=state,
+                engagement=engagement,
+                index=index,
+                seen_events=seen_events,
+            )
             if expected_type == "regrade":
                 latest_regrades[(payload["finding_id"], payload["finding_revision"])] = {"event_id": event["event_id"], "verdict": payload["verdict"]}
             if expected_type == "pocinator":
@@ -1168,8 +2459,28 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 raise RecordError("claim_adjudication_review_not_committed", event["event_id"])
             review = load_json(engagement / review_entry["path"])
             expected_prior_revision = state["findings"].get(payload["entity_id"], {}).get("revision")
-            if sha256_file(engagement / review_entry["path"]) != payload["review_digest"] or review.get("review_type") != "claim_adjudication" or review.get("verdict") != payload["status"] or review.get("proposed_finding_id") != payload["entity_id"] or review.get("entity_ref") != payload["entity_id"] or review.get("finding_revision") != expected_prior_revision or review.get("independence", {}).get("reviewer_id") != payload.get("reviewer_id", event["actor"]["id"]):
+            if _governed_sha256_file(engagement / review_entry["path"]) != payload["review_digest"] or review.get("review_type") != "claim_adjudication" or review.get("verdict") != payload["status"] or review.get("proposed_finding_id") != payload["entity_id"] or review.get("entity_ref") != payload["entity_id"] or review.get("finding_revision") != expected_prior_revision or review.get("independence", {}).get("reviewer_id") != payload.get("reviewer_id", event["actor"]["id"]):
                 raise RecordError("claim_adjudication_review_mismatch", event["event_id"])
+            filing_rows = [
+                row for row in state["outstanding_reviews"]
+                if row.get("entity_ref") == payload["entity_id"]
+                and (
+                    (row.get("review_type") == "legacy_adjudication" and row.get("status") == "pending")
+                    or (row.get("review_type") == "regrade" and row.get("status") in {"correction_required", "evidence_collected"})
+                    or (row.get("review_type") == "regrade_escalation" and row.get("status") == "evidence_collected")
+                    or (row.get("review_type") == "pocinator" and row.get("status") == "correction_required")
+                )
+            ]
+            filing_refs = {
+                reference
+                for row in filing_rows
+                for reference in [row["review_ref"], *row.get("resolution_input_refs", [])]
+            }
+            if not filing_refs.issubset(set(review.get("input_refs", []))):
+                raise RecordError("claim_review_obligation_inputs_missing", event["event_id"])
+            required_statuses = {row.get("required_claim_status") for row in filing_rows if row.get("required_claim_status") is not None}
+            if required_statuses and (len(required_statuses) != 1 or payload["status"] not in required_statuses):
+                raise RecordError("claim_review_obligation_disposition_mismatch", event["event_id"])
         if event["event_type"] == "legacy.record_imported" and payload.get("imported_finding_id") is not None:
             finding_id, revision = payload["imported_finding_id"], payload["imported_revision"]
             commitment=committed_records.get(finding_id);finding_entry=_index_entry(index,finding_id,"finding",engagement_id,revision)
@@ -1177,7 +2488,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 raise RecordError("legacy_finding_import_invalid",event["event_id"])
             finding=load_json(engagement/finding_entry["path"])
             legacy=finding.get("legacy_import",{})
-            if finding.get("claim_state")!="needs_review" or finding.get("revision")!=1 or finding.get("engagement_id")!=engagement_id or legacy.get("source_artifact_ref")!=payload.get("source_artifact_ref") or legacy.get("source_hash")!=payload.get("source_hash") or sha256_file(engagement/finding_entry["path"])!=commitment["record_digest"]:
+            if finding.get("claim_state")!="needs_review" or finding.get("revision")!=1 or finding.get("engagement_id")!=engagement_id or legacy.get("source_artifact_ref")!=payload.get("source_artifact_ref") or legacy.get("source_hash")!=payload.get("source_hash") or _governed_sha256_file(engagement/finding_entry["path"])!=commitment["record_digest"]:
                 raise RecordError("legacy_finding_record_mismatch",event["event_id"])
         if event["event_type"] == "finding.revised":
             finding_id, revision = payload["finding_id"], payload["finding_revision"]
@@ -1187,23 +2498,55 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             prior = state["findings"].get(finding_id)
             expected_revision = 1 if prior is None else prior["revision"] + 1
             expected_supersedes = None if prior is None else prior["revision"]
-            finding_action = {"action_kind": "revise-finding", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "file_digest": payload["finding_digest"], "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
+            v2_target = request.get("target") if request else None
+            if isinstance(v2_target, dict):
+                finding_action = load_json(engagement / str(request.get("action_path", "")))
+                historical_application = request.get("application")
+                v2_binding = (
+                    finding_action.get("action_version") == 2
+                    and revise_finding_target_is_current(state, request, finding_action.get("proposal", {}))
+                    and isinstance(historical_application, dict)
+                    and finding_action.get("executor_id") == historical_application.get("executor_id")
+                    and finding_action.get("session_id") == historical_application.get("session_id")
+                    and finding_action.get("operator_id") == historical_application.get("operator_id")
+                    and finding_action.get("operator_id") == payload.get("operator_id")
+                    and finding_action.get("lane_id") == request.get("lane_id")
+                    and finding_action.get("file_digest") == payload.get("finding_digest")
+                    and finding_action.get("proposal", {}).get("change_reason") == payload.get("change_reason")
+                    and v2_target.get("id") == finding_id
+                    and v2_target.get("expected_revision") == revision
+                    and v2_target.get("claim_state") == payload.get("status")
+                    and v2_target.get("adjudication_event_ref") == payload.get("adjudication_event_ref")
+                    and v2_target.get("adjudication_review_ref") == payload.get("adjudication_review_ref")
+                    and v2_target.get("resolves_review_refs") == sorted(payload.get("resolves_review_refs", []))
+                )
+            else:
+                finding_action = {"action_kind": "revise-finding", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "file_digest": payload["finding_digest"], "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"]}
+                v2_binding = True
+            latest_adjudication = state["claim_adjudications"].get(finding_id)
+            latest_adjudication_exact = bool(latest_adjudication and latest_adjudication.get("status") == payload.get("status") and latest_adjudication.get("event_ref") == payload.get("adjudication_event_ref") and latest_adjudication.get("review_ref") == payload.get("adjudication_review_ref") and latest_adjudication.get("expected_filing_revision") == revision)
             finding_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, finding_action)
-            if not finding_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id", active_scope_operator) != active_scope_operator:
+            if not v2_binding or not finding_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id", active_scope_operator) != active_scope_operator:
                 raise RecordError("finding_filing_not_scope_operator", event["event_id"])
-            regrade_obligations = [item for item in state["outstanding_reviews"] if item["review_type"] in {"regrade_escalation", "regrade"} and item["entity_ref"] == finding_id and item["status"] in {"pending", "routed", "evidence_collected", "correction_required"}]
             resolutions = set(payload.get("resolves_review_refs", []))
-            if any(item["review_type"] == "regrade_escalation" and item["status"] != "evidence_collected" for item in regrade_obligations):
-                raise RecordError("escalation_evidence_not_collected", event["event_id"])
-            if any(item["review_ref"] not in resolutions for item in regrade_obligations):
+            filing_ready = set(_filing_ready_review_refs(state, finding_id))
+            blocking_review_error = _filing_blocking_review_error(state, finding_id)
+            if blocking_review_error is not None:
+                raise RecordError(blocking_review_error, event["event_id"])
+            required_regrade = {item["review_ref"] for item in state["outstanding_reviews"] if item["entity_ref"] == finding_id and item["review_type"] in {"regrade_escalation", "regrade"} and item["review_ref"] in filing_ready}
+            if not resolutions.issubset(filing_ready):
+                raise RecordError("finding_review_resolution_not_filing_ready", event["event_id"])
+            if not required_regrade.issubset(resolutions):
                 raise RecordError("regrade_correction_not_resolved", event["event_id"])
             if revision != expected_revision or payload["supersedes_revision"] != expected_supersedes:
                 raise RecordError("finding_revision_not_contiguous", event["event_id"])
+            if not latest_adjudication_exact:
+                raise RecordError("finding_adjudication_event_mismatch", event["event_id"])
             if commitment is None or finding_entry is None or commitment["record_revision"] != revision or commitment["record_digest"] != payload["finding_digest"]:
                 raise RecordError("finding_revision_not_committed", event["event_id"])
             finding = load_json(engagement / finding_entry["path"])
-            if finding.get("revision") != revision or finding.get("supersedes_revision") != expected_supersedes or finding.get("claim_state") != payload["status"] or finding.get("change_reason") != payload["change_reason"] or finding.get("adjudication", {}).get("review_ref") != payload["adjudication_review_ref"] or finding.get("scope_provenance", {}).get("scope_hash") != state["scope_hash"] or finding.get("scope_provenance", {}).get("environment_ref") != state["active_environment_ref"] or sha256_file(engagement / finding_entry["path"]) != payload["finding_digest"]:
-                raise RecordError("finding_revision_record_mismatch", event["event_id"], [{"finding_revision": finding.get("revision"), "event_revision": revision, "finding_supersedes": finding.get("supersedes_revision"), "expected_supersedes": expected_supersedes, "finding_state": finding.get("claim_state"), "event_state": payload.get("status"), "finding_change_reason": finding.get("change_reason"), "event_change_reason": payload.get("change_reason"), "finding_review_ref": finding.get("adjudication", {}).get("review_ref"), "event_review_ref": payload.get("adjudication_review_ref"), "finding_scope_hash": finding.get("scope_provenance", {}).get("scope_hash"), "active_scope_hash": state.get("scope_hash"), "finding_environment_ref": finding.get("scope_provenance", {}).get("environment_ref"), "active_environment_ref": state.get("active_environment_ref"), "file_digest_matches": sha256_file(engagement / finding_entry["path"]) == payload.get("finding_digest")}])
+            if finding.get("revision") != revision or finding.get("supersedes_revision") != expected_supersedes or finding.get("claim_state") != payload["status"] or finding.get("change_reason") != payload["change_reason"] or finding.get("adjudication", {}).get("review_ref") != payload["adjudication_review_ref"] or finding.get("scope_provenance", {}).get("scope_hash") != state["scope_hash"] or finding.get("scope_provenance", {}).get("environment_ref") != state["active_environment_ref"] or _governed_sha256_file(engagement / finding_entry["path"]) != payload["finding_digest"]:
+                raise RecordError("finding_revision_record_mismatch", event["event_id"], [{"finding_revision": finding.get("revision"), "event_revision": revision, "finding_supersedes": finding.get("supersedes_revision"), "expected_supersedes": expected_supersedes, "finding_state": finding.get("claim_state"), "event_state": payload.get("status"), "finding_change_reason": finding.get("change_reason"), "event_change_reason": payload.get("change_reason"), "finding_review_ref": finding.get("adjudication", {}).get("review_ref"), "event_review_ref": payload.get("adjudication_review_ref"), "finding_scope_hash": finding.get("scope_provenance", {}).get("scope_hash"), "active_scope_hash": state.get("scope_hash"), "finding_environment_ref": finding.get("scope_provenance", {}).get("environment_ref"), "active_environment_ref": state.get("active_environment_ref"), "file_digest_matches": _governed_sha256_file(engagement / finding_entry["path"]) == payload.get("finding_digest")}])
             attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
             artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
             proof = finding["proof"]
@@ -1241,7 +2584,7 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 raise RecordError("finding_adjudication_event_mismatch", event["event_id"])
             review_entry = _index_entry(index, payload["adjudication_review_ref"], "review", engagement_id)
             review = load_json(engagement / review_entry["path"]) if review_entry is not None else {}
-            if review_entry is None or payload["adjudication_review_ref"] not in committed_entity_ids or sha256_file(engagement / review_entry["path"]) != payload["adjudication_review_digest"] or review.get("proposed_finding_id") != finding_id or review.get("finding_revision") != expected_supersedes or finding.get("scope_provenance", {}).get("provenance", {}).get("actor", {}).get("id") != review.get("independence", {}).get("reviewer_id"):
+            if review_entry is None or payload["adjudication_review_ref"] not in committed_entity_ids or _governed_sha256_file(engagement / review_entry["path"]) != payload["adjudication_review_digest"] or review.get("proposed_finding_id") != finding_id or review.get("finding_revision") != expected_supersedes or finding.get("scope_provenance", {}).get("provenance", {}).get("actor", {}).get("id") != review.get("independence", {}).get("reviewer_id"):
                 raise RecordError("finding_adjudication_review_mismatch", event["event_id"])
             if states["claim"].get(finding_id) != payload["status"] or finding_id not in event["finding_refs"] or payload["adjudication_review_ref"] not in event["review_refs"]:
                 raise RecordError("finding_claim_state_mismatch", event["event_id"])
@@ -1259,7 +2602,9 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 if origin_ref not in seen_events or seen_events[origin_ref]["event_type"] != "operator_prior.recorded":
                     raise RecordError("hypothesis_origin_not_prior_operator_event", event["event_id"])
             elif origin_type == "reviewer_challenge":
-                if not ((origin_ref in seen_events and seen_events[origin_ref]["event_type"] in {"review.challenge_recorded", "review.regrade_completed"}) or _index_entry(index, origin_ref, "review", engagement_id)):
+                origin_event = seen_events.get(origin_ref)
+                negative_routing = bool(origin_event and origin_event["event_type"] == "routing.assessed" and origin_event["payload"].get("activation_strength") == "negative")
+                if not ((origin_event and origin_event["event_type"] in {"review.challenge_recorded", "review.regrade_completed"}) or negative_routing or _index_entry(index, origin_ref, "review", engagement_id)):
                     raise RecordError("hypothesis_origin_not_prior_challenge", event["event_id"])
             elif origin_type == "confirmed_primitive":
                 origin_event = seen_events.get(origin_ref)
@@ -1289,15 +2634,43 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
             current_dispositions = {key: value["status"] for key, value in state["hypotheses"].items()}
             if dispositions != current_dispositions:
                 raise RecordError("coverage_review_hypothesis_state_mismatch", f"review={dispositions}; state={current_dispositions}")
-        if event["event_type"] == "coverage.status_changed" and payload.get("status") == "coverage_dry":
+        if event["event_type"] == "coverage.status_changed" and payload.get("status") in {"coverage_dry", "blocked"}:
+            terminal_status = payload["status"]
             review_event = seen_events.get(payload["coverage_review_ref"])
-            if review_event is None or review_event["event_type"] != "review.coverage_completed" or review_event["payload"].get("verdict") != "coverage_dry":
-                raise RecordError("coverage_dry_without_cold_review", event["event_id"])
-            unresolved = {key: value["status"] for key, value in state["hypotheses"].items() if value["status"] not in {"exhausted", "closed"}}
-            if unresolved:
-                raise RecordError("coverage_dry_with_active_hypotheses", str(unresolved))
+            missing_code = "coverage_dry_without_cold_review" if terminal_status == "coverage_dry" else "coverage_blocked_without_cold_review"
+            if review_event is None or review_event["event_type"] != "review.coverage_completed" or review_event["payload"].get("verdict") != terminal_status:
+                raise RecordError(missing_code, event["event_id"])
+            latest_relevant_event = next(
+                (
+                    prior
+                    for prior in reversed(list(seen_events.values()))
+                    if prior["event_type"] != "session.end_checked"
+                ),
+                None,
+            )
+            if latest_relevant_event is None or latest_relevant_event["event_id"] != review_event["event_id"]:
+                raise RecordError("coverage_review_not_current", event["event_id"])
+            reviewed_dispositions: dict[str, str] = {}
+            for review_ref in review_event["review_refs"]:
+                entry = _index_entry(index, review_ref, "review", engagement_id)
+                review = load_json(engagement / entry["path"]) if entry is not None else {}
+                for item in review.get("hypothesis_dispositions", []):
+                    reviewed_dispositions[item["hypothesis_ref"]] = item["status"]
+            current_dispositions = {key: value["status"] for key, value in state["hypotheses"].items()}
+            if reviewed_dispositions != current_dispositions:
+                raise RecordError(
+                    "coverage_review_hypothesis_state_mismatch",
+                    f"review={reviewed_dispositions}; state={current_dispositions}",
+                )
+            if terminal_status == "coverage_dry":
+                unresolved = {key: value["status"] for key, value in state["hypotheses"].items() if value["status"] not in {"exhausted", "closed"}}
+                if unresolved:
+                    raise RecordError("coverage_dry_with_active_hypotheses", str(unresolved))
         for change in event["state_changes"]:
             validate_transition(states, change)
+        coverage_change = next((change for change in event["state_changes"] if change["dimension"] == "coverage"), None)
+        if coverage_change is not None:
+            state["coverage_counts"] = ({"disposed_count": payload["disposed_count"], "enumerated_count": payload["enumerated_count"]} if coverage_change["current"] == "budget_bounded" else None)
         event_type = event["event_type"]
         if event_type == "scope.attested":
             prior = state["scope_hash"]
@@ -1309,11 +2682,21 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                 for request in state["authority_requests"].values():
                     if request["status"] in {"pending_authority", "approved"}: request["status"] = "superseded"
         elif event_type == "authority.requested":
-            state["authority_requests"][payload["request_id"]] = {"request_id": payload["request_id"], "request_event_ref": event["event_id"], "action_kind": payload["action_kind"], "action_digest": payload["action_digest"], "action_path": payload.get("action_path"), "lane_id": payload["lane_id"], "status": "pending_authority", "requested_at": event["recorded_at"], "scope_hash": payload["scope_hash"], "environment_ref": payload["environment_ref"], "expires_at": payload["expires_at"], "resolved_at": None, "resolution_event_ref": None}
+            state["authority_requests"][payload["request_id"]] = {"request_id": payload["request_id"], "request_event_ref": event["event_id"], "action_kind": payload["action_kind"], "action_digest": payload["action_digest"], "action_path": payload.get("action_path"), "lane_id": payload["lane_id"], "status": "pending_authority", "requested_at": event["recorded_at"], "scope_hash": payload["scope_hash"], "environment_ref": payload["environment_ref"], "expires_at": payload["expires_at"], "resolved_at": None, "resolution_event_ref": None, "target": authority_request_target, "application": authority_request_application}
         elif event_type == "authority.resolved":
             request = state["authority_requests"][payload["request_id"]]; request["status"] = payload["resolution"]; request["resolved_at"] = payload["resolved_at"]; request["resolution_event_ref"] = event["event_id"]
+        elif event_type == "authority.expired":
+            request = state["authority_requests"][payload["request_id"]]; request["status"] = "expired"; request["resolved_at"] = event["recorded_at"]; request["resolution_event_ref"] = event["event_id"]
         elif event_type == "scope.amendment_proposed":
             state["scope_drafts"].append({"event_id": event["event_id"], "draft_path": payload["draft_path"], "draft_digest": payload["draft_digest"], "supersedes_scope_hash": payload["supersedes_scope_hash"]})
+        elif event_type in {"operator_stop.recorded", "operator_resume.recorded"}:
+            transition = {"event_ref": event["event_id"], "operator_id": payload["operator_id"], "reason": payload["reason"], "recorded_at": event["recorded_at"]}
+            state["queue_control"]["status"] = payload["status"]
+            if event_type == "operator_stop.recorded":
+                state["queue_control"]["last_stop"] = transition
+                state["queue_control"]["last_resume"] = None
+            else:
+                state["queue_control"]["last_resume"] = transition
         elif event_type == "environment.review_recorded":
             current = state["environment_preflights"][payload["environment_ref"]]; current["status"] = payload["status"]; current["operator_review_ref"] = payload["review_ref"]
             state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
@@ -1365,32 +2748,69 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
                         evidence_is_new = all(any(entry.get("recorded_at") and datetime.fromisoformat(entry["recorded_at"].replace("Z", "+00:00")) > opened_at for entry in index.get(reference, []) if entry.get("engagement_id") == engagement_id) for reference in payload["supporting_evidence_refs"])
                         if evidence_is_new:
                             item["status"] = "evidence_collected"
+                            item["resolution_input_refs"] = list(payload["supporting_evidence_refs"])
+        elif event_type == "claim.adjudicated":
+            review_entry = _index_entry(index, payload["review_ref"], "review", engagement_id)
+            adjudication_review = load_json(engagement / review_entry["path"])
+            reviewed_revision = adjudication_review.get("finding_revision")
+            state["claim_adjudications"][payload["entity_id"]] = {
+                "status": payload["status"],
+                "event_ref": event["event_id"],
+                "review_ref": payload["review_ref"],
+                "reviewer_run_id": adjudication_review["independence"]["reviewer_run_id"],
+                "reviewer_signer_fingerprint": adjudication_review["independence"].get("reviewer_signer_fingerprint"),
+                "reviewed_revision": reviewed_revision,
+                "expected_filing_revision": 1 if reviewed_revision is None else reviewed_revision + 1,
+                # Freshness is the independent review's time, not the later broker recording time.
+                "recorded_at": adjudication_review["recorded_at"],
+                "event_sequence": event["sequence"],
+                "input_refs": list(adjudication_review["input_refs"]),
+            }
+        elif event_type == "review.coverage_completed":
+            state["latest_coverage_review"] = {
+                "event_ref": event["event_id"],
+                "event_sequence": event["sequence"],
+                "review_refs": list(event["review_refs"]),
+                "verdict": payload["verdict"],
+                "hypothesis_dispositions_hash": hypothesis_dispositions_hash(state["hypotheses"]),
+            }
         elif event_type == "review.regrade_completed":
+            if typed_review_resolutions:
+                state["outstanding_reviews"] = [item for item in state["outstanding_reviews"] if item["review_ref"] not in typed_review_resolutions]
+            state["regrade_reviews"][f"{payload['finding_id']}:r{payload['finding_revision']}"] = {
+                "event_ref": event["event_id"],
+                "review_ref": payload["review_ref"],
+                "reviewer_run_id": review["independence"]["reviewer_run_id"],
+                "reviewer_signer_fingerprint": review["independence"].get("reviewer_signer_fingerprint"),
+                "verdict": payload["verdict"],
+            }
             if payload["verdict"] == "escalation_found":
-                state["outstanding_reviews"].append({"review_type": "regrade_escalation", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "pending", "hypothesis_ref": None, "opened_at": event["recorded_at"]})
-            elif payload["verdict"] in {"confirmed_with_correction", "needs_more_evidence", "blocked"}:
-                status = "correction_required" if payload["verdict"] == "confirmed_with_correction" else ("blocked" if payload["verdict"] == "blocked" else "pending")
-                state["outstanding_reviews"].append({"review_type": "regrade", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": status, "hypothesis_ref": None, "opened_at": event["recorded_at"]})
+                state["outstanding_reviews"].append({"review_type": "regrade_escalation", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "pending", "hypothesis_ref": None, "opened_at": event["recorded_at"], "opening_reviewer_run_id": review["independence"]["reviewer_run_id"]})
+            elif payload["verdict"] in {"confirmed_with_correction", "needs_more_evidence", "blocked", "refuted"}:
+                status = "correction_required" if payload["verdict"] in {"confirmed_with_correction", "refuted"} else ("blocked" if payload["verdict"] == "blocked" else "pending")
+                state["outstanding_reviews"].append({"review_type": "regrade", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": status, "hypothesis_ref": None, "opened_at": event["recorded_at"], "opening_reviewer_run_id": review["independence"]["reviewer_run_id"], **({"required_claim_status": "refuted"} if payload["verdict"] == "refuted" else {})})
         elif event_type == "review.pocinator_completed":
+            if typed_review_resolutions:
+                state["outstanding_reviews"] = [item for item in state["outstanding_reviews"] if item["review_ref"] not in typed_review_resolutions]
             key = f"{payload['finding_id']}:r{payload['finding_revision']}"
             prior_proof = state["proof_reviews"].get(key)
-            accumulate = prior_proof is not None and prior_proof["verdict"] == payload["verdict"] == "reward_hacked"
-            refs = ([*prior_proof["review_refs"], payload["review_ref"]] if accumulate and payload["review_ref"] not in prior_proof["review_refs"] else ([payload["review_ref"]] if not accumulate else prior_proof["review_refs"]))
-            reviewer_id = review["independence"]["reviewer_id"]
-            reviewer_ids = ([*prior_proof["reviewer_ids"], reviewer_id] if accumulate and reviewer_id not in prior_proof["reviewer_ids"] else ([reviewer_id] if not accumulate else prior_proof["reviewer_ids"]))
-            if payload["verdict"] == "verified": terminal = "verified"
-            elif payload["verdict"] == "blocked": terminal = "blocked"
-            elif payload["verdict"] == "reward_hacked" and payload["high_value"]: terminal = "second_review_confirmed" if len(refs) >= 2 and len(reviewer_ids) >= 2 else "pending_second_review"
-            else: terminal = "route_back"
-            state["proof_reviews"][key] = {"finding_revision": payload["finding_revision"], "claim_tuple_hash": payload["claim_tuple_hash"], "verdict": payload["verdict"], "review_refs": refs, "reviewer_ids": reviewer_ids, "terminal_status": terminal}
+            state["proof_reviews"][key] = _project_pocinator_proof(prior_proof, payload, review)
+            terminal = state["proof_reviews"][key]["terminal_status"]
+            if terminal == "second_review_confirmed" and isinstance(prior_proof, dict):
+                prior_review_refs = set(prior_proof.get("review_refs", []))
+                for item in state["outstanding_reviews"]:
+                    if item.get("review_type") == "pocinator" and item.get("status") == "correction_required" and item.get("source_review_ref") in prior_review_refs:
+                        item["resolution_input_refs"] = sorted({*item.get("resolution_input_refs", []), payload["review_ref"]})
             if terminal in {"route_back", "pending_second_review", "blocked"}:
-                state["outstanding_reviews"].append({"review_type": "pocinator", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "blocked" if terminal == "blocked" else "correction_required", "hypothesis_ref": None, "opened_at": event["recorded_at"]})
+                state["outstanding_reviews"].append({"review_type": "pocinator", "entity_ref": payload["finding_id"], "review_ref": event["event_id"], "reason": event["rationale"], "status": "blocked" if terminal == "blocked" else "correction_required", "hypothesis_ref": None, "opened_at": event["recorded_at"], "source_review_ref": payload["review_ref"], "opening_reviewer_run_id": review["independence"]["reviewer_run_id"]})
         elif event_type == "legacy.record_imported" and payload.get("imported_finding_id") is not None:
             commitment=committed_records[payload["imported_finding_id"]]
-            state["findings"][payload["imported_finding_id"]]={"revision":payload["imported_revision"],"status":"needs_review","digest":commitment["record_digest"],"adjudication_review_ref":None,"change_reason":"initial legacy reconstruction"}
+            state["findings"][payload["imported_finding_id"]]={"revision":payload["imported_revision"],"status":"needs_review","digest":commitment["record_digest"],"adjudication_review_ref":None,"adjudication_event_ref":None,"change_reason":"initial legacy reconstruction","claim_tuple_hash":None,"revision_event_ref":None}
             state["outstanding_reviews"].append({"review_type":"legacy_adjudication","entity_ref":payload["imported_finding_id"],"review_ref":event["event_id"],"reason":"Legacy finding requires independent adjudication before any authority or report acceptance.","status":"pending","hypothesis_ref":None,"opened_at":event["recorded_at"]})
         elif event_type == "finding.revised":
-            state["findings"][payload["finding_id"]] = {"revision": payload["finding_revision"], "status": payload["status"], "digest": payload["finding_digest"], "adjudication_review_ref": payload["adjudication_review_ref"], "change_reason": payload["change_reason"]}
+            finding_commitment = committed_records.get(payload["finding_id"])
+            finding_record = load_json(engagement / finding_commitment["record_path"]) if finding_commitment else {}
+            state["findings"][payload["finding_id"]] = {"revision": payload["finding_revision"], "status": payload["status"], "digest": payload["finding_digest"], "adjudication_review_ref": payload["adjudication_review_ref"], "adjudication_event_ref": payload["adjudication_event_ref"], "change_reason": payload["change_reason"], "claim_tuple_hash": claim_tuple_hash(finding_record), "revision_event_ref": event["event_id"]}
             resolved = set(payload.get("resolves_review_refs", []))
             state["outstanding_reviews"] = [item for item in state["outstanding_reviews"] if item["review_ref"] not in resolved]
         elif event_type == "report.generated":
@@ -1410,6 +2830,9 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
         if event_type == "record.committed":
             committed_entity_ids.add(payload["record_id"])
             committed_records[payload["record_id"]] = payload
+        if event_type != "session.end_checked":
+            state["coverage_relevant_sequence"] = event["sequence"]
+            state["coverage_relevant_event_ref"] = event["event_id"]
         state["last_event_id"] = event["event_id"]
         seen_events[event["event_id"]] = event
     if not allow_scope_drift:
@@ -1431,14 +2854,98 @@ def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | No
     state["attempt_count"] = len(attempts)
     state["artifact_count"] = len(artifacts)
     state["coverage"] = states["coverage"].get(state["engagement_id"], "active")
+    state["queue_control"]["status"] = states["queue"].get(state["engagement_id"], "active")
     state["ledger_hash"] = events[-1]["record_hash"]
     state["source_hashes"] = {
-        name: sha256_file(engagement / name) for name in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl")
+        name: sha256_bytes(read_governed_file(engagement / name))
+        for name in ("events.jsonl", "attempts.jsonl", "artifacts.jsonl")
     }
+    for control_candidate in state["control_candidates"]:
+        routing_ref = control_candidate["routing_event_id"]
+        hypothesis_refs = sorted(
+            hypothesis_id for hypothesis_id, hypothesis in state["hypotheses"].items()
+            if hypothesis.get("origin_type") == "reviewer_challenge" and hypothesis.get("origin_ref") == routing_ref
+        )
+        hypothesis_ref = hypothesis_refs[0] if hypothesis_refs else None
+        primary_refs = sorted(
+            attempt["attempt_id"] for attempt in attempts
+            if hypothesis_ref is not None
+            and attempt.get("hypothesis_ref") == hypothesis_ref
+            and attempt.get("experiment_ref") == routing_ref
+            and attempt.get("kind") == "primary"
+        )
+        control_candidate["hypothesis_ref"] = hypothesis_ref
+        control_candidate["primary_attempt_ref"] = primary_refs[0] if primary_refs else None
+    pending_attempts: dict[str, list[dict[str, Any]]] = {}
+    artifact_context = {
+        artifact["artifact_id"]: {
+            "created_at": artifact["created_at"],
+            "environment_ref": artifact["environment_ref"],
+        }
+        for artifact in artifacts
+    }
+    for hypothesis_id, hypothesis in state["hypotheses"].items():
+        adjudicated = set(hypothesis.get("experiment_refs", [])) | set(hypothesis.get("control_refs", []))
+        rows = [
+            {
+                "attempt_id": attempt["attempt_id"],
+                "kind": attempt["kind"],
+                "recorded_at": attempt["recorded_at"],
+                "evidence": [
+                    {"reference": reference, "recorded_at": artifact_context[reference]["created_at"]}
+                    for reference in attempt.get("evidence_refs", [])
+                    if reference in artifact_context
+                ],
+            }
+            for attempt in attempts
+            if attempt.get("hypothesis_ref") == hypothesis_id and attempt.get("attempt_id") not in adjudicated
+        ]
+        if rows:
+            pending_attempts[hypothesis_id] = rows
+    state["work_queue_context"] = {
+        "pending_attempts": pending_attempts,
+        "artifacts": artifact_context,
+    }
+    state["work_queue"] = compute_work_queue(state, attempts)
     errors = validate_record(state, "state-snapshot")
     if errors:
         raise RecordError("snapshot_schema_invalid", "reducer emitted invalid state", errors)
     return state
+
+
+def reduce_engagement(engagement: Path, *, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
+    """Reduce one identity-bound usable engagement; quarantine is never a bypass.
+
+    Mutation transactions already pass a ``/dev/fd/N`` alias while holding the kernel lock.  A
+    public caller is a read-only admission path: open the named root once, take its existing lock
+    without creating coordination state, and reduce exclusively through that bound alias.  The
+    source context buffers the return until the public name still identifies the opened inode.
+    """
+
+    engagement = engagement.absolute()
+    already_bound = (
+        len(engagement.parts) == 4
+        and engagement.parts[1:3] == ("dev", "fd")
+        and engagement.parts[3].isdigit()
+    )
+    if already_bound:
+        require_not_quarantined(engagement)
+        state = _reduce_engagement_unchecked(
+            engagement,
+            allowed_record_orphans=allowed_record_orphans,
+            allowed_artifact_orphans=allowed_artifact_orphans,
+            allow_scope_drift=allow_scope_drift,
+        )
+        require_not_quarantined(engagement)
+        return state
+
+    with bound_engagement_source(engagement) as bound:
+        return reduce_engagement(
+            bound,
+            allowed_record_orphans=allowed_record_orphans,
+            allowed_artifact_orphans=allowed_artifact_orphans,
+            allow_scope_drift=allow_scope_drift,
+        )
 
 
 def require_repair_authority_from_intact_prefix(engagement: Path, request_id: str, action_kind: str, action_digest: str, lane_id: str, applied_at: str) -> dict[str, Any]:
@@ -1452,7 +2959,7 @@ def require_repair_authority_from_intact_prefix(engagement: Path, request_id: st
         elif event["event_type"] == "scope.attested": active_environment = None
     applied = datetime.fromisoformat(applied_at.replace("Z", "+00:00")); expires = datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00")) if request.get("expires_at") else None; resolved = datetime.fromisoformat(resolution["recorded_at"].replace("Z", "+00:00")); action_path = engagement / str(request.get("action_path", ""))
     consumed = any(event["event_type"] != "record.committed" and event["payload"].get("authority_request_ref") == request_id for event in events)
-    if request.get("action_kind") != action_kind or request.get("action_digest") != action_digest or request.get("lane_id") != lane_id or request.get("scope_hash") != active_scope or request.get("environment_ref") != active_environment or resolution["actor"] != {"role": "operator", "id": signed_operator} or applied < resolved or expires is None or applied > expires or datetime.now(timezone.utc) > expires or consumed or not action_path.is_file() or action_path.is_symlink() or sha256_file(action_path) != action_digest: raise RecordError("repair_authority_invalid", request_id)
+    if request.get("action_kind") != action_kind or request.get("action_digest") != action_digest or request.get("lane_id") != lane_id or request.get("scope_hash") != active_scope or request.get("environment_ref") != active_environment or resolution["actor"] != {"role": "operator", "id": signed_operator} or applied < resolved or expires is None or applied > expires or datetime.now(timezone.utc) > expires or consumed or not _governed_file_exists(action_path) or _governed_sha256_file(action_path) != action_digest: raise RecordError("repair_authority_invalid", request_id)
     return {"request_id": request_id, "status": "approved", "request_event_ref": request_event["event_id"], "resolution_event_ref": resolution["event_id"]}
 
 
@@ -1479,7 +2986,7 @@ def write_snapshot(engagement: Path, snapshot: dict[str, Any]) -> None:
 def assert_resume_current(engagement: Path) -> dict[str, Any]:
     expected = reduce_engagement(engagement)
     snapshot_path = engagement / "state.snapshot.json"
-    if not snapshot_path.is_file() or snapshot_path.is_symlink() or read_governed_file(snapshot_path) != canonical_json_bytes(expected):
+    if not _governed_file_exists(snapshot_path) or read_governed_file(snapshot_path) != canonical_json_bytes(expected):
         raise RecordError("stale_state_snapshot", "run `reduce` to rebuild state.snapshot.json")
     from engagement_views import assert_views_current
     assert_views_current(engagement, expected)
@@ -1489,6 +2996,10 @@ def assert_resume_current(engagement: Path) -> dict[str, Any]:
 def append_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
     """Public notebook append boundary; authority and typed reviews use dedicated commands."""
     capability = classify_event(proposal.get("event_type", ""), proposal.get("payload", {}))
+    if proposal.get("event_type") == "authority.expired":
+        raise RecordError("canonical_notebook_command_required", "authority.expired")
+    if proposal.get("event_type") == "coverage.status_changed" and proposal.get("payload", {}).get("status") == "budget_bounded":
+        raise RecordError("external_driver_budget_boundary_required", "budget_bounded")
     if proposal.get("event_type") == "record.committed":
         raise RecordError("canonical_record_command_required", proposal.get("payload", {}).get("record_type", "unknown"))
     if capability["tier"] in {"authority", "real_world"}:
@@ -1504,19 +3015,27 @@ def append_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool 
 
 
 def _append_kernel_event_idempotent(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
-    existing = next((event for event in read_ledger(engagement, "event") if event["event_id"] == proposal["event_id"]), None)
-    if existing is not None:
-        strip_chain = lambda value: {key: item for key, item in value.items() if key not in {"sequence", "previous_hash", "record_hash"}}
-        if canonical_json_bytes(strip_chain(existing)) != canonical_json_bytes(strip_chain(proposal)): raise RecordError("event_id_collision", proposal["event_id"])
-        return existing
-    return _append_kernel_event(engagement, proposal, lock_held=lock_held)
+    with _engagement_transaction(engagement, lock_held) as engagement:
+        require_not_quarantined(engagement)
+        existing = next((event for event in read_ledger(engagement, "event") if event["event_id"] == proposal["event_id"]), None)
+        if existing is not None:
+            strip_chain = lambda value: {key: item for key, item in value.items() if key not in {"sequence", "previous_hash", "record_hash"}}
+            if canonical_json_bytes(strip_chain(existing)) != canonical_json_bytes(strip_chain(proposal)): raise RecordError("event_id_collision", proposal["event_id"])
+            return existing
+        return _append_kernel_event(engagement, proposal, lock_held=True)
 
 
-def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
+def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False, completion_claims_token: Any | None = None) -> dict[str, Any]:
     """Trusted kernel producer path; never expose this as a public command."""
     # The append, reduction, snapshot, and views share one lock so concurrent writers cannot publish
     # a projection older than the authoritative ledger tail.
-    with (nullcontext() if lock_held else engagement_lock(engagement)):
+    with _engagement_transaction(engagement, lock_held) as engagement:
+        require_not_quarantined(engagement)
+        if completion_claims_token is not None:
+            # This is before every private append-path write, including a scope-draft
+            # preservation write that can precede the proposed ledger record.
+            from completion_claims import assert_completion_claims_token_current_bound
+            assert_completion_claims_token_current_bound(engagement, completion_claims_token)
         current_events = read_ledger(engagement, "event")
         if not current_events:
             raise RecordError("scope_attestation_missing", "initialize engagement first")
@@ -1527,10 +3046,14 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         if proposal.get("event_type") not in {"scope.attested", "scope.amendment_proposed"}:
             draft_bytes = read_governed_file(engagement/"scope.md"); draft_digest = sha256_bytes(draft_bytes)
             if draft_digest != latest_scope_hash and not any(event["event_type"] == "scope.amendment_proposed" and event["payload"].get("draft_digest") == draft_digest for event in current_events):
+                if completion_claims_token is not None:
+                    # Token-bound closure may not consume a sanctioned writer path to preserve
+                    # unrecorded drift.  Propose the draft in a separate prior transaction.
+                    raise RecordError("completion_claims_scope_drift_unproposed", "token-bound append requires prior scope proposal")
                 if not draft_bytes or detect_secret_classes(draft_bytes): raise RecordError("scope_draft_invalid", "drifted scope bytes are empty or secret-shaped")
                 relative = f"scope-drafts/{draft_digest.removeprefix('sha256:')}.md"; destination = engagement/relative
-                if destination.exists() and read_governed_file(destination) != draft_bytes: raise RecordError("scope_draft_collision", relative)
-                if not destination.exists(): atomic_write(destination, draft_bytes)
+                if _governed_file_exists(destination) and read_governed_file(destination) != draft_bytes: raise RecordError("scope_draft_collision", relative)
+                if not _governed_file_exists(destination): atomic_write(destination, draft_bytes)
                 uid, sid = os.getuid(), os.getsid(0); draft_event = base_event(event_id=f"event-scope-draft-{draft_digest[-12:]}", engagement_id=current_events[0]["engagement_id"], recorded_at=proposal["recorded_at"], actor_role="broker", actor_id=f"local-uid-{uid}:broker", event_type="scope.amendment_proposed", rationale="Preserve drifted scope bytes without activating them.", payload={"draft_path": relative, "draft_digest": draft_digest, "supersedes_scope_hash": latest_scope_hash}, session_id=f"session-posix-{uid}-{sid}", operation_class="notebook")
                 _append_kernel_event(engagement, draft_event, lock_held=True); current_events = read_ledger(engagement, "event")
         if proposal.get("event_type") == "scope.attested":
@@ -1557,21 +3080,19 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         elif proposal.get("event_type") != "scope.attested":
             reduce_engagement(engagement)  # blocks every ordinary write after scope drift
         states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
+        states["queue"][current_events[0]["engagement_id"]] = "active"
         for event in current_events:
             for change in event["state_changes"]:
                 validate_transition(states, change)
         for change in proposal.get("state_changes", []):
             validate_transition(states, change)
         ledger_path = engagement / LEDGERS["event"][0]
-        verified_boundary = ledger_path.stat().st_size
+        verified_boundary = len(read_governed_file(ledger_path))
         record = append_ledger_record(engagement, "event", proposal, lock_held=True)
         try:
             snapshot = reduce_engagement(engagement)
         except Exception:
-            with open(ledger_path, "r+b") as handle:
-                handle.truncate(verified_boundary)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _truncate_governed_file(ledger_path, verified_boundary)
             raise
         write_snapshot(engagement, snapshot)
         from engagement_views import write_views
@@ -1604,36 +3125,39 @@ def register_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any
     return _register_artifact_core(engagement, file_path, metadata)
 
 
-def _register_legacy_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+def _register_legacy_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
     """Trusted Decision-0005/migration compatibility path; never exposed by the public CLI."""
     if metadata.get("schema_version") != 1 or metadata.get("operation_class") is not None or metadata.get("producer", {}).get("role") not in {"operator", "migration", "broker"} or (metadata.get("producer", {}).get("role") == "broker" and not metadata.get("producer_session_id")):
         raise RecordError("legacy_artifact_compatibility_invalid", metadata.get("artifact_id", "unknown"))
-    return _register_artifact_core(engagement, file_path, metadata)
+    return _register_artifact_core(engagement, file_path, metadata, lock_held=lock_held)
 
 
-def _register_artifact_core(engagement: Path, file_path: Path, metadata: dict[str, Any]) -> dict[str, Any]:
-    engagement = engagement.absolute()
+def _register_artifact_core(engagement: Path, file_path: Path, metadata: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
+    logical_engagement = engagement.absolute()
     governed_file = file_path.absolute()
-    try: relative_path = governed_file.relative_to(engagement)
+    try: relative_path = governed_file.relative_to(logical_engagement)
     except ValueError: raise RecordError("artifact_path_not_contained", "artifact must be a regular non-symlink file under engagement/evidence")
     if not relative_path.parts or relative_path.parts[0] != "evidence" or any(part in {"", ".", ".."} for part in relative_path.parts): raise RecordError("artifact_path_not_contained", "artifact must be a regular non-symlink file under engagement/evidence")
-    try: artifact_bytes = read_governed_file(governed_file)
-    except (OSError, RecordError): raise RecordError("artifact_path_not_contained", "artifact must be a regular non-symlink file under engagement/evidence")
-    relative = relative_path.as_posix(); artifact_digest = sha256_bytes(artifact_bytes)
-    if metadata.get("classified_source_digest") is not None and (artifact_digest != metadata.get("classified_source_digest") or len(artifact_bytes) != metadata.get("classified_source_size")):
-        raise RecordError("artifact_classified_source_mismatch", metadata.get("artifact_id", "unknown"))
-    secret_classes = detect_secret_classes(artifact_bytes)
-    if secret_classes:
-        raise RecordError("secret_shaped_artifact_content", "artifact registration blocked by secret-pattern classes", [{"class": value} for value in secret_classes])
-    metadata_secret_classes = detect_secret_classes(canonical_json_bytes(metadata))
-    if metadata_secret_classes:
-        raise RecordError("secret_shaped_artifact_metadata", "artifact metadata blocked by secret-pattern classes", [{"class": value} for value in metadata_secret_classes])
-    proposal = copy.deepcopy(metadata)
-    for trusted in ("relative_path", "sha256", "size", "immutable", "sequence", "previous_hash", "record_hash"):
-        if trusted in proposal:
-            raise RecordError("trusted_field_in_proposal", f"artifact metadata must not set {trusted}")
-    proposal.update({"relative_path": relative, "sha256": artifact_digest, "size": len(artifact_bytes), "immutable": True})
-    with engagement_lock(engagement):
+    relative = relative_path.as_posix()
+    with _engagement_transaction(logical_engagement, lock_held) as engagement:
+        require_not_quarantined(engagement)
+        governed_file = engagement / relative_path
+        try: artifact_bytes = read_governed_file(governed_file)
+        except (OSError, RecordError): raise RecordError("artifact_path_not_contained", "artifact must be a regular non-symlink file under engagement/evidence")
+        artifact_digest = sha256_bytes(artifact_bytes)
+        if metadata.get("classified_source_digest") is not None and (artifact_digest != metadata.get("classified_source_digest") or len(artifact_bytes) != metadata.get("classified_source_size")):
+            raise RecordError("artifact_classified_source_mismatch", metadata.get("artifact_id", "unknown"))
+        secret_classes = detect_secret_classes(artifact_bytes)
+        if secret_classes:
+            raise RecordError("secret_shaped_artifact_content", "artifact registration blocked by secret-pattern classes", [{"class": value} for value in secret_classes])
+        metadata_secret_classes = detect_secret_classes(canonical_json_bytes(metadata))
+        if metadata_secret_classes:
+            raise RecordError("secret_shaped_artifact_metadata", "artifact metadata blocked by secret-pattern classes", [{"class": value} for value in metadata_secret_classes])
+        proposal = copy.deepcopy(metadata)
+        for trusted in ("relative_path", "sha256", "size", "immutable", "sequence", "previous_hash", "record_hash"):
+            if trusted in proposal:
+                raise RecordError("trusted_field_in_proposal", f"artifact metadata must not set {trusted}")
+        proposal.update({"relative_path": relative, "sha256": artifact_digest, "size": len(artifact_bytes), "immutable": True})
         reduce_engagement(engagement, allowed_artifact_orphans={relative})
         records = read_ledger(engagement, "artifact")
         preview = materialize_ledger_record("artifact", proposal, records)
@@ -1641,15 +3165,12 @@ def _register_artifact_core(engagement: Path, file_path: Path, metadata: dict[st
         if reference_errors:
             raise RecordError("record_reference_invalid", "artifact references do not resolve", reference_errors)
         ledger_path = engagement / LEDGERS["artifact"][0]
-        verified_boundary = ledger_path.stat().st_size
+        verified_boundary = len(read_governed_file(ledger_path))
         record = append_ledger_record(engagement, "artifact", proposal, lock_held=True)
         try:
             snapshot = reduce_engagement(engagement)
         except Exception:
-            with open(ledger_path, "r+b") as handle:
-                handle.truncate(verified_boundary)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _truncate_governed_file(ledger_path, verified_boundary)
             raise
         write_snapshot(engagement, snapshot)
         from engagement_views import write_views
@@ -1658,7 +3179,7 @@ def _register_artifact_core(engagement: Path, file_path: Path, metadata: dict[st
 
 
 def append_attempt(engagement: Path, proposal: dict[str, Any]) -> dict[str, Any]:
-    with engagement_lock(engagement):
+    with engagement_lock(engagement) as engagement:
         reduce_engagement(engagement)  # scope and existing ledgers must be authoritative before write
         records = read_ledger(engagement, "attempt")
         preview = materialize_ledger_record("attempt", proposal, records)
@@ -1666,15 +3187,12 @@ def append_attempt(engagement: Path, proposal: dict[str, Any]) -> dict[str, Any]
         if reference_errors:
             raise RecordError("record_reference_invalid", "attempt references do not resolve", reference_errors)
         ledger_path = engagement / LEDGERS["attempt"][0]
-        verified_boundary = ledger_path.stat().st_size
+        verified_boundary = len(read_governed_file(ledger_path))
         record = append_ledger_record(engagement, "attempt", proposal, lock_held=True)
         try:
             snapshot = reduce_engagement(engagement)
         except Exception:
-            with open(ledger_path, "r+b") as handle:
-                handle.truncate(verified_boundary)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _truncate_governed_file(ledger_path, verified_boundary)
             raise
         write_snapshot(engagement, snapshot)
         from engagement_views import write_views

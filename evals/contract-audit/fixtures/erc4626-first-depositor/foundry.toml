@@ -1,0 +1,6 @@
+[profile.default]
+src = "src"
+test = "test"
+libs = ["lib"]
+optimizer = true
+remappings = ["@oz48/=lib/oz-4.8/", "@oz49/=lib/oz-4.9/"]

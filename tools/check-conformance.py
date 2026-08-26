@@ -14,6 +14,12 @@ security semantics:
   - finding fixtures honor the evidence-contract migration gate (Phase 2.5A)
   - the false-discovery corpus has a zero invalid-accept rate
   - the adversarial-candidate corpus is well-formed (>=1 retain, all immutable-touching = block)
+  - AGENTS.md stays byte-identical to CLAUDE.md (a preregistration pins its sha256)
+  - every evals/ fixture directory a card cites exists, or the card declares fixture_status: planned
+  - every intervention record carries an auditable quote and declares its provenance
+  - score_finding.py blocks every trap package and passes every control package
+  - every promoted lesson has an ablation fixture proving it changes a verdict
+  - the novelty mapper separates a card restatement from an unrelated idea
 
 Structural only: a green run means the evidence CONTRACT is present and well-formed (necessary), NOT
 that any finding is true (the model oracle still adjudicates that). Do not read green as "confirmed".
@@ -21,10 +27,18 @@ that any finding is true (the model oracle still adjudicates that). Do not read 
 Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
+import csv
+import gzip
+import hashlib
+import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tarfile
+import tempfile
 
 from engagement_records import (
     legacy_finding_inventory,
@@ -109,6 +123,81 @@ def check_cards(subdir, pattern_ids, cap_ids):
 
         check_routes_to(name, subdir, fm, pattern_ids)
         check_optional_capabilities(name, subdir, fm, cap_ids)
+
+
+def check_completion_claims():
+    """Keep this portable: only the checked-in manifest and synthetic fixture run are admitted."""
+    tools_dir = os.path.join(ROOT, "tools")
+    sys.path.insert(0, tools_dir)
+    try:
+        import completion_claims
+        completion_claims.load_pins()
+        manifest_ok = True
+        manifest_detail = ""
+    except Exception as exc:
+        manifest_ok = False
+        manifest_detail = type(exc).__name__
+    finally:
+        if sys.path and sys.path[0] == tools_dir:
+            sys.path.pop(0)
+    record(manifest_ok, "completion-claims: portable canonical grandfather manifest", manifest_detail)
+    result = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "completion-claims-test.py")], capture_output=True, text=True, check=False)
+    record(result.returncode == 0, "completion-claims: hermetic-only synthetic regression suite", (result.stdout + result.stderr).strip())
+
+
+def check_external_work_queue_driver():
+    """The Strategy-B local driver and its bounded session launcher are harness contracts."""
+    print("\n[external-work-queue] target-local driver and session launcher")
+    driver_label = "external work-queue driver regression suite"
+    if sys.platform != "darwin":
+        driver_label = (
+            "portable external work-queue driver regression suite "
+            "(Darwin launcher integrations not exercised)"
+        )
+    scripts = [
+        ("darwin-read-isolation-test.py", "read-isolation policy regression suite"),
+        ("record-review-atomicity-test.py", "signed record-review transaction regression suite"),
+        ("work-queue-admission-test.py", "work-queue admission predicate regression suite"),
+        ("work-queue-driver-test.py", driver_label),
+        (
+            "container-broker-protocol-test.py",
+            "container broker authentication and replay regression suite",
+        ),
+        (
+            "container-session-supervisor-test.py",
+            "container PID-1 relay and storage adjudication regression suite",
+        ),
+        (
+            "docker-session-runtime-test.py",
+            "Docker boundary unit suite (live Docker lane explicitly opt-in)",
+        ),
+        (
+            "docker-work-queue-integration-test.py",
+            "Docker queue integration suite (live Docker lane explicitly opt-in)",
+        ),
+        (
+            "docker-work-queue-drain-test.py",
+            "Docker reducer drain acceptance suite (live Docker lane explicitly opt-in)",
+        ),
+    ]
+    if sys.platform == "darwin":
+        scripts.insert(
+            1,
+            ("claude-work-session-test.py", "bounded Claude work-session regression suite"),
+        )
+    else:
+        print(
+            "  run portable read-isolation checks; skip bounded Claude work-session regression "
+            f"suite (unsupported on {sys.platform}; Darwin launcher integration not exercised)"
+        )
+    for script, label in scripts:
+        result = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "tools", script)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        record(result.returncode == 0, label, (result.stdout + result.stderr).strip())
 
 
 def check_routes_to(name, subdir, fm, pattern_ids):
@@ -537,6 +626,18 @@ def check_casebooks(pattern_ids):
         unknown = sorted(r for r in refs if r not in pattern_ids)
         record(not unknown, f"casebooks/{name}: pattern refs resolve",
                f"unknown: {unknown}" if unknown else "")
+    provenance = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "tools", "casebook-provenance-test.py")],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    record(
+        provenance.returncode == 0,
+        "casebooks: provenance, local resolution, and dynamic quarantine self-test",
+        (provenance.stdout + provenance.stderr)[-500:],
+    )
 
 
 SECRET_PATTERNS = [
@@ -683,6 +784,1130 @@ def check_adversarial_candidates():
     record(not leaks, "adversarial: every immutable-touching candidate is blocked", f"leaky: {leaks}" if leaks else "")
 
 
+def check_ideation_mapper():
+    """The novelty mapper must separate a restatement from an unrelated idea.
+
+    A mapper that calls everything novel is as useless as one that calls everything known. This
+    runs its own selftest: every card must map to itself as a rediscovery, and prose from an
+    unrelated domain must land as a novelty-candidate."""
+    print("\n[ideation] novelty mapper separation")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from ideation import load_cards, idf_table, nearest, classify
+    except ImportError as exc:
+        record(False, "ideation: module is importable", str(exc))
+        return
+    cards = load_cards()
+    if not cards:
+        return
+    idf, dflt = idf_table(cards)
+    TH = 0.60
+    hits = sum(1 for c in cards
+               if nearest(" ".join(sorted(c["tokens"])), cards, idf, dflt)[1] >= TH)
+    record(hits == len(cards), "ideation: every card maps to itself as a rediscovery",
+           f"{hits}/{len(cards)}")
+    unrelated = ["the sourdough starter must be fed twice daily with equal parts flour and water",
+                 "migratory geese navigate using the earth magnetic field during autumn",
+                 "concrete cures more slowly at low ambient temperature and retains moisture"]
+    bad = [u for u in unrelated
+           if classify(nearest(u, cards, idf, dflt)[1], TH) != "novelty-candidate"]
+    record(not bad, "ideation: unrelated prose lands as novelty-candidate",
+           f"{len(bad)} misclassified")
+
+
+def check_overlay_pins():
+    """A preregistration's safety-overlay pins must match the files, or the drift must be visible.
+
+    D-03 (`docs/engineering/002-decisions.md`) says a change to AGENTS.md's bytes invalidates a
+    frozen preregistration record, and added check_doctrine_mirror() for the CLAUDE/AGENTS pair.
+    Nothing was ever added for the pins. On 2026-08-23 all four overlay files had drifted and no
+    check noticed -- a pin with no enforcement is an instrument that returns a pass because it
+    never ran.
+
+    Drift on an AUTHORIZED record fails. Drift on a draft is reported as stale, not failed, because
+    doctrine legitimately moves before a study is authorized.
+    """
+    print("\n[overlay] preregistration safety-overlay pins track the files they pin")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import overlay_pins
+    except Exception as exc:
+        record(False, "overlay: module is importable", str(exc))
+        return
+    irregular = 0
+    for prereg in overlay_pins.find_preregs():
+        doc, rows = overlay_pins.inspect(prereg)
+        if not rows:
+            continue
+        rel = os.path.relpath(prereg, ROOT)
+        authorized = bool(doc.get("execution_authorized"))
+        bad = [r for r in rows if r["state"] != "ok"]
+        if authorized:
+            record(not bad, f"overlay/{rel}: authorized record's pins are intact",
+                   f"{[r['path'] for r in bad]} drifted -- D-03 invalidates this record")
+        else:
+            record(True, f"overlay/{rel}: draft record, {len(bad)} stale pin(s) reported",
+                   "")
+            irregular += len(bad)
+    record(irregular == 0, "overlay: no stale pins outstanding",
+           f"{irregular} stale -- refresh with tools/overlay_pins.py repin --apply")
+
+
+def check_kernel_precondition():
+    """GK must block a kernel-less engagement, and preflight must refuse before work starts.
+
+    A gate that has never said no is unproven (`docs/decisions/0011`), so this asserts BOTH
+    directions rather than only the happy path.
+    """
+    print("\n[kernel] GK blocks a kernel-less engagement; preflight refuses at Round 0")
+    import tempfile, shutil
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import finding_lifecycle as fl
+    except Exception as exc:
+        record(False, "kernel: finding_lifecycle importable", str(exc))
+        return
+    src = os.path.join(ROOT, "fixtures", "lifecycle-corpus")
+    with tempfile.TemporaryDirectory(prefix="kernel-precondition-") as tmp:
+        eng = os.path.join(tmp, "eng")
+        shutil.copytree(src, eng)
+        os.remove(os.path.join(eng, "events.jsonl"))          # a run that never started its kernel
+        ok, _ = fl.kernel_state(eng)
+        record(ok is False, "kernel: a missing events.jsonl is detected")
+        g, _ = fl.run_gates(os.path.join(eng, "unproven", "F-CORP"), eng)
+        blocked = [r["gate"] for r in g.rows if not r["ok"]]
+        record("GK" in blocked, "kernel: GK blocks when the kernel never ran", str(blocked))
+        ok2, _ = fl.kernel_state(src)
+        record(ok2 is True, "kernel: an initialized engagement passes")
+        g2, _ = fl.run_gates(os.path.join(src, "unproven", "F-CORP"), src)
+        blocked2 = [r["gate"] for r in g2.rows if not r["ok"]]
+        record("GK" not in blocked2, "kernel: GK does not fire on an initialized engagement",
+               str(blocked2))
+
+
+def check_kb_entries():
+    """Phase 8 / Workstream B. Every KB entry obeys the four rules and carries a live ablation proof.
+
+    B.3 is the load-bearing one: an entry that changes no routing decision is noise. This re-runs
+    the gate rather than trusting the `ablation_fixture` field the entry wrote about itself --
+    self-attestation is not evidence, and this is the same lesson the promotion gates learned.
+    """
+    print("\n[kb] cross-engagement entries obey the four rules and still change a decision")
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import kb as kbmod
+    except Exception as exc:
+        record(False, "kb: module is importable", str(exc))
+        return
+    entries = kbmod.load_kb()
+    ids = [e.get("id") for e in entries]
+    record(len(ids) == len(set(ids)), "kb: entry ids are unique (append-only)")
+    for e in entries:
+        eid = e.get("id", "<no id>")
+        record(not kbmod.validate(e), f"kb/{eid}: schema and the four rules",
+               "; ".join(kbmod.validate(e))[:200])
+        fx_rel = e.get("ablation_fixture")
+        if not fx_rel:
+            record(False, f"kb/{eid}: carries an ablation fixture",
+                   "B.3: a promoted entry must prove it changes a routing decision")
+            continue
+        fx_path = os.path.join(ROOT, fx_rel)
+        if not os.path.isfile(fx_path):
+            record(False, f"kb/{eid}: ablation fixture exists", fx_rel)
+            continue
+        with open(fx_path) as fh:
+            fx = json.load(fh)
+        changed, detail = kbmod.ablate(e, fx, entries)
+        record(changed, f"kb/{eid}: still changes a routing decision",
+               f"{detail['without']} == {detail['with']}")
+        rows = kbmod.route(fx["base"], fx["context"], entries)
+        record({r["route"] for r in rows} == {r["route"] for r in fx["base"]},
+               f"kb/{eid}: routing removed no route (D-09, rule 4)")
+    rc = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "kb.py"), "--self-test"],
+                        capture_output=True, text=True)
+    record(rc.returncode == 0, "kb: tool self-test", rc.stdout[-300:])
+    rc2 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "q02_compare.py"), "--self-test"],
+                         capture_output=True, text=True)
+    record(rc2.returncode == 0, "q02: prompt-ablation adjudicator self-test", rc2.stdout[-300:])
+    rc3 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "transcript_distill.py"),
+                          "--self-test"], capture_output=True, text=True)
+    record(rc3.returncode == 0, "distill: transcript distiller self-test", rc3.stdout[-300:])
+    rc4 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "overlay_pins.py"), "check"],
+                         capture_output=True, text=True)
+    record(rc4.returncode == 0, "overlay: pin check exits clean", rc4.stdout[-200:])
+
+
+def check_ablation_fixtures():
+    """Every promoted lesson must demonstrate a changed verdict.
+
+    One `promote` disposition existed across ~25 engagements. It was valid, reviewed and passed
+    every gate, and its winners.md still read `(none yet)`. The promote step had no next step. A
+    promotion that cannot show a decision changing is prose, so this gate refuses it."""
+    print("\n[ablation] promoted lessons demonstrate a changed verdict")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from ablation import fixture_index, promote_dispositions, run_fixture
+    except ImportError as exc:
+        record(False, "ablation: module is importable", str(exc))
+        return
+    idx = fixture_index()
+    for name, d in sorted(idx.items()):
+        ok, _ = run_fixture(d)
+        record(ok, f"ablation/{os.path.basename(d)}: lesson changes a verdict and keeps a control")
+    for rel, doc in promote_dispositions():
+        did = doc.get("disposition_id", "(no id)")
+        record(did in idx, f"{rel}: promote has an ablation fixture",
+               "a promotion without a demonstrated verdict change is prose")
+
+
+def check_finding_traps():
+    """Run tools/score_finding.py against the trap corpus and assert every decision.
+
+    A grader that blocks everything is useless, so this gates on both directions: every trap must
+    block and every control must pass. Package names carry the expectation — `control-*` must pass,
+    everything else must block. This mirrors fixtures/false-discovery/corpus.json, which gates on
+    invalid_accept_rate == 0."""
+    print("\n[finding-traps] score_finding.py decisions")
+    base = os.path.join(ROOT, "fixtures", "finding-traps")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from score_finding import score
+    except ImportError as exc:
+        record(False, "finding-traps: score_finding is importable", str(exc))
+        return
+    for name in sorted(os.listdir(base)):
+        pkg = os.path.join(base, name)
+        if not os.path.isdir(pkg):
+            continue
+        attest_path = os.path.join(pkg, "attest.json")
+        attest = load_json(attest_path) if os.path.isfile(attest_path) else None
+        res, _ = score(pkg, attest)
+        blocked = bool(res.failures)
+        want_block = not name.startswith("control-")
+        detail = ""
+        if blocked != want_block:
+            detail = ("blocked but should pass: " + "; ".join(
+                f"{c['family']}: {c['detail'] or c['label']}" for c in res.failures)
+                if blocked else "passed but should block")
+        record(blocked == want_block,
+               f"finding-traps/{name}: decision is {'block' if want_block else 'pass'}", detail)
+
+
+def check_finding_lifecycle():
+    """Run the promotion gates against the lifecycle fixtures and assert both directions.
+
+    Package names carry the expectation: `promote-*` must clear every gate, `block-*` must be
+    blocked, and each block fixture must be blocked by the ONE gate its name identifies. Testing the
+    specific gate matters — a fixture that blocks for the wrong reason would pass a naive both-
+    directions check while the gate it was built for silently does nothing.
+
+    Grounded in spotify-backstage-2026-07 (2026-08-09): findings were written straight into
+    findings/ with a self-set status. See engine/finding-lifecycle.md."""
+    print("\n[finding-lifecycle] promotion gates")
+    base = os.path.join(ROOT, "fixtures", "lifecycle")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+    except ImportError as exc:
+        record(False, "finding-lifecycle: module is importable", str(exc))
+        return
+    # fixture name suffix -> the gate that must be the blocker
+    expected_gate = {"privilege-mismatch": "G3", "privilege-not-established": "G3",
+                     "synthetic-review": "G4", "no-control": "G2", "no-cvss": "G5",
+                     "synthesized-state": "G6"}
+    seen_clear = 0
+    for name in sorted(os.listdir(base)):
+        pkg = os.path.join(base, name)
+        if not os.path.isdir(pkg):
+            continue
+        g, _ = run_gates(pkg)
+        blocked = [r["gate"] for r in g.blocked]
+        want_block = not name.startswith("promote-")
+        record(bool(blocked) == want_block,
+               f"lifecycle/{name}: decision is {'block' if want_block else 'promote'}",
+               f"blocked_by={blocked}")
+        if not want_block:
+            seen_clear += 1
+            continue
+        suffix = name.split("block-", 1)[-1]
+        want_gate = expected_gate.get(suffix)
+        if want_gate:
+            record(blocked == [want_gate],
+                   f"lifecycle/{name}: blocked by {want_gate} and nothing else",
+                   f"blocked_by={blocked}")
+    record(seen_clear >= 1, "lifecycle: at least one fixture promotes cleanly",
+           "a gate set that blocks everything is useless")
+
+    # G4 regression: the synthetic signature lives in the review CORPUS, not in one review.
+    # A package carrying a single plausible review is indistinguishable on its own, so G4 must also
+    # audit the engagement's whole claim_adjudication set. Running the gates over the eleven spotify
+    # findings on 2026-08-10 passed G4 on all eleven while the engagement corpus audited synthetic.
+    #
+    # The fixture keeps reviews at `unproven/<id>/reviews/`, which is where real engagements put
+    # them. It used to keep them in a top-level `reviews/` dir — a layout no engagement has ever
+    # had. The fixture was shaped to the code, so this check passed for a month while the corpus arm
+    # of G4 silently found nothing on every real engagement. Reshaped 2026-08-11. If this fixture is
+    # ever restructured again, restructure it toward what engagements actually look like.
+    corp = os.path.join(ROOT, "fixtures", "lifecycle-corpus")
+    pkg = os.path.join(corp, "unproven", "F-CORP")
+    if os.path.isdir(pkg):
+        alone, _ = run_gates(pkg)
+        with_corpus, _ = run_gates(pkg, corp)
+        record([r["gate"] for r in alone.blocked] == [],
+               "lifecycle-corpus: the package alone shows nothing",
+               f"blocked_by={[r['gate'] for r in alone.blocked]}")
+        record([r["gate"] for r in with_corpus.blocked] == ["G4"],
+               "lifecycle-corpus: the engagement corpus is what blocks G4",
+               f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
+        # A package path may live inside a governed engagement even when the caller deliberately
+        # omits --engagement. Bind that engagement for quarantine and source-identity admission,
+        # but preserve the historical package-only gate semantics unless corpus context is explicit.
+        with tempfile.TemporaryDirectory(prefix="lifecycle-governed-package-") as temporary:
+            governed = os.path.join(temporary, "synthetic-engagement")
+            shutil.copytree(corp, governed)
+            with open(os.path.join(governed, "scope.md"), "w", encoding="utf-8") as handle:
+                handle.write("# Synthetic governed lifecycle fixture\n")
+            with open(os.path.join(governed, ".record-kernel.lock"), "wb"):
+                pass
+            governed_pkg = os.path.join(governed, "unproven", "F-CORP")
+            governed_alone, _ = run_gates(governed_pkg)
+            governed_with_corpus, _ = run_gates(governed_pkg, governed)
+            record([row["gate"] for row in governed_alone.blocked] == [],
+                   "lifecycle-governed: an implicit engagement binding stays package-only",
+                   f"blocked_by={[row['gate'] for row in governed_alone.blocked]}")
+            record([row["gate"] for row in governed_with_corpus.blocked] == ["G4"],
+                   "lifecycle-governed: explicit engagement context audits the whole corpus",
+                   f"blocked_by={[row['gate'] for row in governed_with_corpus.blocked]}")
+
+            lifecycle_tool = os.path.join(ROOT, "tools", "finding_lifecycle.py")
+            implicit_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "gates", governed_pkg, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            explicit_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "gates", governed_pkg,
+                 "--engagement", governed, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            try:
+                implicit_payload = json.loads(implicit_cli.stdout)
+                explicit_payload = json.loads(explicit_cli.stdout)
+            except json.JSONDecodeError:
+                implicit_payload = explicit_payload = {}
+            record(implicit_cli.returncode == 0 and implicit_payload.get("decision") == "clear",
+                   "lifecycle-governed CLI: omitted --engagement stays package-only",
+                   implicit_cli.stdout + implicit_cli.stderr)
+            record(explicit_cli.returncode == 1
+                   and [row["gate"] for row in explicit_payload.get("gates", []) if not row["ok"]]
+                   == ["G4"],
+                   "lifecycle-governed CLI: explicit --engagement retains corpus semantics",
+                   explicit_cli.stdout + explicit_cli.stderr)
+
+    # G2 regression: a declaration cannot turn a replay into a negative control. These cases vary
+    # only the ref used in proof.negative_control_refs and exercise the production G2 function
+    # against a synthetic attempt ledger.
+    control_fixture = os.path.join(ROOT, "fixtures", "lifecycle-control-kind")
+    if os.path.isdir(control_fixture):
+        from finding_lifecycle import Gates, g2_control
+
+        def control_case(name):
+            case = os.path.join(control_fixture, "cases", name)
+            finding = load_json(os.path.join(case, "finding.json"))
+            attest = load_json(os.path.join(case, "attest.json"))
+            gate = Gates()
+            g2_control(finding, attest, gate, control_fixture)
+            return gate.rows[0]
+
+        replay = control_case("replay-as-control")
+        matched = control_case("matched-control")
+        record(not replay["ok"], "lifecycle-control-kind: replay-as-control blocks G2",
+               replay["detail"])
+        record(matched["ok"], "lifecycle-control-kind: matched control clears G2",
+               matched["detail"])
+
+
+def check_g1_g6_attempt_resolution():
+    """G1 resolves the primary attempt against the ledger — Phase 9's other half.
+
+    G1 used to check that a ref existed and a boolean was set. Both are strings the package writes
+    about itself, so it could be satisfied by naming an attempt that never ran. It now resolves the
+    ref and requires a non-control record with a signalling outcome — the mirror of G2, which
+    requires the control to resolve to held/no_signal.
+
+    Three paths, all asserted, because the first version got the legacy case wrong: it blocked both
+    already-promoted obyte findings, whose attempts.jsonl is a pre-lifecycle research journal with
+    no addressable records at all. An empty ledger is a format gap; a populated ledger missing one
+    ref is a dangling reference. Only the second is a defect."""
+    print("\n[finding-lifecycle] G1 + G6 attempt resolution")
+    base = os.path.join(ROOT, "fixtures", "lifecycle-attempts")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+    except ImportError as exc:
+        record(False, "g1: module is importable", str(exc))
+        return
+    for name, want_block in (("F-G1-OK", False), ("F-G1-DANGLING", True), ("F-G1-HELD", True)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g1/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        blocked = bool(g1) and not g1[0]["ok"]
+        record(blocked == want_block,
+               f"g1/{name}: {'blocks' if want_block else 'clears'}",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+    # G6 resolution — Phase 9's last conversion. G6 was a pure string check, so obyte-2026-08-004,
+    # the finding it exists to catch, passed if you relabelled one dict value. It now resolves
+    # `established_by` when that value is an attempt ref. Two declaration shapes are legitimate in
+    # the wild — an attempt id (angular-cli) and an evidence path with prose (obyte) — so the prose
+    # case must still PASS, or the conversion would false-alarm on every legacy package.
+    # G2's legacy carve-out, added 2026-08-16. G1 and G6 already skipped resolution when the ledger
+    # holds no addressable records; G2 did not, so both promoted obyte findings went from clear to
+    # blocked on G2 alone. The empty-ledger case must PASS and the dangling-ref case must still
+    # BLOCK — asserting only the first would re-open the gate entirely.
+    for name, want_block in (("F-G2-DANGLING", True),):
+        pkg = os.path.join(base, "unproven", name)
+        if os.path.isdir(pkg):
+            g, _ = run_gates(pkg, base)
+            g2 = [r for r in g.rows if r["gate"] == "G2"]
+            record((bool(g2) and not g2[0]["ok"]) == want_block,
+                   f"g2/{name}: blocks a dangling control ref in a populated ledger",
+                   g2[0]["detail"] if g2 else "no G2 row")
+    eng_legacy = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    pkg = os.path.join(eng_legacy, "findings", "obyte-2026-08-001")
+    if os.path.isdir(pkg):
+        g, _ = run_gates(pkg, eng_legacy)
+        g2 = [r for r in g.rows if r["gate"] == "G2"]
+        record(bool(g2) and g2[0]["ok"],
+               "g2/legacy-ledger: a pre-lifecycle attempts.jsonl does not block",
+               g2[0]["detail"] if g2 else "no G2 row")
+
+    for name, want_block in (("F-G6-OK", False), ("F-G6-DANGLING", True), ("F-G6-CONTROL", True),
+                             ("F-G6-HELD", True), ("F-G6-PROSE", False)):
+        pkg = os.path.join(base, "unproven", name)
+        if not os.path.isdir(pkg):
+            record(False, f"g6/{name}: fixture present", "missing")
+            continue
+        g, _ = run_gates(pkg, base)
+        g6 = [r for r in g.rows if r["gate"] == "G6"]
+        blocked = bool(g6) and not g6[0]["ok"]
+        record(blocked == want_block,
+               f"g6/{name}: {'blocks' if want_block else 'clears'}",
+               g6[0]["detail"] if g6 else "no G6 row")
+
+    # The legacy path: a ledger with no addressable records must NOT block. Regression guard for
+    # the false alarm this gate produced on its first run against obyte-ocore-2026-08.
+    eng = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    pkg = os.path.join(eng, "findings", "obyte-2026-08-001")
+    if os.path.isdir(pkg):
+        g, _ = run_gates(pkg, eng)
+        g1 = [r for r in g.rows if r["gate"] == "G1"]
+        record(bool(g1) and g1[0]["ok"],
+               "g1/legacy-ledger: a pre-lifecycle attempts.jsonl does not block",
+               g1[0]["detail"] if g1 else "no G1 row")
+
+
+def check_gates_on_real_data():
+    """Run the gates and the corpus audit against REAL engagement directories.
+
+    Why this exists. Every gate fixture in this repo was authored by the same person who wrote the
+    gates. On 2026-08-11 that cost us: `adjudication_audit.load_reviews` was not recursive and G4's
+    corpus arm looked for `<engagement>/reviews/`, a directory no engagement has ever had. Both
+    failed OPEN — the audit printed CLEAR over zero reviews — and the fixture hid it because the
+    fixture had been shaped to the code. The synthetic suite was green the whole time.
+
+    So the suite now also runs on directories nobody authored to satisfy it, with outcomes already
+    adjudicated by hand. These are records of known outcomes, not rules. If a package below is ever
+    repaired or re-adjudicated, update the expectation and say so in the OUTCOME document."""
+    print("\n[real-data] gates against adjudicated engagement packages")
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from finding_lifecycle import run_gates
+        from adjudication_audit import load_reviews, audit
+    except ImportError as exc:
+        record(False, "real-data: modules are importable", str(exc))
+        return
+
+    # obyte-ocore-2026-08, adjudicated 2026-08-11. 004 is the gate-validation miss: it passed all six
+    # earlier gates and promoted, and its impact rested on a fee window the PoC wrote itself.
+    # Assert only the gates this check is a regression test FOR — the adjudication gates whose
+    # verdicts were hand-adjudicated. G0 is deliberately excluded: it reads whatever files the
+    # package currently cites, so a live engagement that is still being worked moves it. On
+    # 2026-08-11 a concurrent escalation added ER5-independent-poc-review.md to the 001 package,
+    # citing four evidence paths that live in the ENGAGEMENT but were never copied into the
+    # PACKAGE, and G0 went red. That is a genuine packaging defect and it is reported to the
+    # operator — but it is not a regression in the gate machinery, and pinning it here would couple
+    # this suite to someone else's in-flight work. Narrowing the claim is not the same as weakening
+    # it: what is asserted below is exactly what was adjudicated.
+    eng = os.path.join(ROOT, "engagements", "obyte-ocore-2026-08")
+    expect = [("findings/obyte-2026-08-001", set()),
+              ("findings/obyte-2026-08-003", set()),
+              ("unproven/obyte-2026-08-004", {"G6"})]
+    if os.path.isdir(eng):
+        for rel, want in expect:
+            pkg = os.path.join(eng, rel)
+            if not os.path.isdir(pkg):
+                record(False, f"real-data: {rel} is present", "package missing")
+                continue
+            g, _ = run_gates(pkg, eng)
+            got = {r["gate"] for r in g.blocked} & {"G4", "G6"}
+            record(got == want,
+                   f"real-data/{os.path.basename(rel)}: adjudication gates blocked == {sorted(want) or '[]'}",
+                   f"G4/G6 blocked={sorted(got)}; all blocked={[r['gate'] for r in g.blocked]}")
+
+    # G4 corpus arm on real data. spotify-backstage's fifteen reviews were generated by a script that
+    # hardcoded `"verdict": "supported"` (2026-08-09). The package's single review is unremarkable on
+    # its own; only the corpus convicts. This is the check that was silently dead.
+    spot = os.path.join(ROOT, "engagements", "spotify-backstage-2026-07")
+    if os.path.isdir(spot):
+        rv = load_reviews(spot)
+        record(len(rv) >= 10, "real-data: the recursive walker finds the spotify corpus",
+               f"found {len(rv)} review(s) — a non-recursive walker finds 0 here")
+        if rv:
+            verdict, _, _ = audit(rv)
+            record(verdict == "synthetic",
+                   "real-data: the known-fabricated spotify corpus audits synthetic",
+                   f"verdict={verdict}")
+        pkg = os.path.join(spot, "unproven", "F-OIDC3")
+        if os.path.isdir(pkg):
+            alone, _ = run_gates(pkg)
+            with_corpus, _ = run_gates(pkg, spot)
+            record("G4" not in [r["gate"] for r in alone.blocked],
+                   "real-data/F-OIDC3: the package's own review shows nothing alone",
+                   f"blocked_by={[r['gate'] for r in alone.blocked]}")
+            record("G4" in [r["gate"] for r in with_corpus.blocked],
+                   "real-data/F-OIDC3: the engagement corpus is what blocks G4",
+                   f"blocked_by={[r['gate'] for r in with_corpus.blocked]}")
+
+    # gemini-cli: three reviews the OPERATOR wrote by hand in one sitting to mark earlier stubs
+    # non_compliant. Identical timestamps, one reviewer, one template, one verdict — structurally
+    # indistinguishable from generation. It must not be convicted as `synthetic` (nothing promotes
+    # on a rejection), and it must not be called `clear` either, because a batch of unreviewed kills
+    # is exactly how a real finding disappears quietly.
+    gem = os.path.join(ROOT, "engagements", "gemini-cli")
+    if os.path.isdir(gem):
+        rv = load_reviews(gem)
+        if rv:
+            verdict, sig, _ = audit(rv)
+            record(verdict == "rejections-unreviewed",
+                   "real-data/gemini-cli: an all-rejecting corpus is flagged, not convicted",
+                   f"verdict={verdict}")
+
+    # The rejecting branch must not become an escape hatch. An identically fabricated corpus has to
+    # be distinguishable from an honest one in BOTH directions. The first version of the rejecting
+    # rule zeroed every signal and returned `clear`, so a corpus firing all seven signals — fatal
+    # ones included — passed purely because its verdicts rejected. Found 2026-08-11 by a reviewer
+    # auditing the harness for downward bias, which is precisely the bias that hole would hide.
+    def _fab(i, verdict):
+        return {"review_id": f"fab-{i}", "review_type": "claim_adjudication",
+                "recorded_at": "2026-08-11T00:00:00Z", "input_hash": "sha256:" + "a" * 64,
+                "proposed_finding_id": f"F-{i}", "verdict": verdict, "corrections": [],
+                "rationale": "Reviewed and found non-compliant per policy.",
+                "conflicting_evidence": [], "independence": {"reviewer_id": "solo-reviewer"}}
+    rej, _, _ = audit([_fab(i, "refuted") for i in range(5)])
+    conf, _, _ = audit([_fab(i, "confirmed") for i in range(5)])
+    record(conf == "synthetic", "fabrication/confirming corpus audits synthetic", f"verdict={conf}")
+    record(rej == "rejections-unreviewed",
+           "fabrication/rejecting corpus is flagged, never clear",
+           f"verdict={rej} — a fabricated set of kills must stay visible")
+
+
+def check_disposition_ledger():
+    """The calibration arithmetic, and the floor that stops it speaking too early.
+
+    Built 2026-08-12. Four reviewers had just read every engagement record and concluded almost
+    nothing had ever been filed; the operator then said findings HAD been filed and adjudicated
+    across four programs. Both were right — the repository did not know. This ledger is the only
+    place external verdicts can live, so its arithmetic is worth a regression test."""
+    print("\n[disposition-ledger] calibration against external verdicts")
+    base = os.path.join(ROOT, "fixtures", "dispositions")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import disposition_ledger as DL
+    except ImportError as exc:
+        record(False, "disposition-ledger: module is importable", str(exc))
+        return
+
+    class A:
+        pass
+
+    for case, want in (("under-calling", "under-calling"), ("over-calling", "over-calling"),
+                       ("calibrated", "calibrated")):
+        d = os.path.join(base, case)
+        if not os.path.isdir(d):
+            continue
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["verdict"] == want, f"dispositions/{case}: verdict is {want}",
+               f"got {got['verdict']}, deltas under={got['under_called']} "
+               f"agree={got['agreed']} over={got['over_called']}")
+
+    # `not-assigned` must contribute NO delta. Folding an ungraded closure in as a zero would claim
+    # an agreement that never happened — the calibrated fixture carries 7 records and 5 gradings.
+    d = os.path.join(base, "calibrated")
+    if os.path.isdir(d):
+        a = A(); a.root = d; a.json = True; a.min = 5
+        buf = io.StringIO()
+        old, sys.stdout = sys.stdout, buf
+        try:
+            DL.cmd_calibrate(a)
+        finally:
+            sys.stdout = old
+        got = json.loads(buf.getvalue())
+        record(got["dispositions"] > got["both_graded"],
+               "dispositions: an ungraded closure contributes no delta",
+               f"{got['dispositions']} records, {got['both_graded']} graded")
+
+    # A thin ledger must refuse to issue a verdict. The harness's recurring failure is a confident
+    # answer over too little input; this is the one place that would be most tempting.
+    a = A(); a.root = os.path.join(base, "calibrated"); a.json = True; a.min = 99
+    buf = io.StringIO()
+    old, sys.stdout = sys.stdout, buf
+    try:
+        DL.cmd_calibrate(a)
+    finally:
+        sys.stdout = old
+    record(json.loads(buf.getvalue())["verdict"] == "insufficient-data",
+           "dispositions: below the floor, no verdict is issued",
+           "a lopsided two-record ledger is noise, not a finding")
+
+
+def check_framing_probe():
+    """Every packet handed to a grader must carry zero severity signals.
+
+    A grader who can see the band already assigned is not grading, they are agreeing. The scrub is
+    what makes the experiment an experiment, so it is asserted here rather than trusted. The
+    verifier earned its keep immediately: on the first real packet (F-F1) it caught a leak the
+    scrubber missed — `CVSS: S:C 8.5`, a partial vector and a score with text between them, which
+    none of the three vector patterns matched."""
+    print("\n[framing-probe] evidence packets carry no severity signal")
+    pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2")
+    if not os.path.isdir(pk):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        import framing_probe as FP
+    except ImportError as exc:
+        record(False, "framing-probe: module is importable", str(exc))
+        return
+
+    packets = sorted(f for f in os.listdir(pk) if f.endswith(".packet.json"))
+    record(len(packets) >= 3, "framing-probe: packets exist", f"{len(packets)} packet(s)")
+    for name in packets:
+        p = json.load(open(os.path.join(pk, name)))
+        leaked = FP.leaks(p["body"])
+        record(not leaked, f"framing-probe/{p['finding_id']}: zero severity signals survive",
+               f"{len(leaked)} leak(s): {[t for _, t in leaked[:3]]}")
+        import hashlib
+        record(hashlib.sha256(p["body"].encode()).hexdigest() == p["body_sha256"],
+               f"framing-probe/{p['finding_id']}: body matches its recorded hash",
+               "an edited packet invalidates the run it was used in")
+
+    # The scrubber must actually remove what the detector looks for, including the F-F1 shape.
+    probe = ("This is CRITICAL. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H base score 9.8 High. "
+             "Rated CVSS: S:C 8.5 and considered Medium overall, arguably Low.")
+    record(not FP.leaks(FP.scrub(probe)),
+           "framing-probe: the scrubber removes every signal the verifier detects",
+           f"residual after scrub: {FP.leaks(FP.scrub(probe))}")
+
+    # Three framings, one packet: the evidence must be byte-identical across them.
+    if packets:
+        p = json.load(open(os.path.join(pk, packets[0])))
+        record(len(set(FP.FRAMINGS.values())) == 3,
+               "framing-probe: the three framings are distinct texts")
+        record(all(p["body"] not in v for v in FP.FRAMINGS.values()),
+               "framing-probe: no framing text embeds the evidence",
+               "the packet must be the only shared content")
+
+
+def check_adjudication_audit():
+    """Run tools/adjudication_audit.py against the fixture pair and assert both directions.
+
+    A detector that flags every review set is useless, so this gates both ways: the synthetic case
+    must be called synthetic and the independent control must stay clear. Same shape as
+    check_finding_traps. The corpus is a fixture rather than a live engagement because engagements are
+    untracked Plane-3 — conformance proves the detector still works, and the operator points the CLI
+    at a real reviews/ directory.
+
+    Grounded in spotify-backstage-2026-07 (2026-08-09): seven findings registered on fifteen
+    claim_adjudication reviews that a script generated with the verdict hardcoded. One reviewer id,
+    zero corrections, zero conflicting evidence, three rationales. See engine/autonomy.md §4."""
+    print("\n[adjudication-audit] synthetic-adjudication detector")
+    base = os.path.join(ROOT, "fixtures", "adjudication")
+    if not os.path.isdir(base):
+        return
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from adjudication_audit import audit, load_reviews
+    except ImportError as exc:
+        record(False, "adjudication-audit: module is importable", str(exc))
+        return
+    seen = 0
+    for name in sorted(os.listdir(base)):
+        d = os.path.join(base, name)
+        if not os.path.isdir(d):
+            continue
+        seen += 1
+        reviews = load_reviews(d)
+        verdict, signals, stats = audit(reviews)
+        want = "clear" if name.startswith("independent-") else "synthetic"
+        fired = sorted(s["signal"] for s in signals if s["fired"])
+        record(verdict == want,
+               f"adjudication/{name}: verdict is {want}",
+               f"got {verdict!r} over {stats['reviews']} reviews; fired={fired}")
+        record(stats["reviews"] >= 3,
+               f"adjudication/{name}: corpus reaches the set-level minimum",
+               f"only {stats['reviews']} reviews")
+    record(seen >= 2, "adjudication: both a synthetic case and a control exist",
+           f"found {seen} fixture directories")
+
+
+def check_intervention_corpus():
+    """Every intervention record must carry a quote, and live and backfilled must stay separable.
+
+    The corpus is the baseline for CLM-0001 and the source of the regression corpus for
+    score-finding.py. A record with no quote cannot be audited, so it must not count toward either.
+    Absent corpus is not a failure; the check returns early."""
+    print("\n[interventions] operator-intervention ledger")
+    base = os.path.join(ROOT, "fixtures", "interventions")
+    if not os.path.isdir(base):
+        return
+    files = sorted(f for f in os.listdir(base) if f.endswith(".json"))
+    if not files:
+        return
+    seen = {}
+    for fn in files:
+        doc = load_json(os.path.join(base, fn))
+        entries = doc.get("entries", [])
+        record(len(entries) > 0, f"interventions/{fn}: corpus non-empty")
+        record(bool(doc.get("method")), f"interventions/{fn}: declares its method",
+               "add a `method` field saying how the entries were produced")
+        for e in entries:
+            eid = e.get("intervention_id", "?")
+            refs = e.get("source_refs") or []
+            record(any(r.get("quote") for r in refs),
+                   f"interventions/{eid}: carries an auditable quote",
+                   "no source_ref has a quote")
+            record(e.get("provenance") in ("live", "backfilled"),
+                   f"interventions/{eid}: provenance declared", f"got {e.get('provenance')!r}")
+            dup = eid in seen
+            record(not dup, f"interventions/{eid}: id is unique",
+                   f"also in {seen.get(eid)}" if dup else "")
+            seen[eid] = fn
+            if e.get("machine_checkable"):
+                record(bool(e.get("check_shape")),
+                       f"interventions/{eid}: machine_checkable names its check_shape",
+                       "machine_checkable is true but check_shape is absent")
+
+
+def check_doctrine_mirror():
+    """AGENTS.md must stay byte-identical to CLAUDE.md.
+
+    docs/agents/domain.md documents the mirror ("edit both together") and
+    evals/research-kernel/ab-readiness/preregistration.json pins a sha256 of AGENTS.md. A silent
+    divergence breaks the documented convention and invalidates a frozen preregistration record.
+    The convention was prose only until now; this makes it a machine check."""
+    print("\n[doctrine] CLAUDE.md / AGENTS.md mirror")
+    a = os.path.join(ROOT, "CLAUDE.md")
+    b = os.path.join(ROOT, "AGENTS.md")
+    if not (os.path.isfile(a) and os.path.isfile(b)):
+        record(False, "doctrine mirror: both CLAUDE.md and AGENTS.md are present")
+        return
+    da = hashlib.sha256(open(a, "rb").read()).hexdigest()
+    db = hashlib.sha256(open(b, "rb").read()).hexdigest()
+    record(da == db, "AGENTS.md is byte-identical to CLAUDE.md",
+           f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
+
+
+def check_queue_stop_doctrine():
+    """Keep the computed queue as the only completion predicate in active loop doctrine."""
+    print("\n[doctrine] computed queue is the single completion condition")
+    core_doctrine_paths = (
+        "engine/loop.md",
+        "engine/persistence.md",
+        "engine/multi-round-orchestration.md",
+    )
+    forbidden_stops = (
+        (re.compile(r"\bK\s*(?:≈|~=|~|=)\s*\d+\b", re.IGNORECASE), "numeric K dry-round constant"),
+        (re.compile(r"max(?:imum)?\s+dry\s+streak", re.IGNORECASE), "max dry-streak stop"),
+        (re.compile(r"consecutive\s+dry\s+rounds", re.IGNORECASE), "consecutive dry-round stop"),
+        (re.compile(r"\b\d+\s+(?:consecutive\s+)?dry\s+rounds?\b", re.IGNORECASE), "numeric dry-round stop"),
+        (re.compile(r"\b(?:\d+|one|two|three|four|five|six)\s+consecutive\s+(?:full\s+)?(?:coverage\s+)?(?:passes|rounds|iterations)\b", re.IGNORECASE), "consecutive coverage-pass stop"),
+        (re.compile(r"\b(?:round|dry[-_\s]+round)\s+(?:bound|floor)\b", re.IGNORECASE), "round bound or floor"),
+        (re.compile(r"\bfloor\s+applies\b", re.IGNORECASE), "implicit round floor"),
+    )
+    for relative in core_doctrine_paths:
+        path = os.path.join(ROOT, relative)
+        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        record(bool(text), f"queue stop doctrine: {relative} exists")
+        record("computed work queue" in text.lower(),
+               f"queue stop doctrine: {relative} names the computed work queue")
+        record("queue is empty" in text.lower() or "empty queue" in text.lower(),
+               f"queue stop doctrine: {relative} requires an empty queue for completion")
+
+    operational_paths = {"CLAUDE.md", "AGENTS.md", *core_doctrine_paths}
+    for relative_root in (
+        "engagements/_TEMPLATE/goal-prompts",
+        "skills",
+        ".pi/skills",
+    ):
+        absolute_root = os.path.join(ROOT, relative_root)
+        if not os.path.isdir(absolute_root):
+            continue
+        for directory, _, names in os.walk(absolute_root):
+            for name in names:
+                if name.endswith(".md"):
+                    operational_paths.add(os.path.relpath(os.path.join(directory, name), ROOT))
+    doctrine_offenders = []
+    for relative in sorted(operational_paths):
+        path = os.path.join(ROOT, relative)
+        if not os.path.isfile(path):
+            continue
+        text = open(path, encoding="utf-8", errors="replace").read()
+        for pattern, description in forbidden_stops:
+            match = pattern.search(text)
+            if match:
+                doctrine_offenders.append(f"{relative}: {description}: {match.group(0)}")
+    record(not doctrine_offenders,
+           "queue stop doctrine: active prompts, cards, and engine docs have no counter-based stop",
+           "; ".join(doctrine_offenders))
+    doctrine_regression_spellings = (
+        "K~3 dry rounds",
+        "K=2 consecutive dry rounds",
+        "two consecutive full coverage passes that add no material candidate",
+    )
+    missed_doctrine_spellings = [
+        spelling for spelling in doctrine_regression_spellings
+        if not any(pattern.search(spelling) for pattern, _ in forbidden_stops)
+    ]
+    record(not missed_doctrine_spellings,
+           "queue stop doctrine: guard recognizes numeric and semantic consecutive-pass stops",
+           ", ".join(missed_doctrine_spellings))
+
+    loop_text = open(os.path.join(ROOT, "engine/loop.md"), encoding="utf-8").read()
+    record("A dry round is a round that enqueued no new work." in loop_text,
+           "queue stop doctrine: a dry round is defined only as an observation")
+    record("single loop condition" in loop_text.lower(),
+           "queue stop doctrine: loop declares one computed loop condition")
+    record("if work: pause_objective" in loop_text and "complete_objective" in loop_text,
+           "queue stop doctrine: operator-only work pauses instead of completing")
+    ordered_loop_steps = (
+        "if reduced.queue_control.status == parked: exit_objective_noncompletion",
+        "if reduced.coverage in {budget_bounded, blocked}: exit_objective_noncompletion",
+        "if reduced.coverage == coverage_dry:",
+        "if work: record_state_invariant_error",
+        "complete_objective",
+        "if any(item.blocking for item in work): continue_objective",
+        "if work: pause_objective",
+    )
+    loop_step_positions = [loop_text.find(step) for step in ordered_loop_steps]
+    record(all(position >= 0 for position in loop_step_positions)
+           and loop_step_positions == sorted(loop_step_positions),
+           "queue stop doctrine: parked and terminal exits precede active work dispatch",
+           str(dict(zip(ordered_loop_steps, loop_step_positions))))
+
+    runtime_counter_patterns = (
+        re.compile(r"\bdry(?:_|-)?rounds?", re.IGNORECASE),
+        re.compile(r"\bdry(?:_|-)?streak", re.IGNORECASE),
+        re.compile(r"\bmax(?:_|-)?dry", re.IGNORECASE),
+        re.compile(r"\brounds?(?:_|-)?without(?:_|-)?(?:new(?:_|-)?)?work", re.IGNORECASE),
+        re.compile(r"\bno(?:_|-)?new(?:_|-)?work(?:_|-)?(?:rounds?|count|counter|streak)", re.IGNORECASE),
+    )
+    regression_spellings = (
+        "dry_round", "dry_round_count", "dryRoundCount", "--dry-round-count", "dry_streak",
+        "max-dry", "rounds_without_work", "roundsWithoutNewWork", "noNewWorkCount",
+        "no-new-work-counter",
+    )
+    missed_spellings = [
+        spelling for spelling in regression_spellings
+        if not any(pattern.search(spelling) for pattern in runtime_counter_patterns)
+    ]
+    record(not missed_spellings,
+           "queue stop doctrine: runtime guard recognizes snake, camel, kebab, and semantic counters",
+           ", ".join(missed_spellings))
+
+    offenders = []
+    code_extensions = (".py", ".sh", ".js", ".mjs", ".ts")
+    config_extensions = (".json", ".jsonl", ".yaml", ".yml", ".toml")
+    config_bases = {"hooks", ".claude", "schemas", "capabilities", ".github", "config", "engine"}
+    scanned_runtime_paths = set()
+    for base in ("tools", "hooks", ".claude", ".pi", "skills", "schemas", "capabilities", ".github", "config", "engine"):
+        root = os.path.join(ROOT, base)
+        if not os.path.isdir(root):
+            continue
+        for directory, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(directory, name)
+                is_code = name.endswith(code_extensions)
+                is_runtime_config = base in config_bases and name.endswith(config_extensions)
+                if not (is_code or is_runtime_config):
+                    continue
+                if os.path.samefile(path, __file__):
+                    continue
+                relative = os.path.relpath(path, ROOT)
+                scanned_runtime_paths.add(relative)
+                text = open(path, encoding="utf-8", errors="replace").read()
+                for pattern in runtime_counter_patterns:
+                    match = pattern.search(text)
+                    if match:
+                        offenders.append(f"{relative}: {match.group(0)}")
+                        break
+    expected_engine_configs = {
+        os.path.relpath(os.path.join(directory, name), ROOT)
+        for directory, _, names in os.walk(os.path.join(ROOT, "engine"))
+        for name in names
+        if name.endswith(config_extensions)
+    }
+    missing_engine_configs = sorted(expected_engine_configs - scanned_runtime_paths)
+    record(bool(expected_engine_configs),
+           "queue stop doctrine: engine runtime configuration surface exists")
+    record(not missing_engine_configs,
+           "queue stop doctrine: runtime traversal covers every engine configuration",
+           ", ".join(missing_engine_configs))
+    record(not offenders, "queue stop doctrine: code and runtime configuration read no dry-round counter",
+           ", ".join(sorted(offenders)))
+
+
+def check_cited_fixtures():
+    """Every fixture directory a card cites must exist, or the card must declare it as planned.
+
+    A card that names a fixture path that was never built reads as calibrated evidence when
+    nothing executes. Front-matter `fixture_status: planned` makes the gap explicit and passes."""
+    print("\n[fixtures] card-cited fixture paths resolve")
+    pat = re.compile(r"evals/[A-Za-z0-9_./-]*?fixtures/([A-Za-z0-9._-]+)/")
+    for subdir in ("vulns", "patterns", "techniques"):
+        for name, path in list_cards(subdir):
+            text = open(path).read()
+            fm = front_matter(text) or ""
+            planned = re.search(r"^fixture_status:\s*planned\s*$", fm, re.MULTILINE) is not None
+            cited = sorted({m.group(0) for m in pat.finditer(text)})
+            for rel in cited:
+                exists = os.path.isdir(os.path.join(ROOT, rel.rstrip("/")))
+                if exists:
+                    record(True, f"{subdir}/{name}: cited fixture exists — {rel}")
+                elif planned:
+                    record(True, f"{subdir}/{name}: {rel} absent, declared fixture_status: planned")
+                else:
+                    record(False, f"{subdir}/{name}: cited fixture exists — {rel}",
+                           "directory not found; build it or declare fixture_status: planned")
+
+
+def _build_fixture_npm_tarball(source_dir, destination):
+    """Build a byte-stable npm-style tarball from a checked-in source fixture."""
+    with (
+        open(destination, "wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
+    ):
+        for root, dirs, files in os.walk(source_dir):
+            dirs.sort()
+            for name in sorted(files):
+                path = os.path.join(root, name)
+                rel = os.path.relpath(path, source_dir).replace(os.sep, "/")
+                info = archive.gettarinfo(path, arcname=f"package/{rel}")
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = 0
+                with open(path, "rb") as handle:
+                    archive.addfile(info, handle)
+
+
+def check_corpus_enumeration():
+    """Issue #76: the frozen denominator is produced by code, never asserted by the agent."""
+    print("\n[corpus-enumeration] syntactic package + entrypoint denominator")
+    fixture = os.path.join(ROOT, "fixtures", "corpus-enumeration")
+    tool = os.path.join(ROOT, "tools", "corpus_enumeration.py")
+    schema = os.path.join(ROOT, "schemas", "corpus-enumeration.schema.json")
+    expected_path = os.path.join(fixture, "expected.json")
+    required = [tool, schema, expected_path]
+    record(all(os.path.isfile(path) for path in required),
+           "corpus enumeration tool, schema, and expected fixture exist",
+           f"missing={[os.path.relpath(path, ROOT) for path in required if not os.path.isfile(path)]}")
+    if not all(os.path.isfile(path) for path in required):
+        return
+
+    expected = load_json(expected_path)
+    with tempfile.TemporaryDirectory() as temp:
+        tarballs = os.path.join(temp, "tarballs")
+        os.mkdir(tarballs)
+        pin_rows = []
+        for package in expected["packages"]:
+            source = os.path.join(fixture, "packages", package["fixture"])
+            tarball = os.path.join(tarballs, f"{package['fixture']}.tgz")
+            _build_fixture_npm_tarball(source, tarball)
+            with open(tarball, "rb") as handle:
+                digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
+            pin_rows.append((package["status"], package["name"], package["version"], digest))
+
+        pins = os.path.join(temp, "package-pins.tsv")
+        with open(pins, "w", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+            writer.writerow(["status", "package", "version", "dist.shasum"])
+            writer.writerows(pin_rows)
+        artifact = os.path.join(temp, "corpus-enumeration.tsv")
+        freeze = os.path.join(temp, "corpus-enumeration.freeze.json")
+        command = [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+                   "--output", artifact, "--freeze", freeze]
+        built = subprocess.run(command, capture_output=True, text=True, check=False)
+        record(built.returncode == 0, "corpus enumeration builds from pinned tarballs",
+               (built.stdout + built.stderr).strip())
+        if built.returncode != 0:
+            return
+
+        with open(artifact) as handle:
+            lines = handle.read().splitlines()
+        caveat = "# coverage_semantics=visitation-not-understanding; necessary-not-sufficient-for-coverage"
+        record(lines and lines[0] == caveat,
+               "corpus artifact carries the visitation-not-understanding caveat")
+        rows = list(csv.DictReader(lines[1:], delimiter="\t"))
+        projected = [{key: row[key] for key in ("status", "package", "version", "entrypoint_path", "entrypoint_tag")}
+                     for row in rows]
+        record(projected == expected["rows"],
+               "corpus artifact distinguishes declared and undeclared-published entrypoints",
+               f"got={projected}")
+        record(all(re.fullmatch(r"[0-9a-f]{64}", row["entrypoint_sha256"] or "") for row in rows),
+               "every enumerated entrypoint carries a SHA-256 pin")
+        record(any(row["status"] == "out-of-scope" for row in rows),
+               "out-of-scope units remain enumerated with their disposition")
+
+        hostile_tarballs = os.path.join(temp, "hostile-tarballs")
+        os.mkdir(hostile_tarballs)
+        hostile_tarball = os.path.join(hostile_tarballs, "fixture-hostile.tgz")
+        hostile_members = {
+            "package/package.json": b'{"name":"fixture-hostile","version":"1.0.0"}\n',
+            "package/index.js": b"module.exports = true;\n",
+            "package/a\nb.js": b"export const hiddenByNewline = true;\n",
+        }
+        with tarfile.open(hostile_tarball, "w:gz") as archive:
+            for name, payload in hostile_members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+        with open(hostile_tarball, "rb") as handle:
+            hostile_digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
+        hostile_pins = os.path.join(temp, "hostile-pins.tsv")
+        with open(hostile_pins, "w") as handle:
+            handle.write(
+                "status\tpackage\tversion\tdist.shasum\n"
+                f"not-opened\tfixture-hostile\t1.0.0\t{hostile_digest}\n"
+            )
+        hostile_artifact = os.path.join(temp, "hostile-enumeration.tsv")
+        hostile_freeze = os.path.join(temp, "hostile-enumeration.freeze.json")
+        hostile = subprocess.run(
+            [sys.executable, tool, "build", "--pins", hostile_pins,
+             "--tarballs", hostile_tarballs, "--output", hostile_artifact,
+             "--freeze", hostile_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        record(hostile.returncode != 0 and not os.path.exists(hostile_artifact) and
+               not os.path.exists(hostile_freeze),
+               "hostile control characters cannot enter a frozen entrypoint path",
+               (hostile.stdout + hostile.stderr).strip())
+
+        manifest = load_json(freeze)
+        record(manifest.get("generated_by", {}).get("mode") == "syntactic" and
+               manifest.get("generated_by", {}).get("model_involvement") is False,
+               "freeze records syntactic generation with no model involvement")
+        record(manifest.get("granularity") == ["package", "entrypoint"] and
+               manifest.get("artifact", {}).get("row_count") == len(rows),
+               "freeze records package + entrypoint granularity and exact denominator")
+
+        verified = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                  capture_output=True, text=True, check=False)
+        record(verified.returncode == 0, "frozen corpus artifact re-verifies intact",
+               (verified.stdout + verified.stderr).strip())
+        hasher = os.path.join(ROOT, "tools", "hash-campaign-inputs.py")
+        generic_verified = subprocess.run([sys.executable, hasher, "--check", freeze],
+                                          capture_output=True, text=True, check=False)
+        record(generic_verified.returncode == 0,
+               "corpus freeze is compatible with the existing frozen-input checker",
+               (generic_verified.stdout + generic_verified.stderr).strip())
+
+        recovery_artifact = os.path.join(temp, "recovered-corpus-enumeration.tsv")
+        recovery_freeze = os.path.join(temp, "recovered-corpus-enumeration.freeze.json")
+        with open(artifact, "rb") as source, open(recovery_artifact, "wb") as destination:
+            destination.write(source.read())
+        recovered = subprocess.run(
+            [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+             "--output", recovery_artifact, "--freeze", recovery_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        recovered_verify = subprocess.run(
+            [sys.executable, tool, "verify", "--freeze", recovery_freeze],
+            capture_output=True, text=True, check=False,
+        ) if recovered.returncode == 0 else None
+        record(recovered.returncode == 0 and recovered_verify is not None and
+               recovered_verify.returncode == 0,
+               "an interrupted exact TSV is recoverably frozen instead of stranded",
+               (recovered.stdout + recovered.stderr +
+                ((recovered_verify.stdout + recovered_verify.stderr) if recovered_verify else "")).strip())
+
+        rejected_artifact = os.path.join(temp, "agent-authored-enumeration.tsv")
+        rejected_freeze = os.path.join(temp, "agent-authored-enumeration.freeze.json")
+        rejected_bytes = b"status\tpackage\nnot-opened\tasserted-by-agent\n"
+        with open(rejected_artifact, "wb") as handle:
+            handle.write(rejected_bytes)
+        rejected = subprocess.run(
+            [sys.executable, tool, "build", "--pins", pins, "--tarballs", tarballs,
+             "--output", rejected_artifact, "--freeze", rejected_freeze],
+            capture_output=True, text=True, check=False,
+        )
+        with open(rejected_artifact, "rb") as handle:
+            rejected_after_build = handle.read()
+        record(rejected.returncode != 0 and rejected_after_build == rejected_bytes and
+               not os.path.exists(rejected_freeze),
+               "build refuses to freeze an agent-authored denominator",
+               (rejected.stdout + rejected.stderr).strip())
+
+        with open(artifact, "rb") as handle:
+            original = handle.read()
+        overwrite = subprocess.run(command, capture_output=True, text=True, check=False)
+        with open(artifact, "rb") as handle:
+            artifact_after_overwrite = handle.read()
+        record(overwrite.returncode != 0 and artifact_after_overwrite == original,
+               "build refuses to replace an existing frozen denominator",
+               (overwrite.stdout + overwrite.stderr).strip())
+
+        with open(artifact, "ab") as handle:
+            handle.write(b"# drift\n")
+        drifted = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                 capture_output=True, text=True, check=False)
+        record(drifted.returncode != 0 and "DRIFT" in (drifted.stdout + drifted.stderr),
+               "artifact drift fails verification rather than rewriting the denominator",
+               (drifted.stdout + drifted.stderr).strip())
+
+        with open(artifact, "wb") as handle:
+            handle.write(original)
+        first_tarball = os.path.join(tarballs, f"{expected['packages'][0]['fixture']}.tgz")
+        with open(first_tarball, "ab") as handle:
+            handle.write(b"source-drift")
+        source_drifted = subprocess.run([sys.executable, tool, "verify", "--freeze", freeze],
+                                        capture_output=True, text=True, check=False)
+        with open(artifact, "rb") as handle:
+            artifact_after_source_drift = handle.read()
+        record(source_drifted.returncode != 0 and "DRIFT tarball:" in
+               (source_drifted.stdout + source_drifted.stderr) and artifact_after_source_drift == original,
+               "mid-run corpus drift is reported without replacing the frozen denominator",
+               (source_drifted.stdout + source_drifted.stderr).strip())
+
+
 def main():
     pattern_ids = collect_pattern_ids()
     cap_ids = collect_capability_ids()
@@ -694,6 +1919,8 @@ def main():
     check_capability_classes()
     check_capability_scope_flags()
     check_capability_must_reject()
+    check_completion_claims()
+    check_external_work_queue_driver()
     check_tool_family_manifests()
     check_tool_family_must_reject()
     check_payload_proposals()
@@ -704,6 +1931,23 @@ def main():
     check_decision5_record_schemas()
     check_false_discovery_corpus()
     check_adversarial_candidates()
+    check_doctrine_mirror()
+    check_queue_stop_doctrine()
+    check_cited_fixtures()
+    check_corpus_enumeration()
+    check_ideation_mapper()
+    check_ablation_fixtures()
+    check_kb_entries()
+    check_kernel_precondition()
+    check_overlay_pins()
+    check_finding_traps()
+    check_intervention_corpus()
+    check_adjudication_audit()
+    check_disposition_ledger()
+    check_framing_probe()
+    check_finding_lifecycle()
+    check_g1_g6_attempt_resolution()
+    check_gates_on_real_data()
 
     print(f"\n{CHECKS} checks, {len(FAILS)} failing")
     if FAILS:

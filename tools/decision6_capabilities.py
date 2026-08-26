@@ -14,6 +14,7 @@ MATRIX_PATH = ROOT / "engine" / "operation-capabilities.json"
 TIERS = {"notebook", "authority", "real_world"}
 ROLES = {"orchestrator", "hunter", "helper", "reviewer", "operator", "broker", "migration"}
 ENTRY_KEYS = {"tier", "allowed_roles", "blocking_scope", "required_evidence", "variants"}
+EXTERNAL_COMMANDS = {"export-flow", "normalize-runtime", "run-work-queue"}
 
 
 def load_capability_matrix(path: Path = MATRIX_PATH) -> dict[str, Any]:
@@ -73,9 +74,13 @@ def validate_capability_matrix(value: Any, *, public_commands: Iterable[str] | N
     for name, entry in events.items():
         problems.extend(_validate_entry(f"event:{name}", entry))
     if public_commands is not None:
-        missing = sorted(set(public_commands) - set(commands))
+        public = set(public_commands)
+        missing = sorted((public | EXTERNAL_COMMANDS) - set(commands))
         if missing:
-            problems.append("unclassified public commands: " + ",".join(missing))
+            problems.append("unclassified public/external commands: " + ",".join(missing))
+        unexpected = sorted(set(commands) - public - EXTERNAL_COMMANDS)
+        if unexpected:
+            problems.append("unbound capability commands: " + ",".join(unexpected))
     if event_types is not None:
         missing = sorted(set(event_types) - set(events))
         if missing:
@@ -142,6 +147,7 @@ def self_test() -> list[tuple[str, bool, str]]:
     matrix = load_capability_matrix()
     checks: list[tuple[str, bool, str]] = []
     checks.append(("fixed notebook command classifies", classify_command("preflight", matrix=matrix)["tier"] == "notebook", "preflight"))
+    checks.append(("completion-claim gate is a notebook-only check", classify_command("check-completion-claims", matrix=matrix)["tier"] == "notebook" and classify_command("check-completion-claims", matrix=matrix)["required_evidence"] == ["healthy_current_coverage_or_exact_opaque_pin"], "check-completion-claims"))
     checks.append(("record commit dispatches by immutable type", classify_event("record.committed", {"record_type": "review"}, matrix=matrix)["tier"] == "notebook" and classify_event("record.committed", {"record_type": "finding-v3"}, matrix=matrix)["tier"] == "authority", "record.committed"))
     for label, function in (
         ("unknown command fails closed", lambda: classify_command("future-unclassified", matrix=matrix)),
@@ -159,6 +165,35 @@ def self_test() -> list[tuple[str, bool, str]]:
     except RecordError as exc:
         forged_ok = exc.code == "actor_capability_invalid"
     checks.append(("caller role cannot upgrade reviewer capability", forged_ok, "claim.adjudicated"))
+    terminal_block = classify_event("engagement.blocked", {}, matrix=matrix)
+    try:
+        require_actor(terminal_block, "broker")
+        broker_blocked = False
+    except RecordError as exc:
+        broker_blocked = exc.code == "actor_capability_invalid"
+    checks.append((
+        "engagement terminal blocking is operator-only authority",
+        terminal_block["tier"] == "authority"
+        and terminal_block["allowed_roles"] == ["operator"]
+        and terminal_block["blocking_scope"] == "global"
+        and broker_blocked,
+        str(terminal_block),
+    ))
+    external_driver = classify_command("run-work-queue", matrix=matrix)
+    checks.append((
+        "external work-queue driver is one closed broker notebook operation",
+        external_driver == {
+            "operation": "command:run-work-queue",
+            "variant": None,
+            "allowed_roles": ["broker"],
+            "blocking_scope": "none",
+            "required_evidence": ["target_local_workspace", "reducer_owned_single_action", "external_budget"],
+            "tier": "notebook",
+        }
+        and EXTERNAL_COMMANDS == {"export-flow", "normalize-runtime", "run-work-queue"}
+        and EXTERNAL_COMMANDS.issubset(matrix["commands"]),
+        str(external_driver),
+    ))
     generated = {"advisory_zone": "clear_local", "contains_executable_capability": False, "acquisition_method": "generated_local", "sensitivity": "internal", "redaction_status": "not_needed", "media_type": "text/plain"}
     source = {**generated, "acquisition_method": "source_inspection"}
     checks.append(("caller advisory cannot downgrade mechanical artifact class", artifact_variant(generated) == "review_required" and artifact_variant(source) == "clear_local", str((artifact_variant(generated), artifact_variant(source)))))

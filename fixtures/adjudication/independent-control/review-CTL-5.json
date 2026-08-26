@@ -1,0 +1,36 @@
+{
+ "schema_version": 1,
+ "review_id": "review-CTL-5",
+ "engagement_id": "fixture-adjudication",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F-CTL-5",
+ "entity_ref": "F-CTL-5",
+ "recorded_at": "2026-08-09T18:58:07Z",
+ "input_refs": [
+  "attempt-F-CTL-5"
+ ],
+ "input_hash": "sha256:45f1758a2f7202b81c1df9d0829c0a879c112767d0b0681b56e04e34e7f072e4",
+ "evidence_refs": [
+  "artifact-F-CTL-5"
+ ],
+ "conflicting_evidence": [],
+ "independence": {
+  "reviewer_id": "reviewer-d",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-review-CTL-5",
+  "reviewer_session_id": "session-review-CTL-5",
+  "originating_run_id": "attempt-F-CTL-5",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism and control linkage."
+ },
+ "verdict": "refuted",
+ "rationale": "Not reachable at default configuration; the flag is off in the reference deployment.",
+ "corrections": [
+  {
+   "field": "claims.preconditions",
+   "correction": "non-default flag required"
+  }
+ ],
+ "required_next_actions": []
+}

@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-redteam-harness.local/schemas/work-queue-driver.schema.json",
+  "title": "External work queue driver result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ok",
+    "run_ref",
+    "status",
+    "completed",
+    "budget_kind",
+    "budget",
+    "models",
+    "sessions_started",
+    "wall_seconds",
+    "wall_deadline_overrun_seconds",
+    "queue",
+    "final_state_hash",
+    "history"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "ok": {"const": true},
+    "run_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+    "status": {
+      "enum": [
+        "completed",
+        "budget_spent",
+        "operator_parked",
+        "operator_required",
+        "coverage_blocked",
+        "coverage_budget_bounded",
+        "interrupted_unrecorded",
+        "reviewer_model_unavailable"
+      ]
+    },
+    "completed": {"type": "boolean"},
+    "budget_kind": {
+      "oneOf": [
+        {"enum": ["max_sessions", "max_wall_seconds"]},
+        {"type": "null"}
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_sessions", "max_wall_seconds", "session_timeout_seconds", "session_max_budget_usd"],
+      "properties": {
+        "max_sessions": {"type": "integer", "minimum": 1},
+        "max_wall_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "session_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "session_max_budget_usd": {
+          "oneOf": [
+            {"type": "number", "exclusiveMinimum": 0},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordinary", "reviewer_pool"],
+      "properties": {
+        "ordinary": {"type": "string", "minLength": 1},
+        "reviewer_pool": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "sessions_started": {"type": "integer", "minimum": 0},
+    "wall_seconds": {"type": "number", "minimum": 0},
+    "wall_deadline_overrun_seconds": {"type": "number", "minimum": 0},
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocking_count", "total_count", "seen_count", "disposed_count"],
+      "properties": {
+        "blocking_count": {"type": "integer", "minimum": 0},
+        "total_count": {"type": "integer", "minimum": 0},
+        "seen_count": {"type": "integer", "minimum": 0},
+        "disposed_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "final_state_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ordinal",
+          "item_ref",
+          "item_class",
+          "action_id",
+          "session_kind",
+          "principal",
+          "execution_principal",
+          "runtime_model",
+          "before_state_hash",
+          "after_state_hash",
+          "runtime"
+        ],
+        "properties": {
+          "ordinal": {"type": "integer", "minimum": 1},
+          "item_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "item_class": {"type": "string", "minLength": 1},
+          "action_id": {"type": "string", "minLength": 1},
+          "session_kind": {"enum": ["ordinary_bounded", "fresh_independent_reviewer"]},
+          "principal": {"enum": ["orchestrator", "hunter", "broker", "independent_reviewer"]},
+          "execution_principal": {"const": "broker"},
+          "runtime_model": {"type": "string", "minLength": 1},
+          "before_state_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "after_state_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "session_ref",
+              "started",
+              "timed_out",
+              "returncode",
+              "output_was_json",
+              "runtime_reported_error",
+              "cost_usd"
+            ],
+            "properties": {
+              "session_ref": {"type": "string", "format": "uuid"},
+              "started": {"const": true},
+              "timed_out": {"type": "boolean"},
+              "returncode": {"type": ["integer", "null"]},
+              "output_was_json": {"type": "boolean"},
+              "runtime_reported_error": {"type": ["boolean", "null"]},
+              "cost_usd": {"type": ["number", "null"], "minimum": 0}
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "completed"}}, "required": ["status"]},
+      "then": {"properties": {"completed": {"const": true}, "budget_kind": {"type": "null"}}},
+      "else": {"properties": {"completed": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "budget_spent"}}, "required": ["status"]},
+      "then": {"properties": {"budget_kind": {"enum": ["max_sessions", "max_wall_seconds"]}}},
+      "else": {"properties": {"budget_kind": {"type": "null"}}}
+    }
+  ]
+}

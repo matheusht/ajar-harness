@@ -79,9 +79,13 @@
         "review.regrade_completed",
         "review.pocinator_completed",
         "review.coverage_completed",
+        "coverage.reopened",
         "coverage.status_changed",
+        "session.end_checked",
         "report.generated",
         "operator.review_recorded",
+        "operator_stop.recorded",
+        "operator_resume.recorded",
         "submission.recorded",
         "cleanup.updated",
         "memory.disposition_recorded",
@@ -93,6 +97,7 @@
         "engagement.reopened",
         "engagement.closed",
         "authority.requested",
+        "authority.expired",
         "authority.resolved",
         "scope.amendment_proposed",
         "artifact.classified"
@@ -166,7 +171,8 @@
               "cleanup",
               "memory",
               "engagement",
-              "environment"
+              "environment",
+              "queue"
             ]
           },
           "entity_id": {
@@ -533,6 +539,39 @@
         "coverage_review_ref": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
         },
+        "disposed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enumerated_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "driver_run_ref": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        "driver_state_hash": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "budget_kind": {
+          "enum": ["max_sessions", "max_wall_seconds"]
+        },
+        "max_sessions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_wall_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "sessions_started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
         "decisive_falsifiers": {
           "type": "array",
           "minItems": 1,
@@ -771,6 +810,38 @@
             "null"
           ],
           "minLength": 1
+        },
+        "session_ref": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "decision": {
+          "enum": ["block", "release"]
+        },
+        "reason_code": {
+          "enum": [
+            "blocking_work_remaining",
+            "block_budget_exhausted",
+            "reentrant_state_unmatched"
+          ]
+        },
+        "confirmed_consecutive_blocks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "blocking_work_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining_work_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queue_digest": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "observed_state_hash": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
         }
       }
     },
@@ -1199,6 +1270,44 @@
       "if": {
         "properties": {
           "event_type": {
+            "const": "coverage.reopened"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "operation_class"
+        ],
+        "properties": {
+          "operation_class": {
+            "const": "notebook"
+          },
+          "payload": {
+            "required": [
+              "entity_id",
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "active"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
             "const": "coverage.status_changed"
           }
         },
@@ -1211,9 +1320,114 @@
           "payload": {
             "required": [
               "entity_id",
-              "status",
-              "coverage_review_ref"
+              "status"
+            ],
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "budget_bounded"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "required": [
+                "disposed_count",
+                "enumerated_count"
+              ]
+            },
+            "else": {
+              "required": [
+                "coverage_review_ref"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "operator_stop.recorded",
+              "operator_resume.recorded"
             ]
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "operation_class"
+        ],
+        "properties": {
+          "operation_class": {
+            "const": "authority"
+          },
+          "payload": {
+            "required": [
+              "entity_id",
+              "status",
+              "reason",
+              "operator_id"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "operator_stop.recorded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "status": {
+                "const": "parked"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "operator_resume.recorded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "status": {
+                "const": "active"
+              }
+            }
           }
         }
       }
@@ -1535,11 +1749,86 @@
     },
     {
       "if": {
-        "properties": {"event_type": {"enum": ["authority.requested", "authority.resolved", "scope.amendment_proposed", "artifact.classified"]}},
+        "properties": {"event_type": {"const": "session.end_checked"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["operation_class"],
+        "properties": {
+          "operation_class": {"const": "notebook"},
+          "actor": {
+            "properties": {
+              "role": {"const": "broker"},
+              "id": {"const": "session-end-backstop"}
+            }
+          },
+          "entity_refs": {"maxItems": 0},
+          "evidence_refs": {"maxItems": 0},
+          "review_refs": {"maxItems": 0},
+          "finding_refs": {"maxItems": 0},
+          "state_changes": {"maxItems": 0},
+          "payload": {
+            "additionalProperties": false,
+            "required": [
+              "session_ref",
+              "decision",
+              "reason_code",
+              "confirmed_consecutive_blocks",
+              "blocking_work_count",
+              "remaining_work_count",
+              "queue_digest",
+              "observed_state_hash"
+            ],
+            "properties": {
+              "session_ref": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+              },
+              "decision": {"enum": ["block", "release"]},
+              "reason_code": {
+                "enum": [
+                  "blocking_work_remaining",
+                  "block_budget_exhausted",
+                  "reentrant_state_unmatched"
+                ]
+              },
+              "confirmed_consecutive_blocks": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 6
+              },
+              "blocking_work_count": {"type": "integer", "minimum": 0},
+              "remaining_work_count": {"type": "integer", "minimum": 0},
+              "queue_digest": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+              },
+              "observed_state_hash": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"enum": ["authority.requested", "authority.expired", "authority.resolved", "scope.amendment_proposed", "artifact.classified"]}},
         "required": ["event_type"]
       },
       "then": {
         "required": ["operation_class"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "authority.expired"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["request_id", "request_event_ref", "action_digest", "expires_at", "status"]
+          }
+        }
       }
     },
     {

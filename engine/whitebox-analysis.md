@@ -141,6 +141,20 @@ downstream of that check, and none of them are mechanical:
    *"Do not submit an AI-generated report without first reviewing and confirming real impact and
    verifying a working Proof-of-Concept."*
 
+4. **A measurement is only as good as the set it was drawn from.** Problems 1–3 are all about whether
+   the check was *executed* faithfully. This one is upstream of that and survives fixing all three: a
+   perfectly-executed measurement of the wrong instance is indistinguishable, from the inside, from a
+   correct one. It reads as the most rigorous result in the pass, because every mechanical check
+   genuinely passed. Worked instance (crown-2026-08): a lane needed the cash-out ceiling for a token,
+   found a Uniswap V4 pool, built a real `unlock`-callback router, executed a real swap against the
+   real PoolManager, and cross-checked the PoolManager's **own return value** via a trace rather than
+   trusting a balance diff — every anti-reward-hack instinct in §4.3 applied correctly — and reported
+   "extraction = $0.00, measured". Six pools existed; the one measured had zero liquidity. The real
+   ceiling was ~$19.9K. Nothing in the verification-of-the-verification gate would have caught it,
+   because the harness *was* faithful; the sample was not. **Enumerate before you measure, and record
+   the enumeration next to the number** — `N=6 pools found by <method>` is part of the result, not
+   context around it. See `engine/regrade.md` §4a for the grading rule this feeds.
+
 **Consequence:** add an explicit gate that does not exist in the black-box loop — **verification-of-
 the-verification**. Before a Stage 4 "confirmed" is trusted, a separate pass (ideally a different
 model/context than the one that built the harness) must answer, specifically: *does this harness

@@ -1,0 +1,16 @@
+{
+  "name": "@fixture/declared",
+  "version": "1.2.3",
+  "exports": {
+    ".": "./dist/index.js",
+    "./feature/*": "./dist/features/*.js",
+    "./pattern/*": "./dist/pattern/*",
+    "./pattern/private/*": null,
+    "./conditional": {
+      "import": "./dist/conditional.mjs",
+      "require": "./dist/conditional.cjs",
+      "types": "./dist/conditional.d.ts"
+    },
+    "./package.json": "./package.json"
+  }
+}

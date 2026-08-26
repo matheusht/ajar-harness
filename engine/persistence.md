@@ -1,16 +1,17 @@
 # engine/persistence.md — exhausting leads, thoughtfully
 
-> The loop's default stop is "K≈3 dry rounds → move on" (`engine/loop.md`). That is right for a cold
-> surface and too eager when evidence says a vuln is **there**. This doc modulates the stop: evidence
-> *licenses* persistence, a bounded space makes "dry" mean something, a staged funnel keeps the grind
-> rigorous, and a counterweight keeps it from becoming tunnel vision.
+> The **computed work queue is the single completion condition** (`engine/loop.md`). Evidence changes
+> the work that must be represented in that queue: it *licenses* persistence, a bounded space makes
+> "dry" mean something, a staged funnel keeps the grind rigorous, and a counterweight keeps it from
+> becoming tunnel vision.
 > Pairs with `engine/loop.md` (the ladder) and `engine/routing.md` (the signals).
 
 ## When this applies (evidence-licensed, not default)
 Persistence mode turns on only under **evidence**: a confirmed finding, a `strong` activation signal,
 or an explicit operator prior ("there is a vuln in these 57 tables + 97 RPCs, I'm sure of it"). Absent
-evidence, the loop's normal coverage/dry stop governs — do **not** grind a cold surface. Fishing is not
-persistence; persistence is licensed by a signal that something here is already wrong.
+evidence, the computed work queue governs without expanding the bounded search — do **not** grind a
+cold surface. Fishing is not persistence; persistence is licensed by a signal that something here is
+already wrong.
 
 ## The core inversion
 Default loop: a refusal/dead-end is an input to the next rung, terminal verdict is coverage/dry. With
@@ -75,7 +76,9 @@ on instead of training-set intuition. (`casebooks/`, `engine/routing.md`.)
 
 ## Terminal verdicts (what "done" means here)
 - **covered-dry** — the bounded space is fully enumerated and adjudicated; every material route is
-  decisively `exhausted` or `closed`. A merely `held` route remains unresolved and cannot support dry.
+  decisively `exhausted` or `closed`, the computed work queue's final cold-review item has been closed,
+  and the reduced queue is empty. A non-empty operator-only queue is paused, not complete. A merely
+  `held` route remains unresolved and cannot support dry.
 - **confirmed / chained** — found, and composed forward where a finding unlocks the next.
 - **real-but-capped** — the vuln is real but a held control bounds its impact, and the cap is proven.
 
@@ -88,5 +91,5 @@ matches every current hypothesis disposition. A signed-scope operator prior can 
 exhausted hypothesis and coverage, while leaving claim state untouched. The reducer enforces these
 boundaries without prescribing how the researcher generates or revises hypotheses.
 
-A dry verdict is only credible once the space was *bounded* and *enumerated*; "dry after one pass" is
-the failure mode this whole doc exists to prevent.
+A dry verdict is only credible once the space was *bounded* and *enumerated* and the computed work
+queue is clear; "dry after one pass" is the failure mode this whole doc exists to prevent.

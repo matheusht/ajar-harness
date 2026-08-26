@@ -58,6 +58,47 @@ Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown
 `docs/decision-0006-agent-autonomous-record-kernel.md` for commands, trust boundaries, migration, telemetry,
 and the precise distinction between conformance, regression parity, and efficacy.
 
+To drain the reducer-owned queue, use `tools/run-work-queue.py run` with absolute paths to a target
+repository and its own `engagements/<id>` directory, plus explicit session-count, wall-admission,
+and per-session timeout bounds. Supply an ordered reviewer pool by repeating `--reviewer-model`; the
+driver selects the first model distinct from the exact subject origin and required prior reviewer
+lineage, or pauses once as `reviewer_model_unavailable` without launching or retry-spinning. The
+driver stays outside model sessions and never centrally discovers or mounts targets. Repeat
+`--read-only-input` for each distinct canonical `sys.prefix` and `sys.base_prefix` of the Python
+interpreter running the driver, then for any additional operator-declared file or directory the
+session must read. The Python roots are explicit because the in-sandbox Stop hook and broker action
+clients use that interpreter; they are never admitted as ambient prefix authority.
+
+Pass `--workspace` as its canonical absolute path, with no symlink components. The Darwin launcher
+rejects an aliased workspace before model activation so a mutable alias cannot redirect its read
+authority.
+
+`max_wall_seconds` is the deadline for admitting another action, not permission to cancel a trusted
+record transaction halfway through. An action admitted before that deadline must quiesce; terminal
+reducer state then takes precedence. The result always reports both total `wall_seconds` and any
+`wall_deadline_overrun_seconds`, so a completed in-flight action cannot hide cleanup or commit time.
+
+On Darwin, model filesystem reads default to denied. A session can read only the bound target
+workspace, this portable harness, its temporary per-session scratch, the exact runtime and bounded
+dependency closure, a fixed audited set of operating-system roots, its exact internal broker and
+containment endpoints, and repeated explicit `--read-only-input` paths. Descendants inherit the
+same Seatbelt profile; missing inputs, unresolved runtime dependencies, or an unsupported host fail
+before the model process starts. Filesystem writes remain denied except in the intended-ephemeral
+per-session scratch directory.
+Cleanup drains the launched process group and same-UID descendants that still retain an inherited
+sentinel vnode, including ordinary double-fork/`setsid` descendants, and applies a conservative CPU
+limit. This is a bounded mechanism, not container isolation: a deliberate descendant that closes
+the sentinel before detaching can escape discovery, non-filesystem channels and network remain
+available, and the writable scratch has no aggregate storage quota. Therefore the wall timeout is
+not a security boundary for that case and the launcher is not aggregate-resource containment.
+Stronger lifecycle, network, and storage containment is tracked by #83. See `engine/loop.md` for the
+command, stop semantics, and exact residual.
+
+Scratch cleanup is inode-bound and bounded by time, entries, depth, and work. If those bounds or a
+filesystem invariant fail, the session fails closed, leaves a `.cleanup-failed` marker in the temp
+parent, and may retain the exact private scratch for explicit operator cleanup; it is never silently
+reported as removed.
+
 The retrospective and A/B tools are offline evaluators only. They do not contact targets, authorize
 Zone-2 work, file reports, promote memory/cards, or prove efficacy.
 

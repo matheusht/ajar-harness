@@ -9,12 +9,13 @@ from typing import Any
 
 from engagement_records import (
     RecordError, build_reference_index, canonical_json_bytes, detect_secret_classes,
-    load_json, sha256_file, validate_record, validate_record_references,
+    load_json, sha256_bytes, validate_record, validate_record_references,
 )
 from engagement_state import (
     _scope_metadata, _append_kernel_event as append_event, atomic_write, base_event, engagement_lock,
-    read_ledger, reduce_engagement,
+    read_governed_file, read_ledger, reduce_engagement,
 )
+from completion_claims import assert_completion_claims_clear_bound
 
 
 def _operator(value: str) -> str:
@@ -45,12 +46,14 @@ def record_memory_disposition(engagement: Path, proposal_path: Path, operator_id
     secret_classes = detect_secret_classes(canonical_json_bytes(proposal))
     if secret_classes: raise RecordError("secret_shaped_memory_content", "memory disposition contains forbidden secret-shaped content", [{"class": item} for item in secret_classes])
     relative = f"memory/disposition-{proposal['disposition_id']}.json"
-    with engagement_lock(engagement):
+    with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement, allowed_record_orphans={relative})
         scope = _scope_metadata(engagement / "scope.md")
         if state["memory_disposition"] is not None:
             existing_path = engagement / relative
-            if state["memory_disposition"]["disposition_ref"] == proposal["disposition_id"] and existing_path.is_file() and existing_path.read_bytes() == canonical_json_bytes(proposal): return proposal
+            try: existing_bytes = read_governed_file(existing_path)
+            except FileNotFoundError: existing_bytes = None
+            if state["memory_disposition"]["disposition_ref"] == proposal["disposition_id"] and existing_bytes == canonical_json_bytes(proposal): return proposal
             raise RecordError("memory_disposition_already_terminal", state["memory_disposition"]["disposition_ref"])
         if proposal["engagement_id"] != state["engagement_id"] or proposal["scope_hash"] != state["scope_hash"]:
             raise RecordError("memory_disposition_scope_mismatch", proposal["disposition_id"])
@@ -77,9 +80,11 @@ def record_memory_disposition(engagement: Path, proposal_path: Path, operator_id
             if entries and all(_time(entry["recorded_at"]) > proposal_time for entry in entries):
                 raise RecordError("memory_disposition_source_from_future", reference)
         path = engagement / relative; record_bytes = canonical_json_bytes(proposal)
-        if path.exists() and path.read_bytes() != record_bytes: raise RecordError("memory_disposition_id_collision", proposal["disposition_id"])
-        if not path.exists(): atomic_write(path, record_bytes)
-        digest = sha256_file(path); event_ids = {event["event_id"] for event in read_ledger(engagement, "event")}; actor_role = "broker" if authority_request_ref else "operator"; actor_id = executor_id if authority_request_ref else operator_id
+        try: prior_record = read_governed_file(path)
+        except FileNotFoundError: prior_record = None
+        if prior_record is not None and prior_record != record_bytes: raise RecordError("memory_disposition_id_collision", proposal["disposition_id"])
+        if prior_record is None: atomic_write(path, record_bytes)
+        digest = sha256_bytes(read_governed_file(path)); event_ids = {event["event_id"] for event in read_ledger(engagement, "event")}; actor_role = "broker" if authority_request_ref else "operator"; actor_id = executor_id if authority_request_ref else operator_id
         commit_id = f"event-{proposal['disposition_id']}-commit"; disposition_event_id = f"event-{proposal['disposition_id']}-recorded"
         if commit_id not in event_ids:
             append_event(engagement, base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=proposal["recorded_at"], actor_role=actor_role, actor_id=actor_id, event_type="record.committed", rationale="Commit the immutable operator-reviewed memory disposition.", payload={"record_path": relative, "record_digest": digest, "record_type": "memory-disposition", "record_id": proposal["disposition_id"], "record_revision": None, **({"authority_request_ref": authority_request_ref} if authority_request_ref else {})}, session_id=session_id, operation_class="authority" if authority_request_ref else None), lock_held=True)
@@ -94,7 +99,7 @@ def record_memory_disposition(engagement: Path, proposal_path: Path, operator_id
 
 def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_at: str, authority_request_ref: str | None = None, executor_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
     engagement = engagement.absolute(); operator_id = _operator(operator_id)
-    with engagement_lock(engagement):
+    with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement); scope = _scope_metadata(engagement / "scope.md")
         if _operator(scope["operator"]) != operator_id: raise RecordError("engagement_closure_authority_invalid", operator_id)
         memory = state["memory_disposition"]
@@ -104,6 +109,10 @@ def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_a
             for change in event["state_changes"]:
                 if change["dimension"] == "engagement" and change["entity_id"] == state["engagement_id"]: prior = change["current"]
         if prior == "closed": raise RecordError("engagement_already_closed", state["engagement_id"])
+        # This is deliberately the final admission before irreversible closure append.
+        admission = assert_completion_claims_clear_bound(engagement)
+        state = admission.state
         event = base_event(event_id=f"event-{state['engagement_id']}-closed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker" if authority_request_ref else "operator", actor_id=executor_id if authority_request_ref else operator_id, event_type="engagement.closed", rationale=reason, payload={"entity_id": state["engagement_id"], "status": "closed", "scope_hash": state["scope_hash"], "operator_id": operator_id, "disposition_ref": memory["disposition_ref"], "disposition_digest": memory["disposition_digest"], **({"authority_request_ref": authority_request_ref} if authority_request_ref else {})}, entity_refs=[memory["disposition_ref"]], state_changes=[{"dimension": "engagement", "entity_id": state["engagement_id"], "previous": prior, "current": "closed"}], session_id=session_id, operation_class="authority" if authority_request_ref else None)
-        append_event(engagement, event, lock_held=True)
+        # The private append revalidates this under its transaction before any possible write.
+        append_event(engagement, event, lock_held=True, completion_claims_token=admission.token)
         return reduce_engagement(engagement)

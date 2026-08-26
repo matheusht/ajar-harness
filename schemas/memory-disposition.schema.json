@@ -222,6 +222,10 @@
     },
     "provenance": {
       "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/provenance"
+    },
+    "ablation_fixture": {
+      "type": "string",
+      "description": "Directory name under fixtures/ablation/ holding the fixture that proves this lesson changes a verdict. REQUIRED when disposition == 'promote'. A promotion that cannot show a decision changing is prose: one promote disposition existed across ~25 engagements, it was valid and reviewed and passed every gate, and winners.md still read '(none yet)'. The fixture must run the lesson present and absent and produce different verdicts, and must carry a control that stays unchanged so a fixture cannot pass by breaking everything."
     }
   },
   "allOf": [
@@ -367,6 +371,23 @@
             ]
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "disposition": {
+            "const": "promote"
+          }
+        },
+        "required": [
+          "disposition"
+        ]
+      },
+      "then": {
+        "required": [
+          "ablation_fixture"
+        ]
       }
     }
   ]

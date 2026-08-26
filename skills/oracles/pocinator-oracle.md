@@ -59,6 +59,17 @@ a high-value finding earns a second independent pocinator pass before being trea
     confidence; not required, not every finding shape offers one.
 12. **Counterfactual-novice framing** — ask explicitly: *where would a naive or reward-hacked
     verification stop and declare success here?* Sharper than "is this faithful?" alone.
+13. **Precondition-state reachability** — the tuple names `preconditions`; this lens asks how they
+    came to exist. Split the state the PoC starts from into **background setup** (a genesis, a funded
+    account, a deployed contract) and the **impact-bearing state** — the specific condition the
+    severity claim rests on. Background may be seeded; each seeded element needs a one-line reason
+    why that state is ordinary. The impact-bearing state must have been REACHED by driving the
+    target's own code, not written into storage, constructed in memory, or monkeypatched. Ask
+    directly: *if I delete the setup script and drive the target normally, does this condition ever
+    occur?* When the answer is no, the PoC demonstrates the sink and proves nothing about the reach.
+    This maps to lifecycle gate **G6** (`state_provenance` in `attest.json`); use the same four
+    words so the oracle and the gate agree: `real-path` · `none-required` · `synthesized` ·
+    `not-established`.
 
 ## Real adjudicated non-findings (calibration anchors)
 Grounds `claim_mismatch` and the deliberately-narrow `reward_hacked` in real disputed/rejected CVEs
@@ -78,6 +89,26 @@ where the *PoC or claimed impact* — not the finding's existence — was the pr
   memory-corruption RCE; the vendor states the issue produces zero observable effect, "not even a
   crash." These are the *definite, articulable* failures the verdict is reserved for — an assertion
   with nothing behind it — never a hedge.
+
+### Our own adjudicated non-findings (lens 13 anchors)
+The synthesized-state class is the harness's most repeated self-inflicted false positive. Three
+instances, all caught late and none by the PoC passing or failing:
+
+- **`obyte-2026-08-004` (2026-08-11)** — the drive script wrote a `count>=30` settlement window that
+  produced a 10.7%-of-supply fee. Every other gate passed: the PoC ran, the negative control ran, the
+  privilege claim was honest, an independent reviewer reproduced it from raw output. It promoted, and
+  the run's own escalation phase refuted it ten hours later — the real path measured `fee=17` at every
+  step, because settlement runs with `count=1`. **`reward_hacked` on lens 13, `verified` on all
+  others.** The reviewer reproduced the PoC faithfully; nobody asked whether its starting state exists.
+- **`obyte` round-1 crash PoC (same engagement, same week)** — an empirically-crashing PoC killed on
+  the same ground. The class recurred inside one engagement.
+- **Kubernetes fake-client finding (earlier engagement)** — a controller-runtime fake client skipped
+  apiserver validation of ResourceVersion immutability, so the harness "confirmed" a claim the real
+  apiserver rejects. A cheap source-first regrade beat an expensive harness that lied.
+
+**Reading:** an independent re-run is not a control for this. A faithful reviewer re-running a PoC
+that begins mid-attack reproduces the same unreachable state and reports success. Only lens 13 or
+gate G6 asks the question, so ask it explicitly rather than expecting replay to surface it.
 
 ## What this oracle is NOT for
 Passing pocinator does not guarantee a report won't return as a duplicate — it verifies the PoC is

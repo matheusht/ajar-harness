@@ -2,11 +2,19 @@
 """Deterministic read-only inventory and operator-reviewed migration proposals."""
 from __future__ import annotations
 import argparse, json, mimetypes, os, re, shutil, stat, tempfile
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from engagement_records import RecordError, canonical_json_bytes, detect_secret_classes, infer_schema_name, load_json, sha256_bytes, sha256_file, validate_record
 from finding_review import claim_rows, render_claim_proof, render_internal_report
+from engagement_quarantine import (
+    _current_directory_path,
+    atomic_publish_offline_tree,
+    atomic_write_offline,
+    is_quarantined,
+    quarantined_ancestor,
+)
 
 
 def _report_manifest_status(root: Path, path: Path, record: dict[str, Any]) -> tuple[str, str | None]:
@@ -69,11 +77,33 @@ def _classify_source(engagement: Path, path: Path) -> tuple[str, str, str | None
 def inventory(root: Path, *, resolve_root: bool = True) -> dict[str, Any]:
     root=root.resolve() if resolve_root else root;entries=[];engagements=root/"engagements" if (root/"engagements").is_dir() else root
     for engagement in sorted(path for path in engagements.iterdir() if path.is_dir() and path.name!="_TEMPLATE"):
-        paths=sorted((path for path in engagement.rglob("*") if path.is_file() or path.is_symlink()),key=lambda path:path.relative_to(engagement).as_posix())
-        for path in paths:
-            classification,kind,schema,disposition,reason,unresolved=_classify_source(engagement,path)
-            proposed=["legacy.record_imported"]
-            entries.append({"engagement_id":engagement.name,"kind":kind,"classification":classification,"source_path":path.relative_to(engagement).as_posix(),"source_hash":_source_hash(path),"source_schema":schema,"disposition":disposition,"reason":reason,"proposed_events":proposed,"proposed_revision":None,"unresolved_fields":unresolved})
+        try:
+            source_fd=os.open(engagement,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0));source_identity=os.fstat(source_fd)
+        except OSError:
+            continue
+        try:
+            bound_source=Path(f'/dev/fd/{source_fd}')
+            if is_quarantined(bound_source):continue
+            with tempfile.TemporaryDirectory(prefix='migration-inventory-source-') as temporary:
+                snapshot=Path(temporary)/engagement.name
+                try:_snapshot_bound_engagement(source_fd,snapshot)
+                except (OSError,ValueError):continue
+                if is_quarantined(bound_source):continue
+                try:current=os.stat(engagement,follow_symlinks=False)
+                except OSError:continue
+                if stat.S_ISLNK(current.st_mode) or (current.st_dev,current.st_ino)!=(source_identity.st_dev,source_identity.st_ino):continue
+                engagement_entries=[]
+                paths=sorted((path for path in snapshot.rglob("*") if (path.is_file() or path.is_symlink()) and path.name!=".record-kernel.lock"),key=lambda path:path.relative_to(snapshot).as_posix())
+                for path in paths:
+                    classification,kind,schema,disposition,reason,unresolved=_classify_source(snapshot,path)
+                    proposed=["legacy.record_imported"]
+                    engagement_entries.append({"engagement_id":engagement.name,"kind":kind,"classification":classification,"source_path":path.relative_to(snapshot).as_posix(),"source_hash":_source_hash(path),"source_schema":schema,"disposition":disposition,"reason":reason,"proposed_events":proposed,"proposed_revision":None,"unresolved_fields":unresolved})
+                if is_quarantined(bound_source):continue
+                try:final=os.stat(engagement,follow_symlinks=False)
+                except OSError:continue
+                if stat.S_ISLNK(final.st_mode) or (final.st_dev,final.st_ino)!=(source_identity.st_dev,source_identity.st_ino):continue
+                entries.extend(engagement_entries)
+        finally:os.close(source_fd)
     per_engagement={}
     for entry in entries:
         summary=per_engagement.setdefault(entry['engagement_id'],{'representable':0,'needs_review':0,'proposed_event_count':0,'unresolved_count':0,'source_file_count':0})
@@ -85,20 +115,27 @@ def inventory(root: Path, *, resolve_root: bool = True) -> dict[str, Any]:
 
 def write_dry_run_bundle(root: Path, engagement_id: str, operator_id: str, recorded_at: str, output: Path, *, producer_role: str = 'operator', producer_id: str | None = None) -> dict[str, Any]:
     result=inventory(root);base=(root.resolve()/"engagements" if (root.resolve()/"engagements").is_dir() else root.resolve());engagement=base/engagement_id
+    if is_quarantined(engagement):raise ValueError('source engagement is quarantined')
     if _signed_operator(engagement/'scope.md')!=operator_id:raise ValueError('operator does not match signed scope')
     proposal=_proposal_payload(result,root,engagement_id,operator_id,recorded_at,producer_role=producer_role,producer_id=producer_id);selected=proposal['entries']
-    output.mkdir(parents=True,exist_ok=False);(output/'proposed-finding-revisions').mkdir()
     scoped={**result,'entries':selected,'per_engagement':{engagement_id:result['per_engagement'].get(engagement_id,{})},'counts':{'representable':sum(e['disposition']=='representable' for e in selected),'needs_review':sum(e['disposition']=='needs_review' for e in selected),'total':len(selected)}};scoped['inventory_hash']=sha256_bytes(canonical_json_bytes({k:v for k,v in scoped.items() if k!='inventory_hash'}))
-    (output/'inventory.json').write_bytes(canonical_json_bytes(scoped))
     events=[{'event_type':'legacy.record_imported','source_path':entry['source_path'],'source_hash':entry['source_hash'],'migration_disposition':entry['disposition']} for entry in selected]
-    (output/'proposed-events.jsonl').write_bytes(b''.join(canonical_json_bytes(event) for event in events))
+    bundle_files={
+        'inventory.json':canonical_json_bytes(scoped),
+        'proposed-events.jsonl':b''.join(canonical_json_bytes(event) for event in events),
+    }
     for item in proposal['proposed_finding_revisions']:
-        finding=item['record'];directory=output/'proposed-finding-revisions'/finding['finding_id'];directory.mkdir();(directory/'rev-1.json').write_bytes(canonical_json_bytes(finding))
-    unresolved={'engagement_id':engagement_id,'entries':[{'source_path':entry['source_path'],'reason':entry['reason'],'unresolved_fields':entry['unresolved_fields']} for entry in selected if entry['unresolved_fields']]};(output/'unresolved.json').write_bytes(canonical_json_bytes(unresolved))
+        finding=item['record'];bundle_files[f"proposed-finding-revisions/{finding['finding_id']}/rev-1.json"]=canonical_json_bytes(finding)
+    unresolved={'engagement_id':engagement_id,'entries':[{'source_path':entry['source_path'],'reason':entry['reason'],'unresolved_fields':entry['unresolved_fields']} for entry in selected if entry['unresolved_fields']]};bundle_files['unresolved.json']=canonical_json_bytes(unresolved)
+    atomic_publish_offline_tree(output,bundle_files)
     return {'engagement_id':engagement_id,'producer':proposal['operator'],'scope_operator_id':operator_id,'source_files':len(selected),'proposed_events':len(events),'proposed_finding_revisions':len(proposal['proposed_finding_revisions']),'unresolved':len(unresolved['entries']),'invented_attempts':0,'source_bytes_modified':False}
 
 def _signed_operator(scope: Path) -> str:
-    text=scope.read_text(encoding='utf-8');operator=re.search(r'^- Operator:\s*(.+?)\s*$',text,re.M)
+    return _signed_operator_text(scope.read_text(encoding='utf-8'))
+
+
+def _signed_operator_text(text: str) -> str:
+    operator=re.search(r'^- Operator:\s*(.+?)\s*$',text,re.M)
     if not operator or not re.search(r'^- Signed:\s*\[[xX]\]\s*$',text,re.M): raise ValueError('signed scope required')
     return re.sub(r'[^A-Za-z0-9._:-]+','-',operator.group(1).strip()).strip('-') or 'operator'
 
@@ -129,9 +166,10 @@ def _proposal_payload(result: dict[str, Any], root: Path, engagement_id: str, op
 
 def write_proposal(root: Path, engagement_id: str, operator_id: str, recorded_at: str, output: Path, *, producer_role: str = 'operator', producer_id: str | None = None) -> dict[str, Any]:
     result=inventory(root);engagement_root=(root/'engagements' if (root/'engagements').is_dir() else root)/engagement_id
+    if is_quarantined(engagement_root): raise ValueError('source engagement is quarantined')
     if _signed_operator(engagement_root/'scope.md')!=operator_id: raise ValueError('operator does not match signed scope')
     proposal=_proposal_payload(result,root,engagement_id,operator_id,recorded_at,producer_role=producer_role,producer_id=producer_id)
-    output.write_bytes(canonical_json_bytes(proposal));return proposal
+    atomic_write_offline(output,canonical_json_bytes(proposal));return proposal
 
 
 def _same_or_ancestor(left: Path, right: Path) -> bool:
@@ -139,20 +177,157 @@ def _same_or_ancestor(left: Path, right: Path) -> bool:
     return left.exists() and any(candidate.exists() and os.path.samefile(left, candidate) for candidate in (right, *right.parents))
 
 
-def apply_proposal(root: Path, proposal_path: Path, destination: Path, operator_id: str, recorded_at: str, *, operator_redaction_attested: bool = False, artifact_review_path: Path | None = None, bound_root_fd: int | None = None, bound_destination_fd: int | None = None, destination_engagement_id: str | None = None, resume_authorized: bool = False, authority_request_ref: str | None = None, authority_action_digest: str | None = None, authority_control_engagement_id: str | None = None, expected_source_scope_hash: str | None = None, expected_destination_scope_hash: str | None = None, executor_id: str | None = None, executor_session_id: str | None = None) -> dict[str, Any]:
-    proposal=load_json(proposal_path);source_engagement_id=proposal['engagement_id'];root_base=Path(f'/dev/fd/{bound_root_fd}') if bound_root_fd is not None else root.resolve();source_base=(root_base/'engagements' if (root_base/'engagements').is_dir() else root_base);source_engagement=source_base/source_engagement_id;engagement_root=Path(f'/dev/fd/{bound_destination_fd}') if bound_destination_fd is not None else destination.resolve();engagement_id=destination_engagement_id or engagement_root.name
-    if _same_or_ancestor(source_engagement,engagement_root) or _same_or_ancestor(engagement_root,source_engagement):raise ValueError('migration destination must be filesystem-separate from source engagement')
+def _snapshot_bound_engagement(source_fd: int, destination: Path) -> None:
+    """Copy one identity-bound source into an untrusted temporary analysis tree."""
+
+    destination.mkdir(parents=True)
+    def copy_directory(current_fd: int, target: Path) -> None:
+        current_path=_current_directory_path(current_fd)
+        if current_path is not None and quarantined_ancestor(current_path):raise ValueError('migration source became quarantined')
+        before_directory=os.fstat(current_fd);names=sorted(os.listdir(current_fd))
+        for name in names:
+            if name == ".record-kernel.lock":
+                continue
+            identity = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
+            if stat.S_ISDIR(identity.st_mode) and not stat.S_ISLNK(identity.st_mode):
+                child_target = target / name
+                child_target.mkdir()
+                child_fd = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=current_fd,
+                )
+                try:
+                    copy_directory(child_fd, child_target)
+                finally:
+                    os.close(child_fd)
+                continue
+            if not stat.S_ISREG(identity.st_mode) or stat.S_ISLNK(identity.st_mode):
+                raise ValueError("migration source contains an unsafe directory entry")
+            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current_fd)
+            try:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("migration source contains a non-regular file")
+                chunks = []
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                after = os.fstat(fd)
+                if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+                ):
+                    raise ValueError("migration source changed during bound snapshot")
+            finally:
+                os.close(fd)
+            (target / name).write_bytes(b"".join(chunks))
+        after_directory=os.fstat(current_fd)
+        if (before_directory.st_dev,before_directory.st_ino,before_directory.st_mtime_ns,before_directory.st_ctime_ns)!=(after_directory.st_dev,after_directory.st_ino,after_directory.st_mtime_ns,after_directory.st_ctime_ns) or names!=sorted(os.listdir(current_fd)):raise ValueError('migration source changed during bound snapshot')
+        current_path=_current_directory_path(current_fd)
+        if current_path is not None and quarantined_ancestor(current_path):raise ValueError('migration source became quarantined')
+    copy_directory(source_fd, destination)
+
+
+def _read_bound_regular(root_fd: int, relative: str) -> bytes:
+    parts = Path(relative).parts
+    if not parts or Path(relative).is_absolute() or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("migration source relative path invalid")
+    parent_fd = os.dup(root_fd)
+    try:
+        for component in parts[:-1]:
+            child = os.open(
+                component,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            os.close(parent_fd)
+            parent_fd = child
+        fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("migration source entry is not a regular file")
+            chunks = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(fd)
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ):
+                raise ValueError("migration source changed during bound read")
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _bound_source_expected_proposal(
+    source_fd: int,
+    proposal: dict[str, Any],
+    engagement_id: str,
+    operator_id: str,
+    recorded_at: str,
+    producer_role: str,
+    producer_id: str,
+) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="bound-migration-inventory-") as temporary:
+        root = Path(temporary)
+        source = root / "engagements" / engagement_id
+        _snapshot_bound_engagement(source_fd, source)
+        current = inventory(root)
+        expected = _proposal_payload(
+            current,
+            root,
+            engagement_id,
+            operator_id,
+            recorded_at,
+            producer_role=producer_role,
+            producer_id=producer_id,
+        )
+    # The historical corpus-wide inventory hash is authority-bound but cannot be recomputed through
+    # one source FD. Every source-derived proposal field is recomputed from the bound snapshot.
+    expected["inventory_hash"] = proposal.get("inventory_hash")
+    return expected
+
+
+def apply_proposal(root: Path, proposal_path: Path, destination: Path, operator_id: str, recorded_at: str, *, operator_redaction_attested: bool = False, artifact_review_path: Path | None = None, bound_root_fd: int | None = None, bound_source_fd: int | None = None, bound_destination_fd: int | None = None, canonical_source_path: Path | None = None, canonical_destination_path: Path | None = None, destination_engagement_id: str | None = None, resume_authorized: bool = False, authority_request_ref: str | None = None, authority_action_digest: str | None = None, authority_control_engagement_id: str | None = None, expected_source_scope_hash: str | None = None, expected_destination_scope_hash: str | None = None, executor_id: str | None = None, executor_session_id: str | None = None, locks_held: bool = False, expected_source_engagement_id: str | None = None) -> dict[str, Any]:
+    proposal=load_json(proposal_path);source_engagement_id=proposal['engagement_id']
+    if not isinstance(source_engagement_id,str) or source_engagement_id in {'.','..'} or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]*',source_engagement_id):raise ValueError('migration proposal engagement identity invalid')
+    if expected_source_engagement_id is not None and source_engagement_id != expected_source_engagement_id:raise ValueError('migration proposal engagement identity changed after lock binding')
+    root_base=root.resolve();source_base=(root_base/'engagements' if (root_base/'engagements').is_dir() else root_base);source_canonical=(canonical_source_path or source_base/source_engagement_id).resolve();destination_canonical=(canonical_destination_path or destination).resolve()
+    if _same_or_ancestor(source_canonical,destination_canonical) or _same_or_ancestor(destination_canonical,source_canonical):raise ValueError('migration destination must be filesystem-separate from source engagement')
+    source_engagement=Path(f'/dev/fd/{bound_source_fd}') if bound_source_fd is not None else source_canonical;engagement_root=Path(f'/dev/fd/{bound_destination_fd}') if bound_destination_fd is not None else destination_canonical;engagement_id=destination_engagement_id or engagement_root.name
+    if not locks_held:
+        from engagement_state import engagement_lock, require_not_quarantined
+        lock_paths=sorted((source_engagement.resolve(strict=True),engagement_root.resolve(strict=True)),key=str)
+        with ExitStack() as locks:
+            aliases={lock_path:locks.enter_context(engagement_lock(lock_path)) for lock_path in lock_paths}
+            source_alias=aliases[source_canonical];destination_alias=aliases[destination_canonical]
+            for alias in aliases.values():require_not_quarantined(alias)
+            return apply_proposal(root,proposal_path,destination,operator_id,recorded_at,operator_redaction_attested=operator_redaction_attested,artifact_review_path=artifact_review_path,bound_root_fd=bound_root_fd,bound_source_fd=int(source_alias.name),bound_destination_fd=int(destination_alias.name),canonical_source_path=source_canonical,canonical_destination_path=destination_canonical,destination_engagement_id=destination_engagement_id or destination_canonical.name,resume_authorized=resume_authorized,authority_request_ref=authority_request_ref,authority_action_digest=authority_action_digest,authority_control_engagement_id=authority_control_engagement_id,expected_source_scope_hash=expected_source_scope_hash,expected_destination_scope_hash=expected_destination_scope_hash,executor_id=executor_id,executor_session_id=executor_session_id,locks_held=True,expected_source_engagement_id=source_engagement_id)
+    from engagement_state import read_governed_file, require_not_quarantined
+    require_not_quarantined(source_engagement);require_not_quarantined(engagement_root)
     if not operator_redaction_attested:raise ValueError('operator redaction attestation required before legacy bytes may be copied')
-    source_scope_hash=sha256_file(source_engagement/'scope.md');destination_scope_hash=sha256_file(engagement_root/'scope.md')
-    if _signed_operator(source_engagement/'scope.md')!=operator_id or _signed_operator(engagement_root/'scope.md')!=operator_id:raise ValueError('operator must match signed source and destination scopes')
+    source_scope_bytes=_read_bound_regular(bound_source_fd,'scope.md') if bound_source_fd is not None else source_engagement.joinpath('scope.md').read_bytes();destination_scope_bytes=_read_bound_regular(bound_destination_fd,'scope.md') if bound_destination_fd is not None else engagement_root.joinpath('scope.md').read_bytes()
+    source_scope_hash=sha256_bytes(source_scope_bytes);destination_scope_hash=sha256_bytes(destination_scope_bytes)
+    if _signed_operator_text(source_scope_bytes.decode('utf-8'))!=operator_id or _signed_operator_text(destination_scope_bytes.decode('utf-8'))!=operator_id:raise ValueError('operator must match signed source and destination scopes')
     if expected_source_scope_hash is not None and (source_scope_hash!=expected_source_scope_hash or destination_scope_hash!=expected_destination_scope_hash):raise ValueError('migration scope binding changed after authorization')
     producer=proposal.get('operator',{}); producer_role=producer.get('role'); producer_id=producer.get('id')
     if proposal.get('scope_operator_id')!=operator_id or producer_role not in {'operator','broker'} or not isinstance(producer_id,str):raise ValueError('proposal provenance or scope operator binding invalid')
     if authority_request_ref and (producer_role!='broker' or executor_id!=producer_id or not executor_session_id):raise ValueError('authorized migration executor provenance invalid')
     actor_role='broker' if authority_request_ref else producer_role;actor_id=executor_id if authority_request_ref else producer_id
-    current=inventory(root_base,resolve_root=False);expected=_proposal_payload(current,root_base,source_engagement_id,operator_id,recorded_at,resolve_root=False,producer_role=producer_role,producer_id=producer_id)
-    if not resume_authorized and canonical_json_bytes(proposal)!=canonical_json_bytes(expected):raise ValueError('proposal is stale, tampered, or operator-mismatched')
-    from engagement_state import atomic_write, _append_kernel_event_idempotent as append_event, base_event, initialize_engagement, read_governed_file, read_ledger, _register_legacy_artifact as register_artifact
+    if bound_source_fd is not None:
+        expected=_bound_source_expected_proposal(bound_source_fd,proposal,source_engagement_id,operator_id,recorded_at,producer_role,producer_id)
+    else:
+        current=inventory(root_base,resolve_root=False);expected=_proposal_payload(current,root_base,source_engagement_id,operator_id,recorded_at,resolve_root=False,producer_role=producer_role,producer_id=producer_id)
+    if canonical_json_bytes(proposal)!=canonical_json_bytes(expected):raise ValueError('proposal is stale, tampered, or operator-mismatched')
+    from engagement_state import atomic_write, _append_kernel_event_idempotent as append_event, base_event, initialize_engagement, read_ledger, _register_legacy_artifact as register_artifact
     if proposal.get('recorded_at')!=recorded_at:raise ValueError('proposal and apply timestamps must match')
     risky=[entry for entry in proposal['entries'] if entry['classification'] in {'artifact','unknown'}];artifact_reviews={}
     if risky:
@@ -170,34 +345,22 @@ def apply_proposal(root: Path, proposal_path: Path, destination: Path, operator_
     if len(finding_ids)!=len(set(finding_ids)):raise ValueError('reconstructed finding IDs collide')
     sources=[];staging=tempfile.TemporaryFile()
     for entry in proposal['entries']:
-        source=source_engagement/entry['source_path'];fd=os.open(source,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
-        try:
-            before=os.fstat(fd)
-            if not stat.S_ISREG(before.st_mode):raise ValueError(f"legacy source changed or is not a regular file: {entry['source_path']}")
-            chunks=[]
-            while True:
-                chunk=os.read(fd,1024*1024)
-                if not chunk:break
-                chunks.append(chunk)
-            after=os.fstat(fd)
-            if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns):raise ValueError(f"legacy source changed during read: {entry['source_path']}")
-        finally:os.close(fd)
-        data=b''.join(chunks)
+        source=source_engagement/entry['source_path'];data=_read_bound_regular(bound_source_fd,entry['source_path']) if bound_source_fd is not None else source.read_bytes()
         if sha256_bytes(data)!=entry['source_hash']:raise ValueError(f"legacy source changed or is not a regular file: {entry['source_path']}")
         if detect_secret_classes(data):raise ValueError(f"secret-shaped legacy source requires operator redaction outside migration: {entry['source_path']}")
         offset=staging.tell();staging.write(data);sources.append((entry,offset,len(data)))
-    if not read_ledger(engagement_root,'event'):initialize_engagement(engagement_root,recorded_at)
+    if not read_ledger(engagement_root,'event'):initialize_engagement(engagement_root,recorded_at,lock_held=True,engagement_id=engagement_id)
     manifest_entries=[]
-    evidence_dir=engagement_root/'evidence'/'legacy';evidence_dir.mkdir(parents=True,exist_ok=True)
+    evidence_dir=engagement_root/'evidence'/'legacy'
     for number,(entry,offset,size) in enumerate(sources,1):
         artifact_id=f"legacy-artifact-{number:05d}"
         copied=evidence_dir/f"{number:05d}-{Path(entry['source_path']).name}";staging.seek(offset);data=staging.read(size);atomic_write(copied,data)
-        if sha256_file(copied)!=entry['source_hash']:raise ValueError(f"legacy copy fidelity failure: {entry['source_path']}")
+        if sha256_bytes(read_governed_file(copied))!=entry['source_hash']:raise ValueError(f"legacy copy fidelity failure: {entry['source_path']}")
         try:
             artifact_review=artifact_reviews.get(entry['source_path'],{});advisory_zone=artifact_review.get('advisory_zone','clear_local');existing_artifact=next((item for item in read_ledger(engagement_root,'artifact') if item['artifact_id']==artifact_id),None)
             if existing_artifact is not None:
                 if existing_artifact.get('relative_path')!=copied.relative_to(engagement_root).as_posix() or existing_artifact.get('sha256')!=entry['source_hash']:raise ValueError(f"legacy artifact resume mismatch: {entry['source_path']}")
-            else: register_artifact(engagement_root,copied,{'schema_version':1,'artifact_id':artifact_id,'engagement_id':engagement_id,'created_at':recorded_at,'producer':{'role':actor_role,'id':actor_id},**({'producer_session_id':executor_session_id} if executor_session_id else {}),'acquisition_method':'migration','target_refs':[],'environment_ref':None,'media_type':mimetypes.guess_type(source.name)[0] or 'application/octet-stream','sensitivity':'internal','redaction_status':'not_needed','contains_executable_capability':artifact_review.get('contains_executable_capability',False),'advisory_zone':advisory_zone,'escalation_confirmation_event_ref':artifact_review.get('escalation_confirmation_event_ref'),'cleanup_obligation_ref':artifact_review.get('cleanup_obligation_ref'),'supersedes_artifact_id':None})
+            else: register_artifact(engagement_root,copied,{'schema_version':1,'artifact_id':artifact_id,'engagement_id':engagement_id,'created_at':recorded_at,'producer':{'role':actor_role,'id':actor_id},**({'producer_session_id':executor_session_id} if executor_session_id else {}),'acquisition_method':'migration','target_refs':[],'environment_ref':None,'media_type':mimetypes.guess_type(source.name)[0] or 'application/octet-stream','sensitivity':'internal','redaction_status':'not_needed','contains_executable_capability':artifact_review.get('contains_executable_capability',False),'advisory_zone':advisory_zone,'escalation_confirmation_event_ref':artifact_review.get('escalation_confirmation_event_ref'),'cleanup_obligation_ref':artifact_review.get('cleanup_obligation_ref'),'supersedes_artifact_id':None},lock_held=True)
         except RecordError as exc:
             raise ValueError(f"legacy artifact registration failed: {exc.as_dict()}") from exc
         manifest_entries.append({'source_path':entry['source_path'],'source_hash':entry['source_hash'],'disposition':'imported' if entry['disposition']=='representable' else 'needs_review','source_artifact_ref':artifact_id,'imported_finding_id':None,'imported_revision':None,'missing_legacy_evidence':entry['unresolved_fields']})
@@ -210,7 +373,7 @@ def apply_proposal(root: Path, proposal_path: Path, destination: Path, operator_
         except FileNotFoundError: prior_finding=None
         if prior_finding is not None and prior_finding!=finding_bytes:raise ValueError(f"migration finding resume mismatch: {finding['finding_id']}")
         if prior_finding is None:atomic_write(finding_path,finding_bytes)
-        commit=base_event(event_id=f"event-legacy-finding-{finding['finding_id']}-commit",engagement_id=engagement_id,recorded_at=recorded_at,actor_role=actor_role,actor_id=actor_id,event_type='record.committed',rationale='Commit a needs_review v3 reconstruction from operator-approved legacy fields.',payload={'record_path':finding_path.relative_to(engagement_root).as_posix(),'record_digest':sha256_file(finding_path),'record_type':'finding-v3','record_id':finding['finding_id'],'record_revision':1,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority' if authority_request_ref else None);append_event(engagement_root,commit)
+        commit=base_event(event_id=f"event-legacy-finding-{finding['finding_id']}-commit",engagement_id=engagement_id,recorded_at=recorded_at,actor_role=actor_role,actor_id=actor_id,event_type='record.committed',rationale='Commit a needs_review v3 reconstruction from operator-approved legacy fields.',payload={'record_path':finding_path.relative_to(engagement_root).as_posix(),'record_digest':sha256_bytes(read_governed_file(finding_path)),'record_type':'finding-v3','record_id':finding['finding_id'],'record_revision':1,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority' if authority_request_ref else None);append_event(engagement_root,commit,lock_held=True)
         entry['imported_finding_id']=finding['finding_id'];entry['imported_revision']=1
     # A needs_review reconstruction cannot satisfy deterministic report rendering or acceptance authority;
     # report entries therefore retain null binding fields and explicit unresolved evidence.
@@ -221,31 +384,42 @@ def apply_proposal(root: Path, proposal_path: Path, destination: Path, operator_
     except FileNotFoundError: prior_manifest=None
     if prior_manifest is not None and prior_manifest!=manifest_bytes:raise ValueError('migration manifest resume mismatch')
     if prior_manifest is None:atomic_write(path,manifest_bytes)
-    commit=base_event(event_id=f'event-migration-{engagement_id}-commit',engagement_id=engagement_id,recorded_at=recorded_at,actor_role=actor_role,actor_id=actor_id,event_type='record.committed',rationale='Commit operator-reviewed legacy migration manifest.',payload={'record_path':'legacy/migration-manifest.json','record_digest':sha256_file(path),'record_type':'migration-manifest','record_id':manifest['migration_id'],'record_revision':None,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority' if authority_request_ref else None);append_event(engagement_root,commit)
+    commit=base_event(event_id=f'event-migration-{engagement_id}-commit',engagement_id=engagement_id,recorded_at=recorded_at,actor_role=actor_role,actor_id=actor_id,event_type='record.committed',rationale='Commit operator-reviewed legacy migration manifest.',payload={'record_path':'legacy/migration-manifest.json','record_digest':sha256_bytes(read_governed_file(path)),'record_type':'migration-manifest','record_id':manifest['migration_id'],'record_revision':None,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority' if authority_request_ref else None);append_event(engagement_root,commit,lock_held=True)
     for number,entry in enumerate(manifest_entries,1):
         reconstructed_source=entry['source_path'] in proposed_by_source
-        event=base_event(event_id=f'event-legacy-import-{number}',engagement_id=engagement_id,recorded_at=recorded_at,actor_role='migration',actor_id=actor_id,event_type='legacy.record_imported',rationale='Preserve legacy source truth as needs_review without inventing attempts.',payload={'source_path':entry['source_path'],'source_hash':entry['source_hash'],'migration_disposition':entry['disposition'],'source_artifact_ref':entry['source_artifact_ref'],'imported_finding_id':entry['imported_finding_id'] if reconstructed_source else None,'imported_revision':entry['imported_revision'] if reconstructed_source else None,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority');append_event(engagement_root,event)
+        event=base_event(event_id=f'event-legacy-import-{number}',engagement_id=engagement_id,recorded_at=recorded_at,actor_role='migration',actor_id=actor_id,event_type='legacy.record_imported',rationale='Preserve legacy source truth as needs_review without inventing attempts.',payload={'source_path':entry['source_path'],'source_hash':entry['source_hash'],'migration_disposition':entry['disposition'],'source_artifact_ref':entry['source_artifact_ref'],'imported_finding_id':entry['imported_finding_id'] if reconstructed_source else None,'imported_revision':entry['imported_revision'] if reconstructed_source else None,**({'authority_request_ref':authority_request_ref} if authority_request_ref else {})},session_id=executor_session_id,operation_class='authority');append_event(engagement_root,event,lock_held=True)
     staging.close();return {'migration_id':manifest['migration_id'],'entries':len(manifest_entries),'legacy_artifacts_registered':len(manifest_entries),'invented_attempts':0,'source_bytes_modified':False}
 
 
 def self_test()->int:
     with tempfile.TemporaryDirectory() as tmp:
-        root=Path(tmp);e=root/'engagements'/'legacy';(e/'reports').mkdir(parents=True);(e/'findings').mkdir();(e/'progress.md').write_text('# Legacy\nSubmitted finding narrative.\n');(e/'scope.md').write_text('- Operator: operator-test\n- Signed: [x]\n');fixture=Path(__file__).resolve().parents[1]/'fixtures/findings/example-legacy-finding.json';legacy_finding=load_json(fixture);legacy_finding['schema_version']=2;(e/'findings'/'legacy.json').write_bytes(canonical_json_bytes(legacy_finding));(e/'artifacts').mkdir();(e/'artifacts'/'inert.txt').write_text('inert historical fixture\n');(e/'submissions').mkdir();(e/'submissions'/'submit.sh').write_text('# inert executable-shaped fixture\n')
+        root=Path(tmp);e=root/'engagements'/'legacy';(e/'reports').mkdir(parents=True);(e/'findings').mkdir();(e/'progress.md').write_text('# Legacy\nSubmitted finding narrative.\n');(e/'scope.md').write_text('- Operator: operator-test\n- Signed: [x]\n');(e/'.record-kernel.lock').write_bytes(b'');fixture=Path(__file__).resolve().parents[1]/'fixtures/findings/example-legacy-finding.json';legacy_finding=load_json(fixture);legacy_finding['schema_version']=2;(e/'findings'/'legacy.json').write_bytes(canonical_json_bytes(legacy_finding));(e/'artifacts').mkdir();(e/'artifacts'/'inert.txt').write_text('inert historical fixture\n');(e/'submissions').mkdir();(e/'submissions'/'submit.sh').write_text('# inert executable-shaped fixture\n')
         a=inventory(root);source_hashes={path.relative_to(e).as_posix():sha256_file(path) for path in e.rglob('*') if path.is_file()};copy=Path(tmp)/'copy';copy.mkdir();(copy/'engagements').mkdir();shutil.copytree(e,copy/'engagements'/'legacy');b=inventory(copy)
         proposal_path=Path(tmp)/'proposal.json';proposal=write_proposal(root,'legacy','operator-test','2026-07-10T00:00:00Z',proposal_path);bundle_path=Path(tmp)/'migration-bundle';bundle=write_dry_run_bundle(root,'legacy','operator-test','2026-07-10T00:00:00Z',bundle_path)
         destination=root/'destination'/'legacy';destination.mkdir(parents=True);destination.joinpath('scope.md').write_text('# Scope\n\n## Surfaces in scope\n- Offline migration records.\n## Benign safe-objective set\n- Preserve legacy truth.\n## Escalation ceiling\n- Records only.\n## Impact-demo authorization\n- No.\n## Accounts / fixtures\n- None.\n## Authorization\n- Operator: operator-test\n- Date: 2026-07-10\n- Signed: [x]\n- Record kernel: `decision-0005-v1`\n')
-        tampered=dict(proposal);tampered['entries']=[];tampered_path=Path(tmp)/'tampered.json';tampered_path.write_bytes(canonical_json_bytes(tampered));risky=[entry for entry in proposal['entries'] if entry['classification'] in {'artifact','unknown'}];artifact_review={'schema_version':1,'review_id':'migration-artifact-review-test','inventory_hash':proposal['inventory_hash'],'operator':{'role':'operator','id':'operator-test'},'operator_reviewed':True,'redaction_attested':True,'entries':[{'source_path':entry['source_path'],'source_hash':entry['source_hash'],'classification':entry['classification'],'classification_rationale':'Operator reviewed this inert fixture as clear local.','advisory_zone':'clear_local','contains_executable_capability':False,'escalation_confirmation_event_ref':None,'cleanup_obligation_ref':None} for entry in risky]};artifact_review_path=Path(tmp)/'artifact-review.json';artifact_review_path.write_bytes(canonical_json_bytes(artifact_review));tamper_blocked=alias_blocked=redaction_blocked=artifact_review_blocked=False
+        tampered=dict(proposal);tampered['entries']=[];tampered_path=Path(tmp)/'tampered.json';tampered_path.write_bytes(canonical_json_bytes(tampered));risky=[entry for entry in proposal['entries'] if entry['classification'] in {'artifact','unknown'}];artifact_review={'schema_version':1,'review_id':'migration-artifact-review-test','inventory_hash':proposal['inventory_hash'],'operator':{'role':'operator','id':'operator-test'},'operator_reviewed':True,'redaction_attested':True,'entries':[{'source_path':entry['source_path'],'source_hash':entry['source_hash'],'classification':entry['classification'],'classification_rationale':'Operator reviewed this inert fixture as clear local.','advisory_zone':'clear_local','contains_executable_capability':False,'escalation_confirmation_event_ref':None,'cleanup_obligation_ref':None} for entry in risky]};artifact_review_path=Path(tmp)/'artifact-review.json';artifact_review_path.write_bytes(canonical_json_bytes(artifact_review));tamper_blocked=alias_blocked=nested_alias_blocked=bound_extra_blocked=redaction_blocked=artifact_review_blocked=False
         try:apply_proposal(root,tampered_path,destination,'operator-test','2026-07-10T00:00:00Z')
         except ValueError:tamper_blocked=True
         try:apply_proposal(root,proposal_path,e,'operator-test','2026-07-10T00:00:00Z')
         except ValueError:alias_blocked=True
+        nested_destination=e/'nested-destination';nested_destination.mkdir();source_fd=os.open(e,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0));nested_fd=os.open(nested_destination,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0))
+        try:
+            try:apply_proposal(root,proposal_path,nested_destination,'operator-test','2026-07-10T00:00:00Z',bound_source_fd=source_fd,bound_destination_fd=nested_fd,canonical_source_path=e,canonical_destination_path=nested_destination,locks_held=True)
+            except ValueError:nested_alias_blocked=True
+        finally:os.close(source_fd);os.close(nested_fd);nested_destination.rmdir()
+        extra_source=e/'extra-live-source.txt';extra_source.write_text('source added after proposal\n');source_fd=os.open(e,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0));destination_fd=os.open(destination,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0));destination_before=sorted(path.relative_to(destination).as_posix() for path in destination.rglob('*'))
+        try:
+            try:apply_proposal(root,proposal_path,destination,'operator-test','2026-07-10T00:00:00Z',operator_redaction_attested=True,artifact_review_path=artifact_review_path,bound_source_fd=source_fd,bound_destination_fd=destination_fd,canonical_source_path=e,canonical_destination_path=destination,locks_held=True)
+            except ValueError:bound_extra_blocked=True
+        finally:os.close(source_fd);os.close(destination_fd);extra_source.unlink()
+        bound_extra_blocked=bound_extra_blocked and destination_before==sorted(path.relative_to(destination).as_posix() for path in destination.rglob('*'))
         try:apply_proposal(root,proposal_path,destination,'operator-test','2026-07-10T00:00:00Z')
         except ValueError:redaction_blocked=True
         try:apply_proposal(root,proposal_path,destination,'operator-test','2026-07-10T00:00:00Z',operator_redaction_attested=True)
         except ValueError:artifact_review_blocked=True
         applied=apply_proposal(root,proposal_path,destination,'operator-test','2026-07-10T00:00:00Z',operator_redaction_attested=True,artifact_review_path=artifact_review_path);reapplied=apply_proposal(root,proposal_path,destination,'operator-test','2026-07-10T00:00:00Z',operator_redaction_attested=True,artifact_review_path=artifact_review_path);after_hashes={path.relative_to(e).as_posix():sha256_file(path) for path in e.rglob('*') if path.is_file()}
-        ok=a==b and tamper_blocked and alias_blocked and redaction_blocked and artifact_review_blocked and bundle['invented_attempts']==0 and bundle['proposed_finding_revisions']==1 and all(bundle_path.joinpath(name).exists() for name in ('inventory.json','proposed-events.jsonl','proposed-finding-revisions','unresolved.json')) and source_hashes==after_hashes and a['counts']['needs_review']>=1 and any(entry['source_path']=='submissions/submit.sh' and entry['classification']=='artifact' for entry in a['entries']) and a['invented_attempts']==0 and not a['source_bytes_modified'] and proposal['proposal_only'] and not proposal['apply_authorized'] and applied==reapplied and destination.joinpath('legacy/migration-manifest.json').is_file() and destination.joinpath('findings/FX-legacy-bola/rev-1.json').is_file()
-        if not ok:print({'equal_inventory':a==b,'tamper':tamper_blocked,'alias':alias_blocked,'redaction':redaction_blocked,'bundle_findings':bundle['proposed_finding_revisions'],'source_unchanged':source_hashes==after_hashes,'needs_review':a['counts']['needs_review'],'applied':applied})
+        ok=a==b and tamper_blocked and alias_blocked and nested_alias_blocked and bound_extra_blocked and redaction_blocked and artifact_review_blocked and bundle['invented_attempts']==0 and bundle['proposed_finding_revisions']==1 and all(bundle_path.joinpath(name).exists() for name in ('inventory.json','proposed-events.jsonl','proposed-finding-revisions','unresolved.json')) and source_hashes==after_hashes and a['counts']['needs_review']>=1 and any(entry['source_path']=='submissions/submit.sh' and entry['classification']=='artifact' for entry in a['entries']) and a['invented_attempts']==0 and not a['source_bytes_modified'] and proposal['proposal_only'] and not proposal['apply_authorized'] and applied==reapplied and destination.joinpath('legacy/migration-manifest.json').is_file() and destination.joinpath('findings/FX-legacy-bola/rev-1.json').is_file()
+        if not ok:print({'equal_inventory':a==b,'tamper':tamper_blocked,'alias':alias_blocked,'nested_alias':nested_alias_blocked,'bound_extra':bound_extra_blocked,'redaction':redaction_blocked,'bundle_findings':bundle['proposed_finding_revisions'],'source_unchanged':source_hashes==after_hashes,'needs_review':a['counts']['needs_review'],'applied':applied})
         print(f"MIGRATION DRY-RUN SELF-TEST: {'PASS' if ok else 'FAIL'}");return 0 if ok else 1
 
 
@@ -258,6 +432,6 @@ def main()->int:
         raise ValueError('public migration proposal and dry-run require the Decision-0006 run-engagement broker path; direct operator-attributed CLI output is disabled')
     else:result=inventory(args.root)
     if not args.output:print(canonical_json_bytes(result).decode(),end='')
-    elif not args.propose_engagement and not args.apply_proposal:args.output.write_bytes(canonical_json_bytes(result))
+    elif not args.propose_engagement and not args.apply_proposal:atomic_write_offline(args.output,canonical_json_bytes(result))
     return 0
 if __name__=='__main__':raise SystemExit(main())

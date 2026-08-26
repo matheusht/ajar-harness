@@ -1,0 +1,31 @@
+{
+ "schema_version": 1,
+ "review_id": "review-CTL-4",
+ "engagement_id": "fixture-adjudication",
+ "review_type": "claim_adjudication",
+ "proposed_finding_id": "F-CTL-4",
+ "entity_ref": "F-CTL-4",
+ "recorded_at": "2026-08-09T17:31:40Z",
+ "input_refs": [
+  "attempt-F-CTL-4"
+ ],
+ "input_hash": "sha256:0d545eb3fcb378fb0f134ae4b5a34e5175db74e7128cd6f9659cfdf7731a859c",
+ "evidence_refs": [
+  "artifact-F-CTL-4"
+ ],
+ "conflicting_evidence": [],
+ "independence": {
+  "reviewer_id": "reviewer-a",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-review-CTL-4",
+  "reviewer_session_id": "session-review-CTL-4",
+  "originating_run_id": "attempt-F-CTL-4",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism and control linkage."
+ },
+ "verdict": "supported",
+ "rationale": "Replay from a clean environment reproduced the state change; cap demonstrated at 3 requests.",
+ "corrections": [],
+ "required_next_actions": []
+}

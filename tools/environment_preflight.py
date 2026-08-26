@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from engagement_records import build_reference_index, canonical_json_bytes, detect_secret_classes, load_json, sha256_bytes, sha256_file
-from engagement_state import _scope_metadata, atomic_write, _append_kernel_event_idempotent as append_event, base_event, compute_review_input_hash, engagement_lock, read_ledger, reduce_engagement, require_approved_authority
+from engagement_state import _scope_metadata, atomic_write, _append_kernel_event_idempotent as append_event, base_event, compute_review_input_hash, engagement_lock, read_governed_file, read_ledger, reduce_engagement, require_approved_authority
 
 COLLECTOR_VERSION = "decision5-preflight-v1"
 COLLECTOR_VERSION_V2 = "decision6-preflight-v2"
@@ -264,7 +264,7 @@ def _collect_preflight_core(
     if any(not path.is_file() or path.is_symlink() for path in configuration_files): missing.append({"field": "configuration_hash", "reason": "every requested configuration file must be a regular non-symlink file"})
     if not reproduction_verified: missing.append({"field": "reproduction_argv", "reason": "argv[0] must be an absolute, executable, non-symlink regular file and argv must be exact"})
     fidelity_complete = not missing; relative = f"environment/preflight-{preflight_id}.json"
-    with engagement_lock(engagement):
+    with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement, allowed_record_orphans={relative})
         scope_metadata = _scope_metadata(engagement / "scope.md")
         if scope_metadata["scope_hash"] != state["scope_hash"]:
@@ -296,12 +296,14 @@ def _collect_preflight_core(
             }
             commit_role, commit_id_actor, collector_version = "operator", operator_id, COLLECTOR_VERSION
         path = engagement / relative; record_bytes = canonical_json_bytes(record)
-        if path.exists() and path.read_bytes() != record_bytes: raise ValueError("preflight ID already exists with different immutable bytes")
-        if not path.exists(): atomic_write(path, record_bytes)
+        try: prior_record = read_governed_file(path)
+        except FileNotFoundError: prior_record = None
+        if prior_record is not None and prior_record != record_bytes: raise ValueError("preflight ID already exists with different immutable bytes")
+        if prior_record is None: atomic_write(path, record_bytes)
         events = read_ledger(engagement, "event"); event_ids = {item["event_id"] for item in events}
         commit_id = f"event-{preflight_id}-commit"; recorded_id = f"event-{preflight_id}-recorded"
         if commit_id not in event_ids:
-            commit = base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role=commit_role, actor_id=commit_id_actor, event_type="record.committed", rationale="Commit immutable environment and safety preflight.", payload={"record_path": relative, "record_digest": sha256_file(path), "record_type": "environment-preflight", "record_id": preflight_id, "record_revision": None}, session_id=session_id if decision6 else None, operation_class="notebook" if decision6 else None, tool_versions=[collector_version])
+            commit = base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role=commit_role, actor_id=commit_id_actor, event_type="record.committed", rationale="Commit immutable environment and safety preflight.", payload={"record_path": relative, "record_digest": sha256_bytes(read_governed_file(path)), "record_type": "environment-preflight", "record_id": preflight_id, "record_revision": None}, session_id=session_id if decision6 else None, operation_class="notebook" if decision6 else None, tool_versions=[collector_version])
             append_event(engagement, commit, lock_held=True)
         if recorded_id not in event_ids:
             event = base_event(event_id=recorded_id, engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role=actor_role if decision6 else "operator", actor_id=principal_id if decision6 else operator_id, event_type="environment.preflight_recorded", rationale="Record preflight result; advisory Zone classification does not authorize Zone-2.", payload={"environment_ref": preflight_id, "status": status, "identity_hash": record["identity_hash"]}, entity_refs=[preflight_id], state_changes=[{"dimension": "environment", "entity_id": preflight_id, "previous": None, "current": status}], session_id=session_id if decision6 else None, operation_class="notebook" if decision6 else None, model=model, provider=provider, tool_versions=[collector_version])
@@ -328,10 +330,11 @@ def _collect_legacy_preflight(*args: Any, **kwargs: Any) -> dict[str, Any]:
 def review_preflight(engagement: Path, preflight_id: str, verdict: str, reason: str, operator_id: str, recorded_at: str, authority_request_ref: str, lane_id: str, executor_id: str, session_id: str) -> dict[str, Any]:
     engagement = engagement.absolute(); operator_id = _normalized_operator(operator_id)
     action = {"action_kind": "review-preflight", "lane_id": lane_id, "executor_id": executor_id, "session_id": session_id, "preflight_id": preflight_id, "verdict": verdict, "reason": reason, "operator_id": operator_id, "recorded_at": recorded_at}
-    require_approved_authority(engagement, authority_request_ref, "review-preflight", sha256_bytes(canonical_json_bytes(action)), lane_id, recorded_at)
     if verdict not in {"accepted", "rejected"}: raise ValueError("preflight review verdict must be accepted or rejected")
-    review_id = f"review-{preflight_id}-operator"; relative = f"reviews/{review_id}.json"; path = engagement / relative
-    with engagement_lock(engagement):
+    review_id = f"review-{preflight_id}-operator"; relative = f"reviews/{review_id}.json"
+    with engagement_lock(engagement) as engagement:
+        require_approved_authority(engagement, authority_request_ref, "review-preflight", sha256_bytes(canonical_json_bytes(action)), lane_id, recorded_at)
+        path = engagement / relative
         state = reduce_engagement(engagement, allowed_record_orphans={relative}); scope = _scope_metadata(engagement / "scope.md"); current = state["environment_preflights"].get(preflight_id)
         latest_preflight = next((event["payload"]["environment_ref"] for event in reversed(read_ledger(engagement, "event")) if event["event_type"] == "environment.preflight_recorded"), None)
         if _normalized_operator(scope["operator"]) != operator_id or current is None or current["status"] != "needs_review" or latest_preflight != preflight_id: raise ValueError("preflight review requires current needs_review evidence and active operator")
@@ -341,9 +344,11 @@ def review_preflight(engagement: Path, preflight_id: str, verdict: str, reason: 
         if verdict == "accepted" and (not environment["fidelity_complete"] or safety["credentials_present"] or safety["secret_scan_status"] != "clean" or safety["automated_redaction_status"] != "clean" or safety["cleanup_open_count"] != 0): raise ValueError("unsafe or incomplete preflight cannot be accepted")
         review = {"schema_version": 1, "review_id": review_id, "engagement_id": state["engagement_id"], "review_type": "operator", "proposed_finding_id": None, "recorded_at": recorded_at, "entity_ref": preflight_id, "finding_revision": None, "input_refs": [preflight_id], "input_hash": "sha256:" + "0" * 64, "evidence_refs": [], "rationale": reason, "conflicting_evidence": [], "verdict": verdict, "corrections": [], "required_next_actions": [], "independence": {"reviewer_id": operator_id, "reviewer_run_id": f"run-{review_id}", "reviewer_model": None, "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Reject incomplete, secret-bearing, stale, or misidentified preflight evidence.", "originating_run_id": f"event-{preflight_id}-recorded"}}
         review["input_hash"] = compute_review_input_hash(engagement, review, index); data = canonical_json_bytes(review)
-        if path.exists() and path.read_bytes() != data: raise ValueError("preflight review ID collision")
-        if not path.exists(): atomic_write(path, data)
-        commit = base_event(event_id=f"event-{review_id}-commit", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker", actor_id=executor_id, event_type="record.committed", rationale="Commit immutable operator preflight review.", payload={"record_path": relative, "record_digest": sha256_file(path), "record_type": "review", "record_id": review_id, "record_revision": None, "authority_request_ref": authority_request_ref}, session_id=session_id, operation_class="authority"); append_event(engagement, commit, lock_held=True)
+        try: prior_review = read_governed_file(path)
+        except FileNotFoundError: prior_review = None
+        if prior_review is not None and prior_review != data: raise ValueError("preflight review ID collision")
+        if prior_review is None: atomic_write(path, data)
+        commit = base_event(event_id=f"event-{review_id}-commit", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker", actor_id=executor_id, event_type="record.committed", rationale="Commit immutable operator preflight review.", payload={"record_path": relative, "record_digest": sha256_bytes(read_governed_file(path)), "record_type": "review", "record_id": review_id, "record_revision": None, "authority_request_ref": authority_request_ref}, session_id=session_id, operation_class="authority"); append_event(engagement, commit, lock_held=True)
         resulting = "ready" if verdict == "accepted" else "blocked"
         event = base_event(event_id=f"event-{preflight_id}-reviewed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker", actor_id=executor_id, event_type="environment.review_recorded", rationale=reason, payload={"environment_ref": preflight_id, "review_ref": review_id, "status": resulting, "operator_id": operator_id, "authority_request_ref": authority_request_ref}, entity_refs=[preflight_id], review_refs=[review_id], state_changes=[{"dimension": "environment", "entity_id": preflight_id, "previous": "needs_review", "current": resulting}], session_id=session_id, operation_class="authority"); append_event(engagement, event, lock_held=True)
         return review

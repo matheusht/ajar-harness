@@ -2087,6 +2087,7 @@
         "artifact_count": 0,
         "attempt_count": 0,
         "candidates": {},
+        "claim_adjudications": {},
         "cleanup": {
           "obligations": [],
           "open_count": 0,
@@ -2094,6 +2095,8 @@
         },
         "control_candidates": [],
         "coverage": "active",
+        "coverage_relevant_event_ref": "event-scope-1",
+        "coverage_relevant_sequence": 1,
         "engagement_id": "eng-1",
         "environment_preflights": {},
         "event_count": 1,
@@ -2103,9 +2106,34 @@
         "last_event_id": "event-scope-1",
         "ledger_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         "memory_disposition": null,
+        "latest_coverage_review": null,
         "operator_priors": [],
         "outstanding_reviews": [],
         "proof_reviews": {},
+        "regrade_reviews": {},
+        "reviewer_run_models": {},
+        "queue_control": {
+          "last_resume": null,
+          "last_stop": null,
+          "status": "active"
+        },
+        "work_queue": [
+          {
+            "blocking": true,
+            "class": "coverage_review_missing",
+            "closes_when": "coverage is not active",
+            "entity": {
+              "detail": null,
+              "id": "eng-1",
+              "type": "engagement"
+            },
+            "predicate": "coverage is active and no other work queue item exists"
+          }
+        ],
+        "work_queue_context": {
+          "artifacts": {},
+          "pending_attempts": {}
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,
@@ -2146,6 +2174,20 @@
             "status": "selected"
           }
         },
+        "claim_adjudications": {
+          "F-1": {
+            "expected_filing_revision": 1,
+            "event_ref": "event-claim-1",
+            "event_sequence": 4,
+            "input_refs": [],
+            "recorded_at": "2026-07-10T00:00:00Z",
+            "review_ref": "review-1",
+            "reviewer_run_id": "run-review-1",
+            "reviewer_signer_fingerprint": null,
+            "reviewed_revision": null,
+            "status": "needs_review"
+          }
+        },
         "cleanup": {
           "obligations": [],
           "open_count": 0,
@@ -2153,11 +2195,14 @@
         },
         "control_candidates": [],
         "coverage": "blocked",
+        "coverage_relevant_event_ref": "event-scope-1",
+        "coverage_relevant_sequence": 5,
         "engagement_id": "eng-1",
         "environment_preflights": {},
         "event_count": 5,
         "findings": {
           "F-1": {
+            "adjudication_event_ref": "event-claim-1",
             "adjudication_review_ref": "review-1",
             "change_reason": "Initial adjudication.",
             "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
@@ -2227,9 +2272,62 @@
         "last_event_id": "event-scope-1",
         "ledger_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         "memory_disposition": null,
+        "latest_coverage_review": null,
         "operator_priors": [],
-        "outstanding_reviews": [],
+        "outstanding_reviews": [
+          {
+            "entity_ref": "F-1",
+            "hypothesis_ref": null,
+            "opened_at": "2026-07-10T00:00:00Z",
+            "reason": "Confirmed claim still requires a correction.",
+            "review_ref": "event-review-obligation-1",
+            "review_type": "regrade",
+            "status": "correction_required"
+          }
+        ],
         "proof_reviews": {},
+        "regrade_reviews": {},
+        "reviewer_run_models": {
+          "run-review-1": "claude-fixture-reviewer-20260710"
+        },
+        "queue_control": {
+          "last_resume": null,
+          "last_stop": {
+            "event_ref": "event-operator-stop-1",
+            "operator_id": "operator-1",
+            "reason": "Operator paused this fixture deliberately.",
+            "recorded_at": "2026-07-10T00:00:00Z"
+          },
+          "status": "parked"
+        },
+        "work_queue": [
+          {
+            "blocking": true,
+            "class": "claim_unadjudicated",
+            "closes_when": "effective claim status in {confirmed, contaminated, refuted}",
+            "entity": {
+              "detail": null,
+              "id": "F-1",
+              "type": "finding"
+            },
+            "predicate": "effective claim status in {needs_review, supported}"
+          },
+          {
+            "blocking": true,
+            "class": "review_obligation_open",
+            "closes_when": "review_ref is absent from outstanding_reviews",
+            "entity": {
+              "detail": "F-1",
+              "id": "event-review-obligation-1",
+              "type": "review_obligation"
+            },
+            "predicate": "review_ref is present in outstanding_reviews"
+          }
+        ],
+        "work_queue_context": {
+          "artifacts": {},
+          "pending_attempts": {}
+        },
         "report_refs": [],
         "reports": {},
         "schema_version": 1,
@@ -2252,6 +2350,7 @@
         "artifact_count": 0,
         "attempt_count": 0,
         "candidates": {},
+        "claim_adjudications": {},
         "cleanup": {
           "obligations": [],
           "open_count": 0,
@@ -2272,6 +2371,19 @@
         "operator_priors": [],
         "outstanding_reviews": [],
         "proof_reviews": {},
+        "work_queue": [
+          {
+            "blocking": true,
+            "class": "coverage_review_missing",
+            "closes_when": "coverage is not active",
+            "entity": {
+              "detail": null,
+              "id": "eng-1",
+              "type": "engagement"
+            },
+            "predicate": "coverage is active and no other work queue item exists"
+          }
+        ],
         "report_refs": [],
         "reports": {},
         "schema_version": 1,
@@ -2729,7 +2841,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       },
       "schema": "memory-disposition",
       "valid": true
@@ -3213,7 +3326,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       }
     },
     {
@@ -3274,7 +3388,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       }
     },
     {
@@ -3335,7 +3450,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       }
     },
     {
@@ -3396,7 +3512,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       }
     },
     {
@@ -3457,7 +3574,8 @@
             "role": "operator",
             "id": "operator-1"
           }
-        }
+        },
+        "ablation_fixture": "kiwicom-vs02-layer-check"
       }
     },
     {

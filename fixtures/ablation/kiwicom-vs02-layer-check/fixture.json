@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "disposition_id": "memory-r4-kiwicom-vs02-reversal-and-verification",
+  "engagement_id": "kiwicom-15-07",
+  "mode": "executable",
+  "rule_module": "rule.py",
+  "lesson_summary": "A refutation resting on a generic validation layer does not stand until the resource-specific opt-out has been checked.",
+  "note": "The historical case is VS-02: refuted on generic apimachinery empty-RV validation, reversed after a real kube-apiserver envtest showed core Secrets opt out via AllowUnconditionalUpdate()==true. Case 1 replays it. Cases 2 and 3 are controls: the lesson must not change every verdict, or it is a blanket reopen rather than a rule.",
+  "cases": [
+    {
+      "id": "vs02-historical",
+      "input": {
+        "cites_code_path": true,
+        "refutation_layer": "generic",
+        "checked_resource_opt_out": false,
+        "verified_against": "fake-client"
+      },
+      "with_lesson": "reopen",
+      "without_lesson": "stands"
+    },
+    {
+      "id": "control-opt-out-checked",
+      "input": {
+        "cites_code_path": true,
+        "refutation_layer": "generic",
+        "checked_resource_opt_out": true,
+        "verified_against": "real-apiserver"
+      },
+      "with_lesson": "stands",
+      "without_lesson": "stands"
+    },
+    {
+      "id": "control-resource-specific",
+      "input": {
+        "cites_code_path": true,
+        "refutation_layer": "resource-specific",
+        "checked_resource_opt_out": false,
+        "verified_against": "real-apiserver"
+      },
+      "with_lesson": "stands",
+      "without_lesson": "stands"
+    }
+  ]
+}

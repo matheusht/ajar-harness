@@ -1,0 +1,13 @@
+{
+  "real-path-exec": "PoC ran against the pinned build, not a mock",
+  "negative-control": "attempt-control exercised the guarded branch and did not fire",
+  "independent-review": "two reviewers, fresh context, briefed to refute",
+  "state_provenance": {
+    "mode": "synthesized",
+    "synthesized_elements": [
+      "the counter state the impact claim rests on, written directly into storage"
+    ],
+    "impact_bearing_state": "a threshold the real path never reaches",
+    "note": "Modelled on obyte-2026-08-004 (2026-08-11): every other gate passed, the PoC ran, the control ran, the privilege claim was honest, and the impact was still false because the proof wrote its own precondition."
+  }
+}

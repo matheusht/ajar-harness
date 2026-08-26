@@ -1,0 +1,25 @@
+{
+ "schema_version": 3,
+ "finding_id": "F-FIX",
+ "engagement_id": "fixture-lifecycle",
+ "classification": {
+  "severity": {
+   "label": "high",
+   "system": "cvssv31",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+  }
+ },
+ "privilege_context": {
+  "claimed": "authenticated-user",
+  "proven": "authenticated-user"
+ },
+ "proof": {
+  "primary_attempt_refs": [
+   "attempt-primary"
+  ],
+  "negative_control_refs": [],
+  "evidence_refs": [
+   "artifact-poc"
+  ]
+ }
+}

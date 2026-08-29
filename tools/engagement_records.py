@@ -47,6 +47,7 @@ NEW_SCHEMA_FILES = (
     "finding-v3.schema.json",
     "attempt-v2.schema.json",
     "artifact.schema.json",
+    "corpus-enumeration.schema.json",
     "review.schema.json",
     "engagement-event.schema.json",
     "state-snapshot.schema.json",
@@ -92,6 +93,7 @@ RECORD_SCHEMA_FILES = {
     "finding-v3": "finding-v3.schema.json",
     "attempt-v2": "attempt-v2.schema.json",
     "artifact": "artifact.schema.json",
+    "corpus-enumeration": "corpus-enumeration.schema.json",
     "review": "review.schema.json",
     "engagement-event": "engagement-event.schema.json",
     "state-snapshot": "state-snapshot.schema.json",
@@ -460,6 +462,8 @@ def infer_schema_name(record: Any) -> str | None:
     if not isinstance(record, dict):
         return None
     version = record.get("schema_version")
+    if record.get("artifact_type") == "corpus-enumeration" and version == 1:
+        return "corpus-enumeration"
     if record.get("document_type") in {"runtime_observation", "flow_export"} and version == 1:
         return "flow-telemetry"
     if "finding_id" in record and version == 3:

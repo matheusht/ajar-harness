@@ -19,7 +19,24 @@ def _bullets(values: list[str], empty: str = "None.") -> str:
 def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
     engagement_id = snapshot["engagement_id"]
     coverage_counts = snapshot.get("coverage_counts")
-    coverage_fraction = (f"\n- Coverage fraction: `{coverage_counts['disposed_count']}/{coverage_counts['enumerated_count']}` work items disposed (closes on visitation, not understanding)" if coverage_counts is not None else "")
+    coverage_accounting = (
+        "\n"
+        f"- Frozen corpus denominator: `{coverage_counts['enumerated_count']}` package-entrypoint rows "
+        f"from `{coverage_counts['corpus_enumeration_ref']}` (frozen `{coverage_counts['frozen_at']}`; "
+        "closes on visitation, not understanding)\n"
+        f"- Declared disposed rows (not mechanically cross-checked): "
+        f"`{coverage_counts['disposed_count']}`"
+        if coverage_counts is not None
+        else ""
+    )
+    override_lines = [
+        f"- `{item['event_ref']}` — {item['terminal_kind']}→{item['status']} left {len(item['blocking_items'])} blocking item(s): {' '.join(item['reason'].split())}"
+        for item in snapshot["ending_overrides"]
+    ]
+    redeclaration_lines = [
+        f"- `{item['first_event_ref']}` → `{item['redeclaration_event_ref']}` with no intervening work disposition"
+        for item in snapshot["budget_redeclaration_cycles"]
+    ]
     queue_control = snapshot["queue_control"]
     queue_history = ""
     if queue_control["status"] == "parked":
@@ -37,7 +54,7 @@ def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
 
 - Scope: attested `{snapshot['scope_hash']}`
 - Environment: `{snapshot['active_environment_ref'] or 'not-recorded'}`
-- Coverage: `{snapshot['coverage']}`{coverage_fraction}
+- Coverage: `{snapshot['coverage']}`{coverage_accounting}
 - Work queue: `{queue_control['status']}`{queue_history}
 - Events: {snapshot['event_count']}
 - Attempts: {snapshot['attempt_count']}
@@ -63,6 +80,14 @@ def render_views(snapshot: dict[str, Any]) -> dict[str, bytes]:
 ## Findings
 
 {chr(10).join(finding_lines) if finding_lines else 'None.'}
+
+## Ending overrides
+
+{chr(10).join(override_lines) if override_lines else 'None.'}
+
+## Budget redeclaration cycles
+
+{chr(10).join(redeclaration_lines) if redeclaration_lines else 'None.'}
 """
     reviews = f"""{SENTINEL}
 # Review index — {engagement_id}

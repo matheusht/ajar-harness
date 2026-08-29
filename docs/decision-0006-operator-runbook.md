@@ -60,14 +60,41 @@ broker from inventing a reviewer principal. `revise-finding` requires separate o
 authority and one contiguous revision. Report generation/acceptance, submission, memory disposition,
 and closure each require their own exact authority request. Adjudication and filing remain separate.
 
-## 5. Zone-2
+## 5. Terminal coverage and closure
+
+Before moving coverage out of `active` or closing an engagement, reduce the current ledger and inspect
+the computed work queue. Both paths use one rule: the normal ending is refused while any item has
+`blocking: true`. A closed or skipped candidate remains in that accounting. Follow the queue's
+`reopen_candidate` action, then create a hypothesis whose `origin_type` is `candidate` and whose
+`origin_ref` names that selected candidate. The origin hypothesis accounts for the lead; a free-text
+reason does not.
+
+`budget_bounded` additionally requires a prior registered frozen corpus enumeration. Before signing
+scope, replace `none` on the exact `Frozen corpus enumeration SHA256` line with the digest of the
+manifest bytes, then register that manifest and its linked enumeration as engagement artifacts. Pass
+the manifest artifact ID—not its digest—to the outer driver as
+`--corpus-enumeration-ref <artifact-id>`. Its `enumerated_count` must equal the enumeration artifact's
+row count; no frozen enumeration, a signed-scope mismatch, or a damaged link is a hard refusal. If the
+driver reaches its session or wall boundary without the CLI reference, it returns
+`operator_required` and records no `budget_bounded` event. Reopening and redeclaring without an
+intervening work disposition is permitted but appears as a fact in reduced state and must not be
+presented as new coverage.
+
+When the operator judges that an engagement should end with blockers, use the separately signed
+first-class ending override rather than adding a payload flag or editing prose. Review the exact
+blocker list and reason before signing. The resulting record leaves the blockers visible and marks the
+ending as overridden. Its signed context includes the exact attempt-ledger prefix, so any later
+attempt invalidates reuse even when the blocker identity remains the same. It does not bypass scope, cleanup, report, memory, or other independent
+closure gates.
+
+## 6. Zone-2
 
 Do not create or pipe capability-bearing bytes before `confirm-zone2`. Confirmation binds one planned
 artifact digest, size, path, scope, environment, cleanup obligation, operator, and short expiry.
 `create-artifact` revalidates under lock immediately before exclusive creation. Scope authorization
 alone is never sufficient.
 
-## 6. Flow telemetry
+## 7. Flow telemetry
 
 ```bash
 .venv/bin/python tools/flow_telemetry.py normalize --adapter claude-code \

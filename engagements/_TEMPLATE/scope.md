@@ -113,6 +113,16 @@ an engagement file:
 - accounts (owned, same-org if cross-user): ___
 - concurrency: `1`  (raising past 1 requires explicit authorization here)
 
+## Frozen coverage corpus
+Replace `none` with the `sha256:...` digest of the frozen corpus manifest bytes before signing this
+initial scope if the outer driver may declare `budget_bounded`; a later re-attestation cannot add or
+change the genesis pin. Register that exact manifest and its linked
+enumeration as engagement artifacts, then pass the manifest's artifact ID to the driver with
+`--corpus-enumeration-ref`. Leave `none` only when a budget-bounded terminal declaration must fail
+closed for this engagement.
+
+- Frozen corpus enumeration SHA256: `none`
+
 ## Independent reviewer identity
 - Reviewer allowed signers file: `<engagement-relative or operator-controlled path>`
 - Reviewer allowed signers SHA256: `<sha256:...>`

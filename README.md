@@ -66,6 +66,16 @@ reviewer pool by repeating `--reviewer-model`; the driver selects the first mode
 exact subject origin and required prior reviewer lineage, or pauses once as
 `reviewer_model_unavailable` without launching or retry-spinning.
 
+Before a run may end as `budget_bounded`, freeze the coverage corpus and put the manifest bytes'
+`sha256:...` digest on the exact `Frozen corpus enumeration SHA256` line in `scope.md` before the
+initial scope is signed. A later scope re-attestation cannot introduce or replace this genesis pin.
+After kernel initialization and before the run, register that exact manifest and
+its linked enumeration as engagement artifacts. Pass the registered manifest artifact ID to the
+driver as `--corpus-enumeration-ref <artifact-id>`. The digest in scope binds the permitted bytes;
+the CLI value names the registered artifact carrying those bytes. The option may be omitted for a
+run that will not declare a budget boundary, but if a session or wall ceiling is reached without it
+the driver returns `operator_required` and does not record `budget_bounded`.
+
 The Docker backend currently accepts only non-root Apple Silicon macOS with a local Docker Desktop
 Linux/arm64 engine that exposes the required cgroup-v2, seccomp, memory, swap, and PID controls.
 Unsupported hosts fail before the model starts. The runtime accepts only an already-cached immutable

@@ -19,29 +19,41 @@ for objective in scope.active_objectives:          # benign, safe_signal-gated
   reduced = reduce_record()
   work = reduced.work_queue
   if reduced.queue_control.status == parked: exit_objective_noncompletion
-  if reduced.coverage in {budget_bounded, blocked}: exit_objective_noncompletion
-  if reduced.coverage == coverage_dry:
-    if work: record_state_invariant_error
-    complete_objective
+  if reduced.coverage != active:
+    if any(item.blocking for item in work) and not has_valid_ending_override(reduced):
+      record_state_invariant_error                  # normal terminal transitions cannot bypass work
+    if reduced.coverage == coverage_dry: complete_objective
+    exit_objective_noncompletion                    # budget_bounded / blocked remain resumable
   if any(item.blocking for item in work): continue_objective
   if work: pause_objective                          # operator-only; not complete
   record_state_invariant_error                      # active queues contain coverage review
 ```
 
-The **computed work queue is the single loop condition**. Completion requires the typed pair:
-`coverage_dry` and an empty reduced queue. The final blocking item is the cold coverage review, and
-closing it records that verdict. `budget_bounded`, `blocked`, and a parked queue are non-completion
-exits checked before dispatch, because they commonly retain unfinished blocking work. In an active
-run, blocking work continues the loop and a non-empty queue containing only operator work pauses it.
-Pending authority likewise pauses agent work; none of those states is a coverage verdict.
+The **computed work queue is the single loop condition and a binding terminal gate**. One predicate —
+no work item with `blocking: true` — is consulted both when coverage leaves `active` and when the
+engagement closes. Completion normally requires the typed pair `coverage_dry` and no blocking reduced
+work. The final blocking item is the cold coverage review, and closing it records that verdict.
+`budget_bounded` and `blocked` remain resumable non-completion exits, but they cannot be used to step
+around other blocking work. An operator-signed first-class override may record a deliberate terminal
+transition with a reason and the exact blockers left behind; the queue stays visible, so an overridden
+ending cannot look clean. A parked queue remains a non-completion exit checked before dispatch. In an
+active run, blocking work continues the loop and a non-empty queue containing only operator work
+pauses it. Pending authority likewise pauses agent work; none of those states is a coverage verdict.
 A dry round is a round that enqueued no new work. It is an observation, not permission to stop.
+
+`budget_bounded` is admitted only against a prior registered frozen corpus enumeration, with
+`enumerated_count` equal to the artifact's row count. Missing or mismatched denominators fail closed.
+If coverage is reopened and declared `budget_bounded` again without an intervening work disposition,
+the reducer surfaces that redeclaration cycle as a fact. Closing or skipping a candidate does not
+erase the lead: the next action reopens a closed candidate, and a subsequent hypothesis citing that
+candidate as its origin accounts for the candidate-disposal item.
 
 ### External queue driver
 
 `tools/run-work-queue.py` owns repetition outside model sessions. It reads the reducer's exact
 `next` action, launches one fresh no-persistence session in the target repository, and recomputes
 the ledger before selecting again. The model receives one item and has no completion verb: terminal
-completion remains the reducer-owned `coverage_dry` plus empty-queue pair.
+completion remains the reducer-owned `coverage_dry` plus no-blocking-work pair.
 
 Both outer admission ceilings are mandatory. A typical target-local invocation is:
 
@@ -49,6 +61,7 @@ Both outer admission ceilings are mandatory. A typical target-local invocation i
 ./.venv/bin/python tools/run-work-queue.py run \
   --workspace /absolute/path/to/target \
   --engagement /absolute/path/to/target/engagements/<id> \
+  --corpus-enumeration-ref <registered-frozen-manifest-artifact-id> \
   --runtime claude-code --session-backend docker \
   --model claude-worker-20260826 \
   --reviewer-model <reviewer-model-a> \
@@ -67,6 +80,14 @@ Both outer admission ceilings are mandatory. A typical target-local invocation i
   --session-timeout-seconds 600
 ```
 
+`--corpus-enumeration-ref` names the registered frozen-manifest artifact; it is not the manifest
+digest. Before the scope is signed, place the digest of those exact manifest bytes on the scope's
+`Frozen corpus enumeration SHA256` line. After kernel initialization and before the run, register
+the manifest and its linked enumeration. The driver checks the reference, signed pin, registered
+bytes, and row count only if it must declare a budget boundary. If the option is absent when a
+session or wall ceiling is reached, the driver returns `operator_required` instead of recording
+`budget_bounded`.
+
 The image must already be cached under its exact immutable digest; the runtime uses `--pull never`.
 The current backend is deliberately limited to the fail-closed Apple-Silicon Docker Desktop profile.
 See [`docs/agents/docker-work-queue.md`](../docs/agents/docker-work-queue.md) for the complete
@@ -80,8 +101,10 @@ model, the exact subject-origin model, and every reviewer model in the action's 
 lineage. If none is available, it returns `reviewer_model_unavailable` before launching anything;
 that is an operator-visible pause, not a budget retry. The session remains the action's cognitive
 principal; canonical Notebook writes use the action's separate process-bound broker execution
-principal. Reaching either outer budget before another action is admitted atomically records
-`budget_bounded`; it is non-completion. Once a trusted record transaction is admitted, cancellation
+principal. Reaching either outer budget before another action is admitted may atomically record
+`budget_bounded` only when the binding queue predicate and frozen-denominator check pass; it remains
+non-completion. Otherwise the driver returns an operator-visible pause without constructing a
+terminal coverage record. Once a trusted record transaction is admitted, cancellation
 would make its commit state unknowable, so the broker must quiesce it even if that crosses the wall
 deadline. The reducer is recomputed afterward and terminal state takes precedence; the result
 exposes total `wall_seconds` and nonzero `wall_deadline_overrun_seconds` rather than claiming a hard

@@ -28,8 +28,11 @@
     "reviewer_run_models",
     "latest_coverage_review",
     "coverage",
+    "coverage_counts",
     "coverage_relevant_sequence",
     "coverage_relevant_event_ref",
+    "ending_overrides",
+    "budget_redeclaration_cycles",
     "queue_control",
     "work_queue",
     "work_queue_context",
@@ -301,6 +304,9 @@
           "next_experiment": {
             "type": "string"
           },
+          "running_event_ref": {
+            "type": ["string", "null"]
+          },
           "completion_criteria": {
             "type": "array",
             "items": {
@@ -527,7 +533,11 @@
           "additionalProperties": false,
           "required": [
             "disposed_count",
-            "enumerated_count"
+            "enumerated_count",
+            "corpus_enumeration_ref",
+            "enumeration_artifact_ref",
+            "frozen_at",
+            "package_count"
           ],
           "properties": {
             "disposed_count": {
@@ -537,10 +547,80 @@
             "enumerated_count": {
               "type": "integer",
               "minimum": 1
+            },
+            "corpus_enumeration_ref": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+            },
+            "enumeration_artifact_ref": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+            },
+            "frozen_at": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
+            },
+            "package_count": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         }
       ]
+    },
+    "ending_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event_ref", "recorded_at", "terminal_kind", "status", "reason", "operator_id", "blocking_items", "blocking_queue_digest", "attempt_ledger_count", "attempt_ledger_digest", "operator_signature_challenge_digest", "operator_signer_fingerprint"],
+        "properties": {
+          "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
+          "terminal_kind": {"enum": ["coverage", "engagement"]},
+          "status": {"enum": ["coverage_dry", "budget_bounded", "blocked", "closed"]},
+          "reason": {"type": "string", "minLength": 1},
+          "operator_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "blocking_queue_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "attempt_ledger_count": {"type": "integer", "minimum": 0},
+          "attempt_ledger_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "operator_signature_challenge_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "operator_signer_fingerprint": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "blocking_items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["class", "entity"],
+              "properties": {
+                "class": {"type": "string", "minLength": 1},
+                "entity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "id", "detail"],
+                  "properties": {
+                    "type": {"type": "string", "minLength": 1},
+                    "id": {"type": "string", "minLength": 1},
+                    "detail": {"type": ["string", "null"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "budget_redeclaration_cycles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["first_event_ref", "redeclaration_event_ref", "recorded_at", "work_disposition_digest"],
+        "properties": {
+          "first_event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "redeclaration_event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
+          "work_disposition_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
+        }
+      }
     },
     "queue_control": {
       "type": "object",
@@ -708,6 +788,7 @@
           "class": {
             "enum": [
               "hypothesis_ran_unadjudicated",
+              "hypothesis_running_unattempted",
               "hypothesis_unrouted",
               "hypothesis_open_route",
               "hypothesis_unresolved_question",
@@ -808,6 +889,7 @@
                 "class": {
                   "enum": [
                     "hypothesis_ran_unadjudicated",
+                    "hypothesis_running_unattempted",
                     "hypothesis_unrouted",
                     "hypothesis_open_route",
                     "hypothesis_unresolved_question"

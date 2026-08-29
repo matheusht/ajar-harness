@@ -77,8 +77,9 @@ on instead of training-set intuition. (`casebooks/`, `engine/routing.md`.)
 ## Terminal verdicts (what "done" means here)
 - **covered-dry** — the bounded space is fully enumerated and adjudicated; every material route is
   decisively `exhausted` or `closed`, the computed work queue's final cold-review item has been closed,
-  and the reduced queue is empty. A non-empty operator-only queue is paused, not complete. A merely
-  `held` route remains unresolved and cannot support dry.
+  and no reduced item has `blocking: true`. A non-empty operator-only queue remains visible and is
+  not falsely presented as resolved; while coverage is active it pauses agent work. A merely `held`
+  route remains unresolved and cannot support dry.
 - **confirmed / chained** — found, and composed forward where a finding unlocks the next.
 - **real-but-capped** — the vuln is real but a held control bounds its impact, and the cap is proven.
 
@@ -92,4 +93,5 @@ exhausted hypothesis and coverage, while leaving claim state untouched. The redu
 boundaries without prescribing how the researcher generates or revises hypotheses.
 
 A dry verdict is only credible once the space was *bounded* and *enumerated* and the computed work
-queue is clear; "dry after one pass" is the failure mode this whole doc exists to prevent.
+queue contains no blocking item; "dry after one pass" is the failure mode this whole doc exists to
+prevent.

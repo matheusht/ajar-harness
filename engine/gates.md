@@ -86,6 +86,32 @@ forced. `record-memory` changes only engagement-local immutable records. Even `p
 
 `close` is operator-only and requires terminal coverage, a structured cleanup disposition for every
 obligation, no pending review, accepted/submitted current-revision reports for filed findings, and
-the committed memory disposition. Narrative edits cannot satisfy these gates. Operator identity is anchored in the trusted local OS,
+the committed memory disposition. In addition, both `close` and every transition that moves coverage
+out of `active` consult the same reduced-state predicate: the engagement may end only when no computed
+work item has `blocking: true`. The check runs on the current ledger under the terminal transition's
+lock. A closed or skipped candidate therefore remains accounted for until the record lifecycle
+accounts for the lead: the queue first selects `reopen_candidate`, then a
+`hypothesis.created` event whose `origin_type` is `candidate` and whose `origin_ref` is that exact
+candidate closes the candidate-disposal item. Free-text disposal alone cannot shorten the blocking
+queue.
+
+An operator may deliberately end with blocking work only through a separately operator-signed,
+first-class override event. The event records the reason and the exact blocker identities being left;
+it also binds the exact attempt-ledger count and canonical prefix digest that produced those identities.
+A later attempt therefore makes the override stale even when the coarse queue identity is unchanged.
+The event does not erase those blockers or bypass cleanup, report, memory, scope, or other independent gates.
+Reduced state therefore distinguishes a clean ending from an overridden one.
+
+`budget_bounded` also requires a prior registered frozen corpus enumeration. Before the genesis
+signed-scope snapshot is created, its exact manifest-byte digest must replace `none` on the scope's `Frozen corpus
+enumeration SHA256` line. The terminal command or outer driver supplies the registered manifest
+artifact ID as `--corpus-enumeration-ref`; the reducer verifies that its digest matches the signed
+genesis pin, its `frozen_at` is no later than genesis attestation, its linked enumeration is registered and intact, and `enumerated_count` equals that
+enumeration's row count. A missing reference, `none` pin, or mismatch is refused. At an outer-driver
+budget boundary, an omitted reference returns `operator_required` rather than recording a terminal
+coverage event. Consecutive `budget_bounded` declarations with no intervening work disposition
+remain legal to reopen, but the reducer exposes the cycle as a countable fact.
+
+Narrative edits cannot satisfy these gates. Operator identity is anchored in the trusted local OS,
 signed scope, and engagement filesystem; repository hash chains are tamper-evident commitments, not
 cryptographic authentication against total host/filesystem compromise.

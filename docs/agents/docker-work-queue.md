@@ -176,6 +176,7 @@ All isolation and budget arguments are explicit:
 ./.venv/bin/python tools/run-work-queue.py run \
   --workspace /absolute/target-repository \
   --engagement /absolute/target-repository/engagements/example-2026-08 \
+  --corpus-enumeration-ref <registered-frozen-manifest-artifact-id> \
   --runtime claude-code \
   --session-backend docker \
   --model claude-subject-20260826 \
@@ -201,7 +202,12 @@ All isolation and budget arguments are explicit:
 
 Replace the all-zero example digest with the exact already-cached image digest. Repeat
 `--reviewer-model` for the ordered independent-reviewer pool and `--read-only-input` only for regular
-files the session actually needs.
+files the session actually needs. Before signing the engagement scope, pin the exact manifest-byte
+digest on its `Frozen corpus enumeration SHA256` line. After kernel initialization and before the
+run, register that exact manifest plus its linked enumeration as artifacts.
+`--corpus-enumeration-ref` takes the manifest artifact ID, not that digest. If a budget boundary is
+reached without the option, the driver returns `operator_required` and does not record
+`budget_bounded`.
 
 ## What the test lanes prove
 

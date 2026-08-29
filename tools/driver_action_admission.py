@@ -84,7 +84,7 @@ READ_ONLY_COMMANDS = frozenset(
         "gate",
     }
 )
-OPERATOR_GOVERNANCE_COMMANDS = frozenset({"operator-stop", "operator-resume"})
+OPERATOR_GOVERNANCE_COMMANDS = frozenset({"operator-stop", "operator-resume", "override-ending"})
 _ALLOWED_ADMISSION_KEYS = {
     "schema_version",
     "status",

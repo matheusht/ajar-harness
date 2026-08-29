@@ -1,10 +1,18 @@
 # Completion-claim gate
 
-`tools/completion_claims.py` makes prose that says `covered-dry` or `coverage_dry` a
-verifiable claim. It recursively admits only regular, UTF-8 Markdown through the existing
-record-kernel lock, takes two complete Markdown-tree and reducer/event snapshots, and rejects
-any change between them. Generated views are excluded only from matching claims; they remain in
-both tree snapshots.
+`tools/completion_claims.py` makes prose that declares an engagement, its scoped work, or its
+testing complete a verifiable claim. It recognizes the canonical `covered-dry` / `coverage_dry`
+forms and bounded alternate grammar such as “the engagement is complete,” “all scoped surfaces
+are exhausted,” and “no further testing remains.” It recursively scans regular text-like content
+regardless of filename extension through the existing record-kernel lock. Files are hashed and
+matched in fixed-size streaming chunks; normalized horizontal whitespace and a bounded overlap
+keep phrases visible across chunk boundaries without loading large evidence artifacts into memory.
+The gate takes two complete tree and reducer/event snapshots and rejects any change between them.
+Exact kernel-owned ledgers,
+state projections, the kernel lock, and generated views are excluded only from claim matching;
+they remain in both immutable tree snapshots. The exact `verdict: coverage_dry` field of a
+schema-valid coverage-review record is treated as historical reducer data after a legitimate
+reopen; every free-text field in that record, including quoted canonical tokens, is still scanned.
 
 The claim is clear only when the current reducer state is `coverage_dry` and its current-scope
 coverage review is linked, or when the exact immutable bytes match a canonical, opaque

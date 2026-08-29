@@ -44,7 +44,11 @@ from engagement_state import (
     _open_absolute_directory,
     _reduce_engagement_unchecked,
     base_event,
+    blocking_work_identities,
     bound_engagement_lock,
+    engagement_may_end,
+    project_current_terminal_work_state,
+    read_governed_file,
     read_ledger,
     utc_now,
 )
@@ -59,6 +63,7 @@ from driver_action_admission import (
     new_admission_token,
     new_container_broker_session_key,
 )
+from frozen_corpus import require_enumerated_count_matches, resolve_frozen_corpus_denominator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -513,8 +518,29 @@ def _state_stop(state: dict[str, Any]) -> str | None:
     if coverage == "budget_bounded":
         return "coverage_budget_bounded"
     if coverage == "coverage_dry":
-        if queue:
-            raise DriverError("driver_terminal_queue_invariant")
+        blocking = _blocking_items(state)
+        if blocking:
+            identities = blocking_work_identities(state)
+            digest = sha256_bytes(canonical_json_bytes(identities))
+            exact_override = next(
+                (
+                    override
+                    for override in reversed(state.get("ending_overrides", []))
+                    if isinstance(override, dict)
+                    and override.get("terminal_kind") == "coverage"
+                    and override.get("status") == "coverage_dry"
+                    and override.get("event_ref") == state.get("coverage_relevant_event_ref")
+                    and override.get("blocking_items") == identities
+                    and override.get("blocking_queue_digest") == digest
+                    and override.get("attempt_ledger_count") == state.get("attempt_count")
+                    and override.get("attempt_ledger_digest")
+                    == state.get("source_hashes", {}).get("attempts.jsonl")
+                ),
+                None,
+            )
+            if exact_override is None:
+                raise DriverError("driver_terminal_queue_invariant")
+            return "completed"
         return "completed"
     if coverage != "active":
         raise DriverError("driver_coverage_state_invalid")
@@ -929,8 +955,10 @@ def _budget_event(
     budget: DriverBudget,
     sessions_started: int,
     elapsed_seconds: float,
-    disposed_count: int,
     enumerated_count: int,
+    corpus_enumeration_ref: str,
+    corpus_artifact_refs: Sequence[str],
+    recorded_at: str,
 ) -> dict[str, Any]:
     state_hash = sha256_bytes(canonical_json_bytes(state))
     identity = {
@@ -945,7 +973,7 @@ def _budget_event(
     return base_event(
         event_id=f"event-driver-budget-{sha256_bytes(canonical_json_bytes(identity))[-12:]}",
         engagement_id=state["engagement_id"],
-        recorded_at=utc_now(),
+        recorded_at=recorded_at,
         actor_role="broker",
         actor_id=actor_id,
         event_type="coverage.status_changed",
@@ -953,8 +981,11 @@ def _budget_event(
         payload={
             "entity_id": state["engagement_id"],
             "status": "budget_bounded",
-            "disposed_count": disposed_count,
+            # This count has the corpus row as its unit. The driver has no authoritative
+            # visitation evidence yet, so queue-item progress must never be substituted here.
+            "disposed_count": 0,
             "enumerated_count": enumerated_count,
+            "corpus_enumeration_ref": corpus_enumeration_ref,
             "driver_run_ref": run_ref,
             "driver_state_hash": state_hash,
             "budget_kind": budget_kind,
@@ -963,6 +994,7 @@ def _budget_event(
             "sessions_started": sessions_started,
             "wall_seconds": elapsed_seconds,
         },
+        evidence_refs=list(corpus_artifact_refs),
         state_changes=[
             {
                 "dimension": "coverage",
@@ -985,6 +1017,7 @@ def record_budget_boundary(
     sessions_started: int,
     elapsed_seconds: float,
     seen_item_refs: set[str],
+    corpus_enumeration_ref: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Atomically let a newer operator/coverage transition win, else record budget spent."""
 
@@ -1000,8 +1033,31 @@ def record_budget_boundary(
                 return prior_stop, state
             current_refs = {_item_ref(item) for item in _blocking_items(state)}
             seen_item_refs.update(current_refs)
-            enumerated_count = len(seen_item_refs)
-            disposed_count = len(seen_item_refs - current_refs)
+            recorded_at = utc_now()
+            projected = project_current_terminal_work_state(
+                state,
+                read_ledger(engagement, "attempt"),
+                coverage="budget_bounded",
+            )
+            if not engagement_may_end(projected) or not corpus_enumeration_ref:
+                return "operator_required", state
+            artifacts = read_ledger(engagement, "artifact")
+            events = read_ledger(engagement, "event")
+            genesis_scope = events[0]
+            scope_bytes = read_governed_file(
+                engagement
+                / genesis_scope["payload"]["scope_snapshot_path"]
+            )
+            denominator = resolve_frozen_corpus_denominator(
+                engagement,
+                artifacts,
+                corpus_enumeration_ref,
+                recorded_at,
+                scope_bytes,
+                genesis_scope["recorded_at"],
+            )
+            enumerated_count = denominator["row_count"]
+            require_enumerated_count_matches(enumerated_count, denominator)
             if enumerated_count < 1:
                 raise DriverError("driver_budget_denominator_invalid")
             event = _budget_event(
@@ -1011,8 +1067,13 @@ def record_budget_boundary(
                 budget=budget,
                 sessions_started=sessions_started,
                 elapsed_seconds=elapsed_seconds,
-                disposed_count=disposed_count,
                 enumerated_count=enumerated_count,
+                corpus_enumeration_ref=corpus_enumeration_ref,
+                corpus_artifact_refs=[
+                    denominator["manifest_artifact_ref"],
+                    denominator["enumeration_artifact_ref"],
+                ],
+                recorded_at=recorded_at,
             )
             _append_kernel_event_idempotent(engagement, event, lock_held=True)
             after = _reduce_engagement_unchecked(engagement)
@@ -1062,6 +1123,8 @@ def _result(
         "wall_seconds": wall_seconds,
         "wall_deadline_overrun_seconds": wall_deadline_overrun_seconds,
         "queue": {
+            # These are queue-identity counts, kept separate from the corpus-row counts in a
+            # coverage.status_changed event and the reducer's coverage_counts projection.
             "blocking_count": len(current_refs),
             "total_count": len(state.get("work_queue", [])),
             "seen_count": len(seen_item_refs),
@@ -1083,6 +1146,7 @@ def run_driver(
     read_only_inputs: Sequence[Path] = (),
     stop_requested: Callable[[], bool] = lambda: False,
     docker_backend: DockerQueueBackend | None = None,
+    corpus_enumeration_ref: str | None = None,
 ) -> dict[str, Any]:
     budget.validate()
     if docker_backend is not None:
@@ -1154,6 +1218,7 @@ def run_driver(
                     sessions_started=sessions_started,
                     elapsed_seconds=elapsed,
                     seen_item_refs=seen_item_refs,
+                    corpus_enumeration_ref=corpus_enumeration_ref,
                 )
                 return _result(
                     run_ref=run_ref,

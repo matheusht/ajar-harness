@@ -20,6 +20,8 @@ from unittest import mock
 
 import driver_action_admission as admission_module
 
+from corpus_enumeration import CAVEAT, COLUMNS
+
 from engagement_records import (
     RecordError,
     build_reference_index,
@@ -42,8 +44,10 @@ from driver_action_admission import (
 from engagement_state import (
     _append_kernel_event,
     _open_absolute_directory,
+    _register_legacy_artifact,
     append_event,
     base_event,
+    blocking_work_identities,
     compute_review_input_hash,
     initialize_engagement,
     reduce_engagement,
@@ -81,6 +85,7 @@ SCOPE = """# Scope — work queue driver fixture
 ## Independent reviewer identity
 - Reviewer allowed signers SHA256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ## Authorization
+- Frozen corpus enumeration SHA256: `none`
 - Operator allowed signers SHA256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 - Operator: operator-driver-test
 - Date: 2026-08-24
@@ -449,6 +454,72 @@ print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01}))
 '''
 
 
+def _corpus_freeze_documents(row_count: int) -> tuple[bytes, bytes]:
+    """Build the exact TSV and manifest bytes committed by the signed scope."""
+
+    rows = [
+        [
+            "enumerated",
+            "fixture",
+            "1.0.0",
+            "a" * 40,
+            f"entry-{index}.js",
+            "declared",
+            f"{index + 1:064x}",
+        ]
+        for index in range(row_count)
+    ]
+    tsv_bytes = (
+        "\n".join([CAVEAT, "\t".join(COLUMNS), *("\t".join(row) for row in rows)])
+        + "\n"
+    ).encode("utf-8")
+    linked = {
+        "path": "corpus-enumeration.tsv",
+        "sha256": sha256_bytes(tsv_bytes).removeprefix("sha256:"),
+    }
+    manifest = {
+        "schema_version": 1,
+        "artifact_type": "corpus-enumeration",
+        "frozen_at": "2026-08-24T11:59:59Z",
+        "generated_by": {
+            "tool": "tools/corpus_enumeration.py",
+            "tool_sha256": "4" * 64,
+            "mode": "syntactic",
+            "model_involvement": False,
+            "parser_versions": {
+                "tree-sitter": "test",
+                "tree-sitter-javascript": "test",
+                "tree-sitter-typescript": "test",
+            },
+        },
+        "granularity": ["package", "entrypoint"],
+        "columns": COLUMNS,
+        "coverage_semantics": {
+            "closes_on": "visitation",
+            "does_not_establish": "understanding",
+            "necessary_for_coverage": True,
+            "sufficient_for_coverage": False,
+        },
+        "artifact": {**linked, "row_count": row_count, "package_count": 1},
+        "source": {"pins_path": "package-pins.tsv", "tarballs_path": "tarballs"},
+        "frozen_inputs_base": "manifest",
+        "frozen_inputs": {
+            "corpus-enumeration": linked,
+            "package-pins": {"path": "package-pins.tsv", "sha256": "5" * 64},
+            "enumerator": {
+                "path": "../../tools/corpus_enumeration.py",
+                "sha256": "4" * 64,
+            },
+            "schema": {
+                "path": "../../schemas/corpus-enumeration.schema.json",
+                "sha256": "6" * 64,
+            },
+            "tarball:0000": {"path": "tarballs/fixture.tgz", "sha256": "7" * 64},
+        },
+    }
+    return tsv_bytes, canonical_json_bytes(manifest)
+
+
 class WorkQueueDriverTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="work-queue-driver-test-")
@@ -456,11 +527,84 @@ class WorkQueueDriverTest(unittest.TestCase):
         self.workspace = self.root / "target"
         self.engagement = self.workspace / "engagements" / "fixture"
         self.engagement.mkdir(parents=True)
-        (self.engagement / "scope.md").write_text(SCOPE, encoding="utf-8")
+        self.corpus_documents = _corpus_freeze_documents(3)
+        corpus_pin = sha256_bytes(self.corpus_documents[1])
+        scope = SCOPE.replace(
+            "- Frozen corpus enumeration SHA256: `none`",
+            f"- Frozen corpus enumeration SHA256: `{corpus_pin}`",
+        )
+        (self.engagement / "scope.md").write_text(scope, encoding="utf-8")
         initialize_engagement(self.engagement, "2026-08-24T12:00:00Z")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _new_corpus_fixture(
+        self, row_count: int, suffix: str
+    ) -> tuple[Path, Path, tuple[bytes, bytes]]:
+        """Create an engagement whose genesis scope pins the requested frozen corpus."""
+
+        workspace = self.root / f"target-{suffix}"
+        engagement = workspace / "engagements" / f"fixture-{suffix}"
+        engagement.mkdir(parents=True)
+        documents = _corpus_freeze_documents(row_count)
+        scope = SCOPE.replace(
+            "- Frozen corpus enumeration SHA256: `none`",
+            f"- Frozen corpus enumeration SHA256: `{sha256_bytes(documents[1])}`",
+        )
+        engagement.joinpath("scope.md").write_text(scope, encoding="utf-8")
+        initialize_engagement(engagement, "2026-08-24T12:00:00Z")
+        return workspace, engagement, documents
+
+    def _register_corpus_freeze(
+        self,
+        row_count: int = 3,
+        *,
+        engagement: Path | None = None,
+        documents: tuple[bytes, bytes] | None = None,
+    ) -> str:
+        """Register a small, exact denominator for driver boundary tests."""
+
+        target = engagement or self.engagement
+        if documents is None:
+            if row_count != 3:
+                raise ValueError("the default driver fixture scope pins the three-row corpus")
+            documents = self.corpus_documents
+        tsv_bytes, manifest_bytes = documents
+        evidence = target / "evidence"
+        tsv_path = evidence / "corpus-enumeration.tsv"
+        tsv_path.write_bytes(tsv_bytes)
+        common = {
+            "schema_version": 1,
+            "engagement_id": target.name,
+            "created_at": "2026-08-24T12:00:00Z",
+            "producer": {"role": "operator", "id": "operator-driver-test"},
+            "acquisition_method": "generated_local",
+            "target_refs": [],
+            "environment_ref": None,
+            "sensitivity": "internal",
+            "redaction_status": "not_needed",
+            "contains_executable_capability": False,
+            "advisory_zone": "clear_local",
+            "escalation_confirmation_event_ref": None,
+            "cleanup_obligation_ref": None,
+            "supersedes_artifact_id": None,
+        }
+        tsv_ref = "artifact-driver-corpus-tsv"
+        _register_legacy_artifact(
+            target,
+            tsv_path,
+            {**common, "artifact_id": tsv_ref, "media_type": "text/tab-separated-values"},
+        )
+        manifest_path = evidence / "corpus-enumeration.freeze.json"
+        manifest_path.write_bytes(manifest_bytes)
+        manifest_ref = "artifact-driver-corpus-manifest"
+        _register_legacy_artifact(
+            target,
+            manifest_path,
+            {**common, "artifact_id": manifest_ref, "media_type": "application/json"},
+        )
+        return manifest_ref
 
     def _coverage_review_fixture(self) -> tuple[Path, Path, Path]:
         engagement = self.root / "coverage-target" / "engagements" / "coverage-fixture"
@@ -657,7 +801,19 @@ class WorkQueueDriverTest(unittest.TestCase):
 
     def test_budget_boundary_is_atomic_typed_noncompletion(self) -> None:
         budget = DriverBudget(1, 60.0, 10.0, None)
+        manifest_ref = self._register_corpus_freeze(row_count=3)
+        before_events = self.engagement.joinpath("events.jsonl").read_bytes()
         with bind_run(self.workspace, self.engagement) as bound:
+            refused_status, refused_state = record_budget_boundary(
+                bound=bound,
+                run_ref="driver-budget-missing-freeze-test",
+                budget_kind="max_sessions",
+                budget=budget,
+                sessions_started=1,
+                elapsed_seconds=0.5,
+                seen_item_refs=set(),
+            )
+            after_refusal = self.engagement.joinpath("events.jsonl").read_bytes()
             status, state = record_budget_boundary(
                 bound=bound,
                 run_ref="driver-budget-test",
@@ -666,6 +822,7 @@ class WorkQueueDriverTest(unittest.TestCase):
                 sessions_started=1,
                 elapsed_seconds=0.5,
                 seen_item_refs=set(),
+                corpus_enumeration_ref=manifest_ref,
             )
             result = _result(
                 run_ref="driver-budget-test",
@@ -682,12 +839,71 @@ class WorkQueueDriverTest(unittest.TestCase):
             )
 
         event = json.loads((self.engagement / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(refused_status, "operator_required")
+        self.assertEqual(refused_state["coverage"], "active")
+        self.assertEqual(after_refusal, before_events)
         self.assertEqual(status, "budget_spent")
         self.assertEqual(state["coverage"], "budget_bounded")
-        self.assertEqual(state["coverage_counts"], {"disposed_count": 0, "enumerated_count": 1})
+        self.assertEqual(state["coverage_counts"]["disposed_count"], 0)
+        self.assertEqual(state["coverage_counts"]["enumerated_count"], 3)
+        self.assertEqual(state["coverage_counts"]["corpus_enumeration_ref"], manifest_ref)
+        self.assertEqual(
+            state["coverage_counts"]["enumeration_artifact_ref"],
+            "artifact-driver-corpus-tsv",
+        )
         self.assertEqual(event["payload"]["driver_run_ref"], "driver-budget-test")
         self.assertEqual(event["payload"]["budget_kind"], "max_sessions")
+        self.assertEqual(event["payload"]["enumerated_count"], 3)
         self.assertEqual(event["payload"]["sessions_started"], 1)
+        self.assertEqual(validate_record(result, "work-queue-driver"), [])
+
+    def test_budget_boundary_never_counts_queue_dispositions_as_corpus_visits(self) -> None:
+        workspace, engagement, documents = self._new_corpus_fixture(1, "one-row")
+        manifest_ref = self._register_corpus_freeze(
+            row_count=1,
+            engagement=engagement,
+            documents=documents,
+        )
+        # These identities represent queue progress only. There are deliberately more of them
+        # than rows in the frozen corpus, so copying their count into coverage would mix units.
+        seen_item_refs = {"sha256:" + "1" * 64, "sha256:" + "2" * 64}
+        budget = DriverBudget(1, 60.0, 10.0, None)
+
+        with bind_run(workspace, engagement) as bound:
+            status, state = record_budget_boundary(
+                bound=bound,
+                run_ref="driver-budget-unit-separation-test",
+                budget_kind="max_sessions",
+                budget=budget,
+                sessions_started=1,
+                elapsed_seconds=0.5,
+                seen_item_refs=seen_item_refs,
+                corpus_enumeration_ref=manifest_ref,
+            )
+            result = _result(
+                run_ref="driver-budget-unit-separation-test",
+                status=status,
+                budget_kind="max_sessions",
+                budget=budget,
+                sessions_started=1,
+                started_at=time.monotonic(),
+                state=state,
+                seen_item_refs=seen_item_refs,
+                history=[],
+                model="claude-fixture-worker-20260825",
+                reviewer_pool=("claude-fixture-reviewer-20260824",),
+            )
+
+        event = json.loads(
+            engagement.joinpath("events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()[-1]
+        )
+        self.assertEqual(status, "budget_spent")
+        self.assertEqual(event["payload"]["enumerated_count"], 1)
+        self.assertEqual(event["payload"]["disposed_count"], 0)
+        self.assertEqual(state["coverage_counts"]["disposed_count"], 0)
+        self.assertGreaterEqual(result["queue"]["disposed_count"], 2)
         self.assertEqual(validate_record(result, "work-queue-driver"), [])
 
     def test_completed_result_reports_post_admission_wall_overrun(self) -> None:
@@ -1087,7 +1303,7 @@ class WorkQueueDriverTest(unittest.TestCase):
         self.assertEqual(validate_record(result, "work-queue-driver"), [])
 
     @unittest.skipUnless(DARWIN_SESSION_INTEGRATION, DARWIN_SESSION_SKIP)
-    def test_noop_subprocess_spends_outer_session_budget_and_records_it(self) -> None:
+    def test_noop_subprocess_spends_outer_session_budget_against_frozen_corpus(self) -> None:
         _append_kernel_event(
             self.engagement,
             base_event(
@@ -1108,6 +1324,7 @@ class WorkQueueDriverTest(unittest.TestCase):
                 model="claude-fixture-origin-20260824",
             ),
         )
+        manifest_ref = self._register_corpus_freeze(row_count=3)
         runtime = self.root / "fixture-noop-runtime"
         runtime.write_text(
             f"#!{sys.executable}\nimport json\nprint(json.dumps({{'type': 'result', 'is_error': False}}))\n",
@@ -1122,6 +1339,7 @@ class WorkQueueDriverTest(unittest.TestCase):
             reviewer_model="claude-fixture-reviewer-20260824",
             budget=DriverBudget(1, 30.0, 10.0, None),
             read_only_inputs=tuple(dict.fromkeys((Path(sys.prefix), Path(sys.base_prefix)))),
+            corpus_enumeration_ref=manifest_ref,
         )
         state = reduce_engagement(self.engagement)
         event = json.loads(self.engagement.joinpath("events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
@@ -1129,8 +1347,10 @@ class WorkQueueDriverTest(unittest.TestCase):
         self.assertEqual(result["budget_kind"], "max_sessions")
         self.assertEqual(result["sessions_started"], 1)
         self.assertEqual(state["coverage"], "budget_bounded")
+        self.assertEqual(state["coverage_counts"]["enumerated_count"], 3)
         self.assertEqual(event["payload"]["budget_kind"], "max_sessions")
         self.assertEqual(event["payload"]["driver_run_ref"], result["run_ref"])
+        self.assertEqual(event["payload"]["corpus_enumeration_ref"], manifest_ref)
         self.assertEqual(validate_record(result, "work-queue-driver"), [])
 
     def test_missing_independent_reviewer_model_pauses_once_without_launch_or_write(self) -> None:
@@ -1946,14 +2166,61 @@ class WorkQueueDriverTest(unittest.TestCase):
                 "closes_when": "resolved",
             }
         ]
+        terminal_operator_only = copy.deepcopy(operator_only)
+        terminal_operator_only["coverage"] = "coverage_dry"
         blocked = copy.deepcopy(state)
         blocked["coverage"] = "blocked"
         bounded = copy.deepcopy(state)
         bounded["coverage"] = "budget_bounded"
         self.assertEqual(_state_stop(completed), "completed")
         self.assertEqual(_state_stop(operator_only), "operator_required")
+        self.assertEqual(_state_stop(terminal_operator_only), "completed")
         self.assertEqual(_state_stop(blocked), "coverage_blocked")
         self.assertEqual(_state_stop(bounded), "coverage_budget_bounded")
+
+    def test_state_stop_accepts_exact_reducer_validated_coverage_dry_override(self) -> None:
+        state = reduce_engagement(self.engagement)
+        state["coverage"] = "coverage_dry"
+        blockers = blocking_work_identities(state)
+        self.assertTrue(blockers)
+        state["ending_overrides"] = [
+            {
+                "event_ref": "event-ending-override-driver-fixture",
+                "recorded_at": "2026-08-24T12:00:01Z",
+                "terminal_kind": "coverage",
+                "status": "coverage_dry",
+                "reason": "The operator accepts these exact residual items.",
+                "operator_id": "operator-driver-test",
+                "blocking_items": blockers,
+                "blocking_queue_digest": sha256_bytes(canonical_json_bytes(blockers)),
+                "attempt_ledger_count": state["attempt_count"],
+                "attempt_ledger_digest": state["source_hashes"]["attempts.jsonl"],
+                "operator_signature_challenge_digest": "sha256:" + "3" * 64,
+                "operator_signer_fingerprint": "sha256:" + "4" * 64,
+            }
+        ]
+        state["coverage_relevant_event_ref"] = "event-ending-override-driver-fixture"
+
+        self.assertEqual(_state_stop(state), "completed")
+
+        state["ending_overrides"][0]["blocking_queue_digest"] = "sha256:" + "5" * 64
+        with self.assertRaises(DriverError) as raised:
+            _state_stop(state)
+        self.assertEqual(raised.exception.code, "driver_terminal_queue_invariant")
+
+        state["ending_overrides"][0]["blocking_queue_digest"] = sha256_bytes(canonical_json_bytes(blockers))
+        state["attempt_count"] += 1
+        state["source_hashes"]["attempts.jsonl"] = "sha256:" + "6" * 64
+        with self.assertRaises(DriverError) as stale_context:
+            _state_stop(state)
+        self.assertEqual(stale_context.exception.code, "driver_terminal_queue_invariant")
+
+        state["attempt_count"] = state["ending_overrides"][0]["attempt_ledger_count"]
+        state["source_hashes"]["attempts.jsonl"] = state["ending_overrides"][0]["attempt_ledger_digest"]
+        state["coverage_relevant_event_ref"] = "event-later-substantive-work"
+        with self.assertRaises(DriverError) as stale_event_context:
+            _state_stop(state)
+        self.assertEqual(stale_event_context.exception.code, "driver_terminal_queue_invariant")
 
 
 if __name__ == "__main__":

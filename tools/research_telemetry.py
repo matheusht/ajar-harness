@@ -150,7 +150,7 @@ def _export_bound_telemetry(engagement: Path) -> dict[str, Any]:
         linked_outcomes = [review for review in reviews if review.get("review_type") == "candidate_outcome" and review.get("entity_ref") == candidate_id]
         history = [_history("eligible", proposal["recorded_at"], proposal["event_id"], proposal["rationale"], "event", proposal["sequence"])]
         for event in candidate_events.get(candidate_id, []):
-            state_name = {"candidate.selected": "selected", "candidate.skipped": "skipped", "candidate.deferred": "deferred"}.get(event["event_type"])
+            state_name = {"candidate.selected": "selected", "candidate.skipped": "skipped", "candidate.deferred": "deferred", "candidate.reopened": "reopened"}.get(event["event_type"])
             if state_name: history.append(_history(state_name, event["recorded_at"], event["event_id"], event["rationale"], "event", event["sequence"]))
             if event.get("payload", {}).get("operator_override") is True: history.append(_history("overridden", event["recorded_at"], event["event_id"], event["payload"]["override_reason"], "event", event["sequence"]))
         for hypothesis_id in linked_hypotheses:

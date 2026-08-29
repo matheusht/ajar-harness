@@ -70,6 +70,7 @@
         "candidate.selected",
         "candidate.skipped",
         "candidate.deferred",
+        "candidate.reopened",
         "operator_prior.recorded",
         "hypothesis.created",
         "hypothesis.status_changed",
@@ -96,6 +97,7 @@
         "engagement.blocked",
         "engagement.reopened",
         "engagement.closed",
+        "engagement.ending_overridden",
         "authority.requested",
         "authority.expired",
         "authority.resolved",
@@ -546,6 +548,64 @@
         "enumerated_count": {
           "type": "integer",
           "minimum": 1
+        },
+        "corpus_enumeration_ref": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        "terminal_kind": {
+          "enum": ["coverage", "engagement"]
+        },
+        "blocking_queue_digest": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "attempt_ledger_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt_ledger_digest": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "blocking_items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["class", "entity"],
+            "properties": {
+              "class": {"type": "string", "minLength": 1},
+              "entity": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "id", "detail"],
+                "properties": {
+                  "type": {"type": "string", "minLength": 1},
+                  "id": {"type": "string", "minLength": 1},
+                  "detail": {"type": ["string", "null"]}
+                }
+              }
+            }
+          }
+        },
+        "operator_signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_digest",
+            "signature_base64",
+            "allowed_signers_base64",
+            "signer_fingerprint"
+          ],
+          "properties": {
+            "challenge_digest": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            },
+            "signature_base64": {"type": "string", "minLength": 1},
+            "allowed_signers_base64": {"type": "string", "minLength": 1},
+            "signer_fingerprint": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            }
+          }
         },
         "driver_run_ref": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
@@ -1052,6 +1112,38 @@
       "if": {
         "properties": {
           "event_type": {
+            "const": "candidate.reopened"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "candidate_id",
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "selected"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
             "const": "operator_prior.recorded"
           }
         },
@@ -1335,7 +1427,8 @@
             "then": {
               "required": [
                 "disposed_count",
-                "enumerated_count"
+                "enumerated_count",
+                "corpus_enumeration_ref"
               ]
             },
             "else": {
@@ -1343,6 +1436,69 @@
                 "coverage_review_ref"
               ]
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "engagement.ending_overridden"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["operation_class"],
+        "properties": {
+          "operation_class": {"const": "authority"},
+          "payload": {
+            "required": [
+              "entity_id",
+              "terminal_kind",
+              "status",
+              "reason",
+              "operator_id",
+              "blocking_items",
+              "blocking_queue_digest",
+              "attempt_ledger_count",
+              "attempt_ledger_digest",
+              "operator_signature"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {"status": {"const": "budget_bounded"}},
+                  "required": ["status"]
+                },
+                "then": {
+                  "required": ["disposed_count", "enumerated_count", "corpus_enumeration_ref"]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "terminal_kind": {"const": "engagement"},
+                    "status": {"const": "closed"}
+                  },
+                  "required": ["terminal_kind", "status"]
+                },
+                "then": {
+                  "required": ["disposition_ref", "disposition_digest", "scope_hash"]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "terminal_kind": {"const": "coverage"},
+                    "status": {"enum": ["coverage_dry", "blocked"]}
+                  },
+                  "required": ["terminal_kind", "status"]
+                },
+                "then": {"required": ["coverage_review_ref"]}
+              }
+            ]
           }
         }
       }

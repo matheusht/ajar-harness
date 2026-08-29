@@ -158,6 +158,8 @@ def check_external_work_queue_driver():
         ("darwin-read-isolation-test.py", "read-isolation policy regression suite"),
         ("record-review-atomicity-test.py", "signed record-review transaction regression suite"),
         ("work-queue-admission-test.py", "work-queue admission predicate regression suite"),
+        ("claude-stop-hook-test.py", "orchestrating-session Stop backstop regression suite"),
+        ("frozen-corpus-test.py", "registered frozen-corpus denominator regression suite"),
         ("work-queue-driver-test.py", driver_label),
         (
             "container-broker-protocol-test.py",
@@ -1559,8 +1561,13 @@ def check_queue_stop_doctrine():
         record(bool(text), f"queue stop doctrine: {relative} exists")
         record("computed work queue" in text.lower(),
                f"queue stop doctrine: {relative} names the computed work queue")
-        record("queue is empty" in text.lower() or "empty queue" in text.lower(),
-               f"queue stop doctrine: {relative} requires an empty queue for completion")
+        lowered = text.lower()
+        record(
+            "no blocking item" in lowered
+            or "no blocking reduced work" in lowered
+            or "no work item with `blocking: true`" in lowered,
+            f"queue stop doctrine: {relative} requires no blocking queue item for completion",
+        )
 
     operational_paths = {"CLAUDE.md", "AGENTS.md", *core_doctrine_paths}
     for relative_root in (
@@ -1610,10 +1617,11 @@ def check_queue_stop_doctrine():
            "queue stop doctrine: operator-only work pauses instead of completing")
     ordered_loop_steps = (
         "if reduced.queue_control.status == parked: exit_objective_noncompletion",
-        "if reduced.coverage in {budget_bounded, blocked}: exit_objective_noncompletion",
-        "if reduced.coverage == coverage_dry:",
-        "if work: record_state_invariant_error",
-        "complete_objective",
+        "if reduced.coverage != active:",
+        "if any(item.blocking for item in work) and not has_valid_ending_override(reduced):",
+        "record_state_invariant_error",
+        "if reduced.coverage == coverage_dry: complete_objective",
+        "exit_objective_noncompletion                    # budget_bounded / blocked remain resumable",
         "if any(item.blocking for item in work): continue_objective",
         "if work: pause_objective",
     )

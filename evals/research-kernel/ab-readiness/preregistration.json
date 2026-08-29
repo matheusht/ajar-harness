@@ -158,11 +158,11 @@
       },
       {
         "path": "engagements/_TEMPLATE/scope.md",
-        "sha256": "sha256:59a4fc02625572065183f3541dcda2411b26f2f1bdcecbddcae6f7083ffef77d"
+        "sha256": "sha256:7f3afb348dce50e4062c6607dca3dbc802f7b555562223f500d3e11e0e7186fb"
       },
       {
         "path": "engine/gates.md",
-        "sha256": "sha256:999df7380a7b5530b960c5a8ce8e52028ab74aec82354b6c27b202a359844121"
+        "sha256": "sha256:450dc47d978213f767db9e74b26572b115738ddfe81d3ce3684301f8b0c4e616"
       },
       {
         "path": "skills/oracles/adjudication-oracle.md",

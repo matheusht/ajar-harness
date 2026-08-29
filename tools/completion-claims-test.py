@@ -798,7 +798,7 @@ class CompletionClaimsTest(unittest.TestCase):
     def test_47_late_root_addition_blocks_render_publication(self) -> None:
         target = self.root / "zz-last.md"
         target.write_bytes(b"safe-content\n")
-        (self.root / "late-claim.placeholder").write_bytes(b"coverage_dry\n")
+        (self.root / "late-claim.placeholder").write_bytes(b"safe-content\n")
         generated = tuple(render_views(reduce_engagement(self.root)))
         for index, relative in enumerate(generated):
             atomic_write(self.root / relative, f"root-race-sentinel-{index}\n".encode("utf-8"))
@@ -900,6 +900,160 @@ class CompletionClaimsTest(unittest.TestCase):
                 "completion_claims_snapshot_changed",
             )
         self.assertTrue(state["swapped"])
+
+    def test_52_alternate_completion_wording_in_markdown_fails(self) -> None:
+        note = self.root / "notes.md"
+        for wording in (
+            "The engagement is complete.",
+            "All scoped surfaces are exhausted.",
+            "No further testing remains.",
+            "Nothing further to test.",
+            "Final verdict: done.",
+        ):
+            with self.subTest(wording=wording):
+                note.write_text(wording + "\n", encoding="utf-8")
+                self.assertEqual(
+                    self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                    "completion_claims_unjustified",
+                )
+
+    def test_53_completion_claim_in_arbitrary_extension_fails(self) -> None:
+        for filename in ("notes.rst", "notes.evidence"):
+            with self.subTest(filename=filename):
+                note = self.root / filename
+                note.write_text("Engagement complete.\n", encoding="utf-8")
+                self.assertEqual(
+                    self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                    "completion_claims_unjustified",
+                )
+                note.unlink()
+
+    def test_54_alternate_completion_wording_has_word_boundaries(self) -> None:
+        near_misses = (
+            "Engagement completely. All in-scope surfaces exhaustedness, "
+            "nothing further to testing. Final verdict: doneish."
+        )
+        self.assertEqual(claims.CLAIM_TOKEN.findall(near_misses), [])
+
+    def test_55_reopen_does_not_treat_historical_machine_enums_as_prose(self) -> None:
+        self._real_dry()
+        _append_kernel_event(
+            self.root,
+            base_event(
+                event_id="event-coverage-reopen-machine-enums",
+                engagement_id=self.root.name,
+                recorded_at="2026-08-24T00:01:04Z",
+                actor_role="orchestrator",
+                actor_id="orchestrator-test",
+                event_type="coverage.reopened",
+                rationale="Fixture reopens coverage without retaining a prose completion claim.",
+                payload={
+                    "entity_id": self.root.name,
+                    "status": "active",
+                    "reason": "Fixture reopens coverage without retaining a prose completion claim.",
+                },
+                state_changes=[{
+                    "dimension": "coverage",
+                    "entity_id": self.root.name,
+                    "previous": "coverage_dry",
+                    "current": "active",
+                }],
+                session_id="session-reopen-machine-enums",
+                operation_class="notebook",
+            ),
+        )
+        self.assertEqual(claims.assert_completion_claims_clear(self.root)["coverage"], "active")
+
+    def test_56_nul_byte_cannot_hide_completion_claim(self) -> None:
+        for filename in ("notes.txt", "notes.evidence"):
+            with self.subTest(filename=filename):
+                note = self.root / filename
+                note.write_bytes(b"\0The engagement is complete.\n")
+                self.assertEqual(
+                    self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                    "completion_claims_unjustified",
+                )
+                note.unlink()
+
+    def test_57_quotes_cannot_hide_canonical_completion_claim(self) -> None:
+        for filename in ("notes.md", "notes.evidence"):
+            with self.subTest(filename=filename):
+                note = self.root / filename
+                note.write_text('We are "coverage_dry" and still calling it active.\n', encoding="utf-8")
+                self.assertEqual(
+                    self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                    "completion_claims_unjustified",
+                )
+                note.unlink()
+        review = canonical_json_bytes({
+            "review_type": "coverage",
+            "verdict": "coverage_dry",
+            "rationale": 'We are "coverage_dry" despite the reopen.',
+        })
+        review_path = self.root / "reviews" / "quoted-claim.json"
+        review_path.write_bytes(review)
+        review_fd = os.open(review_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            _digest, _identity, count = claims._scan_regular(
+                review_fd,
+                review_path.name,
+                "reviews/quoted-claim.json",
+                claims._identity(review_path.stat()),
+            )
+        finally:
+            os.close(review_fd)
+        self.assertEqual(count, 1)
+
+    def test_58_large_arbitrary_file_is_streamed_and_chunk_boundaries_do_not_hide_claim(self) -> None:
+        path = self.root / "large.evidence"
+        path.write_bytes(
+            b"The engagement"
+            + b" " * (claims.SCAN_CHUNK_BYTES * 2)
+            + b"is complete.\n"
+        )
+        real_read = claims.os.read
+        requested: list[int] = []
+
+        def bounded_read(fd: int, amount: int) -> bytes:
+            requested.append(amount)
+            return real_read(fd, amount)
+
+        root_fd = os.open(self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            with mock.patch.object(claims.os, "read", side_effect=bounded_read):
+                _digest, _identity, count = claims._scan_regular(
+                    root_fd,
+                    path.name,
+                    path.name,
+                    claims._identity(path.stat()),
+                )
+        finally:
+            os.close(root_fd)
+        self.assertEqual(count, 1)
+        self.assertTrue(requested)
+        self.assertLessEqual(max(requested), claims.SCAN_CHUNK_BYTES)
+
+    def test_59_chunk_boundary_waits_for_token_lookahead(self) -> None:
+        token = b"coverage_dry"
+        path = self.root / "boundary.evidence"
+        path.write_bytes(
+            b"A" * (claims.SCAN_CHUNK_BYTES - len(token) - 1)
+            + b" "
+            + token
+            + b"x"
+        )
+        root_fd = os.open(self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            _digest, _identity, count = claims._scan_regular(
+                root_fd,
+                path.name,
+                path.name,
+                claims._identity(path.stat()),
+            )
+        finally:
+            os.close(root_fd)
+        self.assertEqual(count, 0)
+        self.assertEqual(claims.CLAIM_TOKEN_BYTES.findall(path.read_bytes()), [])
 
 
 if __name__ == "__main__":

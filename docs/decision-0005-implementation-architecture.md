@@ -35,8 +35,9 @@ Implementation is successful only when all of the following are true:
 3. An operator prior can increase search depth but cannot appear as evidence for a confirmed claim.
 4. Attempts and artifacts are immutable; findings are revisioned; reports identify the exact finding
    revision they represent.
-5. `coverage_dry` is impossible unless every material hypothesis is closed, explicitly deferred, or
-   blocked, and a cold coverage review records the bounded space.
+5. A terminal coverage state and engagement closure are impossible while the computed work queue has
+   a blocking item, unless a separately operator-signed override records the reason and exact blockers
+   left behind; `coverage_dry` additionally requires a cold review of the bounded space.
 6. Regrade and Pocinator remain distinct, typed, independently reviewable stages.
 7. Non-LLM findings do not need fabricated OWASP-LLM fields.
 8. Full-funnel telemetry includes eligible, skipped, held, deferred, contaminated, reopened,
@@ -512,6 +513,7 @@ material hypotheses and search state
 finding IDs and current revisions/claim states
 outstanding regrade/Pocinator actions
 coverage state and latest coverage review
+computed work queue, ending overrides, and budget-redeclaration-cycle facts
 report/submission refs
 cleanup state
 memory disposition
@@ -536,7 +538,18 @@ Mechanical invariants include:
 - a finding revision must supersede the current revision exactly;
 - a report must reference the current or explicitly selected historical finding revision;
 - a submission event requires operator review and the receiving program's authorship/disclosure note;
+- one reduced-state predicate — no computed work item with `blocking: true` — binds both transitions
+  out of `active` coverage and engagement closure;
+- an operator may end with blockers only through a separately signed first-class override event that
+  records its reason and the exact blocker identities, while all non-queue closure gates still apply;
+- `budget_bounded` requires `enumerated_count` to match the row count of a prior registered frozen
+  corpus enumeration whose manifest-byte digest matches the exact pin in signed scope; a missing or
+  mismatched denominator is refused, and consecutive redeclarations without an intervening work
+  disposition surface as a reduced-state fact;
 - `coverage_dry` requires a valid cold coverage review and no unexplained active material hypothesis;
+- a closed or skipped candidate remains represented as blocking work; its next action is
+  `reopen_candidate`, and only a hypothesis citing the selected candidate as its origin accounts for
+  that candidate-disposal item; free text alone is not a disposition;
 - a deferred hypothesis needs a reason and reopening condition;
 - a confirmed primitive needs a chainability disposition where meaningful, or explicit
   `not_applicable` rationale;
@@ -915,6 +928,10 @@ Required fixture classes:
 - report bound to stale or nonexistent finding revision;
 - regrade/Pocinator verdict confusion;
 - `coverage_dry` with active, unexplained, or silently skipped hypotheses;
+- terminal coverage or engagement closure with any blocking computed work;
+- missing/mismatched frozen corpus denominator and no-work redeclaration cycling;
+- closed/skipped candidate disappearing without reopen-and-origin-hypothesis lifecycle accounting;
+- unsigned, blocker-mismatched, or flag-shaped ending override attempts;
 - missing memory/cleanup disposition;
 - secret-shaped content and unsafe artifact metadata;
 - malformed, truncated, reordered, duplicated, and tampered JSONL.

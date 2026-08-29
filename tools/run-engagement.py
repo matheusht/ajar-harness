@@ -64,10 +64,13 @@ from engagement_state import (
     atomic_write,
     append_ledger_record,
     assert_resume_current,
+    attempt_ledger_context,
     base_event as _base_event,
+    blocking_work_identities,
     compute_work_queue,
     compute_record_hash,
     compute_review_input_hash,
+    engagement_may_end,
     finding_revision_lane_id,
     hypothesis_dispositions_hash,
     bound_engagement_lock,
@@ -77,6 +80,8 @@ from engagement_state import (
     initialize_engagement,
     materialize_ledger_record,
     persist_scope_snapshot,
+    project_current_terminal_work_state,
+    project_terminal_work_state,
     read_governed_file,
     read_ledger,
     reduce_engagement,
@@ -114,6 +119,13 @@ from work_queue_actions import (
     queue_gate_exit,
 )
 from driver_action_admission import consume_action_admission, forward_action_to_broker
+from frozen_corpus import require_enumerated_count_matches, resolve_frozen_corpus_denominator
+from operator_signature import (
+    encode_operator_signature_proof,
+    ending_override_action,
+    operator_challenge_bytes,
+    verify_operator_signature_bytes,
+)
 
 
 _EMIT_BUFFER: ContextVar[bytearray | None] = ContextVar("run_engagement_emit_buffer", default=None)
@@ -470,23 +482,23 @@ def command_init(args: argparse.Namespace) -> int:
 def _require_bound_operator_signature(*, engagement: Path, operator_id: str, operation: str,
                                       scope_hash: str, scope_bytes: bytes,
                                       ledger_hash: str | None, signer_pin: str | None = None,
-                                      engagement_id: str | None = None) -> str:
+                                      engagement_id: str | None = None,
+                                      include_proof: bool = False) -> str | dict[str, str]:
     if signer_pin is None:
         signer_match=re.search(rb"Operator allowed signers SHA256:\s*(sha256:[0-9a-f]{64})",scope_bytes)
         signer_pin=signer_match.group(1).decode() if signer_match is not None else None
-    challenge={"schema_version":1,"namespace":"llm-redteam-harness-operator-v1","engagement_id":engagement_id or engagement.name,"scope_hash":scope_hash,"ledger_hash":ledger_hash,"operation":operation,"operator_id":operator_id};challenge_bytes=canonical_json_bytes(challenge);challenge_digest=sha256_bytes(challenge_bytes);sys.stderr.write("Operator signature challenge:\n"+challenge_bytes.decode());sys.stderr.flush()
+    challenge_bytes=operator_challenge_bytes(engagement_id=engagement_id or engagement.name,scope_hash=scope_hash,ledger_hash=ledger_hash,operation=operation,operator_id=operator_id);challenge_digest=sha256_bytes(challenge_bytes);sys.stderr.write("Operator signature challenge:\n"+challenge_bytes.decode());sys.stderr.flush()
     signature_name=os.environ.get("HARNESS_OPERATOR_SIGNATURE_FILE");signers_name=os.environ.get("HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE")
     if signer_pin is None or not signature_name or not signers_name:raise RecordError("operator_signature_required",challenge_digest)
-    try:signature_bytes,_=_read_regular_file_once(Path(signature_name));signers_bytes,_=_read_regular_file_once(Path(signers_name))
+    try:signature_bytes,_=_read_regular_file_once(Path(signature_name),max_bytes=REVIEW_SIGNATURE_MAX_BYTES);signers_bytes,_=_read_regular_file_once(Path(signers_name),max_bytes=REVIEW_ALLOWED_SIGNERS_MAX_BYTES)
     except (OSError,RecordError) as exc:raise RecordError("operator_signature_invalid",challenge_digest) from exc
+    if detect_secret_classes(signature_bytes) or detect_secret_classes(signers_bytes):raise RecordError("operator_signature_invalid",challenge_digest)
     if sha256_bytes(signers_bytes)!=signer_pin:raise RecordError("operator_signature_invalid",challenge_digest)
-    with tempfile.TemporaryDirectory(prefix="operator-signature-") as temporary:
-        temporary_root=Path(temporary);signature_copy=temporary_root/"operator.sig";signers_copy=temporary_root/"allowed_signers";signature_copy.write_bytes(signature_bytes);signers_copy.write_bytes(signers_bytes);result=subprocess.run(["/usr/bin/ssh-keygen","-Y","verify","-f",str(signers_copy),"-I",operator_id,"-n","llm-redteam-harness-operator-v1","-s",str(signature_copy)],input=challenge_bytes,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={"PATH":"/usr/bin:/bin","LC_ALL":"C"},check=False)
-    if result.returncode!=0:raise RecordError("operator_signature_invalid",challenge_digest)
-    return challenge_digest
+    signer_fingerprint=verify_operator_signature_bytes(scope_bytes=scope_bytes,operator_id=operator_id,challenge_bytes=challenge_bytes,signature_bytes=signature_bytes,allowed_signers_bytes=signers_bytes)
+    return encode_operator_signature_proof(challenge_bytes=challenge_bytes,signature_bytes=signature_bytes,allowed_signers_bytes=signers_bytes,signer_fingerprint=signer_fingerprint) if include_proof else challenge_digest
 
 
-def _require_operator_console(engagement: Path, operator_id: str, operation: str) -> str:
+def _require_operator_console(engagement: Path, operator_id: str, operation: str, *, include_proof: bool = False) -> str | dict[str, str]:
     engagement=engagement.absolute();events=read_ledger(engagement,"event")
     if events:
         attestation=next(event for event in reversed(events) if event["event_type"]=="scope.attested");signed=attestation["payload"]["operator_id"];scope_hash=attestation["payload"]["scope_hash"];scope_bytes=read_governed_file(engagement/attestation["payload"]["scope_snapshot_path"]);ledger_hash=events[-1]["record_hash"];logical_engagement_id=attestation["engagement_id"]
@@ -494,7 +506,7 @@ def _require_operator_console(engagement: Path, operator_id: str, operation: str
         metadata=_scope_metadata(engagement/"scope.md");signed=re.sub(r"[^A-Za-z0-9._:-]+","-",metadata["operator"]).strip("-") or "operator";scope_hash=metadata["scope_hash"];scope_bytes=read_governed_file(engagement/"scope.md");ledger_hash=None;logical_engagement_id=engagement.name
     if sha256_bytes(scope_bytes)!=scope_hash:raise RecordError("operator_scope_snapshot_invalid",scope_hash)
     if operator_id!=signed:raise RecordError("operator_authority_invalid","operator id does not match the active attested scope")
-    return _require_bound_operator_signature(engagement=engagement,operator_id=operator_id,operation=operation,scope_hash=scope_hash,scope_bytes=scope_bytes,ledger_hash=ledger_hash,engagement_id=logical_engagement_id)
+    return _require_bound_operator_signature(engagement=engagement,operator_id=operator_id,operation=operation,scope_hash=scope_hash,scope_bytes=scope_bytes,ledger_hash=ledger_hash,engagement_id=logical_engagement_id,include_proof=include_proof)
 
 
 def _require_session(provenance: dict[str, object], operation: str) -> str:
@@ -1231,6 +1243,269 @@ def command_operator_stop(args: argparse.Namespace) -> int:
 
 def command_operator_resume(args: argparse.Namespace) -> int:
     return _command_operator_queue_control(args, command_name="operator-resume", status="active")
+
+
+def _exact_ending_override_retry(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    events: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the prior event only when this is an exact, unchanged retry.
+
+    The override must still be the event-ledger tail, every CLI input must
+    match, and the current all-attempt queue projection must reproduce the
+    signed blocking identities.  A reopen, a later event, or changed queue
+    context therefore cannot masquerade as an idempotent success.
+    """
+
+    if not events:
+        return None
+    event = events[-1]
+    payload = event.get("payload", {})
+    if (
+        event.get("event_type") != "engagement.ending_overridden"
+        or event.get("recorded_at") != args.recorded_at
+        or event.get("actor") != {"role": "operator", "id": args.operator_id}
+        or event.get("rationale") != args.reason
+        or event.get("provenance", {}).get("session_id") != args.session_id
+        or payload.get("entity_id") != state.get("engagement_id")
+        or payload.get("terminal_kind") != args.terminal_kind
+        or payload.get("status") != args.status
+        or payload.get("reason") != args.reason
+        or payload.get("operator_id") != args.operator_id
+        or payload.get("scope_hash") != state.get("scope_hash")
+    ):
+        return None
+
+    optional_inputs = {
+        "coverage_review_ref": args.coverage_review_ref,
+        "disposed_count": args.disposed_count,
+        "enumerated_count": args.enumerated_count,
+        "corpus_enumeration_ref": args.corpus_enumeration_ref,
+    }
+    if any(
+        (name in payload) != (value is not None) or payload.get(name) != value
+        for name, value in optional_inputs.items()
+    ):
+        return None
+
+    target_coverage = (
+        args.status
+        if args.terminal_kind == "coverage" or args.status == "blocked"
+        else state.get("coverage")
+    )
+    if not isinstance(target_coverage, str):
+        return None
+    projected = project_current_terminal_work_state(
+        state,
+        attempts,
+        coverage=target_coverage,
+    )
+    blockers = blocking_work_identities(projected)
+    current_attempt_context = attempt_ledger_context(attempts)
+    if (
+        not blockers
+        or payload.get("blocking_items") != blockers
+        or payload.get("blocking_queue_digest")
+        != sha256_bytes(canonical_json_bytes(blockers))
+        or payload.get("attempt_ledger_count")
+        != current_attempt_context["attempt_ledger_count"]
+        or payload.get("attempt_ledger_digest")
+        != current_attempt_context["attempt_ledger_digest"]
+    ):
+        return None
+    if args.terminal_kind == "coverage" and state.get("coverage") != args.status:
+        return None
+    if args.terminal_kind == "engagement" and not any(
+        change.get("dimension") == "engagement"
+        and change.get("entity_id") == state.get("engagement_id")
+        and change.get("current") == args.status
+        for change in event.get("state_changes", [])
+    ):
+        return None
+    memory = state.get("memory_disposition")
+    if args.terminal_kind == "engagement" and args.status == "closed" and (
+        not isinstance(memory, dict)
+        or payload.get("disposition_ref") != memory.get("disposition_ref")
+        or payload.get("disposition_digest") != memory.get("disposition_digest")
+    ):
+        return None
+    return event
+
+
+def command_override_ending(args: argparse.Namespace) -> int:
+    """Record one signed, exact exception to the otherwise binding work queue."""
+
+    engagement = args.engagement.absolute()
+    capability = classify_command("override-ending")
+    _require_local_session(args.session_id)
+    if not args.reason.strip():
+        raise RecordError("ending_override_reason_required", "reason must be nonblank")
+    with engagement_lock(engagement) as bound_engagement:
+        admission = assert_completion_claims_clear_bound(bound_engagement) if args.terminal_kind == "engagement" and args.status == "closed" else None
+        state = admission.state if admission is not None else reduce_engagement(bound_engagement)
+        attempts = read_ledger(bound_engagement, "attempt")
+        events = read_ledger(bound_engagement, "event")
+        existing = _exact_ending_override_retry(args, state, events, attempts)
+        if existing is not None:
+            existing_projection = next(
+                item
+                for item in reversed(state["ending_overrides"])
+                if item["event_ref"] == existing["event_id"]
+            )
+            emit({"valid": True, "event_id": existing["event_id"], "override": existing_projection})
+            return 0
+
+        attempts = read_ledger(bound_engagement, "attempt")
+        events = read_ledger(bound_engagement, "event")
+        previous_engagement = "active"
+        for event in events:
+            for change in event.get("state_changes", []):
+                if change["dimension"] == "engagement" and change["entity_id"] == state["engagement_id"]:
+                    previous_engagement = change["current"]
+
+        if args.terminal_kind == "coverage":
+            if args.status not in {"coverage_dry", "budget_bounded", "blocked"}:
+                raise RecordError("ending_override_status_invalid", args.status)
+            previous = state["coverage"]
+            target_coverage = args.status
+            dimension = "coverage"
+        else:
+            if args.status not in {"closed", "blocked"}:
+                raise RecordError("ending_override_status_invalid", args.status)
+            previous = previous_engagement
+            target_coverage = "blocked" if args.status == "blocked" else state["coverage"]
+            dimension = "engagement"
+
+        projected = project_current_terminal_work_state(
+            state,
+            attempts,
+            coverage=target_coverage,
+        )
+        blockers = blocking_work_identities(projected)
+        if not blockers:
+            raise RecordError("ending_override_not_required", "use the ordinary terminal command when no blocking work remains")
+        blocker_digest = sha256_bytes(canonical_json_bytes(blockers))
+        payload: dict[str, object] = {
+            "entity_id": state["engagement_id"],
+            "terminal_kind": args.terminal_kind,
+            "status": args.status,
+            "reason": args.reason,
+            "operator_id": args.operator_id,
+            "scope_hash": state["scope_hash"],
+            "blocking_items": blockers,
+            "blocking_queue_digest": blocker_digest,
+            **attempt_ledger_context(attempts),
+        }
+        evidence_refs: list[str] = []
+        entity_refs: list[str] = []
+        if args.terminal_kind == "engagement" and args.status == "closed":
+            memory = state.get("memory_disposition")
+            if memory is None:
+                raise RecordError("engagement_closure_memory_missing", state["engagement_id"])
+            payload.update({
+                "disposition_ref": memory["disposition_ref"],
+                "disposition_digest": memory["disposition_digest"],
+            })
+            entity_refs.append(memory["disposition_ref"])
+        elif args.terminal_kind == "coverage" and args.status in {"coverage_dry", "blocked"}:
+            if not args.coverage_review_ref:
+                raise RecordError("coverage_review_ref_required", args.status)
+            payload["coverage_review_ref"] = args.coverage_review_ref
+        elif args.terminal_kind == "coverage":
+            if args.disposed_count is None or args.enumerated_count is None or not args.corpus_enumeration_ref:
+                raise RecordError("budget_bounded_denominator_required", "counts and --corpus-enumeration-ref are required")
+            artifacts = read_ledger(bound_engagement, "artifact")
+            genesis_scope = events[0]
+            scope_bytes = read_governed_file(
+                bound_engagement
+                / genesis_scope["payload"]["scope_snapshot_path"]
+            )
+            denominator = resolve_frozen_corpus_denominator(
+                bound_engagement,
+                artifacts,
+                args.corpus_enumeration_ref,
+                args.recorded_at,
+                scope_bytes,
+                genesis_scope["recorded_at"],
+            )
+            require_enumerated_count_matches(args.enumerated_count, denominator)
+            payload.update({
+                "disposed_count": args.disposed_count,
+                "enumerated_count": args.enumerated_count,
+                "corpus_enumeration_ref": args.corpus_enumeration_ref,
+            })
+            evidence_refs.extend([
+                denominator["manifest_artifact_ref"],
+                denominator["enumeration_artifact_ref"],
+            ])
+
+        state_changes = [{
+            "dimension": dimension,
+            "entity_id": state["engagement_id"],
+            "previous": previous,
+            "current": args.status,
+        }]
+        if args.terminal_kind == "engagement" and args.status == "blocked":
+            state_changes.append({
+                "dimension": "coverage",
+                "entity_id": state["engagement_id"],
+                "previous": state["coverage"],
+                "current": "blocked",
+            })
+        actor = {"role": "operator", "id": args.operator_id}
+        action = ending_override_action(
+            engagement_id=state["engagement_id"],
+            recorded_at=args.recorded_at,
+            actor=actor,
+            payload=payload,
+            entity_refs=entity_refs,
+            evidence_refs=evidence_refs,
+            state_changes=state_changes,
+            session_id=args.session_id,
+        )
+        if detect_secret_classes(canonical_json_bytes(action)):
+            raise RecordError("secret_shaped_ending_override", "override reason contains a forbidden secret shape")
+        action_digest = sha256_bytes(canonical_json_bytes(action))
+        require_actor(capability, "operator")
+        signature_proof = _require_operator_console(
+            bound_engagement,
+            args.operator_id,
+            f"override-ending:{action_digest}",
+            include_proof=True,
+        )
+        if not isinstance(signature_proof, dict):
+            raise RecordError("operator_signature_invalid", action_digest)
+        payload["operator_signature"] = signature_proof
+        event = base_event(
+            event_id=f"event-ending-override-{action_digest[-12:]}",
+            engagement_id=state["engagement_id"],
+            recorded_at=args.recorded_at,
+            actor_role="operator",
+            actor_id=args.operator_id,
+            event_type="engagement.ending_overridden",
+            rationale=args.reason,
+            payload=payload,
+            entity_refs=entity_refs,
+            evidence_refs=evidence_refs,
+            state_changes=state_changes,
+            session_id=args.session_id,
+            operation_class=str(capability["tier"]),
+        )
+        if admission is None:
+            applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
+        else:
+            assert_completion_claims_token_current_bound(bound_engagement, admission.token)
+            applied = _append_kernel_event(
+                bound_engagement,
+                event,
+                lock_held=True,
+                completion_claims_token=admission.token,
+            )
+        snapshot = reduce_engagement(bound_engagement)
+    emit({"valid": True, "event_id": applied["event_id"], "override": snapshot["ending_overrides"][-1]})
+    return 0
 
 
 def command_request_authority(args: argparse.Namespace) -> int:
@@ -2752,6 +3027,79 @@ def state_self_test() -> list[tuple[str, bool, str]]:
     append_event = _append_kernel_event
     collect_preflight = _collect_legacy_preflight
     checks: list[tuple[str, bool, str]] = []
+
+    def test_corpus_documents(*, row_count: int, frozen_at: str) -> tuple[bytes, bytes]:
+        from corpus_enumeration import CAVEAT, COLUMNS
+        rows = [
+            ["enumerated", "fixture", "1.0.0", "a" * 40, f"entry-{index}.js", "declared", f"{index + 1:064x}"]
+            for index in range(row_count)
+        ]
+        tsv_bytes = ("\n".join([CAVEAT, "\t".join(COLUMNS), *("\t".join(row) for row in rows)]) + "\n").encode()
+        raw_digest = sha256_bytes(tsv_bytes).removeprefix("sha256:")
+        linked = {"path": "corpus-enumeration.tsv", "sha256": raw_digest}
+        manifest = {
+            "schema_version": 1,
+            "artifact_type": "corpus-enumeration",
+            "frozen_at": frozen_at,
+            "generated_by": {
+                "tool": "tools/corpus_enumeration.py",
+                "tool_sha256": "4" * 64,
+                "mode": "syntactic",
+                "model_involvement": False,
+                "parser_versions": {"tree-sitter": "test", "tree-sitter-javascript": "test", "tree-sitter-typescript": "test"},
+            },
+            "granularity": ["package", "entrypoint"],
+            "columns": COLUMNS,
+            "coverage_semantics": {"closes_on": "visitation", "does_not_establish": "understanding", "necessary_for_coverage": True, "sufficient_for_coverage": False},
+            "artifact": {**linked, "row_count": row_count, "package_count": 1},
+            "source": {"pins_path": "package-pins.tsv", "tarballs_path": "tarballs"},
+            "frozen_inputs_base": "manifest",
+            "frozen_inputs": {
+                "corpus-enumeration": linked,
+                "package-pins": {"path": "package-pins.tsv", "sha256": "5" * 64},
+                "enumerator": {"path": "../../tools/corpus_enumeration.py", "sha256": "4" * 64},
+                "schema": {"path": "../../schemas/corpus-enumeration.schema.json", "sha256": "6" * 64},
+                "tarball:0000": {"path": "tarballs/fixture.tgz", "sha256": "7" * 64},
+            },
+        }
+        return tsv_bytes, canonical_json_bytes(manifest)
+
+    def scope_with_corpus_pin(scope_text: str, manifest_bytes: bytes) -> str:
+        pin = f"- Frozen corpus enumeration SHA256: `{sha256_bytes(manifest_bytes)}`\n"
+        return scope_text.replace("## Authorization\n", "## Authorization\n" + pin, 1)
+
+    def register_test_corpus(target: Path, *, row_count: int = 5, created_at: str = "2026-07-10T00:02:00Z", documents: tuple[bytes, bytes] | None = None) -> tuple[str, str]:
+        state = reduce_engagement(target)
+        suffix = re.sub(r"[^A-Za-z0-9._:-]+", "-", state["engagement_id"])
+        tsv_ref = f"artifact-corpus-tsv-{suffix}"
+        manifest_ref = f"artifact-corpus-manifest-{suffix}"
+        evidence = target / "evidence"
+        evidence.mkdir(exist_ok=True)
+        tsv_bytes, manifest_bytes = documents or test_corpus_documents(row_count=row_count, frozen_at=created_at)
+        tsv_path = evidence / "corpus-enumeration.tsv"
+        tsv_path.write_bytes(tsv_bytes)
+        common = {
+            "schema_version": 1,
+            "engagement_id": state["engagement_id"],
+            "created_at": created_at,
+            "producer": {"role": "operator", "id": "operator-selftest"},
+            "acquisition_method": "generated_local",
+            "target_refs": [],
+            "environment_ref": None,
+            "sensitivity": "internal",
+            "redaction_status": "not_needed",
+            "contains_executable_capability": False,
+            "advisory_zone": "clear_local",
+            "escalation_confirmation_event_ref": None,
+            "cleanup_obligation_ref": None,
+            "supersedes_artifact_id": None,
+        }
+        _register_legacy_artifact(target, tsv_path, {**common, "artifact_id": tsv_ref, "media_type": "text/tab-separated-values"})
+        manifest_path = evidence / "corpus-enumeration.freeze.json"
+        manifest_path.write_bytes(manifest_bytes)
+        _register_legacy_artifact(target, manifest_path, {**common, "artifact_id": manifest_ref, "media_type": "application/json"})
+        return manifest_ref, tsv_ref
+
     with tempfile.TemporaryDirectory(prefix="engagement-state-selftest-") as tmp:
         root = Path(tmp).resolve(); reviewer_key = root / "reviewer-ed25519"; subprocess.run(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(reviewer_key)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); public_parts = reviewer_key.with_suffix(".pub").read_text().split(); allowed_signers_path = root / "allowed-signers"; allowed_signers_path.write_text(f"reviewer-external-canonical {public_parts[0]} {public_parts[1]}\noperator-selftest {public_parts[0]} {public_parts[1]}\n"); allowed_signers_digest = sha256_file(allowed_signers_path)
         engagement = root / "eng-selftest"
@@ -2925,6 +3273,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         synthetic_queue_state = copy.deepcopy(initial_reduction)
         synthetic_queue_state["hypotheses"] = {
             "entity-hypothesis_ran_unadjudicated": {"status": "running", "next_route": None, "unresolved_questions": []},
+            "entity-hypothesis_running_unattempted": {"status": "running", "running_event_ref": "event-entity-hypothesis-running", "next_route": None, "unresolved_questions": []},
             "entity-hypothesis_unrouted": {"status": "selected", "next_route": None, "unresolved_questions": []},
             "entity-hypothesis_open_route": {"status": "running", "next_route": "detail", "unresolved_questions": []},
             "entity-hypothesis_unresolved_question": {"status": "running", "next_route": None, "unresolved_questions": ["detail"]},
@@ -2970,6 +3319,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         synthetic_queue_state["latest_coverage_review"] = None
         entity_types = {
             "hypothesis_ran_unadjudicated": "hypothesis",
+            "hypothesis_running_unattempted": "hypothesis",
             "hypothesis_unrouted": "hypothesis",
             "hypothesis_open_route": "hypothesis",
             "hypothesis_unresolved_question": "hypothesis",
@@ -2987,6 +3337,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         entity_ids["review_obligation_open"] = "review-obligation-open"
         expected_actions = {
             "hypothesis_ran_unadjudicated": "record_hypothesis_disposition",
+            "hypothesis_running_unattempted": "requeue_unattempted_hypothesis",
             "hypothesis_unrouted": "record_hypothesis_disposition",
             "hypothesis_open_route": "record_hypothesis_disposition",
             "hypothesis_unresolved_question": "record_hypothesis_disposition",
@@ -3032,7 +3383,9 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             for item in mapped_items
         )
         operator_action = next(item["next_action"] for item in mapped_items if item["class"] == "awaiting_operator")
+        deferred_action = next(item["next_action"] for item in mapped_items if item["class"] == "deferred_candidate_unreviewed")
         checks.append(("every reducer queue class maps to one closed-shape capability-classified next action", actions_ok and len(mapped_items) == len(WORK_QUEUE_CLASS_ORDER) and operator_action["session_kind"] == "operator_required" and operator_action["principal"] == "operator_only" and operator_action["execution_principal"] == "operator_only" and operator_action["launchable"] is False, str([(item["class"], item["next_action"]["action_id"]) for item in mapped_items])))
+        checks.append(("skipping a deferred candidate advances state without claiming the candidate debt is closed", deferred_action["effect"] == "advances_item", str(deferred_action)))
 
         attempt_stage_state = copy.deepcopy(synthetic_queue_state)
         attempt_stage_state["control_candidates"][0]["hypothesis_ref"] = "entity-hypothesis_ran_unadjudicated"
@@ -3163,6 +3516,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         expected_queue = [
             {"class": "hypothesis_ran_unadjudicated", "entity": {"type": "hypothesis", "id": "hypothesis-ran", "detail": None}, "blocking": True, "predicate": "a matching attempt_id is absent from experiment_refs and control_refs", "closes_when": "every matching attempt_id is present in experiment_refs or control_refs"},
             {"class": "hypothesis_ran_unadjudicated", "entity": {"type": "hypothesis", "id": "hypothesis-terminal-route", "detail": None}, "blocking": True, "predicate": "a matching attempt_id is absent from experiment_refs and control_refs", "closes_when": "every matching attempt_id is present in experiment_refs or control_refs"},
+            {"class": "hypothesis_running_unattempted", "entity": {"type": "hypothesis", "id": "hypothesis-route", "detail": None}, "blocking": True, "predicate": "status is running and no matching attempt is recorded", "closes_when": "a matching attempt is recorded or status is outside running"},
             {"class": "hypothesis_unrouted", "entity": {"type": "hypothesis", "id": "hypothesis-ran", "detail": None}, "blocking": True, "predicate": "status in {queued, selected}", "closes_when": "status is outside {queued, selected}"},
             {"class": "hypothesis_unrouted", "entity": {"type": "hypothesis", "id": "hypothesis-unrouted", "detail": None}, "blocking": True, "predicate": "status in {queued, selected}", "closes_when": "status is outside {queued, selected}"},
             {"class": "hypothesis_open_route", "entity": {"type": "hypothesis", "id": "hypothesis-route", "detail": "route-z"}, "blocking": True, "predicate": "next_route is not null", "closes_when": "next_route is null"},
@@ -3176,7 +3530,8 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             expected_review_z,
             {"class": "finding_revision_pending", "entity": {"type": "finding", "id": "finding-filing", "detail": None}, "blocking": True, "predicate": "latest fileable claim adjudication is not reflected by its expected finding revision", "closes_when": "the expected finding revision reflects the latest adjudication, or a newer adjudication supersedes it"},
             {"class": "finding_unproved", "entity": {"type": "finding", "id": "finding-proof", "detail": None}, "blocking": True, "predicate": "status in {supported, confirmed} and the current revision has no verified proof review", "closes_when": "the current revision has a proof review with terminal_status verified or status is outside {supported, confirmed}"},
-            {"class": "candidate_undisposed", "entity": {"type": "candidate", "id": "candidate-selected", "detail": None}, "blocking": True, "predicate": "status is selected and no hypothesis cites this candidate as origin", "closes_when": "a hypothesis has origin_type candidate and origin_ref equal to this candidate id, or candidate status changes"},
+            {"class": "candidate_undisposed", "entity": {"type": "candidate", "id": "candidate-closed", "detail": None}, "blocking": True, "predicate": "status in {queued, selected, closed} and no hypothesis cites this candidate as origin", "closes_when": "a hypothesis has origin_type candidate and origin_ref equal to this candidate id"},
+            {"class": "candidate_undisposed", "entity": {"type": "candidate", "id": "candidate-selected", "detail": None}, "blocking": True, "predicate": "status in {queued, selected, closed} and no hypothesis cites this candidate as origin", "closes_when": "a hypothesis has origin_type candidate and origin_ref equal to this candidate id"},
             {"class": "deferred_candidate_unreviewed", "entity": {"type": "candidate", "id": "candidate-deferred", "detail": None}, "blocking": True, "predicate": "status is deferred", "closes_when": "status is not deferred"},
             {"class": "control_candidate_unverified", "entity": {"type": "control_candidate", "id": "event-control-candidate", "detail": None}, "blocking": True, "predicate": "status is likely_held and no control-kind attempt references this routing event", "closes_when": "a negative_control or positive_control attempt has experiment_ref equal to this routing event id"},
             {"class": "awaiting_operator", "entity": {"type": "authority_request", "id": "request-pending", "detail": None}, "blocking": False, "predicate": "status is pending_authority", "closes_when": "status is not pending_authority"},
@@ -3193,8 +3548,102 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("computed work queue covers every debt class in canonical order with exact overlapping predicates", computed_queue == expected_queue, str(computed_queue)))
         checks.append(("computed work queue is independent of source insertion order", canonical_json_bytes(computed_queue) == canonical_json_bytes(reordered_queue), str(reordered_queue)))
         checks.append(("only pending operator authority is nonblocking and it suppresses coverage review", [item for item in computed_queue if not item["blocking"]] == [expected_queue[-1]] and all(item["class"] != "coverage_review_missing" for item in computed_queue), str(computed_queue)))
+        checks.append(("the one ending predicate permits empty or operator-only queues and fails closed on blocking, missing, or malformed queue state", engagement_may_end({"work_queue": []}) and engagement_may_end({"work_queue": [expected_queue[-1]]}) and not engagement_may_end({"work_queue": [expected_queue[0]]}) and not engagement_may_end({}) and not engagement_may_end({"work_queue": {}}), "ending predicate admitted malformed or blocking work"))
 
         operator_only_state = {**queue_state, "hypotheses": {}, "findings": {}, "claim_adjudications": {}, "proof_reviews": {}, "outstanding_reviews": [], "candidates": {}, "control_candidates": [], "authority_requests": {"request-pending": queue_state["authority_requests"]["request-pending"]}}
+        terminal_debt_state = {
+            **operator_only_state,
+            "coverage": "active",
+            "authority_requests": {},
+            "hypotheses": {
+                "hypothesis-running-unattempted": {
+                    "status": "running",
+                    "running_event_ref": "event-hypothesis-running-unattempted",
+                    "origin_type": "operator_prior",
+                    "origin_ref": "prior-running-unattempted",
+                    "experiment_refs": [],
+                    "control_refs": [],
+                    "unresolved_questions": [],
+                    "next_route": None,
+                }
+            },
+            "candidates": {"candidate-queued": {"status": "queued"}},
+        }
+        terminal_debt_projection = project_terminal_work_state(
+            terminal_debt_state,
+            [],
+            coverage="coverage_dry",
+            recorded_at="2026-07-10T00:00:10Z",
+        )
+        terminal_debt_actions = {
+            item["class"]: decorate_work_queue_item(item, terminal_debt_projection, engagement.absolute())["next_action"]
+            for item in terminal_debt_projection["work_queue"]
+        }
+        checks.append((
+            "terminal projection keeps queued candidates and running unattempted hypotheses blocking with deterministic next actions",
+            [item["class"] for item in terminal_debt_projection["work_queue"]] == ["hypothesis_running_unattempted", "candidate_undisposed"]
+            and not engagement_may_end(terminal_debt_projection)
+            and terminal_debt_actions["hypothesis_running_unattempted"]["action_id"] == "requeue_unattempted_hypothesis"
+            and terminal_debt_actions["hypothesis_running_unattempted"]["effect"] == "advances_item"
+            and terminal_debt_actions["candidate_undisposed"]["action_id"] == "select_candidate"
+            and terminal_debt_actions["candidate_undisposed"]["effect"] == "advances_item",
+            str((terminal_debt_projection["work_queue"], terminal_debt_actions)),
+        ))
+        specialized_running_state = {
+            **operator_only_state,
+            "coverage": "coverage_dry",
+            "scope_hash": initial_reduction["scope_hash"],
+            "active_environment_ref": "environment-specialized",
+            "authority_requests": {},
+            "outstanding_reviews": [{
+                "review_type": "regrade",
+                "entity_ref": "finding-specialized-review",
+                "review_ref": "review-specialized-running",
+                "reason": "The exact routed review owns this running hypothesis.",
+                "status": "routed",
+                "hypothesis_ref": "hypothesis-specialized-review",
+                "opened_at": "2026-07-10T00:00:00Z",
+            }],
+            "hypotheses": {
+                "hypothesis-specialized-review": {"status": "running", "running_event_ref": "event-specialized-review-running", "next_route": "review experiment", "unresolved_questions": []},
+                "hypothesis-specialized-control": {"status": "running", "running_event_ref": "event-specialized-control-running", "next_route": "control experiment", "unresolved_questions": []},
+            },
+            "control_candidates": [{
+                "routing_event_id": "event-specialized-control-routing",
+                "status": "likely_held",
+                "hypothesis_ref": "hypothesis-specialized-control",
+                "primary_attempt_ref": None,
+            }],
+            "work_queue_context": {
+                "pending_attempts": {},
+                "artifacts": {
+                    "artifact-specialized-review": {
+                        "created_at": "2026-07-10T00:00:01Z",
+                        "environment_ref": "environment-specialized",
+                    }
+                },
+            },
+        }
+        specialized_running_state["work_queue"] = compute_work_queue(specialized_running_state, [])
+        specialized_review_item = next(item for item in specialized_running_state["work_queue"] if item["class"] == "review_obligation_open")
+        specialized_control_item = next(item for item in specialized_running_state["work_queue"] if item["class"] == "control_candidate_unverified")
+        specialized_review_action = decorate_work_queue_item(specialized_review_item, specialized_running_state, engagement.absolute())["next_action"]
+        specialized_control_action = decorate_work_queue_item(specialized_control_item, specialized_running_state, engagement.absolute())["next_action"]
+        from work_queue_admission import build_action_admission
+        specialized_control_admission = build_action_admission(specialized_control_item, specialized_control_action, specialized_running_state, engagement.absolute())
+        specialized_control_experiment_constraints = [
+            constraint
+            for constraint in specialized_control_admission["constraints"]
+            if constraint["document"] == "proposal" and constraint["path"] == ["experiment_ref"]
+        ]
+        checks.append((
+            "running review and control hypotheses retain their exact specialized evidence actions",
+            [item["class"] for item in specialized_running_state["work_queue"]] == ["review_obligation_open", "control_candidate_unverified"]
+            and specialized_review_action["action_id"] == "collect_review_evidence"
+            and specialized_control_action["action_id"] == "record_control_primary"
+            and specialized_control_experiment_constraints == [{"document": "proposal", "path": ["experiment_ref"], "operator": "equals", "value": "event-specialized-control-routing"}],
+            str((specialized_running_state["work_queue"], specialized_review_action, specialized_control_action, specialized_control_admission)),
+        ))
         review_only_state = {**operator_only_state, "findings": {"finding-verified": queue_state["findings"]["finding-verified"]}, "proof_reviews": {"finding-verified:r3": queue_state["proof_reviews"]["finding-verified:r3"]}, "outstanding_reviews": [queue_state["outstanding_reviews"][1]], "authority_requests": {}}
         resolved_review_state = {**review_only_state, "outstanding_reviews": []}
         expected_queue_coverage = {**expected_coverage_item, "entity": {**expected_coverage_item["entity"], "id": queue_state["engagement_id"]}}
@@ -3294,9 +3743,10 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         second_finding = {**pending_filing, "findings": {**pending_filing["findings"], "finding-other": {"revision": 1, "status": "supported", "adjudication_review_ref": "review-other-old", "adjudication_event_ref": "event-other-old"}}, "claim_adjudications": {**pending_filing["claim_adjudications"], "finding-other": {"status": "confirmed", "event_ref": "event-other-new", "review_ref": "review-other-new", "reviewed_revision": 1, "expected_filing_revision": 2}}}
         legacy_pending = {**newer_confirmed, "authority_requests": {"request-legacy": {"request_id": "request-legacy", "action_kind": "revise-finding", "status": "pending_authority", "lane_id": "legacy-lane", "target": None}}}
         checks.append(("v2 suppression is finding-scoped and legacy pending authority never hides filing debt", ("finding_revision_pending", "finding-other") in stage_classes(second_finding) and ("finding_revision_pending", "finding-current") in stage_classes(legacy_pending), str([stage_classes(second_finding), stage_classes(legacy_pending)])))
-        terminal_queues = [compute_work_queue({**operator_only_state, "authority_requests": {}, "coverage": status}, []) for status in ("coverage_dry", "budget_bounded")]
+        terminal_queues = [compute_work_queue({**queue_state, "coverage": status}, queue_attempts) for status in ("coverage_dry", "budget_bounded")]
         checks.append(("coverage review is the sole last item only when active work is otherwise empty", compute_work_queue({**operator_only_state, "authority_requests": {}}, []) == [expected_queue_coverage] and compute_work_queue(operator_only_state, []) == [expected_queue[-1]], "coverage or operator-only queue mismatch"))
-        checks.append(("terminal coverage has no computed work", terminal_queues == [[], []], str(terminal_queues)))
+        terminal_classes = [{item["class"] for item in queue if item["blocking"]} for queue in terminal_queues]
+        checks.append(("terminal coverage removes only its sentinel and preserves unadjudicated claims, deferred candidates, closed candidates, and unverified controls", all({"claim_unadjudicated", "deferred_candidate_unreviewed", "candidate_undisposed", "control_candidate_unverified"}.issubset(classes) for classes in terminal_classes) and all("coverage_review_missing" not in classes for classes in terminal_classes), str(terminal_queues)))
         healthy_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "ledger-health", "--engagement", str(engagement)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: healthy_status = json.loads(healthy_cli.stdout)
         except json.JSONDecodeError: healthy_status = {}
@@ -3532,6 +3982,32 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         search_state = reduce_engagement(engagement)
         checks.append(("candidate→selection→hypothesis lifecycle preserves separate search/claim/coverage state", search_state["candidates"]["candidate-c1"]["status"] == "selected" and search_state["hypotheses"]["hypothesis-h1"]["status"] == "running" and len(search_state["operator_priors"]) == 1 and len(search_state["control_candidates"]) == 1 and search_state["findings"] == {} and search_state["coverage"] == "active", str(search_state)))
 
+        candidate_skip_case = root / "candidate-skip-accounting"; candidate_skip_case.mkdir(); candidate_skip_case.joinpath("scope.md").write_text(scope.replace("self-test", "candidate-skip-accounting"), encoding="utf-8"); initialize_engagement(candidate_skip_case, "2026-07-10T00:01:30Z")
+        append_event(candidate_skip_case, base_event(event_id="event-skip-observation", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:31Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="observation.recorded", rationale="Candidate skip accounting observation.", payload={"entity_id": "observation-skip", "entity_type": "observation", "status": "recorded"}))
+        append_event(candidate_skip_case, base_event(event_id="event-skip-routing", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:32Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="routing.assessed", rationale="Route one candidate for skip accounting.", payload={"entity_id": "routing-skip", "source_observation_ref": "event-skip-observation", "activation_strength": "strong", "card_ids": ["card-selftest"], "status": "assessed"}, entity_refs=["event-skip-observation"]))
+        skip_candidate = base_event(event_id="event-skip-candidate", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:33Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="candidate.proposed", rationale="Propose one candidate whose skip must stay accounted.", payload={"candidate_id": "candidate-skip", "source_observation_ref": "event-skip-observation", "routing_review_ref": "event-skip-routing", "activation_strength": "strong", "card_ids": ["card-selftest"], "status": "queued", "expected_information_gain": 1, "safety_class": "clear_local", "cost_estimate": zero_cost}, entity_refs=["event-skip-observation", "event-skip-routing"], state_changes=[{"dimension": "search", "entity_id": "candidate-skip", "previous": None, "current": "queued"}]); skip_candidate["ex_ante"] = {"probability": 0.5, "ordinal": "strong", "recorded_before_outcome": True}; append_event(candidate_skip_case, skip_candidate)
+        append_event(candidate_skip_case, base_event(event_id="event-skip-deferred", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:34Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="candidate.deferred", rationale="Defer the candidate for operator disposition.", payload={"candidate_id": "candidate-skip", "status": "deferred", "reason": "bounded prioritization"}, state_changes=[{"dimension": "search", "entity_id": "candidate-skip", "previous": "queued", "current": "deferred"}]))
+        append_event(candidate_skip_case, base_event(event_id="event-skip-closed", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:35Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="candidate.skipped", rationale="Record the skip without erasing the lead.", payload={"candidate_id": "candidate-skip", "status": "closed", "reason": "bounded prioritization"}, state_changes=[{"dimension": "search", "entity_id": "candidate-skip", "previous": "deferred", "current": "closed"}]))
+        skipped_candidate_state = reduce_engagement(candidate_skip_case)
+        append_event(candidate_skip_case, base_event(event_id="event-skip-reopened", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:36Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="candidate.reopened", rationale="Reopen the exact candidate for explicit routing.", payload={"candidate_id": "candidate-skip", "status": "selected", "reason": "Reopen the exact candidate for explicit routing."}, state_changes=[{"dimension": "search", "entity_id": "candidate-skip", "previous": "closed", "current": "selected"}]))
+        reopened_candidate_state = reduce_engagement(candidate_skip_case)
+        routed_payload = json.loads(json.dumps(hypothesis["payload"])); routed_payload.update({"hypothesis_id": "hypothesis-from-skipped-candidate", "origin_ref": "candidate-skip", "candidate_ref": "candidate-skip", "status": "queued"})
+        append_event(candidate_skip_case, base_event(event_id="event-skip-hypothesis", engagement_id=candidate_skip_case.name, recorded_at="2026-07-10T00:01:37Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Route the retained candidate into explicit work.", payload=routed_payload, entity_refs=["candidate-skip"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-from-skipped-candidate", "previous": None, "current": "queued"}]))
+        routed_candidate_state = reduce_engagement(candidate_skip_case)
+        candidate_debt = lambda value: [item for item in value["work_queue"] if item["class"] == "candidate_undisposed" and item["entity"]["id"] == "candidate-skip"]
+        skipped_candidate_action = decorate_work_queue_item(
+            candidate_debt(skipped_candidate_state)[0],
+            skipped_candidate_state,
+            candidate_skip_case,
+        )["next_action"]
+        reopened_candidate_action = decorate_work_queue_item(
+            candidate_debt(reopened_candidate_state)[0],
+            reopened_candidate_state,
+            candidate_skip_case,
+        )["next_action"]
+        checks.append(("a skipped candidate remains blocking through close and reopen until an explicit candidate-origin hypothesis accounts for it", len(candidate_debt(skipped_candidate_state)) == 1 and len(candidate_debt(reopened_candidate_state)) == 1 and not candidate_debt(routed_candidate_state), str((skipped_candidate_state["work_queue"], reopened_candidate_state["work_queue"], routed_candidate_state["work_queue"]))))
+        checks.append(("the feedback loop reopens a closed candidate before offering hypothesis creation, so free-text skip cannot bypass lifecycle accounting", skipped_candidate_action["action_id"] == "reopen_candidate" and skipped_candidate_action["effect"] == "advances_item" and reopened_candidate_action["action_id"] == "create_candidate_hypothesis" and reopened_candidate_action["effect"] == "closes_item", str((skipped_candidate_action, reopened_candidate_action))))
+
         mediation_case = root / "queue-action-broker-mediation"; shutil.copytree(engagement, mediation_case)
         # Attempts are admissible only against an environment that was active at
         # their immutable recorded time.  Keep this action-contract fixture
@@ -3555,8 +4031,8 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         mediation_stage_results = []
         for status, previous, recorded_at in (("selected", "queued", "2026-07-10T00:01:40Z"), ("running", "selected", "2026-07-10T00:01:41Z")):
             mediation_state = reduce_engagement(mediation_case)
-            mediation_hypothesis_item = next(item for item in mediation_state["work_queue"] if item["class"] == "hypothesis_unrouted" and item["entity"]["id"] == "hypothesis-control")
-            mediation_stage_action = decorate_work_queue_item(mediation_hypothesis_item, mediation_state, mediation_case)["next_action"]
+            mediation_control_item = next(item for item in mediation_state["work_queue"] if item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative")
+            mediation_stage_action = decorate_work_queue_item(mediation_control_item, mediation_state, mediation_case)["next_action"]
             mediation_transition = base_event(event_id=f"event-control-hypothesis-{status}", engagement_id=engagement.name, recorded_at=recorded_at, actor_role="broker", actor_id=mediation_broker_id, event_type="hypothesis.status_changed", rationale=f"Broker records bounded control hypothesis {status}.", payload={"hypothesis_id": "hypothesis-control", "status": status, "reason": "bounded control progression", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "Advance only the current matched-control stage.", "unresolved_questions": [], "next_route": "matched control"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-control", "previous": previous, "current": status}], session_id=mediation_broker_session, operation_class="notebook")
             mediation_transition_path = root / f"mediation-control-{status}.json"; mediation_transition_path.write_bytes(canonical_json_bytes(mediation_transition)); mediation_stage_results.append(execute_emitted_file_action(mediation_stage_action, mediation_transition_path))
 
@@ -3575,11 +4051,295 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("advertised staged control actions execute under broker mediation while retaining orchestrator and hunter cognitive principals", mediation_create_cli.returncode == 0 and all(result.returncode == 0 for result in mediation_stage_results) and mediation_primary_cli.returncode == 0 and mediation_control_cli.returncode == 0 and mediation_create_action["principal"] == "orchestrator" and mediation_create_action["execution_principal"] == "broker" and mediation_primary_action["principal"] == "hunter" and mediation_primary_action["execution_principal"] == "broker" and mediation_control_action["principal"] == "hunter" and not any(item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative" for item in mediation_final_state["work_queue"]), str({"create": mediation_create_cli.stdout + mediation_create_cli.stderr, "stages": [(item.returncode, item.stdout, item.stderr) for item in mediation_stage_results], "primary": mediation_primary_cli.stdout + mediation_primary_cli.stderr, "control": mediation_control_cli.stdout + mediation_control_cli.stderr, "queue": mediation_final_state["work_queue"]})))
 
         blocked = base_event(event_id="event-blocked", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:00Z", actor_role="operator", actor_id="operator-selftest", event_type="engagement.blocked", rationale="Self-test blocker.", payload={"entity_id": engagement.name, "status": "blocked", "reason": "fixture"}, state_changes=[{"dimension": "engagement", "entity_id": engagement.name, "previous": "active", "current": "blocked"}, {"dimension": "coverage", "entity_id": engagement.name, "previous": "active", "current": "blocked"}])
-        append_event(engagement, blocked)
+        try:
+            append_event(engagement, blocked)
+            ordinary_block_code = None
+        except RecordError as exc:
+            ordinary_block_code = exc.code
+        pre_override_state = reduce_engagement(engagement)
+        override_projection = project_current_terminal_work_state(
+            pre_override_state,
+            read_ledger(engagement, "attempt"),
+            coverage="blocked",
+        )
+        override_blockers = blocking_work_identities(override_projection)
+        blocked_override_reason = "Self-test blocker with exact unfinished work recorded."
+        blocked_override_time = "2026-07-10T00:02:00Z"
+        blocked_override_session = _local_identity("operator")[1]
+        blocked_override_payload = {
+            "entity_id": engagement.name,
+            "terminal_kind": "engagement",
+            "status": "blocked",
+            "reason": blocked_override_reason,
+            "operator_id": "operator-selftest",
+            "scope_hash": pre_override_state["scope_hash"],
+            "blocking_items": override_blockers,
+            "blocking_queue_digest": sha256_bytes(canonical_json_bytes(override_blockers)),
+            **attempt_ledger_context(read_ledger(engagement, "attempt")),
+        }
+        blocked_override_changes = [
+            {"dimension": "engagement", "entity_id": engagement.name, "previous": "active", "current": "blocked"},
+            {"dimension": "coverage", "entity_id": engagement.name, "previous": "active", "current": "blocked"},
+        ]
+        blocked_override_action = ending_override_action(
+            engagement_id=engagement.name,
+            recorded_at=blocked_override_time,
+            actor={"role": "operator", "id": "operator-selftest"},
+            payload=blocked_override_payload,
+            entity_refs=[],
+            evidence_refs=[],
+            state_changes=blocked_override_changes,
+            session_id=blocked_override_session,
+        )
+        blocked_override_action_digest = sha256_bytes(canonical_json_bytes(blocked_override_action))
+        blocked_override_challenge = operator_challenge_bytes(
+            engagement_id=engagement.name,
+            scope_hash=pre_override_state["scope_hash"],
+            ledger_hash=read_ledger(engagement, "event")[-1]["record_hash"],
+            operation=f"override-ending:{blocked_override_action_digest}",
+            operator_id="operator-selftest",
+        )
+        forged_payload = copy.deepcopy(blocked_override_payload)
+        forged_payload["operator_signature"] = {
+            "challenge_digest": sha256_bytes(blocked_override_challenge),
+            "signature_base64": base64.b64encode(b"forged-signature").decode("ascii"),
+            "allowed_signers_base64": base64.b64encode(allowed_signers_path.read_bytes()).decode("ascii"),
+            "signer_fingerprint": "sha256:" + "0" * 64,
+        }
+        forged_override = base_event(
+            event_id=f"event-ending-override-{blocked_override_action_digest[-12:]}",
+            engagement_id=engagement.name,
+            recorded_at=blocked_override_time,
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="engagement.ending_overridden",
+            rationale=blocked_override_reason,
+            payload=forged_payload,
+            state_changes=blocked_override_changes,
+            session_id=blocked_override_session,
+            operation_class="authority",
+        )
+        before_forged_override = (engagement / "events.jsonl").read_bytes()
+        try:
+            append_event(engagement, forged_override)
+            forged_override_code = None
+        except RecordError as exc:
+            forged_override_code = exc.code
+        forged_override_left_ledger_unchanged = (
+            engagement / "events.jsonl"
+        ).read_bytes() == before_forged_override
+        blocked_override_challenge_path = root / "blocked-ending-override-challenge.json"
+        blocked_override_challenge_path.write_bytes(blocked_override_challenge)
+        subprocess.run(
+            [
+                "/usr/bin/ssh-keygen", "-q", "-Y", "sign",
+                "-f", str(reviewer_key),
+                "-n", "llm-redteam-harness-operator-v1",
+                str(blocked_override_challenge_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        blocked_override_argv = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "override-ending",
+            "--engagement", str(engagement),
+            "--terminal-kind", "engagement",
+            "--status", "blocked",
+            "--operator-id", "operator-selftest",
+            "--session-id", blocked_override_session,
+            "--recorded-at", blocked_override_time,
+            "--reason", blocked_override_reason,
+        ]
+        blocked_override_env = {
+            **os.environ,
+            "HARNESS_OPERATOR_SIGNATURE_FILE": str(blocked_override_challenge_path) + ".sig",
+            "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(allowed_signers_path),
+        }
+        blocked_override_cli = subprocess.run(
+            blocked_override_argv,
+            env=blocked_override_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
         reduced_once = reduce_engagement(engagement)
         reduced_twice = reduce_engagement(engagement)
+        override_retry_case = root / "ending-override-retry"; shutil.copytree(engagement, override_retry_case)
+        override_retry_argv = list(blocked_override_argv)
+        override_retry_argv[override_retry_argv.index(str(engagement))] = str(override_retry_case)
+        exact_blocked_override_retry = subprocess.run(override_retry_argv, env=blocked_override_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try:
+            exact_blocked_override_retry_payload = json.loads(exact_blocked_override_retry.stdout)
+        except json.JSONDecodeError:
+            exact_blocked_override_retry_payload = {}
+        changed_blocked_override_retry = subprocess.run([*override_retry_argv, "--coverage-review-ref", "review-changed-after-signing"], env=blocked_override_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        override_retry_count = len(read_ledger(override_retry_case, "event"))
+        _append_kernel_event(override_retry_case, base_event(
+            event_id="event-ending-override-reopened",
+            engagement_id=engagement.name,
+            recorded_at="2026-07-10T00:02:00.500000Z",
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="engagement.reopened",
+            rationale="Reopen the synthetic fixture to prove an old override cannot self-apply again.",
+            payload={"entity_id": engagement.name, "status": "active", "operator_id": "operator-selftest"},
+            state_changes=[
+                {"dimension": "engagement", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+                {"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+            ],
+            operation_class="authority",
+        ))
+        reopened_blocked_override_retry = subprocess.run(override_retry_argv, env=blocked_override_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        reopened_override_state = reduce_engagement(override_retry_case)
         checks.append(("reducer is byte-deterministic", canonical_json_bytes(reduced_once) == canonical_json_bytes(reduced_twice), "same ledgers reduced differently"))
-        checks.append(("valid transition updates separate engagement and coverage state", reduced_once["coverage"] == "blocked" and reduced_once["active_blockers"], str(reduced_once)))
+        checks.append(("coverage cannot leave active with blocking work unless the reducer verifies an exact operator-signed first-class override", ordinary_block_code == "coverage_terminal_work_remaining" and forged_override_code == "operator_signature_invalid" and forged_override_left_ledger_unchanged and blocked_override_cli.returncode == 0 and reduced_once["coverage"] == "blocked" and reduced_once["active_blockers"] and reduced_once["ending_overrides"][-1]["blocking_items"] == override_blockers, str({"ordinary": ordinary_block_code, "forged": forged_override_code, "forged_ledger_unchanged": forged_override_left_ledger_unchanged, "cli": blocked_override_cli.stdout + blocked_override_cli.stderr, "state": reduced_once})))
+        checks.append((
+            "ending override idempotency accepts only the exact unchanged tail and cannot return false success after changed inputs or reopen",
+            exact_blocked_override_retry.returncode == 0
+            and exact_blocked_override_retry_payload.get("override") == reduced_once["ending_overrides"][-1]
+            and "allowed_signers_base64" not in exact_blocked_override_retry.stdout
+            and "signature_base64" not in exact_blocked_override_retry.stdout
+            and changed_blocked_override_retry.returncode != 0
+            and override_retry_count == len(read_ledger(override_retry_case, "event")) - 1
+            and reopened_blocked_override_retry.returncode != 0
+            and reopened_override_state["coverage"] == "active"
+            and not reopened_override_state["active_blockers"]
+            and len(reopened_override_state["ending_overrides"]) == len(reduced_once["ending_overrides"]),
+            str({"exact": exact_blocked_override_retry.stdout + exact_blocked_override_retry.stderr, "changed": changed_blocked_override_retry.stdout + changed_blocked_override_retry.stderr, "reopened": reopened_blocked_override_retry.stdout + reopened_blocked_override_retry.stderr, "state": reopened_override_state}),
+        ))
+
+        secret_signers_path = root / "allowed-signers-with-secret-comment"
+        secret_signers_path.write_bytes(allowed_signers_path.read_bytes() + b"# password=synthetic-secret-value\n")
+        secret_signers_digest = sha256_file(secret_signers_path)
+        secret_signers_case = root / "secret-signers-override"
+        secret_signers_case.mkdir()
+        secret_signers_case.joinpath("scope.md").write_text(
+            scope.replace(allowed_signers_digest, secret_signers_digest),
+            encoding="utf-8",
+        )
+        initialize_engagement(secret_signers_case, "2026-07-10T00:00:00Z")
+        secret_prior = base_event(
+            event_id="event-secret-signers-prior",
+            engagement_id=secret_signers_case.name,
+            recorded_at="2026-07-10T00:00:01Z",
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="operator_prior.recorded",
+            rationale="Seed one bounded hypothesis so an ending override is required.",
+            payload={"prior_id": "prior-secret-signers", "prior_statement": "The bounded fixture branch requires adjudication.", "strength": "strong", "reason": "secret-signers self-test setup"},
+        )
+        append_event(secret_signers_case, secret_prior)
+        secret_hypothesis_payload = json.loads(json.dumps(hypothesis["payload"]))
+        secret_hypothesis_payload.update({"hypothesis_id": "hypothesis-secret-signers", "origin_type": "operator_prior", "origin_ref": secret_prior["event_id"], "status": "queued"})
+        secret_hypothesis_payload.pop("candidate_ref", None)
+        append_event(secret_signers_case, base_event(
+            event_id="event-secret-signers-hypothesis",
+            engagement_id=secret_signers_case.name,
+            recorded_at="2026-07-10T00:00:02Z",
+            actor_role="orchestrator",
+            actor_id="orchestrator-selftest",
+            event_type="hypothesis.created",
+            rationale="Create one bounded blocking hypothesis for the secret-signers regression.",
+            payload=secret_hypothesis_payload,
+            entity_refs=[secret_prior["event_id"]],
+            state_changes=[{"dimension": "search", "entity_id": "hypothesis-secret-signers", "previous": None, "current": "queued"}],
+        ))
+        secret_signers_state = reduce_engagement(secret_signers_case)
+        secret_signers_attempts = read_ledger(secret_signers_case, "attempt")
+        secret_signers_blockers = blocking_work_identities(project_current_terminal_work_state(secret_signers_state, secret_signers_attempts, coverage="blocked"))
+        secret_signers_time = "2026-07-10T00:00:03Z"
+        secret_signers_reason = "Operator accepts the exact bounded residual queue for this redaction regression."
+        secret_signers_session = _local_identity("operator")[1]
+        secret_signers_payload = {
+            "entity_id": secret_signers_case.name,
+            "terminal_kind": "engagement",
+            "status": "blocked",
+            "reason": secret_signers_reason,
+            "operator_id": "operator-selftest",
+            "scope_hash": secret_signers_state["scope_hash"],
+            "blocking_items": secret_signers_blockers,
+            "blocking_queue_digest": sha256_bytes(canonical_json_bytes(secret_signers_blockers)),
+            **attempt_ledger_context(secret_signers_attempts),
+        }
+        secret_signers_action = ending_override_action(
+            engagement_id=secret_signers_case.name,
+            recorded_at=secret_signers_time,
+            actor={"role": "operator", "id": "operator-selftest"},
+            payload=secret_signers_payload,
+            entity_refs=[],
+            evidence_refs=[],
+            state_changes=[
+                {"dimension": "engagement", "entity_id": secret_signers_case.name, "previous": "active", "current": "blocked"},
+                {"dimension": "coverage", "entity_id": secret_signers_case.name, "previous": "active", "current": "blocked"},
+            ],
+            session_id=secret_signers_session,
+        )
+        secret_signers_action_digest = sha256_bytes(canonical_json_bytes(secret_signers_action))
+        secret_signers_challenge = operator_challenge_bytes(
+            engagement_id=secret_signers_case.name,
+            scope_hash=secret_signers_state["scope_hash"],
+            ledger_hash=read_ledger(secret_signers_case, "event")[-1]["record_hash"],
+            operation=f"override-ending:{secret_signers_action_digest}",
+            operator_id="operator-selftest",
+        )
+        secret_signers_challenge_path = root / "secret-signers-override-challenge.json"
+        secret_signers_challenge_path.write_bytes(secret_signers_challenge)
+        subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-operator-v1", str(secret_signers_challenge_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        secret_signers_before = (secret_signers_case / "events.jsonl").read_bytes()
+        secret_signers_cli = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "override-ending", "--engagement", str(secret_signers_case), "--terminal-kind", "engagement", "--status", "blocked", "--operator-id", "operator-selftest", "--session-id", secret_signers_session, "--recorded-at", secret_signers_time, "--reason", secret_signers_reason],
+            env={**os.environ, "HARNESS_OPERATOR_SIGNATURE_FILE": str(secret_signers_challenge_path) + ".sig", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(secret_signers_path)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        try:
+            secret_signers_error = json.loads(secret_signers_cli.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError):
+            secret_signers_error = None
+        secret_signers_embedded_payload = copy.deepcopy(secret_signers_payload)
+        secret_signers_embedded_payload["operator_signature"] = encode_operator_signature_proof(
+            challenge_bytes=secret_signers_challenge,
+            signature_bytes=Path(str(secret_signers_challenge_path) + ".sig").read_bytes(),
+            allowed_signers_bytes=secret_signers_path.read_bytes(),
+            signer_fingerprint=reduced_once["ending_overrides"][-1]["operator_signer_fingerprint"],
+        )
+        secret_signers_embedded_event = base_event(
+            event_id=f"event-ending-override-{secret_signers_action_digest[-12:]}",
+            engagement_id=secret_signers_case.name,
+            recorded_at=secret_signers_time,
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="engagement.ending_overridden",
+            rationale=secret_signers_reason,
+            payload=secret_signers_embedded_payload,
+            state_changes=[
+                {"dimension": "engagement", "entity_id": secret_signers_case.name, "previous": "active", "current": "blocked"},
+                {"dimension": "coverage", "entity_id": secret_signers_case.name, "previous": "active", "current": "blocked"},
+            ],
+            session_id=secret_signers_session,
+            operation_class="authority",
+        )
+        try:
+            _append_kernel_event(secret_signers_case, secret_signers_embedded_event)
+            secret_signers_replay_error = None
+        except RecordError as exc:
+            secret_signers_replay_error = exc.code
+        checks.append((
+            "operator ending override construction and replay refuse secret-shaped raw signer material",
+            secret_signers_blockers
+            and secret_signers_cli.returncode != 0
+            and secret_signers_error == "operator_signature_invalid"
+            and secret_signers_replay_error == "operator_signature_invalid"
+            and (secret_signers_case / "events.jsonl").read_bytes() == secret_signers_before
+            and "synthetic-secret-value" not in secret_signers_cli.stdout + secret_signers_cli.stderr,
+            secret_signers_cli.stdout + secret_signers_cli.stderr + str(secret_signers_replay_error),
+        ))
 
         def run_signed_queue_commands(target: Path, command_name: str, previous_status: str, status: str, recorded_at: str, reason: str, *, concurrency: int = 1) -> list[subprocess.CompletedProcess[str]]:
             session_id = _local_identity("operator")[1]
@@ -3618,42 +4378,66 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         except RecordError as exc: forged_stop_blocked = exc.code in {"actor_capability_invalid", "operator_queue_control_invalid"}
         checks.append(("non-operator principals cannot manufacture the deliberate-stop record", forged_stop_blocked and (forged_control / "events.jsonl").read_bytes() == forged_before and reduce_engagement(forged_control)["queue_control"]["status"] == "active", "forged operator stop changed the ledger"))
 
-        budget_bounded = root / "budget-bounded"; shutil.copytree(engagement, budget_bounded); budget_broker_id, budget_broker_session = _local_identity("broker")
-        budget_event = base_event(event_id="event-budget-bounded", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:01Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.status_changed", rationale="The configured ceiling fired after disposing three of five enumerated work items.", payload={"entity_id": engagement.name, "status": "budget_bounded", "disposed_count": 3, "enumerated_count": 5}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "budget_bounded"}], session_id=budget_broker_session, operation_class="notebook")
+        budget_documents = test_corpus_documents(
+            row_count=5,
+            frozen_at="2026-07-09T23:59:00Z",
+        )
+        budget_base = root / "budget-base"; budget_base.mkdir(); budget_base.joinpath("scope.md").write_text(scope_with_corpus_pin(scope.replace("self-test", "budget-base"), budget_documents[1]), encoding="utf-8"); initialize_engagement(budget_base, "2026-07-10T00:00:00Z")
+        budget_prior = base_event(event_id="event-budget-prior", engagement_id=budget_base.name, recorded_at="2026-07-10T00:00:01Z", actor_role="operator", actor_id="operator-selftest", event_type="operator_prior.recorded", rationale="Seed one already-disposed hypothesis for the reopening control.", payload={"prior_id": "prior-budget", "prior_statement": "The bounded fixture branch was already resolved.", "strength": "strong", "reason": "self-test setup"})
+        append_event(budget_base, budget_prior)
+        budget_hypothesis_payload = json.loads(json.dumps(hypothesis["payload"])); budget_hypothesis_payload.update({"hypothesis_id": "hypothesis-budget", "origin_type": "operator_prior", "origin_ref": "event-budget-prior", "status": "queued"}); budget_hypothesis_payload.pop("candidate_ref", None)
+        append_event(budget_base, base_event(event_id="event-budget-hypothesis", engagement_id=budget_base.name, recorded_at="2026-07-10T00:00:02Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Create the bounded reopening-control hypothesis.", payload=budget_hypothesis_payload, entity_refs=["event-budget-prior"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-budget", "previous": None, "current": "queued"}]))
+        append_event(budget_base, base_event(event_id="event-budget-hypothesis-closed", engagement_id=budget_base.name, recorded_at="2026-07-10T00:00:03Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Dispose the bounded setup hypothesis before terminal coverage.", payload={"hypothesis_id": "hypothesis-budget", "status": "closed", "reason": "setup disposed", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "The synthetic setup branch is already disposed.", "unresolved_questions": [], "next_route": None}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-budget", "previous": "queued", "current": "closed"}]))
+        budget_manifest_ref, budget_tsv_ref = register_test_corpus(
+            budget_base,
+            row_count=5,
+            documents=budget_documents,
+        )
+        budget_bounded = root / "budget-bounded"; shutil.copytree(budget_base, budget_bounded); budget_broker_id, budget_broker_session = _local_identity("broker")
+        budget_event = base_event(event_id="event-budget-bounded", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:01Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.status_changed", rationale="The configured ceiling fired after disposing three queue items against a frozen five-row corpus denominator.", payload={"entity_id": budget_base.name, "status": "budget_bounded", "disposed_count": 3, "enumerated_count": 5, "corpus_enumeration_ref": budget_manifest_ref}, evidence_refs=[budget_manifest_ref, budget_tsv_ref], state_changes=[{"dimension": "coverage", "entity_id": budget_base.name, "previous": "active", "current": "budget_bounded"}], session_id=budget_broker_session, operation_class="notebook")
         budget_state = None; budget_detail = ""
         try:
             _append_kernel_event(budget_bounded, budget_event)
             budget_state = reduce_engagement(budget_bounded); budget_progress = (budget_bounded / "progress.md").read_text(encoding="utf-8")
-            budget_reached = budget_state["coverage"] == "budget_bounded" and budget_state["coverage_counts"] == {"disposed_count": 3, "enumerated_count": 5} and "Coverage: `budget_bounded`" in budget_progress and "Coverage fraction: `3/5` work items disposed (closes on visitation, not understanding)" in budget_progress
+            budget_reached = budget_state["coverage"] == "budget_bounded" and budget_state["coverage_counts"]["enumerated_count"] == 5 and budget_state["coverage_counts"]["corpus_enumeration_ref"] == budget_manifest_ref and "Coverage: `budget_bounded`" in budget_progress and "Frozen corpus denominator: `5` package-entrypoint rows" in budget_progress and "Declared disposed rows (not mechanically cross-checked): `3`" in budget_progress
             budget_detail = str(budget_state)
         except RecordError as exc:
             budget_reached = False; budget_detail = exc.code
-        checks.append(("budget-bounded coverage records the disposed/enumerated fraction without a review", budget_reached, budget_detail))
+        checks.append(("budget-bounded coverage binds its enumerated count to registered frozen corpus evidence without presenting mixed units as a fraction", budget_reached, budget_detail))
         checks.append(("run exhaustion does not fabricate an operator stop or park the queue", budget_state is not None and budget_state["queue_control"] == {"status": "active", "last_stop": None, "last_resume": None}, str((budget_state or {}).get("queue_control"))))
 
-        generic_budget = root / "budget-generic-public"; shutil.copytree(engagement, generic_budget); budget_proposal_path = root / "budget-bounded-event.json"; budget_proposal_path.write_bytes(canonical_json_bytes(budget_event)); budget_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(generic_budget), "--file", str(budget_proposal_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        generic_budget = root / "budget-generic-public"; shutil.copytree(budget_base, generic_budget); budget_proposal_path = root / "budget-bounded-event.json"; budget_proposal_path.write_bytes(canonical_json_bytes(budget_event)); budget_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(generic_budget), "--file", str(budget_proposal_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: generic_budget_code = json.loads(budget_cli.stdout)["error"]["code"]
         except (json.JSONDecodeError, KeyError): generic_budget_code = None
-        checks.append(("generic model-reachable append cannot set the outer driver's budget boundary", budget_cli.returncode != 0 and generic_budget_code == "external_driver_budget_boundary_required" and reduce_engagement(generic_budget)["coverage"] == "blocked", budget_cli.stdout + budget_cli.stderr))
+        checks.append(("generic model-reachable append cannot set the outer driver's budget boundary", budget_cli.returncode != 0 and generic_budget_code == "external_driver_budget_boundary_required" and reduce_engagement(generic_budget)["coverage"] == "active", budget_cli.stdout + budget_cli.stderr))
 
         missing_count_refusals = []
         for missing_field in ("disposed_count", "enumerated_count"):
-            missing_counts = root / f"budget-missing-{missing_field}"; shutil.copytree(engagement, missing_counts)
+            missing_counts = root / f"budget-missing-{missing_field}"; shutil.copytree(budget_base, missing_counts)
             invalid_budget = json.loads(json.dumps(budget_event)); invalid_budget["event_id"] = f"event-budget-missing-{missing_field}"; invalid_budget["payload"].pop(missing_field)
             try: _append_kernel_event(missing_counts, invalid_budget); invalid_code = None
             except RecordError as exc: invalid_code = exc.code
-            missing_count_refusals.append(invalid_code is not None and reduce_engagement(missing_counts)["coverage"] == "blocked")
+            missing_count_refusals.append(invalid_code is not None and reduce_engagement(missing_counts)["coverage"] == "active")
         checks.append(("budget-bounded coverage refuses either missing count", all(missing_count_refusals), str(missing_count_refusals)))
 
-        incoherent_counts = root / "budget-incoherent-counts"; shutil.copytree(engagement, incoherent_counts); incoherent_budget = json.loads(json.dumps(budget_event)); incoherent_budget["event_id"] = "event-budget-incoherent-counts"; incoherent_budget["payload"].update({"disposed_count": 6, "enumerated_count": 5})
+        mismatched_denominator = root / "budget-mismatched-denominator"; shutil.copytree(budget_base, mismatched_denominator); mismatched_budget = json.loads(json.dumps(budget_event)); mismatched_budget["event_id"] = "event-budget-mismatched-denominator"; mismatched_budget["payload"].update({"disposed_count": 1, "enumerated_count": 1})
+        try: _append_kernel_event(mismatched_denominator, mismatched_budget); mismatched_code = None
+        except RecordError as exc: mismatched_code = exc.code
+        checks.append(("a self-declared 1/1 budget boundary is refused against the registered five-row frozen denominator", mismatched_code == "coverage_enumerated_count_mismatch" and reduce_engagement(mismatched_denominator)["coverage"] == "active", str(mismatched_code)))
+
+        incoherent_counts = root / "budget-incoherent-counts"; shutil.copytree(budget_base, incoherent_counts); incoherent_budget = json.loads(json.dumps(budget_event)); incoherent_budget["event_id"] = "event-budget-incoherent-counts"; incoherent_budget["payload"].update({"disposed_count": 6, "enumerated_count": 5})
         try: _append_kernel_event(incoherent_counts, incoherent_budget); incoherent_code = None
         except RecordError as exc: incoherent_code = exc.code
-        checks.append(("budget-bounded disposed count cannot exceed its enumerated denominator", incoherent_code == "budget_bounded_counts_invalid" and reduce_engagement(incoherent_counts)["coverage"] == "blocked", str(incoherent_code)))
+        checks.append(("budget-bounded disposed count cannot exceed its enumerated denominator", incoherent_code == "budget_bounded_counts_invalid" and reduce_engagement(incoherent_counts)["coverage"] == "active", str(incoherent_code)))
 
-        active_budget = root / "budget-active"; active_budget.mkdir(); active_budget.joinpath("scope.md").write_text(scope.replace("self-test", "budget-active"), encoding="utf-8"); initialize_engagement(active_budget, "2026-07-10T00:02:00Z"); active_event = json.loads(json.dumps(budget_event)); active_event["event_id"] = "event-budget-from-active"; active_event["engagement_id"] = active_budget.name; active_event["payload"].update({"entity_id": active_budget.name, "disposed_count": 0, "enumerated_count": 1}); active_event["state_changes"] = [{"dimension": "coverage", "entity_id": active_budget.name, "previous": "active", "current": "budget_bounded"}]
+        active_budget_documents = test_corpus_documents(
+            row_count=1,
+            frozen_at="2026-07-10T00:01:59Z",
+        )
+        active_budget = root / "budget-active"; active_budget.mkdir(); active_budget.joinpath("scope.md").write_text(scope_with_corpus_pin(scope.replace("self-test", "budget-active"), active_budget_documents[1]), encoding="utf-8"); initialize_engagement(active_budget, "2026-07-10T00:02:00Z"); active_manifest_ref, active_tsv_ref = register_test_corpus(active_budget, row_count=1, documents=active_budget_documents); active_event = json.loads(json.dumps(budget_event)); active_event["event_id"] = "event-budget-from-active"; active_event["engagement_id"] = active_budget.name; active_event["payload"].update({"entity_id": active_budget.name, "disposed_count": 0, "enumerated_count": 1, "corpus_enumeration_ref": active_manifest_ref}); active_event["evidence_refs"] = [active_manifest_ref, active_tsv_ref]; active_event["state_changes"] = [{"dimension": "coverage", "entity_id": active_budget.name, "previous": "active", "current": "budget_bounded"}]
         try: _append_kernel_event(active_budget, active_event); active_code = None
         except RecordError as exc: active_code = exc.code
-        checks.append(("active coverage can end budget-bounded", active_code is None and reduce_engagement(active_budget)["coverage_counts"] == {"disposed_count": 0, "enumerated_count": 1}, str(active_code)))
+        checks.append(("active coverage can end budget-bounded only against its registered frozen denominator", active_code is None and reduce_engagement(active_budget)["coverage_counts"]["enumerated_count"] == 1, str(active_code)))
 
         identity_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "runtime-identity", "--role", "orchestrator"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: orchestrator_identity = json.loads(identity_cli.stdout)
@@ -3681,17 +4465,17 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("public orchestrator command reopens only terminal budget-bounded coverage with exact identity and idempotence", identity_cli.returncode == 0 and orchestrator_reopen_cli.returncode == 0 and orchestrator_reopen_retry.returncode == 0 and active_reopen_cli.returncode != 0 and orchestrator_reopened_state["coverage"] == "active" and orchestrator_reopened_state["coverage_counts"] is None and not orchestrator_reopened_state["authority_requests"] and len(read_ledger(orchestrator_reopenable, "event")) == before_reopen_events + 1 and reopen_result.get("event_id") == retry_result.get("event_id") == orchestrator_reopened_event["event_id"] and orchestrator_reopened_event["event_type"] == "coverage.reopened" and orchestrator_reopened_event["actor"] == expected_orchestrator and orchestrator_reopened_event["provenance"]["actor"] == expected_orchestrator and orchestrator_reopened_event["provenance"]["session_id"] == orchestrator_session and orchestrator_reopened_event["payload"]["reason"] == "A materially distinct bounded branch remains to be tested.", orchestrator_reopen_cli.stdout + orchestrator_reopen_cli.stderr + orchestrator_reopen_retry.stdout + orchestrator_reopen_retry.stderr + active_reopen_cli.stdout + active_reopen_cli.stderr))
 
         broker_reopenable = root / "budget-broker-reopen"; shutil.copytree(budget_bounded, broker_reopenable)
-        broker_reopen = base_event(event_id="event-coverage-reopened-broker", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:02Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.reopened", rationale="A broker must not obscure who reopened coverage.", payload={"entity_id": engagement.name, "status": "active", "reason": "A broker must not obscure who reopened coverage."}, state_changes=[{"dimension": "coverage", "entity_id": engagement.name, "previous": "budget_bounded", "current": "active"}], session_id=budget_broker_session, operation_class="notebook")
+        broker_reopen = base_event(event_id="event-coverage-reopened-broker", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:02Z", actor_role="broker", actor_id=budget_broker_id, event_type="coverage.reopened", rationale="A broker must not obscure who reopened coverage.", payload={"entity_id": budget_base.name, "status": "active", "reason": "A broker must not obscure who reopened coverage."}, state_changes=[{"dimension": "coverage", "entity_id": budget_base.name, "previous": "budget_bounded", "current": "active"}], session_id=budget_broker_session, operation_class="notebook")
         broker_reopen_path = root / "budget-broker-reopen.json"; broker_reopen_path.write_bytes(canonical_json_bytes(broker_reopen)); broker_reopen_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(broker_reopenable), "--file", str(broker_reopen_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         checks.append(("generic broker append cannot obscure the orchestrator coverage-reopen actor", broker_reopen_cli.returncode != 0 and reduce_engagement(broker_reopenable)["coverage"] == "budget_bounded", broker_reopen_cli.stdout + broker_reopen_cli.stderr))
 
         missing_reopen_reason = root / "budget-reopen-missing-reason"; shutil.copytree(budget_bounded, missing_reopen_reason)
         no_reason_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "reopen-coverage", "--engagement", str(missing_reopen_reason), "--recorded-at", "2026-07-10T00:02:02Z", "--reason", "", "--actor-id", orchestrator_id, "--session-id", orchestrator_session], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         no_reason_state = reduce_engagement(missing_reopen_reason)
-        checks.append(("coverage reopen is refused without a recorded reason", no_reason_cli.returncode != 0 and no_reason_state["coverage"] == "budget_bounded" and no_reason_state["coverage_counts"] == {"disposed_count": 3, "enumerated_count": 5}, no_reason_cli.stdout + no_reason_cli.stderr))
+        checks.append(("coverage reopen is refused without a recorded reason", no_reason_cli.returncode != 0 and no_reason_state["coverage"] == "budget_bounded" and no_reason_state["coverage_counts"]["enumerated_count"] == 5 and no_reason_state["coverage_counts"]["corpus_enumeration_ref"] == budget_manifest_ref, no_reason_cli.stdout + no_reason_cli.stderr))
 
         untyped_reopenable = root / "budget-untyped-reopen"; shutil.copytree(budget_bounded, untyped_reopenable)
-        untyped_reopen = json.loads(json.dumps(broker_reopen)); untyped_reopen["event_id"] = "event-budget-untyped-reopen"; untyped_reopen["event_type"] = "coverage.status_changed"; untyped_reopen["payload"] = {"entity_id": engagement.name, "status": "active", "coverage_review_ref": "event-budget-bounded"}
+        untyped_reopen = json.loads(json.dumps(broker_reopen)); untyped_reopen["event_id"] = "event-budget-untyped-reopen"; untyped_reopen["event_type"] = "coverage.status_changed"; untyped_reopen["payload"] = {"entity_id": budget_base.name, "status": "active", "coverage_review_ref": "event-budget-bounded"}
         untyped_reopen_path = root / "budget-untyped-reopen.json"; untyped_reopen_path.write_bytes(canonical_json_bytes(untyped_reopen)); untyped_reopen_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "append-event", "--engagement", str(untyped_reopenable), "--file", str(untyped_reopen_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         checks.append(("terminal coverage cannot reopen through the untyped status-change path", untyped_reopen_cli.returncode != 0 and reduce_engagement(untyped_reopenable)["coverage"] == "budget_bounded", untyped_reopen_cli.stdout + untyped_reopen_cli.stderr))
 
@@ -3701,8 +4485,29 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         operator_reopen_state = reduce_engagement(operator_reopen_bypass)
         checks.append(("existing engagement reopen remains authority-gated and distinct", operator_reopen_cli.returncode != 0 and bool(operator_reopen_state["active_blockers"]) and operator_reopen_state["coverage"] == "blocked" and all(event["event_type"] != "engagement.reopened" for event in read_ledger(operator_reopen_bypass, "event")), operator_reopen_cli.stdout + operator_reopen_cli.stderr))
 
-        budget_reopen = base_event(event_id="event-budget-reopened-by-prior", engagement_id=engagement.name, recorded_at="2026-07-10T00:02:02Z", actor_role="operator", actor_id="operator-selftest", event_type="operator_prior.recorded", rationale="A new material branch reopens the budget-bounded run.", payload={"prior_id": "prior-budget-reopen", "prior_statement": "A materially distinct branch remains.", "strength": "strong", "reason": "operator target-model knowledge", "reopen_hypothesis_id": "hypothesis-h1", "reopening_condition": "Test the distinct branch."}, entity_refs=["hypothesis-h1"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-h1", "previous": "running", "current": "queued"}, {"dimension": "coverage", "entity_id": engagement.name, "previous": "budget_bounded", "current": "active"}]); append_event(budget_bounded, budget_reopen); reopened_budget = reduce_engagement(budget_bounded)
-        checks.append(("budget-bounded coverage can reopen to active and clears the terminal fraction", reopened_budget["coverage"] == "active" and reopened_budget["coverage_counts"] is None, str(reopened_budget)))
+        budget_reopen = base_event(event_id="event-budget-reopened-by-prior", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:02Z", actor_role="operator", actor_id="operator-selftest", event_type="operator_prior.recorded", rationale="A new material branch reopens the budget-bounded run.", payload={"prior_id": "prior-budget-reopen", "prior_statement": "A materially distinct branch remains.", "strength": "strong", "reason": "operator target-model knowledge", "reopen_hypothesis_id": "hypothesis-budget", "reopening_condition": "Test the distinct branch."}, entity_refs=["hypothesis-budget"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-budget", "previous": "closed", "current": "queued"}, {"dimension": "coverage", "entity_id": budget_base.name, "previous": "budget_bounded", "current": "active"}]); append_event(budget_bounded, budget_reopen); reopened_budget = reduce_engagement(budget_bounded)
+        checks.append(("budget-bounded coverage can reopen to active and clears terminal denominator accounting", reopened_budget["coverage"] == "active" and reopened_budget["coverage_counts"] is None, str(reopened_budget)))
+        append_event(budget_bounded, base_event(event_id="event-budget-hypothesis-selected", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:02.100000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Select the reopened bounded branch.", payload={"hypothesis_id": "hypothesis-budget", "status": "selected", "reason": "execute the reopened bounded branch", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "The reopened branch is now selected.", "unresolved_questions": [], "next_route": budget_hypothesis_payload["next_experiment"]}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-budget", "previous": "queued", "current": "selected"}]))
+        append_event(budget_bounded, base_event(event_id="event-budget-hypothesis-running", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:02.200000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Begin the reopened bounded branch without recording an attempt yet.", payload={"hypothesis_id": "hypothesis-budget", "status": "running", "reason": "begin the reopened bounded branch", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "The reopened branch is running and still requires its first attempt.", "unresolved_questions": [], "next_route": budget_hypothesis_payload["next_experiment"]}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-budget", "previous": "selected", "current": "running"}]))
+        budget_escape = json.loads(json.dumps(budget_event)); budget_escape["event_id"] = "event-budget-escape-with-work"; budget_escape["recorded_at"] = "2026-07-10T00:02:03Z"; budget_escape["state_changes"][0]["previous"] = "active"
+        budget_escape_before = (budget_bounded / "events.jsonl").read_bytes()
+        try:
+            _append_kernel_event(budget_bounded, budget_escape)
+            budget_escape_code = None
+        except RecordError as exc:
+            budget_escape_code = exc.code
+        budget_escape_state = reduce_engagement(budget_bounded)
+        checks.append(("budget_bounded cannot be used as a free ending after a queued-selected-running lifecycle records zero attempts", budget_escape_code == "coverage_terminal_work_remaining" and (budget_bounded / "events.jsonl").read_bytes() == budget_escape_before and budget_escape_state["coverage"] == "active" and any(item["class"] == "hypothesis_running_unattempted" and item["entity"]["id"] == "hypothesis-budget" for item in budget_escape_state["work_queue"]), str((budget_escape_code, budget_escape_state["work_queue"]))))
+
+        cycle_case = root / "budget-redeclaration-cycle"; shutil.copytree(budget_base, cycle_case)
+        first_cycle_budget = json.loads(json.dumps(budget_event)); first_cycle_budget["event_id"] = "event-budget-cycle-1"
+        _append_kernel_event(cycle_case, first_cycle_budget)
+        append_event(cycle_case, base_event(event_id="event-budget-cycle-reopen", engagement_id=budget_base.name, recorded_at="2026-07-10T00:02:02Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.reopened", rationale="Repeat the same bounded declaration without disposing work.", payload={"entity_id": budget_base.name, "status": "active", "reason": "Repeat the same bounded declaration without disposing work."}, state_changes=[{"dimension": "coverage", "entity_id": budget_base.name, "previous": "budget_bounded", "current": "active"}], session_id="session-cycle-reopen", operation_class="notebook"))
+        second_cycle_budget = json.loads(json.dumps(budget_event)); second_cycle_budget["event_id"] = "event-budget-cycle-2"; second_cycle_budget["recorded_at"] = "2026-07-10T00:02:03Z"; second_cycle_budget["state_changes"][0]["previous"] = "active"
+        _append_kernel_event(cycle_case, second_cycle_budget)
+        cycle_state = reduce_engagement(cycle_case)
+        cycle_facts = cycle_state["budget_redeclaration_cycles"]
+        checks.append(("consecutive budget redeclarations without intervening work disposition surface as deterministic reduced facts", len(cycle_facts) == 1 and cycle_facts[0]["first_event_ref"] == "event-budget-cycle-1" and cycle_facts[0]["redeclaration_event_ref"] == "event-budget-cycle-2" and cycle_facts[0]["recorded_at"] == "2026-07-10T00:02:03Z" and "event-budget-cycle-1" in (cycle_case / "progress.md").read_text(), str(cycle_facts)))
 
         progress = engagement / "progress.md"
         expected_progress = progress.read_bytes()
@@ -3830,11 +4635,174 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         ]
         for spec in attempt_specs:
             append_attempt(engagement, attempt_proposal(*spec))
+        routing_control = attempt_proposal(
+            "attempt-routing-negative-control",
+            "2026-07-10T00:15:13.500000Z",
+            "negative_control",
+            "no_signal",
+            "The likely-held routing control remains held under its bounded matched check.",
+            ["attempt-primary"],
+        )
+        routing_control["experiment_ref"] = "event-routing-negative"
+        append_attempt(engagement, routing_control)
         proof_state = reduce_engagement(engagement)
-        checks.append(("baseline evidence→primary→matched controls→fresh replay is structured and linked", proof_state["attempt_count"] == 4 and [item["kind"] for item in read_ledger(engagement, "attempt")] == ["primary", "negative_control", "positive_control", "replay"], str(proof_state["attempt_count"])))
+        checks.append(("baseline evidence→primary→matched controls→fresh replay is structured and linked", proof_state["attempt_count"] == 5 and [item["kind"] for item in read_ledger(engagement, "attempt")] == ["primary", "negative_control", "positive_control", "replay", "negative_control"] and not any(item["class"] == "control_candidate_unverified" and item["entity"]["id"] == "event-routing-negative" for item in proof_state["work_queue"]), str(proof_state["attempt_count"])))
+
+        same_identity_retry = root / "override-same-identity-attempt"; shutil.copytree(engagement, same_identity_retry)
+        _append_kernel_event(same_identity_retry, base_event(
+            event_id="event-same-identity-reopened",
+            engagement_id=engagement.name,
+            recorded_at="2026-07-10T00:15:13.600000Z",
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="engagement.reopened",
+            rationale="Reopen before recording a fresh exact ending context.",
+            payload={"entity_id": engagement.name, "status": "active", "operator_id": "operator-selftest"},
+            state_changes=[
+                {"dimension": "engagement", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+                {"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+            ],
+            operation_class="authority",
+        ))
+        same_identity_state = reduce_engagement(same_identity_retry)
+        same_identity_attempts = read_ledger(same_identity_retry, "attempt")
+        same_identity_blockers = blocking_work_identities(project_current_terminal_work_state(same_identity_state, same_identity_attempts, coverage="blocked"))
+        same_identity_reason = "Operator accepts this exact synthetic residual queue and attempt ledger context."
+        same_identity_time = "2026-07-10T00:15:14Z"
+        same_identity_session = _local_identity("operator")[1]
+        same_identity_payload = {
+            "entity_id": engagement.name,
+            "terminal_kind": "engagement",
+            "status": "blocked",
+            "reason": same_identity_reason,
+            "operator_id": "operator-selftest",
+            "scope_hash": same_identity_state["scope_hash"],
+            "blocking_items": same_identity_blockers,
+            "blocking_queue_digest": sha256_bytes(canonical_json_bytes(same_identity_blockers)),
+            **attempt_ledger_context(same_identity_attempts),
+        }
+        same_identity_changes = [
+            {"dimension": "engagement", "entity_id": engagement.name, "previous": "active", "current": "blocked"},
+            {"dimension": "coverage", "entity_id": engagement.name, "previous": "active", "current": "blocked"},
+        ]
+        same_identity_action = ending_override_action(
+            engagement_id=engagement.name,
+            recorded_at=same_identity_time,
+            actor={"role": "operator", "id": "operator-selftest"},
+            payload=same_identity_payload,
+            entity_refs=[],
+            evidence_refs=[],
+            state_changes=same_identity_changes,
+            session_id=same_identity_session,
+        )
+        same_identity_action_digest = sha256_bytes(canonical_json_bytes(same_identity_action))
+        same_identity_challenge = operator_challenge_bytes(
+            engagement_id=engagement.name,
+            scope_hash=same_identity_state["scope_hash"],
+            ledger_hash=read_ledger(same_identity_retry, "event")[-1]["record_hash"],
+            operation=f"override-ending:{same_identity_action_digest}",
+            operator_id="operator-selftest",
+        )
+        same_identity_challenge_path = root / "same-identity-override-challenge.json"
+        same_identity_challenge_path.write_bytes(same_identity_challenge)
+        subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-operator-v1", str(same_identity_challenge_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        same_identity_argv = [sys.executable, str(Path(__file__).resolve()), "override-ending", "--engagement", str(same_identity_retry), "--terminal-kind", "engagement", "--status", "blocked", "--operator-id", "operator-selftest", "--session-id", same_identity_session, "--recorded-at", same_identity_time, "--reason", same_identity_reason]
+        same_identity_env = {**os.environ, "HARNESS_OPERATOR_SIGNATURE_FILE": str(same_identity_challenge_path) + ".sig", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(allowed_signers_path)}
+        same_identity_override = subprocess.run(same_identity_argv, env=same_identity_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        equal_time_replay = root / "override-equal-time-later-attempt"; shutil.copytree(same_identity_retry, equal_time_replay)
+        _append_kernel_event(equal_time_replay, base_event(
+            event_id="event-equal-time-override-reopened",
+            engagement_id=engagement.name,
+            recorded_at=same_identity_time,
+            actor_role="operator",
+            actor_id="operator-selftest",
+            event_type="engagement.reopened",
+            rationale="Reopen the exact prior ending before recording later work at the same timestamp precision.",
+            payload={"entity_id": engagement.name, "status": "active", "operator_id": "operator-selftest"},
+            state_changes=[
+                {"dimension": "engagement", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+                {"dimension": "coverage", "entity_id": engagement.name, "previous": "blocked", "current": "active"},
+            ],
+            operation_class="authority",
+        ))
+        equal_time_before_attempt = reduce_engagement(equal_time_replay)
+        try:
+            append_attempt(equal_time_replay, attempt_proposal("attempt-equal-time-after-reopen", same_identity_time, "primary", "suspected_signal", "Later append order, not timestamp precision, separates this attempt from the prior signed ending.", []))
+            equal_time_replay_state = reduce_engagement(equal_time_replay)
+            equal_time_replay_error = None
+        except RecordError as exc:
+            equal_time_replay_state = None
+            equal_time_replay_error = exc.code
+        checks.append((
+            "historical override replay uses its signed attempt prefix so later equal-timestamp work after reopen stays reducible",
+            same_identity_override.returncode == 0
+            and equal_time_replay_error is None
+            and equal_time_replay_state is not None
+            and equal_time_replay_state["coverage"] == "active"
+            and equal_time_replay_state["attempt_count"] == equal_time_before_attempt["attempt_count"] + 1
+            and equal_time_replay_state["ending_overrides"][-1]["attempt_ledger_count"] == same_identity_payload["attempt_ledger_count"],
+            str({"override": same_identity_override.stdout + same_identity_override.stderr, "error": equal_time_replay_error, "state": equal_time_replay_state}),
+        ))
+        before_same_identity_attempt = reduce_engagement(same_identity_retry)
+        blocker_identity_before = blocking_work_identities(before_same_identity_attempt)
+        late_same_identity_attempt = attempt_proposal("attempt-same-identity-later", "2026-07-10T00:15:14.100000Z", "primary", "suspected_signal", "A later attempt preserves the same unadjudicated-hypothesis queue identity.", [])
+        append_attempt(same_identity_retry, late_same_identity_attempt)
+        after_same_identity_attempt = reduce_engagement(same_identity_retry)
+        same_identity_event_count = len(read_ledger(same_identity_retry, "event"))
+        stale_same_identity_retry = subprocess.run(same_identity_argv, env=same_identity_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        checks.append((
+            "a later same-hypothesis attempt keeps the coarse blocker identity but invalidates the signed override and its retry",
+            same_identity_override.returncode == 0
+            and blocker_identity_before == blocking_work_identities(after_same_identity_attempt)
+            and after_same_identity_attempt["attempt_count"] == before_same_identity_attempt["attempt_count"] + 1
+            and after_same_identity_attempt["source_hashes"]["attempts.jsonl"] != before_same_identity_attempt["source_hashes"]["attempts.jsonl"]
+            and stale_same_identity_retry.returncode != 0
+            and len(read_ledger(same_identity_retry, "event")) == same_identity_event_count,
+            str({"first": same_identity_override.stdout + same_identity_override.stderr, "retry": stale_same_identity_retry.stdout + stale_same_identity_retry.stderr, "before": blocker_identity_before, "after": blocking_work_identities(after_same_identity_attempt)}),
+        ))
 
         supported_negative = root / "supported-negative"; shutil.copytree(engagement, supported_negative)
-        exhausted = base_event(event_id="event-hypothesis-exhausted", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:14Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Matched controls and fresh replay exhaust the bounded mechanism without manufacturing a finding.", payload={"hypothesis_id": "hypothesis-h1", "status": "exhausted", "reason": "matched controls refute the bounded path", "experiment_refs": ["attempt-primary", "attempt-replay"], "control_refs": ["attempt-negative", "attempt-positive"], "supporting_evidence_refs": ["artifact-selftest"], "conflicting_evidence_refs": ["attempt-negative"], "disposition_rationale": "The primary anomaly does not survive the matched guarded sibling while detector and replay controls are healthy.", "unresolved_questions": [], "next_route": None}, evidence_refs=["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "artifact-selftest"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-h1", "previous": "running", "current": "exhausted"}]); append_event(supported_negative, exhausted)
+        exhausted = base_event(event_id="event-hypothesis-exhausted", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:14Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Matched controls and fresh replay exhaust the bounded mechanism without manufacturing a finding.", payload={"hypothesis_id": "hypothesis-h1", "status": "exhausted", "reason": "matched controls refute the bounded path", "experiment_refs": ["attempt-primary", "attempt-replay"], "control_refs": ["attempt-negative", "attempt-positive", "attempt-routing-negative-control"], "supporting_evidence_refs": ["artifact-selftest"], "conflicting_evidence_refs": ["attempt-negative"], "disposition_rationale": "The primary anomaly does not survive the matched guarded sibling while detector and replay controls are healthy.", "unresolved_questions": [], "next_route": None}, evidence_refs=["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "attempt-routing-negative-control", "artifact-selftest"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-h1", "previous": "running", "current": "exhausted"}]); append_event(supported_negative, exhausted)
+        backdated_terminal = root / "backdated-terminal"; shutil.copytree(supported_negative, backdated_terminal)
+        late_unadjudicated = attempt_proposal("attempt-late-unadjudicated", "2026-07-10T00:15:20Z", "primary", "suspected_signal", "A ledgered attempt must not disappear behind a backdated terminal timestamp.", [])
+        append_attempt(backdated_terminal, late_unadjudicated)
+        backdated_state = reduce_engagement(backdated_terminal)
+        backdated_attempts = read_ledger(backdated_terminal, "attempt")
+        historical_backdated_projection = project_terminal_work_state(backdated_state, backdated_attempts, coverage=backdated_state["coverage"], recorded_at="2026-07-10T00:15:14.500000Z")
+        current_backdated_projection = project_current_terminal_work_state(backdated_state, backdated_attempts, coverage=backdated_state["coverage"])
+        prior_engagement_status = "active"
+        for prior_event in read_ledger(backdated_terminal, "event"):
+            for change in prior_event["state_changes"]:
+                if change["dimension"] == "engagement" and change["entity_id"] == backdated_state["engagement_id"]:
+                    prior_engagement_status = change["current"]
+        backdated_close = base_event(
+            event_id="event-backdated-close",
+            engagement_id=backdated_state["engagement_id"],
+            recorded_at="2026-07-10T00:15:14.500000Z",
+            actor_role="broker",
+            actor_id=_local_identity("broker")[0],
+            event_type="engagement.closed",
+            rationale="A caller timestamp cannot hide an attempt already committed to the ledger.",
+            payload={"entity_id": backdated_state["engagement_id"], "status": "closed", "scope_hash": backdated_state["scope_hash"], "operator_id": "operator-selftest", "disposition_ref": "memory-not-reached", "disposition_digest": "sha256:" + "0" * 64},
+            state_changes=[{"dimension": "engagement", "entity_id": backdated_state["engagement_id"], "previous": prior_engagement_status, "current": "closed"}],
+            session_id=_local_identity("broker")[1],
+            operation_class="authority",
+        )
+        backdated_before = (backdated_terminal / "events.jsonl").read_bytes()
+        try:
+            _append_kernel_event(backdated_terminal, backdated_close)
+            backdated_terminal_code = None
+        except RecordError as exc:
+            backdated_terminal_code = exc.code
+        checks.append((
+            "current terminal admission sees every already-ledgered attempt even when the proposed ending timestamp is backdated",
+            engagement_may_end(historical_backdated_projection)
+            and not engagement_may_end(current_backdated_projection)
+            and blocking_work_identities(current_backdated_projection) == [{"class": "hypothesis_ran_unadjudicated", "entity": {"type": "hypothesis", "id": "hypothesis-h1", "detail": None}}]
+            and backdated_terminal_code == "terminal_event_precedes_recorded_attempt"
+            and (backdated_terminal / "events.jsonl").read_bytes() == backdated_before,
+            str({"historical": historical_backdated_projection["work_queue"], "current": current_backdated_projection["work_queue"], "code": backdated_terminal_code}),
+        ))
         negative_review = {"schema_version": 1, "review_id": "review-coverage-negative", "engagement_id": engagement.name, "review_type": "coverage", "proposed_finding_id": None, "entity_ref": engagement.name, "finding_revision": None, "recorded_at": "2026-07-10T00:15:15Z", "input_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay"], "input_hash": "sha256:" + "5" * 64, "evidence_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "artifact-selftest"], "conflicting_evidence": [], "independence": {"reviewer_id": "coverage-reviewer", "reviewer_model": "cold-reviewer", "reviewer_run_id": "run-coverage-negative", "originating_run_id": "event-hypothesis-running", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Find an omitted materially distinct path."}, "verdict": "coverage_dry", "rationale": "The bounded hypothesis is decisively exhausted by healthy matched controls.", "corrections": [], "required_next_actions": [], "bounded_space": "One owned-fixture branch and matched guarded sibling.", "hypothesis_dispositions": [{"hypothesis_ref": "hypothesis-h1", "status": "exhausted", "rationale": "Matched negative plus healthy positive and replay controls exhaust the route."}], "omitted_branch_challenge": "Cold review found no unmodeled sibling in the declared bounded space.", "residual_uncertainty": ["future versions not assessed"]}
         negative_review["input_hash"] = compute_review_input_hash(supported_negative, negative_review, build_reference_index(supported_negative))
         negative_review_path = supported_negative / "reviews" / "coverage-negative.json"; negative_review_path.write_bytes(canonical_json_bytes(negative_review))
@@ -4271,7 +5239,11 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         append_event(drifted, reattestation)
         checks.append(("fresh operator scope re-attestation activates the draft without mutating history", reduce_engagement(drifted)["scope_hash"] == new_hash and (drifted / "events.jsonl").read_bytes().startswith(before_drift_write), "scope re-attestation failed or rewrote ledger"))
 
-        closure = root / "memory-closure"; closure.mkdir(); closure.joinpath("scope.md").write_text(scope.replace("self-test", "memory-closure"), encoding="utf-8"); initialize_engagement(closure, "2026-07-10T00:21:00Z"); closure_state = reduce_engagement(closure)
+        closure_documents = test_corpus_documents(
+            row_count=3,
+            frozen_at="2026-07-10T00:20:59Z",
+        )
+        closure = root / "memory-closure"; closure.mkdir(); closure.joinpath("scope.md").write_text(scope_with_corpus_pin(scope.replace("self-test", "memory-closure"), closure_documents[1]), encoding="utf-8"); initialize_engagement(closure, "2026-07-10T00:21:00Z"); closure_state = reduce_engagement(closure)
         append_event(closure, base_event(event_id="event-closure-blocked", engagement_id=closure.name, recorded_at="2026-07-10T00:21:01Z", actor_role="operator", actor_id="operator-selftest", event_type="engagement.blocked", rationale="Exercise an evidence-preserving blocked closure.", payload={"entity_id": closure.name, "status": "blocked", "reason": "A bounded fixture blocker prevents coverage completion."}, state_changes=[{"dimension": "engagement", "entity_id": closure.name, "previous": "active", "current": "blocked"}, {"dimension": "coverage", "entity_id": closure.name, "previous": "active", "current": "blocked"}]))
         append_event(closure, base_event(event_id="event-cleanup-na", engagement_id=closure.name, recorded_at="2026-07-10T00:21:02Z", actor_role="operator", actor_id="operator-selftest", event_type="cleanup.updated", rationale="No live artifact cleanup exists.", payload={"entity_id": "cleanup-none", "status": "not_applicable", "scope_hash": closure_state["scope_hash"], "operator_id": "operator-selftest", "updated_at": "2026-07-10T00:21:02Z", "cleanup_obligations": [{"obligation_id": "cleanup-none", "kind": "no_live_artifacts", "status": "not_applicable", "artifact_refs": [], "rationale": "The engagement created no live target artifacts.", "closed_at": "2026-07-10T00:21:02Z"}]}, state_changes=[{"dimension": "cleanup", "entity_id": "cleanup-none", "previous": None, "current": "not_applicable"}]))
         missing_memory_blocked = False
@@ -4284,8 +5256,160 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         except RecordError as exc: unsafe_promotion_blocked = exc.code == "memory_abstraction_not_sanitized"
         checks.append(("promote scrubbing covers every retained human text field", unsafe_promotion_blocked, "unsafe review rationale passed promotion scrub"))
         proposal_path = root / "memory-proposal.json"; write_canonical_json(proposal_path, memory_proposal); recorded_memory = record_memory_disposition(closure, proposal_path, "operator-selftest"); retry_count = reduce_engagement(closure)["event_count"]; record_memory_disposition(closure, proposal_path, "operator-selftest")
-        budget_closure = root / "budget-closure"; shutil.copytree(closure, budget_closure); _append_kernel_event(budget_closure, base_event(event_id="event-budget-closure-bounded", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.500000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.status_changed", rationale="The bounded closure records two disposed work items from an enumerated set of three.", payload={"entity_id": closure.name, "status": "budget_bounded", "disposed_count": 2, "enumerated_count": 3}, state_changes=[{"dimension": "coverage", "entity_id": closure.name, "previous": "blocked", "current": "budget_bounded"}])); budget_closed = close_engagement(budget_closure, "operator-selftest", "Cleanup, budget-bounded coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
-        checks.append(("budget-bounded is terminal coverage accepted by the unchanged operator closure gate", budget_closed["coverage"] == "budget_bounded" and budget_closed["coverage_counts"] == {"disposed_count": 2, "enumerated_count": 3}, str(budget_closed)))
+        closure_manifest_ref, closure_tsv_ref = register_test_corpus(
+            closure,
+            row_count=3,
+            created_at="2026-07-10T00:21:04Z",
+            documents=closure_documents,
+        )
+        nonblocking_closure = root / "closure-with-awaiting-operator"
+        shutil.copytree(closure, nonblocking_closure)
+        pending_action = _authority_action(
+            "test-authority",
+            lane_id="lane-nonblocking-close",
+            value="operator-may-answer-later",
+        )
+        pending_action_digest = sha256_bytes(canonical_json_bytes(pending_action))
+        append_event(
+            nonblocking_closure,
+            base_event(
+                event_id="event-nonblocking-close-authority-request",
+                engagement_id=closure.name,
+                recorded_at="2026-07-10T00:21:04.100000Z",
+                actor_role="orchestrator",
+                actor_id="orchestrator-selftest",
+                event_type="authority.requested",
+                rationale="Leave one operator decision pending without representing executable work.",
+                payload={
+                    "request_id": "request-nonblocking-close",
+                    "action_kind": "test-authority",
+                    "action_digest": pending_action_digest,
+                    "lane_id": "lane-nonblocking-close",
+                    "request_status": "pending_authority",
+                    "scope_hash": closure_state["scope_hash"],
+                    "environment_ref": None,
+                    "expires_at": None,
+                },
+                session_id="session-nonblocking-close",
+                operation_class="notebook",
+            ),
+        )
+        nonblocking_before = reduce_engagement(nonblocking_closure)
+        nonblocking_closed = close_engagement(
+            nonblocking_closure,
+            "operator-selftest",
+            "Only a nonblocking operator decision remains.",
+            "2026-07-10T00:21:04.200000Z",
+        )
+        checks.append((
+            "actual engagement closure is permitted when the only queued row awaits the operator and is explicitly nonblocking",
+            len(nonblocking_before["work_queue"]) == 1
+            and nonblocking_before["work_queue"][0]["class"] == "awaiting_operator"
+            and nonblocking_before["work_queue"][0]["blocking"] is False
+            and nonblocking_closed["authority_requests"]["request-nonblocking-close"]["status"] == "pending_authority"
+            and all(item["blocking"] is False for item in nonblocking_closed["work_queue"]),
+            str({"before": nonblocking_before["work_queue"], "after": nonblocking_closed["work_queue"]}),
+        ))
+        budget_closure = root / "budget-closure"; shutil.copytree(closure, budget_closure); _append_kernel_event(budget_closure, base_event(event_id="event-budget-closure-bounded", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.500000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="coverage.status_changed", rationale="The bounded closure records two queue disposals against a frozen three-row corpus denominator.", payload={"entity_id": closure.name, "status": "budget_bounded", "disposed_count": 2, "enumerated_count": 3, "corpus_enumeration_ref": closure_manifest_ref}, evidence_refs=[closure_manifest_ref, closure_tsv_ref], state_changes=[{"dimension": "coverage", "entity_id": closure.name, "previous": "blocked", "current": "budget_bounded"}])); budget_closed = close_engagement(budget_closure, "operator-selftest", "Cleanup, budget-bounded coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
+        checks.append(("budget-bounded is terminal coverage accepted by closure only with its frozen denominator and an empty blocking queue", budget_closed["coverage"] == "budget_bounded" and budget_closed["coverage_counts"]["enumerated_count"] == 3 and budget_closed["coverage_counts"]["corpus_enumeration_ref"] == closure_manifest_ref, str(budget_closed)))
+
+        close_escape = root / "close-with-blocking-work"; shutil.copytree(closure, close_escape)
+        append_event(close_escape, base_event(event_id="event-close-escape-prior", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.100000Z", actor_role="operator", actor_id="operator-selftest", event_type="operator_prior.recorded", rationale="Introduce one explicit unresolved branch after terminal coverage.", payload={"prior_id": "prior-close-escape", "prior_statement": "A branch remains unresolved.", "strength": "strong", "reason": "adversarial closure repro"}))
+        close_escape_hypothesis = json.loads(json.dumps(hypothesis["payload"])); close_escape_hypothesis.update({"hypothesis_id": "hypothesis-close-escape", "origin_type": "operator_prior", "origin_ref": "event-close-escape-prior", "status": "queued"}); close_escape_hypothesis.pop("candidate_ref", None)
+        append_event(close_escape, base_event(event_id="event-close-escape-hypothesis", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.200000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Leave one blocking hypothesis on the record.", payload=close_escape_hypothesis, entity_refs=["event-close-escape-prior"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-close-escape", "previous": None, "current": "queued"}]))
+        append_event(close_escape, base_event(event_id="event-close-escape-hypothesis-selected", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.250000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Select the unresolved closure-control branch.", payload={"hypothesis_id": "hypothesis-close-escape", "status": "selected", "reason": "execute the closure-control branch", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "The closure-control branch is selected.", "unresolved_questions": [], "next_route": close_escape_hypothesis["next_experiment"]}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-close-escape", "previous": "queued", "current": "selected"}]))
+        append_event(close_escape, base_event(event_id="event-close-escape-hypothesis-running", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.300000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.status_changed", rationale="Begin the closure-control branch while leaving its first attempt unrecorded.", payload={"hypothesis_id": "hypothesis-close-escape", "status": "running", "reason": "begin the closure-control branch", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "The branch is running and has no attempt yet.", "unresolved_questions": [], "next_route": close_escape_hypothesis["next_experiment"]}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-close-escape", "previous": "selected", "current": "running"}]))
+        append_event(close_escape, base_event(event_id="event-close-escape-observation", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.310000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="observation.recorded", rationale="Record one source observation for a candidate that must remain queued.", payload={"entity_id": "observation-close-escape", "entity_type": "observation", "status": "recorded"}))
+        append_event(close_escape, base_event(event_id="event-close-escape-routing", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.320000Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="routing.assessed", rationale="Route the closure-control observation into one bounded candidate.", payload={"entity_id": "routing-close-escape", "source_observation_ref": "event-close-escape-observation", "activation_strength": "strong", "card_ids": ["card-selftest"], "status": "assessed"}, entity_refs=["event-close-escape-observation"]))
+        close_escape_candidate = base_event(event_id="event-close-escape-candidate", engagement_id=closure.name, recorded_at="2026-07-10T00:21:04.330000Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="candidate.proposed", rationale="Leave one valid proposed candidate queued at the closure gate.", payload={"candidate_id": "candidate-close-escape", "source_observation_ref": "event-close-escape-observation", "routing_review_ref": "event-close-escape-routing", "activation_strength": "strong", "card_ids": ["card-selftest"], "status": "queued", "expected_information_gain": 1, "safety_class": "clear_local", "cost_estimate": zero_cost}, entity_refs=["event-close-escape-observation", "event-close-escape-routing"], state_changes=[{"dimension": "search", "entity_id": "candidate-close-escape", "previous": None, "current": "queued"}]); close_escape_candidate["ex_ante"] = {"probability": 0.5, "ordinal": "strong", "recorded_before_outcome": True}; append_event(close_escape, close_escape_candidate)
+        close_escape_before = (close_escape / "events.jsonl").read_bytes()
+        try:
+            close_engagement(close_escape, "operator-selftest", "Attempt to close around blocking work.", "2026-07-10T00:21:05Z")
+            close_escape_code = None
+        except RecordError as exc:
+            close_escape_code = exc.code
+        close_escape_state = reduce_engagement(close_escape)
+        close_escape_running_item = next((item for item in close_escape_state["work_queue"] if item["class"] == "hypothesis_running_unattempted" and item["entity"]["id"] == "hypothesis-close-escape"), None)
+        close_escape_candidate_item = next((item for item in close_escape_state["work_queue"] if item["class"] == "candidate_undisposed" and item["entity"]["id"] == "candidate-close-escape"), None)
+        close_escape_actions = {
+            "hypothesis-close-escape": decorate_work_queue_item(close_escape_running_item, close_escape_state, close_escape)["next_action"]["action_id"] if close_escape_running_item else None,
+            "candidate-close-escape": decorate_work_queue_item(close_escape_candidate_item, close_escape_state, close_escape)["next_action"]["action_id"] if close_escape_candidate_item else None,
+        }
+        checks.append(("engagement close refuses a real queued-selected-running zero-attempt hypothesis and a still-queued candidate", close_escape_code == "engagement_closure_work_remaining" and (close_escape / "events.jsonl").read_bytes() == close_escape_before and close_escape_running_item is not None and close_escape_candidate_item is not None and close_escape_actions == {"hypothesis-close-escape": "requeue_unattempted_hypothesis", "candidate-close-escape": "select_candidate"}, str((close_escape_code, close_escape_state["work_queue"], close_escape_actions))))
+
+        override_reason = "Operator accepts the exact listed residual work and closes this synthetic fixture on the record."
+        override_items = blocking_work_identities(project_current_terminal_work_state(close_escape_state, read_ledger(close_escape, "attempt"), coverage=close_escape_state["coverage"]))
+        override_digest = sha256_bytes(canonical_json_bytes(override_items))
+        override_session = _local_identity("operator")[1]
+        override_payload = {
+            "entity_id": closure.name,
+            "terminal_kind": "engagement",
+            "status": "closed",
+            "reason": override_reason,
+            "operator_id": "operator-selftest",
+            "scope_hash": close_escape_state["scope_hash"],
+            "blocking_items": override_items,
+            "blocking_queue_digest": override_digest,
+            **attempt_ledger_context(read_ledger(close_escape, "attempt")),
+            "disposition_ref": close_escape_state["memory_disposition"]["disposition_ref"],
+            "disposition_digest": close_escape_state["memory_disposition"]["disposition_digest"],
+        }
+        override_entity_refs = [close_escape_state["memory_disposition"]["disposition_ref"]]
+        override_state_changes = [{
+            "dimension": "engagement",
+            "entity_id": closure.name,
+            "previous": "blocked",
+            "current": "closed",
+        }]
+        override_action = ending_override_action(
+            engagement_id=closure.name,
+            recorded_at="2026-07-10T00:21:05.500000Z",
+            actor={"role": "operator", "id": "operator-selftest"},
+            payload=override_payload,
+            entity_refs=override_entity_refs,
+            evidence_refs=[],
+            state_changes=override_state_changes,
+            session_id=override_session,
+        )
+        override_action_digest = sha256_bytes(canonical_json_bytes(override_action))
+        override_events = read_ledger(close_escape, "event")
+        override_challenge = operator_challenge_bytes(
+            engagement_id=closure.name,
+            scope_hash=close_escape_state["scope_hash"],
+            ledger_hash=override_events[-1]["record_hash"],
+            operation=f"override-ending:{override_action_digest}",
+            operator_id="operator-selftest",
+        )
+        override_challenge_path = root / "ending-override-challenge.json"; override_challenge_path.write_bytes(override_challenge)
+        override_argv = [sys.executable, str(Path(__file__).resolve()), "override-ending", "--engagement", str(close_escape), "--terminal-kind", "engagement", "--status", "closed", "--operator-id", "operator-selftest", "--session-id", override_session, "--recorded-at", "2026-07-10T00:21:05.500000Z", "--reason", override_reason]
+        unsigned_env = {key: value for key, value in os.environ.items() if key not in {"HARNESS_OPERATOR_SIGNATURE_FILE", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE"}}
+        unsigned_override = subprocess.run(override_argv, env=unsigned_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-operator-v1", str(override_challenge_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        override_env = {**unsigned_env, "HARNESS_OPERATOR_SIGNATURE_FILE": str(override_challenge_path) + ".sig", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(allowed_signers_path)}
+        signed_override = subprocess.run(override_argv, env=override_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        overridden_state = reduce_engagement(close_escape)
+        try:
+            unsigned_override_code = json.loads(unsigned_override.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError):
+            unsigned_override_code = None
+        closed_retry_claim = root / "closed-override-retry-claim"; shutil.copytree(close_escape, closed_retry_claim)
+        closed_retry_claim.joinpath("operator-note.txt").write_text("The engagement is complete.\n", encoding="utf-8")
+        closed_retry_claim_argv = list(override_argv)
+        closed_retry_claim_argv[closed_retry_claim_argv.index(str(close_escape))] = str(closed_retry_claim)
+        closed_retry_claim_before = (closed_retry_claim / "events.jsonl").read_bytes()
+        closed_retry_claim_cli = subprocess.run(closed_retry_claim_argv, env=override_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        try:
+            closed_retry_claim_code = json.loads(closed_retry_claim_cli.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError):
+            closed_retry_claim_code = None
+        checks.append(("only an operator-signed first-class override can end with exact blocking identities while non-queue closure gates remain intact", unsigned_override.returncode != 0 and unsigned_override_code == "operator_signature_required" and signed_override.returncode == 0 and overridden_state["ending_overrides"][-1]["blocking_queue_digest"] == override_digest and overridden_state["ending_overrides"][-1]["blocking_items"] == override_items and overridden_state["ending_overrides"][-1]["operator_signature_challenge_digest"] == sha256_bytes(override_challenge) and overridden_state["ending_overrides"][-1]["operator_signer_fingerprint"].startswith("sha256:") and any(item["blocking"] for item in overridden_state["work_queue"]), unsigned_override.stdout + unsigned_override.stderr + signed_override.stdout + signed_override.stderr + str(overridden_state["ending_overrides"])))
+        checks.append((
+            "exact closed-override retry re-runs the local completion-claim precondition before reporting success",
+            closed_retry_claim_cli.returncode != 0
+            and closed_retry_claim_code == "completion_claims_unjustified"
+            and (closed_retry_claim / "events.jsonl").read_bytes() == closed_retry_claim_before,
+            closed_retry_claim_cli.stdout + closed_retry_claim_cli.stderr,
+        ))
         closed = close_engagement(closure, "operator-selftest", "Cleanup, blocked coverage, reports, and memory are terminal.", "2026-07-10T00:21:05Z")
         checks.append(("closure requires one operator-reviewed memory disposition and accepts no_novel_lesson", missing_memory_blocked and recorded_memory["disposition"] == "no_novel_lesson" and retry_count + 1 == closed["event_count"] and closed["memory_disposition"]["disposition"] == "no_novel_lesson", str(closed)))
         checks.append(("memory disposition never writes Plane-1", not (closure / "skills").exists() and not (closure / "casebooks").exists(), "record-memory created Plane-1 content"))
@@ -4579,6 +5703,18 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--session-id", required=True)
         command.add_argument("--recorded-at", required=True)
         command.add_argument("--reason", required=True)
+    override_ending = subcommands.add_parser("override-ending", help="operator-sign one exact terminal transition with blocking work left on the record")
+    override_ending.add_argument("--engagement", type=Path, required=True)
+    override_ending.add_argument("--terminal-kind", choices=["coverage", "engagement"], required=True)
+    override_ending.add_argument("--status", choices=["coverage_dry", "budget_bounded", "blocked", "closed"], required=True)
+    override_ending.add_argument("--operator-id", required=True)
+    override_ending.add_argument("--session-id", required=True)
+    override_ending.add_argument("--recorded-at", required=True)
+    override_ending.add_argument("--reason", required=True)
+    override_ending.add_argument("--coverage-review-ref")
+    override_ending.add_argument("--disposed-count", type=int)
+    override_ending.add_argument("--enumerated-count", type=int)
+    override_ending.add_argument("--corpus-enumeration-ref")
     classify_artifact = subcommands.add_parser("classify-artifact", help="classify a planned artifact before any bytes are created")
     classify_artifact.add_argument("--engagement", type=Path, required=True)
     classify_artifact.add_argument("--metadata", type=Path, required=True)
@@ -4695,6 +5831,7 @@ def _command_handlers() -> dict[str, object]:
             "reopen-coverage": command_reopen_coverage,
             "operator-stop": command_operator_stop,
             "operator-resume": command_operator_resume,
+            "override-ending": command_override_ending,
             "request-authority": command_request_authority,
             "resolve-authority": command_resolve_authority,
             "settle-approved-revision": command_settle_approved_revision,

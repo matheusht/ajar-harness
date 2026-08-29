@@ -32,6 +32,12 @@ from engagement_records import (
 from finding_review import claim_rows, claim_tuple_hash, render_claim_proof, render_internal_report
 from decision6_capabilities import artifact_variant, classify_event, require_actor
 from engagement_quarantine import inspect_quarantine, require_safe_offline_input
+from frozen_corpus import require_enumerated_count_matches, resolve_frozen_corpus_denominator
+from operator_signature import (
+    ending_override_action,
+    operator_challenge_bytes,
+    verify_embedded_operator_signature,
+)
 
 LEDGERS = {
     "event": ("events.jsonl", "engagement-event", "event_id"),
@@ -55,6 +61,7 @@ EVENT_STATE_RULES = {
     "candidate.selected": ({"search"}, {"search"}),
     "candidate.skipped": ({"search"}, {"search"}),
     "candidate.deferred": ({"search"}, {"search"}),
+    "candidate.reopened": ({"search"}, {"search"}),
     "operator_prior.recorded": ({"search", "coverage"}, set()),
     "hypothesis.created": ({"search"}, {"search"}),
     "hypothesis.status_changed": ({"search"}, {"search"}),
@@ -75,6 +82,7 @@ EVENT_STATE_RULES = {
     "engagement.blocked": ({"engagement", "coverage"}, {"engagement", "coverage"}),
     "engagement.reopened": ({"engagement", "coverage"}, {"engagement", "coverage"}),
     "engagement.closed": ({"engagement"}, {"engagement"}),
+    "engagement.ending_overridden": ({"coverage", "engagement"}, set()),
     "authority.requested": (set(), set()),
     "authority.expired": (set(), set()),
     "authority.resolved": (set(), set()),
@@ -111,6 +119,7 @@ TRANSITIONS = {
 
 WORK_QUEUE_CLASS_ORDER = (
     "hypothesis_ran_unadjudicated",
+    "hypothesis_running_unattempted",
     "hypothesis_unrouted",
     "hypothesis_open_route",
     "hypothesis_unresolved_question",
@@ -128,6 +137,10 @@ WORK_QUEUE_RULES = {
     "hypothesis_ran_unadjudicated": (
         "a matching attempt_id is absent from experiment_refs and control_refs",
         "every matching attempt_id is present in experiment_refs or control_refs",
+    ),
+    "hypothesis_running_unattempted": (
+        "status is running and no matching attempt is recorded",
+        "a matching attempt is recorded or status is outside running",
     ),
     "hypothesis_unrouted": (
         "status in {queued, selected}",
@@ -158,8 +171,8 @@ WORK_QUEUE_RULES = {
         "review_ref is absent from outstanding_reviews",
     ),
     "candidate_undisposed": (
-        "status is selected and no hypothesis cites this candidate as origin",
-        "a hypothesis has origin_type candidate and origin_ref equal to this candidate id, or candidate status changes",
+        "status in {queued, selected, closed} and no hypothesis cites this candidate as origin",
+        "a hypothesis has origin_type candidate and origin_ref equal to this candidate id",
     ),
     "deferred_candidate_unreviewed": (
         "status is deferred",
@@ -178,6 +191,29 @@ WORK_QUEUE_RULES = {
         "coverage is not active",
     ),
 }
+
+# Events in this set either create work or mechanically dispose queue work.
+# A review challenge, regrade, or pocinator verdict is evidence about work, but
+# it does not itself route a hypothesis, terminally adjudicate a claim, or file
+# a finding revision.  Counting those review-only events would let metadata
+# churn hide a budget redeclaration made with no intervening disposition.
+WORK_DISPOSITION_EVENT_TYPES = frozenset({
+    "hypothesis.created",
+    "hypothesis.status_changed",
+    "claim.adjudicated",
+    "finding.revised",
+})
+
+
+def _is_work_disposition_event(event: dict[str, Any]) -> bool:
+    event_type = event["event_type"]
+    if event_type not in WORK_DISPOSITION_EVENT_TYPES:
+        return False
+    if event_type == "hypothesis.status_changed":
+        return event.get("payload", {}).get("status") not in {"queued", "selected", "running"}
+    if event_type == "claim.adjudicated":
+        return event.get("payload", {}).get("status") in {"confirmed", "contaminated", "refuted"}
+    return True
 
 FILEABLE_CLAIM_STATES = {"supported", "confirmed", "contaminated", "refuted"}
 REVISE_FINDING_V2_ACTION_KEYS = {"action_kind", "action_version", "lane_id", "executor_id", "session_id", "file_digest", "operator_id", "proposal", "target"}
@@ -595,12 +631,29 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
         for hypothesis in hypotheses.values()
         if hypothesis.get("origin_type") == "candidate"
     }
+    managed_hypothesis_refs = {
+        control.get("hypothesis_ref")
+        for control in state.get("control_candidates", [])
+        if isinstance(control.get("hypothesis_ref"), str)
+    } | {
+        review.get("hypothesis_ref")
+        for review in state.get("outstanding_reviews", [])
+        if review.get("status") == "routed" and isinstance(review.get("hypothesis_ref"), str)
+    }
 
     for hypothesis_id, hypothesis in hypotheses.items():
         status = hypothesis.get("status")
+        matching_attempts = attempts_by_hypothesis.get(hypothesis_id, set())
         adjudicated_attempts = set(hypothesis.get("experiment_refs", [])) | set(hypothesis.get("control_refs", []))
-        if attempts_by_hypothesis.get(hypothesis_id, set()) - adjudicated_attempts:
+        if matching_attempts - adjudicated_attempts:
             add("hypothesis_ran_unadjudicated", "hypothesis", hypothesis_id)
+        # Control and routed-review obligations own their pre-attempt lifecycle.
+        # Their exact queue actions bind the routing/review event; a generic
+        # hypothesis action would otherwise shadow that stronger contract.
+        if hypothesis_id in managed_hypothesis_refs and not matching_attempts:
+            continue
+        if status == "running" and not matching_attempts:
+            add("hypothesis_running_unattempted", "hypothesis", hypothesis_id)
         if status in {"queued", "selected"}:
             add("hypothesis_unrouted", "hypothesis", hypothesis_id)
         if hypothesis.get("next_route") is not None:
@@ -687,7 +740,7 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
             add("review_obligation_open", "review_obligation", review["review_ref"], review["entity_ref"])
 
     for candidate_id, candidate in state.get("candidates", {}).items():
-        if candidate.get("status") == "selected" and candidate_id not in cited_candidates:
+        if candidate.get("status") in {"queued", "selected", "closed"} and candidate_id not in cited_candidates:
             add("candidate_undisposed", "candidate", candidate_id)
         if candidate.get("status") == "deferred":
             add("deferred_candidate_unreviewed", "candidate", candidate_id)
@@ -712,6 +765,209 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
         item["entity"]["detail"] is not None,
         item["entity"]["detail"] or "",
     ))
+
+
+def engagement_may_end(state: dict[str, Any]) -> bool:
+    """Return the one authoritative answer for both terminal transitions.
+
+    Callers must pass a state whose ``work_queue`` has been projected for the
+    proposed terminal coverage value.  Keeping this predicate deliberately
+    small prevents close and coverage from acquiring subtly different ideas of
+    what blocking work means.
+    """
+
+    queue = state.get("work_queue")
+    if not isinstance(queue, list):
+        return False
+    return all(
+        isinstance(item, dict) and item.get("blocking") is False
+        for item in queue
+    )
+
+
+def blocking_work_identities(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return stable, prose-independent identities for blocking queue rows."""
+
+    return [
+        {"class": item["class"], "entity": copy.deepcopy(item["entity"])}
+        for item in state.get("work_queue", [])
+        if item.get("blocking") is True
+    ]
+
+
+def attempt_ledger_context(
+    attempts: list[dict[str, Any]],
+    count: int | None = None,
+) -> dict[str, Any]:
+    """Return the exact canonical prefix bound by an ending override."""
+
+    prefix_count = len(attempts) if count is None else count
+    if (
+        not isinstance(prefix_count, int)
+        or isinstance(prefix_count, bool)
+        or prefix_count < 0
+        or prefix_count > len(attempts)
+    ):
+        raise RecordError("ending_override_attempt_context_invalid", str(prefix_count))
+    return {
+        "attempt_ledger_count": prefix_count,
+        "attempt_ledger_digest": sha256_bytes(
+            b"".join(canonical_json_bytes(item) for item in attempts[:prefix_count])
+        ),
+    }
+
+
+def _attempts_recorded_by(attempts: list[dict[str, Any]], recorded_at: str) -> list[dict[str, Any]]:
+    cutoff = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    return [
+        attempt
+        for attempt in attempts
+        if datetime.fromisoformat(attempt["recorded_at"].replace("Z", "+00:00")) <= cutoff
+    ]
+
+
+def project_terminal_work_state(
+    state: dict[str, Any],
+    attempts: list[dict[str, Any]],
+    *,
+    coverage: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    """Replay the queue as of a historical terminal event timestamp.
+
+    New terminal admission must use :func:`project_current_terminal_work_state`
+    instead.  A caller-controlled timestamp is not an authority boundary for
+    attempts that are already present in the current ledger.
+    """
+
+    projected = copy.deepcopy(state)
+    projected["coverage"] = coverage
+    projected["work_queue"] = compute_work_queue(
+        projected,
+        _attempts_recorded_by(attempts, recorded_at),
+    )
+    return projected
+
+
+def project_current_terminal_work_state(
+    state: dict[str, Any],
+    attempts: list[dict[str, Any]],
+    *,
+    coverage: str,
+) -> dict[str, Any]:
+    """Project a newly proposed terminal state over every recorded attempt."""
+
+    projected = copy.deepcopy(state)
+    projected["coverage"] = coverage
+    projected["work_queue"] = compute_work_queue(projected, attempts)
+    return projected
+
+
+def enforce_current_terminal_work_admission(
+    state: dict[str, Any],
+    attempts: list[dict[str, Any]],
+    proposal: dict[str, Any],
+) -> None:
+    """Fail closed when a new terminal event omits current ledger work.
+
+    Historical reduction remains timestamp-scoped so a later, explicitly
+    reopened round cannot invalidate an earlier valid ending.  This admission
+    check is instead called under the append transaction and deliberately sees
+    every attempt already committed when the new terminal event is proposed.
+    """
+
+    event_type = proposal.get("event_type")
+    payload = proposal.get("payload", {})
+    terminal_coverage: str | None = None
+    error_code: str | None = None
+    if event_type == "engagement.closed":
+        terminal_coverage = state.get("coverage")
+        error_code = "engagement_closure_work_remaining"
+    elif event_type == "engagement.ending_overridden":
+        terminal_kind = payload.get("terminal_kind")
+        status = payload.get("status")
+        terminal_coverage = (
+            status
+            if terminal_kind == "coverage" or status == "blocked"
+            else state.get("coverage")
+        )
+    else:
+        coverage_change = next(
+            (
+                change
+                for change in proposal.get("state_changes", [])
+                if change.get("dimension") == "coverage"
+                and change.get("current")
+                in {"coverage_dry", "budget_bounded", "blocked"}
+            ),
+            None,
+        )
+        if coverage_change is not None:
+            terminal_coverage = coverage_change["current"]
+            error_code = "coverage_terminal_work_remaining"
+
+    if not isinstance(terminal_coverage, str):
+        return
+    terminal_time = datetime.fromisoformat(
+        str(proposal.get("recorded_at", "")).replace("Z", "+00:00")
+    )
+    if any(
+        datetime.fromisoformat(attempt["recorded_at"].replace("Z", "+00:00"))
+        > terminal_time
+        for attempt in attempts
+    ):
+        raise RecordError(
+            "terminal_event_precedes_recorded_attempt",
+            str(proposal.get("event_id", "unknown")),
+        )
+    projected = project_current_terminal_work_state(
+        state,
+        attempts,
+        coverage=terminal_coverage,
+    )
+    blockers = blocking_work_identities(projected)
+    if event_type == "engagement.ending_overridden":
+        current_attempt_context = attempt_ledger_context(attempts)
+        if (
+            not blockers
+            or payload.get("blocking_items") != blockers
+            or payload.get("blocking_queue_digest")
+            != sha256_bytes(canonical_json_bytes(blockers))
+            or payload.get("attempt_ledger_count")
+            != current_attempt_context["attempt_ledger_count"]
+            or payload.get("attempt_ledger_digest")
+            != current_attempt_context["attempt_ledger_digest"]
+        ):
+            raise RecordError(
+                "ending_override_binding_invalid",
+                str(proposal.get("event_id", "unknown")),
+            )
+        return
+    if not engagement_may_end(projected):
+        raise RecordError(
+            error_code or "coverage_terminal_work_remaining",
+            json.dumps(blockers, sort_keys=True),
+        )
+
+
+def work_disposition_digest(
+    seen_events: dict[str, dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    recorded_at: str,
+) -> str:
+    """Fingerprint substantive work recorded no later than one declaration."""
+
+    return sha256_bytes(canonical_json_bytes({
+        "event_refs": [
+            event["event_id"]
+            for event in seen_events.values()
+            if _is_work_disposition_event(event)
+        ],
+        "attempt_refs": [
+            attempt["attempt_id"]
+            for attempt in _attempts_recorded_by(attempts, recorded_at)
+        ],
+    }))
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1756,9 +2012,35 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         raise RecordError("claim_adjudicator_role_invalid", event.get("event_id", "unknown"))
     if event_type == "finding.revised" and event.get("actor", {}).get("role") not in ({"operator", "broker"} if payload.get("authority_request_ref") else {"operator"}):
         raise RecordError("finding_filing_actor_invalid", event.get("event_id", "unknown"))
+    if event_type == "engagement.ending_overridden":
+        terminal_kind = payload.get("terminal_kind")
+        status = payload.get("status")
+        if terminal_kind == "coverage":
+            expected_dimensions = {"coverage"}
+            expected_statuses = {"coverage_dry", "budget_bounded", "blocked"}
+        elif status == "blocked":
+            expected_dimensions = {"coverage", "engagement"}
+            expected_statuses = {"blocked"}
+        else:
+            expected_dimensions = {"engagement"}
+            expected_statuses = {"closed"}
+        if (
+            event.get("actor") != {"role": "operator", "id": payload.get("operator_id")}
+            or event.get("operation_class") != "authority"
+            or payload.get("entity_id") != engagement_id
+            or status not in expected_statuses
+            or payload.get("reason") != event.get("rationale")
+            or set(by_dimension) != expected_dimensions
+            or any(
+                by_dimension[dimension].get("entity_id") != engagement_id
+                or by_dimension[dimension].get("current") != status
+                for dimension in expected_dimensions
+            )
+        ):
+            raise RecordError("ending_override_event_invalid", event.get("event_id", "unknown"))
     if event_type == "record.committed" and event.get("actor", {}).get("role") not in {"operator", "broker", "migration"}:
         raise RecordError("file_commit_actor_unauthorized", event.get("event_id", "unknown"))
-    if event_type in {"candidate.proposed", "candidate.selected", "candidate.skipped", "candidate.deferred"} and event.get("actor", {}).get("role") not in {"orchestrator", "operator", "broker"}:
+    if event_type in {"candidate.proposed", "candidate.selected", "candidate.skipped", "candidate.deferred", "candidate.reopened"} and event.get("actor", {}).get("role") not in {"orchestrator", "operator", "broker"}:
         raise RecordError("candidate_actor_unauthorized", event.get("event_id", "unknown"))
     if event_type in {"candidate.selected", "candidate.skipped", "candidate.deferred"}:
         overridden = payload.get("operator_override", False)
@@ -1766,6 +2048,12 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
             raise RecordError("candidate_override_authority_invalid", event.get("event_id", "unknown"))
         if not overridden and payload.get("override_reason") is not None:
             raise RecordError("candidate_override_reason_without_override", event.get("event_id", "unknown"))
+    if event_type == "candidate.reopened" and (
+        not isinstance(payload.get("reason"), str)
+        or not payload["reason"].strip()
+        or payload["reason"] != event.get("rationale")
+    ):
+        raise RecordError("candidate_reopen_reason_invalid", event.get("event_id", "unknown"))
     if event_type == "candidate.proposed":
         if payload.get("activation_strength") == "negative":
             raise RecordError("negative_signal_not_candidate", "negative routing signals are controls, not candidates")
@@ -1804,14 +2092,22 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         "wall_seconds",
     }
     present_driver_fields = driver_fields.intersection(payload)
+    is_budget_event = (
+        event_type == "coverage.status_changed"
+        or (
+            event_type == "engagement.ending_overridden"
+            and payload.get("terminal_kind") == "coverage"
+        )
+    ) and payload.get("status") == "budget_bounded"
     is_driver_budget_event = event_type == "coverage.status_changed" and payload.get("status") == "budget_bounded"
     if present_driver_fields and not is_driver_budget_event:
         raise RecordError("driver_budget_metadata_wrong_event", event.get("event_id", "unknown"))
-    if is_driver_budget_event:
+    if is_budget_event:
         disposed_count = payload.get("disposed_count")
         enumerated_count = payload.get("enumerated_count")
         if not isinstance(disposed_count, int) or isinstance(disposed_count, bool) or not isinstance(enumerated_count, int) or isinstance(enumerated_count, bool) or enumerated_count < 1 or disposed_count < 0 or disposed_count > enumerated_count:
             raise RecordError("budget_bounded_counts_invalid", event.get("event_id", "unknown"))
+    if is_driver_budget_event:
         if present_driver_fields:
             if present_driver_fields != driver_fields:
                 raise RecordError("driver_budget_metadata_incomplete", event.get("event_id", "unknown"))
@@ -1904,7 +2200,7 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
 
     binding: tuple[str, str | None, str | None] | None = None
     if event_type.startswith("candidate."):
-        targets = {"candidate.proposed": "queued", "candidate.selected": "selected", "candidate.skipped": "closed", "candidate.deferred": "deferred"}
+        targets = {"candidate.proposed": "queued", "candidate.selected": "selected", "candidate.skipped": "closed", "candidate.deferred": "deferred", "candidate.reopened": "selected"}
         binding = ("search", payload.get("candidate_id"), targets[event_type])
     elif event_type == "hypothesis.created":
         binding = ("search", payload.get("hypothesis_id"), "queued")
@@ -1951,6 +2247,9 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         if payload.get("entity_id") != engagement_id or payload.get("status") != "closed":
             raise RecordError("event_payload_state_mismatch", event["event_id"])
         binding = ("engagement", engagement_id, "closed")
+    elif event_type == "engagement.ending_overridden":
+        if payload.get("terminal_kind") == "coverage" or payload.get("status") == "closed":
+            binding = (payload.get("terminal_kind"), engagement_id, payload.get("status"))
 
     if binding:
         dimension, entity_id, target = binding
@@ -1961,7 +2260,7 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
             raise RecordError("event_payload_state_mismatch", f"{event_type}:{payload['status']} != {target}")
 
 
-def validate_transition(states: dict[str, dict[str, str]], change: dict[str, Any]) -> None:
+def validate_transition(states: dict[str, dict[str, str]], change: dict[str, Any], *, event_type: str | None = None) -> None:
     dimension = change["dimension"]
     entity_id = change["entity_id"]
     current = states.setdefault(dimension, {}).get(entity_id)
@@ -1970,7 +2269,8 @@ def validate_transition(states: dict[str, dict[str, str]], change: dict[str, Any
     target = change["current"]
     if target not in STATE_VALUES[dimension]:
         raise RecordError("unknown_transition_state", f"{dimension}:{target}")
-    if target not in TRANSITIONS[dimension].get(current, set()) and not (dimension == "claim" and target == current):
+    candidate_reopen = event_type == "candidate.reopened" and dimension == "search" and current == "closed" and target == "selected"
+    if target not in TRANSITIONS[dimension].get(current, set()) and not (dimension == "claim" and target == current) and not candidate_reopen:
         raise RecordError("invalid_state_transition", f"{dimension}:{current!r}->{target!r}")
     states[dimension][entity_id] = target
 
@@ -2007,7 +2307,7 @@ def validate_temporal_search_reference(event: dict[str, Any], seen_events: dict[
 def validate_reference_precedence(event: dict[str, Any], index: dict[str, list[dict[str, Any]]], committed_entity_ids: set[str]) -> None:
     payload = event["payload"]
     refs = set(event.get("evidence_refs", [])) | set(event.get("review_refs", [])) | set(event.get("finding_refs", [])) | set(event.get("artifact_refs", []))
-    for key in ("environment_ref", "routing_review_ref", "origin_ref", "review_ref", "adjudication_review_ref", "disposition_ref", "authority_request_ref"):
+    for key in ("environment_ref", "routing_review_ref", "origin_ref", "review_ref", "adjudication_review_ref", "disposition_ref", "authority_request_ref", "corpus_enumeration_ref"):
         if payload.get(key):
             refs.add(payload[key])
     for key in ("experiment_refs", "control_refs", "supporting_evidence_refs", "conflicting_evidence_refs"):
@@ -2178,7 +2478,7 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
         "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
+        "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "ending_overrides": [], "budget_redeclaration_cycles": [], "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
 
@@ -2217,6 +2517,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
     active_scope_operator: str | None = None
     latest_preflight_ref: str | None = None
     consumed_authority_actions: set[str] = set()
+    last_budget_declaration: dict[str, str] | None = None
     def consume_exact_authority(event: dict[str, Any], request: dict[str, Any] | None, action: dict[str, Any]) -> bool:
         reference = event["payload"].get("authority_request_ref")
         if request is None or reference in consumed_authority_actions or request["action_digest"] != sha256_bytes(canonical_json_bytes(action)): return False
@@ -2237,11 +2538,44 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         expected_authority_action = {"environment.review_recorded": "review-preflight", "report.generated": "generate-report", "operator.review_recorded": "accept-report", "submission.recorded": "record-submission", "memory.disposition_recorded": "record-memory", "engagement.closed": "close", "finding.revised": "revise-finding", "scope.attested": "reattest-scope", "cleanup.updated": "record-cleanup", "operator_prior.recorded": "record-operator-prior", "engagement.reopened": "reopen", "migration.apply_authorized": "apply-migration"}.get(event["event_type"])
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "ledger_tail_repair" and payload.get("authority_request_ref"): expected_authority_action = "repair-ledger-tail"
         event_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
+        resolved_budget_denominator: dict[str, Any] | None = None
+        override_signer_fingerprint: str | None = None
         request_environment_matches = bool(request and (request["environment_ref"] == state["active_environment_ref"] or (event["event_type"] == "finding.revised" and request.get("target") is None and request["environment_ref"] is None)))
         broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request_environment_matches and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
         if event["event_type"] in {"operator_stop.recorded", "operator_resume.recorded"} and (event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("operator_id") != active_scope_operator):
             raise RecordError("operator_queue_control_not_scope_authorized", event["event_id"])
         validate_reference_precedence(event, index, committed_entity_ids)
+        is_budget_declaration = (
+            event["event_type"] == "coverage.status_changed"
+            or (
+                event["event_type"] == "engagement.ending_overridden"
+                and payload.get("terminal_kind") == "coverage"
+            )
+        ) and payload.get("status") == "budget_bounded"
+        if is_budget_declaration:
+            genesis_scope = events[0]
+            budget_scope_bytes = read_governed_file(
+                engagement
+                / genesis_scope["payload"]["scope_snapshot_path"]
+            )
+            resolved_budget_denominator = resolve_frozen_corpus_denominator(
+                engagement,
+                artifacts,
+                payload.get("corpus_enumeration_ref"),
+                event["recorded_at"],
+                budget_scope_bytes,
+                genesis_scope["recorded_at"],
+            )
+            require_enumerated_count_matches(
+                payload.get("enumerated_count"),
+                resolved_budget_denominator,
+            )
+            required_corpus_refs = {
+                resolved_budget_denominator["manifest_artifact_ref"],
+                resolved_budget_denominator["enumeration_artifact_ref"],
+            }
+            if not required_corpus_refs.issubset(set(event.get("evidence_refs", []))):
+                raise RecordError("frozen_corpus_evidence_refs_missing", event["event_id"])
         if event["event_type"] == "record.committed":
             validate_committed_record_precedence(engagement, event, index, committed_entity_ids)
             if payload["record_type"] == "migration-manifest":
@@ -2292,13 +2626,122 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         if event["event_type"] == "engagement.closed":
             memory = state["memory_disposition"]
             reports_current = all(any(report["finding_id"] == finding_id and report["finding_revision"] == finding["revision"] and report["status"] in {"accepted", "submitted"} for report in state["reports"].values()) for finding_id, finding in state["findings"].items())
-            pending_reviews = bool(state["outstanding_reviews"])
             cleanup_terminal = state["cleanup"]["recorded"] and all(item["status"] in {"completed", "not_applicable", "blocked"} for item in state["cleanup"]["obligations"])
             memory_bound = memory is not None and payload.get("disposition_ref") == memory["disposition_ref"] and payload.get("disposition_digest") == memory["disposition_digest"]
             close_action = {"action_kind": "close", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "reason": event["rationale"], "recorded_at": event["recorded_at"]}
             close_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action)
-            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or states["coverage"].get(engagement_id, "active") not in {"coverage_dry", "budget_bounded", "blocked"} or pending_reviews or not reports_current:
+            terminal_coverage = states["coverage"].get(engagement_id, "active")
+            projected_end = project_terminal_work_state(
+                state,
+                attempts,
+                coverage=terminal_coverage,
+                recorded_at=event["recorded_at"],
+            )
+            if not engagement_may_end(projected_end):
+                raise RecordError(
+                    "engagement_closure_work_remaining",
+                    json.dumps(blocking_work_identities(projected_end), sort_keys=True),
+                )
+            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or terminal_coverage not in {"coverage_dry", "budget_bounded", "blocked"} or not reports_current:
                 raise RecordError("engagement_closure_gate_failed", event["event_id"])
+        if event["event_type"] == "engagement.ending_overridden":
+            terminal_kind = payload["terminal_kind"]
+            terminal_coverage = (
+                payload["status"]
+                if terminal_kind == "coverage" or payload["status"] == "blocked"
+                else states["coverage"].get(engagement_id, "active")
+            )
+            try:
+                override_attempt_context = attempt_ledger_context(
+                    attempts,
+                    payload.get("attempt_ledger_count"),
+                )
+            except RecordError as exc:
+                raise RecordError("ending_override_binding_invalid", event["event_id"]) from exc
+            override_attempts = attempts[:override_attempt_context["attempt_ledger_count"]]
+            override_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
+            if any(
+                datetime.fromisoformat(attempt["recorded_at"].replace("Z", "+00:00"))
+                > override_time
+                for attempt in override_attempts
+            ):
+                raise RecordError("ending_override_binding_invalid", event["event_id"])
+            projected_end = project_current_terminal_work_state(
+                state,
+                override_attempts,
+                coverage=terminal_coverage,
+            )
+            blockers = blocking_work_identities(projected_end)
+            blocker_digest = sha256_bytes(canonical_json_bytes(blockers))
+            override_action = ending_override_action(
+                engagement_id=event["engagement_id"],
+                recorded_at=event["recorded_at"],
+                actor=event["actor"],
+                payload=payload,
+                entity_refs=event["entity_refs"],
+                evidence_refs=event["evidence_refs"],
+                state_changes=event["state_changes"],
+                session_id=event.get("provenance", {}).get("session_id"),
+            )
+            override_action_digest = sha256_bytes(canonical_json_bytes(override_action))
+            override_challenge = operator_challenge_bytes(
+                engagement_id=engagement_id,
+                scope_hash=state["scope_hash"],
+                ledger_hash=event["previous_hash"],
+                operation=f"override-ending:{override_action_digest}",
+                operator_id=active_scope_operator,
+            )
+            scope_snapshot = engagement / "scope-attestations" / f"{state['scope_hash'].removeprefix('sha256:')}.md"
+            scope_bytes = read_governed_file(scope_snapshot)
+            if sha256_bytes(scope_bytes) != state["scope_hash"]:
+                raise RecordError("ending_override_scope_invalid", event["event_id"])
+            override_signer_fingerprint = verify_embedded_operator_signature(
+                proof=payload.get("operator_signature"),
+                scope_bytes=scope_bytes,
+                operator_id=active_scope_operator,
+                challenge_bytes=override_challenge,
+            )
+            if (
+                event["actor"] != {"role": "operator", "id": active_scope_operator}
+                or payload.get("operator_id") != active_scope_operator
+                or payload.get("scope_hash") != state["scope_hash"]
+                or event["event_id"] != f"event-ending-override-{override_action_digest[-12:]}"
+                or not blockers
+                or payload.get("blocking_items") != blockers
+                or payload.get("blocking_queue_digest") != blocker_digest
+                or payload.get("attempt_ledger_count")
+                != override_attempt_context["attempt_ledger_count"]
+                or payload.get("attempt_ledger_digest")
+                != override_attempt_context["attempt_ledger_digest"]
+            ):
+                raise RecordError("ending_override_binding_invalid", event["event_id"])
+            if terminal_kind == "engagement" and payload["status"] == "closed":
+                memory = state["memory_disposition"]
+                reports_current = all(
+                    any(
+                        report["finding_id"] == finding_id
+                        and report["finding_revision"] == finding["revision"]
+                        and report["status"] in {"accepted", "submitted"}
+                        for report in state["reports"].values()
+                    )
+                    for finding_id, finding in state["findings"].items()
+                )
+                cleanup_terminal = state["cleanup"]["recorded"] and all(
+                    item["status"] in {"completed", "not_applicable", "blocked"}
+                    for item in state["cleanup"]["obligations"]
+                )
+                memory_bound = (
+                    memory is not None
+                    and payload.get("disposition_ref") == memory["disposition_ref"]
+                    and payload.get("disposition_digest") == memory["disposition_digest"]
+                )
+                if (
+                    not memory_bound
+                    or not cleanup_terminal
+                    or terminal_coverage not in {"coverage_dry", "budget_bounded", "blocked"}
+                    or not reports_current
+                ):
+                    raise RecordError("ending_override_nonqueue_gate_failed", event["event_id"])
         if event["event_type"] == "escalation.confirmed":
             require_scope_zone2_authorized(engagement, state["scope_hash"]); confirmation_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")); expires_at = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")); cleanup_event = seen_events.get(payload["cleanup_obligation_ref"]); bounded = payload.get("confirmation", {})
             cleanup_open = cleanup_event is not None and cleanup_event["event_type"] == "cleanup.updated" and any(item["obligation_id"] == payload.get("cleanup_obligation_id") and item["status"] == "open" for item in cleanup_event["payload"]["cleanup_obligations"]) and any(item["obligation_id"] == payload.get("cleanup_obligation_id") and item["status"] == "open" for item in state["cleanup"]["obligations"])
@@ -2392,7 +2835,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             if payload["status"] == "ready" and (environment.get("fidelity_complete") is not True or environment.get("collector", {}).get("reproducible") is not True or environment.get("identity", {}).get("runtime_digest") is None or safety.get("advisory_zone") != "clear_local" or safety.get("zone2_authorization_granted") is not False or safety.get("secret_scan_status") != "clean" or safety.get("cleanup_open_count") != 0 or v2_ready_invalid):
                 raise RecordError("environment_preflight_not_usable", event["event_id"])
             latest_preflight_ref = environment_ref
-        if event["event_type"] in {"candidate.proposed", "candidate.selected", "hypothesis.created"} and (states["coverage"].get(engagement_id) in {"coverage_dry", "budget_bounded"} or states["engagement"].get(engagement_id) == "closed"):
+        if event["event_type"] in {"candidate.proposed", "candidate.selected", "candidate.reopened", "hypothesis.created"} and (states["coverage"].get(engagement_id) in {"coverage_dry", "budget_bounded"} or states["engagement"].get(engagement_id) == "closed"):
             raise RecordError("search_material_after_closed_coverage", event["event_id"])
         if event["event_type"] == "report.generated":
             report_ref = payload["report_ref"]; commitment = committed_records.get(report_ref)
@@ -2634,7 +3077,11 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             current_dispositions = {key: value["status"] for key, value in state["hypotheses"].items()}
             if dispositions != current_dispositions:
                 raise RecordError("coverage_review_hypothesis_state_mismatch", f"review={dispositions}; state={current_dispositions}")
-        if event["event_type"] == "coverage.status_changed" and payload.get("status") in {"coverage_dry", "blocked"}:
+        is_coverage_ending = event["event_type"] == "coverage.status_changed" or (
+            event["event_type"] == "engagement.ending_overridden"
+            and payload.get("terminal_kind") == "coverage"
+        )
+        if is_coverage_ending and payload.get("status") in {"coverage_dry", "blocked"}:
             terminal_status = payload["status"]
             review_event = seen_events.get(payload["coverage_review_ref"])
             missing_code = "coverage_dry_without_cold_review" if terminal_status == "coverage_dry" else "coverage_blocked_without_cold_review"
@@ -2666,11 +3113,44 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 unresolved = {key: value["status"] for key, value in state["hypotheses"].items() if value["status"] not in {"exhausted", "closed"}}
                 if unresolved:
                     raise RecordError("coverage_dry_with_active_hypotheses", str(unresolved))
+        terminal_coverage_change = next(
+            (
+                change
+                for change in event["state_changes"]
+                if change["dimension"] == "coverage"
+                and change["current"] in {"coverage_dry", "budget_bounded", "blocked"}
+            ),
+            None,
+        )
+        if terminal_coverage_change is not None and event["event_type"] != "engagement.ending_overridden":
+            projected_end = project_terminal_work_state(
+                state,
+                attempts,
+                coverage=terminal_coverage_change["current"],
+                recorded_at=event["recorded_at"],
+            )
+            if not engagement_may_end(projected_end):
+                raise RecordError(
+                    "coverage_terminal_work_remaining",
+                    json.dumps(blocking_work_identities(projected_end), sort_keys=True),
+                )
         for change in event["state_changes"]:
-            validate_transition(states, change)
+            validate_transition(states, change, event_type=event["event_type"])
         coverage_change = next((change for change in event["state_changes"] if change["dimension"] == "coverage"), None)
         if coverage_change is not None:
-            state["coverage_counts"] = ({"disposed_count": payload["disposed_count"], "enumerated_count": payload["enumerated_count"]} if coverage_change["current"] == "budget_bounded" else None)
+            state["coverage_counts"] = (
+                {
+                    "disposed_count": payload["disposed_count"],
+                    "enumerated_count": payload["enumerated_count"],
+                    "corpus_enumeration_ref": resolved_budget_denominator["manifest_artifact_ref"],
+                    "enumeration_artifact_ref": resolved_budget_denominator["enumeration_artifact_ref"],
+                    "frozen_at": resolved_budget_denominator["frozen_at"],
+                    "package_count": resolved_budget_denominator["package_count"],
+                }
+                if coverage_change["current"] == "budget_bounded"
+                and resolved_budget_denominator is not None
+                else None
+            )
         event_type = event["event_type"]
         if event_type == "scope.attested":
             prior = state["scope_hash"]
@@ -2697,6 +3177,23 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 state["queue_control"]["last_resume"] = None
             else:
                 state["queue_control"]["last_resume"] = transition
+        elif event_type == "engagement.ending_overridden":
+            state["ending_overrides"].append({
+                "event_ref": event["event_id"],
+                "recorded_at": event["recorded_at"],
+                "terminal_kind": payload["terminal_kind"],
+                "status": payload["status"],
+                "reason": payload["reason"],
+                "operator_id": payload["operator_id"],
+                "blocking_items": copy.deepcopy(payload["blocking_items"]),
+                "blocking_queue_digest": payload["blocking_queue_digest"],
+                "attempt_ledger_count": payload["attempt_ledger_count"],
+                "attempt_ledger_digest": payload["attempt_ledger_digest"],
+                "operator_signature_challenge_digest": payload["operator_signature"]["challenge_digest"],
+                "operator_signer_fingerprint": override_signer_fingerprint,
+            })
+            if payload["terminal_kind"] == "engagement" and payload["status"] == "blocked":
+                state["active_blockers"].append(event["rationale"])
         elif event_type == "environment.review_recorded":
             current = state["environment_preflights"][payload["environment_ref"]]; current["status"] = payload["status"]; current["operator_review_ref"] = payload["review_ref"]
             state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
@@ -2720,7 +3217,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             state["control_candidates"].append({"routing_event_id": event["event_id"], "source_observation_ref": payload["source_observation_ref"], "card_ids": payload["card_ids"], "status": "likely_held", "rationale": event["rationale"]})
         elif event_type == "candidate.proposed":
             state["candidates"][payload["candidate_id"]] = {"status": payload["status"], "rationale": event["rationale"], "source_observation_ref": payload["source_observation_ref"], "routing_review_ref": payload["routing_review_ref"], "activation_strength": payload["activation_strength"], "card_ids": payload["card_ids"], "ex_ante": event["ex_ante"]}
-        elif event_type in {"candidate.selected", "candidate.skipped", "candidate.deferred"}:
+        elif event_type in {"candidate.selected", "candidate.skipped", "candidate.deferred", "candidate.reopened"}:
             candidate = state["candidates"].setdefault(payload["candidate_id"], {})
             candidate["status"] = payload["status"]
             candidate["rationale"] = event["rationale"]
@@ -2733,7 +3230,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 hypothesis["status"] = "queued"
                 hypothesis["rationale"] = payload["reopening_condition"]
         elif event_type == "hypothesis.created":
-            state["hypotheses"][payload["hypothesis_id"]] = {"status": payload["status"], "rationale": event["rationale"], "origin_type": payload["origin_type"], "origin_ref": payload["origin_ref"], "statement": payload["hypothesis_statement"], "suspected_invariant": payload["suspected_invariant"], "trust_boundary": payload["trust_boundary"], "attacker_path": payload["attacker_path"], "impact_ceiling": payload["impact_ceiling"], "bounded_space": payload["bounded_space"], "lens_ids": payload["lens_ids"], "card_ids": payload["card_ids"], "expected_confirming_evidence": payload["expected_confirming_evidence"], "decisive_falsifiers": payload["decisive_falsifiers"], "cost_estimate": payload["cost_estimate"], "constraints": payload["constraints"], "next_experiment": payload["next_experiment"], "completion_criteria": payload["completion_criteria"], "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "unresolved_questions": [], "next_route": None}
+            state["hypotheses"][payload["hypothesis_id"]] = {"status": payload["status"], "rationale": event["rationale"], "origin_type": payload["origin_type"], "origin_ref": payload["origin_ref"], "statement": payload["hypothesis_statement"], "suspected_invariant": payload["suspected_invariant"], "trust_boundary": payload["trust_boundary"], "attacker_path": payload["attacker_path"], "impact_ceiling": payload["impact_ceiling"], "bounded_space": payload["bounded_space"], "lens_ids": payload["lens_ids"], "card_ids": payload["card_ids"], "expected_confirming_evidence": payload["expected_confirming_evidence"], "decisive_falsifiers": payload["decisive_falsifiers"], "cost_estimate": payload["cost_estimate"], "constraints": payload["constraints"], "next_experiment": payload["next_experiment"], "running_event_ref": None, "completion_criteria": payload["completion_criteria"], "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "unresolved_questions": [], "next_route": None}
             if payload["origin_type"] == "reviewer_challenge":
                 for item in state["outstanding_reviews"]:
                     if item["review_ref"] == payload["origin_ref"] and item["status"] == "pending":
@@ -2741,6 +3238,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         elif event_type == "hypothesis.status_changed":
             hypothesis = state["hypotheses"].setdefault(payload["hypothesis_id"], {})
             hypothesis.update({"status": payload["status"], "rationale": payload["disposition_rationale"], "experiment_refs": payload["experiment_refs"], "control_refs": payload["control_refs"], "supporting_evidence_refs": payload["supporting_evidence_refs"], "conflicting_evidence_refs": payload["conflicting_evidence_refs"], "unresolved_questions": payload["unresolved_questions"], "next_route": payload["next_route"]})
+            if payload["status"] == "running":
+                hypothesis["running_event_ref"] = event["event_id"]
             if payload["supporting_evidence_refs"]:
                 for item in state["outstanding_reviews"]:
                     if item["hypothesis_ref"] == payload["hypothesis_id"] and item["status"] == "routed":
@@ -2830,6 +3329,22 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         if event_type == "record.committed":
             committed_entity_ids.add(payload["record_id"])
             committed_records[payload["record_id"]] = payload
+        if is_budget_declaration:
+            disposition_digest = work_disposition_digest(seen_events, attempts, event["recorded_at"])
+            if (
+                last_budget_declaration is not None
+                and last_budget_declaration["work_disposition_digest"] == disposition_digest
+            ):
+                state["budget_redeclaration_cycles"].append({
+                    "first_event_ref": last_budget_declaration["event_ref"],
+                    "redeclaration_event_ref": event["event_id"],
+                    "recorded_at": event["recorded_at"],
+                    "work_disposition_digest": disposition_digest,
+                })
+            last_budget_declaration = {
+                "event_ref": event["event_id"],
+                "work_disposition_digest": disposition_digest,
+            }
         if event_type != "session.end_checked":
             state["coverage_relevant_sequence"] = event["sequence"]
             state["coverage_relevant_event_ref"] = event["event_id"]
@@ -3078,14 +3593,19 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
             validate_committed_payload(engagement, proposal["payload"])
             reduce_engagement(engagement, allowed_record_orphans={proposal["payload"]["record_path"]})
         elif proposal.get("event_type") != "scope.attested":
-            reduce_engagement(engagement)  # blocks every ordinary write after scope drift
+            current_state = reduce_engagement(engagement)  # blocks every ordinary write after scope drift
+            enforce_current_terminal_work_admission(
+                current_state,
+                read_ledger(engagement, "attempt"),
+                proposal,
+            )
         states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
         states["queue"][current_events[0]["engagement_id"]] = "active"
         for event in current_events:
             for change in event["state_changes"]:
-                validate_transition(states, change)
+                validate_transition(states, change, event_type=event["event_type"])
         for change in proposal.get("state_changes", []):
-            validate_transition(states, change)
+            validate_transition(states, change, event_type=proposal.get("event_type"))
         ledger_path = engagement / LEDGERS["event"][0]
         verified_boundary = len(read_governed_file(ledger_path))
         record = append_ledger_record(engagement, "event", proposal, lock_held=True)

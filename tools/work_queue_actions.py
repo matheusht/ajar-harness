@@ -368,6 +368,21 @@ def _hypothesis_action(item_class: str, engagement: Path, entity_id: str, detail
     if not isinstance(hypothesis, dict):
         raise RecordError("work_queue_hypothesis_missing", entity_id)
     status = hypothesis.get("status")
+    if item_class == "hypothesis_running_unattempted":
+        if status != "running":
+            raise RecordError("work_queue_hypothesis_status_invalid", f"{entity_id}:{status}")
+        return _event_action(
+            "requeue_unattempted_hypothesis",
+            engagement,
+            "<hypothesis-requeued-event-json>",
+            [
+                "valid hypothesis.status_changed notebook event",
+                f"binds exact hypothesis {entity_id}",
+                "changes running to queued",
+                "preserves the bounded route, evidence refs, and unresolved questions",
+            ],
+            effect="advances_item",
+        )
     requirements = ["valid hypothesis.status_changed notebook event", f"binds exact hypothesis {entity_id}"]
     effect = "closes_item"
     if item_class == "hypothesis_unrouted":
@@ -495,7 +510,7 @@ def decorate_work_queue_item(item: dict[str, Any], state: dict[str, Any], engage
     detail = entity.get("detail")
     engagement = engagement.absolute()
 
-    if item_class in {"hypothesis_ran_unadjudicated", "hypothesis_unrouted", "hypothesis_open_route", "hypothesis_unresolved_question"}:
+    if item_class in {"hypothesis_ran_unadjudicated", "hypothesis_running_unattempted", "hypothesis_unrouted", "hypothesis_open_route", "hypothesis_unresolved_question"}:
         action = _hypothesis_action(item_class, engagement, entity_id, detail, state)
     elif item_class == "claim_unadjudicated":
         action = _claim_action(engagement, entity_id, state, review_rows=_filing_rows(state, entity_id))
@@ -513,9 +528,19 @@ def decorate_work_queue_item(item: dict[str, Any], state: dict[str, Any], engage
         else:
             action = _review_action("record_current_revision_pocinator", engagement, review_type="pocinator", entity_type=entity_type, entity_id=entity_id, requirements=["binds the same current filed revision", "records whichever schema-valid Pocinator verdict the fresh review reaches", f"prior_review_run_ids includes exact regrade run {progress['reviewer_run_id']}", "only a verified end-to-end result closes proof debt; every other verdict remains actionable reducer truth"], effect="conditional")
     elif item_class == "candidate_undisposed":
-        action = _event_action("create_candidate_hypothesis", engagement, "<hypothesis-created-event-json>", ["valid hypothesis.created notebook event", "origin_type is candidate", f"origin_ref is exact selected candidate {entity_id}"], effect="closes_item")
+        candidate = state.get("candidates", {}).get(entity_id)
+        if not isinstance(candidate, dict):
+            raise RecordError("work_queue_candidate_missing", entity_id)
+        if candidate.get("status") == "queued":
+            action = _event_action("select_candidate", engagement, "<candidate-selected-event-json>", ["valid candidate.selected notebook event", f"binds exact queued candidate {entity_id}", "changes queued to selected and records the prioritization reason"], effect="advances_item")
+        elif candidate.get("status") == "closed":
+            action = _event_action("reopen_candidate", engagement, "<candidate-reopened-event-json>", ["valid candidate.reopened notebook event", f"binds exact closed candidate {entity_id}", "changes closed to selected without erasing the candidate debt"], effect="advances_item")
+        elif candidate.get("status") == "selected":
+            action = _event_action("create_candidate_hypothesis", engagement, "<hypothesis-created-event-json>", ["valid hypothesis.created notebook event", "origin_type is candidate", f"origin_ref is exact selected candidate {entity_id}"], effect="closes_item")
+        else:
+            raise RecordError("work_queue_candidate_status_invalid", f"{entity_id}:{candidate.get('status')}")
     elif item_class == "deferred_candidate_unreviewed":
-        action = _event_action("record_candidate_skipped", engagement, "<candidate-skipped-event-json>", ["valid candidate.skipped notebook event", f"binds exact deferred candidate {entity_id}", "changes deferred to closed"], effect="closes_item")
+        action = _event_action("record_candidate_skipped", engagement, "<candidate-skipped-event-json>", ["valid candidate.skipped notebook event", f"binds exact deferred candidate {entity_id}", "changes deferred to closed while retaining candidate disposal debt"], effect="advances_item")
     elif item_class == "control_candidate_unverified":
         action = _control_action(engagement, entity_id, state)
     elif item_class == "awaiting_operator":

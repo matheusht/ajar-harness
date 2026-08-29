@@ -44,6 +44,20 @@ The public record command must classify an operation by capability, validate the
 
 “Async — never blocks the agent” therefore means **never blocks unrelated safe research**. It does not mean that the harness may execute an unapproved dependent action.
 
+Coverage and closure add a mechanical condition inside that authority boundary. One reduced-state
+predicate permits a normal terminal transition only when no computed work item is blocking. Closing
+or skipping a candidate cannot erase it from that computation. A closed candidate's next action is
+`reopen_candidate`; once selected again, a hypothesis citing it as its candidate origin accounts for
+the lead. An operator may deliberately end with blockers only through a separately signed,
+first-class override event that records the reason and exact blockers and remains distinguishable
+from a clean ending. The override does not replace any non-queue gate.
+
+For `budget_bounded`, the claimed denominator is evidence rather than caller-owned bookkeeping:
+`enumerated_count` must equal the row count of a prior registered frozen corpus enumeration. The
+manifest bytes must match the exact digest pinned in signed scope, and the terminal path must name
+the registered manifest artifact. Absence or mismatch fails closed. Consecutive redeclarations
+without an intervening work disposition remain visible as a reduced-state fact.
+
 ### 2.3 Autonomous notebook capability
 
 Notebook autonomy is an allowlist, not a bypass around `_require_operator_console`.
@@ -163,7 +177,8 @@ The gates document will distinguish global, lane-local, and asynchronous blockin
 | Accept report / record submission | Async authority | External path waits; research continues |
 | Create one Zone-2 artifact | Fresh live confirmation | Exact lane pauses before creation |
 | Production/cross-user/destructive action | Fresh live confirmation or refusal | Exact lane pauses; scope ceilings still apply |
-| Memory disposition / close | Async authority | Terminal transition waits; completed evidence is preserved |
+| Terminal coverage | Computed queue; async authority only for override | Leaving `active` fails while blocking work remains; an override records its reason and exact blockers |
+| Memory disposition / close | Computed queue + async authority | Normal closure also requires no blocking work; completed evidence is preserved and any override remains countable |
 
 This table is intended to remove bookkeeping stalls while making consequential boundaries easier to see and test.
 

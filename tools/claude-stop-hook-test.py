@@ -224,8 +224,8 @@ def append_engagement_blocked(engagement: Path) -> None:
             event_id="event-stop-hook-engagement-blocked",
             engagement_id=state["engagement_id"],
             recorded_at="2026-08-24T00:01:00Z",
-            actor_role="orchestrator",
-            actor_id="orchestrator-stop-test",
+            actor_role="operator",
+            actor_id="operator-stop-test",
             event_type="engagement.blocked",
             rationale=reason,
             payload={
@@ -247,8 +247,8 @@ def append_engagement_blocked(engagement: Path) -> None:
                     "current": "blocked",
                 },
             ],
-            session_id="session-orchestrator-stop-test",
-            operation_class="notebook",
+            session_id="session-operator-stop-test",
+            operation_class="authority",
         ),
     )
 
@@ -287,6 +287,42 @@ def session_checks(engagement: Path) -> list[dict[str, Any]]:
         for event in read_ledger(engagement, "event")
         if event["event_type"] == "session.end_checked"
     ]
+
+
+def open_file_observer() -> str | None:
+    """Return the portable mechanism available for observing a child file descriptor."""
+
+    if Path("/proc/self/fd").is_dir():
+        return "procfs"
+    if shutil.which("lsof"):
+        return "lsof"
+    return None
+
+
+def process_has_open_kernel_lock(pid: int, observer: str) -> bool:
+    if observer == "procfs":
+        descriptor_dir = Path("/proc") / str(pid) / "fd"
+        try:
+            for descriptor in descriptor_dir.iterdir():
+                try:
+                    if Path(os.readlink(descriptor)).name == ".record-kernel.lock":
+                        return True
+                except (FileNotFoundError, OSError):
+                    continue
+        except (FileNotFoundError, PermissionError):
+            return False
+        return False
+
+    lsof = shutil.which("lsof")
+    if lsof is None:
+        return False
+    opened_files = subprocess.run(
+        [lsof, "-p", str(pid), "-Fn"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).stdout
+    return b".record-kernel.lock" in opened_files
 
 
 def main() -> int:
@@ -702,71 +738,72 @@ def main() -> int:
             repr(uninitialized_output),
         ))
 
-        identity_case = clone_engagement(pristine, target, "identity-bound")
-        identity_moved = target / "engagements" / "identity-bound-moved"
-        identity_lock_fd = os.open(identity_case / ".record-kernel.lock", os.O_RDWR)
-        identity_environment = dict(os.environ)
-        identity_environment["HARNESS_ACTIVE_ENGAGEMENT"] = str(identity_case)
-        identity_process: subprocess.Popen[bytes] | None = None
-        identity_opened = False
-        identity_output: dict[str, Any] | None = None
-        try:
-            fcntl.flock(identity_lock_fd, fcntl.LOCK_EX)
-            identity_process = subprocess.Popen(
-                [sys.executable, str(HOOK)],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=identity_environment,
+        identity_observer = open_file_observer()
+        if identity_observer is None:
+            print(
+                "  skip rename-and-replace lock identity check "
+                "(requires procfs or lsof file-descriptor observation)"
             )
-            assert identity_process.stdin is not None
-            identity_process.stdin.write(
-                canonical_json_bytes(stop_payload(session_id="session-identity-bound"))
-            )
-            identity_process.stdin.close()
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline and identity_process.poll() is None:
-                opened_files = subprocess.run(
-                    ["/usr/sbin/lsof", "-p", str(identity_process.pid), "-Fn"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                ).stdout
-                if b".record-kernel.lock" in opened_files:
-                    identity_opened = True
-                    break
-                time.sleep(0.02)
-            if identity_opened:
-                identity_case.rename(identity_moved)
-                shutil.copytree(pristine, identity_case)
-        finally:
-            fcntl.flock(identity_lock_fd, fcntl.LOCK_UN)
-            os.close(identity_lock_fd)
-        if identity_process is not None:
-            try:
-                identity_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                identity_process.kill()
-                identity_process.wait(timeout=5)
-            assert identity_process.stdout is not None
-            assert identity_process.stderr is not None
-            raw_identity_output = identity_process.stdout.read()
-            identity_stderr = identity_process.stderr.read()
-            if raw_identity_output:
-                identity_output = decode_one_json_document(raw_identity_output)
-            identity_quiet = identity_process.returncode == 0 and not identity_stderr
         else:
-            identity_quiet = False
-        checks.append((
-            "rename-and-replace cannot redirect a locked end check to either directory inode",
-            identity_opened
-            and identity_quiet
-            and identity_output == {}
-            and identity_moved.is_dir()
-            and not session_checks(identity_moved)
-            and not session_checks(identity_case),
-            repr((identity_opened, identity_output)),
-        ))
+            identity_case = clone_engagement(pristine, target, "identity-bound")
+            identity_moved = target / "engagements" / "identity-bound-moved"
+            identity_lock_fd = os.open(identity_case / ".record-kernel.lock", os.O_RDWR)
+            identity_environment = dict(os.environ)
+            identity_environment["HARNESS_ACTIVE_ENGAGEMENT"] = str(identity_case)
+            identity_process: subprocess.Popen[bytes] | None = None
+            identity_opened = False
+            identity_output: dict[str, Any] | None = None
+            try:
+                fcntl.flock(identity_lock_fd, fcntl.LOCK_EX)
+                identity_process = subprocess.Popen(
+                    [sys.executable, str(HOOK)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=identity_environment,
+                )
+                assert identity_process.stdin is not None
+                identity_process.stdin.write(
+                    canonical_json_bytes(stop_payload(session_id="session-identity-bound"))
+                )
+                identity_process.stdin.close()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and identity_process.poll() is None:
+                    if process_has_open_kernel_lock(identity_process.pid, identity_observer):
+                        identity_opened = True
+                        break
+                    time.sleep(0.02)
+                if identity_opened:
+                    identity_case.rename(identity_moved)
+                    shutil.copytree(pristine, identity_case)
+            finally:
+                fcntl.flock(identity_lock_fd, fcntl.LOCK_UN)
+                os.close(identity_lock_fd)
+            if identity_process is not None:
+                try:
+                    identity_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    identity_process.kill()
+                    identity_process.wait(timeout=5)
+                assert identity_process.stdout is not None
+                assert identity_process.stderr is not None
+                raw_identity_output = identity_process.stdout.read()
+                identity_stderr = identity_process.stderr.read()
+                if raw_identity_output:
+                    identity_output = decode_one_json_document(raw_identity_output)
+                identity_quiet = identity_process.returncode == 0 and not identity_stderr
+            else:
+                identity_quiet = False
+            checks.append((
+                "rename-and-replace cannot redirect a locked end check to either directory inode",
+                identity_opened
+                and identity_quiet
+                and identity_output == {}
+                and identity_moved.is_dir()
+                and not session_checks(identity_moved)
+                and not session_checks(identity_case),
+                repr((identity_opened, identity_output)),
+            ))
 
         timeout_case = clone_engagement(pristine, target, "timeout")
         timeout_before = timeout_case.joinpath("events.jsonl").read_bytes()

@@ -7,6 +7,7 @@ hold their own lock and use :func:`assert_completion_claims_clear_bound` directl
 """
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import os
@@ -28,7 +29,62 @@ GENERATED_VIEWS = frozenset({
     "cleanup.generated.md", "memory/README.md", "progress.md", "reviews/README.md",
     "views/report-index.md", "views/submission-index.md",
 })
-CLAIM_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9_-])(?:covered-dry|coverage_dry)(?![A-Za-z0-9_-])")
+MACHINE_OWNED_RECORDS = frozenset({
+    ".record-kernel.lock",
+    "artifacts.jsonl",
+    "attempts.jsonl",
+    "events.jsonl",
+    "lifecycle.jsonl",
+    "records.index.json",
+    "state.snapshot.json",
+})
+STRICT_UTF8_SUFFIXES = (
+    ".adoc", ".asciidoc", ".markdown", ".md", ".mdown", ".org", ".rest",
+    ".rst", ".textile", ".txt",
+)
+CLAIM_TOKEN = re.compile(
+    r"""
+    (?<![A-Za-z0-9_-])
+    (?:
+        covered[-_ ]dry
+        | coverage[_ -]dry
+        | (?:the[ \t]+)?
+          (?:engagement|assessment|evaluation|review|run|exercise|coverage)
+          [ \t]+(?:(?:is|was|are|were|has[ \t]+been|have[ \t]+been)[ \t]+)?
+          (?:now[ \t]+)?
+          (?:complete(?:d)?|done|finished|concluded|exhausted|closed)
+        | (?:the[ \t]+)?(?:work|testing)[ \t]+
+          (?:is|was|are|were|has[ \t]+been|have[ \t]+been)[ \t]+
+          (?:now[ \t]+)?(?:complete(?:d)?|done|finished|concluded|exhausted|closed)
+        | (?:all|every)[ \t]+
+          (?:in[- ]scope|scoped|authorized|target(?:ed)?|relevant)[ \t]+
+          (?:surfaces?|paths?|routes?|cases?|items?|tests?|objectives?|hypotheses|leads?|work)
+          [ \t]+(?:(?:are|were|is|was|have[ \t]+been|has[ \t]+been)[ \t]+)?
+          (?:complete(?:d)?|done|finished|covered|tested|exhausted|closed|resolved|disposed)
+        | no[ \t]+(?:(?:further|more|remaining|additional)[ \t]+)?
+          (?:testing|tests?|work|items?|routes?|paths?|surfaces?|leads?|hypotheses|objectives?)
+          [ \t]+(?:remains?|is[ \t]+left|are[ \t]+left|is[ \t]+pending|are[ \t]+pending
+          |is[ \t]+outstanding|are[ \t]+outstanding)
+        | nothing[ \t]+(?:(?:further|more)[ \t]+)?
+          (?:remains?|is[ \t]+left|left|to[ \t]+(?:do|test|review|investigate|explore))
+        | final[ \t]+(?:verdict|status|assessment)[ \t]*:[ \t]*
+          (?:complete(?:d)?|done|finished|concluded|exhausted|closed|coverage[_ -]dry)
+    )
+    (?![A-Za-z0-9_-])
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+CLAIM_TOKEN_BYTES = re.compile(
+    CLAIM_TOKEN.pattern.encode("ascii"),
+    re.IGNORECASE | re.VERBOSE,
+)
+HORIZONTAL_SPACE_BYTES = re.compile(rb"[ \t]+")
+SCAN_CHUNK_BYTES = 1024 * 1024
+# Horizontal whitespace is collapsed before matching, so every grammar alternative has a bounded
+# byte length.  This overlap is comfortably larger than the longest normalized alternative.
+SCAN_OVERLAP_BYTES = 512
+REVIEW_TYPE_MARKER = b'"review_type":"coverage"'
+COVERAGE_VERDICT_MARKER = b'"verdict":"coverage_dry"'
 HEX = re.compile(r"sha256:[0-9a-f]{64}\Z")
 MAX_TREE_DEPTH = 512
 FileIdentity = tuple[int, int, int, int, int, int]
@@ -172,7 +228,7 @@ def load_pins() -> dict[str, tuple[str, int]]:
 
 @dataclass
 class _DirectoryFrame:
-    """One owned directory descriptor in the iterative Markdown walk."""
+    """One owned directory descriptor in the iterative engagement-record walk."""
 
     fd: int
     prefix: tuple[str, ...]
@@ -213,8 +269,141 @@ def _read_regular(parent_fd: int, name: str, expected: FileIdentity | None = Non
         os.close(fd)
 
 
+def _count_new_matches(
+    pattern: re.Pattern[bytes],
+    window: bytes,
+    prior_length: int,
+    *,
+    final: bool = False,
+) -> int:
+    """Count newly decidable matches, deferring a token that touches a chunk boundary."""
+
+    return sum(
+        match.end() >= prior_length
+        and (final or match.end() < len(window))
+        for match in pattern.finditer(window)
+    )
+
+
+def _count_new_literal(literal: bytes, window: bytes, prior_length: int) -> int:
+    count = 0
+    position = 0
+    while True:
+        position = window.find(literal, position)
+        if position < 0:
+            return count
+        if position + len(literal) > prior_length:
+            count += 1
+        position += 1
+
+
+def _scan_regular(
+    parent_fd: int,
+    name: str,
+    relative: str,
+    expected: FileIdentity,
+) -> tuple[str, FileIdentity, int]:
+    """Stream one regular file into a digest and bounded completion-claim matcher."""
+
+    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise _failure("completion_claims_tree_unsafe")
+        if _identity(before) != expected:
+            raise _failure("completion_claims_tree_changed")
+        digest = hashlib.sha256()
+        claim_count = 0
+        claim_tail = b""
+        raw_tail = b""
+        previous_was_horizontal_space = False
+        machine_owned = relative in GENERATED_VIEWS or relative in MACHINE_OWNED_RECORDS
+        strict_utf8 = name.lower().endswith(STRICT_UTF8_SUFFIXES)
+        decoder = codecs.getincrementaldecoder("utf-8")("strict") if strict_utf8 else None
+        parts = Path(relative).parts
+        coverage_review_candidate = (
+            len(parts) == 2
+            and parts[0] == "reviews"
+            and parts[1].endswith(".json")
+        )
+        review_type_markers = 0
+        coverage_verdict_markers = 0
+        raw_overlap = max(len(REVIEW_TYPE_MARKER), len(COVERAGE_VERDICT_MARKER)) - 1
+
+        while True:
+            chunk = os.read(fd, SCAN_CHUNK_BYTES)
+            if not chunk:
+                break
+            digest.update(chunk)
+            if decoder is not None:
+                try:
+                    decoder.decode(chunk, final=False)
+                except UnicodeDecodeError as exc:
+                    raise _failure("completion_claims_markdown_invalid_utf8") from exc
+            if not machine_owned:
+                normalized = HORIZONTAL_SPACE_BYTES.sub(b" ", chunk)
+                if previous_was_horizontal_space and normalized.startswith(b" "):
+                    normalized = normalized[1:]
+                previous_was_horizontal_space = chunk[-1] in (0x20, 0x09)
+                claim_window = claim_tail + normalized
+                claim_count += _count_new_matches(
+                    CLAIM_TOKEN_BYTES,
+                    claim_window,
+                    len(claim_tail),
+                )
+                claim_tail = claim_window[-SCAN_OVERLAP_BYTES:]
+                if coverage_review_candidate:
+                    raw_window = raw_tail + chunk
+                    review_type_markers += _count_new_literal(
+                        REVIEW_TYPE_MARKER,
+                        raw_window,
+                        len(raw_tail),
+                    )
+                    coverage_verdict_markers += _count_new_literal(
+                        COVERAGE_VERDICT_MARKER,
+                        raw_window,
+                        len(raw_tail),
+                    )
+                    raw_tail = raw_window[-raw_overlap:]
+        if decoder is not None:
+            try:
+                decoder.decode(b"", final=True)
+            except UnicodeDecodeError as exc:
+                raise _failure("completion_claims_markdown_invalid_utf8") from exc
+        if not machine_owned and claim_tail:
+            claim_count += _count_new_matches(
+                CLAIM_TOKEN_BYTES,
+                claim_tail,
+                len(claim_tail),
+                final=True,
+            )
+
+        # In canonical coverage-review JSON this exact marker is the governed verdict field.  A
+        # duplicate or uncommitted record receives no useful bypass: only one match is subtracted,
+        # and the reducer subsequently rejects invalid/orphan structured records.
+        if review_type_markers == 1 and coverage_verdict_markers == 1 and claim_count:
+            claim_count -= 1
+
+        after = os.fstat(fd)
+        identity = _identity(before)
+        try:
+            named_after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise _failure("completion_claims_tree_changed") from exc
+        if identity != _identity(after) or identity != _identity(named_after):
+            raise _failure("completion_claims_tree_changed")
+        return digest.hexdigest(), identity, claim_count
+    finally:
+        os.close(fd)
+
+
 def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str) -> tuple[tuple[tuple[Any, ...], ...], tuple[tuple[str, str, int], ...]]:
-    """Return a complete Markdown identity/content snapshot and non-generated claims."""
+    """Return a complete tree snapshot and claims from regular text-like records.
+
+    The historical private name remains to avoid changing existing callers.  The descriptor-based
+    tree walk and grandfather-pin format are unchanged.  Claim matching is content-based rather
+    than suffix-allowlisted; only exact kernel-owned projections are excluded from matching.
+    """
     root_fd = os.dup(int(bound.parts[3]))
     trees: list[tuple[Any, ...]] = []
     claims: list[tuple[str, str, int]] = []
@@ -340,26 +529,24 @@ def _scan_markdown(bound: Path, first_scope_hash: str, genesis_record_hash: str)
                 continue
             if not stat.S_ISREG(entry_mode):
                 raise _failure("completion_claims_tree_unsafe", first_scope_hash)
-            if not name.lower().endswith(".md"):
-                trees.append((relative, "regular", *entry))
-                continue
             try:
-                data, identity = _read_regular(directory_fd, name, entry)
-                text = data.decode("utf-8")
+                content_hash, identity, count = _scan_regular(
+                    directory_fd,
+                    name,
+                    relative,
+                    entry,
+                )
             except UnicodeDecodeError as exc:
                 raise _failure("completion_claims_markdown_invalid_utf8", first_scope_hash) from exc
             except OSError as exc:
                 raise _failure("completion_claims_tree_unreadable", first_scope_hash) from exc
-            content_hash = hashlib.sha256(data).hexdigest()
             trees.append((relative, "regular", *identity, content_hash))
-            if relative not in GENERATED_VIEWS:
-                count = len(CLAIM_TOKEN.findall(text))
-                if count:
-                    path_hash = "sha256:" + hashlib.sha256(
-                        PATH_DOMAIN + first_scope_hash.encode("ascii") + b"\0"
-                        + genesis_record_hash.encode("ascii") + b"\0" + relative.encode("utf-8")
-                    ).hexdigest()
-                    claims.append((path_hash, "sha256:" + content_hash, count))
+            if count:
+                path_hash = "sha256:" + hashlib.sha256(
+                    PATH_DOMAIN + first_scope_hash.encode("ascii") + b"\0"
+                    + genesis_record_hash.encode("ascii") + b"\0" + relative.encode("utf-8")
+                ).hexdigest()
+                claims.append((path_hash, "sha256:" + content_hash, count))
         return tuple(trees), tuple(claims)
     except UnicodeEncodeError as exc:
         raise _failure("completion_claims_tree_path_invalid", first_scope_hash) from exc
@@ -514,7 +701,7 @@ def assert_completion_claims_clear(engagement: Path) -> CompletionClaimsAdmissio
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="verify Markdown completion claims against current coverage evidence")
+    parser = argparse.ArgumentParser(description="verify textual completion claims against current coverage evidence")
     parser.add_argument("--engagement", type=Path, required=True)
     args = parser.parse_args(argv)
     try:

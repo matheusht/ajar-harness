@@ -161,6 +161,8 @@ def _hypothesis_disposition(
     if item_class == "hypothesis_unrouted":
         expected = "selected" if previous_status == "queued" else "running"
         return _hypothesis_status_event(hypothesis_id, hypothesis, target_status=expected)
+    if item_class == "hypothesis_running_unattempted":
+        return _hypothesis_status_event(hypothesis_id, hypothesis, target_status="queued")
 
     common = [
         _constraint("proposal", ["payload", "hypothesis_id"], "equals", hypothesis_id),
@@ -349,7 +351,7 @@ def build_action_admission(
         raise RecordError("work_queue_admission_context_invalid", str(action_id))
     entity_id = str(entity.get("id"))
 
-    if action_id == "record_hypothesis_disposition":
+    if action_id in {"record_hypothesis_disposition", "requeue_unattempted_hypothesis"}:
         return _hypothesis_disposition(item, state, engagement, entity_id)
     if action_id == "route_review_obligation":
         return _created_hypothesis("reviewer_challenge", entity_id)
@@ -487,6 +489,23 @@ def build_action_admission(
         )
     if action_id == "create_candidate_hypothesis":
         return _created_hypothesis("candidate", entity_id)
+    if action_id == "select_candidate":
+        candidate = state.get("candidates", {}).get(entity_id)
+        if not isinstance(candidate, dict) or candidate.get("status") != "queued":
+            raise RecordError("work_queue_admission_candidate_missing", entity_id)
+        return _event(
+            _constraint("proposal", ["payload", "candidate_id"], "equals", entity_id),
+            _constraint("proposal", ["payload", "status"], "equals", "selected"),
+            _constraint("proposal", ["state_changes"], "equals", [{"dimension": "search", "entity_id": entity_id, "previous": "queued", "current": "selected"}]),
+            event_type="candidate.selected",
+        )
+    if action_id == "reopen_candidate":
+        return _event(
+            _constraint("proposal", ["payload", "candidate_id"], "equals", entity_id),
+            _constraint("proposal", ["payload", "status"], "equals", "selected"),
+            _constraint("proposal", ["state_changes"], "equals", [{"dimension": "search", "entity_id": entity_id, "previous": "closed", "current": "selected"}]),
+            event_type="candidate.reopened",
+        )
     if action_id == "record_candidate_skipped":
         return _event(
             _constraint("proposal", ["payload", "candidate_id"], "equals", entity_id),

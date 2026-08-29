@@ -503,6 +503,51 @@ class WorkQueueAdmissionTest(unittest.TestCase):
         with self.assertRaises(RecordError):
             self._evaluate(predicate, {"finding_id": "F-1", "revision": 2})
 
+    def test_running_hypothesis_without_attempt_is_requeued(self) -> None:
+        state = {
+            "scope_hash": "sha256:" + "1" * 64,
+            "active_environment_ref": "environment-1",
+            "hypotheses": {
+                "hyp-running": {
+                    "status": "running",
+                    "running_event_ref": "event-hyp-running",
+                }
+            },
+        }
+        predicate = build_action_admission(
+            {"class": "hypothesis_running_unattempted", "entity": {"id": "hyp-running"}},
+            {"action_id": "requeue_unattempted_hypothesis"},
+            state,
+            self.engagement,
+        )
+        proposal = {
+            "event_type": "hypothesis.status_changed",
+            "payload": {
+                "hypothesis_id": "hyp-running",
+                "status": "queued",
+                "experiment_refs": [],
+                "control_refs": [],
+                "supporting_evidence_refs": [],
+                "conflicting_evidence_refs": [],
+                "unresolved_questions": [],
+                "next_route": None,
+            },
+            "state_changes": [
+                {
+                    "dimension": "search",
+                    "entity_id": "hyp-running",
+                    "previous": "running",
+                    "current": "queued",
+                }
+            ],
+        }
+        self._evaluate(predicate, proposal)
+        unrelated = copy.deepcopy(proposal)
+        unrelated["state_changes"][0]["entity_id"] = "hyp-unrelated"
+        with self.assertRaises(RecordError) as raised:
+            self._evaluate(predicate, unrelated)
+        self.assertEqual(raised.exception.code, "driver_action_predicate_mismatch")
+
     def test_alternate_queue_contexts_all_build_closed_predicates(self) -> None:
         base = {
             "engagement_id": "eng-1",
@@ -642,9 +687,27 @@ class WorkQueueAdmissionTest(unittest.TestCase):
             "request_finding_revision_authority",
             self._finding_item("finding_revision_pending", "F-1"),
         )
+        running_state = copy.deepcopy(base)
+        running_state["hypotheses"] = {"hyp-running": {"status": "running", "running_event_ref": "event-hyp-running"}}
+        build(
+            "requeue_unattempted_hypothesis",
+            {"class": "hypothesis_running_unattempted", "entity": {"id": "hyp-running"}},
+            running_state,
+        )
         build(
             "create_candidate_hypothesis",
             {"class": "candidate_undisposed", "entity": {"id": "candidate-1"}},
+        )
+        queued_candidate_state = copy.deepcopy(base)
+        queued_candidate_state["candidates"] = {"candidate-queued": {"status": "queued"}}
+        build(
+            "select_candidate",
+            {"class": "candidate_undisposed", "entity": {"id": "candidate-queued"}},
+            queued_candidate_state,
+        )
+        build(
+            "reopen_candidate",
+            {"class": "candidate_undisposed", "entity": {"id": "candidate-closed"}},
         )
         build(
             "record_candidate_skipped",
@@ -667,7 +730,10 @@ class WorkQueueAdmissionTest(unittest.TestCase):
                 "record_coverage_blocked",
                 "create_coverage_followup_hypothesis",
                 "request_finding_revision_authority",
+                "requeue_unattempted_hypothesis",
                 "create_candidate_hypothesis",
+                "select_candidate",
+                "reopen_candidate",
                 "record_candidate_skipped",
             },
         )

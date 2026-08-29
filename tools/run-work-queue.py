@@ -58,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--session-timeout-seconds", type=float, required=True)
     run.add_argument("--session-max-budget-usd", type=float)
     run.add_argument(
+        "--corpus-enumeration-ref",
+        help="registered frozen corpus manifest artifact used if a budget boundary is declared",
+    )
+    run.add_argument(
         "--claude-executable",
         type=Path,
         required=True,
@@ -129,6 +133,7 @@ def main() -> int:
             read_only_inputs=tuple(args.read_only_input),
             stop_requested=stop,
             docker_backend=docker_backend,
+            corpus_enumeration_ref=args.corpus_enumeration_ref,
         )
     except DriverError as exc:
         emit({"schema_version": 1, "ok": False, "error": {"code": exc.code}})

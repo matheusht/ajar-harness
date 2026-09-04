@@ -6,6 +6,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -144,6 +145,7 @@ def invoke(
 ) -> tuple[subprocess.CompletedProcess[bytes], dict[str, Any]]:
     environment = dict(os.environ)
     environment.pop("HARNESS_ACTIVE_ENGAGEMENT", None)
+    environment.pop("HARNESS_ALLOW_IN_REPO_ENGAGEMENT", None)
     environment.pop("HARNESS_STOP_BLOCK_BUDGET", None)
     environment.pop("HARNESS_EXPECTED_LEDGER_HASH", None)
     environment.pop("HARNESS_EXPECTED_SOURCE_HASHES", None)
@@ -737,6 +739,49 @@ def main() -> int:
             and not uninitialized.joinpath(".record-kernel.lock").exists(),
             repr(uninitialized_output),
         ))
+
+        nested = clone_engagement(pristine, target, "campaign/nested-asset")
+        _, nested_output = invoke(nested, stop_payload(session_id="session-nested"))
+        checks.append((
+            "a campaign-nested per-asset engagement is admitted exactly like a flat one",
+            is_exact_block(nested_output),
+            repr(nested_output),
+        ))
+
+        too_deep = clone_engagement(pristine, target, "campaign/extra/too-deep")
+        _, too_deep_output = invoke(too_deep, stop_payload(session_id="session-too-deep"))
+        checks.append((
+            "nesting stops at one level; a deeper path releases",
+            too_deep_output == {},
+            repr(too_deep_output),
+        ))
+
+        # The in-repo opt-in has to be proven against a real path inside this checkout: a fixture
+        # that only models ROOT would pass whether or not the guard reads it.
+        in_repo_name = f"stop-hook-optin-{secrets.token_hex(4)}"
+        in_repo = make_engagement(ROOT, in_repo_name)
+        try:
+            _, in_repo_default = invoke(
+                in_repo,
+                stop_payload(session_id="session-in-repo-default"),
+            )
+            checks.append((
+                "an in-repo engagement still releases by default",
+                in_repo_default == {},
+                repr(in_repo_default),
+            ))
+            _, in_repo_opted = invoke(
+                in_repo,
+                stop_payload(session_id="session-in-repo-optin"),
+                extra_env={"HARNESS_ALLOW_IN_REPO_ENGAGEMENT": "1"},
+            )
+            checks.append((
+                "an in-repo engagement is admitted only on the explicit operator opt-in",
+                is_exact_block(in_repo_opted),
+                repr(in_repo_opted),
+            ))
+        finally:
+            shutil.rmtree(in_repo, ignore_errors=True)
 
         identity_observer = open_file_observer()
         if identity_observer is None:

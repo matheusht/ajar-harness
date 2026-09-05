@@ -1,0 +1,9 @@
+portable checkpoint: Q02-PROMPT-ABLATION-PORTABLE-v1
+VERDICT: inconclusive
+
+  - preregistration guard tripped
+
+blocked by:
+  ! an account/rate limit truncated one arm: the equal-budget rule broke, so a full arm would be compared against a cut-short one
+
+licenses: This verdict licenses no prompt conclusion, candidate promotion, vendor filing, or doctrine change.

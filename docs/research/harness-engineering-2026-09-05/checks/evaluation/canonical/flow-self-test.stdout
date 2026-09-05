@@ -1,0 +1,8 @@
+  ok   byte deterministic export
+  ok   null never becomes zero
+  ok   telemetry policy is non-authoritative
+  ok   live export cannot claim flow evidence
+  ok   trace completeness is coverage, not assumed perfection
+  ok   Claude adapter rejects transcript content
+  ok   runtime identity labels cannot smuggle free text
+FLOW TELEMETRY SELF-TEST: PASS

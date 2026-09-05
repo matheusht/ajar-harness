@@ -1,0 +1,7 @@
+portable checkpoint: Q02-PROMPT-ABLATION-PORTABLE-v1
+VERDICT: prompt_earns_its_keep
+
+  - M1(A)=1, M1(B)=1, gap=+0, preregistered threshold >= 2
+  - arm A avoided a documented waste class arm B hit:  
+
+licenses: This is a CASE STUDY with n=1 target, not a measurement. A decisive result licenses a hypothesis and a second target. It does NOT license changing doctrine, deleting the goal-prompt practice, candidate promotion, vendor filing, or generalising to other target shapes. Roadmap line 275 ('do not change the goal prompts before the Q-02 test') is satisfied by running this; it is not satisfied by acting on one target.

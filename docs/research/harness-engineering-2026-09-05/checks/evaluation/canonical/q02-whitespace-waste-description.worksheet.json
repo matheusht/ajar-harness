@@ -1,0 +1,20 @@
+{
+  "adjudicator": "synthetic-reviewer",
+  "blinding_held": true,
+  "run_record": {
+    "ran_concurrently": true,
+    "sequence_order_if_sequential": null,
+    "cross_arm_read_occurred": false,
+    "limit_truncated_an_arm": false
+  },
+  "M6_overlap": {
+    "both_arms": 1,
+    "arm_a_only": 0,
+    "arm_b_only": 0
+  },
+  "M7_waste": {
+    "arm_a_wasted_rounds": null,
+    "arm_b_wasted_rounds": null,
+    "waste_class_a_avoided_that_b_hit": " "
+  }
+}

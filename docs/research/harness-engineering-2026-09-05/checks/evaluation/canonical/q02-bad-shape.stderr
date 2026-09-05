@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py", line 795, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py", line 791, in main
+    return args.fn(args)
+           ~~~~~~~^^^^^^
+  File "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py", line 591, in cmd_verdict
+    verdict, reasons, blockers = decide(m, w, threshold)
+                                 ~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py", line 539, in decide
+    a, b = len(m["arm_a"]["M1_findings"]), len(m["arm_b"]["M1_findings"])
+               ~~~~~~~~~~^^^^^^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable

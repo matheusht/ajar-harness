@@ -1,0 +1,19 @@
+{
+  "arm_a": {
+    "M1_findings": [
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5"
+    ],
+    "M5_subagents": 2
+  },
+  "arm_b": {
+    "M1_findings": [
+      "B1",
+      "B2"
+    ],
+    "M5_subagents": 2
+  }
+}

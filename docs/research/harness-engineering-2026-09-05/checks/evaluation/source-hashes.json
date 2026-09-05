@@ -1,0 +1,16 @@
+{
+  "git_commit": "6a47b64264b6bf8f1edf8923847cfc9952cd1ab8",
+  "source_sha256": {
+    "tools/q02_compare.py": "2232693b9d716341c3a8482d86d47e9627e0dd5b3cb8cb62ec05d3f4ae3095d5",
+    "tools/flow_telemetry.py": "d766f752efe3a5ff111bec1494d10214f2002ec47e243b076e6fae683c53a166",
+    "tools/intervention_ledger.py": "ce89ffa5023750e88b1484e5f6803d383d38aa378024de6598fcf4d1a2e1381b",
+    "tools/research_telemetry.py": "69c43cf4157d7ce6f4826e9dbec3f9129796cb45e49a905aae67b4fc5fbcf80b"
+  },
+  "tracked_sources_match_commit": {
+    "tools/q02_compare.py": true,
+    "tools/flow_telemetry.py": true,
+    "tools/intervention_ledger.py": true,
+    "tools/research_telemetry.py": true
+  },
+  "probe_script_sha256": "f90ee239fe037453f4a99ffcdeba07b2e6aaf93c3a66def5183178ebadff6a44"
+}

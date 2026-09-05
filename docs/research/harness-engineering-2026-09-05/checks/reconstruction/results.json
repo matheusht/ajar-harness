@@ -1,0 +1,27 @@
+{
+  "probe_kind": "existing pure renderer, selected AST definitions, unvalidated synthetic document input; no kernel or I/O function executed",
+  "source_sha256": "70ba222a527c284a9dab9151fcb27f035f030a16c401939a0cada168de8bc729",
+  "checks": {
+    "report_draft_vs_accepted": {
+      "all_six_views_identical": true
+    },
+    "review_subject_and_reason": {
+      "all_six_views_identical": true
+    },
+    "finding_change_reason": {
+      "all_six_views_identical": true
+    },
+    "visible_revision_positive_control": {
+      "all_six_views_identical": false
+    }
+  },
+  "fixture_directory": "/tmp/harness-reconstruction-_u2jiqpd",
+  "output_files": [
+    "progress.md",
+    "reviews/README.md",
+    "views/report-index.md",
+    "views/submission-index.md",
+    "memory/README.md",
+    "cleanup.generated.md"
+  ]
+}

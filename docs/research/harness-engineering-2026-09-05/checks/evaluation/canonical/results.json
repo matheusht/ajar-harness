@@ -1,0 +1,575 @@
+{
+  "purpose": "characterization of current code, not repaired acceptance or efficacy",
+  "repo": "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering",
+  "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "executable": "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+  "jsonschema": "4.26.0",
+  "source_sha256": {
+    "tools/q02_compare.py": "2232693b9d716341c3a8482d86d47e9627e0dd5b3cb8cb62ec05d3f4ae3095d5",
+    "tools/flow_telemetry.py": "d766f752efe3a5ff111bec1494d10214f2002ec47e243b076e6fae683c53a166",
+    "tools/intervention_ledger.py": "ce89ffa5023750e88b1484e5f6803d383d38aa378024de6598fcf4d1a2e1381b",
+    "tools/research_telemetry.py": "69c43cf4157d7ce6f4826e9dbec3f9129796cb45e49a905aae67b4fc5fbcf80b"
+  },
+  "commands": [
+    {
+      "name": "q02-self-test",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "--self-test"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "flow-self-test",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/flow_telemetry.py",
+        "--self-test"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-control-count-gap",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-control-count-gap.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-control-count-gap.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-missing-integrity",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-missing-integrity.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-missing-integrity.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-inconsistent-overlap",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-inconsistent-overlap.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-inconsistent-overlap.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-wrong-integrity-types",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-wrong-integrity-types.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-wrong-integrity-types.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-string-instead-of-id-array",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-string-instead-of-id-array.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-string-instead-of-id-array.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-duplicate-result-identities",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-duplicate-result-identities.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-duplicate-result-identities.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-duplicate-json-field",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-duplicate-json-field.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-duplicate-json-field.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-whitespace-waste-description",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-whitespace-waste-description.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-whitespace-waste-description.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-explicit-failed-blinding",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-explicit-failed-blinding.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-explicit-failed-blinding.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-explicit-truncation",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-explicit-truncation.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-explicit-truncation.worksheet.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "q02-bad-shape",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "verdict",
+        "--measurements",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-bad-shape.measurements.json",
+        "--worksheet",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/q02-bad-shape.worksheet.json"
+      ],
+      "returncode": 1
+    },
+    {
+      "name": "q02-public-measure-nonresults",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/q02_compare.py",
+        "measure",
+        "--engagement",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "flow-duplicate-observations",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/flow_telemetry.py",
+        "export",
+        "--engagement",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-metadata-fixture",
+        "--observations",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-duplicate-observations.observations.json",
+        "--output",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-duplicate-observations.export.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "flow-nested-durations",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/flow_telemetry.py",
+        "export",
+        "--engagement",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-metadata-fixture",
+        "--observations",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-nested-durations.observations.json",
+        "--output",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-nested-durations.export.json"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "flow-partial-cost",
+      "argv": [
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python",
+        "/Users/matheusvsky/Documents/trab/llm-redteam-harness-engineering/tools/flow_telemetry.py",
+        "export",
+        "--engagement",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-metadata-fixture",
+        "--observations",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-partial-cost.observations.json",
+        "--output",
+        "/private/tmp/harness-evaluation-101-20260905-036_ohxs/flow-partial-cost.export.json"
+      ],
+      "returncode": 0
+    }
+  ],
+  "results": [
+    {
+      "name": "q02-self-test",
+      "observed": {
+        "returncode": 0,
+        "named_checks": 26
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "flow-self-test",
+      "observed": {
+        "returncode": 0,
+        "named_checks": 7
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-control-count-gap",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-missing-integrity",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-inconsistent-overlap",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-wrong-integrity-types",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-string-instead-of-id-array",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-duplicate-result-identities",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-duplicate-json-field",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-whitespace-waste-description",
+      "observed": {
+        "returncode": 0,
+        "verdict": "prompt_earns_its_keep",
+        "blockers_printed": false
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-explicit-failed-blinding",
+      "observed": {
+        "returncode": 0,
+        "verdict": "inconclusive",
+        "blockers_printed": true
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-explicit-truncation",
+      "observed": {
+        "returncode": 0,
+        "verdict": "inconclusive",
+        "blockers_printed": true
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-bad-shape",
+      "observed": {
+        "returncode": 1,
+        "verdict_present": false,
+        "traceback": true
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "q02-public-measure-nonresults",
+      "observed": {
+        "arm_a": {
+          "M1_findings": [
+            "DOC-1",
+            "DOC-2",
+            "DOC-3",
+            "DRAFT-V3"
+          ],
+          "M2_candidates": [],
+          "M3_severity": {},
+          "M5_attempts": 0,
+          "M5_events": 0,
+          "M5_subagents": 14,
+          "path": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input/arm-a"
+        },
+        "arm_b": {
+          "M1_findings": [],
+          "M2_candidates": [],
+          "M3_severity": {},
+          "M5_attempts": 0,
+          "M5_events": 0,
+          "M5_subagents": null,
+          "path": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input/arm-b"
+        },
+        "computed_only": "M6 and M7 are judged, not computed. Fill the worksheet.",
+        "engagement": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input"
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "flow-duplicate-observations",
+      "observed": {
+        "active_seconds": {
+          "measured": 2,
+          "records": 2,
+          "value": 20
+        },
+        "cost_usd": {
+          "measured": 2,
+          "records": 2,
+          "value": 0.4
+        },
+        "dependency_blocked_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "input_tokens": {
+          "measured": 2,
+          "records": 2,
+          "value": 200
+        },
+        "kernel_cost_usd": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_human_review_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_input_tokens": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_model_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_output_tokens": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_tool_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_wall_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "model_calls": {
+          "measured": 2,
+          "records": 2,
+          "value": 2
+        },
+        "operation_count": 1,
+        "output_tokens": {
+          "measured": 2,
+          "records": 2,
+          "value": 40
+        },
+        "runtime_wait_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "tool_calls": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "turns": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        }
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "flow-nested-durations",
+      "observed": {
+        "active_seconds": {
+          "measured": 3,
+          "records": 3,
+          "value": 30
+        },
+        "cost_usd": {
+          "measured": 1,
+          "records": 1,
+          "value": 0.2
+        },
+        "dependency_blocked_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "input_tokens": {
+          "measured": 1,
+          "records": 1,
+          "value": 100
+        },
+        "kernel_cost_usd": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_human_review_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_input_tokens": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_model_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_output_tokens": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_tool_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "kernel_wall_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "model_calls": {
+          "measured": 1,
+          "records": 1,
+          "value": 1
+        },
+        "operation_count": 1,
+        "output_tokens": {
+          "measured": 1,
+          "records": 1,
+          "value": 20
+        },
+        "runtime_wait_seconds": {
+          "measured": 0,
+          "records": 0,
+          "value": null
+        },
+        "tool_calls": {
+          "measured": 1,
+          "records": 1,
+          "value": 1
+        },
+        "turns": {
+          "measured": 1,
+          "records": 1,
+          "value": 1
+        }
+      },
+      "characterization_holds": true
+    },
+    {
+      "name": "flow-partial-cost",
+      "observed": {
+        "flow": {
+          "measured": 1,
+          "records": 2,
+          "value": 0.2
+        },
+        "research_total": null
+      },
+      "characterization_holds": true
+    }
+  ],
+  "all_characterizations_hold": true,
+  "git_commit": "6a47b64264b6bf8f1edf8923847cfc9952cd1ab8",
+  "probe_script_sha256": "f90ee239fe037453f4a99ffcdeba07b2e6aaf93c3a66def5183178ebadff6a44",
+  "tracked_sources_match_commit": {
+    "tools/q02_compare.py": true,
+    "tools/flow_telemetry.py": true,
+    "tools/intervention_ledger.py": true,
+    "tools/research_telemetry.py": true
+  }
+}

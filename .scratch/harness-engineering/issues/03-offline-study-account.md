@@ -1,10 +1,12 @@
 # 03: Account for every assigned offline comparison case
 
+**Tracker:** [Account for every assigned offline comparison case](https://github.com/matheusht/redteam-harness/issues/109)
+
 **What to build:** An evaluator supplies a compact frozen study definition and normalized case, outcome and receipt records, then receives one deterministic report of assigned work, independently assessed output, accounted human effort, available compute and completeness limits.
 
-**Blocked by:** None (can start after breakdown approval).
+**Blocked by:** None (can start immediately).
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

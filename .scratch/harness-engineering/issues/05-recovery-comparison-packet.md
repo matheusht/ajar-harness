@@ -1,10 +1,12 @@
 # 05: Prepare the benign recovery comparison packet
 
+**Tracker:** [Prepare the benign recovery comparison packet](https://github.com/matheusht/redteam-harness/issues/111)
+
 **What to build:** A reviewer can inspect concrete harmless document cases, expected trace accounts and a pinned protocol that could distinguish recovery-interface requirements before a framework is selected.
 
 **Blocked by:** 03 — Account for every assigned offline comparison case.
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

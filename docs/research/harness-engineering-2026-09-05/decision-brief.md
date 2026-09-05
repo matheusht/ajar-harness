@@ -2,6 +2,8 @@
 
 2026-09-05 · inspected repository `6a47b64264b6bf8f1edf8923847cfc9952cd1ab8` · research and specification only
 
+**Later status on 2026-09-05:** the operator approved this proposal and the specification/tickets were published. See the [approved handoff](handoff.md) for current tracker state. The research reasoning below retains its original proposal framing; it is not an implementation-completion report.
+
 The next useful investment is a trustworthy account of inputs, evidence and total work. The investigation found concrete defects in that account. It did not establish that a new model loop, shared board or storage backend would improve ordinary sessions.
 
 I recommend four small engineering changes: repair active guidance, harden the existing Q02 admission boundary, produce complete offline comparison accounts, and expose existing evidence relationships in one read-only summary. Prepare two bounded experiments, one for recovery interfaces and one for communication. Keep architecture selection open until those experiments distinguish the candidates.

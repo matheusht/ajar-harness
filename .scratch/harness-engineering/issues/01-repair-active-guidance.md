@@ -1,10 +1,12 @@
 # 01: Repair active engineering guidance
 
+**Tracker:** [Repair active engineering guidance](https://github.com/matheusht/redteam-harness/issues/107)
+
 **What to build:** An operator can follow the active setup references and understand which architecture/status statements are current, without losing the dated decision record.
 
-**Blocked by:** None (can start after breakdown approval).
+**Blocked by:** None (can start immediately).
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

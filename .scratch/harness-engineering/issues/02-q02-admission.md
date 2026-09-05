@@ -1,10 +1,12 @@
 # 02: Reject unsupported Q02 comparison inputs
 
+**Tracker:** [Reject unsupported Q02 comparison inputs](https://github.com/matheusht/redteam-harness/issues/108)
+
 **What to build:** The public Q02 comparison command explains whether the supplied evidence is malformed, incomplete or eligible for its existing narrow prompt-ablation decision. A readable file or nonempty folder cannot establish eligibility by itself.
 
-**Blocked by:** None (can start after breakdown approval).
+**Blocked by:** None (can start immediately).
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

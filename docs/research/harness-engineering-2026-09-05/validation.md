@@ -2,6 +2,8 @@
 
 2026-09-05. Inspected production source: `6a47b64264b6bf8f1edf8923847cfc9952cd1ab8`.
 
+**Later publication update:** the operator subsequently approved the boundaries and breakdown. The [approved handoff](handoff.md) records publication and verification; the checks below describe the earlier research/draft validation and were not rerun as implementation acceptance.
+
 ## Executed evidence
 
 - Evaluation's original batch characterized 15 synthetic cases plus Q02's 26 and flow's seven built-in assertions. Invalid favorable verdicts are observed defects, not accepted outcomes. The original flow fixture initialized one fabricated local event; this is explicitly documented and the generated record scaffolding was not retained.

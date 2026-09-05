@@ -1,6 +1,8 @@
 # Spec: trustworthy offline engineering evidence
 
-**Status:** proposed; awaiting review of test boundaries and ticket breakdown. No implementation or experiment execution is authorized by this draft.
+**Tracker:** [Spec: trustworthy offline engineering evidence](https://github.com/matheusht/redteam-harness/issues/106)
+
+**Status:** approved for publication on 2026-09-05. [Operator approval](https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553859692) accepts the four test boundaries and six-ticket breakdown. Implementation and experiment execution have not started.
 
 ## Problem Statement
 
@@ -49,7 +51,7 @@ The delivery consists of four small engineering changes and two experiment packe
 
 ## Implementation Decisions
 
-These are proposed decisions for approval. Reuse existing offline readers, validation, identity, reference and telemetry conventions where their semantics fit. No new persistence backend, dispatcher or generic framework is needed.
+These decisions were approved on 2026-09-05. Reuse existing offline readers, validation, identity, reference and telemetry conventions where their semantics fit. No new persistence backend, dispatcher or generic framework is needed.
 
 1. **Active guidance.** Resolve or remove the two broken setup references, and give the current architecture/status a concise, accurate entry point. Preserve dated history, the accepted entrypoint mirror, generated-view compatibility and draft-versus-frozen pin rules. Extend existing documentation checks only for these active references.
 
@@ -104,4 +106,4 @@ Prior art is the existing command self-tests, documentation/mirror/pin checks, r
 
 The ordinary launch path behind repeated instructions remains unverified. It is a required input for any later ordinary-session causal comparison, not a reason to guess or block this offline work. A floating model alias and unavailable client-loading evidence must be disclosed in that comparison.
 
-Research resolutions are indexed by [Wayfinder: establish trustworthy harness engineering evidence](https://github.com/matheusht/redteam-harness/issues/100). The implementation breakdown is six proposed vertical slices; recovery and communication preparation depend only on the offline study account. Existing filing-authority and held operational architecture work remain separate.
+Research resolutions are indexed by [Wayfinder: establish trustworthy harness engineering evidence](https://github.com/matheusht/redteam-harness/issues/100). The approved implementation breakdown is six vertical slices; recovery and communication preparation depend only on the offline study account. Existing filing-authority and held operational architecture work remain separate.

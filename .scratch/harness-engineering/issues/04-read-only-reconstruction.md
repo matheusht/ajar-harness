@@ -1,10 +1,12 @@
 # 04: Explain evidence state through a read-only reconstruction summary
 
+**Tracker:** [Explain evidence state through a read-only reconstruction summary](https://github.com/matheusht/redteam-harness/issues/110)
+
 **What to build:** An operator or independent reader can inspect one bounded dossier and understand what its records establish, what changed, what remains unknown and where each fact came from, without assembling several bare-ID indexes manually.
 
-**Blocked by:** None (can start after breakdown approval).
+**Blocked by:** None (can start immediately).
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

@@ -1,10 +1,12 @@
 # 06: Prepare the task-local message-board comparison packet
 
+**Tracker:** [Prepare the task-local message-board comparison packet](https://github.com/matheusht/redteam-harness/issues/112)
+
 **What to build:** A reviewer can inspect three benign document cases and a fair communication protocol that tests whether discovery or late corrections through a board improve on a capable direct-handoff baseline.
 
 **Blocked by:** 03 — Account for every assigned offline comparison case.
 
-**Status:** proposed, awaiting approval.
+**Status:** ready-for-agent; approved 2026-09-05.
 
 ## Acceptance criteria
 

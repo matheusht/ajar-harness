@@ -18,4 +18,6 @@ Start with the [approved handoff and published tickets](handoff.md). The [resear
 
 Production source was inspected at `6a47b64264b6bf8f1edf8923847cfc9952cd1ab8`. The complete reviewed research/specification snapshot is local commit `d150f8d04fd902b48f6a5914880637d39e29a2d1` on `codex/research-harness-engineering-2026-09-05`. Later documentation records approval and publication without rewriting the original evidence. The branch has not been pushed.
 
+Local main subsequently advanced to `0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d`, completing the setup-reference removal and refreshing the draft instruction pin. That overlap is recorded in the [handoff](handoff.md) and guidance ticket so it is reused rather than repeated. Other production source inspected for this plan is unchanged across those two commits.
+
 No efficacy experiment, provider comparison, runtime replacement or board deployment has run. The current delivery is documented research, an approved specification and open implementation/preparation tickets.

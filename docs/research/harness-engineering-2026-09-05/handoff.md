@@ -13,6 +13,8 @@ The [human review resolution](https://github.com/matheusht/redteam-harness/issue
 
 A final bounded source-fidelity review found no material research gap preventing publication. The next unanswered questions concern execution and measured benefit, which the approved tickets prepare to investigate. No additional literature search was needed to turn the accepted plan into work items.
 
+**Main-checkout update observed during publication:** local main advanced to `0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d`. Its only changes relative to the inspected base are the two entrypoints and the draft safety-overlay pin. It separates repository engineering from engagement work and removes both broken setup references. Direct checks confirmed mirror equality, reference removal, matching instruction digest and the unchanged unexecuted draft status. The guidance ticket now records this existing work; its remaining status/conformance work stays open. The original source-pinned research evidence was not rewritten or claimed current beyond its inspected revision.
+
 ## Published work and dependencies
 
 The specification and all six tickets are open and labelled `ready-for-agent`. All six are native child issues of the specification. The two experiment packets have native blocking links to the study-account ticket. The specification remains open; planning completion is not implementation completion.
@@ -42,7 +44,7 @@ The four accepted test boundaries are documentation conformance, the public Q02 
 
 Before an actual comparison, establish effective model/runtime/configuration, total budgets, source/case roster, grading/isolation procedure and run scope, with the study account available. Ordinary-session causal claims additionally need the representative launch path behind repeated instructions; that path is still unknown. Persisted no-summary rollover remains an optional recovery diagnostic unless explicitly selected as required. Missing usage, loading evidence or outcome mappings remain qualified.
 
-No implementation, agent experiment, runtime adoption, board service, provider call, historical recomputation or operational gate change was performed for publication. Existing filing-authority and operational-architecture holds remain separate. The active checkout's pre-existing edits were preserved. The research branch is local and unpushed.
+No implementation, agent experiment, runtime adoption, board service, provider call, historical recomputation or operational gate change was performed by this publication task. The independently advanced main commit already supplies part of the guidance work, as recorded above. Existing filing-authority and operational-architecture holds remain separate. The active checkout's pre-existing edits were preserved. The research branch is local and unpushed.
 
 ## Local records and verification
 

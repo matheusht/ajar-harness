@@ -18,6 +18,12 @@
 - [ ] Verify current pointers, mirror equality and relevant pin behavior through the existing public check boundary.
 - [ ] Do not change operational instructions, gate semantics, settings, launch behavior, records or required generated views.
 
+## Current baseline update
+
+Local main advanced to `0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d` during publication. That commit separates repository engineering from engagement work, removes both broken setup references and refreshes the draft instruction pin. A direct check confirmed the two entrypoints are byte-identical, the references are absent, and the matching overlay remains `draft_not_authorized` with execution authorization false.
+
+Reuse that completed work. The original research snapshot remains pinned to the earlier inspected source; do not repeat the reference-removal patch. Current-status navigation and any necessary focused conformance coverage remain to assess and complete. This observation does not establish the whole ticket complete, and no implementation or experiment was run by this publication task.
+
 ## Review basis
 
 The engineering investigation established broken pointers and mixed temporal status. It did not establish a client-loading cause for repeated instructions. This slice fixes navigation only.

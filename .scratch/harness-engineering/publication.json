@@ -96,9 +96,10 @@
       "title": "Repair active engineering guidance",
       "url": "https://github.com/matheusht/redteam-harness/issues/107",
       "state": "open",
-      "body_sha256": "d1af581b8aa685ef8f658035d25ecab9ae2a52da8bb08d3ab9608b8e0fe09d29",
+      "body_sha256": "4803eb65f801a8d9a794540eb09f2cabab553621c633a8cf31ecbcd3b562aefc",
       "ready_for_agent": true,
-      "blocked_by": []
+      "blocked_by": [],
+      "initial_body_sha256": "d1af581b8aa685ef8f658035d25ecab9ae2a52da8bb08d3ab9608b8e0fe09d29"
     },
     {
       "number": 108,
@@ -150,5 +151,15 @@
       ]
     }
   ],
-  "publication_receipt_url": "https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553890562"
+  "publication_receipt_url": "https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553890562",
+  "post_publication_baseline_update": {
+    "local_main": "0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d",
+    "affected_ticket": 107,
+    "scope": "Reuse existing setup-reference repair; remaining acceptance work stays open.",
+    "entrypoints_equal": true,
+    "entrypoint_sha256": "sha256:c8c90c600c4d230f06d61d9c803aa14240eb487a93a1e349c62d57dc1e135edb",
+    "draft_overlay_matches": true,
+    "study_status": "draft_not_authorized",
+    "execution_authorized": false
+  }
 }

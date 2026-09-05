@@ -4,9 +4,12 @@ Research and approval recorded on 2026-09-05. The operator approved the specific
 
 Start with the [approved handoff and published tickets](handoff.md). The [research brief](decision-brief.md) explains the evidence and reasoning; its original proposed state is preserved as a dated research snapshot.
 
+The [engineering wiki](../../wiki/index.md) maintains the evolving synthesis and implementation history. This research directory retains the dated source evidence.
+
 | Document | What it records |
 | --- | --- |
 | [Approval and publication handoff](handoff.md) | Operator decision, published specification/tickets, dependencies, execution boundary and remaining inputs. |
+| [Implementation goal prompt](implementation-goal-prompt.md) | Complete execution brief with model limits, lightweight slices, command-level validation, LLM Wiki updates and completion checks. |
 | [Evaluation and accounting](evaluation.md) | Public Q02 characterizations, count-unit distinctions and complete/qualified study-account requirements. |
 | [Evidence reconstruction](reconstruction.md) | Omitted projection facts, typed references, external outcomes and preserved base-admission limits. |
 | [Instructions and configuration](instructions.md) | Broken active pointers, intentional mirror, pin handling and unknown effective session loading. |

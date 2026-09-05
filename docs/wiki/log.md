@@ -191,3 +191,52 @@ authorization are absent; the agent experiment remains **UNEXECUTED**. No provid
 board service, adapter, execution runtime, engagement access or remote mutation was performed.
 The existing reporter and #111 source files are unchanged. #110 remains blocked/pending after its
 separate automatic safety check; final integration/safe regression and independent review are next.
+
+
+## 2026-09-05 — five-slice integration, incomplete overall goal
+
+The five local slices #107, #108, #109, #111 and #112 are implemented. This bounded integration
+adds one step to the existing Python job in `.github/workflows/conformance.yml`; it introduces no
+runner, framework, job or service and preserves the other workflow steps. The same Astra Low /
+Ponytail Full worker performed the integration without nested delegation. Source revision checked:
+`b1088ae0f09dac7f3a2137a060e487b87da1c3b7`, committed tree
+`5246e987e9bf7d87c48057376388625b144aff2a`. Only CI wiring and these factual wiki pages change
+in the integration; the checked committed Python and packet data remain unchanged.
+
+Each command below ran once in the integration, using the existing interpreter
+`/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python` (denoted `$PY` below),
+with no dependency installation. Every command exited 0:
+
+- `$PY tools/check-conformance.py --engineering-guidance`: 12 checks, 0 failing.
+- `$PY tools/engineering-guidance-test.py`: public CLI navigation, mirror, history and draft/frozen
+  pin controls passed.
+- `$PY tools/study-report-test.py`: 50 synthetic public-command checks passed.
+- `$PY tools/q02-admission-self-test.py`: 99 public controls passed.
+- `$PY tools/q02_compare.py --self-test`: frozen checkpoint/rule self-tests passed.
+- `$PY tools/recovery-packet-test.py`: schedule/access/trace controls and 8 public-command checks
+  passed; candidate execution UNSTARTED.
+- `$PY tools/communication-packet-test.py`: 7 bundle controls and 9 public-command checks passed;
+  agent experiment UNEXECUTED.
+- `$PY tools/overlay_pins.py check --json`: 0 failures, 0 stale; current readiness is
+  `draft_not_authorized`, `execution_authorized: false`.
+- `$PY -m py_compile tools/check-conformance.py tools/communication-packet-test.py
+  tools/engineering-guidance-test.py tools/q02-admission-self-test.py tools/q02_compare.py
+  tools/recovery-packet-test.py tools/study-report-test.py tools/study-report.py`: passed.
+- A bounded inline `python3` Markdown-link check over `docs/wiki/{index,engineering-evidence,comparison-experiments,log}.md` verified 65 local destinations and their supplied heading anchors.
+- `git diff --check`: passed.
+
+The earlier #108 entry preserves the three targeted Q02 regressions: preregistration quarantine
+before output, root rename during measurement and final-admission quarantine before stdout/worksheet,
+using disposable plain-lock fixtures. Those earlier results were not rerun or broadened here.
+No default conformance command, whole CI, operational suite, historical recomputation, candidate
+experiment, target/provider/model/paid call or remote mutation was performed. Packet preparation
+is complete; actual recovery and communication candidate experiments remain unexecuted.
+
+Correction to the prior pending #110 status: two attempts were blocked by automatic safety checks.
+The narrower attempt reported 13 checks, but final validation, documentation and commit never
+completed. Preserve that as observed progress only. Two uncommitted WIP files,
+`tools/inspect-dossier.py` and `tools/dossier-inspector-test.py`, remain preserved and excluded from
+integration testing, compilation, staging and this commit. Neither file was read or changed during
+this integration. There is no reconstruction acceptance or completed #110 slice. Independent
+Standards and Spec review of the committed five-slice diff remains pending; the overall #106
+six-ticket goal is INCOMPLETE.

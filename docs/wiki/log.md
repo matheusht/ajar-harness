@@ -96,3 +96,48 @@ These checks create no live sessions, initialize no record kernel and recompute 
 Source files and the portable checkpoint remain untouched. No tracker mutation or experiment was
 performed. #108 has local implementation evidence; #110–112 and final safe regression/independent
 review remain pending.
+
+## 2026-09-05 — #111 recovery comparison preparation
+
+On clean implementation baseline `ea3e5c69222c9a1a471915af56bf9485429b53ea`, the same single
+`gpt-6-astra / Low` worker continued Ponytail Full and `/implement`, with no nested delegation.
+The approved [#111 packet](../experiments/recovery-v1/README.md) now contains synthetic document
+v1/v2, a scheduled correction, recorded-but-unsupplied result, cooperative pause, and simulated
+artifact write/loss-before-receipt accounts. Three cases are paired across the present baseline
+and the historically inspected OpenAI Agents Python SDK pin. Persisted no-summary rollover is
+separate and optional. Required contract, fixed case ordering/access, isolated reference grading,
+whole-study overhead/repair ceilings, development/maintenance allocation and readiness/stop rules
+are explicit. No effective run configuration or run authorization was supplied.
+
+The present baseline's `tools/work_queue_driver.py` and `tools/claude_work_session.py` Git blob IDs
+match the historical research baseline `6a47b64264b6bf8f1edf8923847cfc9952cd1ab8`: respectively
+`0a068b53f735f323207277dd6399de95fbaa9c57` and `796a27be735f4b57f1753f72ac7d40c69c7aca32`.
+This was checked with `git rev-parse <revision>:<path>` for each pin/path, without reading or
+executing those internals. Historical source/test inspection remains the provenance; neither
+blob equality nor the SDK pin proves an installed configuration or ordinary-session behavior.
+
+Checks on this baseline plus the slice:
+
+- `python3 tools/recovery-packet-test.py`: initial red because the packet definition did not exist;
+  final schedule/access/grader/trace assertions and **8 real public-command checks passed**. Includes
+  all six illustrative cases, deterministic output, a complete fictional scope, missing case,
+  unknown measurements, failed/contaminated output, unknown loading, malformed binding and rejected
+  extra schema fields. Source metadata remains linked through references, not a reporter extension.
+- `python3 tools/study-report.py --study docs/experiments/recovery-v1/definition.json --observations
+  docs/experiments/recovery-v1/observations.json`: accepted; six assigned/observed outputs, zero
+  independent eligibility passes, incomplete metric totals and candidate execution UNSTARTED.
+- `python3 tools/study-report-test.py`: existing **50 synthetic public-command checks passed**.
+- `python3 -m py_compile tools/recovery-packet-test.py`, `git diff --check`, and a bounded check of
+  **49 local links** across packet Markdown and the changed topic/index/evidence pages passed.
+  Packet tests compare both source and temporary input bytes/file inventories before and after.
+
+The fixture counts and receipts are illustrative, not measured implementation labor. Source
+citations/expected traces cannot earn candidate passes. No adapter, runtime, dispatcher, persistence
+backend, provider/model call, actual crash, engagement access or remote mutation was performed.
+The public reporter is unchanged. Local standards/spec inspection found no remaining slice issue;
+final independent review and broader safe regression remain pending with #112.
+
+Separate status: #110 remains pending after an automatic safety check blocked its implementation
+attempt. No #110 artifact was committed; this entry does not mark that slice complete or retry it.
+Recovery candidate execution remains **UNSTARTED**. Missing representative ordinary-session launch
+configuration limits future claims, not completion of this preparation packet.

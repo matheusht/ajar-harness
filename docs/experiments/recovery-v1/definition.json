@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "study_id": "recovery-preparation-v1",
+  "question": "Can the baseline and supported SDK preserve the required benign recovery account at the scripted-adapter boundary?",
+  "permitted_conclusion": "Illustrative packet/account validation only; candidate execution UNSTARTED, no winner or execution pass.",
+  "frozen_at": "2026-09-05T10:00:00Z",
+  "freeze_source_ref": "docs/experiments/recovery-v1/README.md (illustrative chronology; actual run freeze absent)",
+  "missing_data_policy": "Retain all assignments and work; missing/unsupported/contaminated observations never earn a pass. Unknown usage is not zero.",
+  "grading": {
+    "procedure": "Fixed per-case recovery reference; distinguish account correctness from task completion.",
+    "isolation": "Cold reference grader gets only anonymized current-case account and fixed current-case reference; excludes treatment labels, peer material, self-grades and other-case answers.",
+    "reference_ref": "docs/experiments/recovery-v1/expectations.json#/cases"
+  },
+  "source_families": [
+    {
+      "family_id": "workshop",
+      "split": "synthetic evaluation only; no development reuse"
+    }
+  ],
+  "arms": [
+    {
+      "arm_id": "baseline",
+      "treatment": "baseline source pin ea3e5c69222c9a1a471915af56bf9485429b53ea; runtime behavior untested; no effective configuration",
+      "configuration": {
+        "runtime": null,
+        "model": null,
+        "model_revision": null,
+        "model_is_alias": null,
+        "instructions": [],
+        "source_ref": null
+      }
+    },
+    {
+      "arm_id": "sdk",
+      "treatment": "sdk source pin f1f35031d364f9f0d8e94dda0853c92abefdccff; runtime behavior untested; no effective configuration",
+      "configuration": {
+        "runtime": null,
+        "model": null,
+        "model_revision": null,
+        "model_is_alias": null,
+        "instructions": [],
+        "source_ref": null
+      }
+    }
+  ],
+  "assignments": [
+    {
+      "assignment_id": "late-correction-baseline",
+      "case_id": "late-correction",
+      "arm_id": "baseline",
+      "repeat": 1,
+      "family_id": "workshop"
+    },
+    {
+      "assignment_id": "late-correction-sdk",
+      "case_id": "late-correction",
+      "arm_id": "sdk",
+      "repeat": 1,
+      "family_id": "workshop"
+    },
+    {
+      "assignment_id": "cooperative-pause-baseline",
+      "case_id": "cooperative-pause",
+      "arm_id": "baseline",
+      "repeat": 1,
+      "family_id": "workshop"
+    },
+    {
+      "assignment_id": "cooperative-pause-sdk",
+      "case_id": "cooperative-pause",
+      "arm_id": "sdk",
+      "repeat": 1,
+      "family_id": "workshop"
+    },
+    {
+      "assignment_id": "lost-receipt-baseline",
+      "case_id": "lost-receipt",
+      "arm_id": "baseline",
+      "repeat": 1,
+      "family_id": "workshop"
+    },
+    {
+      "assignment_id": "lost-receipt-sdk",
+      "case_id": "lost-receipt",
+      "arm_id": "sdk",
+      "repeat": 1,
+      "family_id": "workshop"
+    }
+  ],
+  "resource_ceilings": {
+    "human_active_seconds": 3600,
+    "elapsed_seconds": 7200,
+    "machine_seconds": 14400,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0
+  },
+  "accounting_scopes": {
+    "study": {
+      "description": "All six cases including preparation, coordination, grading and repair; no provider work",
+      "allocation_rule": "Attribute once directly; shared work split equally only in labeled secondary arm account; cross-scope work explicitly partitioned",
+      "included_phases": [
+        "execution",
+        "preparation",
+        "useful_assistance",
+        "retry",
+        "interruption",
+        "recovery",
+        "synthesis",
+        "grading",
+        "reporting",
+        "cleanup",
+        "accounting"
+      ]
+    },
+    "development": {
+      "description": "Common and candidate-specific preparation tooling; separate from study",
+      "allocation_rule": "Attribute once directly; shared work split equally only in labeled secondary arm account; cross-scope work explicitly partitioned",
+      "included_phases": [
+        "development"
+      ]
+    },
+    "maintenance": {
+      "description": "Compatibility and repair in fixed 30-day post-pilot window",
+      "allocation_rule": "Attribute once directly; shared work split equally only in labeled secondary arm account; cross-scope work explicitly partitioned",
+      "included_phases": [
+        "maintenance"
+      ]
+    }
+  }
+}

@@ -1,8 +1,8 @@
 # Recovery and communication experiments
 
-**Status:** preparation approved; experiments unexecuted; adoption undecided. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
+**Status:** recovery packet implemented and locally checked; communication packet pending; candidate execution UNSTARTED; adoption undecided. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
 
-Both packets depend on the [offline study account](engineering-evidence.md). They prepare concrete benign documents, expected accounts and fixed protocols. They do not justify implementation of the design being compared.
+Both packets depend on the implemented [offline study account](engineering-evidence.md). They prepare concrete benign documents, expected accounts and fixed protocols. They do not justify implementation of the design being compared.
 
 ## Recovery: select observable requirements before a runtime
 
@@ -11,6 +11,28 @@ The [foundation research](../research/harness-engineering-2026-09-05/foundations
 The approved packet covers document revisions, a late correction, a recorded-but-unsupplied result, cooperative pause and simulated loss after an artifact write without a receipt. Keep admission, adapter invocation and unobserved provider receipt separate. Preserve error, termination, uncertain effects and unknown usage rather than collapsing them into one success label. Saved conversation state does not establish exactly-once artifact work.
 
 Persisted rollover without a summary stays an optional diagnostic until explicitly selected as necessary. Fix the required contract before inspecting candidate outcomes. A source citation or illustrative trace cannot earn a passing execution result. The remaining choice is which supported foundation meets the chosen requirements with the least maintenance, not which feature list is longest.
+
+## Implemented recovery packet
+
+The [v1 packet](../experiments/recovery-v1/README.md) supplies [document revisions](../experiments/recovery-v1/documents.md),
+[scheduled expected accounts](../experiments/recovery-v1/expectations.json), a frozen
+[definition](../experiments/recovery-v1/definition.json) and [synthetic observations](../experiments/recovery-v1/observations.json).
+Three cases are paired across the present repository baseline `ea3e5c69222c9a1a471915af56bf9485429b53ea`
+and OpenAI Agents Python SDK `f1f35031d364f9f0d8e94dda0853c92abefdccff`. The historical source-reading
+provenance remains limited; Git confirms only the two named baseline files are unchanged since that
+inspection. Neither pin establishes an installed ordinary-session configuration.
+
+The [packet test](../../tools/recovery-packet-test.py) checks source release order, declared worker/grader
+separation, trace distinctions and eight invocations of the unchanged public study reporter. Complete
+case coverage, a fully measured artificial variation, missing cases, unknown usage, adverse output and
+contamination remain distinct; malformed binding/schema fails. Packet/input bytes and inventories are
+preserved. These are packet/account checks, not executed isolation or candidate recovery proof.
+
+Required contracts, whole-study ceilings including coordination/repair, separate development/maintenance
+allocation, optional rollover, fixed reference grading and run-readiness/stop criteria are recorded before
+outcomes. Effective configuration and run authorization remain absent; candidate execution is **UNSTARTED**.
+Source references and invented expectations earn zero candidate execution passes. #110 remains pending:
+its separate implementation attempt was blocked by an automatic safety check; it is not a completed slice.
 
 ## Communication: test discovery against capable handoffs
 

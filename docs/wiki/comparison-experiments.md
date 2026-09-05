@@ -32,7 +32,7 @@ Required contracts, whole-study ceilings including coordination/repair, separate
 allocation, optional rollover, fixed reference grading and run-readiness/stop criteria are recorded before
 outcomes. Effective configuration and run authorization remain absent; candidate execution is **UNSTARTED**.
 Source references and invented expectations earn zero candidate execution passes. #110 remains pending:
-two automatic safety checks blocked its attempts; two uncommitted WIP files remain preserved, and it is not a completed slice.
+two automatic possible-cybersecurity-risk checks blocked its attempts; two uncommitted WIP files remain preserved, and it is not a completed slice.
 
 ## Communication: test discovery against capable handoffs
 
@@ -77,7 +77,7 @@ no agent experiment ran. The gate remains a validated notice explaining improvem
 direct handoff at the same total budget without new correctness/provenance/isolation failure. Equal
 complete results with equal or lower effort favor the simpler baseline; adoption requires later
 predeclared repeated paired evidence. #110 remains blocked with two preserved uncommitted WIP files. The integrated safe regression
-passed for the five committed slices; independent review remains pending and #106 is incomplete. Both candidate experiments are **UNEXECUTED**.
+passed for the five committed slices; both independent review axes are complete and #106 is incomplete. Both candidate experiments are **UNEXECUTED**.
 
 ## What earns the next step
 

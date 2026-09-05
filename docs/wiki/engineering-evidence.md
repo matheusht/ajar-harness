@@ -1,6 +1,6 @@
 # Offline engineering evidence
 
-**Status:** implementation in progress; #107–109 and #111–112 locally implemented with integrated safe checks passed; #110 blocked with uncommitted WIP; independent review pending; #106 incomplete. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
+**Status:** implementation in progress; #107–109 and #111–112 locally implemented with integrated safe checks passed; #110 blocked with uncommitted WIP; both independent review axes complete; #106 incomplete. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
 
 ## Decision
 
@@ -74,6 +74,29 @@ integrity, mismatched references and source/quarantine races before stdout or wo
 No historical result was recomputed; declared compatibility/blinding is not independent proof.
 The [log](log.md) records exact checks and their limits.
 
-The [recovery packet](comparison-experiments.md#implemented-recovery-packet) now implements #111 preparation with eight public-reporter checks plus schedule/trace controls. Candidate execution remains UNSTARTED. #110 remains blocked after two automatic safety-check rejections; two uncommitted WIP files are preserved and no reconstruction slice was completed. The [communication packet](comparison-experiments.md#implemented-communication-packet) implements #112 preparation with seven concrete bundle controls and nine public-command checks; its nine supplied technical assessments are explicitly synthetic, and no agent experiment ran. The integrated safe acceptance set passed for these five committed slices; independent review remains pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.
+The [recovery packet](comparison-experiments.md#implemented-recovery-packet) now implements #111 preparation with eight public-reporter checks plus schedule/trace controls. Candidate execution remains UNSTARTED. #110 remains blocked after two automatic possible-cybersecurity-risk blocks; two uncommitted WIP files are preserved and no reconstruction slice was completed. The [communication packet](comparison-experiments.md#implemented-communication-packet) implements #112 preparation with seven concrete bundle controls and nine public-command checks; its nine supplied technical assessments are explicitly synthetic, and no agent experiment ran. The integrated safe acceptance set passed for these five committed slices; both independent review axes are complete. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.
 
 The existing Python CI job now includes one step for the seven permitted guidance, study-account, Q02 and preparation-packet commands. On source commit `b1088ae0f09dac7f3a2137a060e487b87da1c3b7` (tree `5246e987e9bf7d87c48057376388625b144aff2a`), all seven passed locally, along with the current pin/readiness check and compilation of the eight changed committed Python files. The [integration log](log.md#2026-09-05--five-slice-integration-incomplete-overall-goal) records exact commands and limits. This is not full CI or reconstruction acceptance. The narrower #110 attempt reported 13 checks before final validation, documentation and commit were blocked; those observations do not establish completion. Its two WIP files remain outside this acceptance and commit.
+
+
+## Final handoff
+
+- **Five slices locally implemented:** #107 guidance, #108 Q02 admission, #109 study account,
+  #111 recovery preparation and #112 communication preparation. Their acceptance sources are
+  described above; the [integration log](log.md#2026-09-05--five-slice-integration-incomplete-overall-goal)
+  records the passing bounded acceptance set.
+- **Two independent review axes complete:** both reviewed committed base
+  `f68caf673ef9ed12aae4f6e43d64b299c5a1ecc9` through HEAD
+  `68ed657b60fd81c9a67d877d0b4c7ffd94d057a8`. Standards found no actionable finding or documented-standard
+  breach. Spec found no additional verified acceptance gap, scope creep or actionable wrong behavior
+  in the five committed slices. Reviewers read code, protocols and public tests; they did not rerun
+  suites or experiments, and did not independently cover every packet value. These results support
+  only the five-slice boundary.
+- **#110 and full #106 remain INCOMPLETE:** two automatic possible-cybersecurity-risk blocks stopped
+  reconstruction work. The two untracked WIP files remain preserved outside acceptance. The narrower
+  attempt's reported 13 checks are partial progress only. Resolving the automatic execution block is
+  required before that slice can resume; operator approval or a model change alone does not override
+  safety restrictions.
+- **Both candidate experiments remain UNEXECUTED:** effective configuration, actual-run budgets,
+  grading isolation and run authorization must be established before execution; adoption requires
+  later repeated evidence. Prepared packets and passing account checks establish no candidate benefit.

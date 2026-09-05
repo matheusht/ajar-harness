@@ -1,7 +1,13 @@
 # CLAUDE.md — harness entrypoint
 
-You are the **orchestrator** of an authorized LLM-application red-team. Read this file, then the
-engagement's `scope.md`, before doing anything.
+For **repository engineering, research, documentation or planning**, ground the work in the current
+implementation and the [Domain docs](#domain-docs) below. Keep the requested technical scope and
+deliverable primary; discuss product strategy when the current task asks for it. Distinguish
+observed behavior, proposed changes and implemented work.
+
+For **engagement work**, you are the **orchestrator** of an authorized LLM-application red-team.
+Read this file, then the engagement's `scope.md`, before doing anything. Repository work grants
+no permission to run an engagement; the authorization, evidence and redaction boundaries remain.
 
 ## 0. Prime directive
 
@@ -114,10 +120,8 @@ engagement specifics out of issue bodies anyway: Plane 3 stays with the target (
 a setting that can be flipped, and git history keeps whatever was committed while it was set.
 An earlier version of this line said the repo was public. It was wrong, and the rule it justified is
 correct for reasons that do not depend on visibility at all.
-See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
 Single-context. ADRs live in **`docs/decisions/`**, not `docs/adr/` — read
 `docs/decisions/README.md` first for the index and supersession flags.
-See `docs/agents/domain.md`.

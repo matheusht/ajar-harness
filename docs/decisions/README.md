@@ -10,6 +10,8 @@ than a one-off field note. Decision docs should explain:
 - how future agents should act on it;
 - what remains deliberately flexible.
 
+For the maintained engineering synthesis and implementation evidence, start with the [engineering wiki](../wiki/index.md). These decision records remain canonical; the wiki links to them and preserves their approval and supersession status.
+
 ## Index
 
 - [0001 — Casebooks, pattern cards, and recon routing](0001-casebooks-patterns-routing.md)

@@ -1,0 +1,47 @@
+./docs/implementation-notes.html:224:        <tr><td>False-discovery regression is always <code>block</code></td><td><code>score-candidate.decide()</code> hard veto on <code>false_discovery_rate&gt;0</code>; self-test "FDR regression → block even with new coverage"</td></tr>
+./docs/implementation-notes.html:227:        <tr><td>Mechanical failure not overridable by an LLM judge</td><td><code>judge_note</code> recorded but never read by <code>decide()</code>; self-test "conformance fail + glowing judge note → still block"</td></tr>
+./tools/check-conformance.py:931:    rc2 = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "q02_compare.py"), "--self-test"],
+./tools/apply-candidate-eval.py:24:  score-candidate.decide(incumbent, applied)  ->  allow | probe | block
+./tools/apply-candidate-eval.py:406:    decision = SC.decide(inc, cand_eval)
+./tools/apply-candidate-eval.py:497:        return SC.decide(inc, ce)["verdict"]
+./tools/quarantine-self-test.py:461:        q02 = _run(TOOLS / "q02_compare.py", "measure", "--engagement", str(engagement))
+./tools/quarantine-self-test.py:803:                    "arm_a": {"M1_findings": [], "M5_subagents": 1},
+./tools/quarantine-self-test.py:804:                    "arm_b": {"M1_findings": [], "M5_subagents": 1},
+./tools/quarantine-self-test.py:819:                    "M6_overlap": {"both_arms": 0, "arm_a_only": 0, "arm_b_only": 0},
+./tools/quarantine-self-test.py:842:            TOOLS / "q02_compare.py",
+./tools/quarantine-self-test.py:856:        q02_module = runpy.run_path(str(TOOLS / "q02_compare.py"), run_name="q02_quarantine_test")
+./tools/ablation.py:85:            return False, [f"{name}: rule module has no decide(case, lesson_applied) function"]
+./tools/ablation.py:94:            with_l = rule.decide(case["input"], lesson_applied=True)
+./tools/ablation.py:95:            without_l = rule.decide(case["input"], lesson_applied=False)
+./tools/run-behavioral-eval.py:336:    decision = SC.decide(inc_eval, cand_eval)
+./tools/run-behavioral-eval.py:545:    v = SC.decide(ie, ce)["verdict"]
+./tools/score-candidate.py:43:def decide(incumbent, candidate):
+./tools/score-candidate.py:135:        v = decide(inc, cand)["verdict"]
+./tools/score-candidate.py:176:    res = decide(inc, cand)
+./tools/q02_compare.py:263:        "M1_findings": count_packages(arm, "findings"),
+./tools/q02_compare.py:268:        "M5_subagents": subagent_spend(arm),
+./tools/q02_compare.py:392:        "M1_findings": package_ids("findings"),
+./tools/q02_compare.py:397:        "M5_subagents": subagents,
+./tools/q02_compare.py:414:    "M6_overlap": {"both_arms": None, "arm_a_only": None, "arm_b_only": None},
+./tools/q02_compare.py:522:def decide(m, w, threshold):
+./tools/q02_compare.py:534:        if (w.get("M6_overlap") or {}).get(k) is None:
+./tools/q02_compare.py:535:            blockers.append(f"M6_overlap.{k} is unfilled -- it is judged, and the tool will not guess it")
+./tools/q02_compare.py:539:    a, b = len(m["arm_a"]["M1_findings"]), len(m["arm_b"]["M1_findings"])
+./tools/q02_compare.py:558:    sa, sb = m["arm_a"].get("M5_subagents"), m["arm_b"].get("M5_subagents")
+./tools/q02_compare.py:591:    verdict, reasons, blockers = decide(m, w, threshold)
+./tools/q02_compare.py:609:    return {"arm_a": {"M1_findings": ["f"] * a, "M5_subagents": sa},
+./tools/q02_compare.py:610:            "arm_b": {"M1_findings": ["f"] * b, "M5_subagents": sb}}
+./tools/q02_compare.py:618:    w["M6_overlap"] = {"both_arms": 0, "arm_a_only": 0, "arm_b_only": 0}
+./tools/q02_compare.py:736:    v, _, _ = decide(_m(5, 2), _w(), th)
+./tools/q02_compare.py:738:    v, _, _ = decide(_m(0, 0), _w(), th)
+./tools/q02_compare.py:744:    v, _, _ = decide(_m(2, 4), _w(), th)
+./tools/q02_compare.py:748:    v, _, _ = decide(_m(3, 2, sa=60, sb=12), _w(), th)
+./tools/q02_compare.py:750:    v, _, _ = decide(_m(3, 2), _w(), th)
+./tools/q02_compare.py:754:    v, _, _ = decide(_m(1, 1), _w(M7_waste={"waste_class_a_avoided_that_b_hit": "misattribution"}), th)
+./tools/q02_compare.py:758:    v, _, bl = decide(_m(9, 0), _w(blinding_held=False), th)
+./tools/q02_compare.py:761:    v, _, bl = decide(_m(9, 0), w, th)
+./tools/q02_compare.py:764:    v, _, bl = decide(_m(9, 0), w, th)
+./tools/q02_compare.py:766:    w = _w(); w["M6_overlap"]["arm_b_only"] = None
+./tools/q02_compare.py:767:    v, _, bl = decide(_m(9, 0), w, th)
+./tools/run-gepa-shadow.py:193:            kd = SC.decide(incumbent_eval(scoreboard), candidate_eval(cand, scoreboard))
+./fixtures/ablation/kiwicom-vs02-layer-check/rule.py:14:def decide(case, lesson_applied):

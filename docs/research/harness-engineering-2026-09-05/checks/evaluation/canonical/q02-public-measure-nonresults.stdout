@@ -1,0 +1,27 @@
+{
+  "arm_a": {
+    "M1_findings": [
+      "DOC-1",
+      "DOC-2",
+      "DOC-3",
+      "DRAFT-V3"
+    ],
+    "M2_candidates": [],
+    "M3_severity": {},
+    "M5_attempts": 0,
+    "M5_events": 0,
+    "M5_subagents": 14,
+    "path": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input/arm-a"
+  },
+  "arm_b": {
+    "M1_findings": [],
+    "M2_candidates": [],
+    "M3_severity": {},
+    "M5_attempts": 0,
+    "M5_events": 0,
+    "M5_subagents": null,
+    "path": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input/arm-b"
+  },
+  "computed_only": "M6 and M7 are judged, not computed. Fill the worksheet.",
+  "engagement": "../../../../../private/tmp/harness-evaluation-101-20260905-036_ohxs/synthetic-measure-input"
+}

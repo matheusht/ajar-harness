@@ -1,0 +1,64 @@
+{
+  "engagement_id": "document-review-demo",
+  "scope_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "active_environment_ref": null,
+  "coverage": "active",
+  "coverage_counts": null,
+  "ending_overrides": [],
+  "budget_redeclaration_cycles": [],
+  "queue_control": {
+    "status": "active",
+    "last_stop": null,
+    "last_resume": null
+  },
+  "candidates": {},
+  "hypotheses": {},
+  "control_candidates": [],
+  "findings": {
+    "DOC-1": {
+      "revision": 3,
+      "status": "needs_review",
+      "change_reason": "Correct source revision",
+      "adjudication_review_ref": "review-source-r2",
+      "revision_event_ref": "event-revision-r3"
+    }
+  },
+  "event_count": 5,
+  "attempt_count": 0,
+  "artifact_count": 0,
+  "last_event_id": "event-revision-r3",
+  "active_blockers": [],
+  "outstanding_reviews": [
+    {
+      "review_type": "regrade",
+      "entity_ref": "DOC-2",
+      "review_ref": "event-review-request",
+      "reason": "A different document needs a correction",
+      "status": "pending"
+    }
+  ],
+  "reports": {
+    "report-DOC-1-r2": {
+      "finding_id": "DOC-1",
+      "finding_revision": 2,
+      "status": "historical",
+      "historical_reason": "superseded by finding revision 3"
+    },
+    "report-DOC-1-r3": {
+      "finding_id": "DOC-1",
+      "finding_revision": 3,
+      "status": "draft",
+      "historical_reason": null
+    }
+  },
+  "report_refs": [
+    "report-DOC-1-r2",
+    "report-DOC-1-r3"
+  ],
+  "submission_refs": [],
+  "memory_disposition": null,
+  "cleanup": {
+    "recorded": false,
+    "obligations": []
+  }
+}

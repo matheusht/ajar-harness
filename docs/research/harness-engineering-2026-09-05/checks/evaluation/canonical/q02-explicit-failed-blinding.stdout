@@ -1,0 +1,9 @@
+portable checkpoint: Q02-PROMPT-ABLATION-PORTABLE-v1
+VERDICT: inconclusive
+
+  - preregistration guard tripped
+
+blocked by:
+  ! blinding failed: the M6 split is unreliable and must be reported as such
+
+licenses: This verdict licenses no prompt conclusion, candidate promotion, vendor filing, or doctrine change.

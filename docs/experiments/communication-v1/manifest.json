@@ -1,0 +1,486 @@
+{
+  "data_kind": "synthetic_preparation",
+  "execution_status": "UNEXECUTED",
+  "run_authorization": null,
+  "effective_configuration": null,
+  "case_order": [
+    "complete",
+    "complementary",
+    "late"
+  ],
+  "arm_order": [
+    "serial",
+    "direct",
+    "board"
+  ],
+  "repeats": 1,
+  "notice_limit_per_packet": 5,
+  "notice_max_characters": 400,
+  "schedule": [
+    {
+      "ordinal": 1,
+      "event": "initial_sources_and_task"
+    },
+    {
+      "ordinal": 2,
+      "event": "commit_independent_initial_observations",
+      "required_roles": {
+        "serial": [
+          "worker"
+        ],
+        "direct": [
+          "worker-a",
+          "worker-b"
+        ],
+        "board": [
+          "worker-a",
+          "worker-b"
+        ]
+      }
+    },
+    {
+      "ordinal": 3,
+      "event": "direct_handoffs_and_curated_packet_then_optional_board_notices",
+      "recipients": {
+        "serial": "worker",
+        "direct": "coordinator",
+        "board": "coordinator"
+      },
+      "delivery": "same scheduled observation bytes to all arrangements after independent commits; board additionally exposes the notice to its workers"
+    },
+    {
+      "ordinal": 4,
+      "event": "commit_initial_draft"
+    },
+    {
+      "ordinal": 5,
+      "event": "release_external_observation_or_correction",
+      "recipients": {
+        "serial": "worker",
+        "direct": "coordinator",
+        "board": "coordinator"
+      },
+      "delivery": "same exact bytes and ordinal; direct coordinator may immediately forward to workers; board adds feed opportunity"
+    },
+    {
+      "ordinal": 6,
+      "event": "source_check_and_revision_coordination"
+    },
+    {
+      "ordinal": 7,
+      "event": "commit_designated_final"
+    },
+    {
+      "ordinal": 8,
+      "event": "anonymize_and_grade_final_only"
+    }
+  ],
+  "arrangements": {
+    "serial": {
+      "roles": [
+        "worker"
+      ],
+      "initial_assignment": "complete source set and synthesis",
+      "allowed_source_access": "all current-case released sources"
+    },
+    "direct": {
+      "roles": [
+        "worker-a",
+        "worker-b",
+        "coordinator"
+      ],
+      "initial_assignment": {
+        "worker-a": "first case source, excluding common brief",
+        "worker-b": "second case source, excluding common brief",
+        "coordinator": "curate both committed observations, inspect all sources, direct updates and synthesize"
+      },
+      "allowed_source_access": "all current-case released sources",
+      "curated_packet": true,
+      "board_notices": false
+    },
+    "board": {
+      "roles": [
+        "worker-a",
+        "worker-b",
+        "coordinator"
+      ],
+      "initial_assignment": {
+        "worker-a": "first case source, excluding common brief",
+        "worker-b": "second case source, excluding common brief",
+        "coordinator": "curate both committed observations, inspect all sources, direct updates and synthesize"
+      },
+      "allowed_source_access": "all current-case released sources",
+      "curated_packet": true,
+      "board_notices": true
+    }
+  },
+  "resource_limits_per_arm": {
+    "human_active_seconds": 1200,
+    "elapsed_seconds": 2400,
+    "machine_seconds": 4800,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0
+  },
+  "cases": [
+    {
+      "case_id": "complete",
+      "family_id": "complete-documents",
+      "split": "evaluation; no development or cross-case answer reuse",
+      "initial_worker_files": [
+        "inputs/brief.md",
+        "inputs/complete/display-v1.md",
+        "inputs/complete/display-notes-v1.md"
+      ],
+      "parallel_handoff_ref": "coordination/complete.json",
+      "board_notice_files": [
+        "notices/complete-3.json",
+        "notices/complete-5.json"
+      ],
+      "external_release_files": [
+        "notices/complete-5.json"
+      ],
+      "external_release_ordinal": 5,
+      "final_ref": "finals/complete.md",
+      "grader_reference_ref": "grader/complete.md",
+      "grader_output_names": [
+        "output-a.md",
+        "output-b.md",
+        "output-c.md"
+      ],
+      "grader_arm_mapping": [
+        "direct",
+        "board",
+        "serial"
+      ],
+      "shared_observation_files": [
+        "notices/complete-3.json"
+      ],
+      "shared_observation_ordinal": 3
+    },
+    {
+      "case_id": "complementary",
+      "family_id": "complementary-documents",
+      "split": "evaluation; no development or cross-case answer reuse",
+      "initial_worker_files": [
+        "inputs/brief.md",
+        "inputs/complementary/attendance-v1.md",
+        "inputs/complementary/stock-v1.md"
+      ],
+      "parallel_handoff_ref": "coordination/complementary.json",
+      "board_notice_files": [
+        "notices/complementary-3.json",
+        "notices/complementary-5.json"
+      ],
+      "external_release_files": [
+        "notices/complementary-5.json"
+      ],
+      "external_release_ordinal": 5,
+      "final_ref": "finals/complementary.md",
+      "grader_reference_ref": "grader/complementary.md",
+      "grader_output_names": [
+        "output-a.md",
+        "output-b.md",
+        "output-c.md"
+      ],
+      "grader_arm_mapping": [
+        "board",
+        "serial",
+        "direct"
+      ],
+      "shared_observation_files": [
+        "notices/complementary-3.json"
+      ],
+      "shared_observation_ordinal": 3
+    },
+    {
+      "case_id": "late",
+      "family_id": "late-documents",
+      "split": "evaluation; no development or cross-case answer reuse",
+      "initial_worker_files": [
+        "inputs/brief.md",
+        "inputs/late/binding-v1.md",
+        "inputs/late/materials-v1.md"
+      ],
+      "parallel_handoff_ref": "coordination/late.json",
+      "board_notice_files": [
+        "notices/late-3.json",
+        "notices/late-5.json"
+      ],
+      "external_release_files": [
+        "notices/late-5.json",
+        "releases/late/binding-v2.md"
+      ],
+      "external_release_ordinal": 5,
+      "final_ref": "finals/late.md",
+      "grader_reference_ref": "grader/late.md",
+      "grader_output_names": [
+        "output-a.md",
+        "output-b.md",
+        "output-c.md"
+      ],
+      "grader_arm_mapping": [
+        "serial",
+        "direct",
+        "board"
+      ],
+      "shared_observation_files": [
+        "notices/late-3.json"
+      ],
+      "shared_observation_ordinal": 3
+    }
+  ],
+  "notice_accounts": [
+    {
+      "notice_id": "complete-n1",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 4,
+          "source_ref": "inputs/complete/display-notes-v1.md",
+          "revision": "display-notes-v1",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/complete-3.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": true,
+        "source_ref": "grader/complete.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    },
+    {
+      "notice_id": "complete-n2",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 6,
+          "source_ref": "inputs/complete/display-notes-v1.md",
+          "revision": "display-notes-v1",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/complete-5.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": true,
+        "source_ref": "grader/complete.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    },
+    {
+      "notice_id": "complementary-n1",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 4,
+          "source_ref": "inputs/complementary/stock-v1.md",
+          "revision": "stock-v1",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/complementary-3.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": true,
+        "source_ref": "grader/complementary.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    },
+    {
+      "notice_id": "complementary-n2",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 6,
+          "source_ref": "inputs/complementary/stock-v1.md",
+          "revision": "stock-v1",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/complementary-5.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": true,
+        "source_ref": "grader/complementary.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    },
+    {
+      "notice_id": "late-n1",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 4,
+          "source_ref": "inputs/late/binding-v1.md",
+          "revision": "binding-v1",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/late-3.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": false,
+        "source_ref": "grader/late.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    },
+    {
+      "notice_id": "late-n2",
+      "data_kind": "synthetic_illustrative",
+      "source_check_timeline": [
+        {
+          "ordinal": 6,
+          "source_ref": "releases/late/binding-v2.md",
+          "revision": "binding-v2",
+          "action": "check source before relying on notice"
+        }
+      ],
+      "correction_timeline": [
+        {
+          "ordinal": 5,
+          "predecessor": "late-n1",
+          "replacement": "late-n2",
+          "changed_claims": [
+            "time",
+            "room"
+          ]
+        }
+      ],
+      "retained": {
+        "value": true,
+        "source_ref": "notices/late-5.json"
+      },
+      "delivered_read_opportunity": {
+        "value": true,
+        "source_ref": "illustrative scheduled bundle; no actual agent receipt"
+      },
+      "used": {
+        "value": null,
+        "source_ref": null
+      },
+      "correct": {
+        "value": true,
+        "source_ref": "grader/late.md",
+        "basis": "At final revision; late-n1 was valid at initial revision but is stale after correction."
+      },
+      "useful": {
+        "value": null,
+        "source_ref": null
+      },
+      "acknowledgment": "Illustrative acknowledgment does not establish comprehension or use."
+    }
+  ],
+  "grading_excludes": [
+    "treatment labels",
+    "peer discussion",
+    "worker self-grades",
+    "other-case answers"
+  ],
+  "file_sha256": {
+    "grader/complete.md": "sha256:39bb9fc04df7270bfa144fdfba32836a941496fdaa13dc79fae434484621f3e5",
+    "grader/complementary.md": "sha256:60b32c4738bb4d3174b8c1c8e603da1be93ab8a4d666f26da0357f8097ad1033",
+    "grader/late.md": "sha256:da5f1a5c70c8409af60392cc03b6b804761b132118ab47ed9eb0946d209432df",
+    "coordination/late.json": "sha256:5bfc67b6ad22cc3ebec89fcd487a9c22a14fa3a155579975f21e06b9fbf874c5",
+    "coordination/complete.json": "sha256:140bf8b5dd79bd48c382d501373106cd579752031285132a0bcd942a6d254516",
+    "coordination/complementary.json": "sha256:83159719e08b607264de42b262d14c19efb44de06dd6b5a7bdb94ac4bce60a63",
+    "finals/complete.md": "sha256:d6725140ad2f065e16a0d85c088b9aaaa9ffa943fbcaec6d577aaeda0c2d5fb0",
+    "finals/complementary.md": "sha256:8cabf8273a3d95ffbb13dba7e87da2c94a937359f8674f628c71bf2dfb901144",
+    "finals/late.md": "sha256:7cf4f78579da0c0d750121cf0b84210587015f2f3cbea846afd3c357d0b61f8a",
+    "notices/complementary-3.json": "sha256:db852edb68923bfbc1aa432886754f4b456638b5e86e1d6febc139ad9477acb7",
+    "notices/complementary-5.json": "sha256:4d6ff02ea269e43b1f7128ad286746310a70b7a2c5201e6cc5bf25f553e54889",
+    "notices/complete-3.json": "sha256:bc66f77851638623d6a7198e4c3374f71a2185b2b9ba8e37e14574eebc516ce0",
+    "notices/late-5.json": "sha256:81df121cba608dfac9a70dfa2b17e19eaa92694e621fcabd8462d48d58c29728",
+    "notices/complete-5.json": "sha256:ff60581eef40b9629fd3f832c8ac270118b578f91d116eec3444f2056022dbc4",
+    "notices/late-3.json": "sha256:ddf74ad995bc60d8e1d3035e0832b6b1c8c8186e900cf72810bdb60fc1c91afc",
+    "inputs/brief.md": "sha256:62199981ba6c5869f65c916fc833ae2115648f9f6f3caa1b790d05b9af84e9a9",
+    "inputs/complete/display-notes-v1.md": "sha256:79ef2fbb1d225453315d894f301aa5774c13cc67233d8c60864b31e3c84aa304",
+    "inputs/complete/display-v1.md": "sha256:e1c1ac6ce1b4385b855b4a33186d90c9d6667ec8d20821c25c268f4500997de4",
+    "inputs/complementary/stock-v1.md": "sha256:9950f7968a3b02c13bd35f26707585ddd57ab0644cac2aa32d26efb4f6b86b00",
+    "inputs/complementary/attendance-v1.md": "sha256:98172705d781b585c249bced47ed5d915064e0c1481e3a827d0de6ec925d6818",
+    "inputs/late/materials-v1.md": "sha256:7c9df8275ac9c56fd17ab5e049918d0e5758a78105907c3e20022d5bc7682367",
+    "inputs/late/binding-v1.md": "sha256:ee9f1fbd820541cd76fbffee32e78ef14e27b5128c5b2a01c09c83bcc94966bb",
+    "releases/late/binding-v2.md": "sha256:368d11dc53de813dc04fc4044790e33aa8d82dd60605237972c8586d82cc53e0"
+  }
+}

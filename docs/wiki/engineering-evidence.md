@@ -1,6 +1,6 @@
 # Offline engineering evidence
 
-**Status:** implementation in progress; #107–109 and #111 locally implemented and checked; #110 blocked/pending; #112 pending. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
+**Status:** implementation in progress; #107–109 and #111–112 locally implemented and checked; #110 blocked/pending; final review pending. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
 
 ## Decision
 
@@ -74,4 +74,4 @@ integrity, mismatched references and source/quarantine races before stdout or wo
 No historical result was recomputed; declared compatibility/blinding is not independent proof.
 The [log](log.md) records exact checks and their limits.
 
-The [recovery packet](comparison-experiments.md#implemented-recovery-packet) now implements #111 preparation with eight public-reporter checks plus schedule/trace controls. Candidate execution remains UNSTARTED. #110 is still pending after an automatic safety check blocked its separate attempt; no reconstruction slice was completed. Next: #112; final bounded review and safe regression run remain pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.
+The [recovery packet](comparison-experiments.md#implemented-recovery-packet) now implements #111 preparation with eight public-reporter checks plus schedule/trace controls. Candidate execution remains UNSTARTED. #110 is still pending after an automatic safety check blocked its separate attempt; no reconstruction slice was completed. The [communication packet](comparison-experiments.md#implemented-communication-packet) implements #112 preparation with seven concrete bundle controls and nine public-command checks; its nine supplied technical assessments are explicitly synthetic, and no agent experiment ran. Final bounded review and safe regression run remain pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.

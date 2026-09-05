@@ -10,6 +10,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 | How will recovery and a message board be compared fairly? | [Recovery and communication experiments](comparison-experiments.md) |
 | Which Q02 inputs can receive a new verdict? | [Q02 admission contract](../q02-admission.md) |
 | Where are the concrete recovery cases and protocol? | [Recovery packet v1](../experiments/recovery-v1/README.md) |
+| Where are the communication sources, bundles and grading rules? | [Communication packet v1](../experiments/communication-v1/README.md) |
 | How do I prepare and inspect an offline study account? | [Study report contract](../study-report.md) |
 | What should the implementation task do? | [Implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) |
 | What changed in this wiki? | [Chronological log](log.md) |
@@ -17,7 +18,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 
 ## Current delivery state
 
-Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107–109 have local guidance/admission/accounting and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #111 now has a [document-only packet and local checks](comparison-experiments.md#implemented-recovery-packet); #110 remains pending after an automatic safety check blocked that separate attempt, and #112 remains pending. Recovery and communication candidate execution remains UNSTARTED. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
+Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107–109 have local guidance/admission/accounting and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #111 has a [recovery packet and local checks](comparison-experiments.md#implemented-recovery-packet), and #112 has a [communication packet and local checks](comparison-experiments.md#implemented-communication-packet). #110 remains pending after an automatic safety check blocked that separate attempt. Final safe regression/independent review remains pending; recovery and communication candidate experiments remain UNEXECUTED. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
 
 This status is a dated observation, not a live tracker. Recheck the source commit and issue state when execution begins. Future completed slices must update the topic page and append to the log with their test evidence.
 

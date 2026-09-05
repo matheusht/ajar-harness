@@ -1,6 +1,6 @@
 # Recovery and communication experiments
 
-**Status:** recovery packet implemented and locally checked; communication packet pending; candidate execution UNSTARTED; adoption undecided. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
+**Status:** recovery and communication packets implemented and locally checked; candidate execution UNSTARTED; adoption undecided. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
 
 Both packets depend on the implemented [offline study account](engineering-evidence.md). They prepare concrete benign documents, expected accounts and fixed protocols. They do not justify implementation of the design being compared.
 
@@ -47,6 +47,37 @@ The [message-board research](../research/harness-engineering-2026-09-05/message-
 Use three short cases: complete sources, complementary evidence and a late correction, with a stale or unsupported notice included. Keep source access, effective configuration, total budget and the release point of external observations equal. Count preparation, coordinator work, reading, posting, curation, failed lookups, repeated analysis and human repair. Necessary independent checking is not waste by definition.
 
 Commit independent initial observations before shared conclusions. Fix the reference assessment first and grade anonymized final outputs without treatment labels, peer discussion, self-grades or other cases' answers. Notices retain task, author, source version, observation, applicability and uncertainty; corrections identify their predecessor. Retention, delivery opportunity, use, correctness and usefulness are separate observations.
+
+## Implemented communication packet
+
+The [communication v1 packet](../experiments/communication-v1/README.md) contains three concrete
+source cases, independent observation/curated handoff examples, bounded notices and physically
+separate fixed grader references and illustrative finals. Its [manifest](../experiments/communication-v1/manifest.json)
+fixes source hashes, identical direct/board assignments, exact worker/grader file lists, matched
+external releases and a five-notice ceiling. Serial receives complete sources; every role can
+inspect every released current-case source. Graders receive only their current-case reference and
+neutral designated finals, with assignment mappings withheld.
+
+The [definition](../experiments/communication-v1/definition.json) and
+[fully admitted synthetic account](../experiments/communication-v1/observations.json) pass the
+unchanged public reporter for all nine assignments. The supplied nine technical eligibility
+assessments are artificial, not nine agent successes. Whole-study work includes coordinator and
+communication effort, failed lookup, repeated analysis, human repair and overhead. Budget adherence
+in the illustrative closed-world account establishes no observed real spend or budget enforcement.
+
+The [packet test](../../tools/communication-packet-test.py) passed **7 bundle controls and 9 public-command
+checks**. It materializes and byte-checks exact worker/release/grader bundles; negative controls reject
+reference leakage, other-case answers, early corrections and assignment drift. Report variations retain
+contaminated/missing/failed cases and distinguish technical eligibility from comparison contamination,
+unknown measurement from zero, and known budget overrun. Source/input inventories stay unchanged.
+This proves prepared-file/account checks, not physical runtime access control or cognitive isolation.
+
+Effective run configuration and authorization remain absent. No board/adapter/runtime was built and
+no agent experiment ran. The gate remains a validated notice explaining improvement over capable
+direct handoff at the same total budget without new correctness/provenance/isolation failure. Equal
+complete results with equal or lower effort favor the simpler baseline; adoption requires later
+predeclared repeated paired evidence. #110 remains blocked/pending; final safe regression and
+independent review remain pending. Both candidate experiments are **UNEXECUTED**.
 
 ## What earns the next step
 

@@ -141,3 +141,53 @@ Separate status: #110 remains pending after an automatic safety check blocked it
 attempt. No #110 artifact was committed; this entry does not mark that slice complete or retry it.
 Recovery candidate execution remains **UNSTARTED**. Missing representative ordinary-session launch
 configuration limits future claims, not completion of this preparation packet.
+
+## 2026-09-05 — #112 communication comparison preparation
+
+On clean baseline `43eab2e8edaffb6ca3f00179c007a7ea6dcf0788`, the same single
+`gpt-6-astra / Low` worker continued Ponytail Full and `/implement`, with no nested delegation.
+The [communication packet](../experiments/communication-v1/README.md) supplies three harmless
+workshop-document cases: complete sources, complementary evidence and a scheduled late correction.
+All three arrangements retain complete source access: serial, capable curated direct handoff,
+and the identical parallel arrangement plus bounded notices. The source-key distinction is physical
+in the prepared artifacts: worker sources, later releases, curation examples, grader references and
+illustrative finals occupy separate paths enumerated and byte-bound by a manifest.
+
+The packet fixes case/arm ordering, role assignment, independent initial commits before curation,
+matched external observation/correction releases, exact grader bundles, five notices per packet,
+and total shared budgets including workers, coordinator, reads/posting, curation and human repair.
+Each notice retains source version, uncertainty and provenance; the stale time notice survives beside
+its named correction. Retention, delivery opportunity, use, correctness and usefulness remain distinct.
+An acknowledgment does not establish comprehension. The permitted progression remains a mechanism
+pilot followed, only if justified, by a preregistered repeated paired study; no adoption is authorized.
+
+Checks on the baseline plus this slice:
+
+- `python3 tools/communication-packet-test.py`: initial red because manifest.json was absent; final
+  **7 bundle controls and 9 real public-command checks passed**. It copies exact allowed files into
+  temporary worker/release/grader bundles and compares bytes/inventories. Negative controls reject
+  leaked grader material, other-case answers, premature corrections and unequal parallel assignment.
+  Notice fields/caps, source revisions, committed observations, grader output names, matched
+  configuration, release schedule and source hashes are checked against the prepared data.
+- `python3 tools/study-report.py --study docs/experiments/communication-v1/definition.json
+  --observations docs/experiments/communication-v1/observations.json`: accepted all **9 assigned and
+  observed** cases, with **9 supplied eligible artificial outputs** and complete fictional metric
+  totals. The account's loading, completeness and independent assessments are invented fixture
+  assertions, not actual observations. No candidate receives a measured success from this result.
+- Public-command adverse controls retain contaminated technical eligibility for cross-case leakage,
+  extra access and extra effective budget; missing/failed work and unknown loading/cost stay visible.
+  A positive token receipt exceeds the frozen zero-token ceiling. Wrong definition binding and added
+  reporter fields fail; no reporter schema change was needed.
+- `python3 tools/recovery-packet-test.py`: existing schedule/trace checks and **8 public-command checks
+  passed**. `python3 tools/study-report-test.py`: existing **50 public-command checks passed**.
+- `python3 -m py_compile tools/communication-packet-test.py`, `git diff --check`, and a bounded check
+  of **75 local documentation links** across the packet README and changed topic/index/evidence pages
+  passed. Tests preserve packet source bytes/inventory and report-input bytes/inventory.
+
+Local standards/spec inspection found no remaining slice issue. These are concrete artifact/account
+checks, not a runtime access-control test, model experiment, proof of actual grading independence,
+measured authoring effort or communication benefit. Effective runtime configuration and run
+authorization are absent; the agent experiment remains **UNEXECUTED**. No provider, paid/live call,
+board service, adapter, execution runtime, engagement access or remote mutation was performed.
+The existing reporter and #111 source files are unchanged. #110 remains blocked/pending after its
+separate automatic safety check; final integration/safe regression and independent review are next.

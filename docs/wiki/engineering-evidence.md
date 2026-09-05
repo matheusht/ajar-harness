@@ -1,6 +1,6 @@
 # Offline engineering evidence
 
-**Status:** accepted implementation plan, not implementation-complete. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
+**Status:** implementation in progress; #107 locally implemented and checked, #108–112 pending. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
 
 ## Decision
 
@@ -45,4 +45,12 @@ These distinctions come from the approved specification and the linked evaluatio
 
 Acceptance uses four public boundaries: existing documentation conformance, Q02, the offline study report and the read-only inspector. Both packets pass illustrative complete and adverse accounts through the study report. The [goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) specifies the necessary end-to-end cases and the tested/small-diff/no-unnecessary-abstraction completion gate.
 
-No new implementation acceptance result is recorded yet. The next worker must recheck current source and ticket comments, implement only missing approved behavior, and add exact command/revision/result evidence here. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.
+Execution started from clean merge `f68caf673ef9ed12aae4f6e43d64b299c5a1ecc9` on local branch `codex/implement-harness-engineering-2026-09-05`, using one **gpt-6-astra / Low** implementation worker with **Ponytail Full** and **`/implement`**. The accepted intent is trustworthy offline evidence; scope is the six approved slices with public-command synthetic acceptance, intact source records and a small reviewed diff. The [goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) retains the constraints and resolved `docs/wiki/` location. No runtime replacement, operational changes, historical recomputation or model experiments belong to this work.
+
+Slice #107 replaces the README's whole-repository scaffold status with dated current navigation and marks the original architecture summary as historical, linking the implemented record model and decision index. The already-repaired entrypoints and draft pins are unchanged. Historical decisions remain intact.
+
+The existing [conformance checker](../../tools/check-conformance.py) now offers `--engineering-guidance`, running only the fixed active-reference checks, mirror check and existing pin check. Its default check set retains its behavior and includes the new navigation check. A narrow option is necessary because the default command also invokes operational and historical checks outside this goal; no generic crawler or selector framework was added.
+
+Verified locally: `python3 tools/check-conformance.py --engineering-guidance` (12 checks, 0 failures); `python3 tools/engineering-guidance-test.py` (real CLI controls for missing destinations, removed setup references, mirror drift, preserved historical prose, stale draft refresh and authorized-drift refusal); `python3 tools/overlay_pins.py check --json` (0 failures, 0 stale, current readiness record still unauthorized); Python compilation and whitespace checks. The [log](log.md) records the red/green evidence and initial failed broader invocation. These are #107 evidence, not a completed #106 review or full-suite pass.
+
+Next: #109 study account, then #108, #110 and the dependent packets; final bounded review and safe regression run remain pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.

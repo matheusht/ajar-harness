@@ -1,7 +1,12 @@
 # Architecture (v1.1 summary)
 
 Full brainstorm + decision history: `harness-merged-architecture-v1.html` (kept with the originating
-engagement wiki). This is the standalone summary.
+engagement wiki). This is the original conceptual summary, retained as history.
+
+For the implemented record and review model, read the
+[record-kernel architecture](decision-0005-implementation-architecture.md). Follow the
+[decision index](decisions/README.md) for later decisions and supersession status; the three record
+types below describe the original conceptual pipeline, not the complete current record schema.
 
 ## Three planes (don't let them bleed)
 - **Plane 1 — methodology** (`skills/`): vuln × technique × oracle cards. Read-only, target-agnostic,

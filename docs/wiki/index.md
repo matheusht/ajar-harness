@@ -14,7 +14,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 
 ## Current delivery state
 
-Research and the six-ticket plan are approved. The implementation goal prompt and this wiki are prepared. No implementation or experiment was started by this documentation task. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) records the partial guidance repair already present in main; the remaining work belongs to [specification #106](https://github.com/matheusht/redteam-harness/issues/106).
+Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slice #107 has local guidance and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #108–112 remain pending. Recovery and communication experiments remain unexecuted. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
 
 This status is a dated observation, not a live tracker. Recheck the source commit and issue state when execution begins. Future completed slices must update the topic page and append to the log with their test evidence.
 

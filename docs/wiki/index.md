@@ -8,13 +8,14 @@ A maintained synthesis of engineering decisions, their evidence and the question
 | --- | --- |
 | What did we decide to build, and why? | [Offline engineering evidence](engineering-evidence.md) |
 | How will recovery and a message board be compared fairly? | [Recovery and communication experiments](comparison-experiments.md) |
+| How do I prepare and inspect an offline study account? | [Study report contract](../study-report.md) |
 | What should the implementation task do? | [Implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) |
 | What changed in this wiki? | [Chronological log](log.md) |
 | How should an agent maintain these pages? | [Maintenance instructions](AGENTS.md) |
 
 ## Current delivery state
 
-Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slice #107 has local guidance and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #108–112 remain pending. Recovery and communication experiments remain unexecuted. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
+Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107 and #109 have local guidance/accounting and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #108 and #110–112 remain pending. Recovery and communication experiments remain unexecuted. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
 
 This status is a dated observation, not a live tracker. Recheck the source commit and issue state when execution begins. Future completed slices must update the topic page and append to the log with their test evidence.
 

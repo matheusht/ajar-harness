@@ -49,3 +49,50 @@ Checks on this slice's implementation diff against the baseline above:
 - Bounded Markdown link check over the contract and three updated wiki pages: all 38 local destinations resolve. `git diff --check`: passed.
 
 The command reads only the two requested offline files and emits stdout; source references are preserved but not opened. It disables import bytecode writes and creates no authority or coordination state. Historical/operational conformance and the blanket CI suite were not run. Final safe regression and independent Standards/Spec review remain pending after the remaining slices. #109 has local implementation evidence; tracker closure, remote mutation and experiments remain outside this slice.
+
+## [2026-09-05] implement | Q02 input admission #108
+
+Source baseline: `ade080e64861b5390633fa39d8aaffef491d8f2b`, clean before this slice, on
+`codex/implement-harness-engineering-2026-09-05`. Continued with the same single
+`gpt-6-astra / low` worker, Ponytail Full and `/implement`. Current #108 was read with
+`gh issue view 108 --repo matheusht/redteam-harness --json body,state,updatedAt`: OPEN,
+updated `2026-09-05T18:24:01Z`, matching the approved local mirror and #106 decisions 2–3.
+
+The existing [Q02 command](../../tools/q02_compare.py) now emits inventory with version, source,
+case/run and exact measurement-byte binding. Its public verdict/helper admission validates present
+malformed dimensions before handling incomplete evidence. A separate source-bound attributed
+eligibility assessment retains M1 legacy-package units and explicitly maps them to M6 root-cause
+groups; it also records frozen-rule unit compatibility. Notes and unsupported revisions can remain
+inventory when excluded. Missing support is inconclusive; wrong types, duplicates, contradictions,
+blank assertions and changed bytes are bounded errors with no verdict/license. Bound waste evidence
+is required only when asserted. Existing optional cost behavior remains unchanged.
+
+Reused existing source locks and safe-offline readers. Removed unused loose package-reading helpers;
+kept the private frozen rule for rule-only self-tests. Named root/arm identity, source bytes and
+quarantine are explicitly rechecked under the same locks immediately before publication, alongside
+input/reference byte rechecks. No rejecting post-publication context exit or shared kernel API
+change was added. [The input contract](../q02-admission.md) documents the supported legacy layout,
+references and declarations. A blinding or compatibility declaration remains attributed evidence,
+not independent proof. The frozen checkpoint, threshold, license and historical probes are unchanged.
+
+Checks against the baseline plus this slice:
+
+- `tools/q02-admission-self-test.py`, using the existing main-checkout `.venv/bin/python`: first red
+  because `measure` lacked case/run arguments; final **99 disposable benign controls passed**.
+  The real CLI covers complete bound input, all required missing/malformed dimensions, distinct
+  package/group units, unsupported/excluded layouts, missing/changed references and waste binding.
+  Additional public-helper and command hooks cover source/quarantine/reference publication races.
+- `q02_compare.py --self-test` with that interpreter: passed the unchanged checkpoint and private
+  frozen-decision controls. These are separate from admission acceptance.
+- The three existing Q02 checks from `quarantine-self-test.py` were executed in isolation from its
+  unrelated suite. A temporary wrapper used their unchanged check bodies with disposable plain-lock
+  directories and a malformed quarantine marker, replacing only kernel-initializing fixture setup.
+  Preregistration quarantine before output, root rename during measurement and final-admission
+  quarantine before stdout/worksheet all passed. This is not a blanket quarantine-suite result.
+- Python compilation, `git diff --check` and a bounded link check over the input contract and changed
+  wiki pages passed. No typechecker is configured; no dependency installation was required.
+
+These checks create no live sessions, initialize no record kernel and recompute no historical result.
+Source files and the portable checkpoint remain untouched. No tracker mutation or experiment was
+performed. #108 has local implementation evidence; #110–112 and final safe regression/independent
+review remain pending.

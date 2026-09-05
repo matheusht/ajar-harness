@@ -1,6 +1,6 @@
 # Offline engineering evidence
 
-**Status:** implementation in progress; #107 and #109 locally implemented and checked; #108 and #110–112 pending. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
+**Status:** implementation in progress; #107–109 locally implemented and checked; #110–112 pending. **Updated:** 2026-09-05. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106) and its [approval/publication record](../research/harness-engineering-2026-09-05/handoff.md).
 
 ## Decision
 
@@ -59,4 +59,19 @@ Study, development and maintenance remain separate. The frozen scope explicitly 
 
 On source baseline `3c5c8a847e330e89e6cf48ecf14c3cb1022e3bf3` plus this slice, `python3 tools/study-report-test.py` passed **50 synthetic public-command checks**, including full/partial/unknown accounts, all case states, arm/repeat coverage, successful assistance and execution, duplicate/conflicting/cross-case identities, overlaps/allocations, imports, aliases/loading, definition binding, decimal ceilings and input/file-inventory immutability. Compilation and bounded documentation-link/whitespace checks passed. The [log](log.md) records commands and limits. This report checks supplied records; it does not prove their references, freeze timing, loading, independence or actual-work completeness independently, and it computes no comparison winner. The executable fixture is reusable for the two still-unexecuted preparation packets.
 
-Next: #108, #110 and the dependent packets; final bounded review and safe regression run remain pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.
+Slice #108 adds the [Q02 admission contract](../q02-admission.md) to the existing public command.
+Measurements expose source-bound inventory; a separately byte-bound attributed assessment declares
+eligibility, frozen-rule compatibility and package-to-root-cause mapping. M1 retains package units;
+M6 counts groups. Missing support is inconclusive, malformed evidence is a bounded input error, and
+present malformed dimensions are validated before incomplete-input handling. Old loose input cannot
+receive a fresh decisive verdict. The checkpoint, decision branches and license remain unchanged.
+
+Verified on source baseline `ade080e64861b5390633fa39d8aaffef491d8f2b` plus the slice: **99 synthetic
+public/admission controls**, existing private frozen-rule/checkpoint tests, and the three existing
+Q02 quarantine regression checks exercised in isolation with plain lock files. The tests cover
+multiple admitted packages per root cause, unsupported/excluded layouts, missing versus malformed
+integrity, mismatched references and source/quarantine races before stdout or worksheet publication.
+No historical result was recomputed; declared compatibility/blinding is not independent proof.
+The [log](log.md) records exact checks and their limits.
+
+Next: #110 and the dependent packets; final bounded review and safe regression run remain pending. Missing representative launch/configuration prevents a later ordinary-session claim; it does not block the offline implementation or synthetic packet preparation.

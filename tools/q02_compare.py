@@ -8,7 +8,8 @@ PREREGISTERED decision rule.
 The design rule here is the one this repository keeps re-learning: **do not let a tool assert what
 it cannot compute.**
 
-  computable from the ledgers   M1 findings, M2 candidates, M5 cost
+  computable from source bytes package inventory, M2 candidates, M5 cost proxies
+  admitted by bound assessment M1 legacy packages
   partly computable             M3 severity profile, M4 family coverage
   JUDGED, never computed        M6 overlap (needs the same-finding root-cause rule)
                                 M7 waste (needs a human reading rounds)
@@ -31,8 +32,7 @@ Commands:
 """
 
 import argparse
-from contextlib import ExitStack
-import glob
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
@@ -44,12 +44,11 @@ from pathlib import Path, PurePosixPath
 from engagement_quarantine import (
     _current_directory_path,
     atomic_write_offline,
-    is_quarantined,
     quarantined_ancestor,
     read_safe_offline_file,
     require_safe_offline_output,
 )
-from engagement_records import RecordError
+from engagement_records import RecordError, validate_record
 from engagement_state import bound_engagement_lock, require_not_quarantined
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -216,59 +215,6 @@ def read_threshold(prereg_path=PREREG):
     return _threshold_from_bytes(_stable_regular_bytes(prereg_path))
 
 
-def count_packages(arm, sub):
-    d = os.path.join(arm, sub)
-    if not os.path.isdir(d):
-        return []
-    return sorted(
-        os.path.basename(p.rstrip("/"))
-        for p in glob.glob(os.path.join(d, "*/"))
-    )
-
-
-def jsonl_rows(path):
-    if not os.path.isfile(path):
-        return []
-    return [json.loads(l) for l in open(path) if l.strip()]
-
-
-def severity_profile(arm):
-    prof = {}
-    for pkg in glob.glob(os.path.join(arm, "findings", "*/")):
-        fj = os.path.join(pkg, "finding.json")
-        if not os.path.isfile(fj):
-            continue
-        try:
-            band = (json.load(open(fj)).get("severity") or {})
-            band = band.get("band") if isinstance(band, dict) else band
-        except Exception:
-            band = None
-        prof[band or "unstated"] = prof.get(band or "unstated", 0) + 1
-    return prof
-
-
-def subagent_spend(arm):
-    """Read the per-round spend the brief required in progress.md. Absent is reported, not zeroed."""
-    p = os.path.join(arm, "progress.md")
-    if not os.path.isfile(p):
-        return None
-    nums = [int(n) for n in re.findall(r"(?:subagents?|agents?)[^0-9\n]{0,20}(\d{1,3})",
-                                       open(p).read(), re.I)]
-    return sum(nums) if nums else None
-
-
-def measure_arm(arm):
-    return {
-        "path": os.path.relpath(arm, ROOT),
-        "M1_findings": count_packages(arm, "findings"),
-        "M2_candidates": count_packages(arm, "unproven"),
-        "M3_severity": severity_profile(arm),
-        "M5_attempts": len(jsonl_rows(os.path.join(arm, "attempts.jsonl"))),
-        "M5_events": len(jsonl_rows(os.path.join(arm, "events.jsonl"))),
-        "M5_subagents": subagent_spend(arm),
-    }
-
-
 def _snapshot_bound_tree(root_fd):
     """Snapshot one locked arm without reopening its public pathname."""
 
@@ -349,7 +295,7 @@ def _snapshot_bound_tree(root_fd):
 def _jsonl_count_bytes(data):
     if data is None:
         return 0
-    return len([json.loads(line) for line in data.splitlines() if line.strip()])
+    return len([_load_json(line) for line in data.splitlines() if line.strip()])
 
 
 def _measure_arm_snapshot(tree, display_path):
@@ -389,7 +335,7 @@ def _measure_arm_snapshot(tree, display_path):
         subagents = sum(numbers) if numbers else None
     return {
         "path": display_path,
-        "M1_findings": package_ids("findings"),
+        "package_inventory": package_ids("findings"),
         "M2_candidates": package_ids("unproven"),
         "M3_severity": severity,
         "M5_attempts": _jsonl_count_bytes(tree.get("attempts.jsonl")),
@@ -418,108 +364,98 @@ WORKSHEET = {
 }
 
 
-def cmd_measure(args):
-    if args.worksheet:
-        try:
-            require_safe_offline_output(Path(args.worksheet))
-        except ValueError:
-            raise SystemExit("worksheet destination is quarantined or reserved")
-    engagement_path = Path(args.engagement).absolute()
-    root_fd = -1
-    arm_fds = []
+def _json_bytes(value):
+    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _source_commitment(root, trees):
+    payload = {"root": str(root), "arms": {
+        arm: {path: _digest(data) for path, data in sorted(tree.items())}
+        for arm, tree in zip(("arm_a", "arm_b"), trees)
+    }}
+    return {**payload, "sha256": _digest(_json_bytes(payload))}
+
+
+@contextmanager
+def _bound_sources(source_root):
+    """Hold existing source locks; the caller rechecks immediately before publication."""
+    root = Path(source_root).absolute()
+    descriptors = []
     try:
-        root_fd = os.open(
-            engagement_path,
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
-        root_identity = os.fstat(root_fd)
-        with bound_engagement_lock(root_fd, create=False) as bound_engagement:
-            for arm_name in ("arm-a", "arm-b"):
-                try:
-                    arm_fds.append(
-                        os.open(
-                            arm_name,
-                            os.O_RDONLY
-                            | getattr(os, "O_DIRECTORY", 0)
-                            | getattr(os, "O_NOFOLLOW", 0),
-                            dir_fd=root_fd,
-                        )
-                    )
-                except OSError as error:
-                    raise SystemExit("missing ablation arm directory") from error
-            with ExitStack() as locks:
-                bound_arms = [
-                    locks.enter_context(bound_engagement_lock(fd, create=False)) for fd in arm_fds
-                ]
-                trees = [_snapshot_bound_tree(fd) for fd in arm_fds]
-                require_not_quarantined(bound_engagement)
-                for bound_arm in bound_arms:
-                    require_not_quarantined(bound_arm)
-                try:
-                    current_root = os.stat(engagement_path, follow_symlinks=False)
-                except OSError as error:
-                    raise SystemExit("ablation evidence changed during measurement") from error
-                if (
-                    stat.S_ISLNK(current_root.st_mode)
-                    or (current_root.st_dev, current_root.st_ino)
-                    != (root_identity.st_dev, root_identity.st_ino)
-                ):
-                    raise SystemExit("ablation evidence changed during measurement")
-                out = {
-                    "engagement": os.path.relpath(args.engagement, ROOT),
-                    "arm_a": _measure_arm_snapshot(
-                        trees[0], os.path.relpath(os.path.join(args.engagement, "arm-a"), ROOT)
-                    ),
-                    "arm_b": _measure_arm_snapshot(
-                        trees[1], os.path.relpath(os.path.join(args.engagement, "arm-b"), ROOT)
-                    ),
-                    "computed_only": "M6 and M7 are judged, not computed. Fill the worksheet.",
-                }
-                # Admission and every publication share the source locks. A signed quarantine
-                # marker that wins before this point is excluded; one waiting on these locks is
-                # ordered after the measurement has been emitted.
-                require_not_quarantined(bound_engagement)
-                for bound_arm in bound_arms:
-                    require_not_quarantined(bound_arm)
-                try:
-                    final_root = os.stat(engagement_path, follow_symlinks=False)
-                except OSError as error:
-                    raise SystemExit("ablation evidence changed during measurement") from error
-                if (
-                    stat.S_ISLNK(final_root.st_mode)
-                    or (final_root.st_dev, final_root.st_ino)
-                    != (root_identity.st_dev, root_identity.st_ino)
-                ):
-                    raise SystemExit("ablation evidence changed during measurement")
-                if args.worksheet:
-                    try:
-                        require_safe_offline_output(Path(args.worksheet))
-                    except ValueError:
-                        raise SystemExit("worksheet destination is quarantined or reserved")
-                    if os.path.exists(args.worksheet) and not args.force:
-                        raise SystemExit(f"{args.worksheet} exists; pass --force to overwrite")
-                    atomic_write_offline(
-                        Path(args.worksheet),
-                        (json.dumps(WORKSHEET, indent=2) + "\n").encode("utf-8"),
-                    )
-                print(json.dumps(out, indent=2, sort_keys=True))
-                if args.worksheet:
-                    sys.stderr.write(f"\nworksheet written to {args.worksheet}\n")
-                return 0
-    except RecordError as error:
-        if error.code in {"engagement_quarantined", "engagement_coordination_unavailable"}:
-            raise SystemExit("ablation evidence is quarantined or uncoordinated") from error
-        raise
-    except OSError as error:
-        raise SystemExit("ablation evidence is unavailable or unsafe") from error
+        root_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                          | getattr(os, "O_NOFOLLOW", 0))
+        descriptors.append(root_fd)
+        with ExitStack() as locks:
+            bounds = [locks.enter_context(bound_engagement_lock(root_fd, create=False))]
+            for arm in ("arm-a", "arm-b"):
+                fd = os.open(arm, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                             | getattr(os, "O_NOFOLLOW", 0), dir_fd=root_fd)
+                descriptors.append(fd)
+                bounds.append(locks.enter_context(bound_engagement_lock(fd, create=False)))
+            identities = [(os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in descriptors]
+            trees = [_snapshot_bound_tree(fd) for fd in descriptors[1:]]
+
+            def recheck():
+                for bound in bounds:
+                    require_not_quarantined(bound)
+                for path, identity in zip((root, root / "arm-a", root / "arm-b"), identities):
+                    current = os.stat(path, follow_symlinks=False)
+                    if stat.S_ISLNK(current.st_mode) or (current.st_dev, current.st_ino) != identity:
+                        raise ValueError("ablation source identity changed")
+                if trees != [_snapshot_bound_tree(fd) for fd in descriptors[1:]]:
+                    raise ValueError("ablation source bytes changed")
+
+            recheck()
+            yield trees, recheck
     finally:
-        for fd in arm_fds:
+        for fd in reversed(descriptors):
             os.close(fd)
-        if root_fd >= 0:
-            os.close(root_fd)
 
 
-def decide(m, w, threshold):
+def cmd_measure(args):
+    try:
+        if args.worksheet:
+            require_safe_offline_output(Path(args.worksheet))
+            if os.path.exists(args.worksheet) and not args.force:
+                raise ValueError("worksheet exists; pass --force to overwrite")
+        for name in ("case_id", "run_id"):
+            value = getattr(args, name, None)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError("case/run identity must be nonblank text")
+        source_root = Path(args.engagement).absolute()
+        with _bound_sources(source_root) as (trees, recheck):
+            out = {
+                "schema_version": 1,
+                "case_id": getattr(args, "case_id", None),
+                "run_id": getattr(args, "run_id", None),
+                "source": _source_commitment(source_root, trees),
+                "arm_a": _measure_arm_snapshot(trees[0], str(source_root / "arm-a")),
+                "arm_b": _measure_arm_snapshot(trees[1], str(source_root / "arm-b")),
+                "computed_only": "Inventory is not M1 eligibility. M6 and M7 require bound adjudication.",
+            }
+            output = _json_bytes(out)
+            worksheet = {**WORKSHEET, "schema_version": 1,
+                         "case_id": out["case_id"], "run_id": out["run_id"],
+                         "measurement_sha256": _digest(output),
+                         "source_sha256": out["source"]["sha256"],
+                         "eligibility_ref": None, "waste_ref": None}
+            recheck()
+            if args.worksheet:
+                require_safe_offline_output(Path(args.worksheet))
+                atomic_write_offline(Path(args.worksheet), _json_bytes(worksheet))
+            sys.stdout.write(output.decode("utf-8"))
+            if args.worksheet:
+                sys.stderr.write(f"\nworksheet written to {args.worksheet}\n")
+        return 0
+    except (RecordError, OSError, ValueError, TypeError, RecursionError) as error:
+        raise SystemExit("cannot measure ablation evidence: unsafe, changed, or malformed input") from error
+
+
+def _decide_frozen(m, w, threshold):
     """Apply the preregistered rule. Returns (verdict, reasons, blockers)."""
     blockers = []
     if w.get("blinding_held") is False:
@@ -573,34 +509,358 @@ def _license_text_for_verdict(doc, verdict):
     return rule["maximum_license_text_if_decisive"]
 
 
+def _load_json(data):
+    def reject_constant(value):
+        raise ValueError("nonfinite JSON number")
+
+    return json.loads(data, object_pairs_hook=_reject_duplicate_keys, parse_constant=reject_constant)
+
+
+def _object(value, label):
+    if not isinstance(value, dict):
+        raise ValueError(label + ' must be an object')
+    return value
+
+
+def _text(value, label):
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise ValueError(label + ' must be nonblank text')
+    return value
+
+
+def _count(value, label):
+    if value is not None and (type(value) is not int or value < 0):
+        raise ValueError(label + ' must be a nonnegative integer')
+
+
+def _ids(value, label):
+    if not isinstance(value, list):
+        raise ValueError(label + ' must be an array')
+    for item in value:
+        if _text(item, label) is None:
+            raise ValueError(label + ' contains a null identity')
+    if len(set(value)) != len(value):
+        raise ValueError(label + ' contains duplicate identities')
+    return value
+
+
+def _hash(value, label):
+    if value is not None and (not isinstance(value, str) or not _SHA256.fullmatch(value)):
+        raise ValueError(label + ' must be a lowercase SHA-256')
+    return value
+
+
+@contextmanager
+def _admitted_decision(m, w, threshold, *, measurement_bytes=None, reference_base=None):
+    """Validate every present dimension before applying incomplete-input handling or the rule."""
+    missing = []
+    references = []
+    _object(m, 'measurement'); _object(w, 'worksheet')
+    if measurement_bytes is not None and _load_json(measurement_bytes) != m:
+        raise ValueError('measurement object differs from declared bytes')
+
+    def required(value, label):
+        if value is None:
+            missing.append(label + ' is missing')
+        return value
+
+    def version(record, label):
+        if 'schema_version' not in record:
+            missing.append(label + ' version is missing')
+        elif type(record['schema_version']) is not int:
+            raise ValueError(label + ' version must be an integer')
+        elif record['schema_version'] != 1:
+            missing.append(label + ' version is unsupported')
+
+    def identity(record, field, label):
+        return required(_text(record.get(field), label + '.' + field), label + '.' + field)
+
+    def answer(record, field, label):
+        value = record.get(field)
+        if value is not None and type(value) is not bool:
+            raise ValueError(label + '.' + field + ' must be boolean')
+        return required(value, label + '.' + field)
+
+    def reference(value, label):
+        if value is None:
+            missing.append(label + ' reference is missing')
+            return None
+        _object(value, label)
+        path = required(_text(value.get('path'), label + '.path'), label + '.path')
+        expected = required(_hash(value.get('sha256'), label + '.sha256'), label + '.sha256')
+        if path is None:
+            return None
+        path = Path(path)
+        if not path.is_absolute():
+            if reference_base is None:
+                missing.append(label + ' has no reference base')
+                return None
+            path = reference_base / path
+        if quarantined_ancestor(path):
+            raise ValueError('reference is quarantined')
+        try:
+            data = _stable_regular_bytes(path)
+        except (OSError, ValueError) as error:
+            cause = error.__cause__
+            if isinstance(error, FileNotFoundError) or isinstance(cause, FileNotFoundError):
+                missing.append(label + ' reference is unavailable')
+                return None
+            raise
+        references.append((path, data))
+        if expected is not None and _digest(data) != expected:
+            raise ValueError(label + ' byte commitment mismatch')
+        return data
+
+    for record, label in ((m, 'measurement'), (w, 'worksheet')):
+        version(record, label)
+        for field in ('case_id', 'run_id'):
+            identity(record, field, label)
+    identity(w, 'adjudicator', 'worksheet')
+    answer(w, 'blinding_held', 'worksheet')
+    rr = _object(w.get('run_record', {}), 'run_record')
+    for field in ('ran_concurrently', 'cross_arm_read_occurred', 'limit_truncated_an_arm'):
+        answer(rr, field, 'run_record')
+    order = rr.get('sequence_order_if_sequential')
+    if order is not None and order not in ('arm_a_then_arm_b', 'arm_b_then_arm_a'):
+        raise ValueError('invalid sequential order')
+    if rr.get('ran_concurrently') is False and order is None:
+        missing.append('sequential run order is missing')
+    overlap = _object(w.get('M6_overlap', {}), 'M6_overlap')
+    for field in ('both_arms', 'arm_a_only', 'arm_b_only'):
+        _count(overlap.get(field), 'M6_overlap.' + field)
+        required(overlap.get(field), 'M6_overlap.' + field)
+    waste = _object(w.get('M7_waste', {}), 'M7_waste')
+    for field in ('arm_a_wasted_rounds', 'arm_b_wasted_rounds'):
+        _count(waste.get(field), field)
+    assertion = _text(waste.get('waste_class_a_avoided_that_b_hit'), 'waste assertion')
+    families = _object(w.get('M4_families', {}), 'M4_families')
+    for arm in ('arm_a', 'arm_b'):
+        if families.get(arm) is not None:
+            _ids(families[arm], 'M4_families.' + arm)
+        record = _object(m.get(arm, {}), arm)
+        for field in ('package_inventory', 'M1_findings', 'M2_candidates'):
+            if field in record:
+                _ids(record[field], arm + '.' + field)
+        if 'package_inventory' not in record:
+            missing.append(arm + ' source inventory is missing (old M1 input is not eligibility)')
+        for field in ('M5_attempts', 'M5_events', 'M5_subagents'):
+            _count(record.get(field), arm + '.' + field)
+        if 'M3_severity' in record:
+            for band, count in _object(record['M3_severity'], 'severity').items():
+                _text(band, 'severity band'); _count(count, 'severity count')
+                if count is None:
+                    raise ValueError('null severity count')
+
+    source = _object(m.get('source', {}), 'source')
+    source_root = required(_text(source.get('root'), 'source.root'), 'source.root')
+    source_hash = required(_hash(source.get('sha256'), 'source.sha256'), 'source.sha256')
+    manifest = _object(source.get('arms', {}), 'source.arms')
+    for arm in ('arm_a', 'arm_b'):
+        if arm not in manifest:
+            missing.append('source manifest for ' + arm + ' is missing')
+        for path, digest in _object(manifest.get(arm, {}), 'manifest arm').items():
+            _text(path, 'manifest path')
+            if PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts:
+                raise ValueError('unsafe manifest path')
+            if _hash(digest, 'manifest digest') is None:
+                raise ValueError('null manifest digest')
+    if source_hash is not None and source_root is not None and set(manifest) == {'arm_a', 'arm_b'}:
+        if source_hash != _digest(_json_bytes({'root': source_root, 'arms': manifest})):
+            raise ValueError('source commitment mismatch')
+    elif set(manifest) - {'arm_a', 'arm_b'}:
+        raise ValueError('unknown source arm')
+
+    def binding(record, label):
+        for field in ('case_id', 'run_id', 'adjudicator'):
+            value = identity(record, field, label)
+            expected = w.get(field)
+            if value is not None and expected is not None and value != expected:
+                raise ValueError(label + ' identity mismatch')
+        for field, expected in (('source_sha256', source_hash),
+                                ('measurement_sha256', _digest(measurement_bytes)
+                                 if measurement_bytes is not None else None)):
+            actual = required(_hash(record.get(field), label + '.' + field), label + '.' + field)
+            if actual is not None and expected is not None and actual != expected:
+                raise ValueError(label + ' binding mismatch')
+
+    binding(w, 'worksheet')
+    for field in ('case_id', 'run_id'):
+        if m.get(field) is not None and w.get(field) is not None and m[field] != w[field]:
+            raise ValueError('measurement/worksheet identity mismatch')
+    if measurement_bytes is None:
+        missing.append('exact measurement bytes are unavailable')
+    assessment_bytes = reference(w.get('eligibility_ref'), 'eligibility')
+    assessment = _load_json(assessment_bytes) if assessment_bytes is not None else None
+    package_map = {}
+    if assessment is not None:
+        _object(assessment, 'eligibility'); version(assessment, 'eligibility'); binding(assessment, 'eligibility')
+        compatibility = _object(assessment.get('compatibility', {}), 'compatibility')
+        compatible = answer(compatibility, 'compatible', 'compatibility')
+        for field, expected in (('M1_unit', 'legacy_packages'), ('M6_unit', 'root_cause_groups')):
+            unit = identity(compatibility, field, 'compatibility')
+            if unit is not None and unit != expected:
+                missing.append(field + ' interpretation is unsupported')
+        identity(compatibility, 'basis', 'compatibility')
+        if compatible is not True:
+            missing.append('frozen-rule M1/M6 unit compatibility is unestablished')
+        packages = assessment.get('packages')
+        if packages is None:
+            missing.append('package eligibility assessment is missing')
+            packages = []
+        if not isinstance(packages, list):
+            raise ValueError('eligibility packages must be an array')
+        for package in packages:
+            _object(package, 'package assessment')
+            arm = identity(package, 'arm', 'package')
+            package_id = identity(package, 'package_id', 'package')
+            if arm is not None and arm not in ('arm_a', 'arm_b'):
+                raise ValueError('unknown package arm')
+            eligible = answer(package, 'eligible', 'package')
+            group = _text(package.get('root_cause_group'), 'root cause group')
+            if eligible is True:
+                required(group, 'eligible package root cause group')
+            elif eligible is False and group is not None:
+                raise ValueError('excluded package has root cause group')
+            if arm is None or package_id is None:
+                continue
+            key = (arm, package_id)
+            if key in package_map:
+                raise ValueError('duplicate arm-scoped package identity')
+            package_map[key] = package
+        inventory = {(arm, package_id) for arm in ('arm_a', 'arm_b')
+                     for package_id in m.get(arm, {}).get('package_inventory', [])}
+        if set(package_map) - inventory:
+            raise ValueError('assessment names an unknown package')
+        if inventory - set(package_map):
+            missing.append('inventory has unassessed packages')
+        groups = {arm: {record['root_cause_group'] for (record_arm, _), record in package_map.items()
+                        if record_arm == arm and record.get('eligible') is True
+                        and record.get('root_cause_group') is not None}
+                  for arm in ('arm_a', 'arm_b')}
+        derived = {'both_arms': len(groups['arm_a'] & groups['arm_b']),
+                   'arm_a_only': len(groups['arm_a'] - groups['arm_b']),
+                   'arm_b_only': len(groups['arm_b'] - groups['arm_a'])}
+        mapping_complete = all(type(record.get('eligible')) is bool and
+                               (not record['eligible'] or record.get('root_cause_group') is not None)
+                               for record in package_map.values())
+        if mapping_complete and not (inventory - set(package_map)):
+            for field, value in derived.items():
+                if overlap.get(field) is not None and overlap[field] != value:
+                    raise ValueError('M6 overlap contradicts package root cause mapping')
+
+    waste_bytes = reference(w.get('waste_ref'), 'waste') if assertion is not None or w.get('waste_ref') is not None else None
+    if waste_bytes is not None:
+        record = _object(_load_json(waste_bytes), 'waste evidence')
+        version(record, 'waste evidence'); binding(record, 'waste evidence')
+        evidence_assertion = identity(record, 'assertion', 'waste evidence')
+        if assertion is not None and evidence_assertion is not None and assertion != evidence_assertion:
+            raise ValueError('waste assertion mismatch')
+        refs = record.get('source_refs')
+        if refs is None:
+            missing.append('waste source references are missing')
+            refs = []
+        if not isinstance(refs, list):
+            raise ValueError('waste source references must be an array')
+        if not refs:
+            missing.append('waste source references are empty')
+        for ref in refs:
+            reference(ref, 'waste source')
+
+    def references_unchanged():
+        if any(data != _stable_regular_bytes(path) for path, data in references):
+            raise ValueError('adjudication reference bytes changed')
+
+    def result():
+        if missing:
+            # Preserve the old adverse integrity blockers alongside admission explanations.
+            _, _, adverse = _decide_frozen({'arm_a': {'M1_findings': []},
+                                            'arm_b': {'M1_findings': []}}, w, threshold)
+            return 'inconclusive', ['Q02 input eligibility is unestablished'], list(dict.fromkeys(missing + adverse))
+        admitted = {arm: {**m[arm], 'M1_findings': sorted(package_id
+                    for (record_arm, package_id), record in package_map.items()
+                    if record_arm == arm and record['eligible'])} for arm in ('arm_a', 'arm_b')}
+        return _decide_frozen(admitted, w, threshold)
+
+    # Even incomplete metadata cannot hide changed bytes or unsupported claimed packages.
+    if source_root is not None:
+        try:
+            Path(source_root).stat()
+        except FileNotFoundError:
+            missing.append('declared source root is unavailable')
+        else:
+            with _bound_sources(source_root) as (trees, source_recheck):
+                actual = _source_commitment(Path(source_root).absolute(), trees)
+                if source_hash is not None and actual['sha256'] != source_hash:
+                    raise ValueError('current source bytes do not match measurement')
+                for arm, tree in zip(('arm_a', 'arm_b'), trees):
+                    current = _measure_arm_snapshot(tree, m.get(arm, {}).get('path'))
+                    for field, value in current.items():
+                        if field != 'path' and field in m.get(arm, {}) and m[arm][field] != value:
+                            raise ValueError('measurement disagrees with source inventory/cost')
+                    for (record_arm, package_id), record in package_map.items():
+                        if record_arm != arm or record.get('eligible') is not True:
+                            continue
+                        prefix = 'findings/' + package_id + '/'
+                        data = tree.get(prefix + 'finding.json')
+                        if data is None or any(path.startswith(prefix + 'revisions/') for path in tree):
+                            missing.append('eligible package has unsupported legacy layout')
+                            continue
+                        finding = _load_json(data)
+                        if (not isinstance(finding, dict) or finding.get('schema_version') not in (None, 2)
+                                or validate_record(finding, 'finding-v2-legacy')):
+                            missing.append('eligible package does not match the supported legacy schema')
+                        elif finding.get('id') != package_id:
+                            raise ValueError('legacy finding identity does not match package ID')
+                        elif finding.get('confidence') != 'confirmed' or not all(
+                            finding['oracle_verdict'][field] for field in
+                            ('signal', 'adjudication', 'contamination_ruled_out')) or finding['status'] == 'withdrawn':
+                            missing.append('eligible legacy finding lacks the declared confirmation state')
+
+                def recheck():
+                    source_recheck(); references_unchanged()
+
+                yield result(), recheck
+                return
+    yield result(), references_unchanged
+
+
+def decide(m, w, threshold, *, measurement_bytes=None, reference_base=None):
+    """Public helper uses the same admission as verdict; unbound dictionaries cannot be decisive."""
+    with _admitted_decision(m, w, threshold, measurement_bytes=measurement_bytes,
+                            reference_base=reference_base) as (result, recheck):
+        recheck()
+        return result
+
+
 def cmd_verdict(args):
-    sources = tuple(Path(path) for path in (args.measurements, args.worksheet, args.prereg))
-    if any(quarantined_ancestor(path) for path in sources):
-        raise SystemExit("ablation evidence is quarantined")
+    sources = tuple(Path(path).absolute() for path in (args.measurements, args.worksheet, args.prereg))
     try:
-        measurement_bytes, worksheet_bytes, prereg_bytes = (
-            _stable_regular_bytes(path) for path in sources
-        )
+        if any(quarantined_ancestor(path) for path in sources):
+            raise ValueError("ablation evidence is quarantined")
+        original = tuple(_stable_regular_bytes(path) for path in sources)
+        if any(quarantined_ancestor(path) for path in sources):
+            raise ValueError("ablation evidence became quarantined")
+        measurement_bytes, worksheet_bytes, prereg_bytes = original
         threshold, doc = _threshold_from_bytes(prereg_bytes)
-        m = json.loads(measurement_bytes)
-        w = json.loads(worksheet_bytes)
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        raise SystemExit("cannot read ablation evidence")
-    if any(quarantined_ancestor(path) for path in sources):
-        raise SystemExit("ablation evidence became quarantined during adjudication")
-    verdict, reasons, blockers = decide(m, w, threshold)
-    if any(quarantined_ancestor(path) for path in sources):
-        raise SystemExit("ablation evidence became quarantined during adjudication")
-    print(f"portable checkpoint: {doc['checkpoint_id']}")
-    print(f"VERDICT: {verdict}\n")
-    for r in reasons:
-        print("  -", r)
-    if blockers:
-        print("\nblocked by:")
-        for b in blockers:
-            print("  !", b)
-    print("\nlicenses: " + _license_text_for_verdict(doc, verdict))
-    return 0
+        m, w = (_load_json(data) for data in (measurement_bytes, worksheet_bytes))
+        with _admitted_decision(m, w, threshold, measurement_bytes=measurement_bytes,
+                                reference_base=sources[1].parent) as (result, recheck):
+            verdict, reasons, blockers = result
+            lines = [f"portable checkpoint: {doc['checkpoint_id']}", f"VERDICT: {verdict}\n"]
+            lines.extend("  - " + reason for reason in reasons)
+            if blockers:
+                lines.append("\nblocked by:")
+                lines.extend("  ! " + blocker for blocker in blockers)
+            lines.append("\nlicenses: " + _license_text_for_verdict(doc, verdict))
+            recheck()
+            if any(quarantined_ancestor(path) for path in sources):
+                raise ValueError("ablation evidence became quarantined")
+            if original != tuple(_stable_regular_bytes(path) for path in sources):
+                raise ValueError("ablation input bytes changed before publication")
+            print("\n".join(lines))
+        return 0
+    except (RecordError, OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+        raise SystemExit("cannot read ablation evidence: malformed, mismatched, quarantined, or unsafe input") from error
 
 
 # ---------------------------------------------------------------- self-test
@@ -733,38 +993,38 @@ def self_test():
     )
 
     print("[self-test] the three preregistered outcomes")
-    v, _, _ = decide(_m(5, 2), _w(), th)
+    v, _, _ = _decide_frozen(_m(5, 2), _w(), th)
     check("gap >= 2 earns its keep", v == "prompt_earns_its_keep", v)
-    v, _, _ = decide(_m(0, 0), _w(), th)
+    v, _, _ = _decide_frozen(_m(0, 0), _w(), th)
     check("both zero is inconclusive", v == "inconclusive", v)
     check(
         "an inconclusive verdict licenses no prompt conclusion",
         "no prompt conclusion" in _license_text_for_verdict(prereg, v).casefold(),
     )
-    v, _, _ = decide(_m(2, 4), _w(), th)
+    v, _, _ = _decide_frozen(_m(2, 4), _w(), th)
     check("arm B ahead does not earn its keep", v == "prompt_does_not_earn_its_keep", v)
 
     print("[self-test] a gap of one is NOT a result")
-    v, _, _ = decide(_m(3, 2, sa=60, sb=12), _w(), th)
+    v, _, _ = _decide_frozen(_m(3, 2, sa=60, sb=12), _w(), th)
     check("gap 1 + A costs more -> does not earn its keep", v == "prompt_does_not_earn_its_keep", v)
-    v, _, _ = decide(_m(3, 2), _w(), th)
+    v, _, _ = _decide_frozen(_m(3, 2), _w(), th)
     check("gap 1 + no cost data -> inconclusive, never a win", v == "inconclusive", v)
 
     print("[self-test] the waste clause")
-    v, _, _ = decide(_m(1, 1), _w(M7_waste={"waste_class_a_avoided_that_b_hit": "misattribution"}), th)
+    v, _, _ = _decide_frozen(_m(1, 1), _w(M7_waste={"waste_class_a_avoided_that_b_hit": "misattribution"}), th)
     check("a documented waste class A avoided earns its keep", v == "prompt_earns_its_keep", v)
 
     print("[self-test] guards refuse a verdict rather than issuing a wrong one")
-    v, _, bl = decide(_m(9, 0), _w(blinding_held=False), th)
+    v, _, bl = _decide_frozen(_m(9, 0), _w(blinding_held=False), th)
     check("blinding failure blocks even a landslide", v == "inconclusive" and bl, v)
     w = _w(); w["run_record"]["limit_truncated_an_arm"] = True
-    v, _, bl = decide(_m(9, 0), w, th)
+    v, _, bl = _decide_frozen(_m(9, 0), w, th)
     check("a truncated arm blocks", v == "inconclusive" and bl, v)
     w = _w(); w["run_record"]["cross_arm_read_occurred"] = True
-    v, _, bl = decide(_m(9, 0), w, th)
+    v, _, bl = _decide_frozen(_m(9, 0), w, th)
     check("a cross-arm read blocks", v == "inconclusive" and bl, v)
     w = _w(); w["M6_overlap"]["arm_b_only"] = None
-    v, _, bl = decide(_m(9, 0), w, th)
+    v, _, bl = _decide_frozen(_m(9, 0), w, th)
     check("an unfilled judged metric blocks (never guessed)", v == "inconclusive" and bl, v)
 
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
@@ -778,6 +1038,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd")
     m = sub.add_parser("measure")
     m.add_argument("--engagement", required=True)
+    m.add_argument("--case-id"); m.add_argument("--run-id")
     m.add_argument("--worksheet"); m.add_argument("--force", action="store_true")
     m.set_defaults(fn=cmd_measure)
     v = sub.add_parser("verdict")

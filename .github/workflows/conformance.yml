@@ -19,11 +19,12 @@ jobs:
           python-version: "3.x"
       - name: Install pinned conformance dependencies
         run: python3 -m pip install --disable-pip-version-check -r requirements-ci.txt
-      - name: Offline engineering guidance, admission, accounting and preparation packets
+      - name: Offline engineering guidance, admission, accounting, inspection and preparation packets
         run: |
           python3 tools/check-conformance.py --engineering-guidance
           python3 tools/engineering-guidance-test.py
           python3 tools/study-report-test.py
+          python3 tools/dossier-inspector-test.py
           python3 tools/q02-admission-self-test.py
           python3 tools/q02_compare.py --self-test
           python3 tools/recovery-packet-test.py

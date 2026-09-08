@@ -276,3 +276,81 @@ are limited to changed wiki local links/heading anchors, current-status consiste
 Bounded inline `python3` verification passed all 67 local links/heading anchors across the four
 changed wiki pages and confirmed consistent current review/incomplete status. `git diff --check`
 passed. Executable inputs are unchanged, so the existing integrated acceptance evidence is retained.
+
+
+## 2026-09-08 — #110 read-only inspector and bounded integration
+
+Correction to the September 5 handoff: the two automatic possible-cybersecurity-risk errors were
+execution observations, not a demonstrated finding that this offline engineering task was prohibited.
+The parent had converted those observations into a blanket stop. After the user's September 8
+clarification and reassessment of the actual ticket/WIP, scoped work resumed through normal tools.
+No safety bypass or alternate execution route was used. The current operations and checks below
+succeeded; the old errors remain part of the dated record, including the narrower attempt's reported
+13 checks and its unfinished validation/docs/commit at that time.
+
+The same `gpt-6-astra / Low` implementation worker continued Ponytail Full and `/implement`, without
+nested delegation, from HEAD `5267ced0747cd33c9441db73e90b7258a0ebc46b` (tree
+`eb9cce5a2af30395efa79346125b94a6e062281d`). The two preserved WIP files were reused. The completed
+[inspector](../dossier-inspector.md) invokes existing bound reads, read-only reduction, reference index
+and pure projections, buffers the result until final admission checks succeed, and prints JSON only.
+No shared reducer, index, lock, view, schema, operational gate or filing-lifecycle code changed.
+
+The final source bytes checked were `tools/inspect-dossier.py` SHA-256
+`b319471764bdd20b395f60c03bd045a132d695792bbf419a0eab8fcdc77d7bd3` and
+`tools/dossier-inspector-test.py` SHA-256
+`77eb5ffc72b0d1abfc0988e356ca3b7d931f798de16ca1b46365680eb7fac802`, on that baseline plus this slice.
+CI adds the public inspector test to the existing scoped Python step; no job/service/framework or
+dependency was added. The command documentation maps all ten acceptance criteria to output and checks.
+
+The resumed inspection found and fixed a concrete optional-input defect: duplicate-key JSON raises
+`RecordError`, which the WIP's separate-supplement catch did not handle. It now marks that supplement
+invalid beside admitted base evidence; indexed duplicate/malformed/colliding records still reject
+base admission. Invalid duplicate-key snapshots remain failed projections. Supplied stale task labels
+and loading stay visibly attributed/stale; exact current, exact older and mismatched external revision
+bindings remain distinct. Source environment, outstanding citation-review reasons/subjects and report
+supersession events are explicit. No inference from external spelling or a supplied decision changes
+claim state.
+
+Static workshop fixtures use plain disposable files and a preexisting plain lock, with no lifecycle,
+initializer, publisher or writing renderer call. The additional outstanding-review fixture initially
+failed `review_material_not_in_input_set`, then `review_freshness_not_bound`; its declared inputs and
+prior review-run binding were corrected to satisfy the unchanged reducer. Focused development checks
+then passed 21 and 23 public invocations. The final acceptance run below occurred once after the final
+executable edit. Every public invocation compares source bytes and file/directory inventory and supplied
+input bytes; final identity rejection prints no valid summary. The original three presentation omissions
+are recovered in the new output, while existing generated-view bytes remain compatible.
+
+Using the existing interpreter `/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python`
+(denoted `$PY` below), without installing dependencies, every final command exited 0:
+
+- `$PY tools/dossier-inspector-test.py`: static admission and **23 public-command checks passed**;
+  no source mutation.
+- `$PY tools/check-conformance.py --engineering-guidance`: **12 checks, 0 failing**.
+- `$PY tools/engineering-guidance-test.py`: public navigation, mirror, history and draft/frozen pin
+  controls passed.
+- `$PY tools/study-report-test.py`: **50 synthetic public-command checks passed**.
+- `$PY tools/q02-admission-self-test.py`: **99 public controls passed**.
+- `$PY tools/q02_compare.py --self-test`: frozen checkpoint/rule self-tests passed.
+- `$PY tools/recovery-packet-test.py`: schedule/access/trace controls and **8 public-command checks
+  passed**; candidate execution UNSTARTED.
+- `$PY tools/communication-packet-test.py`: **7 bundle controls and 9 public-command checks passed**;
+  agent experiment UNEXECUTED.
+- `$PY tools/overlay_pins.py check --json`: **0 failures, 0 stale**, readiness `draft_not_authorized`,
+  `execution_authorized: false`.
+- `$PY docs/research/harness-engineering-2026-09-05/checks/reconstruction_probe.py`: original six-view
+  baseline bytes matched; all three omitted-fact variants remained byte-identical; the visible-revision
+  positive control changed only progress. Temporary outputs were removed. This is a pure historical
+  renderer probe, not an operational replay or historical finding recomputation.
+- `$PY -m py_compile tools/inspect-dossier.py tools/dossier-inspector-test.py`: passed.
+
+No default conformance command, whole CI, operational suite, real engagement, provider/target/model/paid
+call, historical finding recomputation or remote mutation ran. These are synthetic metadata and packet
+accounting checks, not operator-time savings, verified outside outcomes or proven cognitive independence.
+The earlier five-slice independent review retains its exact scope. New #110/integration independent
+Standards and Spec review is pending, so final #106 acceptance is still incomplete. Both experiment
+packets remain UNEXECUTED; effective configuration, actual-run budget, isolation/authorization and later
+repeated evidence remain prerequisites for execution or adoption as applicable.
+
+Final bounded documentation verification passed 74 local links/heading anchors across the command
+documentation and four wiki pages, and confirmed consistent current review-pending status.
+`git diff --check` passed. No executable files changed after the final acceptance run.

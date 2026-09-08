@@ -11,6 +11,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 | Which Q02 inputs can receive a new verdict? | [Q02 admission contract](../q02-admission.md) |
 | Where are the concrete recovery cases and protocol? | [Recovery packet v1](../experiments/recovery-v1/README.md) |
 | Where are the communication sources, bundles and grading rules? | [Communication packet v1](../experiments/communication-v1/README.md) |
+| How do I inspect existing evidence without changing it? | [Dossier inspector](../dossier-inspector.md) |
 | How do I prepare and inspect an offline study account? | [Study report contract](../study-report.md) |
 | What should the implementation task do? | [Implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) |
 | What changed in this wiki? | [Chronological log](log.md) |
@@ -18,7 +19,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 
 ## Current delivery state
 
-Implementation is in progress as of 2026-09-05 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107–109 have local guidance/admission/accounting and public-command verification evidence in [offline engineering evidence](engineering-evidence.md#verification-and-open-work); #111 has a [recovery packet and local checks](comparison-experiments.md#implemented-recovery-packet), and #112 has a [communication packet and local checks](comparison-experiments.md#implemented-communication-packet). #110 remains blocked after two automatic possible-cybersecurity-risk blocks, with two preserved uncommitted WIP files and no completed reconstruction slice. The integrated safe acceptance set passed for the five committed slices; both independent review axes are complete and #106 is incomplete; recovery and communication candidate experiments remain UNEXECUTED. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
+All six slices have local implementation and bounded acceptance evidence as of 2026-09-08 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107–109 and #111–112 previously completed both independent review axes; their exact reviewed boundary remains in the [evidence page](engineering-evidence.md#final-handoff). The [read-only dossier inspector](../dossier-inspector.md) now implements #110 with 23 public-command checks and integration into the existing scoped CI step. Independent review of the new #110/integration diff is pending, so final #106 acceptance remains incomplete. The September 5 automatic execution errors are preserved as observations, not a finding that this offline task was prohibited; the resumed September 8 scoped work succeeded through normal tools. Recovery and communication candidate experiments remain UNEXECUTED. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
 
 This status is a dated observation, not a live tracker. Recheck the source commit and issue state when execution begins. Future completed slices must update the topic page and append to the log with their test evidence.
 

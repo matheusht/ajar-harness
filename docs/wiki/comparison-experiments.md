@@ -31,7 +31,7 @@ preserved. These are packet/account checks, not executed isolation or candidate 
 Required contracts, whole-study ceilings including coordination/repair, separate development/maintenance
 allocation, optional rollover, fixed reference grading and run-readiness/stop criteria are recorded before
 outcomes. Effective configuration and run authorization remain absent; candidate execution is **UNSTARTED**.
-Source references and invented expectations earn zero candidate execution passes. #110 now has a separate [read-only inspector implementation](../dossier-inspector.md) and local checks; its independent review remains pending.
+Source references and invented expectations earn zero candidate execution passes. #110 now has a separate [read-only inspector implementation](../dossier-inspector.md) and local checks; both independent review axes are complete.
 
 ## Communication: test discovery against capable handoffs
 
@@ -75,7 +75,7 @@ Effective run configuration and authorization remain absent. No board/adapter/ru
 no agent experiment ran. The gate remains a validated notice explaining improvement over capable
 direct handoff at the same total budget without new correctness/provenance/isolation failure. Equal
 complete results with equal or lower effort favor the simpler baseline; adoption requires later
-predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice independent reviews are complete; review of #110/integration remains pending, so final #106 acceptance is incomplete. Both candidate experiments are **UNEXECUTED**.
+predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice and new #110/integration independent reviews are complete; all six scoped local slices are accepted. This work performed no issue closure or remote mutation; remote issue state was not re-queried. Both candidate experiments are **UNEXECUTED**.
 
 ## What earns the next step
 

@@ -34,9 +34,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_ENGAGEMENT_ENV = "HARNESS_ACTIVE_ENGAGEMENT"
 EXPECTED_LEDGER_HASH_ENV = "HARNESS_EXPECTED_LEDGER_HASH"
 EXPECTED_SOURCE_HASHES_ENV = "HARNESS_EXPECTED_SOURCE_HASHES"
-ALLOW_IN_REPO_ENV = "HARNESS_ALLOW_IN_REPO_ENGAGEMENT"
-ALLOW_IN_REPO_VALUES = frozenset({"1", "true", "yes"})
-RELEASE_LEDGER = ROOT / ".stop-hook-releases.jsonl"
 BLOCK_BUDGET = 6
 MAX_STDIN_BYTES = 1024 * 1024
 SESSION_NAMESPACE = b"llm-redteam-harness:session-end:v1:"
@@ -50,10 +47,6 @@ SESSION_AUDIT_STATE_KEYS = frozenset({
 
 class ReleaseTurn(Exception):
     """Internal control flow for an intentional fail-open release."""
-
-    def __init__(self, code: str = "unspecified") -> None:
-        super().__init__(code)
-        self.code = code
 
 
 @dataclass(frozen=True)
@@ -91,20 +84,6 @@ class EndDecision:
 
 def emit(value: dict[str, Any]) -> None:
     sys.stdout.buffer.write(canonical_json_bytes(value))
-
-
-def record_release(code: str) -> None:
-    """Append one reason code so an inert hook is distinguishable from a satisfied one.
-
-    Records the code and the time only. Never a target path, reducer state, or any other
-    Plane-3 material. A failure to record must not itself change the Stop decision.
-    """
-
-    try:
-        with open(RELEASE_LEDGER, "ab") as handle:
-            handle.write(canonical_json_bytes({"code": code, "recorded_at": utc_now()}))
-    except OSError:
-        pass
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -157,28 +136,23 @@ def parse_hook_input() -> HookInput:
 def active_engagement_path() -> Path:
     raw = os.environ.get(ACTIVE_ENGAGEMENT_ENV)
     if not raw:
-        raise ReleaseTurn("engagement_env_unset")
+        raise ReleaseTurn
     candidate = Path(raw)
     if not candidate.is_absolute() or Path(os.path.normpath(raw)) != candidate:
-        raise ReleaseTurn("engagement_path_unresolvable")
+        raise ReleaseTurn
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError):
-        raise ReleaseTurn("engagement_path_unresolvable") from None
-    # A campaign holds one engagement per asset, because the kernel holds one coverage state
-    # per engagement. One level of nesting only: engagements/<id> or engagements/<campaign>/<id>.
-    if "engagements" not in [parent.name for parent in resolved.parents[:2]]:
-        raise ReleaseTurn("engagement_path_not_under_engagements")
+        raise ReleaseTurn from None
+    if resolved.parent.name != "engagements":
+        raise ReleaseTurn
     try:
         resolved.relative_to(ROOT.resolve(strict=True))
     except ValueError:
         pass
     else:
-        # Plane 3 belongs to a target repository, never this portable harness checkout. The
-        # operator may opt in explicitly for an in-tree engagement; the default is unchanged.
-        if os.environ.get(ALLOW_IN_REPO_ENV, "").strip().lower() not in ALLOW_IN_REPO_VALUES:
-            raise ReleaseTurn("engagement_inside_portable_checkout")
-        record_release("in_repo_engagement_allowed_by_operator")
+        # Plane 3 belongs to a target repository, never this portable harness checkout.
+        raise ReleaseTurn
     return resolved
 
 
@@ -520,14 +494,9 @@ def main() -> int:
         return 0
     try:
         result = run_hook()
-    except ReleaseTurn as release:
-        record_release(release.code)
-        result = {}
-    except Exception as error:
+    except Exception:
         # Claude Code releases Stop on exit-0 non-blocking JSON. Never emit diagnostics containing
         # target paths, reducer details, raw stdin, or other Plane-3 material from this boundary.
-        # The class name alone is safe to record and is what tells an inert hook from a clean one.
-        record_release(f"error:{type(error).__name__}")
         result = {}
     emit(result)
     return 0

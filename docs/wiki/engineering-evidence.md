@@ -117,7 +117,7 @@ was prohibited. Current scoped work succeeded through normal tools after the use
 - **Scoped local acceptance complete:** all six slices have integrated tests and independent reviews
   done. The executed source hashes in the September 8 log belong to source commit
   `a0f6a480028b630fbb85dd1fbfa448dca28d8767`; this final handoff changes documentation only.
-  This work performed no push, PR, issue closure or other remote mutation; remote issue state was not re-queried.
+  The prior local acceptance involved no remote mutation. PR publication was separately requested on September 10; no issue closure or merge is part of this delivery.
 - **Both candidate experiments remain UNEXECUTED:** effective configuration, actual-run budgets,
   grading isolation and run authorization must be established before execution; adoption requires
   later repeated evidence. Prepared packets and passing account checks establish no candidate benefit.

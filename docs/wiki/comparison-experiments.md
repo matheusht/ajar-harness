@@ -75,7 +75,7 @@ Effective run configuration and authorization remain absent. No board/adapter/ru
 no agent experiment ran. The gate remains a validated notice explaining improvement over capable
 direct handoff at the same total budget without new correctness/provenance/isolation failure. Equal
 complete results with equal or lower effort favor the simpler baseline; adoption requires later
-predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice and new #110/integration independent reviews are complete; all six scoped local slices are accepted. This work performed no issue closure or remote mutation; remote issue state was not re-queried. Both candidate experiments are **UNEXECUTED**.
+predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice and new #110/integration independent reviews are complete; all six scoped local slices are accepted. No issue closure or merge is part of this delivery; PR publication was separately requested on September 10. Both candidate experiments are **UNEXECUTED**.
 
 ## What earns the next step
 

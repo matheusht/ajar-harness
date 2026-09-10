@@ -381,3 +381,30 @@ four existing wiki pages, so no acceptance suites were rerun and no code, tests 
 
 Bounded verification passed 72 local links/heading anchors and current acceptance-status consistency
 across the four changed wiki pages. `git diff --check` passed. Remote issue state was not rechecked.
+
+
+## 2026-09-10 — PR scope preparation
+
+The user separately authorized pushing the named implementation branch and opening a PR against main.
+Fetched origin/main is `fd40756c304c80acd14f541f5447e229a7b510c3`, already the merge base/ancestor of
+`feb6604c1649a8690f4696aab8bf521aa3da4386`; no main integration was required. The actual remote-main
+diff included inherited pre-implementation stop-hook changes from local history. Only
+`tools/claude-stop-hook.py` and its test were restored to origin/main to exclude that unrelated
+operational behavior from the PR. Existing history and all approved engineering research, publication
+records, six implementation slices, synthetic packets and wiki evidence remain. No engagement path
+is present in the final changed-file set.
+
+`git diff a0f6a480028b630fbb85dd1fbfa448dca28d8767 --` over the scoped executable files/tests,
+shared record readers, schemas, requirements and both packet directories was empty. The source-pinned
+September 8 integrated acceptance evidence therefore remains applicable; those suites were not rerun.
+The existing interpreter ran `tools/check-conformance.py --engineering-guidance`: 12 checks, 0 failing,
+including mirror/current draft pins. `git diff origin/main -- tools/claude-stop-hook.py
+tools/claude-stop-hook-test.py` was empty after the scope correction. The operational stop-hook suite
+and default/full conformance were not run.
+
+The approved research retains one intentional trailing-whitespace line in the canonical captured
+`q02-whitespace-waste-description.stdout` probe. Whole-PR `git diff --check` reports that historical
+input/output evidence; it was not rewritten to conceal its original bytes. New preparation changes
+pass whitespace checks. No other inherited changed path was identified outside the approved
+research/guidance/implementation deliverable. No issue closure or merge is authorized by publication;
+the two requested new review passes are separate from the prior local acceptance record.

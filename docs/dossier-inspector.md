@@ -22,8 +22,9 @@ returning anything to stdout. Missing scope/lock, quarantined evidence, malforme
 and identity changes retain the existing rejection behavior. Separately supplied inputs must be
 outside the admitted source and pass the existing safe-offline reader.
 
-The result includes the inspector's source-byte hash, named source path and inode/device, scope and
-ledger hashes, all inspected regular-file digests, the last event, event-derived current state,
+The top-level `inspector_sha256` hashes the inspector Python file itself. The `source` object names
+the inspected dossier path and inode/device, scope and ledger hashes, and individual regular-file
+digests in `file_digests`. The result also includes the last event, event-derived current state,
 active source environment, and record pointers with types, paths, line numbers and digests.
 JSONL record hashes and whole-file hashes remain distinct. It retains immutable claim revisions,
 change reasons/events, typed review records, rationale and declared independence. Resolved review

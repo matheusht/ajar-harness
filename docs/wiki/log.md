@@ -408,3 +408,14 @@ input/output evidence; it was not rewritten to conceal its original bytes. New p
 pass whitespace checks. No other inherited changed path was identified outside the approved
 research/guidance/implementation deliverable. No issue closure or merge is authorized by publication;
 the two requested new review passes are separate from the prior local acceptance record.
+
+
+## 2026-09-10 — clarify inspector code digest in PR review
+
+At PR source HEAD `84c2ecec70cd88386c6b34080747af53cdfb2e90`, the phrase “inspector's source-byte
+hash” was read as an aggregate dossier hash. The existing top-level `inspector_sha256` already hashes
+the inspector Python file; `source.file_digests`, scope/ledger hashes and directory identity describe
+the dossier. The #110/#106 contract requires source identity/digests, not a new aggregate snapshot
+contract. Command documentation now names these existing fields explicitly. No executable or test
+changed, and prior source-pinned acceptance remains applicable; no suite was rerun for this wording
+clarification. Local documentation links/anchors and whitespace were checked before commit.

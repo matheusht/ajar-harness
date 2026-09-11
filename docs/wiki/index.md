@@ -14,6 +14,7 @@ A maintained synthesis of engineering decisions, their evidence and the question
 | How do I inspect existing evidence without changing it? | [Dossier inspector](../dossier-inspector.md) |
 | How do I prepare and inspect an offline study account? | [Study report contract](../study-report.md) |
 | What should the implementation task do? | [Implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) |
+| Which external evaluation ideas and benign cases are useful for future work? | [Future evaluation applications](future-evaluations.md) |
 | What changed in this wiki? | [Chronological log](log.md) |
 | How should an agent maintain these pages? | [Maintenance instructions](AGENTS.md) |
 

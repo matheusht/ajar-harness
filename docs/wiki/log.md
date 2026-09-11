@@ -419,3 +419,23 @@ the dossier. The #110/#106 contract requires source identity/digests, not a new 
 contract. Command documentation now names these existing fields explicitly. No executable or test
 changed, and prior source-pinned acceptance remains applicable; no suite was rerun for this wording
 clarification. Local documentation links/anchors and whitespace were checked before commit.
+
+
+## 2026-09-11 — future evaluation applications and XBOW comparison
+
+Added [future evaluation applications](future-evaluations.md) and linked it from the index at the user's
+request to preserve useful cases for later work. The page synthesizes the prior Gill/MCP and Madhu
+series comparison, plus the September 11 reading of XBOW's guardrails article/whitepaper and the
+user-supplied X excerpt. Mutable external sources and the pinned harness-kit revision are identified
+on the page. Local contracts were checked at `6fd04bfbc128b95d201b38f82dc467e7c05fdcfb`.
+
+The backlog names benign manipulated conditions, expected observations, metrics and existing hooks.
+It separates evaluation jobs, independent grading, evidence quality and whole-trajectory economics;
+reuses the prepared recovery/communication packets; and records the documented gap between our
+containment and XBOW's described egress/action controls without claiming comparative efficacy.
+The persistence critique and all additional experiments/controls remain recommendations, not adopted
+doctrine or implementation. Both prepared candidate experiments remain UNEXECUTED.
+
+Only this topic, index and append-only log changed. Local links/anchors, status/conclusion wording
+and whitespace were checked; no runtime/test/packet/source records changed, no experiment ran and
+no acceptance suite was rerun. No remote mutation is part of this documentation slice.

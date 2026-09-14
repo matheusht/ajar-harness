@@ -60,6 +60,10 @@ not permission to execute a target or to bypass a pending queue item.
    Retain independent verification and named human gates. For handoff, link immutable evidence and
    the inspector/queue results; add only unique intent, unavailable observations or decisions.
 
+For fallback generation, copy only the fenced goal body below and substitute the verified absolute
+`[HARNESS_CHECKOUT]`. Keep this shared procedure in the harness; do not copy or rewrite it into the
+target goal. Its local runner-document link resolves here.
+
 ```markdown
 # Goal — [ENGAGEMENT_ID]
 

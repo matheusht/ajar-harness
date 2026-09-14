@@ -90,7 +90,7 @@ current root gates.
   participates / independent-second-reviewer-then-synchronise rule for direction-changing claims,
   re-attack-the-prior-kill-conditions framing, and never-audited-surface-first routing. Modeled on the
   Crown engagement's revisit prompt.
-- Long-form structured fallback: `references/goal-template.md` for engagements neither template fits.
+- Long-form structured fallback: `references/goal-template.md` for engagements neither template fits. Copy only its fenced `markdown` goal body, then substitute the verified `[HARNESS_CHECKOUT]` path. The shared entry/resume procedure stays in the harness reference; do not copy or rewrite it into the target goal.
 
 The template block must, once filled:
 

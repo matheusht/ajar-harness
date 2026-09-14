@@ -1,12 +1,15 @@
 # Goal prompt — LONG-RUN single-asset deep hunt (standard format)
 
-> **This is the standard goal-prompt format for a LONG-RUN (6+ hour, multi-round, one-asset) deep hunt.**
+Follow the harness [entry/resume procedure]([HARNESS_CHECKOUT]/skills/source-engagement-bootstrap/references/goal-template.md#entry-and-resume-procedure) for signed-scope/init ordering, inspector reconstruction, list/next/gate queue reads and supported runner readiness.
+
+
+> **This is the standard goal-prompt format for a LONG-RUN (budget-bounded, multi-round, one-asset) deep hunt.**
 > Copy it into `engagements/<id>/goal-prompts/<id>-goal-prompt-longrun-<asset>.md` and fill every `<...>`
 > with verified facts. The section skeleton is the constant; the LLM adapts depth to the domain.
 >
 > **Pick the right template.** `goal-prompt-START.md` opens an engagement across many surfaces.
 > `goal-prompt-REVISIT-ESCALATION.md` re-runs a closed engagement for escalation. **This one** points a
-> multi-round agent portfolio at ONE asset and runs until a terminal verdict — use it when the asset is
+> bounded sequence of independent assignments at ONE asset and runs until a terminal verdict — use it when the asset is
 > big enough to hold several independent mechanism families, and the operator will not be available to
 > steer for hours.
 >
@@ -37,31 +40,24 @@ for us. It is not for a vendor blog.
 
 We keep the persistence and drop the bias with three moves.
 
-**1. Symmetric exit obligation — replaces the asserted bug.** Both exits cost the same, so neither is
-the lazy one:
-
-> Exactly one of two statements about this surface is true. Either a reachable flaw exists on it, or
-> every mechanism family on it is bounded by a control you can name and demonstrate. Proving either takes
-> the same work. You may not return until you have proven one. **"I did not find anything" proves
-> neither and is not a terminal state.**
-
-That exhaustion result carries a payload (Part 12). A model cannot reach it by getting tired.
+**1. Evidence-bounded exits.** Attempt to refute as well as support each hypothesis. Return the
+recorded bounded disposition: confirmed only with its required proof, refuted/held with the control
+that held, reviewed exhaustion only for the enumerated corpus, or blocked with the missing condition.
+Unknown coverage is not proof that a flaw exists or that the entire asset is safe.
 
 **2. Bias placement by lane — the prior is allowed where it is cheap.**
 
 | Lane | Optimistic prior | Cost if the prior is wrong |
 |---|---|---|
-| Hunter | **allowed and encouraged** — "assume the developer made a mistake here; find it" | wasted compute, extra candidates |
+| Hunter | may allocate bounded search effort; never assume a flaw exists | wasted compute, extra candidates |
 | Refuter / oracle / adjudicator | **forbidden — never told a flaw is expected** | a false report to a vendor |
 
 A hunter cannot emit `confirmed` (`CLAUDE.md` §2), so its bias is contained. The orchestrator's standing
 duty is to stop the hunter's prior from leaking into a refuter's brief. A refuter brief that says
 "confirm this bug" has already failed.
 
-**3. Effort framing, never verdict framing.** *"It's possible; if you give up you're not trying hard
-enough"* and *"be more stubborn than the developer was careful"* are correct instructions about **how
-long to work** and false instructions about **what to conclude**. Use them in Part 11 only, scoped to
-effort. Never let them reach Part 12.
+**3. Evidence-grounded persistence.** Set explicit budgets and decisive falsifiers. New evidence may
+justify more work; effort spent and optimistic priors do not increase confidence.
 
 ---
 
@@ -70,15 +66,14 @@ effort. Never let them reach Part 12.
 GOAL: long-run white-box exhaustion of **<ASSET>** — <ONE-LINE DESCRIPTION OF WHAT IT DOES AND WHO
 TALKS TO IT>. Program: <PROGRAM NAME / PLATFORM / reward basis; or "no formal program — <DISCLOSURE
 REALITY>">. Audit baseline pinned at <TAG / COMMIT / ARTIFACT SHA256>, mirrored at <LOCAL_PATH>
-(identity recorded in `progress.md`).
+(identity recorded in authoritative source/environment records).
 
 <STATE THE SURFACE. DO NOT STATE THAT A FLAW EXISTS.> The attacker-reachable surface of this asset is
 <SURFACE: entry points, parsers, routes, RPCs, message types, config loaders>. The impact classes that
 would matter are <IMPACT CLASSES, ranked>.
 
-Exactly one of two statements about that surface is true: a reachable flaw exists on it, or every
-mechanism family on it is bounded by a control you can name and demonstrate. Both cost the same to
-prove. Return only when one is proven. **"I did not find anything" is not a terminal state.**
+Test each hypothesis against source and controls. A supported finding, refuted/held route, reviewed
+bounded exhaustion or explicit blocker are valid dispositions; unknown coverage remains unknown.
 
 Work from first principles by reading the code. **Do not diff against a patched version, read
 changelogs, read release notes, read git history, or search the web for known issues in this asset** —
@@ -93,7 +88,7 @@ a link inside a dependency, a runtime, or the language itself.
 
 Binding: `CLAUDE.md`, `scope.md` (signed <DATE> — <ZONE-2 LEVEL>), `program-policy.md`,
 `engine/{multi-round-orchestration,whitebox-analysis,persistence,regrade,pocinator,chainability,escalation}.md`.
-Read `recon-signals.md` and `progress.md` FIRST.
+Use the admitted inspector/queue handoff and read unique `recon-signals.md` context FIRST.
 
 ---
 
@@ -112,10 +107,9 @@ evidence gathered against it is quarantined, not used, **even when it is the run
 Zone-2: <CEILING FROM scope.md>. Every state-changing proof runs on <THE DISPOSABLE OWNED LOCAL
 ENVIRONMENT: local instance, private fork, loopback sim>.
 
-**Escalate to maximum impact without asking.** `scope.md` carries a standing impact-maximization
-mandate. Push every confirmed bug to its maximal demonstrated impact inside the authorized surface,
-and compose confirmed primitives freely — chaining is escalation, not a new act. Do not ask for what
-the mandate already grants.
+**Escalate only within the exact authorized surface.** Before creating any Zone-2 PoC artifact,
+obtain explicit per-artifact human confirmation under root policy, including benign local artifacts.
+Category or standing authorization does not replace that confirmation.
 
 **Stop for a fresh human confirm when an act trips one of five wires.** These are properties of the
 act, not of its severity:
@@ -200,15 +194,14 @@ cards, and log a pattern-candidate.
 Run `engine/multi-round-orchestration.md`. Maintain its three live artifacts: the **approach-family
 registry**, the **primitive registry**, and the **round ledger**.
 
-Concurrency: up to **<N>** agents at once (source audit parallelises; a live or browser target
-serialises toward 1 per `CLAUDE.md`). Never exceed the runtime cap.
+Concurrency defaults to one bounded worker. Additional parallel assignments require explicit
+authorization and must fit the runtime cap; use independent sequential review sessions otherwise.
 
-- **Round 0 is blind.** Independent hunters, each seeded a distinct family. **Withhold what you already
+- **Initial review is blind.** Use distinct sequential sessions by default; parallel hunters require explicit authorization. Seed each a distinct family. **Withhold what you already
   suspect.** Telling every agent the favoured hypothesis buys you that hypothesis's blind spots.
 - Group agents by the **research idea**, not by wording. Two agents phrasing the same mechanism
   differently are one family.
-- No family takes more than about half a round's concurrency. Every round spends at least one agent on
-  an `untouched` family until all are touched.
+- Allocate the next bounded assignment by material evidence and coverage gaps, including untouched families; do not create a fleet to satisfy a quota.
 - Every agent gets a bounded brief: family, source slice, attacker boundary, required concrete output,
   excluded claims, budget. Require source→sink→path triples with `file:line`, byte-level input
   constructions, or **the exact mechanism that blocks the route**. Reject status reports and vague
@@ -221,7 +214,7 @@ serialises toward 1 per `CLAUDE.md`). Never exceed the runtime cap.
   only at the confirm stage. The refuter is briefed to **REFUTE**, and is never told a flaw is expected
   (Part 0, move 2).
 - **Kill-pair for framing-ambiguous candidates only** (`multi-round-orchestration.md` §4a): one reviewer
-  assigned to kill, one assigned to establish, run concurrently and blind to each other; the
+  assigned to kill, one assigned to establish, run in separate blind sessions within authorized concurrency; the
   orchestrator adjudicates rather than averaging. Fire it when the verdict turns on *framing* ("is this
   a bug or the function's purpose?"), when two lanes disagree, or when a candidate survives only because
   nobody attacked it. Do not fire it for anything one measurement settles.
@@ -249,9 +242,7 @@ Rules that do not bend:
 - **Never one-pass kill or bless.** Multiple genuinely independent keep-biased grading rounds, each
   adding **new** signal. Log every kill with its reason. The grading agents manage the pipeline
   themselves and do not stop until every enumerated lead has a disposition.
-- **The job is filtering, not finding.** Sinks are cheap; the work is filtering thousands of fake ones
-  for the real one. Understand the **whole** exploit before verifying — know what is real and what is
-  fake *before* you run it, and give a one-sentence "why it's real" per survivor.
+- **The job is filtering, not finding.** A sink is a hypothesis. Assess its complete path and decisive controls; a held control or refutation is a valid result. State the evidence supporting each surviving claim before any authorized verification.
 
 ---
 
@@ -298,7 +289,7 @@ Append-only, updated at every synthesis point, never rewritten to match a later 
 - `hypotheses.md` — every hypothesis with its disposition
 - `cascades.md` — see below
 - `attempts.jsonl` — an `attempt` for every result; a `finding` only on oracle-`confirmed`
-- `progress.md` — pinned identities, environment, blockers recorded verbatim
+- Canonical source/environment records — pinned identities and blockers; generated progress is derived
 - `cleanup.md` — every artifact created, and its disposition
 
 **CASCADING** (second-order discovery; every discovery is a branch, not an endpoint). When a finding or
@@ -320,11 +311,9 @@ not terminal. It will get messy; the ledger is what keeps the mess productive.
 
 ## Part 11 — Persistence contract (effort, never verdict)
 
-Target at least **<DURATION: 6+ hours>** of active research. Do not sleep to consume time. Keep reading
-source, constructing inputs, measuring controls, rotating agents, and opening untouched families.
-
-**It is possible; if you give up you are not trying hard enough. Be more stubborn than the developer was
-careful.** That applies to **effort**. It does not license a conclusion, and it never reaches Part 12.
+Use the explicit session, wall-time and cost budgets. Continue only evidence-grounded bounded work;
+record unavailable conditions and material falsifiers. No minimum elapsed time or code-size target
+is evidence of quality.
 
 Do not return merely because:
 
@@ -350,7 +339,7 @@ shapes do not make a finding.
 A safety or authorization gate may pause the current session, and a budget may end it, but neither
 completes the queue. Otherwise execute the next blocking item selected by the reducer.
 
-If a candidate survives early, do **not** stop. Spend the remaining time attacking it: disprove its
+If a candidate survives, complete the required verification within the authorized budget: challenge its
 reachability, attack its cap, measure its scaling, sweep for sibling instances, look for alternate
 constructions, replay it from a clean environment, and complete the regrade / pocinator / chainability /
 novelty / cleanup passes.
@@ -406,13 +395,12 @@ input that skips the real parser, or a differential no real system relies on.
 
 MODELS: <PLANNING MODEL, top tier> = orchestration, triage, verdicts, gates, cascade seeding,
 cross-agent reconciliation. <HUNTER MODEL, mid tier> = one bounded brief each. <EXECUTION MODEL> = the
-long-horizon grunt work — PoC harnesses, fuzzers, instrumentation, private-net sims, tens of thousands
-of lines where the work genuinely needs it. **Do not invert these.**
+bounded implementation and verification with the smallest adequate artifact. **Do not invert these.**
 
 FIRST MOVE:
 
-1. Pin and record: clone <ASSET> at <TAG>, remove `.git` if the no-diff rule is in force, record the
-   identity and any artifact sha256 in `progress.md`; create `third_party/`.
+1. Complete the shared entry/resume procedure and reuse the verified pinned <LOCAL_PATH>. Preserve
+   source identity metadata; enforce blind source access without deleting repository history.
 2. Environment preflight: <TOOLCHAIN>. Build the pinned source, then the targeted test subset. Record
    any blocker verbatim.
 3. Recon on the mirror: complete the activation-signals table in `recon-signals.md` —
@@ -421,4 +409,4 @@ FIRST MOVE:
 4. Seed the family registry from Part 5 plus whatever recon surfaced. Mark every family `unexplored`.
 5. Calibrate the oracle against <FIXTURES / SOURCE / THE SEVERITY-PRECEDENT CORPUS>, and run a
    random-garbage negative control in each namespace you will use it in.
-6. Launch Round 0 blind, one distinct family per hunter, withholding any suspicion you already hold.
+6. Select one bounded blind assignment from the computed queue, withholding prior conclusions.

@@ -1,5 +1,8 @@
 # Goal prompt — REVISIT / REDO / RE-RUN an engagement (standard format)
 
+Follow the harness [entry/resume procedure]([HARNESS_CHECKOUT]/skills/source-engagement-bootstrap/references/goal-template.md#entry-and-resume-procedure) for signed-scope/init ordering, inspector reconstruction, list/next/gate queue reads and supported runner readiness.
+
+
 > **This is the standard goal-prompt format for REVISITING / REDOING / RE-RUNNING an already-closed
 > engagement when the operator wants escalation vectors, exhaustion checks, or a fresh pass** ("was it
 > exhausted?", "find the critical escalation, but no reward-hacking", "the report was rejected / judged
@@ -17,7 +20,7 @@ findings are STARTING PRIORS, not re-hunt targets (re-derive each from real sour
 fresh-context, never inherit the draft's conclusions). The prior independent review
 (<REVIEW_FILE>) and the escalation ledger (<LEDGER_FILE>, CLOSED <N>/<N> lanes) are the binding prior
 state. Audit baseline = the LIVE DEPLOYED / PINNED source (mainnet block snapshots or exact commit — see
-progress.md for the frozen block / source freeze <SHA256>). <RPCS/TOOLING: endpoints, toolchain, the
+the admitted source/environment records for the frozen block / source freeze <SHA256>). <RPCS/TOOLING: endpoints, toolchain, the
 tooling gaps that blocked the prior pass — re-verify reachability, the blocked surface is the highest-
 value unexplored lane>. IN: every surface below; the operator will provide <SECRETS/CREDENTIALS for any
 API/web/testing> separately, and <API/WEB TESTING> is IN once they arrive.
@@ -44,8 +47,8 @@ Oracle-grade it. Log a pattern-candidate.
 PIPELINE: narrow->classify->triples->reachability->confirm->faithfulness-verify->chainability->Post
 (engine/whitebox-analysis.md; jump back freely). Grading agents manage the pipeline themselves and do
 not stop until every lead is exhausted and adjudicated. Full persistence mode (engine/persistence.md) —
-<DURATION: 6+ hours> MINIMUM, this is a MAXIMAL-effort re-run, not a review pass; a held vector is a
-WRONG TURN to revisit with fresh recon, never a dry verdict.
+explicit effort budgets and material new evidence control the re-run. Revisit a held vector when new
+evidence changes its bounded search; preserve refutation and independently reviewed exhaustion.
 
 CASCADING (second-order discovery — every discovery is a tree branch, not an endpoint): when a finding,
 escalation, or significant research discovery survives, INTERROGATE IT WITH TWO QUESTIONS. Q1: "how can
@@ -79,27 +82,12 @@ incident response destroys collateral / does nothing — a Medium-trap worth sha
 <UNAUDITABLE COMPONENT — unresolved-to-a-reachable-chain domain; is there an off-chain attack or a
 completion gap?>.
 
-OPERATING MODEL: filter 9,999 fakes for the 1 real, NOT find sinks. FLEET of hunters
-(one/sub: <DIVERSE LENS ROSTER — domain lenses + taint/sink, concurrency/TOCTOU, dependency-CVE-
-reachability, unicode/encoding, numeric/serialization, protocol/state, framework-internals,
-by-design-vs-gap, plus <DOMAIN> lenses>), keep-biased, multi-round (expect 3+ waves; each wave's
-findings seed the next wave's cascades; <8 or 16> rounds of agents as the orchestrator judges). NEVER
-one-pass kill OR bless: multiple genuinely independent keep-biased grading rounds, each adds NEW signal,
-log every kill. THE ORCHESTRATOR PARTICIPATES in review: never depend on a single subagent's word. If a
-subagent claims something that could SEVERELY change the engagement's direction (a new
-Critical/High, a broken cap, a new venue, a new exit path), spawn an INDEPENDENT second subagent to
-review that exact claim from fresh context, then SYNCHRONISE their results before the claim changes any
-verdict — no single claim moves the ledger without a second reviewer. Faithfulness pass = FRESH context;
-the PoC must exercise the REAL deployed/pinned artifact on a disposable fork/repro of the real chain
-(never a mock/reimplementation of the target — a PoC that passes against a hand-rolled copy is worth
-ZERO and is a reward-hack). Understand the WHOLE exploit, not the sink; give a one-sentence "why it's
-real" per survivor. MODELS: orchestrator (top) = planning, triage, verdicts, gates, cascade seeding,
-cross-subagent synchronisation; hunter fleet (mid) = one bounded brief each; <EXECUTION MODEL> =
-long-horizon grunt (PoC harnesses, fork sims, bytecode analysis, exhaustive enumerations). Don't invert.
-RUN LONG: <DURATION: 6+ hours> straight minimum, multiple agent ROUNDS, no check-in until every
-enumerated lead has a disposition; document every hypothesis/escalation/chain/kill; 100% exhaustion of
-enumerated leads — no shortcuts, "it's possible, if you give up you're not trying hard enough". Be more
-stubborn than the developer was careful.
+OPERATING MODEL: one bounded worker by default, with independent cold review in distinct sessions.
+Extra concurrency needs explicit authorization and a concrete independent assignment. The orchestrator
+checks direction-changing claims against source evidence and an independent reviewer before changing
+any verdict; agreement is not an oracle. Preserve real pinned-path controls and faithfulness checks.
+Use the requested available models and finite budgets. Evidence-grounded persistence can return
+refuted, bounded or blocked outcomes; neither a prior nor elapsed effort establishes a finding.
 
 KEY ROUTING (the ceiling = a NEW <Critical/High> mechanism, or a PROVEN structural cap per surface; do
 NOT re-grade the prior severities): (1) <THE NEVER-AUDITED SURFACE — the flagship lane>: <mechanism
@@ -131,8 +119,8 @@ chain pinned to a frozen state, verified clean against live values before use (u
 explicit --fork-block-number + verify a known live value + generate fresh keypairs and assert
 <eth_getCode == 0x> on the <FORK> before use — <DEFAULT ACCOUNTS ARE NOT CLEAN IN THE PRIOR PASS'S
 DOMAIN>). Escalate each confirmed bug to MAXIMAL demonstrated impact inside the fork (a forked-state
-delta, a fork-wide exit path, an unbounded <MINT>) then stop — never expand the surface. ONE hard stop
-for fresh human confirm: any real-network transaction, any real user/funds/key, any
+delta, a fork-wide exit path, an unbounded <MINT>) then stop — never expand the surface. Obtain explicit human confirmation before every Zone-2 PoC artifact under root policy. Retain the other
+human gates for: any real-network transaction, any real user/funds/key, any
 publication/disclosure step. The fresh-confirm gate is NOT waived. Do NOT fabricate / reward-hack /
 overclaim (escalation.md §1 marginal-contribution: severity = the delta the bug adds vs the world
 without it, never the total nearby; and a chain whose preconditions include <A PRIVILEGED CAPABILITY>
@@ -141,11 +129,7 @@ finding carries its block/commit number and its measurement method ("N=<count> f
 one tested was dead" is the correct shape; "measured <$0>" without enumeration is not). Emit attempt
 always, finding only on oracle-confirmed; operator re-authors + files; cleanup.md logged.
 
-FIRST MOVE: (1) verify toolchain + <RPC/ENV> reachability: <TOOLCHAIN>, confirm <RPC1> + find a
-WORKING <RPC2> (the prior pass was <BLOCKED REASON> — try <ALTERNATIVES, incl. operator-provided
-secrets>) and <RPC3 for the third domain>; record which work in progress.md; (2) verify all prior
-target identities (proxies/impls/commits) live at a pinned state + re-fetch <NEVER-FETCHED SOURCE> (the
-<NEVER-AUDITED SURFACE> source — never before audited); (3) re-derive the prior-priority findings fresh
+FIRST MOVE: (1) follow the shared entry/resume procedure, preparing the complete scope/goal/readiness draft before signature and admitting records only after required authority; verify existing pinned identities and acquire only missing explicitly scoped <NEVER-FETCHED SOURCE>; (2) after signed scope, authorized init and execution readiness, verify the authorized <TOOLCHAIN> and <RPC/ENV> availability; record unavailable requirements as blockers in canonical environment records; (3) re-derive the prior-priority findings fresh
 (<LIST: F2-001 etc.>) — one sentence "why it's real (or not)" per survivor, log the disposition in
 cascades.md; (4) formal recon: complete the activation-signals table in recon-signals.md — confirm every
 role × getRoleAdmin across ALL components, map the delegation graph, enumerate ALL asymmetric guard
@@ -153,5 +137,5 @@ pairs, inventory the <BRIDGE> domains and the stranded gap, and run the exhausti
 for both <ASSETS> on all reachable chains; (5) oracle calibration vs the prior review's severity
 precedent + the severity-precedent-corpus (note: the corpus has NO <DOMAIN> bucket and NO
 reversible-DoS exemplar — flag this gap, do not force-fit a different class onto a <DOMAIN> finding);
-(6) route to per-family hunters per recon-signals, spawning the <NEVER-AUDITED-SURFACE> lane FIRST, and
-when the operator provides the <API/WEB> secrets, spin the off-chain lane.
+(6) select one bounded next assignment from the computed queue, prioritizing <NEVER-AUDITED-SURFACE>;
+record missing authorized environment access as blocked rather than starting an unavailable lane.

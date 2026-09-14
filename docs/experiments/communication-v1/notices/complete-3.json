@@ -1,0 +1,14 @@
+[
+  {
+    "notice_id": "complete-n1",
+    "task": "complete",
+    "author": "worker-b",
+    "source_version": "display-notes-v1",
+    "observation": "Lunch is not specified in display-notes-v1.",
+    "applicability": "Lunch field in the display note.",
+    "uncertainty": "Source-bound observation only; check the primary source before use.",
+    "predecessor": null,
+    "release_ordinal": 3,
+    "source_ref": "inputs/complete/display-notes-v1.md"
+  }
+]

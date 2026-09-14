@@ -1,0 +1,165 @@
+{
+  "approval_url": "https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553859692",
+  "reviewed_commit": "d150f8d04fd902b48f6a5914880637d39e29a2d1",
+  "spec": {
+    "key": "spec",
+    "number": 106,
+    "id": 5360039506,
+    "title": "Spec: trustworthy offline engineering evidence",
+    "url": "https://github.com/matheusht/redteam-harness/issues/106",
+    "body_file": ".scratch/harness-engineering/published/spec.md"
+  },
+  "tickets": [
+    {
+      "key": "ticket_1",
+      "number": 107,
+      "id": 5360039680,
+      "title": "Repair active engineering guidance",
+      "url": "https://github.com/matheusht/redteam-harness/issues/107",
+      "body_file": ".scratch/harness-engineering/published/01-repair-active-guidance.md",
+      "ordinal": 1,
+      "blockers": [],
+      "local_draft": ".scratch/harness-engineering/issues/01-repair-active-guidance.md"
+    },
+    {
+      "key": "ticket_2",
+      "number": 108,
+      "id": 5360039839,
+      "title": "Reject unsupported Q02 comparison inputs",
+      "url": "https://github.com/matheusht/redteam-harness/issues/108",
+      "body_file": ".scratch/harness-engineering/published/02-q02-admission.md",
+      "ordinal": 2,
+      "blockers": [],
+      "local_draft": ".scratch/harness-engineering/issues/02-q02-admission.md"
+    },
+    {
+      "key": "ticket_3",
+      "number": 109,
+      "id": 5360040146,
+      "title": "Account for every assigned offline comparison case",
+      "url": "https://github.com/matheusht/redteam-harness/issues/109",
+      "body_file": ".scratch/harness-engineering/published/03-offline-study-account.md",
+      "ordinal": 3,
+      "blockers": [],
+      "local_draft": ".scratch/harness-engineering/issues/03-offline-study-account.md"
+    },
+    {
+      "key": "ticket_4",
+      "number": 110,
+      "id": 5360040369,
+      "title": "Explain evidence state through a read-only reconstruction summary",
+      "url": "https://github.com/matheusht/redteam-harness/issues/110",
+      "body_file": ".scratch/harness-engineering/published/04-read-only-reconstruction.md",
+      "ordinal": 4,
+      "blockers": [],
+      "local_draft": ".scratch/harness-engineering/issues/04-read-only-reconstruction.md"
+    },
+    {
+      "key": "ticket_5",
+      "number": 111,
+      "id": 5360040525,
+      "title": "Prepare the benign recovery comparison packet",
+      "url": "https://github.com/matheusht/redteam-harness/issues/111",
+      "body_file": ".scratch/harness-engineering/published/05-recovery-comparison-packet.md",
+      "ordinal": 5,
+      "blockers": [
+        109
+      ],
+      "local_draft": ".scratch/harness-engineering/issues/05-recovery-comparison-packet.md"
+    },
+    {
+      "key": "ticket_6",
+      "number": 112,
+      "id": 5360040674,
+      "title": "Prepare the task-local message-board comparison packet",
+      "url": "https://github.com/matheusht/redteam-harness/issues/112",
+      "body_file": ".scratch/harness-engineering/published/06-message-board-comparison-packet.md",
+      "ordinal": 6,
+      "blockers": [
+        109
+      ],
+      "local_draft": ".scratch/harness-engineering/issues/06-message-board-comparison-packet.md"
+    }
+  ],
+  "native_relationships_verified": true,
+  "verification": [
+    {
+      "number": 106,
+      "title": "Spec: trustworthy offline engineering evidence",
+      "url": "https://github.com/matheusht/redteam-harness/issues/106",
+      "state": "open",
+      "body_sha256": "582aa4bcbe351247a4380e25a86939449f5b966b86145a3537be31458611ec3b",
+      "ready_for_agent": true
+    },
+    {
+      "number": 107,
+      "title": "Repair active engineering guidance",
+      "url": "https://github.com/matheusht/redteam-harness/issues/107",
+      "state": "open",
+      "body_sha256": "4803eb65f801a8d9a794540eb09f2cabab553621c633a8cf31ecbcd3b562aefc",
+      "ready_for_agent": true,
+      "blocked_by": [],
+      "initial_body_sha256": "d1af581b8aa685ef8f658035d25ecab9ae2a52da8bb08d3ab9608b8e0fe09d29"
+    },
+    {
+      "number": 108,
+      "title": "Reject unsupported Q02 comparison inputs",
+      "url": "https://github.com/matheusht/redteam-harness/issues/108",
+      "state": "open",
+      "body_sha256": "bb56f6f1fce01cd67fdccf806e37d782579514b53a8b1646046c9e2b48d1efd8",
+      "ready_for_agent": true,
+      "blocked_by": []
+    },
+    {
+      "number": 109,
+      "title": "Account for every assigned offline comparison case",
+      "url": "https://github.com/matheusht/redteam-harness/issues/109",
+      "state": "open",
+      "body_sha256": "7565d50f7b5f9e04add57741f5295e016114d218799a4baf1821942a3be9151d",
+      "ready_for_agent": true,
+      "blocked_by": []
+    },
+    {
+      "number": 110,
+      "title": "Explain evidence state through a read-only reconstruction summary",
+      "url": "https://github.com/matheusht/redteam-harness/issues/110",
+      "state": "open",
+      "body_sha256": "13f7bb078d5eb5bf6cebb17f6ed799fb3b080972126fb4aced3d95fd7a160a46",
+      "ready_for_agent": true,
+      "blocked_by": []
+    },
+    {
+      "number": 111,
+      "title": "Prepare the benign recovery comparison packet",
+      "url": "https://github.com/matheusht/redteam-harness/issues/111",
+      "state": "open",
+      "body_sha256": "16403a8e73dc977baa1cc34385406733d7c72ee17b4eb6c8d168a7a0ae6354d1",
+      "ready_for_agent": true,
+      "blocked_by": [
+        109
+      ]
+    },
+    {
+      "number": 112,
+      "title": "Prepare the task-local message-board comparison packet",
+      "url": "https://github.com/matheusht/redteam-harness/issues/112",
+      "state": "open",
+      "body_sha256": "04a8b5468fe1a7f7a453490c0d534b16cda58f55c82a04a0cfb0eec906f50745",
+      "ready_for_agent": true,
+      "blocked_by": [
+        109
+      ]
+    }
+  ],
+  "publication_receipt_url": "https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553890562",
+  "post_publication_baseline_update": {
+    "local_main": "0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d",
+    "affected_ticket": 107,
+    "scope": "Reuse existing setup-reference repair; remaining acceptance work stays open.",
+    "entrypoints_equal": true,
+    "entrypoint_sha256": "sha256:c8c90c600c4d230f06d61d9c803aa14240eb487a93a1e349c62d57dc1e135edb",
+    "draft_overlay_matches": true,
+    "study_status": "draft_not_authorized",
+    "execution_authorized": false
+  }
+}

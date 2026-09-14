@@ -1,0 +1,54 @@
+[
+  {
+    "key": "map",
+    "number": 100,
+    "id": 5359150622,
+    "title": "Wayfinder: establish trustworthy harness engineering evidence",
+    "url": "https://github.com/matheusht/redteam-harness/issues/100"
+  },
+  {
+    "key": "evaluation",
+    "number": 101,
+    "id": 5359150900,
+    "title": "Establish reliable inputs and complete accounting for offline harness comparisons",
+    "url": "https://github.com/matheusht/redteam-harness/issues/101",
+    "resolution_url": "https://github.com/matheusht/redteam-harness/issues/101#issuecomment-5553486080",
+    "state": "closed"
+  },
+  {
+    "key": "context",
+    "number": 102,
+    "id": 5359151150,
+    "title": "Determine the smallest trustworthy context and evidence reconstruction view",
+    "url": "https://github.com/matheusht/redteam-harness/issues/102",
+    "resolution_url": "https://github.com/matheusht/redteam-harness/issues/102#issuecomment-5553486375",
+    "state": "closed"
+  },
+  {
+    "key": "foundations",
+    "number": 103,
+    "id": 5359151483,
+    "title": "Compare supported recovery contracts for offline document processing",
+    "url": "https://github.com/matheusht/redteam-harness/issues/103",
+    "resolution_url": "https://github.com/matheusht/redteam-harness/issues/103#issuecomment-5553486632",
+    "state": "closed"
+  },
+  {
+    "key": "message_board",
+    "number": 104,
+    "id": 5359330941,
+    "title": "Determine whether a shared message board adds useful research context",
+    "url": "https://github.com/matheusht/redteam-harness/issues/104",
+    "resolution_url": "https://github.com/matheusht/redteam-harness/issues/104#issuecomment-5553486887",
+    "state": "closed"
+  },
+  {
+    "key": "review",
+    "number": 105,
+    "id": 5359637095,
+    "title": "Review offline engineering test boundaries and ticket granularity",
+    "url": "https://github.com/matheusht/redteam-harness/issues/105",
+    "resolution_url": "https://github.com/matheusht/redteam-harness/issues/105#issuecomment-5553859692",
+    "state": "closed"
+  }
+]

@@ -77,11 +77,19 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v3-2026-07-10/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v3-2026-07-10`
+## Canonical campaign: `behavioral-canonical-v4-2026-09-13`
+
+Revision 4 retains the existing candidate definitions and patch bytes and freezes the current
+conformance checker after queue/guidance changes. Revision 3 was already drifted on main before
+#113, and #113 changes the checker further. Its manifest and prior results are preserved rather
+than retroactively re-pinned. Revision 4 has no executed candidate run or new efficacy claim.
+Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 3
 
 Revision 3 preserves the revision-2 candidate set and rotates only the frozen conformance-checker pin
 after Decision 0005 introduced approved full Draft 2020-12 record validation. Revision 2 and its runs

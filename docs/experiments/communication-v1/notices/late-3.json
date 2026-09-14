@@ -1,0 +1,14 @@
+[
+  {
+    "notice_id": "late-n1",
+    "task": "late",
+    "author": "worker-b",
+    "source_version": "binding-v1",
+    "observation": "The initial binding-v1 time is 09:00, Room Willow.",
+    "applicability": "Initial draft only; may be superseded by a later revision.",
+    "uncertainty": "Source-bound observation only; check the primary source before use.",
+    "predecessor": null,
+    "release_ordinal": 3,
+    "source_ref": "inputs/late/binding-v1.md"
+  }
+]

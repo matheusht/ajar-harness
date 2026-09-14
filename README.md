@@ -151,7 +151,9 @@ agents** and gray-box ground truth held only by the orchestrator.
 
 ## Status
 
-`v0` scaffold. The **LLM07 system-prompt-leakage** LLM-app slice is structure-first; the harness's
-live exercise to date is the **CTF/benchmark calibration** above (XBOW + Cybench Phase-1 complete;
-CVE-Bench zero-day queued) plus the source-available engagements under `engagements/`. See
-`docs/architecture.md` and `CLAUDE.md`.
+As of 2026-09-05, the repository includes the Decision 0005/0006 record kernel described above;
+the original scaffold label no longer describes the whole implementation. Start with the
+[decision index](docs/decisions/README.md) for accepted and superseded architecture decisions,
+and the [engineering wiki](docs/wiki/index.md) for the current offline engineering delivery state
+and its verification limits. The benchmark table above records earlier calibrations, not a fresh
+execution result or authorization.

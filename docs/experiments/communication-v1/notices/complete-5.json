@@ -1,0 +1,14 @@
+[
+  {
+    "notice_id": "complete-n2",
+    "task": "complete",
+    "author": "external-curator",
+    "source_version": "display-notes-v1",
+    "observation": "The supplied notes still make no promise of lunch.",
+    "applicability": "Final document note after scheduled release 5.",
+    "uncertainty": "No additional facts beyond the cited revision.",
+    "predecessor": null,
+    "release_ordinal": 5,
+    "source_ref": "inputs/complete/display-notes-v1.md"
+  }
+]

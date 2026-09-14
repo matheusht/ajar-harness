@@ -1,0 +1,34 @@
+[self-test] threshold is read from the frozen portable checkpoint (got 2)
+  ok   threshold is 2
+[self-test] malformed or non-portable checkpoints fail closed
+  ok   malformed JSON is rejected
+  ok   duplicate JSON keys are rejected
+  ok   unknown fields are rejected
+  ok   malformed source pins are rejected
+  ok   different well-formed source pins are rejected
+  ok   one pin cannot stand for both source records
+  ok   historical provenance cannot be strengthened
+  ok   inconsistent threshold fields are rejected
+  ok   coordinated threshold changes are rejected
+  ok   non-portable content claims are rejected
+  ok   candidate-promotion licenses are rejected
+  ok   missing licensing text is rejected
+  ok   target-specific licensing text is rejected
+  ok   contradictory promotion wording is rejected
+[self-test] the three preregistered outcomes
+  ok   gap >= 2 earns its keep
+  ok   both zero is inconclusive
+  ok   an inconclusive verdict licenses no prompt conclusion
+  ok   arm B ahead does not earn its keep
+[self-test] a gap of one is NOT a result
+  ok   gap 1 + A costs more -> does not earn its keep
+  ok   gap 1 + no cost data -> inconclusive, never a win
+[self-test] the waste clause
+  ok   a documented waste class A avoided earns its keep
+[self-test] guards refuse a verdict rather than issuing a wrong one
+  ok   blinding failure blocks even a landslide
+  ok   a truncated arm blocks
+  ok   a cross-arm read blocks
+  ok   an unfilled judged metric blocks (never guessed)
+
+SELF-TEST: PASS

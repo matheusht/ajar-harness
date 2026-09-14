@@ -27,6 +27,7 @@ that any finding is true (the model oracle still adjudicates that). Do not read 
 Usage:  python3 tools/check-conformance.py        (exit 0 = clean, 1 = failures)
 """
 
+import argparse
 import csv
 import gzip
 import hashlib
@@ -1538,6 +1539,27 @@ def check_doctrine_mirror():
            f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
 
 
+def check_active_guidance():
+    """Bounded navigation contract for the current engineering entrypoints (#107)."""
+    print("\n[guidance] active engineering navigation")
+    for source, destinations in (
+        ("README.md", ("docs/decisions/README.md", "docs/wiki/index.md")),
+        ("docs/architecture.md", ("decisions/README.md", "decision-0005-implementation-architecture.md")),
+        ("AGENTS.md", ("docs/decisions/README.md",)),
+    ):
+        path = os.path.join(ROOT, source)
+        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        for destination in destinations:
+            record((f"]({destination})" in text or f"`{destination}`" in text)
+                   and os.path.isfile(os.path.join(os.path.dirname(path), destination)),
+                   f"guidance/{source}: {destination} is linked and exists")
+    for source in ("AGENTS.md", "CLAUDE.md"):
+        path = os.path.join(ROOT, source)
+        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        for missing in ("docs/agents/issue-tracker.md", "docs/agents/domain.md"):
+            record(missing not in text, f"guidance/{source}: absent setup reference {missing} stays removed")
+
+
 def check_queue_stop_doctrine():
     """Keep the computed queue as the only completion predicate in active loop doctrine."""
     print("\n[doctrine] computed queue is the single completion condition")
@@ -1917,6 +1939,16 @@ def check_corpus_enumeration():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--engineering-guidance", action="store_true",
+                        help="check only active engineering navigation, entrypoint mirror and overlay pins")
+    args = parser.parse_args()
+    if args.engineering_guidance:
+        check_active_guidance()
+        check_doctrine_mirror()
+        check_overlay_pins()
+        print(f"\n{CHECKS} checks, {len(FAILS)} failing")
+        return 1 if FAILS else 0
     pattern_ids = collect_pattern_ids()
     cap_ids = collect_capability_ids()
     print(f"known pattern ids: {sorted(pattern_ids)}")
@@ -1940,6 +1972,7 @@ def main():
     check_false_discovery_corpus()
     check_adversarial_candidates()
     check_doctrine_mirror()
+    check_active_guidance()
     check_queue_stop_doctrine()
     check_cited_fixtures()
     check_corpus_enumeration()

@@ -1,0 +1,14 @@
+[
+  {
+    "notice_id": "complementary-n1",
+    "task": "complementary",
+    "author": "worker-b",
+    "source_version": "stock-v1",
+    "observation": "Stock lists 6 packs of 6 sheets; compare against attendee need.",
+    "applicability": "Stock sufficiency calculation; attendance still needed.",
+    "uncertainty": "Source-bound observation only; check the primary source before use.",
+    "predecessor": null,
+    "release_ordinal": 3,
+    "source_ref": "inputs/complementary/stock-v1.md"
+  }
+]

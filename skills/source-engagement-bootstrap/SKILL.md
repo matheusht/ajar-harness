@@ -13,7 +13,7 @@ Use this skill only when explicitly invoked with `/source-engagement-bootstrap <
 1. Read the repo root policy `CLAUDE.md` (mirrored as `AGENTS.md`), the current `engagements/_TEMPLATE/scope.md`, `engine/gates.md`, `engine/whitebox-analysis.md`, `engine/persistence.md`, `engine/regrade.md`, `engine/pocinator.md`, `engine/chainability.md`, and `engine/escalation.md` before producing or changing engagement files. Root policy wins over this skill and over prior goal prompts.
 2. Accept **source code only**: a local source tree or an authorized repository URL with a branch/tag/commit that can be frozen. Reject live applications, production hosts, browser targets, API-only targets, binaries without corresponding source, and entries whose authorization cannot be established. Ranking/repository inspection is offline source triage; do not contact or probe an application.
 3. Never claim to be the human operator and never sign `scope.md`. Fill the scope completely, record the proposed operator identity, leave `**signed:** [ ]`, and stop at the scope gate. Resume only after the human changes it to `[x]`. A user asking the agent to "sign" is authorization to prepare the signature block, not authority to impersonate a human signature. (Exception recorded for the record: an operator may explicitly sign inline in-session, e.g. "draft the scope and I already sign it" — in that case fill the Authorization block with the operator's stated identity, date, and `[x]`, and quote the instruction. The agent still never fabricates a signature the operator did not give.)
-4. Broad phrases such as "most Zone-2 work is authorized" are insufficient. Convert operator intent into exact proposed artifact classes, environment, accounts, containment, expiry, and cleanup requirements. Even after a signed category authorization, **stop for a fresh live human confirmation before creating any Zone-2 PoC artifact that could be destructive or harm other users** (`CLAUDE.md` §1 gate 3). A standing operator authorization may waive the per-artifact pause for benign, non-destructive Zone-2 work in a disposable owned environment (as in `cosmos-2026-07`); it never waives the hard stop for destructive / other-user / shared-infra actions. No goal prompt may weaken that hard stop.
+4. Convert operator intent into exact proposed artifact classes, environment, accounts, containment, expiry and cleanup requirements. Before creating **any Zone-2 PoC artifact**, obtain explicit per-artifact human confirmation under `CLAUDE.md` §1 gate 3. Signed categories or standing authorizations do not waive that root gate.
 5. Never authorize or perform production exploitation, cross-user reach against systems you do not own, real-value loss, destructive writes, persistence outside a disposable owned environment, real secret access, real credential use, public disclosure, filing, deployment, or supply-chain publication. "Does not impact other users" does not waive scope, Zone-2, cleanup, or filing gates.
 6. Models and tools are proposal/review sources, not oracles. Operator priors can increase search effort but cannot establish truth. Do not fabricate findings, controls, reachability, exploitation, source identity, coverage, or independent review.
 7. Multiple graders must mean genuinely independent model runs/sessions or a human review. Never simulate a panel by asking one model to role-play several experts. If independent execution is unavailable, record that limitation and keep the candidate alive or route it to human review.
@@ -45,16 +45,16 @@ For every score, cite the source path, symbol/config, and policy fact that suppo
 
 1. Follow `CLAUDE.md` §4 placement rules: Plane 3 belongs in the selected target's own project repository. Use an existing local source tree when supplied. If only a remote repository is supplied, stop and ask for the intended local checkout path before cloning or creating Plane 3.
 2. Copy `engagements/_TEMPLATE/` into the target repo as `engagements/<id>/`. Do not overwrite an existing engagement.
-3. Freeze the source identity using the exact commit and eligible release/tag. Record uncommitted source drift. Do not silently switch branches or update dependencies.
+3. Verify the existing source identity using the exact commit and eligible release/tag; acquire only missing explicitly authorized source. Record uncommitted source drift. Do not silently switch branches or update dependencies.
 4. Create or update only:
    - `engagements/<id>/scope.md`
    - `engagements/<id>/asset-prioritization.md` (or `coverage-matrix.md` for a multi-asset pack, per recent engagements)
    - `engagements/<id>/goal-prompts/<id>-goal-prompt.md` (one per asset for a multi-asset pack)
    - `engagements/<id>/program-policy.md` when the program has published rules to capture verbatim
-   - template-required progress, recon, attempts, evidence, and cleanup files
-5. Record-kernel: if the engagement uses the Decision-0005/0006 canonical record kernel, initialize it with `python3 tools/run-engagement.py init --engagement engagements/<id>` (binds the exact scope bytes). If instead the engagement uses the Cosmos-style inline-signed `scope.md` (as recent engagements do), maintain `progress.md` manually and note it. Do not emulate trusted record transitions with ad hoc file writes.
+   - template files for later canonical records and unique recon/cleanup narrative; generated progress remains derived
+5. Prepare the frozen corpus manifest/enumeration and its initial-scope digest before signing when budget-bounded completion may be used. Follow the [entry/resume procedure](references/goal-template.md#entry-and-resume-procedure); initialize only after the exact scope is signed and init's operator-console SSH authority is available, before any recon. Existing engagements require admitted reads, not reinitialization or a manually maintained progress substitute.
 
-## Phase 4 — Draft scope, then stop for signature
+## Phase 4 — Draft scope for the complete handoff
 
 Fill every scope field from verified input:
 
@@ -69,13 +69,13 @@ Fill every scope field from verified input:
 - cleanup and data-retention rules;
 - operator identity and date, with `signed: [ ]` (or `[x]` only if the operator signed inline in-session, per safety rule 3's exception).
 
-Do not begin vulnerability research, run a vuln skill, build the target, or create a PoC until the human signs. Report the exact file awaiting signature.
+Do not begin vulnerability research, run a vuln skill, build the target, or create a PoC until the human signs. Complete the Phase 5 goal draft and readiness facts before presenting the exact file awaiting signature.
 
 ## Phase 5 — Generate the long-running goal brief
 
-After the scope is signed, copy the standard scaffold template from `engagements/_TEMPLATE/goal-prompts/`
+Before requesting signature, prepare the complete reviewable scope, goal draft and runtime/readiness facts together. Mark launch pending until exact scope signature, authorized kernel initialization and execution readiness are satisfied. Copy the standard scaffold template from `engagements/_TEMPLATE/goal-prompts/`
 into `engagements/<id>/goal-prompts/<id>-goal-prompt.md` and fill every `<...>` with verified
-engagement facts. Also read prior goal prompts under `engagements/*/goal-prompts/` (excluding
+engagement facts. Replace `[HARNESS_CHECKOUT]` with the verified absolute harness checkout path in every generated goal reference; verify the copied link resolves from the target repository. If the checkout is unknown, retain an explicit pending placeholder and do not present the goal as launch-ready. Also read prior goal prompts under `engagements/*/goal-prompts/` (excluding
 vendored/upstream trees) as style/examples only. Never copy a prior authorization that conflicts with
 current root gates.
 
@@ -90,7 +90,7 @@ current root gates.
   participates / independent-second-reviewer-then-synchronise rule for direction-changing claims,
   re-attack-the-prior-kill-conditions framing, and never-audited-surface-first routing. Modeled on the
   Crown engagement's revisit prompt.
-- Long-form structured fallback: `references/goal-template.md` for engagements neither template fits.
+- Long-form structured fallback: `references/goal-template.md` for engagements neither template fits. Copy only its fenced `markdown` goal body, then substitute the verified `[HARNESS_CHECKOUT]` path. The shared entry/resume procedure stays in the harness reference; do not copy or rewrite it into the target goal.
 
 The template block must, once filled:
 
@@ -102,7 +102,7 @@ The template block must, once filled:
 - separate signal, adjudication, PoC proof quality, report quality, and operator acceptance;
 - use evidence-licensed persistence and bounded exhaustion, not "find a bug at any cost";
 - prevent reward hacking, emulator-only proof, unsupported impact, and forced findings;
-- stop at every human gate that the signed scope has not already, explicitly, standing-authorized;
+- preserve every root human gate and the exact independent review obligations;
 - prohibit autonomous filing and Plane-1 promotion;
 - define exact terminal states and `goal_complete` acceptance criteria.
 
@@ -112,10 +112,10 @@ Preferred model roles are configuration, not fabricated capabilities: a high-jud
 
 Use a referenced file, not a giant inline goal. The goal file carries full instructions; `/goal` carries only the objective, authoritative paths, budget, gates, and done condition.
 
-Default command format:
+Use the operator-selected goal interface only if available; it is not a replacement for the governed queue runner. Example format for clients supporting this syntax:
 
 ```text
-/goal --tokens 500k Execute the signed, source-only engagement <id>. Read and obey @engagements/<id>/goal-prompts/<id>-goal-prompt.md and @engagements/<id>/scope.md; root CLAUDE.md gates override. Work until its bounded terminal criteria are verified, pause at every required human gate, and call goal_complete only when the goal file's acceptance checklist is satisfied.
+/goal --tokens <EXPLICIT_BUDGET> Execute the signed, source-only engagement <id>. Read and obey @engagements/<id>/goal-prompts/<id>-goal-prompt.md and @engagements/<id>/scope.md; root CLAUDE.md gates override. Work until its bounded terminal criteria are verified, pause at every required human gate, and call goal_complete only when the goal file's acceptance checklist is satisfied.
 ```
 
 Adjust the token budget only from an explicit operator preference or a documented corpus estimate. A token budget is not authorization to cross a gate.

@@ -15,7 +15,7 @@ Replace every bracketed field with verified engagement facts. Delete inapplicabl
 >   orchestrator-participation / second-reviewer-synchronisation rule, re-attack-the-prior-kill-
 >   conditions framing, and the never-audited-surface-first routing. Modeled on the Crown engagement's
 >   revisit prompt.
-> - `goal-prompt-LONG-RUN.md` — **standard format for a LONG-RUN (6+ hour, multi-round) deep hunt on
+> - `goal-prompt-LONG-RUN.md` — **standard format for a LONG-RUN (budget-bounded, multi-round) deep hunt on
 >   ONE asset**, when the operator will not be available to steer. Twelve parts + the anti-bias
 >   construction in Part 0: a **symmetric exit obligation** replaces the source method's asserted
 >   vulnerability, the optimistic prior is confined to the hunter lane and barred from the adjudicating
@@ -28,10 +28,48 @@ Replace every bracketed field with verified engagement facts. Delete inapplicabl
 > This file below remains the long-form structured fallback for cases neither template fits (very large
 > multi-surface engagements wanting a fuller section layout).
 
+## Entry and resume procedure
+
+Use this procedure from the harness checkout before new work or resume. It is setup and reconstruction,
+not permission to execute a target or to bypass a pending queue item.
+
+1. Reuse the named local source and verify its exact commit/artifact identity and dirty state. Acquire
+   source only when missing and explicitly authorized; changing the pin is a scope decision. Keep
+   original source identity evidence, unique narrative and human cleanup context.
+2. Before asking for signature, prepare the complete scope and goal draft with verified runtime/provider availability, finite budgets and pending launch requirements. For a new engagement, prepare the exact corpus manifest/enumeration and put its digest in the
+   initial scope **before signing** if budget-bounded completion may be used. The genesis pin cannot
+   be added by a later re-attestation. Obtain the real operator's exact scope signature; then use
+   `tools/run-engagement.py init` with its required operator-console SSH authority for that scope and
+   operation. An inline scope signature does not replace init's SSH check. Initialization and admitted
+   state must precede recon. After authorized initialization, run the root-required mechanical proof from the harness checkout: `./.venv/bin/python tools/finding_lifecycle.py preflight --engagement <absolute-engagement>`. It must pass before any recon or attempt. Existing engagements run this same preflight without reinitialization. This is an agent-run check, not another human approval; refusal blocks recon/attempt execution while diagnostic read-only inspection remains available under its existing admission rules. Existing engagements use admission, not reinitialization or manual ledgers.
+3. Run `tools/inspect-dossier.py --source <absolute-engagement>` for current revisions, typed reviews,
+   outstanding obligations, stale projections and attributed optional context. Run
+   `tools/run-engagement.py list|next|gate --engagement <absolute-engagement>` separately for the
+   computed queue (invoke one subcommand at a time). These reads create no coordination state; invalid
+   base or missing lock is unavailable. Inspector output explains evidence; it grants no authority and
+   cannot run work. Generated progress/views are derived: record facts through canonical commands and
+   use the governed render path only when needed, rather than transcribing another current-state view.
+4. Before execution, verify signed environment scope, real runtime/provider availability and finite
+   session/wall/cost/resource budgets. If declaring `budget_bounded` coverage, register the exact precommitted corpus artifacts for the driver's `--corpus-enumeration-ref`. Corpus omission does not prohibit a bounded session or inspection; retain the existing `operator_required`/noncompletion boundary. Read [the existing runner contract](../../../docs/agents/docker-work-queue.md)
+   and `tools/run-work-queue.py run --help`: its public backend is Docker with a locally available
+   immutable image containing Claude and Python, on the documented supported host. It has no implicit
+   host fallback and does not implement an Astra/Codex backend. Record unavailable requirements as
+   blockers; retain independent reviewer requirements and use only explicitly authorized concurrency.
+5. Continue the next admitted queue action through the existing governed driver when ready. A gate
+   release is a queue/session decision, not automatic approval of findings or global completion.
+   Retain independent verification and named human gates. For handoff, link immutable evidence and
+   the inspector/queue results; add only unique intent, unavailable observations or decisions.
+
+For fallback generation, copy only the fenced goal body below and substitute the verified absolute
+`[HARNESS_CHECKOUT]`. Keep this shared procedure in the harness; do not copy or rewrite it into the
+target goal. Its local runner-document link resolves here.
+
 ```markdown
 # Goal — [ENGAGEMENT_ID]
 
 ## Authority and starting state
+
+Follow [the entry/resume procedure]([HARNESS_CHECKOUT]/skills/source-engagement-bootstrap/references/goal-template.md#entry-and-resume-procedure) before execution; use its inspector and list/next/gate handoff instead of manual generated-state transcription.
 
 Execute an authorized, source-only white-box assessment of `[REPOSITORY]` at exact identity `[COMMIT/TAG]`, limited to the signed `engagements/[ENGAGEMENT_ID]/scope.md`. Read `CLAUDE.md`, the signed scope, `asset-prioritization.md`, `engine/whitebox-analysis.md`, `engine/loop.md`, `engine/persistence.md`, `engine/regrade.md`, `engine/pocinator.md`, `engine/chainability.md`, `engine/escalation.md`, and applicable oracle/card files before acting. Root policy and the signed scope override this goal.
 
@@ -45,7 +83,7 @@ Produce a rigorously adjudicated disposition for every material candidate in the
 
 [INSERT RANKED ASSETS, SOURCE PATHS/SYMBOLS, TRUST BOUNDARIES, RELEASE ELIGIBILITY, AND COVERAGE DENOMINATOR]
 
-Before hunting, freeze the denominator and record any newly discovered asset. "Dry" is unavailable while material assets/candidates lack a disposition.
+If declaring `budget_bounded` coverage, before initial scope signing freeze the denominator as specified in the entry/resume procedure; record newly discovered assets without rewriting the genesis pin. "Dry" is unavailable while material assets/candidates lack a disposition.
 
 ## Progression map — backtrack freely
 
@@ -90,7 +128,7 @@ For every confirmed finding, run an escalation/chainability pass (`engine/escala
 
 ## Human gates and Zone-2
 
-The signed scope may pre-authorize only these exact categories: [EXACT CATEGORY LIST OR NONE]. Category authorization does not authorize construction by itself unless the signed scope carries a standing operator authorization for benign, non-destructive Zone-2 work in a disposable owned environment. The non-waivable hard stop remains: before any Zone-2 PoC artifact that could be destructive or harm other users, pause and request fresh human confirmation naming:
+The signed scope names exact categories: [EXACT CATEGORY LIST OR NONE]. Before creating any Zone-2 PoC artifact, obtain the explicit per-artifact human confirmation required by root policy, naming:
 
 - candidate/finding and exact artifact;
 - bounded action and capability;
@@ -98,11 +136,11 @@ The signed scope may pre-authorize only these exact categories: [EXACT CATEGORY 
 - expected impact and non-user-impact controls;
 - expiry and cleanup obligation.
 
-Proceed only after the fresh confirmation is recorded (or, for benign non-destructive work, under the scope's standing authorization). Never autonomously cross users/accounts you do not own, touch production, use real credentials/funds/data, create destructive or persistent capability, publish a package/image, or file a report. Log every artifact and cleanup status.
+Proceed only after that confirmation is recorded. Never autonomously cross users/accounts you do not own, touch production, use real credentials/funds/data, create destructive or persistent capability, publish a package/image, or file a report. Log every artifact and cleanup status.
 
 ## Records and anti-fabrication
 
-Use the canonical engagement record command when available. Attempts/artifacts are immutable; findings are revisioned; views are derived. Record failed attempts, controls, held/refuted candidates, reopenings, cost, and missing evidence. Never invent attempts, source identity, test output, independent review, environment fidelity, or impact. Missing environment produces `blocked`, not synthetic pass/fail.
+Use the mandatory canonical engagement record commands after admitted initialization. Attempts/artifacts are immutable; findings are revisioned; views are derived. Record failed attempts, controls, held/refuted candidates, reopenings, cost, and missing evidence. Never invent attempts, source identity, test output, independent review, environment fidelity, or impact. Missing environment produces `blocked`, not synthetic pass/fail.
 
 ## Done criteria
 

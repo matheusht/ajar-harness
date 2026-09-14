@@ -439,3 +439,48 @@ doctrine or implementation. Both prepared candidate experiments remain UNEXECUTE
 Only this topic, index and append-only log changed. Local links/anchors, status/conclusion wording
 and whitespace were checked; no runtime/test/packet/source records changed, no experiment ran and
 no acceptance suite was rerun. No remote mutation is part of this documentation slice.
+
+
+## 2026-09-13 — preserve frozen history and repair delivery CI
+
+PR #113 run `34515196852` stopped at the canonical v3 checker pin. Its expected SHA-256 was
+`85d18ca3588d4ba3a3b80494dbbdb18c8233cbc1a483b8d1e21bed573d410ea3`; base `fd40756c` already had
+`d2314ffbea18c320a5c965050a4c7f0356b5f674d48315c769c4c267b07ae911`, and the PR checker has
+`8bac09dee0e54e5b42cd56e8942f69e6c76d4d7d243190a2f2376c65ce0bbdcd`. The PR changes that input too;
+this is not dismissed as an unrelated baseline failure. The other five frozen inputs remain intact.
+
+Following the existing builder's rotate-CAMP_ID guard and v2→v3 supersession convention, the current
+campaign is now v4 (`behavioral-canonical-v4-2026-09-13`). It was built from committed source
+`a63eef8f65a6274f75d730e8da5adf5bd88cfb78` with the existing builder, updated only for the new revision
+identity/date/note. The workflow and active README point to v4. Every preexisting v3 byte is preserved;
+only its new supersession note is added. All five candidate definitions and patch bytes, the seed and
+non-checker pins are unchanged. No old result was regraded, and no v4 candidate run or efficacy claim
+was created. Later changes to any frozen input require another explicit revision, never in-place
+refresh of this historical pin. No evaluator/scorer/gate behavior was weakened.
+
+Using the existing main-checkout `.venv/bin/python` interpreter, the following local checks passed on
+that source plus this rotation, each with exit 0:
+
+- `tools/build-behavioral-campaign.py`: built five candidates.
+- `tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json`:
+  intact; `tools/hash-campaign-inputs.py --self-test`: passed.
+- A disposable copy passed the real hash-check CLI, then failed with exit 1 after only its copied
+  checker bytes changed. Direct comparisons proved unchanged v3 tracked bytes, normalized candidate
+  definitions, all five patches, seed and non-checker pins. No new test framework was added.
+- The eight scoped commands passed: `tools/check-conformance.py --engineering-guidance` (12/0),
+  `tools/engineering-guidance-test.py`, `tools/study-report-test.py` (50),
+  `tools/dossier-inspector-test.py` (23), `tools/q02-admission-self-test.py` (99),
+  `tools/q02_compare.py --self-test`, `tools/recovery-packet-test.py` (8 plus controls),
+  `tools/communication-packet-test.py` (7 bundle/9 public checks).
+- Every command in the eight previously skipped workflow steps passed with `--self-test`:
+  `tools/score-routing.py`, `tools/score-false-discovery.py`, `tools/run-hermetic-bola.py`,
+  `tools/run-hermetic-fakemodel.py`, `tools/run-hermetic-api.py`, `tools/run-qualification.py`,
+  `tools/obfuscation-converter.py`, `tools/stego-converter.py`, `tools/covert-channel-converter.py`,
+  `tools/covert-channel-evidence.py`, `tools/tollbooth-digest-adapter.py`,
+  `tools/casebook-retrieval-index.py`, `tools/encoding-robustness-eval.py`,
+  `tools/generate-payload-proposal.py`, `tools/payload-proposal-hermetic-test.py`.
+- `python3 -m py_compile tools/build-behavioral-campaign.py` and new-change whitespace checks passed.
+
+These are offline/synthetic self-tests, not real engagement/provider/model execution. Prior scenario
+packet experiments remain unexecuted. The pending `a63eef8f` wiki assessment is included in publication.
+Full hosted CI will validate the pushed head separately; no merge or issue closure occurred here.

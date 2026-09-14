@@ -41,7 +41,7 @@ not permission to execute a target or to bypass a pending queue item.
    be added by a later re-attestation. Obtain the real operator's exact scope signature; then use
    `tools/run-engagement.py init` with its required operator-console SSH authority for that scope and
    operation. An inline scope signature does not replace init's SSH check. Initialization and admitted
-   state must precede recon. Existing engagements use admission, not reinitialization or manual ledgers.
+   state must precede recon. After authorized initialization, run the root-required mechanical proof from the harness checkout: `./.venv/bin/python tools/finding_lifecycle.py preflight --engagement <absolute-engagement>`. It must pass before any recon or attempt. Existing engagements run this same preflight without reinitialization. This is an agent-run check, not another human approval; refusal blocks recon/attempt execution while diagnostic read-only inspection remains available under its existing admission rules. Existing engagements use admission, not reinitialization or manual ledgers.
 3. Run `tools/inspect-dossier.py --source <absolute-engagement>` for current revisions, typed reviews,
    outstanding obligations, stale projections and attributed optional context. Run
    `tools/run-engagement.py list|next|gate --engagement <absolute-engagement>` separately for the

@@ -82,3 +82,58 @@ improvement. Added the public read-only completion-claims CLI before candidate d
 exited 1 (`completion_claims_unjustified`), candidate exited 0 (`completion_claims_clear`).
 Both preserve source inventory. Clear text scanning does not clear the five queue blockers.
 The revised task/grade are frozen externally; final reviewed #99 pin is still required before dispatch.
+
+## Measured result — 2026-09-20
+
+The preparation statements above are historical. The single candidate ran against independently
+reviewed harness `2f5ad62eaf54fa7117273e38f56d3919fcaf439b` (Standards and Spec: PASS),
+with runtime changes last made at `9919fba5e13485d43113e10a6ac235dd16556f81`.
+The final externally frozen inputs were:
+
+- Task SHA-256: `90707b3433bd96b7bf3d0541e357d37ccb5b12dcd8ab4781953497639f0ffd33`.
+- Grade SHA-256: `a6aa7c85fa7c6dada8ce5f7a207e71812cbbfb316786081bc126d40945d0ea1f`.
+- Source manifest SHA-256: `4939031c37571e670744282335e1f576ddaf74bb778e1ed8aedfbab53e6de4f3`.
+
+One fresh Astra Low agent received no prior conversation (`fork_turns=none`). Dispatch was
+22:26:17 UTC; its result was received at 22:27:54 UTC: **97 seconds orchestration elapsed**.
+This is neither measured machine effort nor human working time. There was no user intervention
+and no replacement trial. Actual model inference occurred; token usage and billing are unknown.
+
+The parent independently compared the answer with the frozen grade. All requested dimensions
+were correct:
+
+- Current `document-claim` revision 3 is supported, not confirmed. Workshop v2 supersedes v1;
+  the current time is 11:00 rather than 10:00, and the venue is unknown.
+- Pending `citation-review-needed` / `regrade-citation-review` concerns the missing venue citation
+  for subject `document-claim`.
+- Progress still describes revision 1, snapshot is `{}`, report index contains only report 2,
+  and review index contains review 2; these projections are stale.
+- Next queue action is `hypothesis_ran_unadjudicated` for `document-revision-question`, with
+  operation `record_hypothesis_disposition`. Gate exit 3 retains five blockers; coverage is
+  active and completion is not allowed. The paper-crane cleanup context was preserved.
+
+The candidate reported six public checks: preflight 0, inspector 0, list 0, next 0, gate 3,
+and completion-claims 0. These agree with independently run mechanical controls. The candidate
+reported no state-changing operations. Its command list/statuses are self-reported; there is no
+independent per-command trace or verified total command count. Independently, the parent recomputed
+all **64 file and directory entries, including Git metadata**: exact equality, with zero added,
+removed, or changed entries.
+
+There were two frictions. The candidate reported an initial `cat` of
+`<dossier>/source/goal-prompts/goal.md` exiting 1, then recovered through directory inspection and
+reading the actual goal path with exit 0. The task's shorthand `source/goal...` was ambiguous.
+Inspector display truncation also led to direct source reads. These are observable in the returned
+account, not an independently captured tool trace. Recovery occurred within the same trial; this
+was not a zero-retry or issue-free run. Future pilot briefs should name the exact goal path; the
+frozen task was not rewritten. Neither friction warrants a runtime change on this evidence.
+
+This result supports one read-only synthetic workflow: reconstructing current state, retaining
+unknowns and blockers, and preserving source bytes despite explanatory completion tokens. It does
+not establish actual-target performance, autonomous-hunter efficacy, general workflow reliability,
+or human-time savings. There was no matched agent baseline. Mechanical before/after completion
+checks isolate gate behavior; they do not supply that missing agent comparison.
+
+All 62 completion-claim tests passed at `9919fba5` (the same runtime used here). Full kernel
+self-test and 898-check structural conformance passed at prior head `a263c8c5`; these broader
+checks were not repeated for the formatting-only correction. Final combined-head hosted CI
+remains to be verified before merge.

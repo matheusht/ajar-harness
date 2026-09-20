@@ -51,13 +51,14 @@ This is instruction-only blindness, not filesystem isolation or a hidden benchma
 
 Read the synthetic goal and the named shared procedure at
 `skills/source-engagement-bootstrap/references/goal-template.md` in the pinned candidate harness.
-Use public preflight, inspector, list, next and gate reads to identify current claim/source revisions,
+Use public preflight, inspector, list, next and gate reads, plus
+`tools/completion_claims.py --engagement <dossier>` to identify current claim/source revisions,
 stale views, outstanding review reason/subject, next queue action and whether completion is allowed.
 Preserve narrative, unknowns and human cleanup context; report command exit statuses.
 
 One fresh Astra Low agent, one attempt, ten-minute ceiling. Read only the fixture and named
 harness/interpreter needed for those commands. Do not inspect fixture construction tests, expected
-answers, grading files or task history. No reinitialization, rendering, repairs, hunting, target or
+answers, grading files or task history. Do not use `run-engagement reduce`: it writes snapshot/views. No reinitialization, rendering, repairs, hunting, target or
 provider API invocation, provider runtime, Zone-2 artifact, extra agent or favorable-result retry.
 Candidate model inference is real usage; billing is unknown. No fallback extraction exercise.
 
@@ -71,7 +72,13 @@ completion from misleading explanatory goal text. A failed trial remains a resul
 replace the candidate. Human-time savings, discovery efficacy and operational runtime viability
 remain unknown. This document records protocol only; no candidate outcome is claimed.
 
-Prepared task SHA-256: `b62cf4871b2bd9cab755ed927f0651a00400e02b7fad7701981e7739ffd51550`.
+Prepared task SHA-256: `26438c490b3243836c1e41d7c728e3a58312b8613d050d0036d7db99ac7285c6`.
 Prepared manifest SHA-256: `4939031c37571e670744282335e1f576ddaf74bb778e1ed8aedfbab53e6de4f3`.
 Baseline and candidate mechanical controls each returned preflight/inspector/list/next 0 and gate 3.
 All ten reads preserved bytes/inventory. These are setup controls; the agent trial has not run.
+
+The five original reads bypass completion-claim scanning; equal results are expected, not a patch
+improvement. Added the public read-only completion-claims CLI before candidate dispatch: baseline
+exited 1 (`completion_claims_unjustified`), candidate exited 0 (`completion_claims_clear`).
+Both preserve source inventory. Clear text scanning does not clear the five queue blockers.
+The revised task/grade are frozen externally; final reviewed #99 pin is still required before dispatch.

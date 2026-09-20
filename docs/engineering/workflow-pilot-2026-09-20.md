@@ -104,8 +104,8 @@ were correct:
 
 - Current `document-claim` revision 3 is supported, not confirmed. Workshop v2 supersedes v1;
   the current time is 11:00 rather than 10:00, and the venue is unknown.
-- Pending `citation-review-needed` / `regrade-citation-review` concerns the missing venue citation
-  for subject `document-claim`.
+- Pending `citation-review-needed`, backed by regrade `citation-review`, concerns the missing
+  venue citation for subject `document-claim`.
 - Progress still describes revision 1, snapshot is `{}`, report index contains only report 2,
   and review index contains review 2; these projections are stale.
 - Next queue action is `hypothesis_ran_unadjudicated` for `document-revision-question`, with

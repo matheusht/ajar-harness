@@ -322,7 +322,7 @@ class CompletionClaimsTest(unittest.TestCase):
         _append_kernel_event(self.root, base_event(event_id="event-coverage-dry", engagement_id=self.root.name, recorded_at="2026-08-24T00:01:03Z", actor_role="operator", actor_id="operator-test", event_type="coverage.status_changed", rationale="Fixture reaches dry coverage.", payload={"entity_id": self.root.name, "status": "coverage_dry", "coverage_review_ref": "event-coverage-reviewed"}, entity_refs=["event-coverage-reviewed"], state_changes=[{"dimension": "coverage", "entity_id": self.root.name, "previous": state["coverage"], "current": "coverage_dry"}]))
 
     def test_01_exact_boundary_tokens_only(self) -> None:
-        text = "coverage_dry COVERED-DRY coverage_dryer uncovered-dry"
+        text = "coverage_dry\nCOVERED-DRY\ncoverage_dryer\nuncovered-dry"
         self.assertEqual(len(claims.CLAIM_TOKEN.findall(text)), 2)
 
     def test_02_active_claim_fails(self) -> None:
@@ -1055,6 +1055,50 @@ class CompletionClaimsTest(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertEqual(claims.CLAIM_TOKEN_BYTES.findall(path.read_bytes()), [])
 
+
+    def test_60_state_mentions_allow_fresh_engagement_reduce(self) -> None:
+        prompt = self.root / "goal-prompts" / "goal.md"
+        prompt.parent.mkdir()
+        prompt.write_text(
+            "You cannot move coverage to `coverage_dry` while blocking work remains.\n"
+            "`covered-dry` — the bounded space was enumerated AND adjudicated.\n"
+            "The gate checks coverage_dry before publishing.\n",
+            encoding="utf-8",
+        )
+        # Identical instructions outside the prompt folder must also be accepted.
+        (self.root / "notes.md").write_bytes(prompt.read_bytes())
+        namespace = runpy.run_path(str(ROOT / "tools" / "run-engagement.py"))
+        self.assertEqual(namespace["command_reduce"](argparse.Namespace(engagement=self.root)), 0)
+        self.assertEqual(claims.assert_completion_claims_clear(self.root)["coverage"], "active")
+
+    def test_61_canonical_claim_contexts_still_fail(self) -> None:
+        note = self.root / "notes.md"
+        for wording in (
+            "## `covered-dry`", "**verdict:** `coverage_dry`",
+            "Disposition: covered-dry", "Status = coverage_dry",
+            "| route | disposition |\n| --- | --- |\n| local | `covered-dry` |",
+            'We are "coverage_dry".', "The engagement is now `covered-dry`.",
+            '{"status":"coverage_dry"}',
+        ):
+            with self.subTest(wording=wording):
+                note.write_text(wording + "\n", encoding="utf-8")
+                self.assertEqual(self._error(lambda: claims.assert_completion_claims_clear(self.root)),
+                                 "completion_claims_unjustified")
+
+    def test_62_canonical_context_crosses_stream_boundaries(self) -> None:
+        note = self.root / "notes.md"
+        for wording, expected in (
+            ("## `covered-dry`\n", 1),
+            ("## `covered-dry` — a definition\n", 0),
+            ("| route | `covered-dry` |\n", 1),
+            ("**verdict:** `coverage_dry`\n", 1),
+        ):
+            # Place every byte of the assertion at the boundary in turn.
+            for split in range(1, len(wording)):
+                with self.subTest(wording=wording, split=split):
+                    note.write_text("x" * (128 - split - 1) + "\n" + wording, encoding="utf-8")
+                    with mock.patch.object(claims, "SCAN_CHUNK_BYTES", 128):
+                        self.assertEqual(sum(row[2] for row in self._claim_rows()), expected)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

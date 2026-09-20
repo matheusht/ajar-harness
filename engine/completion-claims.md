@@ -2,7 +2,12 @@
 
 `tools/completion_claims.py` makes prose that declares an engagement, its scoped work, or its
 testing complete a verifiable claim. It recognizes the canonical `covered-dry` / `coverage_dry`
-forms and bounded alternate grammar such as “the engagement is complete,” “all scoped surfaces
+forms in claim positions: standalone terminal-state lines/headings, verdict/disposition/status
+fields, table cells, and assertions such as “we are coverage_dry.” Instructional mentions such as
+“you cannot move coverage to `coverage_dry` while work remains” and glossary definitions are free.
+Table cells containing only a terminal enum are deliberately treated as dispositions; explain an
+enum in prose rather than putting it alone in a glossary table cell. This is a bounded grammar,
+not a general natural-language classifier. The gate also recognizes bounded alternate grammar such as “the engagement is complete,” “all scoped surfaces
 are exhausted,” and “no further testing remains.” It recursively scans regular text-like content
 regardless of filename extension through the existing record-kernel lock. Files are hashed and
 matched in fixed-size streaming chunks; normalized horizontal whitespace and a bounded overlap

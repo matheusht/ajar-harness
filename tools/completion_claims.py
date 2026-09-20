@@ -49,15 +49,15 @@ CLAIM_TOKEN = re.compile(
         # Canonical enums need assertion context; naming a state is not claiming it.
         (?:
             (?:^|(?<=[\r\n]))[ \t]*(?:\#{1,6}[ \t]+|[-+*][ \t]+)?
-            [`*"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)[`*"\\]{0,4}
-            [ \t]*[.!]?[ \t]*(?=[\r\n]|$)
-            | (?:verdict|disposition|status|coverage)[`*"\\]{0,4}[ \t]*[:=][`*"\\]{0,4}[ \t]*
-              [`*"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
+            [`*'"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)[`*'"\\]{0,4}
+            (?:[ \t]+\#{1,6})?[ \t]*[.!]?[ \t]*(?=[\r\n]|$)
+            | (?:verdict|disposition|status|coverage)[`*'"\\]{0,4}[ \t]*[:=][`*'"\\]{0,4}[ \t]*
+              [`*'"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
             | (?:we|it|(?:the[ \t]+)?(?:engagement|assessment|evaluation|review|run|exercise|coverage))
               [ \t]+(?:is|was|are|were|has[ \t]+been|have[ \t]+been)[ \t]+(?:now[ \t]+)?
-              [`*"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
-            | \|[ \t]*[`*"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
-              [`*"\\]{0,4}[ \t]*(?=\|)
+              [`*'"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
+            | \|[ \t]*[`*'"\\]{0,4}(?:covered[-_ ]dry|coverage[_ -]dry)
+              [`*'"\\]{0,4}[ \t]*(?=\|)
         )
         | (?:the[ \t]+)?
           (?:engagement|assessment|evaluation|review|run|exercise|coverage)

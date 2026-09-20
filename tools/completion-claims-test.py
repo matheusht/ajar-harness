@@ -1076,6 +1076,7 @@ class CompletionClaimsTest(unittest.TestCase):
         for wording in (
             "## `covered-dry`", "**verdict:** `coverage_dry`",
             "Disposition: covered-dry", "Status = coverage_dry",
+            "Status: 'coverage_dry'", "{'status': 'coverage_dry'}", "# covered-dry #",
             "| route | disposition |\n| --- | --- |\n| local | `covered-dry` |",
             'We are "coverage_dry".', "The engagement is now `covered-dry`.",
             '{"status":"coverage_dry"}',
@@ -1089,6 +1090,9 @@ class CompletionClaimsTest(unittest.TestCase):
         note = self.root / "notes.md"
         for wording, expected in (
             ("## `covered-dry`\n", 1),
+            ("# covered-dry #\n", 1),
+            ("Status: 'coverage_dry'\n", 1),
+            ("{'status': 'coverage_dry'}\n", 1),
             ("## `covered-dry` — a definition\n", 0),
             ("| route | `covered-dry` |\n", 1),
             ("**verdict:** `coverage_dry`\n", 1),

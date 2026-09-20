@@ -135,5 +135,5 @@ checks isolate gate behavior; they do not supply that missing agent comparison.
 
 All 62 completion-claim tests passed at `9919fba5` (the same runtime used here). Full kernel
 self-test and 898-check structural conformance passed at prior head `a263c8c5`; these broader
-checks were not repeated for the formatting-only correction. Final combined-head hosted CI
-remains to be verified before merge.
+checks were not repeated for the formatting-only correction. At recording time, final combined-head
+hosted CI remains to be verified before merge.

@@ -1,0 +1,17 @@
+{
+  "complementary": {
+    "A": "direct",
+    "B": "board",
+    "C": "serial"
+  },
+  "complete": {
+    "A": "board",
+    "B": "serial",
+    "C": "direct"
+  },
+  "late": {
+    "A": "serial",
+    "B": "direct",
+    "C": "board"
+  }
+}

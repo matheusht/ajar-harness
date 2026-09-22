@@ -1,0 +1,18 @@
+{
+  "files": {
+    "development-runner.py": {
+      "bytes": 3709,
+      "portable_sha256": "sha256:1be7733286321631f81fcf571a24eb0276bb3990454db45fe12ebd2a0047b1df",
+      "raw_sha256": "sha256:1be7733286321631f81fcf571a24eb0276bb3990454db45fe12ebd2a0047b1df",
+      "redactions": 0
+    },
+    "results.json": {
+      "bytes": 7020,
+      "portable_sha256": "sha256:b0a4171f8f9ac506b29e206a5baaea2b0c589fcf24ac85e1cfdb71f748f0ccd6",
+      "raw_sha256": "sha256:b0a4171f8f9ac506b29e206a5baaea2b0c589fcf24ac85e1cfdb71f748f0ccd6",
+      "redactions": 0
+    }
+  },
+  "raw_root": "/tmp/redteam-pilots/recovery-v2",
+  "redaction": "All occurrences of the personal home prefix were replaced with <redacted-user-home>. Original target-local raw files remain under /tmp and are bound below by SHA-256."
+}

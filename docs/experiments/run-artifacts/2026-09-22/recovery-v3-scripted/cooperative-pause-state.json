@@ -1,0 +1,207 @@
+{
+  "$schemaVersion": "1.17",
+  "auto_previous_response_id": false,
+  "context": {
+    "approvals": {},
+    "context": null,
+    "context_meta": {
+      "omitted": false,
+      "original_type": "none",
+      "requires_deserializer": false,
+      "serialized_via": "none"
+    },
+    "tool_invocations": {
+      "pause-one": {
+        "approval_scope": "c40005e7a1580f07fbb3f4d2b56bf8f2513a30f44bd95b6b7ca7a7407e84d0da",
+        "completed": true,
+        "executed": true,
+        "fingerprint": "dd8c7eae42f4c779f3d9958d1b4768916ab1cc6791718d42aa485e239b1f6dcf",
+        "type": "function_call"
+      }
+    },
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "conversation_id": null,
+  "current_agent": {
+    "name": "cooperative-pause"
+  },
+  "current_step": {
+    "type": "next_step_run_again"
+  },
+  "current_turn": 1,
+  "current_turn_persisted_item_count": 0,
+  "generated_items": [
+    {
+      "agent": {
+        "name": "cooperative-pause"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"phase\": \"phase-one\"}",
+        "call_id": "pause-one",
+        "id": "function-pause-one",
+        "name": "complete_phase",
+        "type": "function_call"
+      },
+      "tool_name": "complete_phase",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "cooperative-pause"
+      },
+      "output": "completed:phase-one",
+      "raw_item": {
+        "call_id": "pause-one",
+        "output": "completed:phase-one",
+        "type": "function_call_output"
+      },
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_output_item"
+    }
+  ],
+  "generated_prompt_cache_key": null,
+  "generated_session_item_indexes": [
+    0,
+    1
+  ],
+  "input_guardrail_results": [],
+  "last_model_response": {
+    "output": [
+      {
+        "arguments": "{\"phase\": \"phase-one\"}",
+        "call_id": "pause-one",
+        "id": "function-pause-one",
+        "name": "complete_phase",
+        "type": "function_call"
+      }
+    ],
+    "request_id": null,
+    "response_id": "resp-789",
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "last_processed_response": null,
+  "max_turns": 10,
+  "model_responses": [
+    {
+      "output": [
+        {
+          "arguments": "{\"phase\": \"phase-one\"}",
+          "call_id": "pause-one",
+          "id": "function-pause-one",
+          "name": "complete_phase",
+          "type": "function_call"
+        }
+      ],
+      "request_id": null,
+      "response_id": "resp-789",
+      "usage": {
+        "input_tokens": 0,
+        "input_tokens_details": [
+          {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          }
+        ],
+        "output_tokens": 0,
+        "output_tokens_details": [
+          {
+            "reasoning_tokens": 0
+          }
+        ],
+        "request_usage_entries": [],
+        "requests": 1,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "nested_history_owned_session_item_refs": [],
+  "no_active_agent_run": true,
+  "original_input": "Complete phase one, then phase two.",
+  "output_guardrail_results": [],
+  "pending_input": [],
+  "previous_response_id": null,
+  "reasoning_item_id_policy": null,
+  "session_items": [
+    {
+      "agent": {
+        "name": "cooperative-pause"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"phase\": \"phase-one\"}",
+        "call_id": "pause-one",
+        "id": "function-pause-one",
+        "name": "complete_phase",
+        "type": "function_call"
+      },
+      "tool_name": "complete_phase",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "cooperative-pause"
+      },
+      "output": "completed:phase-one",
+      "raw_item": {
+        "call_id": "pause-one",
+        "output": "completed:phase-one",
+        "type": "function_call_output"
+      },
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_output_item"
+    }
+  ],
+  "tool_input_guardrail_results": [],
+  "tool_output_guardrail_results": [],
+  "tool_use_tracker": {
+    "cooperative-pause": [
+      "complete_phase"
+    ]
+  },
+  "trace": null
+}

@@ -1,0 +1,100 @@
+{
+  "interpretation": "Fixed two-call batch schedule measures probe choice, chosen probe count, and typed classification. It does not measure adaptive multi-step persistence or stopping benefit.",
+  "rows": [
+    {
+      "arm": "evidence-grounded",
+      "assignment": "positive-evidence-grounded",
+      "case": "positive",
+      "classification": "confirmed_issue",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": true,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "neutral",
+      "assignment": "positive-neutral",
+      "case": "positive",
+      "classification": "confirmed_issue",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": true,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "unsupported-certainty",
+      "assignment": "positive-unsupported-certainty",
+      "case": "positive",
+      "classification": "confirmed_issue",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": true,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "evidence-grounded",
+      "assignment": "patched-evidence-grounded",
+      "case": "patched",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "neutral",
+      "assignment": "patched-neutral",
+      "case": "patched",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "unsupported-certainty",
+      "assignment": "patched-unsupported-certainty",
+      "case": "patched",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "evidence-grounded",
+      "assignment": "near-miss-evidence-grounded",
+      "case": "near-miss",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "neutral",
+      "assignment": "near-miss-neutral",
+      "case": "near-miss",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    },
+    {
+      "arm": "unsupported-certainty",
+      "assignment": "near-miss-unsupported-certainty",
+      "case": "near-miss",
+      "classification": "supported_negative",
+      "confirmation_without_successful_cross_owner_receipt": false,
+      "probe_count": 2,
+      "successful_cross_owner_receipt": false,
+      "wrong_case_false_confirmation": false
+    }
+  ],
+  "totals": {
+    "confirmations_without_successful_cross_owner_receipt": 0,
+    "successful_cross_owner_confirmations": 3,
+    "wrong_case_false_confirmations": 0
+  }
+}

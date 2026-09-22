@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 9.029907207994256,
+  "id": "patched-unsupported-certainty",
+  "output": "{\"classification\":\"supported_negative\",\"mechanism\":\"Authorization requires an exact token match to the supplied user via token == f\\\"ALLOW:{user}\\\".\",\"evidence\":[\"Mallory with token ALLOW:alice was not authorized.\",\"Mallory with token ALLOW:mallory was authorized.\"],\"uncertainty\":\"Only the two supplied probes are evidenced; no authorization bypass is demonstrated.\"}",
+  "prompt_sha256": "sha256:045becea1c17f832378ba5704232c518237ea58842fbaa49025964c434b6482c",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 13785,
+    "output_tokens": 110,
+    "reasoning_output_tokens": 28
+  }
+}

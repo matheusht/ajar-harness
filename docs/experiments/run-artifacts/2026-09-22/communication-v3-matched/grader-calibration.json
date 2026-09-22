@@ -1,0 +1,13 @@
+{
+  "expected": {
+    "ambiguous": "ambiguous",
+    "correct": "correct",
+    "wrong": "wrong"
+  },
+  "observed": {
+    "ambiguous": "ambiguous",
+    "correct": "correct",
+    "wrong": "wrong"
+  },
+  "passed": true
+}

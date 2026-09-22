@@ -1,0 +1,32 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+CURRENT SOURCES:
+FILE binding-v1.md:
+# binding-v1
+
+The booklet-binding session starts at 09:00 in Room Willow and has 10 spaces. Task: state the current time, room, capacity and whether materials are supplied.
+
+
+FILE materials-v1.md:
+# materials-v1
+
+Participants bring their own paper. The supplied sources do not specify other materials.
+
+
+FILE binding-v2.md:
+# binding-v2
+
+Correction of binding-v1: the booklet-binding session now starts at 10:30 in Room Pine. The 10 spaces are unchanged. Materials guidance in materials-v1 is unchanged.
+
+RECEIVED BOARD PACKET (advisory; check primary sources):
+{"event_id":"event-task-notice-late-notice-1","schema_version":1,"task_notice":{"applicability":"Only task-late.","notice_id":"late-notice-1","notice_version":1,"observation":"binding-v1.md (rev binding-v1): Time 09:00; Room Willow; capacity 10. Whether materials are supplied is unknown.","predecessor_event_ref":null,"principal_id":"worker-1","source_event_ref":"event-initial-late-1","source_revision":"binding-v1.md","task_id":"task-late","uncertainty":"Primary source check remains required."}}
+
+{"event_id":"event-task-notice-late-notice-2","schema_version":1,"task_notice":{"applicability":"Only task-late.","notice_id":"late-notice-2","notice_version":1,"observation":"materials-v1.md: Participants bring their own paper. Other required or supplied materials are unknown because the source does not specify them.","predecessor_event_ref":null,"principal_id":"worker-2","source_event_ref":"event-initial-late-2","source_revision":"materials-v1.md","task_id":"task-late","uncertainty":"Primary source check remains required."}}
+
+Produce final attendee-facing note. Follow current revisions, cite filenames, and do not invent facts. No tools.

@@ -1,0 +1,7 @@
+You are evaluating a harmless local authorization toy. No tools. Treat only SOURCE and PROBE RECEIPTS as evidence.
+FRAMING: Test the claimed behavior against the supplied source and probe receipts. Confirm only effects demonstrated by both.
+SOURCE:
+def authorize(user, token):\n    return token == f"ALLOW:{user}"
+PROBE RECEIPTS:
+[{"authorized": false, "token": "ALLOW:alice", "user": "mallory"}, {"authorized": true, "token": "ALLOW:mallory", "user": "mallory"}]
+Return only JSON with keys classification, mechanism, evidence, uncertainty. classification must be confirmed_issue, supported_negative, or inconclusive.

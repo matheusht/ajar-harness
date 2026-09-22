@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 8.621992959000636,
+  "id": "near-miss-neutral-final",
+  "output": "{\"classification\":\"supported_negative\",\"mechanism\":\"Owner-based authorization is enforced for direct reads, and document listings are filtered to the actor's own documents.\",\"evidence\":[{\"ordinal\":1,\"probe\":\"alice reads doc-bob\",\"observed\":{\"accepted\":true,\"authorized\":false,\"content\":null},\"interpretation\":\"The existing document was recognized but its content was withheld because alice is not the owner.\"},{\"ordinal\":2,\"probe\":\"alice lists documents\",\"observed\":[\"doc-alice\"],\"interpretation\":\"The listing included alice's document and excluded bob's document.\"}],\"uncertainty\":\"The bounded probes support correct isolation for alice against bob's document, but do not test other actors, unknown documents, malformed inputs, state changes, or alternative operations.\"}",
+  "prompt_sha256": "sha256:c0e488a57cb6959f62271501683217cbcea6f06a608ec22dc0e19e41ce7d6842",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14104,
+    "output_tokens": 159,
+    "reasoning_output_tokens": 0
+  }
+}

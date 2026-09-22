@@ -1,0 +1,23 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+CURRENT RELEASED PRIMARY SOURCES:
+FILE display-v1.md:
+# display-v1
+
+The kite display is Tuesday at 14:00 in Room Maple. There are 8 seats. Task: state day, time, room, capacity and whether lunch is promised.
+
+
+FILE display-notes-v1.md:
+# display-notes-v1
+
+This is a display, not a class. Lunch and accessibility arrangements are not specified.
+
+INITIAL DRAFT:
+Initial observation (frozen): The kite display is Tuesday at 14:00 in Room Maple, with 8 seats. Lunch is not specified, so it is not known to be promised. Accessibility arrangements are also unknown. [display-v1.md, rev. v1; display-notes-v1.md, rev. v1]
+Produce the final attendee-facing note. Cite current revisions and retain unknowns.

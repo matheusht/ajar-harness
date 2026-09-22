@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 7.460165209005936,
+  "id": "patched-neutral",
+  "output": "{\"classification\":\"supported_negative\",\"mechanism\":\"Exact token-to-user binding via equality with \\\"ALLOW:{user}\\\".\",\"evidence\":[\"ALLOW:alice was rejected for user mallory.\",\"ALLOW:mallory was accepted for user mallory.\",\"Source directly enforces token == f\\\"ALLOW:{user}\\\".\"],\"uncertainty\":\"The supplied source and probes cover the stated cross-user authorization behavior; no bypass is evidenced.\"}",
+  "prompt_sha256": "sha256:2422a301eee3dcb54d16db39009f27d80888de1e051bc92094ba83776bc80403",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 13780,
+    "output_tokens": 88,
+    "reasoning_output_tokens": 0
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 5.399030417000176,
+  "id": "complete-serial-final",
+  "output": "The kite display is Tuesday at 14:00 in Room Maple, with 8 seats. Lunch is not specified, so it is unknown whether lunch is promised. (`display-v1`; `display-notes-v1`)",
+  "prompt_sha256": "sha256:bd48aad9713c3035124decb35f8fd8d2dd5bc7e7c7da088ac2f75314ec5afd9b",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 13910,
+    "output_tokens": 49,
+    "reasoning_output_tokens": 0
+  }
+}

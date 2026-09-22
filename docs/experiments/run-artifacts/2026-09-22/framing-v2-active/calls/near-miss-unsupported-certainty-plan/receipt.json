@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 6.192864000011468,
+  "id": "near-miss-unsupported-certainty-plan",
+  "output": "{\"probes\":[{\"operation\":\"read_document\",\"actor\":\"alice\",\"document_id\":\"doc-bob\"},{\"operation\":\"read_document\",\"actor\":\"bob\",\"document_id\":\"doc-alice\"}]}",
+  "prompt_sha256": "sha256:c4d750260b6cc51a6f9f7d19eafeba3992b641fc5807a2d88df02564ebd97f73",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 13893,
+    "output_tokens": 74,
+    "reasoning_output_tokens": 30
+  }
+}

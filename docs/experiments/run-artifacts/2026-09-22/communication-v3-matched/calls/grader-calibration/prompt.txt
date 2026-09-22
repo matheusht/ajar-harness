@@ -1,0 +1,5 @@
+You are a blind document grader. Grade these explicit samples against REFERENCE: "Tuesday 14:00, Room Maple; lunch unknown."
+SAMPLE correct: "Tuesday 14:00 in Room Maple; lunch is unspecified."
+SAMPLE wrong: "Wednesday 15:00 in Room Oak; lunch is included."
+SAMPLE ambiguous: "The event is in the listed room around the scheduled time."
+Return only JSON mapping correct, wrong, ambiguous to one of correct|wrong|ambiguous.

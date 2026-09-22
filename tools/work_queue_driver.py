@@ -1358,7 +1358,7 @@ def run_driver(
                     "view_type": "hunter-current-v1",
                     "view_digest": hunter_view.view_digest,
                     "input_corpus_digest": hunter_view.input_corpus_digest,
-                    "treatment": "compiled_current_only",
+                    "treatment": hunter_view.manifest["treatment"],
                 }
                 admission = arm_action_admission(
                     engagement_fd=bound.engagement_fd,

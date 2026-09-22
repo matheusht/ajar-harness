@@ -41,7 +41,7 @@ SCOPE = """# Scope - task board fixture
 - Operator: operator-board-test
 - Date: 2026-09-22
 - Signed: [x]
-- Record kernel: `decision-0006-v2`
+- Record kernel: `decision-0006-v1`
 """
 
 

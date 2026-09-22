@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from engagement_records import canonical_json_bytes, sha256_bytes
+from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import read_governed_file, read_ledger
+from task_notice import compile_hunter_notices
 
 
 VIEW_VERSION = "hunter-current-v1"
@@ -26,7 +27,7 @@ DEFAULT_BYTE_BUDGET = 512 * 1024
 EXCLUDED_CLASSES = (
     "engagement-ledgers", "findings", "reviews", "reports", "submissions", "cleanup",
     "portable-memory", "casebooks", "evaluation-gold", "other-hypotheses",
-    "unselected-methodology", "peer-or-task-notice-feed", "git-metadata", "environment-secrets",
+    "unselected-methodology", "unrelated-or-untyped-task-notice-feed", "git-metadata", "environment-secrets",
 )
 REQUIRED_HYPOTHESIS_FIELDS = (
     "status", "statement", "suspected_invariant", "trust_boundary", "attacker_path",
@@ -254,6 +255,22 @@ def _evidence_inputs(engagement: Path, state: dict[str, Any], hypothesis: dict[s
     return rows
 
 
+def _current_task_notices(engagement: Path, hypothesis_id: str) -> dict[str, Any]:
+    events = read_ledger(engagement, "event")
+    defined = any(
+        event.get("event_type") == "observation.recorded"
+        and event.get("payload", {}).get("entity_type") == "task_definition"
+        and event.get("payload", {}).get("task_id") == hypothesis_id
+        for event in events
+    )
+    if not defined:
+        return {"commitment": [], "brief": [], "files": {}}
+    try:
+        return compile_hunter_notices(events, task_id=hypothesis_id)
+    except RecordError as exc:
+        raise HunterViewError("hunter_view_task_notice_invalid") from exc
+
+
 @dataclass
 class HunterView:
     projection: Path
@@ -301,6 +318,8 @@ class HunterView:
             raise HunterViewError("hunter_view_stale") from exc
         if [metadata for metadata, _data in current_evidence] != self.manifest["evidence_inputs"]:
             raise HunterViewError("hunter_view_stale")
+        if _current_task_notices(engagement, hypothesis_id)["commitment"] != self.manifest["task_notices"]:
+            raise HunterViewError("hunter_view_stale")
         schemas = Path(__file__).resolve().parents[1] / "schemas" if schema_root is None else schema_root.resolve(strict=True)
         current_template = _attempt_template(state=state, action=self.manifest["action"], hypothesis_id=hypothesis_id)
         current_contract = {
@@ -345,7 +364,9 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
     ]
     evidence = _evidence_inputs(engagement, state, hypothesis_view)
     evidence_entries = [metadata for metadata, _data in evidence]
-    corpus_digest = sha256_bytes(canonical_json_bytes({"target_inputs": input_entries, "evidence_inputs": evidence_entries}))
+    task_notices = _current_task_notices(engagement, hypothesis_id)
+    treatment = "compiled_current_only_with_task_notices" if task_notices["commitment"] else "compiled_current_only"
+    corpus_digest = sha256_bytes(canonical_json_bytes({"target_inputs": input_entries, "evidence_inputs": evidence_entries, "task_notices": task_notices["commitment"]}))
     proposal_template = _attempt_template(state=state, action=action, hypothesis_id=hypothesis_id)
     schemas = Path(__file__).resolve().parents[1] / "schemas" if schema_root is None else schema_root.resolve(strict=True)
     attempt_schema = _read_relative_regular(schemas, Path("attempt-v2.schema.json"), max_bytes=DEFAULT_BYTE_BUDGET, one_link=False)
@@ -361,19 +382,20 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
         "action": action, "hypothesis_id": hypothesis_id, "hypothesis": hypothesis_view,
         "scope_digest": scope_hash,
         "methodology": [{key: card[key] for key in ("id", "type", "digest")} for card in cards],
-        "target_inputs": input_entries, "evidence_inputs": evidence_entries, "input_corpus_digest": corpus_digest,
+        "target_inputs": input_entries, "evidence_inputs": evidence_entries, "task_notices": task_notices["commitment"], "input_corpus_digest": corpus_digest,
         "exclusion_policy": list(EXCLUDED_CLASSES), "byte_budget": byte_budget,
-        "output_contract": output_contract, "treatment": "compiled_current_only",
+        "output_contract": output_contract, "treatment": treatment,
     }
     view_digest = sha256_bytes(canonical_json_bytes(commitment))
     manifest = {**commitment, "view_digest": view_digest}
     brief = {
-        "schema_version": 1, "principal": "hunter", "view_digest": view_digest,
+        "schema_version": 1, "principal": "hunter", "view_digest": view_digest, "treatment": treatment,
         "task": f"Execute exactly one bounded experiment and submit exactly one truthful {proposal_template['kind']} attempt through the authenticated broker.",
         "hypothesis": hypothesis_view, "action": action,
         "safety_constraints": {"signed_scope": "scope.md", "scope_digest": scope_hash, "impact_ceiling": hypothesis_view["impact_ceiling"], "constraints": hypothesis_view["constraints"]},
         "target_inputs": [{"slot": entry["slot"], "path": f"target-inputs/{entry['slot']}", "reason": entry["reason"], "digest": entry["digest"]} for entry in input_entries],
         "evidence_inputs": [{"reference": entry["reference"], "path": f"evidence/{entry['slot']}", "reason": entry["reason"], "digest": entry["digest"], "media_type": entry["media_type"]} for entry in evidence_entries],
+        "task_notices": task_notices["brief"],
         "unknowns": list(hypothesis_view.get("unresolved_questions", [])),
         "stop_conditions": ["one broker-accepted attempt is recorded", "the experiment reaches a scope or capability ceiling", "required evidence is unavailable"],
         "forbidden": list(EXCLUDED_CLASSES),
@@ -388,6 +410,7 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
     files.extend((f"methodology/{card['type']}/{card['id']}.md", card["bytes"]) for card in cards)
     files.extend((f"target-inputs/input-{index:03d}", data) for index, (_path, data) in enumerate(inputs))
     files.extend((f"evidence/{metadata['slot']}", data) for metadata, data in evidence)
+    files.extend(sorted(task_notices["files"].items()))
     if sum(len(data) for _path, data in files) > byte_budget:
         raise HunterViewError("hunter_view_budget_exceeded")
     root = Path(tempfile.mkdtemp(prefix=f".hunter-view-{view_digest[7:19]}-", dir=workspace))
@@ -432,11 +455,12 @@ def inspect_hunter_view(view: HunterView) -> dict[str, Any]:
     return {
         "schema_version": 1, "view_type": VIEW_VERSION, "principal": "hunter",
         "view_digest": view.view_digest, "input_corpus_digest": view.input_corpus_digest,
-        "treatment": "compiled_current_only", "included": [
+        "treatment": view.manifest["treatment"], "included": [
             {"class": "signed_scope", "digest": view.manifest["scope_digest"], "reason": "signed_safety_constraints"},
             *({"class": "methodology", "digest": row["digest"], "reason": "selected_card_or_oracle"} for row in view.manifest["methodology"]),
             *({"class": "target_input", "digest": row["digest"], "reason": row["reason"]} for row in view.manifest["target_inputs"]),
             *({"class": "current_hypothesis_evidence", "digest": row["digest"], "reason": row["reason"]} for row in view.manifest["evidence_inputs"]),
+            *({"class": "current_task_notice", "digest": row["digest"], "reason": "typed_current_task_advisory"} for row in view.manifest["task_notices"]),
             {"class": "proposal_template", "digest": view.manifest["output_contract"]["proposal_template_digest"], "reason": "exact_admitted_output_shape"},
             {"class": "attempt_schema", "digest": view.manifest["output_contract"]["attempt_schema_digest"], "reason": "self_contained_output_validation"},
             {"class": "common_schema", "digest": view.manifest["output_contract"]["common_schema_digest"], "reason": "referenced_output_definitions"},

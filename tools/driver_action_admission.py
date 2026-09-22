@@ -445,7 +445,7 @@ def arm_action_admission(
             or action.get("principal") != "hunter"
             or view_binding.get("cognitive_principal") != "hunter"
             or view_binding.get("view_type") != "hunter-current-v1"
-            or view_binding.get("treatment") != "compiled_current_only"
+            or view_binding.get("treatment") not in {"compiled_current_only", "compiled_current_only_with_task_notices"}
             or _SHA256_RE.fullmatch(str(view_binding.get("view_digest"))) is None
             or _SHA256_RE.fullmatch(str(view_binding.get("input_corpus_digest"))) is None
         ):

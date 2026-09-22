@@ -42,7 +42,7 @@
         "view_type": {"const": "hunter-current-v1"},
         "view_digest": {"$ref": "#/$defs/sha256"},
         "input_corpus_digest": {"$ref": "#/$defs/sha256"},
-        "treatment": {"const": "compiled_current_only"},
+        "treatment": {"enum": ["compiled_current_only", "compiled_current_only_with_task_notices"]},
         "prompt_version": {"type": ["string", "null"]},
         "card_versions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "tool_versions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}

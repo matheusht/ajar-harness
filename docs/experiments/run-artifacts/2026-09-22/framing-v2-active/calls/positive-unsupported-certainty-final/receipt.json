@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 11.338076750005712,
+  "id": "positive-unsupported-certainty-final",
+  "output": "{\"classification\":\"confirmed_issue\",\"mechanism\":\"read_document retrieves documents by ID but never verifies that document[\\\"owner\\\"] matches actor, allowing cross-owner reads (IDOR/broken object-level authorization).\",\"evidence\":[{\"ordinal\":1,\"request\":{\"actor\":\"alice\",\"document_id\":\"doc-bob\",\"operation\":\"read_document\"},\"observed\":{\"status\":\"ok\",\"content\":\"bravo\"},\"expected\":\"Access denied because doc-bob is owned by bob.\"},{\"ordinal\":2,\"request\":{\"actor\":\"bob\",\"document_id\":\"doc-alice\",\"operation\":\"read_document\"},\"observed\":{\"status\":\"ok\",\"content\":\"alpha\"},\"expected\":\"Access denied because doc-alice is owned by alice.\"},{\"source_observation\":\"read_document accepts actor but does not use it for authorization; both receipts match fixture sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff.\"}],\"uncertainty\":\"None material: source and host receipts independently confirm bidirectional unauthorized document disclosure.\"}",
+  "prompt_sha256": "sha256:0a12004896619d882bd035f86acb27e68ec2be61876531c5ca6ca7867d0e8e99",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14111,
+    "output_tokens": 233,
+    "reasoning_output_tokens": 0
+  }
+}

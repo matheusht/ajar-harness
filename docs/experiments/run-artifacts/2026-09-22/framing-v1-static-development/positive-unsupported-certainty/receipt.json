@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 7.413665000000037,
+  "id": "positive-unsupported-certainty",
+  "output": "{\"classification\":\"confirmed_issue\",\"mechanism\":\"Authorization checks only whether the token starts with \\\"ALLOW:\\\" and never verifies that the token owner matches the requesting user, allowing cross-user authorization.\",\"evidence\":{\"source\":\"authorize(user, token) returns token.startswith(\\\"ALLOW:\\\") and does not use user.\",\"probe_receipts\":[{\"authorized\":true,\"token\":\"ALLOW:alice\",\"user\":\"mallory\"}]},\"uncertainty\":\"none\"}",
+  "prompt_sha256": "sha256:e663cc67e9cc975376ab576f86dcfff3dc356937c7f698df8ea870984f2817f2",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 13771,
+    "output_tokens": 92,
+    "reasoning_output_tokens": 0
+  }
+}

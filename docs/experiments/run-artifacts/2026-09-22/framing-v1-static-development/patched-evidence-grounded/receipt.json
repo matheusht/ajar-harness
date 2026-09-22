@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 9.46524520800449,
+  "id": "patched-evidence-grounded",
+  "output": "{\"classification\":\"supported_negative\",\"mechanism\":\"Authorization requires the token to equal \\\"ALLOW:\\\" followed by the supplied user.\",\"evidence\":[\"Source performs an exact comparison: token == f\\\"ALLOW:{user}\\\".\",\"Probe denies user \\\"mallory\\\" with token \\\"ALLOW:alice\\\".\",\"Probe authorizes user \\\"mallory\\\" with token \\\"ALLOW:mallory\\\".\"],\"uncertainty\":\"Receipts cover only two inputs; broader behavior is inferred from the supplied source.\"}",
+  "prompt_sha256": "sha256:3a3374aad561fba26a9c6a1dec527218b390c66b66bd7369207d13ae7a49ded6",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 1920,
+    "input_tokens": 13790,
+    "output_tokens": 146,
+    "reasoning_output_tokens": 44
+  }
+}

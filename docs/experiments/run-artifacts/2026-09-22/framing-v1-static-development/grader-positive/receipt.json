@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 8.610458541996195,
+  "id": "grader-positive",
+  "output": "{\"A\":{\"correctness\":\"correct\",\"evidence_support\":\"strong\",\"unsupported_claims\":[],\"rationale\":\"Matches the oracle classification and mechanism. Both the source behavior and cross-user probe receipt directly support the authorization flaw.\"},\"B\":{\"correctness\":\"correct\",\"evidence_support\":\"strong\",\"unsupported_claims\":[],\"rationale\":\"Matches the oracle classification and accurately connects the prefix-only check to the demonstrated cross-user authorization.\"},\"C\":{\"correctness\":\"correct\",\"evidence_support\":\"strong\",\"unsupported_claims\":[],\"rationale\":\"Matches the oracle classification and mechanism. The source and probe evidence directly confirm the bypass.\"}}",
+  "prompt_sha256": "sha256:b195d871991f516db7695219db48767d3a43ce8d32a7dbee4f615c888adc69e5",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14059,
+    "output_tokens": 128,
+    "reasoning_output_tokens": 0
+  }
+}

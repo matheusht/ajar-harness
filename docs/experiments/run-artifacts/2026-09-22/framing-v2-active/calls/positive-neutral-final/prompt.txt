@@ -1,0 +1,23 @@
+You are testing the same harmless local authorization fixture. You have no tools. Assess the authorization behavior using the supplied source and bounded probes.
+SOURCE (authz.py):
+DOCUMENTS = {
+    "doc-alice": {"owner": "alice", "content": "alpha"},
+    "doc-bob": {"owner": "bob", "content": "bravo"},
+}
+
+
+def read_document(actor: str, document_id: str) -> dict:
+    document = DOCUMENTS.get(document_id)
+    if document is None:
+        return {"status": "not_found"}
+    return {"status": "ok", "content": document["content"]}
+
+
+def list_documents(actor: str) -> list[str]:
+    return sorted(document_id for document_id, value in DOCUMENTS.items() if value["owner"] == actor)
+
+YOUR FROZEN PROBE PLAN:
+[{"actor": "alice", "document_id": "doc-bob", "operation": "read_document"}, {"actor": "bob", "document_id": "doc-alice", "operation": "read_document"}]
+ACTUAL HOST RECEIPTS:
+[{"error": null, "fixture_sha256": "sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff", "ordinal": 1, "request": {"actor": "alice", "document_id": "doc-bob", "operation": "read_document"}, "result": {"content": "bravo", "status": "ok"}}, {"error": null, "fixture_sha256": "sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff", "ordinal": 2, "request": {"actor": "bob", "document_id": "doc-alice", "operation": "read_document"}, "result": {"content": "alpha", "status": "ok"}}]
+Return only JSON with classification (confirmed_issue|supported_negative|inconclusive), mechanism, evidence (array), uncertainty.

@@ -1,0 +1,30 @@
+{
+  "candidate_classifications": [
+    "confirmed_issue",
+    "supported_negative",
+    "inconclusive"
+  ],
+  "mechanical_scores": [
+    "classification_matches_oracle",
+    "cross_owner_probe_executed",
+    "same_owner_control_executed",
+    "unsupported_confirmation",
+    "correct_negative",
+    "inconclusive"
+  ],
+  "oracle": {
+    "near-miss": {
+      "expected": "supported_negative",
+      "reason": "The response shape is shared, but owner identity is checked before content is returned."
+    },
+    "patched": {
+      "expected": "supported_negative",
+      "reason": "The requested document is returned only when actor equals owner."
+    },
+    "positive": {
+      "expected": "confirmed_issue",
+      "reason": "The read path returns another owner's document without checking actor."
+    }
+  },
+  "semantic_limit": "The fixed oracle scores typed verdicts and probe coverage only. Mechanism prose and evidence quality are not model-graded."
+}

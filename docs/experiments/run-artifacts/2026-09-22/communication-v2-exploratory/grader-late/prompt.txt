@@ -1,0 +1,10 @@
+Blindly grade outputs A/B/C. No arm labels. REFERENCE:
+# Fixed reference assessment
+
+Require 10:30, Room Pine, 10 spaces citing binding-v2 and recognizing correction of binding-v1. Retain own paper/other materials unknown with materials-v1; the old time/room is stale after release 5.
+
+Grade only the designated final note. Assess completeness, source-version correctness, unsupported claims and provenance separately. Do not grade intermediate discussion or worker self-assessments. This reference was authored before the illustrative output chronology; it is not a measured independent review.
+
+OUTPUTS:
+{"A": "The booklet-binding session starts at 10:30 in Room Pine and has 10 spaces. Bring your own paper; whether other materials are supplied is unknown. The earlier 09:00/Room Willow details were superseded. (`binding-v1.md`, corrected by `binding-v2.md`; `materials-v1.md`)", "B": "Initial observation from `binding-v1.md` recorded 09:00 in Room Willow; those details were later corrected.\n\nCurrent note: The booklet-binding session starts at 10:30 in Room Pine, with 10 spaces (`binding-v2.md`). Bring your own paper. The sources do not specify whether other materials are supplied (`materials-v1.md`; reaffirmed by `binding-v2.md`).", "C": "The booklet-binding session starts at 10:30 in Room Pine and has 10 spaces (`binding-v2.md`, rev. v2). Bring your own paper; whether any other materials are supplied is unknown (`materials-v1.md`, rev. v1; confirmed unchanged by `binding-v2.md`, rev. v2)."}
+Return only JSON mapping each output to correctness, completeness, revision_correctness, unsupported_claims, rationale.

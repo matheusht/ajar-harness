@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 20.341741750002257,
+  "id": "grader-complete",
+  "output": "{\"A\":{\"correctness\":\"incorrect\",\"completeness\":\"incomplete: no designated final note; accessibility status is also omitted\",\"revision_correctness\":\"correct citations to display-v1 and display-notes-v1\",\"unsupported_claims\":[],\"rationale\":\"The only text is explicitly labeled an initial observation, which must not be graded as the designated final note.\"},\"B\":{\"correctness\":\"partially_correct\",\"completeness\":\"incomplete: omits that accessibility is unspecified\",\"revision_correctness\":\"correct: cites revision v1 for both sources\",\"unsupported_claims\":[\"Lunch is not promised\"],\"rationale\":\"The designated final note correctly gives Tuesday, 14:00, Room Maple, and 8 seats, but turns unspecified lunch information into a negative claim and omits accessibility.\"},\"C\":{\"correctness\":\"partially_correct\",\"completeness\":\"incomplete: omits that accessibility is unspecified\",\"revision_correctness\":\"correct: cites display-v1 and display-notes-v1\",\"unsupported_claims\":[],\"rationale\":\"The note correctly reports the event details and preserves lunch uncertainty, but it does not state that accessibility is unspecified.\"}}",
+  "prompt_sha256": "sha256:471aef3f35e8a45103724e4cf99cc4f8eb254bf18bc8d022274dce2e0f13ef1d",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 13971,
+    "output_tokens": 502,
+    "reasoning_output_tokens": 266
+  }
+}

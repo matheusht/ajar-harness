@@ -1,0 +1,1 @@
+Blind grader calibration. Correct: current revision and all required facts with citations. Wrong: stale revision or unsupported fact. Ambiguous: wording cannot establish required claim. Return only JSON confirming fields correctness, completeness, revision_correctness, unsupported_claims.

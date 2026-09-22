@@ -1,0 +1,227 @@
+{
+  "assignments": [
+    {
+      "arm": "baseline",
+      "case": "late-correction",
+      "exactly_once_external_effects": "not_established",
+      "native_pause_restore": "unsupported",
+      "received_arguments": [
+        "workshop-v1",
+        "binding-v2"
+      ],
+      "unfinished_work": [
+        "reconcile state"
+      ]
+    },
+    {
+      "arm": "sdk",
+      "case": "late-correction",
+      "effects": [
+        "binding-v2 correction supplied"
+      ],
+      "error": null,
+      "exactly_once_external_effects": "not_established",
+      "final_output": "Revised output uses binding-v2 and retains the predecessor as stale history.",
+      "interruption": {
+        "arguments": "{\"payload\": \"binding-v2 correction supplied\"}",
+        "name": "checkpoint"
+      },
+      "model_calls": [
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=late-correction; preserve exact supplied arguments",
+              "role": "user"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        },
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=late-correction; preserve exact supplied arguments",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"payload\": \"binding-v2 correction supplied\"}",
+              "call_id": "c1",
+              "id": "f",
+              "name": "checkpoint",
+              "type": "function_call"
+            },
+            {
+              "call_id": "c1",
+              "output": "receipt:binding-v2 correction supplied",
+              "type": "function_call_output"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        }
+      ],
+      "state_bytes": 5309,
+      "state_sha256": "sha256:4dcf995d6ce4fa9560d2f775428882fce4b7bbcfe1f93c1cd74bf4c98d516536",
+      "trace_export": false
+    },
+    {
+      "arm": "baseline",
+      "case": "cooperative-pause",
+      "exactly_once_external_effects": "not_established",
+      "native_pause_restore": "unsupported",
+      "received_arguments": [
+        "workshop-v1"
+      ],
+      "unfinished_work": [
+        "reconcile state"
+      ]
+    },
+    {
+      "arm": "sdk",
+      "case": "cooperative-pause",
+      "effects": [
+        "pause after bounded first phase"
+      ],
+      "error": null,
+      "exactly_once_external_effects": "not_established",
+      "final_output": "Resumed from approved checkpoint with unfinished work visible.",
+      "interruption": {
+        "arguments": "{\"payload\": \"pause after bounded first phase\"}",
+        "name": "checkpoint"
+      },
+      "model_calls": [
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=cooperative-pause; preserve exact supplied arguments",
+              "role": "user"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        },
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=cooperative-pause; preserve exact supplied arguments",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"payload\": \"pause after bounded first phase\"}",
+              "call_id": "c1",
+              "id": "f",
+              "name": "checkpoint",
+              "type": "function_call"
+            },
+            {
+              "call_id": "c1",
+              "output": "receipt:pause after bounded first phase",
+              "type": "function_call_output"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        }
+      ],
+      "state_bytes": 5339,
+      "state_sha256": "sha256:38154d28f88dc7b1c744ef6053c021ede979f26cfff7e13a8e6ad04ee725f2d8",
+      "trace_export": false
+    },
+    {
+      "arm": "baseline",
+      "case": "lost-receipt",
+      "exactly_once_external_effects": "not_established",
+      "native_pause_restore": "unsupported",
+      "received_arguments": [
+        "workshop-v1"
+      ],
+      "unfinished_work": [
+        "reconcile state"
+      ]
+    },
+    {
+      "arm": "sdk",
+      "case": "lost-receipt",
+      "effects": [
+        "write attendee-note-v2"
+      ],
+      "error": "RuntimeError: simulated lost provider receipt after approved effect",
+      "exactly_once_external_effects": "not_established",
+      "final_output": null,
+      "interruption": {
+        "arguments": "{\"payload\": \"write attendee-note-v2\"}",
+        "name": "checkpoint"
+      },
+      "model_calls": [
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=lost-receipt; preserve exact supplied arguments",
+              "role": "user"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        },
+        {
+          "conversation_id": null,
+          "input": [
+            {
+              "content": "case=lost-receipt; preserve exact supplied arguments",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"payload\": \"write attendee-note-v2\"}",
+              "call_id": "c1",
+              "id": "f",
+              "name": "checkpoint",
+              "type": "function_call"
+            },
+            {
+              "call_id": "c1",
+              "output": "receipt:write attendee-note-v2",
+              "type": "function_call_output"
+            }
+          ],
+          "previous_response_id": null,
+          "system_instructions": "Use checkpoint once, then report recovery status without exactly-once claims.",
+          "tools": [
+            "checkpoint"
+          ]
+        }
+      ],
+      "state_bytes": 5199,
+      "state_sha256": "sha256:b9610bd84b9ba276a8b2b4b02ce3348b22826e051ded4096e8b675a25dcff5f5",
+      "trace_export": false
+    }
+  ],
+  "development_failures": [
+    {
+      "candidate_output_produced": false,
+      "error": "AttributeError: dict has no attribute encode",
+      "stage": "result serialization after native first pause/restore"
+    }
+  ],
+  "protocol_commit": "bc5c5bb3beb7979fb3c71b7f21ab9c1bec85947c",
+  "sdk_commit": "f1f35031d364f9f0d8e94dda0853c92abefdccff"
+}

@@ -17,17 +17,19 @@ already wrong.
 Default loop: a refusal/dead-end is an input to the next rung, terminal verdict is coverage/dry. With
 evidence in hand, sharpen it:
 
-> A held vector is a **wrong turn**, not a negative result. It eliminates one path; it does **not**
-> lower belief the vuln is reachable another way.
+> A held vector is a **wrong turn** for the current route. It is negative evidence for that route; it
+> does **not** by itself decide whether the vuln is reachable another way.
 
-So you keep enumerating vectors — the vuln is somewhere in the bounded space, and a dead end just means
-you took the wrong door, not that the room is empty.
+Update belief in the route, mechanism and broader hypothesis according to how diagnostic the observation
+is. Continue the remaining bounded work while its evidence-adjusted priority and budget justify it. A
+dead end neither proves the broader space clean nor guarantees a vulnerability elsewhere in it.
 
 ## Bound the space so "dry" is real
 Quantify the surface up front: N tables + M RPCs, the sink set, the route list, the delivery channels.
 Then **dry has a definition** — every one of the N+M enumerated *and adjudicated* — instead of "I got
 tired." A bounded, enumerable space is what converts "try harder" into a finite, checkable job. The
-operator's conviction that a vuln exists is itself a strong prior; treat it as a signal, not pressure.
+operator's conviction that a vuln exists is a prior; treat it as a search signal, not claim truth or
+pressure to force a finding. Contradictory evidence may lower it.
 
 ## The funnel — grade top to bottom, revisit freely
 Run leads through a wide-to-narrow funnel with a rigor gate at each narrowing:
@@ -60,9 +62,10 @@ claim a hit.
 - **Default-to-disbelief holds.** A strong lead can still end `refuted` (e.g. an accepted metadata-IP
   literal that the OAST oracle shows never triggers an actual fetch → DNS-only, not SSRF). Persistence
   buys a *definitive answer*, not a forced finding.
-- **Trust the live signal over the reassuring dead-end.** When a source read *looks* fixed but the live
-  target says otherwise, re-verify directly and name the mechanism that reconciles them — the confirmed
-  live result wins until you can explain it away.
+- **Reconcile conflicting evidence.** When a source read *looks* fixed but an independently observed
+  live effect says otherwise, re-verify both and name the mechanism that reconciles them. A confirmed
+  effect supported by its oracle is strong evidence for that observed path; it does not make unrelated
+  claims true, and source text does not erase the effect without an explanation.
 - **Land the result honestly.** Terminal states are `confirmed` / `chained`, `real-but-capped` (a held
   control bounds impact — *prove* the cap), or `covered-dry`. Never "it finally worked," never "I gave
   up."

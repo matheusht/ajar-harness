@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 35.11362216700218,
+  "id": "late-direct-final",
+  "output": "Please release `binding-v2.md` and `materials-v1.md`. The packet contains only advisory notices, which are not authority, so I cannot yet produce a verified attendee-facing note. The requirements for materials other than paper also remain unknown.",
+  "prompt_sha256": "sha256:d09e4d680e2040ba2798ea6ca8e3b5cc23db1d6abf6f0f9ed4f7b8a2dc4db978",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14224,
+    "output_tokens": 977,
+    "reasoning_output_tokens": 861
+  }
+}

@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a0c996-5675-7661-ab8d-495f5e710ea1"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"classification\":\"supported_negative\",\"mechanism\":\"Exact token-to-user binding via equality with \\\"ALLOW:{user}\\\".\",\"evidence\":[\"ALLOW:alice was rejected for user mallory.\",\"ALLOW:mallory was accepted for user mallory.\",\"Source directly enforces token == f\\\"ALLOW:{user}\\\".\"],\"uncertainty\":\"The supplied source and probes cover the stated cross-user authorization behavior; no bypass is evidenced.\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":13780,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":88,"reasoning_output_tokens":0}}

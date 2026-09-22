@@ -1,0 +1,25 @@
+{
+  "files": {
+    "docs/experiments/communication-v1/grader/complementary.md": "sha256:60b32c4738bb4d3174b8c1c8e603da1be93ab8a4d666f26da0357f8097ad1033",
+    "docs/experiments/communication-v1/grader/complete.md": "sha256:39bb9fc04df7270bfa144fdfba32836a941496fdaa13dc79fae434484621f3e5",
+    "docs/experiments/communication-v1/grader/late.md": "sha256:da5f1a5c70c8409af60392cc03b6b804761b132118ab47ed9eb0946d209432df",
+    "docs/experiments/communication-v1/inputs/brief.md": "sha256:62199981ba6c5869f65c916fc833ae2115648f9f6f3caa1b790d05b9af84e9a9",
+    "docs/experiments/communication-v1/inputs/complementary/attendance-v1.md": "sha256:98172705d781b585c249bced47ed5d915064e0c1481e3a827d0de6ec925d6818",
+    "docs/experiments/communication-v1/inputs/complementary/stock-v1.md": "sha256:9950f7968a3b02c13bd35f26707585ddd57ab0644cac2aa32d26efb4f6b86b00",
+    "docs/experiments/communication-v1/inputs/complete/display-notes-v1.md": "sha256:79ef2fbb1d225453315d894f301aa5774c13cc67233d8c60864b31e3c84aa304",
+    "docs/experiments/communication-v1/inputs/complete/display-v1.md": "sha256:e1c1ac6ce1b4385b855b4a33186d90c9d6667ec8d20821c25c268f4500997de4",
+    "docs/experiments/communication-v1/inputs/late/binding-v1.md": "sha256:ee9f1fbd820541cd76fbffee32e78ef14e27b5128c5b2a01c09c83bcc94966bb",
+    "docs/experiments/communication-v1/inputs/late/materials-v1.md": "sha256:7c9df8275ac9c56fd17ab5e049918d0e5758a78105907c3e20022d5bc7682367",
+    "docs/experiments/communication-v1/releases/late/binding-v2.md": "sha256:368d11dc53de813dc04fc4044790e33aa8d82dd60605237972c8586d82cc53e0",
+    "docs/experiments/communication-v3/failure-matrix.md": "sha256:5f455daf4404bf499a1e5afbf5323d93351b2aec3e7c3d964e7d90a7a702a6fb",
+    "docs/experiments/communication-v3/protocol.json": "sha256:b3c16e387ed358ecfc484a3db58bcc83f0dce4c739c3c4caad1c963a2360e26a",
+    "docs/experiments/communication-v3/runtime-config.json": "sha256:924978ed61fdff0329322ebc340abdf8e167dd8a4c3ab3c7d50fbb45def2c1e3",
+    "tools/engagement_records.py": "sha256:1b3b0be62ef5864ab4890dc9085f9fba397dafc51606407657d78230e7490069",
+    "tools/engagement_state.py": "sha256:1c7b4de34e16a776ca8a5763d0535c9ce6466148137ff8618863e10e107ca297",
+    "tools/run_communication_v3.py": "sha256:d47c5c39094471cd0e5ae2b5b74f8f428e65cb153092aa78c297d8a6cebd6c01",
+    "tools/task_board.py": "sha256:8d3de265bae4f6d894dd1b095b6fd58d92674e14e4d7be2a1e17941604d4eea4",
+    "tools/task_notice.py": "sha256:92b80fe21c90e9270ef1adbbf1c10637c85b91603dc6937dcfd3136b7ae47f5d"
+  },
+  "manifest_id": "communication-v3-freeze-2026-09-22T15:02:28Z",
+  "note": "Frozen before communication-v3 candidate inference. manifest.json is excluded from its own digest."
+}

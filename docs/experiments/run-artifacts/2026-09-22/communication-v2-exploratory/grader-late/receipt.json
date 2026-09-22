@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 19.639852332999,
+  "id": "grader-late",
+  "output": "{\"A\":{\"correctness\":\"correct\",\"completeness\":\"complete\",\"revision_correctness\":\"correct\",\"unsupported_claims\":\"none\",\"rationale\":\"States 10:30, Room Pine, and 10 spaces; cites binding-v2; explicitly recognizes that binding-v2 corrected binding-v1; and attributes the paper requirement and unknown status of other materials to materials-v1.\"},\"B\":{\"correctness\":\"mostly_correct\",\"completeness\":\"incomplete\",\"revision_correctness\":\"partial\",\"unsupported_claims\":[\"Claims binding-v2 reaffirmed the materials information.\"],\"rationale\":\"The designated final note contains the correct current time, room, capacity, paper requirement, and uncertainty about other materials. However, it does not itself recognize the correction of binding-v1; that appears only in intermediate text, which must not be graded. It also unsupportedly attributes reaffirmation of the materials information to binding-v2.\"},\"C\":{\"correctness\":\"mostly_correct\",\"completeness\":\"incomplete\",\"revision_correctness\":\"partial\",\"unsupported_claims\":[\"Claims binding-v2 confirmed that the materials information was unchanged.\"],\"rationale\":\"Correctly gives 10:30, Room Pine, 10 spaces, and the materials status with the primary source versions. It does not recognize that binding-v2 corrected binding-v1, and it unsupportedly claims binding-v2 confirmed the materials information.\"}}",
+  "prompt_sha256": "sha256:6bb452d31fd25973277a3b285f5182c1d9c10cf5013d6e23d9419c203889aafd",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14022,
+    "output_tokens": 511,
+    "reasoning_output_tokens": 230
+  }
+}

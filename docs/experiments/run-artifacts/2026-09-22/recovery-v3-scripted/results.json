@@ -1,0 +1,260 @@
+{
+  "all_sdk_scenarios_passed": true,
+  "manifest_id": "recovery-v3-freeze-2026-09-22T14:57:48Z",
+  "model_calls": 0,
+  "rows": [
+    {
+      "arm": "baseline",
+      "case": "late-correction",
+      "invoked_recovery_interfaces": [],
+      "reason": "The pinned baseline files expose no native serialized pause/restore or late pending-input interface. A prose occurrence of 'pause' is not such an interface.",
+      "received_arguments": null,
+      "source_inspection": [
+        {
+          "path": "tools/claude_work_session.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:3bfe7b4db842c09bc5b38753534280fd304e7ae94a74884a866c57333b32a5e4"
+        },
+        {
+          "path": "tools/work_queue_driver.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:801ce2ad3157b8f35b18bc2b3125591dbbe17e92a2074879a4ea82bfdc11fae9"
+        }
+      ],
+      "status": "unsupported_not_executed"
+    },
+    {
+      "arm": "baseline",
+      "case": "cooperative-pause",
+      "invoked_recovery_interfaces": [],
+      "reason": "The pinned baseline files expose no native serialized pause/restore or late pending-input interface. A prose occurrence of 'pause' is not such an interface.",
+      "received_arguments": null,
+      "source_inspection": [
+        {
+          "path": "tools/claude_work_session.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:3bfe7b4db842c09bc5b38753534280fd304e7ae94a74884a866c57333b32a5e4"
+        },
+        {
+          "path": "tools/work_queue_driver.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:801ce2ad3157b8f35b18bc2b3125591dbbe17e92a2074879a4ea82bfdc11fae9"
+        }
+      ],
+      "status": "unsupported_not_executed"
+    },
+    {
+      "arm": "baseline",
+      "case": "lost-receipt",
+      "invoked_recovery_interfaces": [],
+      "reason": "The pinned baseline files expose no native serialized pause/restore or late pending-input interface. A prose occurrence of 'pause' is not such an interface.",
+      "received_arguments": null,
+      "source_inspection": [
+        {
+          "path": "tools/claude_work_session.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:3bfe7b4db842c09bc5b38753534280fd304e7ae94a74884a866c57333b32a5e4"
+        },
+        {
+          "path": "tools/work_queue_driver.py",
+          "recovery_api_terms_found": [],
+          "sha256": "sha256:801ce2ad3157b8f35b18bc2b3125591dbbe17e92a2074879a4ea82bfdc11fae9"
+        }
+      ],
+      "status": "unsupported_not_executed"
+    },
+    {
+      "arm": "sdk",
+      "case": "late-correction",
+      "correction_occurrences_in_next_input": 1,
+      "effects": [
+        "workshop-v1"
+      ],
+      "final_output": "late correction admitted",
+      "mechanism": "soft_cancel_after_turn_plus_pending_input",
+      "next_model_input": [
+        {
+          "content": "Use workshop-v1; wait for later updates.",
+          "role": "user"
+        },
+        {
+          "arguments": "{\"revision\": \"workshop-v1\"}",
+          "call_id": "late-v1",
+          "id": "function-late-v1",
+          "name": "record_revision",
+          "type": "function_call"
+        },
+        {
+          "call_id": "late-v1",
+          "output": "recorded:workshop-v1",
+          "type": "function_call_output"
+        },
+        {
+          "content": "Correction c1: replace workshop-v1 with workshop-v2.",
+          "role": "user"
+        }
+      ],
+      "passed": true,
+      "pending_input_before_resume": [
+        {
+          "content": "Correction c1: replace workshop-v1 with workshop-v2.",
+          "role": "user"
+        }
+      ],
+      "state_sha256": "sha256:bbc911acb022ef95015f1f59a5813d0030986c575b27e62eb02d9948a8cc7e4f",
+      "stream_events": [
+        {
+          "name": null,
+          "type": "agent_updated_stream_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": "tool_called",
+          "type": "run_item_stream_event"
+        },
+        {
+          "name": "tool_output",
+          "type": "run_item_stream_event"
+        }
+      ]
+    },
+    {
+      "arm": "sdk",
+      "case": "cooperative-pause",
+      "effects_before_and_after_resume": [
+        "phase-one"
+      ],
+      "final_output": "phase two completed after resume",
+      "mechanism": "soft_cancel_after_turn",
+      "next_model_input": [
+        {
+          "content": "Complete phase one, then phase two.",
+          "role": "user"
+        },
+        {
+          "arguments": "{\"phase\": \"phase-one\"}",
+          "call_id": "pause-one",
+          "id": "function-pause-one",
+          "name": "complete_phase",
+          "type": "function_call"
+        },
+        {
+          "call_id": "pause-one",
+          "output": "completed:phase-one",
+          "type": "function_call_output"
+        }
+      ],
+      "passed": true,
+      "state_sha256": "sha256:dfe0d7cec2a263828d5f543cd662bc8592e977e8435fc5c622cdfe0844b7cc60",
+      "stream_events": [
+        {
+          "name": null,
+          "type": "agent_updated_stream_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": null,
+          "type": "raw_response_event"
+        },
+        {
+          "name": "tool_called",
+          "type": "run_item_stream_event"
+        },
+        {
+          "name": "tool_output",
+          "type": "run_item_stream_event"
+        }
+      ],
+      "unfinished_model_steps_at_pause": 1
+    },
+    {
+      "arm": "sdk",
+      "case": "lost-receipt",
+      "effects_after_failure": [
+        "{\"attempt\": 1, \"payload\": \"attendee-note-v2\"}"
+      ],
+      "effects_after_retry": [
+        "{\"attempt\": 1, \"payload\": \"attendee-note-v2\"}",
+        "{\"attempt\": 2, \"payload\": \"attendee-note-v2\"}"
+      ],
+      "exactly_once_external_effects": false,
+      "final_output": "receipt observed after retry",
+      "first_attempt_error": "LostBeforeReceipt: local effect completed before tool receipt",
+      "mechanism": "approved_pre_effect_snapshot_replay",
+      "passed": true,
+      "pre_effect_state_sha256": "sha256:2f72b342dfdc8a9a1d4f7a9b881e5903c6d9d75a212be263adb6f435eac9307f",
+      "receipt_visible_after_retry": true,
+      "receipt_visible_in_pre_effect_state": false,
+      "retry_next_model_input": [
+        {
+          "content": "Write attendee-note-v2.",
+          "role": "user"
+        },
+        {
+          "arguments": "{\"payload\": \"attendee-note-v2\"}",
+          "call_id": "lost-write",
+          "id": "function-lost-write",
+          "name": "write_note",
+          "type": "function_call"
+        },
+        {
+          "call_id": "lost-write",
+          "output": "receipt:attendee-note-v2",
+          "type": "function_call_output"
+        }
+      ]
+    }
+  ],
+  "sdk_commit": "f1f35031d364f9f0d8e94dda0853c92abefdccff",
+  "trace_export": false
+}

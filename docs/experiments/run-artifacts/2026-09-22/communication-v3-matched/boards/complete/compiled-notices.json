@@ -1,0 +1,36 @@
+{
+  "brief": [
+    {
+      "digest": "sha256:ecf9e07d77242a4e7f320370fcdb310ef4c1252e4856ea0af81ffa323b77bcb8",
+      "event_id": "event-task-notice-complete-notice-1",
+      "path": "notices/notice-000.json",
+      "principal": "worker-1",
+      "source_revision": "display-v1.md"
+    },
+    {
+      "digest": "sha256:2d50c55eb3efa37ac2216ebfdb445f252b9d7db149c2e3530cf38d361a0b7d66",
+      "event_id": "event-task-notice-complete-notice-2",
+      "path": "notices/notice-001.json",
+      "principal": "worker-2",
+      "source_revision": "display-notes-v1.md"
+    }
+  ],
+  "commitment": [
+    {
+      "digest": "sha256:ecf9e07d77242a4e7f320370fcdb310ef4c1252e4856ea0af81ffa323b77bcb8",
+      "event_id": "event-task-notice-complete-notice-1",
+      "principal": "worker-1",
+      "source_event_ref": "event-initial-complete-1",
+      "source_revision": "display-v1.md",
+      "task_id": "task-complete"
+    },
+    {
+      "digest": "sha256:2d50c55eb3efa37ac2216ebfdb445f252b9d7db149c2e3530cf38d361a0b7d66",
+      "event_id": "event-task-notice-complete-notice-2",
+      "principal": "worker-2",
+      "source_event_ref": "event-initial-complete-2",
+      "source_revision": "display-notes-v1.md",
+      "task_id": "task-complete"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 10.128440333006438,
+  "id": "grader-near-miss",
+  "output": "{\"A\":{\"correctness\":\"correct\",\"evidence_support\":\"fully_supported\",\"unsupported_claims\":[],\"rationale\":\"Matches the oracle: exact token equality controls authorization, the prefix audit check is irrelevant, and the mismatched user/token probe was rejected.\"},\"B\":{\"correctness\":\"correct\",\"evidence_support\":\"fully_supported\",\"unsupported_claims\":[],\"rationale\":\"Correctly evaluates the exact comparison for mallory and accurately cites the probe's authorized=false result. Its uncertainty appropriately limits the probe evidence.\"},\"C\":{\"correctness\":\"correct\",\"evidence_support\":\"fully_supported\",\"unsupported_claims\":[],\"rationale\":\"Matches both the source and probe: authorization depends on exact user-bound token equality, while the accepted prefix shape has no effect on authorization.\"}}",
+  "prompt_sha256": "sha256:4801334aa694f9a9ab0dd67a78ad3620ea82ff2f88fe5e05af110e9b525fadde",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14148,
+    "output_tokens": 181,
+    "reasoning_output_tokens": 24
+  }
+}

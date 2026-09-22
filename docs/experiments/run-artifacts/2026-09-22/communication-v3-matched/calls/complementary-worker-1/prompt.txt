@@ -1,0 +1,13 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+You are independent worker 1. Read only the source below. Return only JSON with observation (max 220 characters, include filename and useful facts) and uncertainty (max 80 characters).
+FILE attendance-v1.md:
+# attendance-v1
+
+The paper-art demonstration has 36 attendees. Each attendee needs one sheet. Task: determine whether supplied stock suffices and state the spare count; retain any restocking uncertainty.

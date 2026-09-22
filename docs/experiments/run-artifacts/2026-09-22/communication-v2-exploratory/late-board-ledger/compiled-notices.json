@@ -1,0 +1,36 @@
+{
+  "brief": [
+    {
+      "digest": "sha256:4ca3bd4f3cebe28d4bd806c8780bcba99193c721f1f7667666a0be21bb3cf557",
+      "event_id": "event-task-notice-late-notice-1",
+      "path": "notices/notice-000.json",
+      "principal": "worker-1",
+      "source_revision": "binding-v1.md"
+    },
+    {
+      "digest": "sha256:955b65c2d502a78ce710078b4aa01a7d0552130deb4e58bfd13c304ba13e5925",
+      "event_id": "event-task-notice-late-notice-2",
+      "path": "notices/notice-001.json",
+      "principal": "worker-2",
+      "source_revision": "materials-v1.md"
+    }
+  ],
+  "commitment": [
+    {
+      "digest": "sha256:4ca3bd4f3cebe28d4bd806c8780bcba99193c721f1f7667666a0be21bb3cf557",
+      "event_id": "event-task-notice-late-notice-1",
+      "principal": "worker-1",
+      "source_event_ref": "event-initial-late-1",
+      "source_revision": "binding-v1.md",
+      "task_id": "task-late"
+    },
+    {
+      "digest": "sha256:955b65c2d502a78ce710078b4aa01a7d0552130deb4e58bfd13c304ba13e5925",
+      "event_id": "event-task-notice-late-notice-2",
+      "principal": "worker-2",
+      "source_event_ref": "event-initial-late-2",
+      "source_revision": "materials-v1.md",
+      "task_id": "task-late"
+    }
+  ]
+}

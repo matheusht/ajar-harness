@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 10.383128125002258,
+  "id": "positive-evidence-grounded-final",
+  "output": "{\"classification\":\"confirmed_issue\",\"mechanism\":\"read_document ignores the actor and returns any existing document by ID, allowing alice to read bob's document despite list_documents exposing only alice-owned documents.\",\"evidence\":[\"Source: list_documents('alice') filters documents by owner, while read_document(actor, document_id) performs no ownership check and returns the selected document's content.\",\"Receipt 1: alice listed documents and received only ['doc-alice'].\",\"Receipt 2: alice requested read_document for 'doc-bob' and received status 'ok' with content 'bravo'.\",\"Both receipts identify the same fixture SHA-256: sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff.\"],\"uncertainty\":\"The evidence confirms unauthorized cross-owner read access for alice reading doc-bob in this fixture; it does not establish effects beyond existing-document reads or beyond the supplied fixture.\"}",
+  "prompt_sha256": "sha256:48f2de8066540c864a8462e01ba3a6823d09eeaf51adfe5221736ddc5407dfb8",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14093,
+    "output_tokens": 212,
+    "reasoning_output_tokens": 0
+  }
+}

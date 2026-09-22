@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 12.157693332992494,
+  "id": "late-direct-draft",
+  "output": "Initial observation (frozen, pre-correction): The advisories report that booklet-binding starts at 09:00 in Room Willow, with 10 spaces, and participants bring their own paper (revisions `binding-v1` and `materials-v1`). Whether other materials are required or provided remains unknown. The source documents themselves were not released, so these claims are not yet independently verified.",
+  "prompt_sha256": "sha256:4d8cfd16cdd227b073632d67bd43a33e63a03889d9d5dd4e6fbed9722c6766fe",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14006,
+    "output_tokens": 247,
+    "reasoning_output_tokens": 162
+  }
+}

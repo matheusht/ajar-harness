@@ -40,12 +40,14 @@ from engagement_state import (
     read_ledger,
     reduce_engagement,
 )
+from environment_preflight import _collect_legacy_preflight as collect_preflight
 from work_queue_actions import queue_command_payload
 from work_queue_driver import DockerQueueBackend, DriverBudget, run_driver
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_IMAGE = os.environ.get("HARNESS_DOCKER_QUEUE_TEST_IMAGE", "")
+LIVE_PYTHON = os.environ.get("HARNESS_DOCKER_QUEUE_TEST_PYTHON", "/usr/local/bin/python3")
 SSH_KEYGEN = Path("/usr/bin/ssh-keygen")
 WORKER_MODEL = "claude-docker-queue-worker-20260826"
 REVIEWER_MODEL = "claude-docker-queue-reviewer-20260826"
@@ -84,7 +86,6 @@ FAKE_CLAUDE = r'''#!/usr/local/bin/python3
 import json
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -226,6 +227,41 @@ require(stop_result.returncode == 0, 97)
 require(stop_result.stderr == b"", 98)
 require(stop_output == {}, 99)
 
+print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01}))
+'''
+
+FAKE_HUNTER = r'''#!/usr/local/bin/python3
+import json
+import os
+import pathlib
+import shlex
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+view = pathlib.Path("/workspace")
+required = ["brief.json", "manifest.json", "scope.md", "contracts/proposal-template.json", "contracts/attempt-v2.schema.json", "contracts/research-common.schema.json", "SUBMIT.md"]
+if not all((view / name).is_file() for name in required):
+    raise SystemExit(71)
+if (view / "engagements").exists() or (view / ".git").exists():
+    raise SystemExit(72)
+prompt = json.loads(sys.argv[-1])
+transport = prompt["container_action_transport"]
+proposal = json.loads((view / "contracts/proposal-template.json").read_text())
+proposal["attempt_id"] = "attempt-docker-hunter-view"
+proposal["recorded_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+proposal["surface"] = "owned synthetic route file"
+proposal["action_summary"] = "Read the single allowlisted route and compare its benign marker."
+proposal["observation"]["statement"] = "The allowlisted route contains the expected owned marker."
+proposal_path = pathlib.Path("/scratch/attempt.json")
+proposal_path.write_text(json.dumps(proposal, sort_keys=True, separators=(",", ":")) + "\n")
+argv = list(transport["argv"])
+argument_index = argv.index("--arguments-json") + 1
+arguments = json.loads(argv[argument_index])
+argv[argument_index] = json.dumps([str(proposal_path) if value == "/scratch/hunter-action-input.json" else value for value in arguments], separators=(",", ":"))
+result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+if result.returncode != 0 or json.loads(result.stdout).get("ok") is not True:
+    raise SystemExit(73)
 print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01}))
 '''
 
@@ -430,6 +466,25 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
 
+    def _seed_running_hypothesis(self, engagement: Path) -> None:
+        zero_cost = {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "input_tokens": None, "output_tokens": None, "cost_usd": None, "human_review_seconds": 0}
+        cards = ["llm07.system-prompt-leakage", "task-reframing", "adjudication-oracle"]
+        events = [
+            base_event(event_id="event-hunter-observation", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:04Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="observation.recorded", rationale="Record the owned synthetic route marker before choosing a bounded experiment.", payload={"entity_id": "observation-hunter", "entity_type": "observation", "status": "recorded"}),
+            base_event(event_id="event-hunter-routing", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:05Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="routing.assessed", rationale="Route the owned marker to the exact safe-signal cards.", payload={"entity_id": "routing-hunter", "source_observation_ref": "event-hunter-observation", "activation_strength": "strong", "card_ids": cards, "status": "assessed"}, entity_refs=["event-hunter-observation"]),
+        ]
+        candidate = base_event(event_id="event-hunter-candidate", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:06Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="candidate.proposed", rationale="Select one local source inspection with no target contact.", payload={"candidate_id": "candidate-hunter", "source_observation_ref": "event-hunter-observation", "routing_review_ref": "event-hunter-routing", "activation_strength": "strong", "card_ids": cards, "status": "queued", "expected_information_gain": 1, "safety_class": "clear_local", "cost_estimate": zero_cost}, entity_refs=["event-hunter-observation", "event-hunter-routing"], state_changes=[{"dimension": "search", "entity_id": "candidate-hunter", "previous": None, "current": "queued"}])
+        candidate["ex_ante"] = {"probability": 0.5, "ordinal": "strong", "recorded_before_outcome": True}
+        events.extend([
+            candidate,
+            base_event(event_id="event-hunter-selected", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:07Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="candidate.selected", rationale="Choose the only bounded synthetic candidate.", payload={"candidate_id": "candidate-hunter", "status": "selected", "reason": "only bounded synthetic candidate"}, state_changes=[{"dimension": "search", "entity_id": "candidate-hunter", "previous": "queued", "current": "selected"}]),
+            base_event(event_id="event-hunter-hypothesis", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:08Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.created", rationale="Create the one bounded current hypothesis.", payload={"hypothesis_id": "hypothesis-hunter", "origin_type": "candidate", "origin_ref": "candidate-hunter", "candidate_ref": "candidate-hunter", "hypothesis_statement": "The owned route contains the distinctive benign marker.", "suspected_invariant": "Only the allowlisted route exposes the marker.", "trust_boundary": "owned source reader to owned route", "attacker_path": ["owned reader", "route"], "impact_ceiling": "clear_local source inspection", "bounded_space": "one allowlisted route file", "lens_ids": ["authorization"], "card_ids": cards, "expected_confirming_evidence": [{"evidence_type": "trace", "description": "exact benign marker", "required": True}], "decisive_falsifiers": ["marker absent"], "cost_estimate": zero_cost, "constraints": ["read only", "no target contact"], "next_experiment": "read the exact allowlisted route once", "completion_criteria": ["truthful primary attempt"], "status": "queued"}, entity_refs=["candidate-hunter"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": None, "current": "queued"}]),
+            base_event(event_id="event-hunter-hypothesis-selected", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:09Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.status_changed", rationale="Select the bounded hypothesis.", payload={"hypothesis_id": "hypothesis-hunter", "status": "selected", "reason": "execute bounded source inspection", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "selected for one attempt", "unresolved_questions": [], "next_route": "read exact route"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": "queued", "current": "selected"}]),
+            base_event(event_id="event-hunter-hypothesis-running", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:10Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.status_changed", rationale="Begin the bounded source inspection.", payload={"hypothesis_id": "hypothesis-hunter", "status": "running", "reason": "execute bounded source inspection", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "await one primary attempt", "unresolved_questions": [], "next_route": "read exact route"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": "selected", "current": "running"}]),
+        ])
+        for event in events:
+            _append_kernel_event(engagement, event)
+
     def test_interrupted_docker_session_without_commit_remains_unrecorded(self) -> None:
         if not SSH_KEYGEN.is_file():
             self.skipTest("ssh-keygen unavailable for the signed queue fixture")
@@ -441,7 +496,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
             self._seed_current_signed_dry_review(root, workspace, engagement)
             backend = DockerQueueBackend(
                 image="python@sha256:" + "a" * 64,
-                python_executable="/usr/local/bin/python3",
+            python_executable=LIVE_PYTHON,
                 docker_executable=Path("/usr/local/bin/docker"),
                 limits=DockerRuntimeLimits(),
             )
@@ -479,6 +534,106 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
         LIVE_IMAGE,
         "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
     )
+    def test_real_docker_hunter_uses_only_projection_and_records_bound_attempt(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("the strong Docker runtime currently supports local Docker Desktop on Darwin")
+        docker_text = shutil.which("docker")
+        if docker_text is None or not SSH_KEYGEN.is_file():
+            self.skipTest("Docker or ssh-keygen unavailable")
+        docker = Path(docker_text).resolve(strict=True)
+        before_containers = _docker_owned_ids(docker, "container")
+        before_networks = _docker_owned_ids(docker, "network")
+        with tempfile.TemporaryDirectory(prefix="docker-hunter-view-") as temporary:
+            root = Path(temporary).resolve()
+            workspace = root / "target"
+            engagement = workspace / "engagements" / "docker-hunter"
+            engagement.mkdir(parents=True)
+            self._seed_current_signed_dry_review(root, workspace, engagement)
+            route = workspace / "src" / "route.txt"
+            route.parent.mkdir()
+            route.write_text("owned synthetic marker\n", encoding="utf-8")
+            collect_preflight(
+                engagement,
+                preflight_id="preflight-docker-hunter",
+                mode="package",
+                target=route,
+                expected_identity=sha256_file(route),
+                runtime=Path(sys.executable).resolve(),
+                reproduction_argv=[str(Path(sys.executable).resolve()), "-c", "pass"],
+                operator_id="operator-docker-queue-test",
+                recorded_at="2026-08-26T12:00:03.500000Z",
+                operator_redaction_attested=True,
+                endpoint_identity="local",
+                account_role="owner",
+            )
+            self._seed_running_hypothesis(engagement)
+            state = reduce_engagement(engagement)
+            payload = queue_command_payload("next", state, engagement)
+            self.assertEqual(payload["item"]["next_action"]["action_id"], "record_hunter_primary")
+
+            original_compile = queue_driver.compile_hunter_view
+            observed_roots: list[Path] = []
+
+            def compile_with_test_provider(**arguments: object) -> object:
+                packet = original_compile(**arguments)  # type: ignore[arg-type]
+                os.chmod(packet.runtime, 0o700)
+                provider = packet.runtime / "fake-claude"
+                provider.write_text(textwrap.dedent(FAKE_HUNTER).replace("/usr/local/bin/python3", LIVE_PYTHON), encoding="utf-8")
+                provider.chmod(0o555)
+                os.chmod(packet.runtime, 0o555)
+                observed_roots.append(packet.projection)
+                return packet
+
+            backend = DockerQueueBackend(
+                image=LIVE_IMAGE,
+                python_executable=LIVE_PYTHON,
+                docker_executable=docker,
+                limits=DockerRuntimeLimits(memory_bytes=256 * 1024 * 1024, cpu_count=1.0, pids=64, nofile=256, scratch_bytes=16 * 1024 * 1024, scratch_inodes=2048, shm_bytes=4 * 1024 * 1024, shm_inodes=256),
+            )
+            try:
+                with (
+                    mock.patch("work_queue_driver.compile_hunter_view", side_effect=compile_with_test_provider),
+                    mock.patch.dict(os.environ, {key: "" for key in MODEL_AUTH_ENV_KEYS}, clear=False),
+                ):
+                    result = run_driver(
+                        workspace=workspace,
+                        engagement=engagement,
+                        executable=Path("/harness/fake-claude"),
+                        model=WORKER_MODEL,
+                        reviewer_model=REVIEWER_MODEL,
+                        budget=DriverBudget(1, 45.0, 30.0, None),
+                        docker_backend=backend,
+                        read_only_inputs=(route,),
+                    )
+            finally:
+                self.assertEqual(_docker_owned_ids(docker, "container"), before_containers)
+                self.assertEqual(_docker_owned_ids(docker, "network"), before_networks)
+            attempts = read_ledger(engagement, "attempt")
+            recorded = [row for row in attempts if row.get("attempt_id") == "attempt-docker-hunter-view"]
+            self.assertEqual(len(recorded), 1, result)
+            after_attempt = reduce_engagement(engagement)
+            self.assertIn("hypothesis_ran_unadjudicated", {row["class"] for row in after_attempt["work_queue"]})
+            adjudication = queue_command_payload("next", after_attempt, engagement)["item"]
+            self.assertEqual(adjudication["next_action"]["action_id"], "record_hypothesis_disposition")
+            self.assertEqual(adjudication["next_action"]["principal"], "orchestrator")
+            attempt = recorded[0]
+            self.assertEqual(attempt["kind"], "primary")
+            self.assertEqual(attempt["hypothesis_ref"], "hypothesis-hunter")
+            self.assertEqual(attempt["experiment_ref"], "event-hunter-hypothesis-running")
+            self.assertEqual(attempt["provenance"]["cognitive_principal"], "hunter")
+            self.assertEqual(attempt["provenance"]["view_type"], "hunter-current-v1")
+            self.assertEqual(attempt["provenance"]["runtime_session_ref"], result["history"][0]["runtime"]["session_ref"])
+            self.assertEqual(result["history"][0]["runtime"]["returncode"], 0)
+            self.assertTrue(result["history"][0]["runtime"]["output_was_json"])
+            self.assertEqual(result["history"][0]["admission_state_binding"]["source_hashes"], state["source_hashes"])
+            self.assertEqual(validate_record(result, "work-queue-driver"), [])
+            self.assertTrue(observed_roots)
+            self.assertTrue(all(not path.exists() for path in observed_roots))
+
+    @unittest.skipUnless(
+        LIVE_IMAGE,
+        "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
+    )
     def test_real_docker_reducer_drains_one_brokered_action_and_cleans_exactly(self) -> None:
         if sys.platform != "darwin":
             self.skipTest("the strong Docker runtime currently supports local Docker Desktop on Darwin")
@@ -509,7 +664,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
             )
 
             fake_claude = workspace / "fake-claude"
-            fake_claude.write_text(textwrap.dedent(FAKE_CLAUDE), encoding="utf-8")
+            fake_claude.write_text(textwrap.dedent(FAKE_CLAUDE).replace("/usr/local/bin/python3", LIVE_PYTHON), encoding="utf-8")
             fake_claude.chmod(fake_claude.stat().st_mode | stat.S_IXUSR)
             target_probe = workspace / ".docker-queue-target-write"
             harness_probe = ROOT / ".docker-queue-harness-write"
@@ -518,7 +673,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
 
             backend = DockerQueueBackend(
                 image=LIVE_IMAGE,
-                python_executable="/usr/local/bin/python3",
+                python_executable=LIVE_PYTHON,
                 docker_executable=docker,
                 limits=DockerRuntimeLimits(
                     memory_bytes=256 * 1024 * 1024,

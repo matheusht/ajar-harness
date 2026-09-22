@@ -38,6 +38,11 @@
         "runtime_session_ref": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
         "model": {"type": ["string", "null"]},
         "provider": {"type": ["string", "null"]},
+        "cognitive_principal": {"enum": ["hunter"]},
+        "view_type": {"const": "hunter-current-v1"},
+        "view_digest": {"$ref": "#/$defs/sha256"},
+        "input_corpus_digest": {"$ref": "#/$defs/sha256"},
+        "treatment": {"const": "compiled_current_only"},
         "prompt_version": {"type": ["string", "null"]},
         "card_versions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "tool_versions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}

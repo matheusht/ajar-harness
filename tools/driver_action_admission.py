@@ -105,6 +105,11 @@ _ALLOWED_ADMISSION_KEYS = {
     "argument_template",
     "action_hash",
     "predicate",
+    "cognitive_principal",
+    "view_type",
+    "view_digest",
+    "input_corpus_digest",
+    "treatment",
 }
 
 
@@ -379,6 +384,7 @@ def arm_action_admission(
     runtime_session_ref: str,
     runtime_model: str,
     token: str,
+    view_binding: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Arm an unactivated one-shot record on the already-bound engagement inode."""
 
@@ -426,7 +432,27 @@ def arm_action_admission(
         "argument_template": copy.deepcopy(action.get("arguments")),
         "action_hash": sha256_bytes(canonical_json_bytes(_normalized_action(action))),
         "predicate": copy.deepcopy(action["admission"]),
+        "cognitive_principal": None,
+        "view_type": None,
+        "view_digest": None,
+        "input_corpus_digest": None,
+        "treatment": None,
     }
+    if view_binding is not None:
+        required_view = {"cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment"}
+        if (
+            set(view_binding) != required_view
+            or action.get("principal") != "hunter"
+            or view_binding.get("cognitive_principal") != "hunter"
+            or view_binding.get("view_type") != "hunter-current-v1"
+            or view_binding.get("treatment") != "compiled_current_only"
+            or _SHA256_RE.fullmatch(str(view_binding.get("view_digest"))) is None
+            or _SHA256_RE.fullmatch(str(view_binding.get("input_corpus_digest"))) is None
+        ):
+            raise RecordError("driver_action_view_binding_invalid", str(record.get("action_id")))
+        record.update(view_binding)
+    if action.get("principal") == "hunter" and not all(record[key] for key in ("cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment")):
+        raise RecordError("driver_action_view_binding_missing", str(record.get("action_id")))
     if (
         set(record) != _ALLOWED_ADMISSION_KEYS
         or not isinstance(record["action_id"], str)
@@ -615,9 +641,11 @@ def _match_argument_template(template: list[str], actual: list[str]) -> None:
     if len(template) != len(actual):
         raise RecordError("driver_action_arguments_mismatch", "length")
     replacements: dict[str, str] = {}
+    prior_option = None
     for expected, received in zip(template, actual, strict=True):
         is_placeholder = expected.startswith("<") and expected.endswith(">")
-        if not is_placeholder and expected != received:
+        engagement_alias = prior_option == "--engagement" and received == "/workspace"
+        if not is_placeholder and expected != received and not engagement_alias:
             raise RecordError("driver_action_arguments_mismatch", expected)
         if is_placeholder:
             if not received or (received.startswith("<") and received.endswith(">")):
@@ -625,6 +653,7 @@ def _match_argument_template(template: list[str], actual: list[str]) -> None:
             prior = replacements.setdefault(expected, received)
             if prior != received:
                 raise RecordError("driver_action_input_inconsistent", expected)
+        prior_option = expected
 
 
 def _document_value(document: Any, path: list[str]) -> Any:
@@ -998,6 +1027,7 @@ def _stamp_parent_recorder_documents(
     command: str,
     runtime_session_ref: str,
     runtime_model: str,
+    view_binding: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Replace forgeable recorder metadata while retaining authenticated producer identity.
 
@@ -1034,6 +1064,8 @@ def _stamp_parent_recorder_documents(
             provenance["runtime_session_ref"] = runtime_session_ref
             provenance["model"] = runtime_model
             provenance["provider"] = None
+            if view_binding is not None:
+                provenance.update(view_binding)
         elif command == "request-authority" and value.get("action_version") == 2:
             value["executor_id"] = actor_id
             value["session_id"] = session_id
@@ -1745,6 +1777,10 @@ class DriverActionBroker:
                     command=request["command"],
                     runtime_session_ref=runtime_session_ref,
                     runtime_model=runtime_model,
+                    view_binding=(
+                        {key: self._admission[key] for key in ("cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment")}
+                        if self._admission.get("cognitive_principal") is not None else None
+                    ),
                 )
                 returncode, output = module.execute_broker_command(
                     command=request["command"],

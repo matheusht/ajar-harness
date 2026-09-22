@@ -153,6 +153,12 @@ _LEDGER_KEYS = frozenset(
         "HARNESS_EXPECTED_RUNTIME_SESSION_REF",
     }
 )
+_COGNITIVE_KEYS = frozenset(
+    {
+        "HARNESS_COGNITIVE_PRINCIPAL",
+        "HARNESS_HUNTER_VIEW_DIGEST",
+    }
+)
 _AUTH_KEYS = frozenset(
     {
         "ANTHROPIC_API_KEY",
@@ -1179,7 +1185,7 @@ def _validate_session(value: dict[str, Any]) -> tuple[list[str], dict[str, str]]
         or not command[0].startswith("/")
         or sum(len(argument.encode("utf-8")) for argument in command) > MAX_COMMAND_BYTES
         or not isinstance(environment, dict)
-        or set(environment) != _LEDGER_KEYS
+        or frozenset(environment) not in {_LEDGER_KEYS, _LEDGER_KEYS | _COGNITIVE_KEYS}
         or any(
             not isinstance(key, str)
             or not isinstance(item, str)
@@ -1191,11 +1197,24 @@ def _validate_session(value: dict[str, Any]) -> tuple[list[str], dict[str, str]]
         raise SupervisorError("session_invalid")
     engagement = environment["HARNESS_ACTIVE_ENGAGEMENT"]
     engagement_path = Path(engagement)
-    if (
-        not engagement_path.is_absolute()
-        or Path(os.path.normpath(engagement)) != engagement_path
-        or engagement_path.parent.parent != Path("/workspace")
-        or engagement_path.parent.name != "engagements"
+    cognitive = frozenset(environment) == _LEDGER_KEYS | _COGNITIVE_KEYS
+    engagement_valid = (
+        engagement_path.is_absolute()
+        and Path(os.path.normpath(engagement)) == engagement_path
+        and (
+            (cognitive and engagement_path == Path("/workspace"))
+            or (
+                not cognitive
+                and engagement_path.parent.parent == Path("/workspace")
+                and engagement_path.parent.name == "engagements"
+            )
+        )
+    )
+    if not engagement_valid:
+        raise SupervisorError("session_invalid")
+    if cognitive and (
+        environment["HARNESS_COGNITIVE_PRINCIPAL"] != "hunter"
+        or _SHA256_RE.fullmatch(environment["HARNESS_HUNTER_VIEW_DIGEST"]) is None
     ):
         raise SupervisorError("session_invalid")
     if _SHA256_RE.fullmatch(environment["HARNESS_EXPECTED_LEDGER_HASH"]) is None:

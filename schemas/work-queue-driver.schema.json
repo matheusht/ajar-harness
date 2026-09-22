@@ -117,6 +117,28 @@
           "runtime_model": {"type": "string", "minLength": 1},
           "before_state_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
           "after_state_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+        "admission_state_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ledger_hash", "source_hashes", "event_count"],
+          "properties": {
+            "ledger_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+            "source_hashes": {"type": "object", "additionalProperties": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}},
+            "event_count": {"type": "integer", "minimum": 1}
+          }
+        },
+        "cognitive_view": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment"],
+            "properties": {
+              "cognitive_principal": {"const": "hunter"},
+              "view_type": {"const": "hunter-current-v1"},
+              "view_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+              "input_corpus_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+              "treatment": {"const": "compiled_current_only"}
+            }
+          },
           "runtime": {
             "type": "object",
             "additionalProperties": false,

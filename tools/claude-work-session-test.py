@@ -1035,7 +1035,10 @@ class ClaudeWorkSessionTest(unittest.TestCase):
                             if mode == "normal"
                             else "99999999-9999-4999-8999-999999999999"
                         ),
-                        timeout_seconds=5 if mode == "normal" else 0.15,
+                        # Allow the fixture to cross the start gate, double-fork, call setsid,
+                        # and publish its PID before exercising timed cleanup.  The assertion still
+                        # requires the session to time out and the detached descendant to be gone.
+                        timeout_seconds=5 if mode == "normal" else 1.0,
                         max_budget_usd=None,
                     )
                     listener.settimeout(2.0)

@@ -3341,7 +3341,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         entity_ids["review_obligation_open"] = "review-obligation-open"
         expected_actions = {
             "hypothesis_ran_unadjudicated": "record_hypothesis_disposition",
-            "hypothesis_running_unattempted": "requeue_unattempted_hypothesis",
+            "hypothesis_running_unattempted": "record_hunter_primary",
             "hypothesis_unrouted": "record_hypothesis_disposition",
             "hypothesis_open_route": "record_hypothesis_disposition",
             "hypothesis_unresolved_question": "record_hypothesis_disposition",
@@ -3587,7 +3587,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             "terminal projection keeps queued candidates and running unattempted hypotheses blocking with deterministic next actions",
             [item["class"] for item in terminal_debt_projection["work_queue"]] == ["hypothesis_running_unattempted", "candidate_undisposed"]
             and not engagement_may_end(terminal_debt_projection)
-            and terminal_debt_actions["hypothesis_running_unattempted"]["action_id"] == "requeue_unattempted_hypothesis"
+            and terminal_debt_actions["hypothesis_running_unattempted"]["action_id"] == "record_hunter_primary"
             and terminal_debt_actions["hypothesis_running_unattempted"]["effect"] == "advances_item"
             and terminal_debt_actions["candidate_undisposed"]["action_id"] == "select_candidate"
             and terminal_debt_actions["candidate_undisposed"]["effect"] == "advances_item",
@@ -5339,7 +5339,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             "hypothesis-close-escape": decorate_work_queue_item(close_escape_running_item, close_escape_state, close_escape)["next_action"]["action_id"] if close_escape_running_item else None,
             "candidate-close-escape": decorate_work_queue_item(close_escape_candidate_item, close_escape_state, close_escape)["next_action"]["action_id"] if close_escape_candidate_item else None,
         }
-        checks.append(("engagement close refuses a real queued-selected-running zero-attempt hypothesis and a still-queued candidate", close_escape_code == "engagement_closure_work_remaining" and (close_escape / "events.jsonl").read_bytes() == close_escape_before and close_escape_running_item is not None and close_escape_candidate_item is not None and close_escape_actions == {"hypothesis-close-escape": "requeue_unattempted_hypothesis", "candidate-close-escape": "select_candidate"}, str((close_escape_code, close_escape_state["work_queue"], close_escape_actions))))
+        checks.append(("engagement close refuses a real queued-selected-running zero-attempt hypothesis and a still-queued candidate", close_escape_code == "engagement_closure_work_remaining" and (close_escape / "events.jsonl").read_bytes() == close_escape_before and close_escape_running_item is not None and close_escape_candidate_item is not None and close_escape_actions == {"hypothesis-close-escape": "record_hunter_primary", "candidate-close-escape": "select_candidate"}, str((close_escape_code, close_escape_state["work_queue"], close_escape_actions))))
 
         override_reason = "Operator accepts the exact listed residual work and closes this synthetic fixture on the record."
         override_items = blocking_work_identities(project_current_terminal_work_state(close_escape_state, read_ledger(close_escape, "attempt"), coverage=close_escape_state["coverage"]))

@@ -50,6 +50,7 @@ SESSION_KEY = b"k" * 32
 SESSION_REF = "0d1058c2-32b0-4b8c-9326-9d6bf2e48314"
 MODEL_SECRET = "test-model-secret-never-retain"
 LIVE_IMAGE = os.environ.get("HARNESS_DOCKER_QUEUE_TEST_IMAGE", "")
+LIVE_PYTHON = os.environ.get("HARNESS_DOCKER_QUEUE_TEST_PYTHON", "/usr/local/bin/python3")
 
 
 def _load_cli_module() -> object:
@@ -551,13 +552,13 @@ except json.JSONDecodeError:
 if not all(required.values()) or hook_result.returncode != 0 or hook_output != {}:
     raise SystemExit(91)
 print(json.dumps({"is_error": False, "total_cost_usd": 0.25}))
-""",
+""".replace("/usr/local/bin/python3", LIVE_PYTHON),
             encoding="utf-8",
         )
         fake_claude.chmod(0o755)
         backend = DockerQueueBackend(
             image=LIVE_IMAGE,
-            python_executable="/usr/local/bin/python3",
+            python_executable=LIVE_PYTHON,
             docker_executable=Path(docker).resolve(),
             limits=DockerRuntimeLimits(),
         )
@@ -719,13 +720,13 @@ written = os.write(descriptor, b'x' * requested)
 os.close(descriptor)
 path.unlink(missing_ok=True)
 os._exit(0 if 0 < written < requested else 92)
-""",
+""".replace("/usr/local/bin/python3", LIVE_PYTHON),
             encoding="utf-8",
         )
         fake_claude.chmod(0o755)
         backend = DockerQueueBackend(
             image=LIVE_IMAGE,
-            python_executable="/usr/local/bin/python3",
+            python_executable=LIVE_PYTHON,
             docker_executable=Path(docker).resolve(),
             limits=DockerRuntimeLimits(
                 memory_bytes=128 * 1024 * 1024,

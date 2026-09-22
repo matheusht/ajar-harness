@@ -96,7 +96,7 @@ SCOPE = """# Scope - Docker work queue acceptance fixture
 """
 
 
-FAKE_CLAUDE = r'''#!/usr/local/bin/python3
+FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json
 import os
 import pathlib
@@ -1065,7 +1065,10 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
                     ),
                     mock.patch.dict(
                         os.environ,
-                        {key: "" for key in MODEL_AUTH_ENV_KEYS},
+                        {
+                            **{key: "" for key in MODEL_AUTH_ENV_KEYS},
+                            "ANTHROPIC_API_KEY": "fixture-parent-api-key",
+                        },
                         clear=False,
                     ),
                 ):

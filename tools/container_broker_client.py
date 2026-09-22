@@ -38,6 +38,7 @@ IO_TIMEOUT_SECONDS = 2.0
 MAX_STOP_HOOK_STDIN_BYTES = 1024 * 1024
 REQUEST_DOMAIN = b"llm-redteam-harness:container-broker:request:v1\0"
 RESPONSE_DOMAIN = b"llm-redteam-harness:container-broker:response:v1\0"
+TARGET_FETCH_ID_DOMAIN = b"llm-redteam-harness:target-fetch-id:v1\0"
 STOP_SESSION_DOMAIN = b"llm-redteam-harness:session-end:v1:"
 STOP_REQUEST_DOMAIN = b"llm-redteam-harness:session-end-request:v1:"
 CONTAINER_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -476,6 +477,144 @@ def forward_stop(
     return result["returncode"], result["output"]
 
 
+def stream_provider(
+    manifest: dict[str, Any],
+    key: bytes,
+    *,
+    path: str,
+    headers: dict[str, str],
+    body: bytes,
+    on_headers: Any,
+    on_chunk: Any,
+) -> int:
+    """Receive authenticated provider frames and release each body chunk immediately."""
+
+    if not callable(on_headers) or not callable(on_chunk):
+        raise ContainerBrokerClientError("container_broker_provider_invalid")
+    # Reuse the request validation and payload shape without performing a second exchange.
+    if (
+        path != "/v1/messages"
+        or not isinstance(headers, dict)
+        or any(
+            not isinstance(name, str)
+            or not isinstance(value, str)
+            or name.lower() not in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+            or "\r" in value
+            or "\n" in value
+            for name, value in headers.items()
+        )
+        or not isinstance(body, bytes)
+        or len(body) > RAW_INPUT_LIMIT
+    ):
+        raise ContainerBrokerClientError("container_broker_provider_invalid")
+    payload = {
+        "request_kind": "provider_request",
+        "method": "POST",
+        "path": path,
+        "headers": {name.lower(): value for name, value in headers.items()},
+        "body_base64": base64.b64encode(body).decode("ascii"),
+        "runtime_session_ref": manifest.get("runtime_session_ref"),
+    }
+    request = _envelope(validate_manifest(manifest), key, payload)
+    endpoint = manifest["endpoint"]
+    connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    connection.settimeout(IO_TIMEOUT_SECONDS)
+    expected_sequence = 0
+    total = 0
+    saw_headers = False
+    try:
+        connection.connect((endpoint["host"], endpoint["port"]))
+        send_frame(connection, request)
+        connection.shutdown(socket.SHUT_WR)
+        connection.settimeout(None)
+        while True:
+            authenticated = _validate_response(
+                manifest, key, recv_frame(connection), request["nonce"]
+            )
+            if authenticated["returncode"] != 0:
+                raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+            try:
+                frame = json.loads(
+                    authenticated["output"], object_pairs_hook=_reject_duplicate_pairs
+                )
+            except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                raise ContainerBrokerClientError("container_broker_provider_response_invalid") from exc
+            if not isinstance(frame, dict):
+                raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+            if frame.get("stream") == "headers" and not saw_headers:
+                if (
+                    set(frame) != {"stream", "status", "headers"}
+                    or type(frame.get("status")) is not int
+                    or not 100 <= frame["status"] <= 599
+                    or not isinstance(frame.get("headers"), list)
+                ):
+                    raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+                on_headers(frame["status"], frame["headers"])
+                saw_headers = True
+                continue
+            if frame.get("stream") == "chunk" and saw_headers:
+                if set(frame) != {"stream", "sequence", "body_base64"} or frame.get("sequence") != expected_sequence:
+                    raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+                try:
+                    chunk = base64.b64decode(frame["body_base64"], validate=True)
+                except (binascii.Error, TypeError, ValueError) as exc:
+                    raise ContainerBrokerClientError("container_broker_provider_response_invalid") from exc
+                total += len(chunk)
+                if not chunk or total > RAW_INPUT_LIMIT:
+                    raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+                on_chunk(chunk)
+                expected_sequence += 1
+                continue
+            if frame == {"stream": "end", "sequence": expected_sequence} and saw_headers:
+                return total
+            raise ContainerBrokerClientError("container_broker_provider_response_invalid")
+    except (OSError, TimeoutError) as exc:
+        raise ContainerBrokerClientError("container_broker_unavailable") from exc
+    finally:
+        connection.close()
+
+
+def forward_target_fetch(
+    manifest: dict[str, Any], key: bytes, *, request_id: str, url: str, method: str
+) -> tuple[int, bytes]:
+    expected_request_id = target_fetch_request_id(manifest, url=url, method=method)
+    if (
+        not isinstance(request_id, str)
+        or request_id != expected_request_id
+        or not isinstance(url, str)
+        or not 1 <= len(url) <= 8192
+        or method not in {"GET", "HEAD"}
+    ):
+        raise ContainerBrokerClientError("container_broker_target_fetch_invalid")
+    payload = {
+        "request_kind": "target_fetch",
+        "operation": "target_fetch",
+        "request_id": request_id,
+        "url": url,
+        "method": method,
+        "runtime_session_ref": manifest.get("runtime_session_ref"),
+    }
+    result = _exchange(validate_manifest(manifest), key, payload)
+    return result["returncode"], result["output"]
+
+
+def target_fetch_request_id(
+    manifest: dict[str, Any], *, url: str, method: str
+) -> str:
+    validated = validate_manifest(manifest)
+    return _sha256(
+        TARGET_FETCH_ID_DOMAIN
+        + canonical_json_bytes(
+            {
+                "runtime_session_ref": validated.get("runtime_session_ref"),
+                "action_id": validated.get("action_id"),
+                "url": url,
+                "method": method,
+            }
+        )
+    )
+
+
 def _validate_relay_request(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema_version") != PROTOCOL_VERSION:
         raise ContainerBrokerClientError("container_broker_relay_request_invalid")
@@ -526,6 +665,17 @@ def _validate_relay_request(value: Any) -> dict[str, Any]:
             or SHA256_RE.fullmatch(value["request_ref"]) is None
         ):
             raise ContainerBrokerClientError("container_broker_relay_request_invalid")
+    elif kind == "target_fetch":
+        if set(value) != {"schema_version", "request_kind", "request_id", "url", "method"}:
+            raise ContainerBrokerClientError("container_broker_relay_request_invalid")
+        if (
+            not isinstance(value.get("request_id"), str)
+            or SHA256_RE.fullmatch(value["request_id"]) is None
+            or not isinstance(value.get("url"), str)
+            or not 1 <= len(value["url"]) <= 8192
+            or value.get("method") not in {"GET", "HEAD"}
+        ):
+            raise ContainerBrokerClientError("container_broker_relay_request_invalid")
     else:
         raise ContainerBrokerClientError("container_broker_relay_request_invalid")
     return value
@@ -544,12 +694,20 @@ def handle_relay_request(
             command=request["command"],
             arguments=request["arguments"],
         )
-    return forward_stop(
+    if request["request_kind"] == "session_end_check":
+        return forward_stop(
+            manifest,
+            key,
+            hook_session_ref=request["hook_session_ref"],
+            stop_hook_active=request["stop_hook_active"],
+            request_ref=request["request_ref"],
+        )
+    return forward_target_fetch(
         manifest,
         key,
-        hook_session_ref=request["hook_session_ref"],
-        stop_hook_active=request["stop_hook_active"],
-        request_ref=request["request_ref"],
+        request_id=request["request_id"],
+        url=request["url"],
+        method=request["method"],
     )
 
 
@@ -639,6 +797,16 @@ def relay_stop(
             "request_ref": request_ref,
         }
     )
+
+
+def relay_target_fetch(*, request_id: str, url: str, method: str) -> tuple[int, bytes]:
+    return _relay_exchange({
+        "schema_version": PROTOCOL_VERSION,
+        "request_kind": "target_fetch",
+        "request_id": request_id,
+        "url": url,
+        "method": method,
+    })
 
 
 def _parse_stop_hook_input(raw: bytes) -> tuple[str, bool, str]:
@@ -747,6 +915,10 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("--stop-hook-active", choices=("true", "false"), required=True)
     stop.add_argument("--request-ref", required=True)
     subcommands.add_parser("stop-hook")
+    target = subcommands.add_parser("target-fetch")
+    target.add_argument("--request-id", required=True)
+    target.add_argument("--url", required=True)
+    target.add_argument("--method", choices=("GET", "HEAD"), required=True)
     return parser
 
 
@@ -755,7 +927,17 @@ def main() -> int:
     if args.mode == "stop-hook":
         return run_stop_hook()
     try:
-        if args.mode == "action":
+        if args.mode == "target-fetch":
+            if os.environ.get(RELAY_SOCKET_ENV):
+                returncode, output = relay_target_fetch(
+                    request_id=args.request_id, url=args.url, method=args.method
+                )
+            else:
+                returncode, output = forward_target_fetch(
+                    load_manifest_from_environment(), load_key_from_environment(),
+                    request_id=args.request_id, url=args.url, method=args.method,
+                )
+        elif args.mode == "action":
             arguments = json.loads(args.arguments_json)
             if not isinstance(arguments, list) or any(not isinstance(v, str) for v in arguments):
                 raise ContainerBrokerClientError("container_broker_request_invalid")

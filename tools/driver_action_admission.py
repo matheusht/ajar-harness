@@ -15,6 +15,7 @@ import copy
 import fcntl
 import hashlib
 import hmac
+import http.client
 import importlib.util
 import json
 import math
@@ -22,12 +23,14 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import stat
 import struct
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -46,6 +49,7 @@ from engagement_state import (
     utc_now,
 )
 from work_queue_actions import queue_command_payload
+import network_scope
 
 
 ADMISSION_FILE = ".work-queue-action-admission.json"
@@ -62,12 +66,54 @@ _CONTAINER_NONCE_BYTES = 32
 _CONTAINER_FRAME_LIMIT = 12 * 1024 * 1024
 _CONTAINER_RAW_INPUT_LIMIT = _RPC_LIMIT
 _CONTAINER_ACTION_NONCE_BUDGET = 32
+_CONTAINER_PROVIDER_NONCE_BUDGET = 32
+_CONTAINER_TARGET_FETCH_NONCE_BUDGET = 32
 _CONTAINER_REQUEST_DOMAIN = b"llm-redteam-harness:container-broker:request:v1\0"
 _CONTAINER_RESPONSE_DOMAIN = b"llm-redteam-harness:container-broker:response:v1\0"
+_TARGET_FETCH_ID_DOMAIN = b"llm-redteam-harness:target-fetch-id:v1\0"
 _CONTAINER_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _STOP_BLOCK_BUDGET = 6
 _STOP_REQUEST_BUDGET = _STOP_BLOCK_BUDGET + 1
+_PROVIDER_FORBIDDEN_CAPABILITY_FIELDS = frozenset(
+    {"container", "mcp_servers", "skills"}
+)
+_PROVIDER_INFERENCE_FIELDS = frozenset(
+    {
+        "cache_control",
+        "context_management",
+        "inference_geo",
+        "max_tokens",
+        "messages",
+        "metadata",
+        "model",
+        "output_config",
+        "output_format",
+        "service_tier",
+        "speed",
+        "stop_sequences",
+        "stream",
+        "system",
+        "temperature",
+        "thinking",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_p",
+    }
+)
+_PROVIDER_CLIENT_TOOL_FIELDS = frozenset(
+    {
+        "allowed_callers",
+        "cache_control",
+        "description",
+        "input_examples",
+        "input_schema",
+        "name",
+        "strict",
+        "type",
+    }
+)
 _SESSION_AUDIT_STATE_KEYS = frozenset(
     {"event_count", "last_event_id", "ledger_hash", "source_hashes"}
 )
@@ -424,6 +470,7 @@ def arm_action_admission(
             "ledger_hash": state.get("ledger_hash"),
             "source_hashes": copy.deepcopy(source_hashes),
             "event_count": state.get("event_count"),
+            "scope_hash": state.get("scope_hash"),
         },
         "item_ref": item_ref,
         "item_identity": _item_identity(item),
@@ -687,6 +734,54 @@ def _json_document_from_bytes(raw: bytes, *, error_code: str) -> dict[str, Any]:
     return value
 
 
+def _validate_provider_inference_body(raw: bytes) -> None:
+    """Admit inference plus client tools, never provider-side network capabilities."""
+
+    try:
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_pairs)
+    except (RecordError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise RecordError("driver_provider_request_invalid", "JSON") from exc
+    if (
+        not isinstance(value, dict)
+        or _PROVIDER_FORBIDDEN_CAPABILITY_FIELDS.intersection(value)
+        or not set(value).issubset(_PROVIDER_INFERENCE_FIELDS)
+        or not isinstance(value.get("model"), str)
+        or not value["model"]
+        or type(value.get("max_tokens")) is not int
+        or value["max_tokens"] <= 0
+        or not isinstance(value.get("messages"), list)
+    ):
+        raise RecordError("driver_provider_capability_denied", "request capability")
+    tools = value.get("tools", [])
+    if not isinstance(tools, list):
+        raise RecordError("driver_provider_request_invalid", "tools")
+    for tool in tools:
+        if (
+            not isinstance(tool, dict)
+            or not set(tool).issubset(_PROVIDER_CLIENT_TOOL_FIELDS)
+            or tool.get("type", "custom") != "custom"
+            or not isinstance(tool.get("name"), str)
+            or not tool["name"]
+            or not isinstance(tool.get("input_schema"), dict)
+        ):
+            raise RecordError("driver_provider_capability_denied", "tool")
+
+    pending: list[Any] = [value.get("messages"), value.get("system")]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            source = item.get("source")
+            if (
+                item.get("type") in {"document", "image"}
+                and isinstance(source, dict)
+                and (source.get("type") == "url" or "url" in source)
+            ):
+                raise RecordError("driver_provider_capability_denied", "remote content")
+            pending.extend(item.values())
+
+
 def _expected_inline_inputs(record: dict[str, Any]) -> list[dict[str, Any]]:
     predicate = record.get("predicate")
     definitions = predicate.get("documents") if isinstance(predicate, dict) else None
@@ -893,6 +988,7 @@ def _state_binding(state: dict[str, Any]) -> dict[str, Any]:
         "ledger_hash": state.get("ledger_hash"),
         "source_hashes": copy.deepcopy(state.get("source_hashes")),
         "event_count": state.get("event_count"),
+        "scope_hash": state.get("scope_hash"),
     }
 
 
@@ -1200,6 +1296,7 @@ class DriverActionBroker:
         execution_deadline: float | None = None,
         docker_identity: dict[str, str] | None = None,
         docker_session_key: bytes | None = None,
+        provider_fixture_origin: str | None = None,
     ) -> None:
         if execution_deadline is not None and (
             not isinstance(execution_deadline, (int, float))
@@ -1229,7 +1326,19 @@ class DriverActionBroker:
         self._docker_session_key = b""
         self._container_nonces: dict[str, str] = {}
         self._container_nonce_lock = threading.Lock()
+        self._container_workers: set[threading.Thread] = set()
+        self._container_workers_lock = threading.Lock()
         self._container_deadline_ref: str | None = None
+        configured_provider = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+        self._provider_base_url = provider_fixture_origin or configured_provider
+        self._provider_fixture = provider_fixture_origin is not None
+        self._provider_api_key = os.environ.get("ANTHROPIC_API_KEY")
+        self._network_gateway = (
+            network_scope.NetworkGateway(request_budget=32, deadline=self._execution_deadline)
+            if self._execution_deadline is not None
+            else None
+        )
+        self.network_audit: list[dict[str, Any]] = []
         self.tcp_endpoint: tuple[str, int] | None = None
         try:
             if docker_identity is None and docker_session_key is None:
@@ -1960,12 +2069,73 @@ class DriverActionBroker:
                 raise RecordError("driver_action_broker_request_invalid", "Stop")
             self._remember_container_nonce(nonce, "session_end_check")
             return copy.deepcopy(payload), None, nonce
+        if request_kind == "provider_request":
+            if (
+                set(payload) != {
+                    "request_kind", "method", "path", "headers", "body_base64", "runtime_session_ref"
+                }
+                or payload.get("method") != "POST"
+                or payload.get("path") != "/v1/messages"
+                or payload.get("runtime_session_ref") != self._admission.get("runtime_session_ref")
+                or not isinstance(payload.get("headers"), dict)
+                or any(
+                    not isinstance(name, str)
+                    or not isinstance(value, str)
+                    or name not in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+                    or "\r" in value
+                    or "\n" in value
+                    for name, value in payload["headers"].items()
+                )
+                or not isinstance(payload.get("body_base64"), str)
+            ):
+                raise RecordError("driver_provider_request_invalid", "shape")
+            try:
+                body = base64.b64decode(payload["body_base64"], validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise RecordError("driver_provider_request_invalid", "body") from exc
+            if len(body) > _CONTAINER_RAW_INPUT_LIMIT:
+                raise RecordError("driver_provider_request_invalid", "body")
+            _validate_provider_inference_body(body)
+            self._remember_container_nonce(nonce, "provider_request")
+            request = copy.deepcopy(payload)
+            request["body"] = body
+            del request["body_base64"]
+            return request, None, nonce
+        if request_kind == "target_fetch":
+            expected_request_id = sha256_bytes(
+                _TARGET_FETCH_ID_DOMAIN
+                + canonical_json_bytes(
+                    {
+                        "runtime_session_ref": payload.get("runtime_session_ref"),
+                        "action_id": self._admission.get("action_id"),
+                        "url": payload.get("url"),
+                        "method": payload.get("method"),
+                    }
+                )
+            )
+            if (
+                set(payload) != {
+                    "request_kind", "operation", "request_id", "url", "method", "runtime_session_ref"
+                }
+                or payload.get("operation") != "target_fetch"
+                or payload.get("runtime_session_ref") != self._admission.get("runtime_session_ref")
+                or not isinstance(payload.get("request_id"), str)
+                or payload["request_id"] != expected_request_id
+                or not isinstance(payload.get("url"), str)
+                or not 1 <= len(payload["url"]) <= 8192
+                or payload.get("method") not in {"GET", "HEAD"}
+            ):
+                raise RecordError("driver_target_fetch_invalid", "shape")
+            self._remember_container_nonce(nonce, "target_fetch")
+            return copy.deepcopy(payload), None, nonce
         raise RecordError("driver_action_broker_request_invalid", "request kind")
 
     def _remember_container_nonce(self, nonce: str, request_kind: str) -> None:
         budgets = {
             "action": _CONTAINER_ACTION_NONCE_BUDGET,
             "session_end_check": _STOP_REQUEST_BUDGET,
+            "provider_request": _CONTAINER_PROVIDER_NONCE_BUDGET,
+            "target_fetch": _CONTAINER_TARGET_FETCH_NONCE_BUDGET,
         }
         budget = budgets.get(request_kind)
         if budget is None:
@@ -2022,6 +2192,204 @@ class DriverActionBroker:
             ).decode("ascii"),
         }
 
+    def _serve_provider_stream(
+        self, connection: socket.socket, request: dict[str, Any], nonce: str
+    ) -> None:
+        parsed = urllib.parse.urlsplit(self._provider_base_url)
+        production = (
+            not self._provider_fixture
+            and parsed.scheme == "https"
+            and parsed.hostname == "api.anthropic.com"
+            and parsed.port in {None, 443}
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.username is None
+        )
+        fixture = (
+            self._provider_fixture
+            and parsed.scheme == "http"
+            and parsed.hostname in {"127.0.0.1", "localhost"}
+            and parsed.port is not None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.username is None
+        )
+        if not (production or fixture) or request.get("path") != "/v1/messages" or not self._provider_api_key:
+            raise RecordError("driver_provider_unavailable", "configuration")
+        with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+            state = _reduce_engagement_unchecked(bound)
+            scope = read_governed_file(bound / "scope.md")
+            if (
+                sha256_bytes(scope) != state.get("scope_hash")
+                or self._admission.get("state_binding", {}).get("scope_hash")
+                != state.get("scope_hash")
+                or not _neutral_tail_is_allowed(self._admission, state, bound)
+            ):
+                raise RecordError("driver_provider_scope_stale", "scope")
+        port = parsed.port or 443
+        deadline = self._execution_deadline or time.monotonic()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RecordError("driver_provider_failed", "deadline")
+        address = "127.0.0.1" if fixture else network_scope.resolve_pinned(parsed.hostname, port)
+        upstream = socket.create_connection((address, port), timeout=min(30.0, remaining))
+        total = 0
+        sent_headers = False
+        try:
+            if production:
+                upstream = ssl.create_default_context().wrap_socket(
+                    upstream, server_hostname=parsed.hostname
+                )
+            headers = {
+                name.lower(): value
+                for name, value in request["headers"].items()
+                if name.lower() in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+            }
+            headers["host"] = parsed.hostname
+            headers["x-api-key"] = self._provider_api_key
+            headers["content-length"] = str(len(request["body"]))
+            headers["connection"] = "close"
+            raw = (
+                "POST /v1/messages HTTP/1.1\r\n"
+                + "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+                + "\r\n"
+            ).encode("ascii") + request["body"]
+            upstream.sendall(raw)
+            response = http.client.HTTPResponse(upstream, method="POST")
+            response.begin()
+            response_headers = [
+                [name.lower(), value]
+                for name, value in response.getheaders()
+                if name.lower() in {"content-type", "request-id", "anthropic-request-id"}
+                and "\r" not in value
+                and "\n" not in value
+            ]
+            _send_container_frame(
+                connection,
+                self._container_response(
+                    request_nonce=nonce,
+                    returncode=0,
+                    output=canonical_json_bytes({
+                        "stream": "headers",
+                        "status": response.status,
+                        "headers": response_headers,
+                    }),
+                ),
+            )
+            sent_headers = True
+            sequence = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RecordError("driver_provider_failed", "deadline")
+                upstream.settimeout(min(30.0, remaining))
+                chunk = response.read1(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _CONTAINER_RAW_INPUT_LIMIT:
+                    raise RecordError("driver_provider_response_oversize", "body")
+                _send_container_frame(
+                    connection,
+                    self._container_response(
+                        request_nonce=nonce,
+                        returncode=0,
+                        output=canonical_json_bytes({
+                            "stream": "chunk",
+                            "sequence": sequence,
+                            "body_base64": base64.b64encode(chunk).decode("ascii"),
+                        }),
+                    ),
+                )
+                sequence += 1
+            _send_container_frame(
+                connection,
+                self._container_response(
+                    request_nonce=nonce,
+                    returncode=0,
+                    output=canonical_json_bytes({"stream": "end", "sequence": sequence}),
+                ),
+            )
+            self.network_audit.append({
+                "operation": "provider_request",
+                "method": "POST",
+                "host": parsed.hostname,
+                "path": "/v1/messages",
+                "status": response.status,
+                "request_bytes": len(request["body"]),
+                "response_bytes": total,
+            })
+        except BaseException:
+            self.network_audit.append({
+                "operation": "provider_request",
+                "method": "POST",
+                "host": parsed.hostname,
+                "path": "/v1/messages",
+                "status": "uncertain" if sent_headers else "failed",
+            })
+            raise
+        finally:
+            upstream.close()
+
+    def _execute_target_fetch(self, request: dict[str, Any]) -> tuple[int, bytes]:
+        request_id = request["request_id"]
+        try:
+            if self._network_gateway is None:
+                raise network_scope.NetworkScopeError("network_gateway_unavailable")
+            self._network_gateway.begin(request_id)
+            with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+                state = _reduce_engagement_unchecked(bound)
+                scope = read_governed_file(bound / "scope.md")
+                policy = network_scope.parse_network_policy(
+                    scope, expected_scope_hash=str(state.get("scope_hash"))
+                )
+                if (
+                    self._admission.get("state_binding", {}).get("scope_hash")
+                    != state.get("scope_hash")
+                    or not _neutral_tail_is_allowed(self._admission, state, bound)
+                ):
+                    raise RecordError("driver_target_fetch_state_stale", "admission")
+            status, headers, body = network_scope.pinned_request(
+                policy=policy,
+                operation="target_fetch",
+                url=request["url"],
+                method=request["method"],
+                timeout=max(
+                    0.1,
+                    min(30.0, (self._execution_deadline or time.monotonic()) - time.monotonic()),
+                ),
+            )
+            safe_headers = [
+                [name, value]
+                for name, value in headers
+                if name in {"content-type", "content-length", "etag", "last-modified"}
+            ]
+            output = canonical_json_bytes({
+                "status": status,
+                "headers": safe_headers,
+                "body_base64": base64.b64encode(body).decode("ascii"),
+            })
+            self.network_audit.append({
+                "operation": "target_fetch",
+                "method": request["method"],
+                "url_sha256": sha256_bytes(request["url"].encode("utf-8")),
+                "status": status,
+                "response_bytes": len(body),
+            })
+            return 0, output
+        except (network_scope.NetworkScopeError, OSError, TimeoutError, RecordError) as exc:
+            if self._network_gateway is not None:
+                self._network_gateway.mark_uncertain(request_id)
+            self.network_audit.append({
+                "operation": "target_fetch",
+                "method": request.get("method"),
+                "url_sha256": sha256_bytes(str(request.get("url", "")).encode("utf-8")),
+                "status": "denied_or_uncertain",
+            })
+            return _broker_error(RecordError("driver_target_fetch_denied", type(exc).__name__))
+
     def _serve_container_connection(self, connection: socket.socket) -> None:
         envelope: dict[str, Any] | None = None
         try:
@@ -2031,6 +2399,11 @@ class DriverActionBroker:
             )
             if request.get("request_kind") == "session_end_check":
                 returncode, output = self._execute_stop(request)
+            elif request.get("request_kind") == "provider_request":
+                self._serve_provider_stream(connection, request, nonce)
+                return
+            elif request.get("request_kind") == "target_fetch":
+                returncode, output = self._execute_target_fetch(request)
             else:
                 returncode, output = self._execute(request, inline_inputs)
         except RecordError as exc:
@@ -2049,6 +2422,28 @@ class DriverActionBroker:
         except (OSError, RecordError):
             pass
 
+    def _serve_container_worker(self, connection: socket.socket) -> None:
+        try:
+            with connection:
+                connection.settimeout(_BROKER_IO_TIMEOUT_SECONDS)
+                try:
+                    self._serve_container_connection(connection)
+                except (
+                    OSError,
+                    TimeoutError,
+                    UnicodeError,
+                    TypeError,
+                    ValueError,
+                    RecursionError,
+                    OverflowError,
+                ):
+                    # A peer that stalls or truncates a frame has no authenticated nonce to bind
+                    # a response to. Close only this connection.
+                    pass
+        finally:
+            with self._container_workers_lock:
+                self._container_workers.discard(threading.current_thread())
+
     def _serve(self) -> None:
         while not self._stop.is_set():
             try:
@@ -2057,25 +2452,18 @@ class DriverActionBroker:
                 continue
             except OSError:
                 return
+            if self._transport_kind == "tcp_hmac_sha256":
+                worker = threading.Thread(
+                    target=self._serve_container_worker,
+                    args=(connection,),
+                    daemon=True,
+                )
+                with self._container_workers_lock:
+                    self._container_workers.add(worker)
+                worker.start()
+                continue
             with connection:
                 connection.settimeout(_BROKER_IO_TIMEOUT_SECONDS)
-                if self._transport_kind == "tcp_hmac_sha256":
-                    try:
-                        self._serve_container_connection(connection)
-                    except (
-                        OSError,
-                        TimeoutError,
-                        UnicodeError,
-                        TypeError,
-                        ValueError,
-                        RecursionError,
-                        OverflowError,
-                    ):
-                        # A peer that stalls or truncates a frame has not supplied a request nonce,
-                        # so no authenticated response is possible.  Close only that connection;
-                        # malformed container traffic must never terminate the broker thread.
-                        pass
-                    continue
                 try:
                     if not self._peer_is_runtime(connection):
                         raise RecordError("driver_action_scope_mismatch", "peer session")
@@ -2125,6 +2513,16 @@ class DriverActionBroker:
             # Cancellation is unsafe once an admitted transaction starts.  The broker retains its
             # duplicated engagement descriptor and shutdown requires worker quiescence.
             self._thread.join()
+            workers_lock = getattr(self, "_container_workers_lock", None)
+            workers_set = getattr(self, "_container_workers", None)
+            if workers_lock is not None and workers_set is not None:
+                while True:
+                    with workers_lock:
+                        workers = tuple(workers_set)
+                    if not workers:
+                        break
+                    for worker in workers:
+                        worker.join()
             os.close(self._engagement_fd)
             self._engagement_fd = -1
             self._closed = True

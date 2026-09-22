@@ -1,0 +1,19 @@
+test_any_pre_gate_execution_is_rejected (__main__.DockerRuntimeIntegrationTest.test_any_pre_gate_execution_is_rejected) ... ok
+test_close_fd_double_fork_setsid_chdir_exec_cannot_survive (__main__.DockerRuntimeIntegrationTest.test_close_fd_double_fork_setsid_chdir_exec_cannot_survive) ... ok
+test_parent_sigkill_triggers_watchdog_and_unrelated_canary_survives (__main__.DockerRuntimeIntegrationTest.test_parent_sigkill_triggers_watchdog_and_unrelated_canary_survives) ... ok
+test_stopped_manifest_is_revalidated_and_callback_failure_cleans (__main__.DockerRuntimeIntegrationTest.test_stopped_manifest_is_revalidated_and_callback_failure_cleans) ... ok
+test_timeout_kills_exact_container_and_output_is_bounded (__main__.DockerRuntimeIntegrationTest.test_timeout_kills_exact_container_and_output_is_bounded) ... ok
+test_tmpfs_byte_inode_and_sparse_accounting_are_bounded (__main__.DockerRuntimeIntegrationTest.test_tmpfs_byte_inode_and_sparse_accounting_are_bounded) ... ok
+test_two_phase_identity_control_injection_and_exact_cleanup (__main__.DockerRuntimeIntegrationTest.test_two_phase_identity_control_injection_and_exact_cleanup) ... ok
+test_create_command_is_pull_free_read_only_and_resource_bounded (__main__.DockerRuntimeUnitTest.test_create_command_is_pull_free_read_only_and_resource_bounded) ... ok
+test_only_immutable_digest_references_are_accepted (__main__.DockerRuntimeUnitTest.test_only_immutable_digest_references_are_accepted) ... ok
+test_optional_mounts_are_distinct_nonoverlapping_regular_files (__main__.DockerRuntimeUnitTest.test_optional_mounts_are_distinct_nonoverlapping_regular_files) ... ok
+test_public_result_summary_does_not_echo_output_or_exact_ids (__main__.DockerRuntimeUnitTest.test_public_result_summary_does_not_echo_output_or_exact_ids) ... ok
+test_resource_limits_are_finite_and_bounded (__main__.DockerRuntimeUnitTest.test_resource_limits_are_finite_and_bounded) ... ok
+test_unsupported_platform_or_root_fails_before_docker_access (__main__.DockerRuntimeUnitTest.test_unsupported_platform_or_root_fails_before_docker_access) ... ok
+test_write_broker_admission_is_bound_to_the_trusted_supervisor (__main__.DockerRuntimeUnitTest.test_write_broker_admission_is_bound_to_the_trusted_supervisor) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 58.852s
+
+OK

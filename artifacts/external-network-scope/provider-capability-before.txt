@@ -1,0 +1,55 @@
+test_live_network_boundary_and_provider_streaming (__main__.DockerWorkQueueIntegrationTest.test_live_network_boundary_and_provider_streaming) ... Exception in thread work-queue-action-broker-28798:
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 584, in _get_chunk_left
+    chunk_left = self._read_next_chunk_size()
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 551, in _read_next_chunk_size
+    return int(line, 16)
+ValueError: invalid literal for int() with base 16: b''
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/redteam-harness-egress/tools/driver_action_admission.py", line 2291, in _serve
+    self._serve_container_connection(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/private/tmp/redteam-harness-egress/tools/driver_action_admission.py", line 2257, in _serve_container_connection
+    self._serve_provider_stream(connection, request, nonce)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/redteam-harness-egress/tools/driver_action_admission.py", line 2146, in _serve_provider_stream
+    chunk = response.read1(64 * 1024)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 682, in read1
+    return self._read1_chunked(n)
+           ~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 723, in _read1_chunked
+    chunk_left = self._get_chunk_left()
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 586, in _get_chunk_left
+    raise IncompleteRead(b'')
+http.client.IncompleteRead: IncompleteRead(0 bytes read)
+FAIL
+
+======================================================================
+FAIL: test_live_network_boundary_and_provider_streaming (__main__.DockerWorkQueueIntegrationTest.test_live_network_boundary_and_provider_streaming)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/redteam-harness-egress/tools/docker-work-queue-integration-test.py", line 957, in test_live_network_boundary_and_provider_streaming
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        execution.session.returncode,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        f"session={execution.session!r} output={runtime_output!r}",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: 1 != 0 : provider_requests=1 provider_done=False first_chunk=False bypass_hits=0 session=SessionResult(session_ref='0d1058c2-32b0-4b8c-9326-9d6bf2e48314', started=True, timed_out=False, returncode=1, output_was_json=False, runtime_reported_error=None, cost_usd=None) output=[b'Traceback (most recent call last):\n  File "/usr/lib/python3.13/http/client.py", line 584, in _get_chunk_left\n    chunk_left = self._read_next_chunk_size()\n  File "/usr/lib/python3.13/http/client.py", line 551, in _read_next_chunk_size\n    return int(line, 16)\nValueError: invalid literal for int() with base 16: b\'\'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File "/usr/lib/python3.13/http/client.py", line 602, in _read_chunked\n    while (chunk_left := self._get_chunk_left()) is not None:\n                         ~~~~~~~~~~~~~~~~~~~~^^\n  File "/usr/lib/python3.13/http/client.py", line 586, in _get_chunk_left\n    raise IncompleteRead(b\'\')\nhttp.client.IncompleteRead: IncompleteRead(0 bytes read)\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/workspace/fake-network-claude", line 125, in <module>\n    rejected.read()\n    ~~~~~~~~~~~~~^^\n  File "/usr/lib/python3.13/http/client.py", line 478, in read\n    return self._read_chunked(amt)\n           ~~~~~~~~~~~~~~~~~~^^^^^\n  File "/usr/lib/python3.13/http/client.py", line 614, in _read_chunked\n    raise IncompleteRead(b\'\'.join(value)) from exc\nhttp.client.IncompleteRead: IncompleteRead(6 bytes read)\n']
+
+----------------------------------------------------------------------
+Ran 1 test in 15.684s
+
+FAILED (failures=1)

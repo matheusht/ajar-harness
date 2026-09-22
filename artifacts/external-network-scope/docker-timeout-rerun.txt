@@ -1,0 +1,6 @@
+test_timeout_kills_exact_container_and_output_is_bounded (__main__.DockerRuntimeIntegrationTest.test_timeout_kills_exact_container_and_output_is_bounded) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 32.147s
+
+OK

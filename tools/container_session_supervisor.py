@@ -21,6 +21,7 @@ import binascii
 import ctypes
 import errno
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -55,6 +56,8 @@ MAX_COMMAND_ARGUMENTS = 1024
 MAX_COMMAND_BYTES = 1024 * 1024
 MAX_EMULATED_WRITE_BYTES = 16 * 1024 * 1024
 RELAY_IO_TIMEOUT_SECONDS = 2.0
+PROVIDER_IO_TIMEOUT_SECONDS = 30.0
+MAX_PROVIDER_HEADER_BYTES = 64 * 1024
 TRACE_BOOTSTRAP_TIMEOUT_SECONDS = 5.0
 STORAGE_EXIT_CODE = 73
 INTERNAL_FAILURE_EXIT_CODE = 74
@@ -70,6 +73,7 @@ SECCOMP_RET_KILL_PROCESS = 0x80000000
 SECCOMP_RET_ERRNO = 0x00050000
 SECCOMP_RET_USER_NOTIF = 0x7FC00000
 SECCOMP_RET_ALLOW = 0x7FFF0000
+SECCOMP_USER_NOTIF_FLAG_CONTINUE = 1
 BPF_LD = 0x00
 BPF_W = 0x00
 BPF_ABS = 0x20
@@ -90,6 +94,14 @@ AARCH64_NR_IO_SUBMIT = 2
 AARCH64_NR_IO_CANCEL = 3
 AARCH64_NR_IO_GETEVENTS = 4
 AARCH64_NR_CLONE = 220
+AARCH64_NR_SOCKET = 198
+AARCH64_NR_SOCKETPAIR = 199
+AARCH64_NR_BIND = 200
+AARCH64_NR_LISTEN = 201
+AARCH64_NR_ACCEPT = 202
+AARCH64_NR_CONNECT = 203
+AARCH64_NR_SENDTO = 206
+AARCH64_NR_SENDMSG = 211
 AARCH64_NR_WRITE = 64
 AARCH64_NR_WRITEV = 66
 AARCH64_NR_PWRITE64 = 68
@@ -99,7 +111,9 @@ AARCH64_NR_SPLICE = 76
 AARCH64_NR_UNSHARE = 97
 AARCH64_NR_PRCTL = 167
 AARCH64_NR_MMAP = 222
+AARCH64_NR_ACCEPT4 = 242
 AARCH64_NR_PROCESS_VM_WRITEV = 271
+AARCH64_NR_SENDMMSG = 269
 AARCH64_NR_SECCOMP = 277
 AARCH64_NR_COPY_FILE_RANGE = 285
 AARCH64_NR_PWRITEV2 = 287
@@ -305,6 +319,26 @@ class _BrokeredWriteResult:
     value: int
     error: int
     storage_exhausted: bool
+
+
+def _socket_policy(family: int, kind: int, protocol: int) -> bool:
+    base_kind = kind & 0xF
+    return bool(
+        family == socket.AF_UNIX
+        and base_kind in {socket.SOCK_STREAM, socket.SOCK_SEQPACKET}
+        and protocol == 0
+        or family == socket.AF_INET
+        and base_kind == socket.SOCK_STREAM
+        and protocol in {0, socket.IPPROTO_TCP}
+    )
+
+
+def _message_flags_allowed(flags: int) -> bool:
+    return not flags & getattr(socket, "MSG_FASTOPEN", 0x20000000)
+
+
+def _sockaddr_in_bytes(address: str, port: int) -> bytes:
+    return struct.pack("=H", socket.AF_INET) + struct.pack("!H", port) + socket.inet_aton(address) + b"\0" * 8
 
 
 def _harden_process_memory() -> None:
@@ -548,6 +582,12 @@ def _tracee_filter_instructions() -> tuple[_SockFilter, ...]:
         _SockFilter(return_value, 0, 0, SECCOMP_RET_USER_NOTIF),
         _SockFilter(jump_equal, 0, 1, AARCH64_NR_PWRITE64),
         _SockFilter(return_value, 0, 0, SECCOMP_RET_USER_NOTIF),
+        _SockFilter(jump_equal, 0, 1, AARCH64_NR_SOCKET),
+        _SockFilter(return_value, 0, 0, SECCOMP_RET_USER_NOTIF),
+        _SockFilter(jump_equal, 0, 1, AARCH64_NR_SOCKETPAIR),
+        _SockFilter(return_value, 0, 0, SECCOMP_RET_USER_NOTIF),
+        _SockFilter(jump_equal, 0, 1, AARCH64_NR_CONNECT),
+        _SockFilter(return_value, 0, 0, SECCOMP_RET_USER_NOTIF),
     ]
     for syscall_number in _UNAVAILABLE_TRACE_SYSCALLS:
         instructions.extend(
@@ -556,8 +596,37 @@ def _tracee_filter_instructions() -> tuple[_SockFilter, ...]:
                 _SockFilter(return_value, 0, 0, unavailable),
             )
         )
+    for syscall_number in (
+        AARCH64_NR_BIND,
+        AARCH64_NR_LISTEN,
+        AARCH64_NR_ACCEPT,
+        AARCH64_NR_ACCEPT4,
+    ):
+        instructions.extend(
+            (
+                _SockFilter(jump_equal, 0, 1, syscall_number),
+                _SockFilter(return_value, 0, 0, clone_escape_denied),
+            )
+        )
     instructions.extend(
         (
+            # TCP Fast Open can combine an unobserved destination with the first payload.  Ordinary
+            # send variants remain available for already-brokered stream sockets.
+            _SockFilter(jump_equal, 0, 3, AARCH64_NR_SENDTO),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_ARG3_OFFSET),
+            _SockFilter(jump_set, 0, 1, getattr(socket, "MSG_FASTOPEN", 0x20000000)),
+            _SockFilter(return_value, 0, 0, clone_escape_denied),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_NR_OFFSET),
+            _SockFilter(jump_equal, 0, 3, AARCH64_NR_SENDMSG),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_ARG2_OFFSET),
+            _SockFilter(jump_set, 0, 1, getattr(socket, "MSG_FASTOPEN", 0x20000000)),
+            _SockFilter(return_value, 0, 0, clone_escape_denied),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_NR_OFFSET),
+            _SockFilter(jump_equal, 0, 3, AARCH64_NR_SENDMMSG),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_ARG3_OFFSET),
+            _SockFilter(jump_set, 0, 1, getattr(socket, "MSG_FASTOPEN", 0x20000000)),
+            _SockFilter(return_value, 0, 0, clone_escape_denied),
+            _SockFilter(load_word, 0, 0, SECCOMP_DATA_NR_OFFSET),
             # File-backed MAP_SHARED pages can be dirtied by any syscall that writes to user
             # memory. Reject them; anonymous shared memory remains memory-cgroup bounded.
             _SockFilter(jump_equal, 0, 4, AARCH64_NR_MMAP),
@@ -785,6 +854,93 @@ def _emulate_brokered_write(
         os.close(duplicate)
 
 
+def _emulate_brokered_connect(
+    notification: _SeccompNotif,
+    listener_descriptor: int,
+    provider_endpoint: tuple[str, int],
+) -> _BrokeredWriteResult:
+    """Connect the exact tracee socket to PID 1 using one immutable sockaddr copy."""
+
+    if (
+        notification.flags != 0
+        or notification.data.architecture != AUDIT_ARCH_AARCH64
+        or notification.data.number != AARCH64_NR_CONNECT
+    ):
+        raise SupervisorError("network_broker_notification_invalid")
+    _notification_id_valid(listener_descriptor, int(notification.identifier))
+    target_descriptor, address, count = (
+        int(notification.data.arguments[index]) for index in range(3)
+    )
+    if target_descriptor > 2**31 - 1 or count < 2 or count > 128:
+        return _BrokeredWriteResult(0, -errno.EINVAL, False)
+    try:
+        copied = _read_tracee_memory(int(notification.pid), address, count)
+    except OSError as exc:
+        if exc.errno in {errno.EFAULT, errno.EINVAL}:
+            return _BrokeredWriteResult(0, -errno.EFAULT, False)
+        raise SupervisorError("network_broker_memory_unavailable") from exc
+    family = struct.unpack_from("=H", copied)[0]
+    if family == socket.AF_INET and count >= 16:
+        destination: str | tuple[str, int] = provider_endpoint
+    elif family == socket.AF_UNIX:
+        raw_path = copied[2:].split(b"\0", 1)[0]
+        if raw_path != os.fsencode(BROKER_RELAY_PATH):
+            return _BrokeredWriteResult(0, -errno.EACCES, False)
+        destination = str(BROKER_RELAY_PATH)
+    else:
+        return _BrokeredWriteResult(0, -errno.EAFNOSUPPORT, False)
+    try:
+        duplicate = _pidfd_getfd(int(notification.pid), target_descriptor)
+    except OSError as exc:
+        if exc.errno == errno.EBADF:
+            return _BrokeredWriteResult(0, -errno.EBADF, False)
+        raise SupervisorError("network_broker_descriptor_unavailable") from exc
+    wrapped: socket.socket | None = None
+    try:
+        wrapped = socket.socket(fileno=duplicate)
+        if (
+            wrapped.family != family
+            or wrapped.type & 0xF != socket.SOCK_STREAM
+            or family == socket.AF_INET
+            and wrapped.proto not in {0, socket.IPPROTO_TCP}
+            or family == socket.AF_UNIX
+            and wrapped.proto != 0
+        ):
+            return _BrokeredWriteResult(0, -errno.EPROTOTYPE, False)
+        _notification_id_valid(listener_descriptor, int(notification.identifier))
+        try:
+            wrapped.connect(destination)
+        except OSError as exc:
+            return _BrokeredWriteResult(0, -(exc.errno or errno.EIO), False)
+        return _BrokeredWriteResult(0, 0, False)
+    finally:
+        if wrapped is not None:
+            try:
+                wrapped.detach()
+            except (AttributeError, OSError):
+                pass
+        os.close(duplicate)
+
+
+def _continue_socket_notification(notification: _SeccompNotif) -> _SeccompNotifResp:
+    arguments = tuple(int(value) for value in notification.data.arguments)
+    if notification.data.number == AARCH64_NR_SOCKET:
+        allowed = _socket_policy(*arguments[:3])
+    elif notification.data.number == AARCH64_NR_SOCKETPAIR:
+        allowed = (
+            arguments[0] == socket.AF_UNIX
+            and _socket_policy(*arguments[:3])
+        )
+    else:
+        raise SupervisorError("network_broker_notification_invalid")
+    return _SeccompNotifResp(
+        identifier=notification.identifier,
+        value=0,
+        error=0 if allowed else -errno.EAFNOSUPPORT,
+        flags=SECCOMP_USER_NOTIF_FLAG_CONTINUE if allowed else 0,
+    )
+
+
 class _WriteBroker:
     """Own one seccomp listener and emulate scalar writes without ``CONTINUE`` races."""
 
@@ -793,10 +949,12 @@ class _WriteBroker:
         listener_descriptor: int,
         bounded_devices: frozenset[int],
         tracee_pid: int,
+        provider_endpoint: tuple[str, int] = ("127.0.0.1", 9),
     ) -> None:
         self._listener_descriptor = listener_descriptor
         self._bounded_devices = bounded_devices
         self._tracee_pid = tracee_pid
+        self._provider_endpoint = provider_endpoint
         self._stop = threading.Event()
         self.storage_exhausted = threading.Event()
         self.failed = threading.Event()
@@ -859,11 +1017,33 @@ class _WriteBroker:
                     self._mark_failed()
                 return
             try:
-                result = _emulate_brokered_write(
-                    notification,
-                    self._bounded_devices,
-                    self._listener_descriptor,
-                )
+                if notification.data.number in {AARCH64_NR_SOCKET, AARCH64_NR_SOCKETPAIR}:
+                    response = _continue_socket_notification(notification)
+                    result = None
+                elif notification.data.number == AARCH64_NR_CONNECT:
+                    result = _emulate_brokered_connect(
+                        notification,
+                        self._listener_descriptor,
+                        self._provider_endpoint,
+                    )
+                    response = _SeccompNotifResp(
+                        identifier=notification.identifier,
+                        value=result.value,
+                        error=result.error,
+                        flags=0,
+                    )
+                else:
+                    result = _emulate_brokered_write(
+                        notification,
+                        self._bounded_devices,
+                        self._listener_descriptor,
+                    )
+                    response = _SeccompNotifResp(
+                        identifier=notification.identifier,
+                        value=result.value,
+                        error=result.error,
+                        flags=0,
+                    )
             except OSError as exc:
                 if exc.errno == errno.ENOENT:
                     continue
@@ -874,14 +1054,8 @@ class _WriteBroker:
                 self._fail_notification(notification)
                 self._mark_failed()
                 return
-            if result.storage_exhausted:
+            if result is not None and result.storage_exhausted:
                 self.storage_exhausted.set()
-            response = _SeccompNotifResp(
-                identifier=notification.identifier,
-                value=result.value,
-                error=result.error,
-                flags=0,
-            )
             try:
                 _seccomp_ioctl(
                     self._listener_descriptor,
@@ -958,7 +1132,11 @@ def _wait_returncode(status: int) -> int:
     raise SupervisorError("ptrace_wait_invalid")
 
 
-def _run_traced_command(command: list[str], environment: dict[str, str]) -> int:
+def _run_traced_command(
+    command: list[str],
+    environment: dict[str, str],
+    provider_endpoint: tuple[str, int] = ("127.0.0.1", 9),
+) -> int:
     """Run one model process and permanently latch storage failures from every descendant."""
 
     if not sys.platform.startswith("linux"):
@@ -1018,7 +1196,9 @@ def _run_traced_command(command: list[str], environment: dict[str, str]) -> int:
             os.close(listener_descriptor)
             raise SupervisorError("write_broker_bootstrap_failed") from exc
         os.close(bootstrap_duplicate)
-        broker = _WriteBroker(listener_descriptor, bounded_devices, process.pid)
+        broker = _WriteBroker(
+            listener_descriptor, bounded_devices, process.pid, provider_endpoint
+        )
         broker.start()
         _ptrace(PTRACE_SYSCALL, process.pid)
         pending_syscalls: dict[int, int] = {}
@@ -1294,7 +1474,12 @@ def _load_broker_manifest() -> dict[str, Any]:
         raise SupervisorError("broker_manifest_invalid") from exc
 
 
-def _child_environment(session: dict[str, str], auth: dict[str, str]) -> dict[str, str]:
+def _child_environment(
+    session: dict[str, str],
+    auth: dict[str, str],
+    *,
+    provider_endpoint: str = "http://127.0.0.1:9",
+) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items() if key in _INHERITED_RUNTIME_KEYS
     }
@@ -1311,7 +1496,14 @@ def _child_environment(session: dict[str, str], auth: dict[str, str]) -> dict[st
         }
     )
     environment.update(session)
-    environment.update(auth)
+    # Provider authority remains in the host parent.  The child receives only the fixed PID-1
+    # endpoint and an inert token for SDKs that require a non-empty value.
+    environment.update(
+        {
+            "ANTHROPIC_BASE_URL": provider_endpoint,
+            "ANTHROPIC_API_KEY": "lrh-parent-owned",
+        }
+    )
     return environment
 
 
@@ -1418,6 +1610,133 @@ class _BrokerRelay:
             pass
 
 
+class _ProviderProxy:
+    """Fixed HTTP/1.1 provider endpoint backed by the authenticated parent broker."""
+
+    def __init__(self, *, manifest: dict[str, Any], key: bytes) -> None:
+        self._manifest = manifest
+        self._key = key
+        self._stop = threading.Event()
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(4)
+        self._listener.settimeout(0.1)
+        host, port = self._listener.getsockname()[:2]
+        if host != "127.0.0.1" or type(port) is not int:
+            raise SupervisorError("provider_proxy_unavailable")
+        self.endpoint = (host, port)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    @staticmethod
+    def _read_request(connection: socket.socket) -> tuple[dict[str, str], bytes]:
+        data = bytearray()
+        while b"\r\n\r\n" not in data:
+            chunk = connection.recv(min(4096, MAX_PROVIDER_HEADER_BYTES + 1 - len(data)))
+            if not chunk:
+                raise SupervisorError("provider_request_invalid")
+            data.extend(chunk)
+            if len(data) > MAX_PROVIDER_HEADER_BYTES:
+                raise SupervisorError("provider_request_invalid")
+        raw_headers, body_prefix = bytes(data).split(b"\r\n\r\n", 1)
+        try:
+            lines = raw_headers.decode("iso-8859-1").split("\r\n")
+        except UnicodeError as exc:
+            raise SupervisorError("provider_request_invalid") from exc
+        if lines[0] != "POST /v1/messages HTTP/1.1":
+            raise SupervisorError("provider_request_denied")
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            name, separator, value = line.partition(":")
+            lowered = name.strip().lower()
+            if not separator or not lowered or lowered in headers:
+                raise SupervisorError("provider_request_invalid")
+            headers[lowered] = value.strip()
+        if "transfer-encoding" in headers or headers.get("expect"):
+            raise SupervisorError("provider_request_denied")
+        try:
+            content_length = int(headers.get("content-length", ""))
+        except ValueError as exc:
+            raise SupervisorError("provider_request_invalid") from exc
+        if content_length < 0 or content_length > broker_client.RAW_INPUT_LIMIT:
+            raise SupervisorError("provider_request_invalid")
+        body = bytearray(body_prefix)
+        while len(body) < content_length:
+            chunk = connection.recv(content_length - len(body))
+            if not chunk:
+                raise SupervisorError("provider_request_invalid")
+            body.extend(chunk)
+        if len(body) != content_length:
+            raise SupervisorError("provider_request_invalid")
+        forwarded = {
+            name: value
+            for name, value in headers.items()
+            if name in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+        }
+        return forwarded, bytes(body)
+
+    def _serve_one(self, connection: socket.socket) -> None:
+        connection.settimeout(PROVIDER_IO_TIMEOUT_SECONDS)
+        started = False
+        try:
+            headers, body = self._read_request(connection)
+            def send_headers(status: int, response_headers: list[list[str]]) -> None:
+                nonlocal started
+                phrase = http.client.responses.get(status, "Response")
+                safe_headers = "".join(
+                    f"{name}: {value}\r\n"
+                    for name, value in response_headers
+                    if name.lower() in {"content-type", "request-id", "anthropic-request-id"}
+                    and "\r" not in value
+                    and "\n" not in value
+                )
+                connection.sendall(
+                    f"HTTP/1.1 {status} {phrase}\r\n{safe_headers}Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n".encode("iso-8859-1")
+                )
+                started = True
+
+            def send_chunk(chunk: bytes) -> None:
+                connection.sendall(f"{len(chunk):x}\r\n".encode("ascii") + chunk + b"\r\n")
+
+            broker_client.stream_provider(
+                self._manifest,
+                self._key,
+                path="/v1/messages",
+                headers=headers,
+                body=body,
+                on_headers=send_headers,
+                on_chunk=send_chunk,
+            )
+            connection.sendall(b"0\r\n\r\n")
+        except Exception:
+            if not started:
+                try:
+                    connection.sendall(
+                        b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                except OSError:
+                    pass
+
+    def _serve(self) -> None:
+        while not self._stop.is_set():
+            try:
+                connection, _address = self._listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            with connection:
+                self._serve_one(connection)
+
+    def close(self) -> None:
+        self._stop.set()
+        self._listener.close()
+        self._thread.join(timeout=1.0)
+
+
 def _returncode(value: int) -> int:
     if value == STORAGE_EXIT_CODE:
         return INTERNAL_FAILURE_EXIT_CODE
@@ -1458,12 +1777,21 @@ def run(*, expected_session_hash: str) -> int:
     if _storage_exhausted():
         return STORAGE_EXIT_CODE
     relay = _BrokerRelay(manifest=manifest, key=broker_key)
+    provider = _ProviderProxy(manifest=manifest, key=broker_key)
     relay.start()
+    provider.start()
     try:
         return _run_traced_command(
-            command, _child_environment(session_environment, auth)
+            command,
+            _child_environment(
+                session_environment,
+                auth,
+                provider_endpoint=f"http://127.0.0.1:{provider.endpoint[1]}",
+            ),
+            provider.endpoint,
         )
     finally:
+        provider.close()
         relay.close()
 
 

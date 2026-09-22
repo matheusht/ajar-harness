@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import contextmanager
@@ -365,6 +366,189 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(
             separated.exception.code, "container_broker_response_auth_invalid"
         )
+
+    def test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay(self) -> None:
+        scope = admission.network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        logical_request = client.target_fetch_request_id(
+            self.manifest, url="https://sink.invalid/allowed", method="GET"
+        )
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "read_governed_file", return_value=scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(
+                admission.network_scope,
+                "pinned_request",
+                side_effect=TimeoutError("lost receipt"),
+            ) as effect,
+        ):
+            first = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=logical_request,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+            replay = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=logical_request,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+        self.assertEqual((first[0], replay[0]), (1, 1))
+        self.assertEqual(effect.call_count, 1)
+
+        changed_scope = admission.network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/reattested", method="GET"
+        )
+        changed_state = {"scope_hash": sha256_bytes(changed_scope)}
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(
+                admission, "_reduce_engagement_unchecked", return_value=changed_state
+            ),
+            mock.patch.object(admission, "read_governed_file", return_value=changed_scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(
+                admission.network_scope,
+                "pinned_request",
+                side_effect=AssertionError("effect began for stale admission"),
+            ),
+        ):
+            stale = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest,
+                    url="https://sink.invalid/reattested",
+                    method="GET",
+                ),
+                url="https://sink.invalid/reattested",
+                method="GET",
+            )
+        self.assertEqual(stale[0], 1)
+
+    def test_target_fetch_real_broker_reaches_only_the_approved_owned_sink(self) -> None:
+        sink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sink.bind(("127.0.0.1", 0))
+        sink.listen(1)
+        sink.settimeout(5.0)
+        sink_port = sink.getsockname()[1]
+        sink_requests: list[bytes] = []
+
+        def serve() -> None:
+            try:
+                connection, _ = sink.accept()
+                with connection:
+                    request = bytearray()
+                    while b"\r\n\r\n" not in request:
+                        request.extend(connection.recv(4096))
+                    sink_requests.append(bytes(request))
+                    connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    )
+            finally:
+                sink.close()
+
+        server = threading.Thread(target=serve, daemon=True)
+        server.start()
+        scope = admission.network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        class FixtureTls:
+            @staticmethod
+            def wrap_socket(raw: socket.socket, *, server_hostname: str) -> socket.socket:
+                self.assertEqual(server_hostname, "sink.invalid")
+                return raw
+
+        original_request = admission.network_scope.pinned_request
+        real_create_connection = socket.create_connection
+
+        def fixture_request(**arguments: object) -> tuple[int, list[tuple[str, str]], bytes]:
+            return original_request(
+                **arguments,
+                resolver=lambda _host, _port: "93.184.216.34",
+            )
+
+        def fixture_connection(_address: object, *, timeout: float) -> socket.socket:
+            return real_create_connection(("127.0.0.1", sink_port), timeout=timeout)
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "read_governed_file", return_value=scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(admission.network_scope, "pinned_request", side_effect=fixture_request),
+            mock.patch.object(
+                admission.network_scope.socket,
+                "create_connection",
+                side_effect=fixture_connection,
+            ),
+            mock.patch.object(
+                admission.network_scope.ssl,
+                "create_default_context",
+                return_value=FixtureTls(),
+            ),
+        ):
+            approved = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://sink.invalid/allowed", method="GET"
+                ),
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+            denied_host = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://other.invalid/allowed", method="GET"
+                ),
+                url="https://other.invalid/allowed",
+                method="GET",
+            )
+            denied_path = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://sink.invalid/denied", method="GET"
+                ),
+                url="https://sink.invalid/denied",
+                method="GET",
+            )
+            with self.assertRaises(client.ContainerBrokerClientError):
+                client.forward_target_fetch(
+                    self.manifest,
+                    KEY,
+                    request_id=client.target_fetch_request_id(
+                        self.manifest, url="https://sink.invalid/allowed", method="POST"
+                    ),
+                    url="https://sink.invalid/allowed",
+                    method="POST",
+                )
+        server.join(timeout=5.0)
+        self.assertEqual((approved[0], denied_host[0], denied_path[0]), (0, 1, 1))
+        self.assertEqual(len(sink_requests), 1)
+        self.assertIn(b"GET /allowed HTTP/1.1", sink_requests[0])
 
     def test_every_runtime_binding_and_the_host_deadline_fail_closed(self) -> None:
         proposal = self.root / "proposal.json"

@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Workflow checks for the external network authorization boundary.
+
+The default lane is credential-free and uses only loopback fixtures.  The Docker lane is selected
+with ``HARNESS_RUN_EGRESS_DOCKER=1`` and never pulls an image.  Results can be saved with
+``--result PATH``; the emitted JSON contains the exact image and checks that ran.
+"""
+
+from __future__ import annotations
+
+import argparse
+import errno
+import json
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import container_session_supervisor as supervisor
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_IMAGE = (
+    "golang@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80"
+)
+RESULTS: list[dict[str, object]] = []
+
+
+def record(name: str, passed: bool, detail: str = "") -> None:
+    RESULTS.append({"name": name, "passed": passed, "detail": detail})
+
+
+class ExternalNetworkPolicyWorkflow(unittest.TestCase):
+    def test_socket_matrix_and_fastopen_are_fail_closed(self) -> None:
+        decide = getattr(supervisor, "_socket_policy", None)
+        self.assertTrue(callable(decide), "missing inherited socket policy")
+        allowed = (
+            (socket.AF_UNIX, socket.SOCK_STREAM, 0),
+            (socket.AF_UNIX, socket.SOCK_SEQPACKET, 0),
+            (socket.AF_INET, socket.SOCK_STREAM, 0),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP),
+        )
+        denied = (
+            (socket.AF_INET6, socket.SOCK_STREAM, 0),
+            (socket.AF_INET, socket.SOCK_DGRAM, 0),
+            (socket.AF_INET, socket.SOCK_RAW, 0),
+            (getattr(socket, "AF_PACKET", 17), socket.SOCK_RAW, 0),
+            (getattr(socket, "AF_NETLINK", 16), socket.SOCK_RAW, 0),
+            (getattr(socket, "AF_VSOCK", 40), socket.SOCK_STREAM, 0),
+        )
+        for values in allowed:
+            with self.subTest(values=values):
+                self.assertTrue(decide(*values))
+        for values in denied:
+            with self.subTest(values=values):
+                self.assertFalse(decide(*values))
+        self.assertTrue(callable(getattr(supervisor, "_message_flags_allowed", None)))
+        self.assertFalse(supervisor._message_flags_allowed(getattr(socket, "MSG_FASTOPEN", 0x20000000)))
+        record("socket-family-type-protocol-and-fastopen-matrix", True)
+
+    def test_connect_copies_sockaddr_once_and_emulates_on_exact_duplicate(self) -> None:
+        emulate = getattr(supervisor, "_emulate_brokered_connect", None)
+        self.assertTrue(callable(emulate), "missing connect emulator")
+        notification = supervisor._SeccompNotif()
+        notification.identifier = 9
+        notification.pid = 123
+        notification.data.architecture = supervisor.AUDIT_ARCH_AARCH64
+        notification.data.number = supervisor.AARCH64_NR_CONNECT
+        notification.data.arguments[0] = 7
+        notification.data.arguments[1] = 0x1000
+        notification.data.arguments[2] = 16
+        copied = supervisor._sockaddr_in_bytes("203.0.113.9", 443)
+        calls: list[tuple[str, object]] = []
+
+        class Duplicate:
+            family = socket.AF_INET
+            type = socket.SOCK_STREAM
+            proto = socket.IPPROTO_TCP
+
+            def connect(self, address: object) -> None:
+                calls.append(("connect", address))
+
+            def detach(self) -> int:
+                return 71
+
+        with (
+            mock.patch.object(supervisor, "_notification_id_valid"),
+            mock.patch.object(supervisor, "_read_tracee_memory", return_value=copied) as read,
+            mock.patch.object(supervisor, "_pidfd_getfd", return_value=71),
+            mock.patch.object(supervisor.socket, "socket", return_value=Duplicate()),
+            mock.patch.object(supervisor.os, "close"),
+        ):
+            result = emulate(notification, 55, ("127.0.0.1", 48123))
+        self.assertEqual(result.error, 0)
+        self.assertEqual(read.call_count, 1)
+        self.assertEqual(calls, [("connect", ("127.0.0.1", 48123))])
+        record("single-copy-connect-emulation", True)
+
+    def test_signed_scope_policy_defaults_deny_and_detects_tamper(self) -> None:
+        try:
+            import network_scope
+        except ImportError as exc:
+            self.fail(f"missing parent network policy gateway: {exc}")
+        scope = network_scope.scope_with_network_policy(
+            host="fixture.invalid", path="/allowed", method="GET"
+        )
+        digest = network_scope.sha256_bytes(scope)
+        policy = network_scope.parse_network_policy(scope, expected_scope_hash=digest)
+        self.assertTrue(policy.allows("target_fetch", "https", "fixture.invalid", 443, "/allowed", "GET"))
+        for values in (
+            ("target_fetch", "https", "denied.invalid", 443, "/allowed", "GET"),
+            ("target_fetch", "https", "fixture.invalid", 443, "/denied", "GET"),
+            ("target_fetch", "https", "fixture.invalid", 443, "/allowed", "POST"),
+        ):
+            with self.subTest(values=values):
+                self.assertFalse(policy.allows(*values))
+        with self.assertRaises(network_scope.NetworkScopeError):
+            network_scope.parse_network_policy(scope + b"tamper", expected_scope_hash=digest)
+        record("signed-scope-destination-path-method-and-tamper", True)
+
+    def test_policy_rejects_request_smuggling_and_ambiguous_hosts(self) -> None:
+        import network_scope
+
+        for host, path in (
+            ("fixture.invalid", "/allowed\r\nX-Injected: yes"),
+            ("fixture.invalid", "/allowed\x00suffix"),
+            ("bad_host.invalid", "/allowed"),
+            ("127.0.0.1", "/allowed"),
+            ("fixture.invalid.", "/allowed"),
+        ):
+            with self.subTest(host=host, path=path):
+                scope = network_scope.scope_with_network_policy(
+                    host=host, path=path, method="GET"
+                )
+                with self.assertRaises(network_scope.NetworkScopeError):
+                    network_scope.parse_network_policy(
+                        scope, expected_scope_hash=network_scope.sha256_bytes(scope)
+                    )
+        record("policy-rejects-smuggling-controls-and-ambiguous-hosts", True)
+
+    def test_dns_alias_redirect_and_uncertain_replay_rules(self) -> None:
+        try:
+            import network_scope
+        except ImportError as exc:
+            self.fail(f"missing parent network policy gateway: {exc}")
+        forbidden = (
+            "127.0.0.1", "0.0.0.0", "10.0.0.1", "169.254.169.254", "::1", "::ffff:127.0.0.1"
+        )
+        for address in forbidden:
+            with self.subTest(address=address):
+                self.assertFalse(network_scope.address_allowed(address))
+        gateway = network_scope.NetworkGateway(request_budget=1, deadline=time.monotonic() + 1)
+        self.assertEqual(gateway.request_budget, 1)
+        gateway.mark_uncertain("request-1")
+        with self.assertRaises(network_scope.NetworkScopeError):
+            gateway.begin("request-1")
+        record("dns-alias-redirect-budget-deadline-and-no-uncertain-replay", True)
+
+    def test_parent_transport_rejects_alias_and_headers_before_sink_contact(self) -> None:
+        import network_scope
+
+        scope = network_scope.scope_with_network_policy(
+            host="fixture.invalid", path="/allowed", method="GET"
+        )
+        policy = network_scope.parse_network_policy(
+            scope, expected_scope_hash=network_scope.sha256_bytes(scope)
+        )
+        with (
+            mock.patch.object(
+                network_scope.socket,
+                "create_connection",
+                side_effect=AssertionError("forbidden alias reached socket creation"),
+            ),
+            self.assertRaises(network_scope.NetworkScopeError),
+        ):
+            network_scope.pinned_request(
+                policy=policy,
+                operation="target_fetch",
+                url="https://fixture.invalid/allowed",
+                method="GET",
+                resolver=lambda *_args: "127.0.0.1",
+            )
+        resolver = mock.Mock(side_effect=AssertionError("invalid header reached DNS"))
+        with self.assertRaises(network_scope.NetworkScopeError):
+            network_scope.pinned_request(
+                policy=policy,
+                operation="target_fetch",
+                url="https://fixture.invalid/allowed",
+                method="GET",
+                headers={"Authorization": "secret"},
+                resolver=resolver,
+            )
+        self.assertEqual(resolver.call_count, 0)
+        record("parent-transport-precontact-alias-and-header-rejection", True)
+
+    def test_child_environment_contains_only_local_provider_authority(self) -> None:
+        environment = supervisor._child_environment(
+            {
+                "HARNESS_ACTIVE_ENGAGEMENT": "/workspace/engagements/test",
+                "HARNESS_EXPECTED_LEDGER_HASH": "sha256:" + "1" * 64,
+                "HARNESS_EXPECTED_SOURCE_HASHES": json.dumps({
+                    "events.jsonl": "sha256:" + "2" * 64,
+                    "attempts.jsonl": "sha256:" + "3" * 64,
+                    "artifacts.jsonl": "sha256:" + "4" * 64,
+                }),
+                "HARNESS_EXPECTED_RUNTIME_SESSION_REF": "00000000-0000-4000-8000-000000000000",
+            },
+            {
+                "ANTHROPIC_API_KEY": "real-secret",
+                "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+            },
+            provider_endpoint="http://127.0.0.1:48123",
+        )
+        self.assertEqual(environment["ANTHROPIC_BASE_URL"], "http://127.0.0.1:48123")
+        self.assertNotEqual(environment.get("ANTHROPIC_API_KEY"), "real-secret")
+        self.assertNotIn("real-secret", json.dumps(environment))
+        record("provider-credentials-and-url-remain-parent-owned", True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--result", type=Path)
+    arguments, unittest_arguments = parser.parse_known_args()
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(ExternalNetworkPolicyWorkflow)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    payload = {
+        "schema_version": 1,
+        "fixture_image": FIXTURE_IMAGE,
+        "docker_requested": os.environ.get("HARNESS_RUN_EGRESS_DOCKER") == "1",
+        "real_provider_auth_qualified": False,
+        "checks": RESULTS,
+        "successful": result.wasSuccessful(),
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+    }
+    if arguments.result is not None:
+        arguments.result.parent.mkdir(parents=True, exist_ok=True)
+        arguments.result.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return 0 if result.wasSuccessful() else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

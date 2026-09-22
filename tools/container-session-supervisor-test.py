@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import errno
 import io
+import json
 import os
 import signal
 import stat
@@ -123,7 +124,7 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
         ), mock.patch.object(
             supervisor,
             "_run_traced_command",
-            side_effect=lambda command, environment: subprocess.run(
+            side_effect=lambda command, environment, _provider_endpoint: subprocess.run(
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -480,7 +481,9 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
             session(["/bin/true"])["environment"],  # type: ignore[arg-type]
             {"ANTHROPIC_API_KEY": "fixture-secret"},
         )
-        self.assertEqual(clean["ANTHROPIC_API_KEY"], "fixture-secret")
+        self.assertEqual(clean["ANTHROPIC_API_KEY"], "lrh-parent-owned")
+        self.assertEqual(clean["ANTHROPIC_BASE_URL"], "http://127.0.0.1:9")
+        self.assertNotIn("fixture-secret", json.dumps(clean))
         self.assertEqual(
             clean[supervisor.broker_client.RELAY_SOCKET_ENV], str(self.relay_path)
         )

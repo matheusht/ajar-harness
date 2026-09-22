@@ -10,6 +10,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -314,7 +315,7 @@ class DockerWorkQueueIntegrationTest(unittest.TestCase):
             bootstrap,
             {
                 "schema_version": 1,
-                "environment": {"ANTHROPIC_API_KEY": MODEL_SECRET},
+                "environment": {},
                 "broker_session_key_base64": base64.b64encode(SESSION_KEY).decode("ascii"),
             },
         )
@@ -335,6 +336,38 @@ class DockerWorkQueueIntegrationTest(unittest.TestCase):
         self.assertFalse(execution.interrupted)
         self.assertEqual(execution.session.returncode, 0)
         self.assertEqual(execution.session.cost_usd, 0.5)
+
+    def test_token_only_provider_auth_is_rejected_before_container_preparation(self) -> None:
+        for environment, code in (
+            ({"ANTHROPIC_AUTH_TOKEN": "unsupported-parent-token"}, "driver_provider_auth_unsupported"),
+            ({}, "driver_provider_auth_missing"),
+        ):
+            with (
+                self.subTest(code=code),
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch(
+                    "work_queue_driver.prepare_docker_session",
+                    side_effect=AssertionError("container prepared before auth validation"),
+                ),
+                self.assertRaises(DriverError) as rejected,
+            ):
+                _run_docker_queue_session(
+                    bound=self.bound,
+                    backend=self.backend,
+                    executable=Path("/usr/local/bin/claude"),
+                    model="claude-test-20260826",
+                    prompt="bounded prompt",
+                    session_ref=SESSION_REF,
+                    state=self.state,
+                    timeout_seconds=30.0,
+                    max_budget_usd=None,
+                    read_only_inputs=(),
+                    admission={"status": "armed"},
+                    admission_token="admission-token",
+                    execution_deadline=time.monotonic() + 30.0,
+                    stop_requested=lambda: False,
+                )
+            self.assertEqual(rejected.exception.code, code)
 
     def test_storage_timeout_interrupt_and_nonzero_are_distinct(self) -> None:
         with self.assertRaises(DriverError) as storage:
@@ -440,7 +473,7 @@ class DockerWorkQueueIntegrationTest(unittest.TestCase):
             self.skipTest("Docker CLI unavailable")
         fake_claude = self.workspace / "fake-claude"
         fake_claude.write_text(
-            """#!/usr/local/bin/python3
+            """#!/usr/bin/env python3
 import json
 import ctypes
 import errno
@@ -451,6 +484,9 @@ import shlex
 import subprocess
 import sys
 import threading
+import traceback
+
+sys.excepthook = lambda kind, value, tb: traceback.print_exception(kind, value, tb, file=sys.stdout)
 
 try:
     pid1_environ = pathlib.Path('/proc/1/environ').read_bytes()
@@ -656,13 +692,328 @@ print(json.dumps({"is_error": False, "total_cost_usd": 0.25}))
         LIVE_IMAGE,
         "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
     )
+    def test_live_network_boundary_and_provider_streaming(self) -> None:
+        docker = shutil.which("docker")
+        if docker is None:
+            self.skipTest("Docker CLI unavailable")
+
+        first_chunk_consumed = threading.Event()
+        provider_done = threading.Event()
+        provider_requests: list[bytes] = []
+        provider = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        provider.bind(("127.0.0.1", 0))
+        provider.listen(1)
+        provider.settimeout(15.0)
+        provider_port = provider.getsockname()[1]
+
+        def serve_provider() -> None:
+            try:
+                connection, _ = provider.accept()
+                with connection:
+                    request = bytearray()
+                    while b"\r\n\r\n" not in request:
+                        request.extend(connection.recv(4096))
+                    head, body = bytes(request).split(b"\r\n\r\n", 1)
+                    length = next(
+                        int(line.split(b":", 1)[1])
+                        for line in head.split(b"\r\n")[1:]
+                        if line.lower().startswith(b"content-length:")
+                    )
+                    while len(body) < length:
+                        body += connection.recv(length - len(body))
+                    provider_requests.append(head + b"\r\n\r\n" + body)
+                    connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                        b"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                        b"6\r\nfirst\n\r\n"
+                    )
+                    if not first_chunk_consumed.wait(10.0):
+                        return
+                    connection.sendall(b"7\r\nsecond\n\r\n0\r\n\r\n")
+                    provider_done.set()
+            finally:
+                provider.close()
+
+        provider_thread = threading.Thread(target=serve_provider, daemon=True)
+        provider_thread.start()
+
+        bypass_hits: list[bytes] = []
+        bypass = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        bypass.bind(("0.0.0.0", 0))
+        bypass.listen(4)
+        bypass.settimeout(0.2)
+        bypass_port = bypass.getsockname()[1]
+        bypass_stop = threading.Event()
+
+        def watch_bypass() -> None:
+            try:
+                while not bypass_stop.is_set():
+                    try:
+                        connection, _ = bypass.accept()
+                    except socket.timeout:
+                        continue
+                    with connection:
+                        bypass_hits.append(connection.recv(4096))
+            finally:
+                bypass.close()
+
+        bypass_thread = threading.Thread(target=watch_bypass, daemon=True)
+        bypass_thread.start()
+
+        fake_claude = self.workspace / "fake-network-claude"
+        fake_claude.write_text(
+            f'''#!/usr/bin/env python3
+import ctypes
+import errno
+import http.client
+import json
+import os
+import shlex
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import traceback
+
+sys.excepthook = lambda kind, value, tb: traceback.print_exception(kind, value, tb, file=sys.stdout)
+
+def denied_socket(family, kind, protocol=0):
+    try:
+        socket.socket(family, kind, protocol)
+    except OSError:
+        return True
+    return False
+
+checks = {{
+    "ipv6": denied_socket(socket.AF_INET6, socket.SOCK_STREAM),
+    "udp": denied_socket(socket.AF_INET, socket.SOCK_DGRAM),
+    "raw": denied_socket(socket.AF_INET, socket.SOCK_RAW),
+}}
+inherited_sockets = []
+for descriptor in os.listdir("/proc/self/fd"):
+    if descriptor in {{"0", "1", "2"}}:
+        continue
+    try:
+        target = os.readlink(f"/proc/self/fd/{{descriptor}}")
+    except OSError:
+        continue
+    if "socket:[" in target:
+        inherited_sockets.append(target)
+checks["descriptor_hygiene"] = not inherited_sockets
+
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    listener.bind(("0.0.0.0", 0))
+except OSError as exc:
+    checks["bind_listen"] = exc.errno == errno.EPERM
+else:
+    checks["bind_listen"] = False
+listener.close()
+
+fast = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    fast.sendto(b"x", getattr(socket, "MSG_FASTOPEN", 0x20000000), ("203.0.113.9", 443))
+except OSError as exc:
+    checks["fastopen"] = exc.errno == errno.EPERM
+else:
+    checks["fastopen"] = False
+finally:
+    fast.close()
+
+direct = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+direct.settimeout(2)
+direct.connect(("192.168.65.254", {bypass_port}))
+direct.sendall(b"GET /denied HTTP/1.1\\r\\nHost: 192.168.65.254\\r\\nConnection: close\\r\\n\\r\\n")
+checks["direct_host"] = b"502 Bad Gateway" in direct.recv(4096)
+direct.close()
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+ctypes.set_errno(0)
+checks["accept"] = libc.syscall(202, -1, 0, 0) == -1 and ctypes.get_errno() == errno.EPERM
+ctypes.set_errno(0)
+checks["accept4"] = libc.syscall(242, -1, 0, 0, 0) == -1 and ctypes.get_errno() == errno.EPERM
+ctypes.set_errno(0)
+checks["io_uring_setup"] = libc.syscall(425, 1, 0) == -1 and ctypes.get_errno() == errno.ENOSYS
+ctypes.set_errno(0)
+checks["io_uring_enter"] = libc.syscall(426, -1, 0, 0, 0, 0, 0) == -1 and ctypes.get_errno() == errno.ENOSYS
+shared = ctypes.create_string_buffer(16)
+running = True
+def mutate():
+    first = struct.pack("=H", socket.AF_INET) + struct.pack("!H", {bypass_port}) + socket.inet_aton("192.168.65.254") + b"\\0" * 8
+    second = struct.pack("=H", socket.AF_INET) + struct.pack("!H", 443) + socket.inet_aton("203.0.113.9") + b"\\0" * 8
+    while running:
+        shared.raw = first
+        shared.raw = second
+thread = threading.Thread(target=mutate)
+thread.start()
+race_ok = True
+for _ in range(64):
+    descriptor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = libc.syscall(203, descriptor.fileno(), ctypes.byref(shared), 16)
+    if result == 0:
+        try:
+            descriptor.sendall(b"GET /race HTTP/1.1\\r\\nHost: denied\\r\\nConnection: close\\r\\n\\r\\n")
+        except OSError:
+            pass
+    elif ctypes.get_errno() not in (errno.EAFNOSUPPORT, errno.EINVAL, errno.ECONNREFUSED):
+        race_ok = False
+    descriptor.close()
+running = False
+thread.join()
+checks["sockaddr_race"] = race_ok
+
+child = subprocess.run(
+    [sys.executable, "-c", "import socket,sys;\\ntry: socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\\nexcept OSError: sys.exit(0)\\nsys.exit(1)"],
+    check=False,
+)
+checks["fork_exec"] = child.returncode == 0
+
+base = os.environ["ANTHROPIC_BASE_URL"].removeprefix("http://")
+host, port = base.rsplit(":", 1)
+def provider_post(body):
+    request = http.client.HTTPConnection(host, int(port), timeout=15)
+    request.request("POST", "/v1/messages", body=body, headers={{
+        "content-type": "application/json", "anthropic-version": "2023-06-01"
+    }})
+    return request, request.getresponse()
+
+denied_bodies = [
+    b'{{"model":"fixture","max_tokens":1,"messages":[],"tools":[{{"type":"web_fetch_20250910","name":"web_fetch"}}]}}',
+    b'{{"model":"fixture","max_tokens":1,"messages":[],"mcp_servers":[{{"type":"url","url":"https://mcp.invalid/sse","name":"remote"}}]}}',
+    b'{{"model":"fixture","max_tokens":1,"messages":[{{"role":"user","content":[{{"type":"image","source":{{"type":"url","url":"https://content.invalid/image.png"}}}}]}}]}}',
+    b'{{"model":"fixture","max_tokens":1,"messages":[],"tools":[{{"type":"future_server_20990101","name":"future"}}]}}',
+    b'{{"model":"fixture","max_tokens":1,"messages":[],"tools":[],"tools":[{{"type":"web_fetch_20250910","name":"web_fetch"}}]}}',
+]
+denied_capabilities = True
+for body in denied_bodies:
+    rejected_connection, rejected = provider_post(body)
+    denied_capabilities = denied_capabilities and rejected.status == 502
+    rejected.read()
+    rejected_connection.close()
+checks["provider_capabilities"] = denied_capabilities
+
+approved_body = b'{{"model":"fixture","max_tokens":8,"messages":[{{"role":"user","content":"URL https://data.invalid is inert text"}}],"tools":[{{"name":"local_lookup","description":"client-side only","input_schema":{{"type":"object","properties":{{"url":{{"type":"string"}}}},"additionalProperties":false}}}}]}}'
+connection, response = provider_post(approved_body)
+first = response.read(6)
+settings = json.loads(sys.argv[sys.argv.index("--settings") + 1])
+hook = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+hook_result = subprocess.run(
+    shlex.split(hook),
+    input=(json.dumps({{
+        "session_id": os.environ["HARNESS_EXPECTED_RUNTIME_SESSION_REF"],
+        "hook_event_name": "Stop", "stop_hook_active": False,
+    }}) + "\\n").encode(),
+    stdout=subprocess.PIPE, check=False,
+)
+rest = response.read()
+connection.close()
+checks["stream"] = first == b"first\\n" and rest == b"second\\n" and hook_result.returncode == 0
+if not all(checks.values()):
+    print(json.dumps({{"is_error": True, "checks": checks}}))
+    raise SystemExit(91)
+print(json.dumps({{"is_error": False, "total_cost_usd": 0.1}}))
+''',
+            encoding="utf-8",
+        )
+        fake_claude.chmod(0o755)
+        backend = DockerQueueBackend(
+            image=LIVE_IMAGE,
+            python_executable=LIVE_PYTHON,
+            docker_executable=Path(docker).resolve(),
+            limits=DockerRuntimeLimits(),
+        )
+        engagement_entry = os.fstat(self.engagement_fd)
+        admission = {
+            "status": "armed",
+            "runtime_session_ref": SESSION_REF,
+            "action_id": "live-network-probe",
+            "os_session_id": None,
+            "runtime_identity": None,
+            "hook_session_ref": sha256_bytes(
+                b"llm-redteam-harness:session-end:v1:" + SESSION_REF.encode()
+            ),
+            "state_binding": {},
+            "engagement_identity": {"device": engagement_entry.st_dev, "inode": engagement_entry.st_ino},
+            "predicate": {"documents": [{"name": "probe", "argument": "--file"}]},
+        }
+        scope = b"fixture signed scope\n"
+        state = {"scope_hash": sha256_bytes(scope)}
+        admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        runtime_output: list[bytes] = []
+
+        class StreamingBroker(DriverActionBroker):
+            def __init__(broker_self, **arguments: object) -> None:
+                super().__init__(
+                    **arguments,
+                    provider_fixture_origin=f"http://127.0.0.1:{provider_port}",
+                )
+
+            def _execute_stop(broker_self, _request: dict[str, object]) -> tuple[int, bytes]:
+                first_chunk_consumed.set()
+                return 0, b"{{}}\n"
+
+        try:
+            with (
+                mock.patch("work_queue_driver.DriverActionBroker", StreamingBroker),
+                mock.patch("work_queue_driver.activate_docker_action_admission"),
+                mock.patch("driver_action_admission._reduce_engagement_unchecked", return_value=state),
+                mock.patch("driver_action_admission.read_governed_file", return_value=scope),
+                mock.patch("driver_action_admission._neutral_tail_is_allowed", return_value=True),
+                mock.patch(
+                    "work_queue_driver._summary_from_output",
+                    side_effect=lambda raw: runtime_output.append(raw) or (False, None, None),
+                ),
+                mock.patch(
+                    "driver_action_admission.bound_engagement_lock",
+                    side_effect=lambda *_args, **_kwargs: contextlib.nullcontext(self.engagement),
+                ),
+                mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fixture-parent-secret"}, clear=False),
+            ):
+                execution = _run_docker_queue_session(
+                    bound=self.bound,
+                    backend=backend,
+                    executable=Path("/workspace/fake-network-claude"),
+                    model="claude-test-20260826",
+                    prompt="network boundary probe",
+                    session_ref=SESSION_REF,
+                    state=self.state,
+                    timeout_seconds=30.0,
+                    max_budget_usd=None,
+                    read_only_inputs=(),
+                    admission=admission,
+                    admission_token="live-network-token",
+                    execution_deadline=time.monotonic() + 30.0,
+                    stop_requested=lambda: False,
+                )
+        finally:
+            bypass_stop.set()
+            bypass_thread.join(timeout=2.0)
+            provider_thread.join(timeout=2.0)
+        self.assertEqual(
+            execution.session.returncode,
+            0,
+            f"provider_requests={len(provider_requests)} provider_done={provider_done.is_set()} "
+            f"first_chunk={first_chunk_consumed.is_set()} bypass_hits={len(bypass_hits)} "
+            f"session={execution.session!r} output={runtime_output!r}",
+        )
+        self.assertTrue(provider_done.is_set())
+        self.assertEqual(len(provider_requests), 1)
+        self.assertEqual(bypass_hits, [])
+        self.assertNotIn(b"fixture-parent-secret", provider_requests[0].split(b"\r\n\r\n", 1)[1])
+
+    @unittest.skipUnless(
+        LIVE_IMAGE,
+        "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
+    )
     def test_live_storage_breach_is_sanitized_and_kills_the_session(self) -> None:
         docker = shutil.which("docker")
         if docker is None:
             self.skipTest("Docker CLI unavailable")
         fake_claude = self.workspace / "fake-storage-claude"
         fake_claude.write_text(
-            """#!/usr/local/bin/python3
+            """#!/usr/bin/env python3
 import ctypes
 import os
 import pathlib
@@ -759,7 +1110,9 @@ os._exit(0 if 0 < written < requested else 92)
         started = time.monotonic()
         with (
             mock.patch("work_queue_driver.activate_docker_action_admission"),
-            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.dict(
+                os.environ, {"ANTHROPIC_API_KEY": "fixture-parent-secret"}, clear=True
+            ),
             self.assertRaises(DriverError) as raised,
         ):
             _run_docker_queue_session(

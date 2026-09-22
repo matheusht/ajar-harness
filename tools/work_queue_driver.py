@@ -22,7 +22,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Sequence
 
 from claude_work_session import (
-    MODEL_AUTH_ENV_KEYS,
     SessionLaunchError,
     SessionResult,
     _summary_from_output,
@@ -784,28 +783,29 @@ def _docker_session_bytes(
 def _model_auth_bootstrap(session_key: bytes) -> bytes:
     if not isinstance(session_key, bytes) or len(session_key) != 32:
         raise DriverError("driver_container_broker_key_invalid")
-    authority: dict[str, str] = {}
-    for key in sorted(MODEL_AUTH_ENV_KEYS):
-        value = os.environ.get(key)
-        if value is None or value == "":
-            continue
-        if (
-            not isinstance(value, str)
-            or "\x00" in value
-            or len(value.encode("utf-8")) > 32 * 1024
-        ):
-            raise DriverError("driver_model_auth_invalid")
-        authority[key] = value
     raw = canonical_json_bytes(
         {
             "schema_version": 1,
-            "environment": authority,
+            "environment": {},
             "broker_session_key_base64": base64.b64encode(session_key).decode("ascii"),
         }
     )
     if len(raw) > 64 * 1024:
         raise DriverError("driver_model_auth_invalid")
     return raw
+
+
+def _validate_parent_provider_auth() -> None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        if any(
+            os.environ.get(name)
+            for name in ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+        ):
+            raise DriverError("driver_provider_auth_unsupported")
+        raise DriverError("driver_provider_auth_missing")
+    if "\x00" in api_key or len(api_key.encode("utf-8")) > 32 * 1024:
+        raise DriverError("driver_provider_auth_invalid")
 
 
 def _run_docker_queue_session(
@@ -829,6 +829,7 @@ def _run_docker_queue_session(
     view_binding: dict[str, str] | None = None,
     cognitive_view: HunterView | None = None,
 ) -> _QueueSessionExecution:
+    _validate_parent_provider_auth()
     session_bytes = _docker_session_bytes(
         bound=bound,
         backend=backend,

@@ -68,3 +68,20 @@ than claiming synthetic replay establishes agent effectiveness.
 
 The original dirty checkout is preserved. The integration worktree is `/tmp/redteam-harness-full`.
 Acceptance is not complete until this ledger links actual results and remaining limitations.
+
+## Environment observations
+
+- Claude Code 2.1.278 reported an authenticated subscription, but a no-tools configuration probe
+  returned HTTP 403 `oauth_not_allowed_for_organization`, zero reported model tokens and no model
+  result. An authorized local API key is needed for real-provider qualification of that backend.
+- Codex CLI 0.155.1 accepted `gpt-5.6-sol` with medium effort and returned `READY` in fresh probes.
+  These were configuration checks, not study assignments. The tool-disabled settings follow the
+  [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+  The exact backend weights and full internal system context are not independently observed.
+- The pinned recovery SDK `f1f35031d364f9f0d8e94dda0853c92abefdccff` was checked out separately at
+  `/tmp/redteam-recovery-sdk`; `uv sync --frozen --no-dev` succeeded and its public offline
+  Agent/Runner/RunState/ScriptedModel imports work. No production dependency was added.
+- Existing Docker image
+  `golang@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80`
+  runs `/usr/bin/python3` (3.13.5) without networking, capabilities or a writable root. This is a
+  usable deterministic qualification fixture, not a qualified real-model image.

@@ -4,6 +4,12 @@ Research note · 2026-09-05 · [issue #104](https://github.com/matheusht/redteam
 
 ## Recommendation
 
+**2026-09-22 implementation update:** the optional bounded projection described here now exists as
+[`tools/task_board.py`](../../../tools/task_board.py), with its failure contract and repeatable E2E
+in [`docs/engineering/task-board-v1.md`](../../engineering/task-board-v1.md). This implements
+retention and filtered delivery through the record kernel. It does not establish usefulness or
+change the no-go decision for a default board; that still depends on the executed comparison.
+
 A task-scoped observation board is worth a small comparison when useful information may have an unknown recipient or arrive after the original handoff. It is not yet a justified platform feature, replacement for direct handoffs, shared source of truth, or reason to own the model loop.
 
 For the current document-processing work, compare a board against a coordinator who already distributes concise, cited task packets. The board must earn its extra reading, curation and reconciliation cost. If the coordinator knows the recipient and dependency, a direct message can already do the job. If a single worker can inspect the complete source set cheaply, parallel collaboration may add no value.

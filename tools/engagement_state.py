@@ -29,6 +29,7 @@ from engagement_records import (
     validate_record,
     validate_record_references,
 )
+from task_notice import validate_notice
 from finding_review import claim_rows, claim_tuple_hash, render_claim_proof, render_internal_report
 from decision6_capabilities import artifact_variant, classify_event, require_actor
 from engagement_quarantine import inspect_quarantine, require_safe_offline_input
@@ -2659,6 +2660,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             active_scope_operator = event["payload"]["operator_id"]
             active_record_kernel = event["payload"]["record_kernel"]
         validate_event_semantics(event)
+        if event["event_type"] == "observation.recorded" and event.get("payload", {}).get("entity_type") == "task_notice":
+            validate_notice(list(seen_events.values()), event)
         validate_temporal_search_reference(event, seen_events, index, engagement)
         payload = event["payload"]
         typed_review_resolutions: set[str] = set()

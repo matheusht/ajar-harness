@@ -2,16 +2,20 @@
 
 ## 1. The rule
 
-A finding is written to `unproven/`. It has no status field. It has a **location**.
+A finding revision is stored before activation. Its directory is storage, never proof of filing.
+For `decision-0006-v2`, only `run-engagement.py` action-version 3 creates active membership through
+an authenticated `finding.revised` commit. `finding_lifecycle.py promote` is inspection-only package
+archaeology and never moves or activates a finding.
 
-The location changes only by running `promote`, which runs gates. Any gate can say no. A finding
-that does not pass stays where it is.
+Historical decision-0006-v1 action-version 2 events replay under their recorded semantics. They
+cannot be submitted as new activations after the authenticated v2 kernel boundary.
 
 ```
 engagements/<id>/
-  unproven/<FINDING_ID>/     every finding starts here
-  findings/<FINDING_ID>/     a finding arrives here only through promote
-  lifecycle.jsonl            append-only record of every promote and demote
+  findings/<FINDING_ID>/rev-<N>.json  immutable stored revisions
+  events.jsonl                      authoritative activation history
+  unproven/<FINDING_ID>/             optional legacy package storage
+  lifecycle.jsonl                    historical package-move log only
 ```
 
 ## 2. Why the default matters
@@ -34,24 +38,22 @@ does not run is a silent block, so a broken run produces nothing. Choose the fai
 written straight into `findings/` with `claim_state: supported` set by the script that created them.
 Nothing objected, because nothing had to. See `fixtures/preregistration/spotify-phase2-OUTCOME.md`.
 
-## 3. Who may move a finding
+## 3. Who may activate a finding
 
 | action | role | why |
 |---|---|---|
-| write to `unproven/` | hunter, orchestrator | a hunter may propose, never confirm (`CLAUDE.md` §2) |
-| `promote` | **orchestrator only** | this is decision selection, the stage that stays human-supervised |
-| `demote` | **any role, any time** | a wrong demote costs a re-review; a wrong promote reaches a vendor |
+| stage revision evidence | researcher/orchestrator | evidence collection does not create active membership |
+| independent claim adjudication | authenticated reviewer | judgement remains separate from filing authority |
+| action-version 3 activation | signed scope operator + bound broker settlement | the exact bytes, scope, environment, lane, session, review, and ledger state are bound |
+| legacy `promote` | any caller | inspection-only; always returns blocked and moves nothing |
 
-Promote is hard and demote is easy on purpose. The costs are not symmetric, so the friction should
-not be either.
-
-The orchestrator running `promote` is necessary and **not sufficient**. The orchestrator is what
-fabricated the adjudication in the case above. The gates therefore check things that cannot be
-satisfied by writing more text.
+The signed operator accepts the exact activation; this does not replace independent adjudication.
+The gates check committed typed records rather than unsigned `attest.json` truth flags.
 
 ## 4. The gates
 
-`tools/finding_lifecycle.py gates PACKAGE` runs them without moving anything.
+`tools/finding_lifecycle.py gates PACKAGE` remains an advisory legacy-package view. Production
+activation enforces the retained predicates in `run-engagement.py` and the reducer.
 
 | gate | question | kind |
 |---|---|---|
@@ -59,8 +61,12 @@ satisfied by writing more text.
 | G1 | is a primary attempt named, and real execution attested? | computable + attestable |
 | G2 | does a distinct control ref resolve to a `negative_control` attempt with a held/no-signal outcome, and is it attested? | computable + attestable |
 | G3 | did the proof run at or below the claimed attacker privilege? | computable |
-| G4 | is the adjudication judgement rather than generation? | computable |
+| G4 | does the applicable committed review corpus avoid the statistical signature of generated confirmations? | computed corpus heuristic |
 | G5 | does a claimed severity carry a CVSS vector that recomputes? | computable |
+| G6 | did the impact-bearing state arise through the typed attempt path rather than direct synthesis? | computable |
+
+The sections below document the legacy package inspector. The v2 activation reducer binds the same
+questions to committed records; package declarations cannot satisfy production admission.
 
 ### G2 — the control-role gate
 
@@ -79,8 +85,9 @@ verified.
 
 ### G3 — the privilege gate
 
-A program cannot decide whether a proof truly ran as a low-privilege user. It can decide that the
-package **declares both positions** and that they agree.
+A program cannot decide whether a proof truly ran as a low-privilege user. The legacy inspector
+checks package declarations. The v2 activation reducer instead resolves the cited primary attempts'
+typed execution contexts and rejects a contradictory or unrelated reference.
 
 The package declares `privilege_context: {claimed, proven}`. The gate ranks both on a ladder —
 unauthenticated 0, authenticated or co-tenant 1, privileged or admin 2, system or root 3 — and

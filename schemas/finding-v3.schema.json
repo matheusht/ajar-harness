@@ -109,9 +109,62 @@
                 "null"
               ]
             },
+            "score": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 10
+            },
             "rationale": {
               "type": "string",
               "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "privilege_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claimed_position",
+        "execution_position",
+        "evidence_refs"
+      ],
+      "properties": {
+        "claimed_position": {
+          "enum": ["unauthenticated", "authenticated-user", "privileged-user", "admin", "system", "root", "not-established"]
+        },
+        "execution_position": {
+          "enum": ["unauthenticated", "authenticated-user", "privileged-user", "admin", "system", "root", "not-established"]
+        },
+        "evidence_refs": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
+        }
+      }
+    },
+    "state_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "evidence_refs", "synthesized_setup"],
+      "properties": {
+        "mode": {
+          "enum": ["real-path", "none-required", "synthesized", "not-established"]
+        },
+        "evidence_refs": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
+        },
+        "synthesized_setup": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["element", "reachability_basis"],
+            "properties": {
+              "element": {"type": "string", "minLength": 1},
+              "reachability_basis": {"type": "string", "minLength": 1}
             }
           }
         }
@@ -501,30 +554,30 @@
               "provenance"
             ]
           },
-          "proof": {
-            "properties": {
-              "primary_attempt_refs": {
-                "minItems": 1
-              },
-              "negative_control_refs": {
-                "minItems": 1
-              },
-              "replay_refs": {
-                "minItems": 1
-              },
-              "evidence_refs": {
-                "minItems": 1
-              },
-              "claim_proofs": {
-                "minItems": 1
-              }
-            }
-          },
           "adjudication": {
             "required": [
               "review_ref",
               "justification"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"claim_state": {"enum": ["supported", "confirmed"]}},
+        "required": ["claim_state"]
+      },
+      "then": {
+        "properties": {
+          "proof": {
+            "properties": {
+              "primary_attempt_refs": {"minItems": 1},
+              "negative_control_refs": {"minItems": 1},
+              "replay_refs": {"minItems": 1},
+              "evidence_refs": {"minItems": 1},
+              "claim_proofs": {"minItems": 1}
+            }
           }
         }
       }

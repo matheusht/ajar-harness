@@ -1,0 +1,9 @@
+{
+  "files": {
+    "docs/experiments/recovery-v3/failure-matrix.md": "sha256:36b112f4ec463d4364bf443c4e136d97baeff4a83ee00f89383f9a83a4c2c249",
+    "docs/experiments/recovery-v3/protocol.json": "sha256:5ba742870759dbf19843abc7771e02ba08ad78dcc08a1fb2864cc8b0fd2b6ff0",
+    "tools/run_recovery_v3.py": "sha256:45dae91dea2b6cc4c270fa894397604a285058419424d0e43c94203e9580caf7"
+  },
+  "manifest_id": "recovery-v3-freeze-2026-09-22T14:57:48Z",
+  "note": "Frozen before scripted scenario execution. manifest.json is excluded from its own digest."
+}

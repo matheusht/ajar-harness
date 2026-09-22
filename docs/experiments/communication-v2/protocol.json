@@ -1,0 +1,92 @@
+{
+  "arms": [
+    "serial",
+    "direct",
+    "board"
+  ],
+  "cases": [
+    {
+      "case_id": "complete",
+      "reference": {
+        "path": "docs/experiments/communication-v1/grader/complete.md",
+        "sha256": "sha256:39bb9fc04df7270bfa144fdfba32836a941496fdaa13dc79fae434484621f3e5"
+      },
+      "sources": [
+        {
+          "path": "docs/experiments/communication-v1/inputs/complete/display-v1.md",
+          "sha256": "sha256:e1c1ac6ce1b4385b855b4a33186d90c9d6667ec8d20821c25c268f4500997de4"
+        },
+        {
+          "path": "docs/experiments/communication-v1/inputs/complete/display-notes-v1.md",
+          "sha256": "sha256:79ef2fbb1d225453315d894f301aa5774c13cc67233d8c60864b31e3c84aa304"
+        }
+      ]
+    },
+    {
+      "case_id": "complementary",
+      "reference": {
+        "path": "docs/experiments/communication-v1/grader/complementary.md",
+        "sha256": "sha256:60b32c4738bb4d3174b8c1c8e603da1be93ab8a4d666f26da0357f8097ad1033"
+      },
+      "sources": [
+        {
+          "path": "docs/experiments/communication-v1/inputs/complementary/attendance-v1.md",
+          "sha256": "sha256:98172705d781b585c249bced47ed5d915064e0c1481e3a827d0de6ec925d6818"
+        },
+        {
+          "path": "docs/experiments/communication-v1/inputs/complementary/stock-v1.md",
+          "sha256": "sha256:9950f7968a3b02c13bd35f26707585ddd57ab0644cac2aa32d26efb4f6b86b00"
+        }
+      ]
+    },
+    {
+      "case_id": "late",
+      "reference": {
+        "path": "docs/experiments/communication-v1/grader/late.md",
+        "sha256": "sha256:da5f1a5c70c8409af60392cc03b6b804761b132118ab47ed9eb0946d209432df"
+      },
+      "sources": [
+        {
+          "path": "docs/experiments/communication-v1/inputs/late/binding-v1.md",
+          "sha256": "sha256:ee9f1fbd820541cd76fbffee32e78ef14e27b5128c5b2a01c09c83bcc94966bb"
+        },
+        {
+          "path": "docs/experiments/communication-v1/inputs/late/materials-v1.md",
+          "sha256": "sha256:7c9df8275ac9c56fd17ab5e049918d0e5758a78105907c3e20022d5bc7682367"
+        },
+        {
+          "path": "docs/experiments/communication-v1/releases/late/binding-v2.md",
+          "sha256": "sha256:368d11dc53de813dc04fc4044790e33aa8d82dd60605237972c8586d82cc53e0"
+        }
+      ]
+    }
+  ],
+  "ceilings": {
+    "calls": 100,
+    "elapsed_seconds": 5400,
+    "input_tokens": 2000000,
+    "output_tokens": 80000
+  },
+  "frozen_at": "2026-09-22T18:00:00Z",
+  "model": "gpt-5.6-sol",
+  "notice_limit": 5,
+  "permitted_conclusion": "Three benign document cases are a mechanism pilot only; board adoption requires improvement over direct at equal total cost.",
+  "reasoning_effort": "medium",
+  "runtime": "codex-cli-0.155.1-no-tools",
+  "schedule": [
+    "sources",
+    "independent-notes",
+    "coordination",
+    "current-release",
+    "final",
+    "blind-grade"
+  ],
+  "schema_version": 1,
+  "stop_rules": [
+    "no favorable reruns",
+    "retain failures",
+    "stop before exceeding any ceiling",
+    "unexpected tool event contaminates assignment"
+  ],
+  "study_id": "communication-v2-real-model-pilot"
+}

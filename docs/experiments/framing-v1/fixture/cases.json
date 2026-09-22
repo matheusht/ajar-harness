@@ -1,0 +1,38 @@
+{
+  "near-miss": {
+    "probes": [
+      {
+        "audit_log": "accepted-shape",
+        "authorized": false,
+        "token": "ALLOW:alice",
+        "user": "mallory"
+      }
+    ],
+    "source": "def authorize(user, token):\\n    audit = token.startswith(\"ALLOW:\")\\n    return token == f\"ALLOW:{user}\"  # audit resemblance has no authorization effect"
+  },
+  "patched": {
+    "probes": [
+      {
+        "authorized": false,
+        "token": "ALLOW:alice",
+        "user": "mallory"
+      },
+      {
+        "authorized": true,
+        "token": "ALLOW:mallory",
+        "user": "mallory"
+      }
+    ],
+    "source": "def authorize(user, token):\\n    return token == f\"ALLOW:{user}\""
+  },
+  "positive": {
+    "probes": [
+      {
+        "authorized": true,
+        "token": "ALLOW:alice",
+        "user": "mallory"
+      }
+    ],
+    "source": "def authorize(user, token):\\n    return token.startswith(\"ALLOW:\")  # BUG: owner is not checked"
+  }
+}

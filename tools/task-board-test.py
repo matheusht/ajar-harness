@@ -14,6 +14,7 @@ from pathlib import Path
 from engagement_records import RecordError, sha256_file
 from engagement_state import _append_kernel_event, base_event, initialize_engagement, read_ledger
 from task_board import compile_notices, post_notice
+from task_notice import compile_hunter_notices
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -110,6 +111,10 @@ class TaskBoardE2E(unittest.TestCase):
         rows = compile_notices(self.engagement, task_id="task-display", after_sequence=first["sequence"])["notices"]
         self.assertEqual([row["notice_id"] for row in rows], ["notice-2"])
         self.assertEqual(len([event for event in read_ledger(self.engagement, "event") if event.get("payload", {}).get("entity_type") == "task_notice"]), 2)
+        hunter = compile_hunter_notices(read_ledger(self.engagement, "event"), task_id="task-display")
+        self.assertEqual([row["path"] for row in hunter["brief"]], ["notices/notice-000.json", "notices/notice-001.json"])
+        self.assertEqual(set(hunter["files"]), {"notices/notice-000.json", "notices/notice-001.json"})
+        self.assertNotIn("observation", hunter["commitment"][0])
 
         cases = []
         wrong_task = self.notice("bad-task"); wrong_task["task_id"] = "other-task"; cases.append((wrong_task, "task_notice_task_unbound"))

@@ -1,7 +1,8 @@
 # Governed hunter delivery and research evaluation
 
-Status: in progress. Authorized by the user's 2026-09-22 request for the full outcomes of
-#85, #97, external destination enforcement, and message-board follow-through.
+Status: local implementation and qualification complete at implementation head `b30cee92`; hosted
+CI and real-provider qualification remain separate. Authorized by the user's 2026-09-22 request for
+the full outcomes of #85, #97, external destination enforcement, and message-board follow-through.
 Starting point: `c139c660f9563e5daef568f9cb53207fb4395372`.
 
 ## Intent and boundaries
@@ -61,13 +62,17 @@ than claiming synthetic replay establishes agent effectiveness.
 | Work | State | Evidence |
 | --- | --- | --- |
 | Prior #99 delivery | Merged; main CI passed | PR #115, main `c139c660` |
-| #85 | Implementing in isolated worktree | `codex/full-filing-85` |
-| #97 | Implementing in isolated worktree | `codex/full-hunter-97` |
-| Egress | Design/acceptance review | Runtime currently permits general outbound access |
-| Board and new evaluations | Design/acceptance review | Existing v1 packets are unexecuted preparations |
+| #85 | Implemented and locally qualified | One signed v3 activation path; retired legacy mutation; exact interrupted-write retry; unrelated orphan rejection with unchanged ledger |
+| #97 | Implemented and locally qualified | One running hypothesis reached one brokered attempt and adjudication through a compiled current-only hunter view |
+| Egress | Implemented and locally qualified | Parent-enforced provider and signed target-fetch paths; Docker negative sinks observed zero denied requests |
+| Board and new evaluations | Implemented as optional; bounded studies complete | Board did not meet its default-adoption gate; framing showed no arm difference at the fixed ceiling; SDK replay duplicated an unreceipted effect |
 
 The original dirty checkout is preserved. The integration worktree is `/tmp/redteam-harness-full`.
-Acceptance is not complete until this ledger links actual results and remaining limitations.
+The full kernel self-test passed. Focused results were broker protocol 22/22, external network 10/10,
+filing activation 16/16, record-review atomicity 11/11, engineering guidance 12/12, engagement-lock
+race pass, and the real-Docker joint hunter workflow pass. Canonical review staging retained
+5,466.604 ms of its unchanged 10,000 ms prewrite budget. The full repository conformance run and
+hosted CI are repeated at the final documentation head before delivery.
 
 ## Environment observations
 

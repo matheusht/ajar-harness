@@ -1,9 +1,22 @@
 # Local candidate delivery status — 2026-09-22
 
-This page records three separate local candidate heads. They have not been merged, pushed or
-released as one system, and their evidence must not be combined into a full qualification claim.
-The coordinator is independently reviewing the defensive controls. This is a dated handoff, not a
-live status service.
+This page records the September 22 candidate progression. The three original heads below are
+historical inputs; they were integrated and repaired on
+`codex/full-harness-delivery-2026-09-22`. This is a dated handoff, not a live status service.
+
+## Integrated update
+
+Implementation head `b30cee92` completes the local #85 filing path, #97 ordinary hunter path,
+parent-enforced egress, optional task board, and bounded research record. The full kernel self-test
+passed. Focused qualification passed for broker protocol (22/22), external network scope (10/10),
+filing activation (16/16), record-review atomicity (11/11), engineering guidance (12/12), the
+engagement-lock race, and the real-Docker joint hunter workflow.
+
+The board remains optional because it did not meet its adoption gate. Unsupported-certainty framing
+also remains rejected as a default: the bounded framing pilot observed no arm difference, and a
+prior still supplies search direction rather than claim truth. External-effect recovery remains
+receipt-bounded; the SDK replay result showed that restoring a pre-effect snapshot can duplicate an
+effect whose receipt was lost.
 
 ## Candidate boundaries
 
@@ -33,26 +46,24 @@ external effects. See [recovery and communication experiments](comparison-experi
 experiment lineage and [future evaluation applications](future-evaluations.md) for still-proposed
 work.
 
-## Pending and unresolved qualification
+## Remaining qualification boundaries
 
-- **Integrated checks pending.** A previous full-kernel attempt did not produce a qualifying
-  completion before its time limit; a retained later log also ended non-success at
-  `record_review_staging_budget_exceeded`. A clean exact-head integrated run remains pending. No
-  full-system pass is claimed here.
+- **Hosted exact-head checks.** Local kernel and focused workflow checks pass at the implementation
+  head. The repository conformance run and hosted CI are repeated after this status update; neither
+  is claimed by this paragraph before its result is observed.
 - **Real provider deferred.** Real-provider qualification was deferred by the user after the
   available Claude authentication path returned `403 oauth_not_allowed_for_organization`. The
   recorded request/response exercise used an owned fake provider. It establishes actual-client
   request shape and local protocol handling only.
-- **UNRESOLVED compatibility observation.** The actual Claude Code client against the owned fake
-  provider emitted `POST /v1/messages?beta=true`, while the separate egress candidate's typed
-  provider-path contract is `/v1/messages`. These candidates have not been exercised together, so
-  compatibility is unverified. This observation carries no implementation instruction.
+- **Provider compatibility.** The integrated broker accepts the actual Claude Code request shape
+  `POST /v1/messages?beta=true` against an owned fake provider. This establishes local client/proxy
+  compatibility only; real Anthropic authentication and inference remain unqualified.
 - **Managed-sandbox limitation.** Two POSIX session checks in the egress worktree encountered
   `PermissionError` when the managed CLI sandbox denied `os.killpg`. The Docker qualification was
   performed separately; the POSIX failures are retained as a test-environment limitation, not
   converted into a pass.
 
-This delivery covers defensive controls, provenance and research documentation only. It adds no
-live-target authority, Zone-2 work or autonomous hunter capability. The [task-board contract](../engineering/task-board-v1.md),
+This delivery adds the bounded ordinary hunter path but no live-target authority or Zone-2 work.
+The [task-board contract](../engineering/task-board-v1.md),
 [filing scope](../engineering/filing-scope-2026-09-20.md) and [Docker work-queue contract](../agents/docker-work-queue.md)
 remain the relevant source documents; this page does not supersede them.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from engagement_records import RecordError
+from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 
 
 NOTICE_KEYS = {
@@ -87,3 +87,19 @@ def compile_projection(events: list[dict[str, Any]], *, task_id: str, after_sequ
         notice.update({"event_id": event["event_id"], "sequence": event["sequence"], "recorded_at": event["recorded_at"]})
         notices.append(notice)
     return {"schema_version": 1, "task_id": task_id, "after_sequence": after_sequence, "notices": notices}
+
+
+def compile_hunter_notices(events: list[dict[str, Any]], *, task_id: str) -> dict[str, Any]:
+    """Return canonical, path-free notice inputs for the admitted hunter-view compiler."""
+    projection = compile_projection(events, task_id=task_id)
+    commitment, brief, files = [], [], {}
+    for index, row in enumerate(projection["notices"]):
+        payload = {key: row[key] for key in NOTICE_KEYS}
+        data = canonical_json_bytes({"schema_version": 1, "event_id": row["event_id"], "task_notice": payload})
+        digest = sha256_bytes(data)
+        path = f"notices/notice-{index:03d}.json"
+        principal = payload["principal_id"]
+        commitment.append({"event_id": row["event_id"], "task_id": task_id, "source_event_ref": payload["source_event_ref"], "source_revision": payload["source_revision"], "principal": principal, "digest": digest})
+        brief.append({"event_id": row["event_id"], "path": path, "source_revision": payload["source_revision"], "principal": principal, "digest": digest})
+        files[path] = data
+    return {"commitment": commitment, "brief": brief, "files": files}

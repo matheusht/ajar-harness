@@ -1470,7 +1470,19 @@ class DriverActionBroker:
                 return
             except (OSError, RecordError) as exc:
                 raise RecordError("driver_network_receipt_invalid", "unsafe path") from exc
-        self.network_audit.extend(self._decode_network_receipts(raw))
+        recovered = self._decode_network_receipts(raw)
+        self.network_audit.extend(recovered)
+        if self._network_gateway is not None:
+            for receipt in recovered:
+                if (
+                    receipt["operation"] == "target_fetch"
+                    and receipt["runtime_session_ref"] == self._admission.get("runtime_session_ref")
+                    and receipt["action_id"] == self._admission.get("action_id")
+                ):
+                    # A persisted completion or uncertainty receipt proves that this logical
+                    # request began. Restore it as a tombstone without charging an unrelated
+                    # historical request against this admission's fresh request budget.
+                    self._network_gateway.mark_uncertain(receipt["request_id"])
 
     @staticmethod
     def _decode_network_receipts(raw: bytes) -> list[dict[str, Any]]:
@@ -1488,7 +1500,7 @@ class DriverActionBroker:
         }
         operation_fields = {
             "provider_request": {"host", "path", "request_bytes", "response_bytes"},
-            "target_fetch": {"url_sha256", "request_bytes", "response_bytes"},
+            "target_fetch": {"request_id", "url_sha256", "request_bytes", "response_bytes"},
         }
         for line in lines:
             try:
@@ -1507,6 +1519,13 @@ class DriverActionBroker:
                 or not isinstance(row.get("action_id"), str)
                 or not isinstance(row.get("method"), str)
                 or type(row.get("status")) not in {str, int}
+                or (
+                    operation == "target_fetch"
+                    and (
+                        _SHA256_RE.fullmatch(str(row.get("request_id"))) is None
+                        or _SHA256_RE.fullmatch(str(row.get("url_sha256"))) is None
+                    )
+                )
             ):
                 raise RecordError("driver_network_receipt_invalid", "shape")
             recovered.append(copy.deepcopy(row))
@@ -1522,6 +1541,7 @@ class DriverActionBroker:
             **receipt,
         }
         data = canonical_json_bytes(row)
+        self._decode_network_receipts(data)
         with bound_engagement_lock(self._engagement_fd, create=False) as bound:
             path = bound / NETWORK_RECEIPTS_FILE
             try:
@@ -2499,6 +2519,7 @@ class DriverActionBroker:
             })
             self._persist_network_receipt({
                 "operation": "target_fetch",
+                "request_id": request_id,
                 "method": request["method"],
                 "url_sha256": sha256_bytes(request["url"].encode("utf-8")),
                 "status": status,
@@ -2510,6 +2531,7 @@ class DriverActionBroker:
                 self._network_gateway.mark_uncertain(request_id)
             self._persist_network_receipt({
                 "operation": "target_fetch",
+                "request_id": request_id,
                 "method": request.get("method"),
                 "url_sha256": sha256_bytes(str(request.get("url", "")).encode("utf-8")),
                 "status": "denied_or_uncertain",

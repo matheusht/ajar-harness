@@ -1609,7 +1609,21 @@ def command_settle_approved_revision(args: argparse.Namespace) -> int:
         now = datetime.now(timezone.utc)
         if recorded.tzinfo is None or abs((recorded - now).total_seconds()) > 60:
             raise RecordError("authority_settlement_time_not_current", args.authority_request_id)
-        state = reduce_engagement(bound_engagement)
+        supplied_finding = _command_json(args, "file")
+        supplied_errors = validate_record(supplied_finding, "finding-v3")
+        if supplied_errors:
+            raise RecordError(
+                "finding_revision_invalid",
+                str(supplied_finding.get("finding_id", "unknown")),
+                supplied_errors,
+            )
+        supplied_relative = (
+            f"findings/{supplied_finding['finding_id']}/"
+            f"rev-{supplied_finding['revision']}.json"
+        )
+        state = reduce_engagement(
+            bound_engagement, allowed_record_orphans={supplied_relative}
+        )
         request = state["authority_requests"].get(args.authority_request_id)
         application = request.get("application") if isinstance(request, dict) else None
         if (
@@ -2461,12 +2475,9 @@ def _apply_record_review_transaction(
     if commit_event is None or commit_event.get("payload", {}).get("record_digest") != commit["payload"]["record_digest"]:
         _append_kernel_event_idempotent(engagement, commit, lock_held=True)
     applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
-    snapshot = reduce_engagement(engagement)
-    write_snapshot(engagement, snapshot)
-    write_views(engagement, snapshot)
-    assert_views_current(engagement, snapshot)
-    if read_governed_file(engagement / "state.snapshot.json") != canonical_json_bytes(snapshot):
-        raise RecordError("record_review_staging_projection_invalid", str(event.get("event_id", "unknown")))
+    # Each kernel append already reduces the complete ledger and atomically publishes the snapshot
+    # and views under this same lock. Repeating that full reduction here made review staging scale
+    # as three reductions and could consume the fixed prewrite budget before the live commit.
     return applied
 
 
@@ -2553,11 +2564,13 @@ def command_record_review(args: argparse.Namespace) -> int:
         engagement_id = str(state["engagement_id"])
         if Path(engagement_id).name != engagement_id or engagement_id in {"", ".", ".."}:
             raise RecordError("record_review_staging_engagement_id_invalid", engagement_id)
+        copy_started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="record-review-transaction-") as temporary:
             staged_engagement = Path(temporary) / engagement_id
             _copy_engagement_for_review_staging(
                 bound_engagement, staged_engagement, deadline=deadline
             )
+            copy_finished = time.monotonic()
             with engagement_lock(staged_engagement) as bound_staged_engagement:
                 _apply_record_review_transaction(
                     bound_staged_engagement,
@@ -2566,7 +2579,9 @@ def command_record_review(args: argparse.Namespace) -> int:
                     commit=commit,
                     event=event,
                 )
+            staged_finished = time.monotonic()
         _require_record_review_prewrite_time(deadline, "live commit")
+        remaining_before_live_commit = max(0.0, deadline - time.monotonic())
         applied = _apply_record_review_transaction(
             bound_engagement,
             relative=relative,
@@ -2574,7 +2589,7 @@ def command_record_review(args: argparse.Namespace) -> int:
             commit=commit,
             event=event,
         )
-    emit({"valid": True, "review_id": review["review_id"], "event_id": applied["event_id"], "claim_truth_self_accepted": False}); return 0
+    emit({"valid": True, "review_id": review["review_id"], "event_id": applied["event_id"], "claim_truth_self_accepted": False, "staging_timing_ms": {"copy_snapshot": round((copy_finished - copy_started) * 1000, 3), "staged_transaction": round((staged_finished - copy_finished) * 1000, 3), "remaining_before_live_commit": round(remaining_before_live_commit * 1000, 3), "declared_budget": round(REVIEW_STAGING_TIMEOUT_SECONDS * 1000, 3)}}); return 0
 
 
 def command_review_preflight(args: argparse.Namespace) -> int:
@@ -3033,6 +3048,21 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         with (engagement / "events.jsonl").open("ab") as stream:
             stream.write(canonical_json_bytes(record))
         return record
+
+    def historical_reduction_rejection(
+        engagement: Path, proposal: dict[str, Any]
+    ) -> str | None:
+        """Exercise historical reducer semantics without opening a fresh writer bypass."""
+        ledger = engagement / "events.jsonl"
+        before = ledger.read_bytes()
+        try:
+            append_historical_fixture_event(engagement, proposal)
+            reduce_engagement(engagement)
+        except RecordError as exc:
+            return exc.code
+        finally:
+            ledger.write_bytes(before)
+        return None
 
     def test_corpus_documents(*, row_count: int, frozen_at: str) -> tuple[bytes, bytes]:
         from corpus_enumeration import CAVEAT, COLUMNS
@@ -4881,18 +4911,10 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         finding_state = reduce_engagement(engagement)
         checks.append(("revisioned finding history and active chainability search coexist", finding_state["findings"]["F-selftest"]["revision"] == 2 and finding_state["findings"]["F-selftest"]["status"] == "confirmed" and finding_state["hypotheses"]["hypothesis-chain"]["status"] == "queued" and finding1_path.read_bytes() == canonical_json_bytes(finding1), str(finding_state["findings"])))
         forged_filing = copy.deepcopy(filing2); forged_filing["event_id"] = "event-finding-forged-operator"; forged_filing["recorded_at"] = "2026-07-10T00:15:32Z"; forged_filing["actor"] = {"role": "operator", "id": "other-operator"}; forged_filing["provenance"]["actor"] = forged_filing["actor"]
-        before_forged = (engagement / "events.jsonl").read_bytes(); forged_blocked = False
-        try:
-            append_event(engagement, forged_filing)
-        except RecordError as exc:
-            forged_blocked = exc.code == "finding_filing_not_scope_operator"
+        before_forged = (engagement / "events.jsonl").read_bytes(); forged_blocked = historical_reduction_rejection(engagement, forged_filing) == "finding_filing_not_scope_operator"
         checks.append(("only the active signed-scope operator can file a finding revision", forged_blocked and (engagement / "events.jsonl").read_bytes() == before_forged, "forged operator filing appended"))
         skip_revision = copy.deepcopy(filing2); skip_revision["event_id"] = "event-finding-revision-4"; skip_revision["recorded_at"] = "2026-07-10T00:15:33Z"; skip_revision["payload"]["finding_revision"] = 4; skip_revision["payload"]["supersedes_revision"] = 2
-        before_skip = (engagement / "events.jsonl").read_bytes(); skip_blocked = False
-        try:
-            append_event(engagement, skip_revision)
-        except RecordError as exc:
-            skip_blocked = exc.code == "finding_revision_not_contiguous"
+        before_skip = (engagement / "events.jsonl").read_bytes(); skip_blocked = historical_reduction_rejection(engagement, skip_revision) == "finding_revision_not_contiguous"
         checks.append(("finding revision cannot skip history", skip_blocked and (engagement / "events.jsonl").read_bytes() == before_skip, "skipped revision appended"))
 
         tuple_hash = claim_tuple_hash(finding2)
@@ -4901,11 +4923,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         regrade_commit = base_event(event_id="event-regrade-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:35Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit fresh regrade review.", payload={"record_path": "reviews/regrade-selftest.json", "record_digest": sha256_file(regrade_path), "record_type": "review", "record_id": "review-regrade-selftest", "record_revision": None}); append_event(engagement, regrade_commit)
         regrade_event = base_event(event_id="event-regrade-escalation", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:36Z", actor_role="reviewer", actor_id="regrade-reviewer", event_type="review.regrade_completed", rationale="Escalation is a search obligation, not a finding claim.", payload={"review_ref": "review-regrade-selftest", "finding_id": "F-selftest", "finding_revision": 2, "verdict": "escalation_found", "claim_tuple_hash": tuple_hash}, review_refs=["review-regrade-selftest"], finding_refs=["F-selftest"]); append_event(engagement, regrade_event)
         premature_revision = copy.deepcopy(filing2); premature_revision["event_id"] = "event-premature-escalation-revision"; premature_revision["recorded_at"] = "2026-07-10T00:15:37Z"; premature_revision["payload"]["finding_revision"] = 3; premature_revision["payload"]["supersedes_revision"] = 2
-        premature_blocked = False
-        try:
-            append_event(engagement, premature_revision)
-        except RecordError as exc:
-            premature_blocked = exc.code == "escalation_evidence_not_collected"
+        premature_blocked = historical_reduction_rejection(engagement, premature_revision) == "escalation_evidence_not_collected"
         checks.append(("regrade escalation routes to evidence collection before finding revision", premature_blocked, "escalation directly revised finding"))
         escalation_hypothesis = base_event(event_id="event-hypothesis-escalation", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:38Z", actor_role="orchestrator", actor_id="orchestrator-selftest", event_type="hypothesis.created", rationale="Route reviewer escalation into bounded evidence collection.", payload={"hypothesis_id": "hypothesis-escalation", "origin_type": "reviewer_challenge", "origin_ref": "event-regrade-escalation", "hypothesis_statement": "The adjacent owned transition composes with the confirmed primitive.", "suspected_invariant": "Primitive output must not cross the adjacent boundary.", "trust_boundary": "primitive to adjacent owned transition", "attacker_path": ["primitive", "adjacent transition"], "impact_ceiling": "owned fixture only", "bounded_space": "One adjacent transition.", "lens_ids": ["composition"], "card_ids": ["card-selftest"], "expected_confirming_evidence": [{"evidence_type": "trace", "description": "end-to-end composition trace", "required": True}], "decisive_falsifiers": ["adjacent transition rejects primitive output"], "cost_estimate": zero_cost, "constraints": ["offline fixture"], "next_experiment": "trace composition", "completion_criteria": ["trace or decisive rejection"], "status": "queued"}, entity_refs=["event-regrade-escalation"], finding_refs=["F-selftest"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-escalation", "previous": None, "current": "queued"}]); append_event(engagement, escalation_hypothesis)
         escalation_evidence_path = engagement / "evidence" / "escalation.txt"; escalation_evidence_path.write_text("new bounded escalation trace\n", encoding="utf-8")
@@ -4958,11 +4976,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         correction_commit = base_event(event_id="event-regrade-correction-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:52Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit correction regrade.", payload={"record_path": "reviews/regrade-correction.json", "record_digest": sha256_file(correction_path), "record_type": "review", "record_id": "review-regrade-correction", "record_revision": None}); append_event(engagement, correction_commit)
         correction_event = base_event(event_id="event-regrade-correction", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:53Z", actor_role="reviewer", actor_id="correction-reviewer", event_type="review.regrade_completed", rationale="Correction must become a contiguous revision before closure.", payload={"review_ref": "review-regrade-correction", "finding_id": "F-selftest", "finding_revision": 2, "verdict": "confirmed_with_correction", "claim_tuple_hash": tuple_hash}, review_refs=["review-regrade-correction"], finding_refs=["F-selftest"]); append_event(engagement, correction_event)
         unresolved_correction = copy.deepcopy(filing2); unresolved_correction["event_id"] = "event-unresolved-correction"; unresolved_correction["recorded_at"] = "2026-07-10T00:15:53.500000Z"; unresolved_correction["payload"]["finding_revision"] = 3; unresolved_correction["payload"]["supersedes_revision"] = 2
-        correction_block_code = None
-        try:
-            append_event(engagement, unresolved_correction)
-        except RecordError as exc:
-            correction_block_code = exc.code
+        correction_block_code = historical_reduction_rejection(engagement, unresolved_correction)
         checks.append(("confirmed_with_correction blocks filing until a fresh correction-bound adjudication", correction_block_code == "review_adjudication_not_fresh", str(correction_block_code or "unresolved correction allowed finding revision")))
         review3_path = reviews_dir / "review-claim-3.json"; review3 = claim_review("review-claim-3", "2026-07-10T00:15:54Z", "confirmed", "F-selftest", 2, "event-regrade-correction"); review3["input_refs"].extend(["event-regrade-escalation", "attempt-escalation", "artifact-escalation", "event-regrade-correction", "event-review-poc-mismatch", "event-review-poc-reward-1", "review-poc-reward-2"]); review3["input_refs"] = sorted(set(review3["input_refs"])); review3["input_hash"] = compute_review_input_hash(engagement, review3, build_reference_index(engagement)); review3_path.write_bytes(canonical_json_bytes(review3))
         review3_commit = base_event(event_id="event-review-claim-3-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:55Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit correction adjudication.", payload={"record_path": "reviews/review-claim-3.json", "record_digest": sha256_file(review3_path), "record_type": "review", "record_id": "review-claim-3", "record_revision": None}); append_event(engagement, review3_commit)
@@ -5007,11 +5021,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         blocked_state = reduce_engagement(engagement); checks.append(("typed blocked regrade preserves finding truth and names blocker", blocked_state["findings"]["F-selftest"]["status"] == "confirmed" and _filing_blocking_review_error(blocked_state, "F-selftest") == "regrade_review_blocked" and any(item["status"] == "blocked" for item in blocked_state["outstanding_reviews"]), str(blocked_state["outstanding_reviews"])))
         blocked_source = root / "blocked-review-source"; shutil.copytree(engagement, blocked_source)
         blocked_manual_filing = copy.deepcopy(filing3); blocked_manual_filing["event_id"] = "event-blocked-manual-filing"; blocked_manual_filing["recorded_at"] = "2026-07-10T00:16:00Z"; blocked_manual_filing["payload"].update({"finding_revision": 4, "supersedes_revision": 3, "resolves_review_refs": []})
-        try:
-            _append_kernel_event(blocked_source, blocked_manual_filing)
-            blocked_manual_code = None
-        except RecordError as exc:
-            blocked_manual_code = exc.code
+        blocked_manual_code = historical_reduction_rejection(blocked_source, blocked_manual_filing)
         blocked_queue_row = next(item for item in blocked_state["work_queue"] if item["class"] == "review_obligation_open" and item["entity"]["id"] == "event-regrade-blocked")
         blocked_next_action = decorate_work_queue_item(blocked_queue_row, blocked_state, engagement.absolute())["next_action"]
 
@@ -5432,6 +5442,8 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-review-v1", str(canonical_review_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); review_signature = Path(str(canonical_review_path) + ".sig")
         review_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "record-review", "--engagement", str(engagement), "--file", str(canonical_review_path), "--event", str(canonical_event_path), "--actor-id", broker_id, "--session-id", broker_session, "--signature", str(review_signature), "--allowed-signers", str(allowed_signers_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         if review_cli.returncode != 0: raise RecordError("canonical_review_subprocess_failed", review_cli.stdout + review_cli.stderr)
+        review_timing = json.loads(review_cli.stdout).get("staging_timing_ms", {})
+        checks.append((f"canonical review staging completes within its fixed prewrite budget (copy={review_timing.get('copy_snapshot')}ms, staged={review_timing.get('staged_transaction')}ms, remaining={review_timing.get('remaining_before_live_commit')}ms)", review_timing.get("declared_budget") == REVIEW_STAGING_TIMEOUT_SECONDS * 1000 and isinstance(review_timing.get("remaining_before_live_commit"), (int, float)) and review_timing["remaining_before_live_commit"] > 0, str(review_timing)))
         forged_event = json.loads(json.dumps(canonical_event)); forged_event["event_id"] = "event-forged-reviewer"; forged_event["payload"]["reviewer_id"] = "forged-reviewer"; forged_path = root / "forged-review-event.json"; forged_path.write_bytes(canonical_json_bytes(forged_event)); forged_reviewer_blocked = False
         forged_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "record-review", "--engagement", str(engagement), "--file", str(canonical_review_path), "--event", str(forged_path), "--actor-id", broker_id, "--session-id", broker_session, "--signature", str(review_signature), "--allowed-signers", str(allowed_signers_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: forged_reviewer_blocked = forged_cli.returncode != 0 and json.loads(forged_cli.stdout)["error"]["code"] == "canonical_review_binding_invalid"
@@ -5469,6 +5481,16 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("atomic settlement applies a live nullable-expiry v2 target, resumes a same-digest partial commit, and propagates exact resolutions", v2_pending_state["authority_requests"]["request-v2-finding"]["target"] == v2_target and v2_pending_state["authority_requests"]["request-v2-finding"]["expires_at"] is None and ("finding_revision_pending", "F-canonical-public") not in v2_pending_classes and ("claim_unadjudicated", "F-canonical-public") in v2_pending_classes and ("awaiting_operator", "request-v2-finding") in v2_pending_classes and v2_applied_state["findings"]["F-canonical-public"]["adjudication_event_ref"] == v2_target["adjudication_event_ref"] and v2_applied_event["payload"].get("resolves_review_refs") == [], str({"pending": v2_pending_classes, "finding": v2_applied_state["findings"].get("F-canonical-public")})))
 
         precommit_retry = root / "v3-finding-precommit-retry"; shutil.copytree(v2_source, precommit_retry); retry_action, retry_target, retry_request = prepare_v2_request(precommit_retry, "request-v3-precommit", canonical_finding, v2_request_time, expires_at=None); append_event(precommit_retry, retry_request); retry_state = reduce_engagement(precommit_retry); retry_digest = sha256_bytes(canonical_json_bytes(retry_action)); append_event(precommit_retry, base_event(event_id="event-resolution-v3-precommit", engagement_id=retry_state["engagement_id"], recorded_at=v2_resolution_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve exact precommit retry fixture.", payload={"request_id": "request-v3-precommit", "request_event_ref": retry_request["event_id"], "action_digest": retry_digest, "resolution": "approved", "resolved_at": v2_resolution_time}, entity_refs=[retry_request["event_id"]], session_id=broker_session, operation_class="authority")); retry_path = precommit_retry / "findings/F-canonical-public/rev-1.json"; atomic_write(retry_path, canonical_json_bytes(canonical_finding)); command_settle_approved_revision(argparse.Namespace(engagement=precommit_retry, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=v2_apply_time, authority_request_id="request-v3-precommit", lane_id=retry_action["lane_id"], executor_id=broker_id, session_id=broker_session)); retry_events = read_ledger(precommit_retry, "event"); checks.append(("retry after revision bytes but before record commit activates once", len([event for event in retry_events if event.get("event_type") == "record.committed" and event.get("payload", {}).get("record_id") == "F-canonical-public"]) == 1 and len([event for event in retry_events if event.get("event_type") == "finding.revised" and event.get("payload", {}).get("finding_id") == "F-canonical-public"]) == 1, str(retry_events[-2:])))
+
+        unrelated_orphan = root / "v3-finding-unrelated-orphan"; shutil.copytree(v2_source, unrelated_orphan); orphan_action, _, orphan_request = prepare_v2_request(unrelated_orphan, "request-v3-orphan", canonical_finding, v2_request_time, expires_at=None); append_event(unrelated_orphan, orphan_request); orphan_state = reduce_engagement(unrelated_orphan); append_event(unrelated_orphan, base_event(event_id="event-resolution-v3-orphan", engagement_id=orphan_state["engagement_id"], recorded_at=v2_resolution_time, actor_role="operator", actor_id="operator-selftest", event_type="authority.resolved", rationale="Approve exact orphan-boundary fixture.", payload={"request_id": "request-v3-orphan", "request_event_ref": orphan_request["event_id"], "action_digest": sha256_bytes(canonical_json_bytes(orphan_action)), "resolution": "approved", "resolved_at": v2_resolution_time}, entity_refs=[orphan_request["event_id"]], session_id=broker_session, operation_class="authority")); orphan_expected = unrelated_orphan / "findings/F-canonical-public/rev-1.json"; atomic_write(orphan_expected, canonical_json_bytes(canonical_finding)); unrelated_path = unrelated_orphan / "findings/F-unrelated/rev-1.json"; unrelated_finding = copy.deepcopy(canonical_finding); unrelated_finding["finding_id"] = "F-unrelated"; atomic_write(unrelated_path, canonical_json_bytes(unrelated_finding)); orphan_before = (unrelated_orphan / "events.jsonl").read_bytes(); allowed_path_code = None
+        try: reduce_engagement(unrelated_orphan, allowed_record_orphans={"findings/F-canonical-public/rev-1.json"})
+        except RecordError as exc: allowed_path_code = exc.code
+        orphan_apply_time = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        settlement_code = None
+        try: command_settle_approved_revision(argparse.Namespace(engagement=unrelated_orphan, file=canonical_finding_path, resolve_review=None, operator_id="operator-selftest", recorded_at=orphan_apply_time, authority_request_id="request-v3-orphan", lane_id=orphan_action["lane_id"], executor_id=broker_id, session_id=broker_session))
+        except RecordError as exc: settlement_code = exc.code
+        orphan_ledger_equal = (unrelated_orphan / "events.jsonl").read_bytes() == orphan_before
+        checks.append((f"precommit recovery allows only the supplied path; unrelated orphan rejection={settlement_code}, ledger_equal={orphan_ledger_equal}", allowed_path_code == "orphan_immutable_record" and settlement_code is not None and orphan_ledger_equal, str({"allowed_path_reduction": allowed_path_code, "settlement": settlement_code, "ledger_equal": orphan_ledger_equal})))
 
         expiry_deadline_dt = v2_clock + timedelta(seconds=3)
         expiry_deadline = expiry_deadline_dt.isoformat(timespec="seconds").replace("+00:00", "Z")

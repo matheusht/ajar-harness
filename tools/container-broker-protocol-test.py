@@ -1061,6 +1061,76 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         )
         self.assertEqual(self.broker.network_audit[-1]["status"], "uncertain")
 
+    def test_recovered_target_receipt_tombstones_only_same_admission_request(self) -> None:
+        scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        admission_value = broker_admission()
+        admission_value["state_binding"] = {"scope_hash": state["scope_hash"]}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        request_id = client.target_fetch_request_id(
+            self.manifest, url="https://sink.invalid/allowed", method="GET"
+        )
+        self.broker._persist_network_receipt({
+            "operation": "target_fetch",
+            "request_id": request_id,
+            "method": "GET",
+            "url_sha256": sha256_bytes(b"https://sink.invalid/allowed"),
+            "status": 200,
+        })
+        # A prior session must remain auditable without consuming this admission's request budget.
+        self.broker._persist_network_receipt({
+            "operation": "target_fetch",
+            "request_id": "sha256:" + "f" * 64,
+            "method": "GET",
+            "url_sha256": sha256_bytes(b"https://sink.invalid/other"),
+            "status": "denied_or_uncertain",
+        })
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[-1]["runtime_session_ref"] = "other-session"
+        path.write_bytes(b"".join(canonical_json_bytes(row) for row in rows))
+
+        self.broker.close()
+        self.broker = admission.DriverActionBroker(
+            engagement_fd=self.engagement_fd,
+            logical_engagement=self.root,
+            admission=admission_value,
+            execution_deadline=time.monotonic() + 30.0,
+            docker_identity={
+                "container_id": CONTAINER_ID,
+                "container_config_digest": CONFIG_DIGEST,
+            },
+            docker_session_key=KEY,
+        )
+        self.broker.activate_docker()
+        self.manifest = self.broker.container_manifest()
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "read_governed_file", return_value=scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(network_scope, "pinned_request") as sink,
+        ):
+            replay = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=request_id,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+        self.assertEqual(replay[0], 1)
+        sink.assert_not_called()
+        self.assertEqual(self.broker._network_gateway.request_budget, 32)
+        self.assertEqual(self.broker._network_gateway._started, set())
+        self.assertEqual(self.broker._network_gateway._uncertain, {request_id})
+
     def test_corrupt_network_receipt_blocks_restart_and_persist_failure_is_not_acknowledged(self) -> None:
         path = self.root / admission.NETWORK_RECEIPTS_FILE
         before = list(self.broker.network_audit)
@@ -1068,6 +1138,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.broker._persist_network_receipt({
                     "operation": "target_fetch", "method": "GET",
+                    "request_id": "sha256:" + "b" * 64,
                     "url_sha256": "sha256:" + "a" * 64, "status": "uncertain",
                 })
         self.assertEqual(self.broker.network_audit, before)

@@ -33,4 +33,3 @@ RUN npm install --global --omit=optional \
 
 WORKDIR /workspace
 USER node
-

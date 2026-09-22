@@ -1123,35 +1123,13 @@ def _cmd_promote_unlocked(args, engagement, package_relative):
 
 
 def cmd_demote(args):
-    with engagement_lock(Path(args.engagement).absolute()) as engagement:
-        return _cmd_demote_unlocked(args, engagement)
+    print("demote is inspection-only; canonical finding state changes require the authenticated record kernel")
+    return 1
 
 
 def _cmd_demote_unlocked(args, engagement):
-    src = os.path.join(args.engagement, PROVEN, args.finding_id)
-    dest = os.path.join(args.engagement, UNPROVEN, args.finding_id)
-    root_fd = _bound_root_fd(engagement)
-    try:
-        proven_fd = _open_state_directory(root_fd, PROVEN)
-        try:
-            source = os.stat(args.finding_id, dir_fd=proven_fd, follow_symlinks=False)
-            source_exists = stat.S_ISDIR(source.st_mode) and not stat.S_ISLNK(source.st_mode)
-        finally:
-            os.close(proven_fd)
-    except (FileNotFoundError, ValueError):
-        source_exists = False
-    if not source_exists:
-        print(f"not promoted: {src} does not exist")
-        return 1
-    if not _bound_move(engagement, PROVEN, UNPROVEN, args.finding_id):
-        print(f"cannot demote: {dest} already exists")
-        return 1
-    _append_log_bound(engagement, {
-        "recorded_at": now(), "action": "demote", "finding_id": args.finding_id,
-        "actor": args.actor, "result": "demoted", "reason": args.reason})
-    print(f"demoted {args.finding_id} -> {UNPROVEN}/")
-    print(f"reason: {args.reason}")
-    return 0
+    print("demote is inspection-only; canonical finding state changes require the authenticated record kernel")
+    return 1
 
 
 def cmd_status(args):
@@ -1159,18 +1137,18 @@ def cmd_status(args):
     try:
         with bound_engagement_source(original) as engagement:
             rows = _bound_finding_rows(engagement)
+            display_rows = [{**row, "location": "canonical storage" if row["state"] == PROVEN else "legacy unproven package"} for row in rows]
             _require_bound_package_current(original, engagement, portable=False)
             if args.json:
-                json.dump({"engagement": args.engagement, "findings": rows}, sys.stdout, indent=2)
+                json.dump({"engagement": args.engagement, "findings": display_rows, "authority": "record-kernel only"}, sys.stdout, indent=2)
                 sys.stdout.write("\n")
             else:
                 if not rows:
                     print("no findings")
-                for r in rows:
-                    mark = "PROVEN  " if r["state"] == PROVEN else "unproven"
-                    print(f"  {mark} {r['finding_id']}")
-                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} proven, "
-                      f"{sum(1 for r in rows if r['state']==UNPROVEN)} unproven")
+                for r in display_rows:
+                    print(f"  {r['location']} {r['finding_id']}")
+                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} canonical storage, "
+                      f"{sum(1 for r in rows if r['state']==UNPROVEN)} legacy unproven packages")
             return 0
     except (OSError, RecordError, ValueError):
         if args.json:
@@ -1232,7 +1210,8 @@ def main():
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_promote)
 
-    p = sub.add_parser("demote", help="any role — move back to unproven/")
+    p = sub.add_parser("demote", help="inspection-only retired alias; never moves canonical finding bytes",
+                       description="Inspection-only retired alias. Canonical state changes require the authenticated record kernel.")
     p.add_argument("finding_id")
     p.add_argument("--engagement", required=True)
     p.add_argument("--actor", required=True)

@@ -6,10 +6,11 @@ from __future__ import annotations
 import copy
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from engagement_records import RecordError
-from engagement_state import require_filing_corpus_quality, validate_filing_evidence
+from engagement_state import initialize_engagement, require_filing_corpus_quality, validate_filing_evidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,7 +89,41 @@ def main() -> int:
         stdout=subprocess.PIPE,
     ).stdout
     assert "inspection-only" in help_text.lower()
-    print("filing activation checks: 14 passed")
+    with tempfile.TemporaryDirectory(prefix="filing-lifecycle-retired-") as tmp:
+        engagement = Path(tmp)
+        engagement.joinpath("scope.md").write_text("""# Scope - lifecycle retired fixture
+## Surfaces in scope
+- Local fixture.
+## Benign safe-objective set
+- Inspect canonical storage.
+## Escalation ceiling
+- Local only.
+## Impact-demo authorization
+- impact_demo_authorized: `no`
+- zone2_authorized_categories: `none`
+- zone2_escalation_ceiling: `none`
+- zone2_containment: `none`
+## Accounts / fixtures
+- None.
+## Independent reviewer identity
+- Reviewer allowed signers SHA256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+## Authorization
+- Operator allowed signers SHA256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+- Operator: operator-fixture
+- Date: 2026-09-22
+- Signed: [x]
+- Record kernel: `decision-0006-v2`
+""")
+        initialize_engagement(engagement, "2026-09-22T00:00:00Z")
+        revision = engagement / "findings/F-canonical/rev-1.json"
+        revision.parent.mkdir(parents=True)
+        revision.write_text('{"immutable":"canonical revision"}\n')
+        before = revision.read_bytes()
+        demote = subprocess.run([sys.executable, str(ROOT / "tools/finding_lifecycle.py"), "demote", "F-canonical", "--engagement", str(engagement), "--actor", "arbitrary", "--reason", "must not mutate"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert demote.returncode != 0 and revision.read_bytes() == before and not (engagement / "unproven/F-canonical").exists()
+        status = subprocess.run([sys.executable, str(ROOT / "tools/finding_lifecycle.py"), "status", "--engagement", str(engagement)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert "PROVEN" not in status.stdout and "canonical storage" in status.stdout
+    print("filing activation checks: 16 passed")
     return 0
 
 

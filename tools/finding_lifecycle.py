@@ -35,7 +35,7 @@ Usage
   finding_lifecycle.py demote  FINDING_ID  --engagement DIR --actor ID --reason TEXT
   finding_lifecycle.py status  --engagement DIR [--json]
 
-Exit 0 = clear or moved, 1 = blocked.
+Exit 0 = advisory gates clear or status read; retired promote/demote aliases return 1.
 """
 
 import argparse
@@ -1123,11 +1123,6 @@ def _cmd_promote_unlocked(args, engagement, package_relative):
 
 
 def cmd_demote(args):
-    print("demote is inspection-only; canonical finding state changes require the authenticated record kernel")
-    return 1
-
-
-def _cmd_demote_unlocked(args, engagement):
     print("demote is inspection-only; canonical finding state changes require the authenticated record kernel")
     return 1
 

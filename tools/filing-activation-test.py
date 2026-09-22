@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from engagement_records import RecordError
-from engagement_state import validate_filing_evidence
+from engagement_state import require_filing_corpus_quality, validate_filing_evidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,17 @@ def expect(code: str | None, finding: dict, attempts: list[dict]) -> None:
 
 
 def main() -> int:
+    synthetic_corpus = [
+        {"review_id": f"review-{index}", "review_type": "claim_adjudication", "proposed_finding_id": f"F-{index}", "entity_ref": f"F-{index}", "recorded_at": "2026-09-22T00:00:00Z", "input_hash": "sha256:" + "a" * 64, "verdict": "supported", "rationale": "Generated support.", "corrections": [], "conflicting_evidence": [], "independence": {"reviewer_id": "same-reviewer"}}
+        for index in range(3)
+    ]
+    require_filing_corpus_quality(2, synthetic_corpus, "historical-v2-replay")
+    try:
+        require_filing_corpus_quality(3, synthetic_corpus, "new-v3-activation")
+    except RecordError as exc:
+        assert exc.code == "filing_review_corpus_quality_invalid"
+    else:
+        raise AssertionError("new v3 activation accepted a synthetic committed review corpus")
     primary = {
         "attempt_id": "attempt-primary",
         "kind": "primary",
@@ -77,7 +88,7 @@ def main() -> int:
         stdout=subprocess.PIPE,
     ).stdout
     assert "inspection-only" in help_text.lower()
-    print("filing activation checks: 12 passed")
+    print("filing activation checks: 14 passed")
     return 0
 
 

@@ -2885,18 +2885,10 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
                         and e.get("payload", {}).get("finding_revision") == revision
                         for e in read_ledger(bound_engagement, "event"))
         prior_bytes = _governed_regular_bytes_or_none(destination)
-        if prior_bytes is not None and prior_bytes != data and activated:
+        if prior_bytes is not None and prior_bytes != data:
             raise RecordError("finding_revision_collision", f"{finding_id}:{revision}")
-        repaired_commit_id = None
-        if prior_bytes is not None and prior_bytes != data and not activated and existing_commit is not None:
-            # Repair an un-activated partial commit: the revision was committed but never activated
-            # (no finding.revised event). Overwrite with the corrected bytes and append a NEW commit
-            # event under a distinct id recording the corrected digest. The old commit event stays as
-            # a historical record of the aborted attempt; the file now matches the repair commit.
-            atomic_write(destination, data)
-            repaired_commit_id = f"event-{finding_id}-r{revision}-repair-{int(__import__('time').time())}"
         if prior_bytes is None: atomic_write(destination, data)
-        commit_id = repaired_commit_id or f"event-{finding_id}-r{revision}-commit"
+        commit_id = f"event-{finding_id}-r{revision}-commit"
         commit = base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="record.committed", rationale="Commit immutable operator-authorized finding revision.", payload={"record_path": relative, "record_digest": digest, "record_type": "finding-v3", "record_id": finding_id, "record_revision": revision, "authority_request_ref": args.authority_request_id}, session_id=args.session_id, operation_class="authority")
         commit_events = [c for c in read_ledger(bound_engagement, "event") if c.get("event_id") == commit["event_id"]]
         if commit_events and commit_events[0].get("payload", {}).get("record_digest") == digest:

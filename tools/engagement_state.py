@@ -229,6 +229,16 @@ FILING_PRIVILEGE_RANK = {
 }
 
 
+def require_filing_corpus_quality(action_version: int, corpus: list[dict[str, Any]], context: str) -> None:
+    """Apply the corpus heuristic only to new-contract activation."""
+    if action_version != 3:
+        return
+    from adjudication_audit import audit
+    corpus_verdict, _, _ = audit(corpus)
+    if not corpus or corpus_verdict == "synthetic":
+        raise RecordError("filing_review_corpus_quality_invalid", context)
+
+
 def validate_filing_evidence(
     finding: dict[str, Any],
     *,
@@ -670,7 +680,6 @@ def _validate_revise_finding_v2_action(
     expected_provider = review.get("provenance", {}).get("provider")
     if review_entry is None or target["adjudication_review_ref"] not in committed_entity_ids or review.get("review_type") != "claim_adjudication" or review.get("proposed_finding_id") != finding_id or review.get("entity_ref") != finding_id or review.get("finding_revision") != expected_supersedes or review.get("verdict") != target.get("claim_state") or proposal_provenance.get("actor") != {"role": "reviewer", "id": review_independence.get("reviewer_id")} or proposal_provenance.get("session_id") != review_independence.get("reviewer_session_id") or proposal_provenance.get("model") != review_independence.get("reviewer_model") or proposal_provenance.get("provider") != expected_provider:
         raise RecordError("revise_finding_v2_review_binding_invalid", context)
-    from adjudication_audit import audit
     corpus = []
     for entity_id, entries in index.items():
         for entry in entries:
@@ -679,9 +688,7 @@ def _validate_revise_finding_v2_action(
             candidate = load_json(engagement / entry["path"])
             if candidate.get("review_type") == "claim_adjudication":
                 corpus.append(candidate)
-    corpus_verdict, _, _ = audit(corpus)
-    if not corpus or corpus_verdict == "synthetic":
-        raise RecordError("filing_review_corpus_quality_invalid", context)
+    require_filing_corpus_quality(action.get("action_version"), corpus, context)
 
     if target.get("claim_state") in {"contaminated", "refuted"} and action.get("action_version") == 3:
         validate_filing_evidence(proposal, attempts=attempts, artifacts=artifacts)

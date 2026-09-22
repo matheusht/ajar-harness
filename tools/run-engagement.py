@@ -769,6 +769,8 @@ def command_append_event(args: argparse.Namespace) -> int:
         raise RecordError("canonical_authority_command_required", proposal.get("event_type", "unknown"))
     if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "authority.expired", "coverage.reopened"}:
         raise RecordError("canonical_notebook_command_required", proposal.get("event_type", "unknown"))
+    if proposal.get("event_type") == "observation.recorded" and proposal.get("payload", {}).get("entity_type") == "task_notice":
+        raise RecordError("canonical_task_notice_command_required", proposal.get("event_id", "unknown"))
     if proposal.get("event_type") == "coverage.status_changed" and proposal.get("payload", {}).get("status") == "budget_bounded":
         raise RecordError("external_driver_budget_boundary_required", "budget_bounded")
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-event:{proposal.get('event_type','event')}:{proposal.get('event_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")

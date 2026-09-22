@@ -484,3 +484,20 @@ that source plus this rotation, each with exit 0:
 These are offline/synthetic self-tests, not real engagement/provider/model execution. Prior scenario
 packet experiments remain unexecuted. The pending `a63eef8f` wiki assessment is included in publication.
 Full hosted CI will validate the pushed head separately; no merge or issue closure occurred here.
+
+
+## 2026-09-22 — record separate local candidate delivery status
+
+Added [local candidate delivery status](delivery-status-2026-09-22.md) and linked it from the index.
+The page binds the research/board head `1d461b8661da37098c609fe4ef3257c7eaf2667a`, integrated
+candidate `d859a8990b58e71e5b21448070adb6b0fb642264` and egress candidate
+`3ce769ab28a4bcdf2c361b6b5302c4c50d8cdc5c` without presenting them as merged or fully qualified.
+It records the measured case against default board adoption, the fixed-schedule framing limit and
+the distinction between state recovery and exactly-once effects. Pending integrated checks,
+deferred real-provider qualification, the actual-client/fake-provider path mismatch and the
+managed-sandbox POSIX limitation remain explicit.
+
+This was a documentation-only delivery. Frozen manifests and source commits were not changed; no
+model experiment, target run, merge, push or capability expansion occurred. Changed local links,
+artifact manifests, exact commit identifiers, contradictory status wording and whitespace were
+checked before commit.

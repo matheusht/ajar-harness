@@ -1235,13 +1235,13 @@ def _open_parent_fd(root: Path, parts: tuple[str, ...], *, create: bool) -> tupl
         os.close(fd); raise
 
 
-def read_governed_file(path: Path) -> bytes:
+def read_governed_file(path: Path, *, require_single_link: bool = False) -> bytes:
     root, parts = _governed_root(path); parent_fd, name = _open_parent_fd(root, parts, create=False)
     try:
         fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
         try:
             before = os.fstat(fd)
-            if not stat.S_ISREG(before.st_mode): raise RecordError("unsafe_governed_path", str(path))
+            if not stat.S_ISREG(before.st_mode) or (require_single_link and before.st_nlink != 1): raise RecordError("unsafe_governed_path", str(path))
             chunks: list[bytes] = []
             while True:
                 chunk = os.read(fd, 1024 * 1024)
@@ -3708,8 +3708,31 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         proposal = copy.deepcopy(proposal)
         if proposal.get("engagement_id") != current_events[0]["engagement_id"]:
             raise RecordError("cross_engagement_event", str(proposal.get("event_id")))
-        if proposal.get("event_type") == "finding.revised" and proposal.get("payload", {}).get("filing_contract_version") != 1:
-            raise RecordError("historical_finding_action_not_activatable", str(proposal.get("event_id")))
+        if proposal.get("event_type") == "finding.revised":
+            payload = proposal.get("payload", {})
+            if payload.get("filing_contract_version") != 1:
+                raise RecordError("historical_finding_action_not_activatable", str(proposal.get("event_id")))
+            state = _reduce_engagement_unchecked(engagement)
+            request = state.get("authority_requests", {}).get(payload.get("authority_request_ref"))
+            action_path = request.get("action_path") if isinstance(request, dict) else None
+            action = load_json(engagement / action_path) if isinstance(action_path, str) and action_path else {}
+            application = request.get("application") if isinstance(request, dict) else None
+            if (
+                not isinstance(request, dict)
+                or request.get("status") != "approved"
+                or request.get("action_kind") != "revise-finding"
+                or request.get("action_digest") != sha256_bytes(canonical_json_bytes(action))
+                or not isinstance(request.get("target"), dict)
+                or not isinstance(application, dict)
+                or action.get("action_version") != 3
+                or proposal.get("actor") != {"role": "broker", "id": action.get("executor_id")}
+                or proposal.get("provenance", {}).get("session_id") != action.get("session_id")
+                or application.get("executor_id") != action.get("executor_id")
+                or application.get("session_id") != action.get("session_id")
+                or application.get("operator_id") != action.get("operator_id")
+                or payload.get("operator_id") != action.get("operator_id")
+            ):
+                raise RecordError("historical_finding_action_not_activatable", str(proposal.get("event_id")))
         if proposal.get("event_type") == "authority.requested" and proposal.get("payload", {}).get("action_kind") == "revise-finding" and proposal.get("actor", {}).get("role") == "broker":
             action_path = proposal.get("payload", {}).get("action_path")
             action = load_json(engagement / action_path) if isinstance(action_path, str) and action_path else {}

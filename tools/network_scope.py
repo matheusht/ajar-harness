@@ -11,6 +11,8 @@ import math
 import re
 import socket
 import ssl
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -190,22 +192,45 @@ class NetworkGateway:
             self._uncertain.add(request_id)
 
 
-def resolve_pinned(host: str, port: int) -> str:
+def resolve_pinned(host: str, port: int, *, deadline: float | None = None) -> str:
+    """Resolve in a killable child so a stuck resolver cannot outlive the session deadline."""
+
+    timeout = None if deadline is None else _remaining(deadline)
+    program = (
+        "import json,socket,sys;"
+        "v=socket.getaddrinfo(sys.argv[1],int(sys.argv[2]),socket.AF_INET,socket.SOCK_STREAM,socket.IPPROTO_TCP);"
+        "print(json.dumps(sorted({x[4][0] for x in v if len(x)>=5})))"
+    )
     try:
-        values = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", program, host, str(port)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, timeout=timeout,
+        )
+        addresses = json.loads(completed.stdout) if completed.returncode == 0 else []
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as exc:
         raise NetworkScopeError("network_dns_failed") from exc
-    addresses = sorted({item[4][0] for item in values if len(item) >= 5})
-    if not addresses or any(not address_allowed(item) for item in addresses):
+    if not isinstance(addresses, list) or not addresses or any(
+        not isinstance(item, str) or not address_allowed(item) for item in addresses
+    ):
         raise NetworkScopeError("network_address_forbidden")
     # Multiple public answers are allowed, but one answer is selected and pinned for this connection.
     return addresses[0]
 
 
-def _read_response(sock: socket.socket, *, method: str) -> tuple[int, list[tuple[str, str]], bytes]:
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise NetworkScopeError("network_deadline_exceeded")
+    return remaining
+
+
+def _read_response(sock: socket.socket, *, method: str, deadline: float) -> tuple[int, list[tuple[str, str]], bytes]:
+    sock.settimeout(_remaining(deadline))
     response = http.client.HTTPResponse(sock, method=method)
     response.begin()
     headers = [(key.lower(), value) for key, value in response.getheaders()]
+    sock.settimeout(_remaining(deadline))
     body = response.read(MAX_RESPONSE_BYTES + 1)
     if len(body) > MAX_RESPONSE_BYTES:
         raise NetworkScopeError("network_response_oversize")
@@ -221,10 +246,15 @@ def pinned_request(
     headers: dict[str, str] | None = None,
     body: bytes = b"",
     timeout: float = 10.0,
+    deadline: float | None = None,
     resolver: Callable[[str, int], str] = resolve_pinned,
 ) -> tuple[int, list[tuple[str, str]], bytes]:
+    absolute_deadline = time.monotonic() + timeout if deadline is None else float(deadline)
+    if not math.isfinite(absolute_deadline):
+        raise NetworkScopeError("network_deadline_invalid")
     current = url
     for redirect_count in range(MAX_REDIRECTS + 1):
+        _remaining(absolute_deadline)
         parsed = urllib.parse.urlsplit(current)
         if (
             parsed.username is not None
@@ -254,13 +284,19 @@ def pinned_request(
             for name, value in supplied.items()
         ):
             raise NetworkScopeError("network_header_invalid")
-        address = resolver(host, port)
+        _remaining(absolute_deadline)
+        address = (
+            resolver(host, port, deadline=absolute_deadline)
+            if resolver is resolve_pinned
+            else resolver(host, port)
+        )
         if not isinstance(address, str) or not address_allowed(address):
             raise NetworkScopeError("network_address_forbidden")
-        raw = socket.create_connection((address, port), timeout=timeout)
+        raw = socket.create_connection((address, port), timeout=_remaining(absolute_deadline))
         connection: socket.socket = raw
         try:
             if scheme == "https":
+                raw.settimeout(_remaining(absolute_deadline))
                 connection = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
             elif scheme == "http":
                 connection = raw
@@ -272,8 +308,9 @@ def pinned_request(
                 + "".join(f"{key}: {value}\r\n" for key, value in request_headers.items())
                 + f"Content-Length: {len(body)}\r\n\r\n"
             ).encode("ascii") + body
+            connection.settimeout(_remaining(absolute_deadline))
             connection.sendall(payload)
-            status, response_headers, response_body = _read_response(connection, method=method)
+            status, response_headers, response_body = _read_response(connection, method=method, deadline=absolute_deadline)
         finally:
             connection.close()
         locations = [value for key, value in response_headers if key == "location"]

@@ -1632,7 +1632,7 @@ class _ProviderProxy:
         self._thread.start()
 
     @staticmethod
-    def _read_request(connection: socket.socket) -> tuple[dict[str, str], bytes]:
+    def _read_request(connection: socket.socket) -> tuple[dict[str, str], bytes, str]:
         data = bytearray()
         while b"\r\n\r\n" not in data:
             chunk = connection.recv(min(4096, MAX_PROVIDER_HEADER_BYTES + 1 - len(data)))
@@ -1646,8 +1646,13 @@ class _ProviderProxy:
             lines = raw_headers.decode("iso-8859-1").split("\r\n")
         except UnicodeError as exc:
             raise SupervisorError("provider_request_invalid") from exc
-        if lines[0] != "POST /v1/messages HTTP/1.1":
+        allowed_request_lines = {
+            "POST /v1/messages HTTP/1.1": "/v1/messages",
+            "POST /v1/messages?beta=true HTTP/1.1": "/v1/messages?beta=true",
+        }
+        if lines[0] not in allowed_request_lines:
             raise SupervisorError("provider_request_denied")
+        path = allowed_request_lines[lines[0]]
         headers: dict[str, str] = {}
         for line in lines[1:]:
             name, separator, value = line.partition(":")
@@ -1676,13 +1681,13 @@ class _ProviderProxy:
             for name, value in headers.items()
             if name in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
         }
-        return forwarded, bytes(body)
+        return forwarded, bytes(body), path
 
     def _serve_one(self, connection: socket.socket) -> None:
         connection.settimeout(PROVIDER_IO_TIMEOUT_SECONDS)
         started = False
         try:
-            headers, body = self._read_request(connection)
+            headers, body, path = self._read_request(connection)
             def send_headers(status: int, response_headers: list[list[str]]) -> None:
                 nonlocal started
                 phrase = http.client.responses.get(status, "Response")
@@ -1704,7 +1709,7 @@ class _ProviderProxy:
             broker_client.stream_provider(
                 self._manifest,
                 self._key,
-                path="/v1/messages",
+                path=path,
                 headers=headers,
                 body=body,
                 on_headers=send_headers,

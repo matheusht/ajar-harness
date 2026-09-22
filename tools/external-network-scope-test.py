@@ -36,6 +36,65 @@ def record(name: str, passed: bool, detail: str = "") -> None:
 
 
 class ExternalNetworkPolicyWorkflow(unittest.TestCase):
+    def test_provider_body_is_bound_to_admitted_model_and_output_ceiling(self) -> None:
+        import driver_action_admission as admission
+
+        valid = json.dumps({"model": "admitted-model", "max_tokens": 32, "messages": []}).encode()
+        admission._validate_provider_inference_body(
+            valid, expected_model="admitted-model", max_tokens=32
+        )
+        for changed in (
+            {"model": "other-model", "max_tokens": 32, "messages": []},
+            {"model": "admitted-model", "max_tokens": 33, "messages": []},
+        ):
+            with self.assertRaises(admission.RecordError):
+                admission._validate_provider_inference_body(
+                    json.dumps(changed).encode(),
+                    expected_model="admitted-model",
+                    max_tokens=32,
+                )
+
+    def test_provider_proxy_accepts_only_exact_optional_beta_query(self) -> None:
+        allowed = (
+            b"POST /v1/messages HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+            b"POST /v1/messages?beta=true HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+        )
+        for request in allowed:
+            left, right = socket.socketpair()
+            try:
+                left.sendall(request)
+                _headers, body, path = supervisor._ProviderProxy._read_request(right)
+                self.assertEqual(body, b"")
+                self.assertIn(path, {"/v1/messages", "/v1/messages?beta=true"})
+            finally:
+                left.close(); right.close()
+        for path in ("/v1/messages?beta=false", "/v1/messages?beta=true&x=1", "/v1/messages/"):
+            left, right = socket.socketpair()
+            try:
+                left.sendall(f"POST {path} HTTP/1.1\r\nContent-Length: 0\r\n\r\n".encode())
+                with self.assertRaises(supervisor.SupervisorError):
+                    supervisor._ProviderProxy._read_request(right)
+            finally:
+                left.close(); right.close()
+
+    def test_expired_absolute_deadline_stops_before_dns(self) -> None:
+        import network_scope
+
+        scope = network_scope.scope_with_network_policy(
+            host="fixture.invalid", path="/allowed", method="GET"
+        )
+        policy = network_scope.parse_network_policy(
+            scope, expected_scope_hash=network_scope.sha256_bytes(scope)
+        )
+        resolver = mock.Mock(side_effect=AssertionError("expired request reached DNS"))
+        with self.assertRaises(network_scope.NetworkScopeError):
+            network_scope.pinned_request(
+                policy=policy, operation="target_fetch",
+                url="https://fixture.invalid/allowed", method="GET",
+                deadline=time.monotonic() - 0.001, resolver=resolver,
+            )
+        self.assertEqual(resolver.call_count, 0)
+
     def test_socket_matrix_and_fastopen_are_fail_closed(self) -> None:
         decide = getattr(supervisor, "_socket_policy", None)
         self.assertTrue(callable(decide), "missing inherited socket policy")
@@ -143,7 +202,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
                     )
         record("policy-rejects-smuggling-controls-and-ambiguous-hosts", True)
 
-    def test_dns_alias_redirect_and_uncertain_replay_rules(self) -> None:
+    def test_address_budget_and_uncertain_replay_rules(self) -> None:
         try:
             import network_scope
         except ImportError as exc:
@@ -159,7 +218,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
         gateway.mark_uncertain("request-1")
         with self.assertRaises(network_scope.NetworkScopeError):
             gateway.begin("request-1")
-        record("dns-alias-redirect-budget-deadline-and-no-uncertain-replay", True)
+        record("address-budget-and-no-uncertain-replay", True)
 
     def test_parent_transport_rejects_alias_and_headers_before_sink_contact(self) -> None:
         import network_scope

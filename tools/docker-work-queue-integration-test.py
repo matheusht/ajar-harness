@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 from container_session_supervisor import _validate_session
+import driver_action_admission as action_admission
 from docker_session_runtime import (
     CONTROL_DESTINATION,
     DockerRuntimeLimits,
@@ -106,6 +107,7 @@ class DockerWorkQueueIntegrationTest(unittest.TestCase):
         self.workspace = root / "target"
         self.engagement = self.workspace / "engagements" / "fixture"
         self.engagement.mkdir(parents=True)
+        (self.engagement / ".record-kernel.lock").touch()
         self.workspace_fd = os.open(self.workspace, os.O_RDONLY | os.O_DIRECTORY)
         self.engagement_fd = os.open(self.engagement, os.O_RDONLY | os.O_DIRECTORY)
         self.bound = BoundRun(
@@ -894,7 +896,7 @@ for body in denied_bodies:
     rejected_connection.close()
 checks["provider_capabilities"] = denied_capabilities
 
-approved_body = b'{{"model":"fixture","max_tokens":8,"messages":[{{"role":"user","content":"URL https://data.invalid is inert text"}}],"tools":[{{"name":"local_lookup","description":"client-side only","input_schema":{{"type":"object","properties":{{"url":{{"type":"string"}}}},"additionalProperties":false}}}}]}}'
+approved_body = b'{{"model":"claude-test-20260826","max_tokens":8,"messages":[{{"role":"user","content":"URL https://data.invalid is inert text"}}],"tools":[{{"name":"local_lookup","description":"client-side only","input_schema":{{"type":"object","properties":{{"url":{{"type":"string"}}}},"additionalProperties":false}}}}]}}'
 connection, response = provider_post(approved_body)
 first = response.read(6)
 settings = json.loads(sys.argv[sys.argv.index("--settings") + 1])
@@ -928,6 +930,8 @@ print(json.dumps({{"is_error": False, "total_cost_usd": 0.1}}))
         admission = {
             "status": "armed",
             "runtime_session_ref": SESSION_REF,
+            "runtime_model": "claude-test-20260826",
+            "provider_max_tokens": 32768,
             "action_id": "live-network-probe",
             "os_session_id": None,
             "runtime_identity": None,
@@ -942,6 +946,7 @@ print(json.dumps({{"is_error": False, "total_cost_usd": 0.1}}))
         state = {"scope_hash": sha256_bytes(scope)}
         admission["state_binding"] = {"scope_hash": state["scope_hash"]}
         runtime_output: list[bytes] = []
+        governed_read = action_admission.read_governed_file
 
         class StreamingBroker(DriverActionBroker):
             def __init__(broker_self, **arguments: object) -> None:
@@ -959,7 +964,14 @@ print(json.dumps({{"is_error": False, "total_cost_usd": 0.1}}))
                 mock.patch("work_queue_driver.DriverActionBroker", StreamingBroker),
                 mock.patch("work_queue_driver.activate_docker_action_admission"),
                 mock.patch("driver_action_admission._reduce_engagement_unchecked", return_value=state),
-                mock.patch("driver_action_admission.read_governed_file", return_value=scope),
+                mock.patch(
+                    "driver_action_admission.read_governed_file",
+                    side_effect=lambda path: (
+                        scope
+                        if Path(path).name == "scope.md"
+                        else governed_read(path)
+                    ),
+                ),
                 mock.patch("driver_action_admission._neutral_tail_is_allowed", return_value=True),
                 mock.patch(
                     "work_queue_driver._summary_from_output",

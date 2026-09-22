@@ -21,6 +21,7 @@ from unittest import mock
 
 import container_broker_client as client
 import driver_action_admission as admission
+import network_scope
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 
 
@@ -60,6 +61,7 @@ def broker_admission() -> dict[str, object]:
         "status": "armed",
         "runtime_session_ref": RUNTIME_REF,
         "runtime_model": "fixture-container-model",
+        "provider_max_tokens": 32768,
         "runtime_session_kind": "ordinary_bounded",
         "hook_session_ref": HOOK_REF,
         "os_session_id": None,
@@ -89,6 +91,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="container-broker-test-")
         self.root = Path(self.temporary.name)
+        (self.root / ".record-kernel.lock").touch()
         self.engagement_fd = os.open(
             self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         )
@@ -368,7 +371,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         )
 
     def test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay(self) -> None:
-        scope = admission.network_scope.scope_with_network_policy(
+        scope = network_scope.scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
         state = {"scope_hash": sha256_bytes(scope)}
@@ -387,7 +390,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
             mock.patch.object(admission, "read_governed_file", return_value=scope),
             mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
             mock.patch.object(
-                admission.network_scope,
+                network_scope,
                 "pinned_request",
                 side_effect=TimeoutError("lost receipt"),
             ) as effect,
@@ -409,7 +412,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual((first[0], replay[0]), (1, 1))
         self.assertEqual(effect.call_count, 1)
 
-        changed_scope = admission.network_scope.scope_with_network_policy(
+        changed_scope = network_scope.scope_with_network_policy(
             host="sink.invalid", path="/reattested", method="GET"
         )
         changed_state = {"scope_hash": sha256_bytes(changed_scope)}
@@ -421,7 +424,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
             mock.patch.object(admission, "read_governed_file", return_value=changed_scope),
             mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
             mock.patch.object(
-                admission.network_scope,
+                network_scope,
                 "pinned_request",
                 side_effect=AssertionError("effect began for stale admission"),
             ),
@@ -463,7 +466,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
 
         server = threading.Thread(target=serve, daemon=True)
         server.start()
-        scope = admission.network_scope.scope_with_network_policy(
+        scope = network_scope.scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
         state = {"scope_hash": sha256_bytes(scope)}
@@ -479,7 +482,8 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
                 self.assertEqual(server_hostname, "sink.invalid")
                 return raw
 
-        original_request = admission.network_scope.pinned_request
+        original_request = network_scope.pinned_request
+        governed_read = admission.read_governed_file
         real_create_connection = socket.create_connection
 
         def fixture_request(**arguments: object) -> tuple[int, list[tuple[str, str]], bytes]:
@@ -494,16 +498,24 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         with (
             mock.patch.object(admission, "bound_engagement_lock", bound),
             mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
-            mock.patch.object(admission, "read_governed_file", return_value=scope),
-            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
-            mock.patch.object(admission.network_scope, "pinned_request", side_effect=fixture_request),
             mock.patch.object(
-                admission.network_scope.socket,
+                admission,
+                "read_governed_file",
+                side_effect=lambda path, **kwargs: (
+                    scope
+                    if Path(path).name == "scope.md"
+                    else governed_read(path, **kwargs)
+                ),
+            ),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(network_scope, "pinned_request", side_effect=fixture_request),
+            mock.patch.object(
+                network_scope.socket,
                 "create_connection",
                 side_effect=fixture_connection,
             ),
             mock.patch.object(
-                admission.network_scope.ssl,
+                network_scope.ssl,
                 "create_default_context",
                 return_value=FixtureTls(),
             ),
@@ -1020,6 +1032,122 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(action["action_version"], 3)
         self.assertEqual(action["executor_id"], "local-uid-501:broker")
         self.assertEqual(action["session_id"], "session-posix-501-77")
+
+    def test_network_receipt_is_redacted_bounded_and_persistent(self) -> None:
+        receipt = {
+            "operation": "provider_request", "method": "POST",
+            "host": "api.anthropic.com", "path": "/v1/messages?beta=true",
+            "status": "uncertain",
+        }
+        self.broker._persist_network_receipt(receipt)
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual(rows[-1]["status"], "uncertain")
+        self.assertEqual(rows[-1]["runtime_session_ref"], RUNTIME_REF)
+        self.assertNotIn("headers", rows[-1])
+        self.assertNotIn("body", rows[-1])
+
+        self.broker.close()
+        self.broker = admission.DriverActionBroker(
+            engagement_fd=self.engagement_fd,
+            logical_engagement=self.root,
+            admission=broker_admission(),
+            execution_deadline=time.monotonic() + 30.0,
+            docker_identity={
+                "container_id": CONTAINER_ID,
+                "container_config_digest": CONFIG_DIGEST,
+            },
+            docker_session_key=KEY,
+        )
+        self.assertEqual(self.broker.network_audit[-1]["status"], "uncertain")
+
+    def test_corrupt_network_receipt_blocks_restart_and_persist_failure_is_not_acknowledged(self) -> None:
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        before = list(self.broker.network_audit)
+        with mock.patch.object(admission, "atomic_write", side_effect=OSError("fixture")):
+            with self.assertRaises(OSError):
+                self.broker._persist_network_receipt({
+                    "operation": "target_fetch", "method": "GET",
+                    "url_sha256": "sha256:" + "a" * 64, "status": "uncertain",
+                })
+        self.assertEqual(self.broker.network_audit, before)
+
+        self.broker.close()
+        path.write_bytes(b'{"schema_version":1')
+        with self.assertRaises(RecordError) as corrupt:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={
+                    "container_id": CONTAINER_ID,
+                    "container_config_digest": CONFIG_DIGEST,
+                },
+                docker_session_key=KEY,
+            )
+        self.assertEqual(corrupt.exception.code, "driver_network_receipt_invalid")
+
+        path.unlink()
+        outside = self.root / "outside-receipt"
+        outside.write_text('{}\n')
+        path.symlink_to(outside)
+        with self.assertRaises(RecordError) as symlinked:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={"container_id": CONTAINER_ID, "container_config_digest": CONFIG_DIGEST},
+                docker_session_key=KEY,
+            )
+        self.assertEqual(symlinked.exception.code, "driver_network_receipt_invalid")
+
+        path.unlink()
+        os.link(outside, path)
+        with self.assertRaises(RecordError) as hardlinked:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={"container_id": CONTAINER_ID, "container_config_digest": CONFIG_DIGEST},
+                docker_session_key=KEY,
+            )
+        self.assertEqual(hardlinked.exception.code, "driver_network_receipt_invalid")
+
+    def test_close_cancels_stalled_container_worker_within_absolute_deadline(self) -> None:
+        assert self.broker.tcp_endpoint is not None
+        peer = socket.create_connection(self.broker.tcp_endpoint, timeout=1.0)
+        try:
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                with self.broker._container_workers_lock:
+                    if self.broker._container_workers:
+                        break
+                time.sleep(0.01)
+            started = time.monotonic()
+            self.broker.close()
+            self.assertLess(time.monotonic() - started, 0.5)
+            with self.broker._container_workers_lock:
+                self.assertFalse(self.broker._container_workers)
+        finally:
+            peer.close()
+
+    def test_expired_deadline_shutdown_is_bounded_closes_descriptors_and_is_retry_safe(self) -> None:
+        worker = threading.Thread(target=lambda: time.sleep(1.0), daemon=True)
+        with self.broker._container_workers_lock:
+            self.broker._container_workers.add(worker)
+        worker.start()
+        self.broker._execution_deadline = time.monotonic() - 1.0
+        started = time.monotonic()
+        with self.assertRaises(RecordError) as raised:
+            self.broker.close()
+        self.assertEqual(raised.exception.code, "driver_action_broker_shutdown_timeout")
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertTrue(self.broker._closed)
+        self.assertEqual(self.broker._engagement_fd, -1)
+        self.broker.close()
 
 
 if __name__ == "__main__":

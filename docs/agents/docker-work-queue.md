@@ -164,17 +164,30 @@ The parent currently supports only `ANTHROPIC_API_KEY`. A token-only
 `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` profile is rejected before container
 preparation; it is never reinterpreted as `x-api-key`. The child receives a dummy key and a local
 PID-1 URL. The real key, configured production origin, TLS connection, and redacted audit stay in
-the parent. Production is fixed to verified TLS at `api.anthropic.com:443`, `POST /v1/messages`,
-with no redirects. Plain HTTP loopback provider origins exist only through an explicit test-only
-constructor.
+the parent. Production is fixed to verified TLS at `api.anthropic.com:443`, with only
+`POST /v1/messages` and the observed exact `POST /v1/messages?beta=true` accepted; all other query
+forms and redirects are denied. Plain HTTP loopback provider origins exist only through an explicit
+test-only constructor.
 
-Before any provider contact, the parent duplicate-safely parses the bounded JSON request. It allows
+Before any provider contact, the parent duplicate-safely parses the bounded JSON request. The
+request model must exactly equal the runtime model in the parent-owned action admission, and
+`max_tokens` cannot exceed that admission's 32,768-token output ceiling. It allows
 ordinary inference and client-side tool definitions (`name`, `description`, JSON `input_schema`,
 and the bounded client-tool metadata fields). It rejects all typed server tools, including web
 fetch/search/code and unknown future types, plus remote MCP configuration, remote URL image/document
 sources, and container/skills extensions. URL-looking prose and JSON-schema string fields remain
 data. Provider response headers and body chunks are authenticated independently and streamed through
-PID 1 as they arrive, with aggregate size, inactivity, session-deadline, and disconnect bounds.
+PID 1 as they arrive, with aggregate size, inactivity, absolute session-deadline, and disconnect
+bounds. One absolute parent deadline covers DNS, connect, TLS, request write, response headers,
+body reads and redirects. Shutdown closes active client and upstream sockets, then allows a bounded
+250 ms cancellation/reaping grace; an expired worker fails closed after owned descriptors are
+released and the close state is made retry-safe.
+
+Before acknowledging completion, the parent persists a redacted receipt to
+`.work-queue-network-receipts.jsonl` under the engagement lock. The file contains at most 256 rows
+and 256 KiB, never request headers or bodies, and is reloaded on broker restart. Corrupt, symlinked,
+or hard-linked receipt storage fails closed. If persistence fails, the network result remains
+uncertain and is not acknowledged to the worker.
 
 Explicit target access is narrower still. A `network-policy-v1` block in the current signed
 `scope.md` must authorize the exact `target_fetch` operation, scheme, lowercase DNS hostname,

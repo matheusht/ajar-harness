@@ -928,7 +928,14 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
             try:
                 with (
                     mock.patch("work_queue_driver.compile_hunter_view", side_effect=compile_with_test_provider),
-                    mock.patch.dict(os.environ, {key: "" for key in MODEL_AUTH_ENV_KEYS}, clear=False),
+                    mock.patch.dict(
+                        os.environ,
+                        {
+                            **{key: "" for key in MODEL_AUTH_ENV_KEYS},
+                            "ANTHROPIC_API_KEY": "fixture-parent-api-key",
+                        },
+                        clear=False,
+                    ),
                 ):
                     result = run_driver(
                         workspace=workspace,

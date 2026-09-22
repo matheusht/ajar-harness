@@ -120,11 +120,12 @@
         "admission_state_binding": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["ledger_hash", "source_hashes", "event_count"],
+          "required": ["ledger_hash", "source_hashes", "event_count", "scope_hash"],
           "properties": {
             "ledger_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
             "source_hashes": {"type": "object", "additionalProperties": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}},
-            "event_count": {"type": "integer", "minimum": 1}
+            "event_count": {"type": "integer", "minimum": 1},
+            "scope_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
           }
         },
         "cognitive_view": {

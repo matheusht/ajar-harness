@@ -38,6 +38,35 @@ The latter runs the harness-owned PID-1 supervisor, action client, and Stop hook
 `/harness` mount. Pin and review the image that supplies those runtimes. A digest pin proves byte
 identity, not provenance or trust by itself.
 
+The repository includes a Darwin/Apple-Silicon qualification recipe at
+`docker/claude-runtime/`. It pins the official Node base manifest, Claude Code 2.1.278, the registry
+integrity values for the main and Linux arm64 packages, and Python. Its script builds locally, runs
+`claude --version`, `claude --help`, and `python3 --version`, pushes to an operator-owned registry so
+Docker records a usable `RepoDigest`, pulls that exact digest, repeats the checks, and prints the
+exact locally cached image reference:
+
+```sh
+CLAUDE_RUNTIME_REPOSITORY=registry.example/owned/claude-runtime \
+  docker/claude-runtime/build-and-qualify.sh
+```
+
+The printed `repository@sha256:...` reference can be passed to `--docker-image`. Registry upload is
+an explicit operator preparation write; the queue runner still uses `--pull never`. For a
+credential-free local build check that performs no registry write, set `QUALIFY_LOCAL_ONLY=1`; its
+tag is not accepted by the queue runner and is not a substitute for the digest-qualified result.
+The recipe contains no credentials and does not exercise a provider request. A live qualification
+still requires an explicitly supplied supported Claude credential at queue-run time.
+
+On 2026-09-22 the locally built 2.1.278 image also completed one credential-free request against an
+owned fake Anthropic server and consumed its streamed text response. That probe observed one
+`POST /v1/messages?beta=true`; request body keys were `context_management`, `max_tokens`,
+`messages`, `metadata`, `model`, `stream`, `system`, `thinking`, and `tools`. Each client tool used
+the keys `description`, `input_schema`, and `name`. Header names included `x-api-key`,
+`anthropic-version`, `anthropic-beta`, `x-claude-code-session-id`, `x-app`, and the `x-stainless-*`
+runtime metadata family. No secret value or real provider inference was used. Network policy for
+this client version therefore has to account for the exact `beta=true` query while retaining the
+typed inference-body and destination restrictions.
+
 ## Mount and lifecycle boundary
 
 The driver creates a uniquely named bridge network and a stopped container, then inspects both

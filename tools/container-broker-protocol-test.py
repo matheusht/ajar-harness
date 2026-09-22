@@ -809,6 +809,34 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(request["request_kind"], "session_end_check")
         self.assertIsNone(inline_inputs)
 
+    def test_v3_filing_action_is_stamped_to_the_authenticated_broker(self) -> None:
+        forged = {
+            "action": {
+                "argument": "--action-file",
+                "value": {
+                    "action_kind": "revise-finding",
+                    "action_version": 3,
+                    "executor_id": "forged-executor",
+                    "session_id": "forged-session",
+                },
+            }
+        }
+        with mock.patch.object(
+            admission,
+            "_parent_recorder_identity",
+            return_value=("local-uid-501:broker", "session-posix-501-77"),
+        ):
+            stamped = admission._stamp_parent_recorder_documents(
+                forged,
+                command="request-authority",
+                runtime_session_ref=RUNTIME_REF,
+                runtime_model="fixture-container-model",
+            )
+        action = stamped["action"]["value"]
+        self.assertEqual(action["action_version"], 3)
+        self.assertEqual(action["executor_id"], "local-uid-501:broker")
+        self.assertEqual(action["session_id"], "session-posix-501-77")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1066,7 +1066,7 @@ def _stamp_parent_recorder_documents(
             provenance["provider"] = None
             if view_binding is not None:
                 provenance.update(view_binding)
-        elif command == "request-authority" and value.get("action_version") == 2:
+        elif command == "request-authority" and value.get("action_version") in {2, 3}:
             value["executor_id"] = actor_id
             value["session_id"] = session_id
         entry["bytes"] = canonical_json_bytes(value)

@@ -87,40 +87,6 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_regular_once(path: Path, *, limit: int = _MAX_JSON_BYTES) -> bytes:
-    try:
-        before_path = path.lstat()
-        if stat.S_ISLNK(before_path.st_mode) or not stat.S_ISREG(before_path.st_mode):
-            raise ProvenanceError()
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except (OSError, ValueError) as exc:
-        raise ProvenanceError() from exc
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-            raise ProvenanceError()
-        chunks: list[bytes] = []
-        remaining = limit + 1
-        while remaining:
-            chunk = os.read(fd, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        data = b"".join(chunks)
-        after = os.fstat(fd)
-        if len(data) > limit or (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-            raise ProvenanceError()
-        return data
-    finally:
-        os.close(fd)
-
-
 def _decode_closed_json(data: bytes) -> dict[str, Any]:
     try:
         value = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicates)
@@ -129,10 +95,6 @@ def _decode_closed_json(data: bytes) -> dict[str, Any]:
     if not isinstance(value, dict) or canonical_json_bytes(value) != data:
         raise ProvenanceError()
     return value
-
-
-def _load_closed_json(path: Path, *, limit: int = _MAX_JSON_BYTES) -> dict[str, Any]:
-    return _decode_closed_json(_read_regular_once(path, limit=limit))
 
 
 def _tokens(text: str) -> set[str]:
@@ -626,11 +588,6 @@ def _atomic_write_bound(bound: _BoundOutputParent, data: bytes) -> None:
                 )
             except OSError:
                 pass
-
-
-def _atomic_write(path: Path, data: bytes) -> None:
-    with _bound_output_parent(path) as bound:
-        _atomic_write_bound(bound, data)
 
 
 def _write_exclusive(path: Path, data: bytes) -> bool:

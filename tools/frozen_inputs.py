@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Mapping
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -37,10 +36,6 @@ def emit(paths, base: os.PathLike[str] | str = REPOSITORY_ROOT) -> dict[str, dic
         absolute = Path(path) if os.path.isabs(os.fspath(path)) else root / os.fspath(path)
         block[name_for(absolute, root)] = spec_for(absolute, root)
     return block
-
-
-def emit_named(paths: Mapping[str, os.PathLike[str] | str], base: os.PathLike[str] | str) -> dict[str, dict[str, str]]:
-    return {name: spec_for(path, base) for name, path in paths.items()}
 
 
 def _manifest_base(manifest_path: Path, document: dict) -> Path:

@@ -1085,12 +1085,30 @@ def check_kb_entries():
             record(False, f"kb/{eid}: carries an ablation fixture",
                    "B.3: a promoted entry must prove it changes a routing decision")
             continue
-        fx_path = os.path.join(ROOT, fx_rel)
-        if not os.path.isfile(fx_path):
+        if not isinstance(fx_rel, str):
+            parts = []
+        else:
+            parts = fx_rel.split("/")
+        if (
+            not isinstance(fx_rel, str)
+            or "\\" in fx_rel
+            or os.path.isabs(fx_rel)
+            or len(parts) < 2
+            or parts[0] != "fixtures"
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            record(False, f"kb/{eid}: ablation fixture path stays within repository fixtures",
+                   str(fx_rel))
+            continue
+        fx_path = os.path.join(ROOT, *parts)
+        if not os.path.lexists(fx_path):
             record(False, f"kb/{eid}: ablation fixture exists", fx_rel)
             continue
-        with open(fx_path) as fh:
-            fx = json.load(fh)
+        guarded_dirs = tuple(os.path.join(ROOT, *parts[:index])
+                             for index in range(1, len(parts)))
+        fx = read_conformance_json(fx_path, f"kb/{eid} ablation fixture", guarded_dirs)
+        if fx is None:
+            continue
         changed, detail = kbmod.ablate(e, fx, entries)
         record(changed, f"kb/{eid}: still changes a routing decision",
                f"{detail['without']} == {detail['with']}")

@@ -78,6 +78,18 @@ def scan(root, mode):
         elif mode == "queue-stop-doctrine":
             module.check_queue_stop_doctrine()
             result = rows
+        elif mode == "kb-fixture":
+            sys.path.insert(0, str(CHECKER.parent))
+            import kb as kbmod
+            kbmod.load_kb = lambda: [{"id": "test-entry", "ablation_fixture": "fixtures/kb/input.json"}]
+            kbmod.validate = lambda entry: []
+            kbmod.ablate = lambda entry, fixture, entries: (True, {"without": [], "with": ["pattern.safe"]})
+            kbmod.route = lambda base, context, entries: base
+            module.subprocess.run = lambda *args, **kwargs: type(
+                "Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""}
+            )()
+            module.check_kb_entries()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -349,6 +361,40 @@ def main():
             scope_template_failures.append(f"scope template FIFO: {exc}")
 
     assert not scope_template_failures, "\n".join(scope_template_failures)
+
+    kb_fixture_failures = []
+    with tempfile.TemporaryDirectory(prefix="kb-ablation-fixture-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        fixture_dir = root / "fixtures" / "kb"
+        fixture_dir.mkdir(parents=True)
+        fixture = fixture_dir / "input.json"
+        fixture_json = '{"base":[],"context":{}}\n'
+        outside = Path(tmp) / "outside-kb-fixture.json"
+        outside.write_text(fixture_json)
+        fixture.symlink_to(outside)
+        try:
+            rows = run_scan(root, "kb-fixture")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            kb_fixture_failures.append(f"external fixture symlink: {exc}")
+
+        fixture.unlink()
+        os.mkfifo(fixture)
+        try:
+            rows = run_scan(root, "kb-fixture")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            kb_fixture_failures.append(f"fixture FIFO: {exc}")
+
+        fixture.unlink()
+        fixture.write_text(fixture_json)
+        try:
+            rows = run_scan(root, "kb-fixture")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            kb_fixture_failures.append(f"regular fixture: {exc}")
+
+    assert not kb_fixture_failures, "\n".join(kb_fixture_failures)
 
     finding_fixture_failures = []
     with tempfile.TemporaryDirectory(prefix="finding-fixture-e2e-") as tmp:
@@ -1085,7 +1131,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, KB ablation fixture, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

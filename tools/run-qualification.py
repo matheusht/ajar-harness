@@ -189,6 +189,21 @@ def self_test():
                 ok = False
                 print("  !! FIFO evaluator input was not rejected promptly")
 
+    with tempfile.TemporaryDirectory(prefix="qualification-input-") as temp_dir:
+        invalid_utf8 = os.path.join(temp_dir, "evaluator.json")
+        with open(invalid_utf8, "wb") as handle:
+            handle.write(b"\xff")
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--evaluator", invalid_utf8,
+             "--orchestrator", os.path.join(ex, "orchestrator-case-a.json")],
+            capture_output=True, text=True, timeout=2,
+        )
+        rejected = (result.returncode == 2 and "input error:" in result.stderr
+                    and "Traceback" not in result.stderr)
+        if not rejected:
+            ok = False
+            print("  !! invalid UTF-8 evaluator input returned an unhandled error")
+
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -206,7 +221,7 @@ def main(argv):
                 orchs.append(load(argv[i + 1])); i += 2
             else:
                 i += 1
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         print(f"input error: {exc}", file=sys.stderr)
         return 2
     if ev is None or not orchs:

@@ -45,7 +45,9 @@ def sha256_file(path):
 
 
 def find_preregs():
-    return sorted(glob.glob(PREREG_GLOB, recursive=True))
+    return sorted(candidate for candidate in glob.glob(PREREG_GLOB, recursive=True)
+                  if pinned_path(os.path.relpath(candidate, ROOT)) is not None
+                  and os.path.isfile(candidate))
 
 
 def pinned_path(relative):

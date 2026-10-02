@@ -103,8 +103,23 @@ def main():
             before = escaped_prereg.read_bytes()
             run("overlay_pins.py", "repin", "--apply", code=1, contains="no longer exist")
             assert escaped_prereg.read_bytes() == before
+
+            # Discovery must not follow a preregistration symlink outside the repository.
+            escaped_prereg.unlink()
+            outside_prereg = root.parent / f"{root.name}-outside-preregistration.json"
+            outside_prereg.write_text(json.dumps({
+                "status": "draft_not_authorized", "execution_authorized": False,
+                "common_safety_overlay": {"files": [{"path": "AGENTS.md", "sha256": "sha256:old"}]},
+            }))
+            prereg_link = root / "evals/synthetic/link/preregistration.json"
+            prereg_link.parent.mkdir(parents=True)
+            prereg_link.symlink_to(outside_prereg)
+            outside_before = outside_prereg.read_bytes()
+            run("overlay_pins.py", "repin", "--apply", contains="nothing to refresh")
+            assert outside_prereg.read_bytes() == outside_before
         finally:
             outside.unlink(missing_ok=True)
+            (root.parent / f"{root.name}-outside-preregistration.json").unlink(missing_ok=True)
     print("engineering guidance: public CLI navigation, mirror, history and draft/frozen pin controls passed")
 
 

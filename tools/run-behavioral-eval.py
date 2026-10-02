@@ -34,8 +34,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -61,8 +65,7 @@ FORBIDDEN_IN_VIEW = ["signal_available", "contaminated", "gold_verdict", "win_re
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def sha256_text(text):
@@ -558,6 +561,21 @@ class _ClaimingResearcher:
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="behavioral-eval-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     eps = load_episodes("task-reframing")
     budget = {"max_probes": 6}
 
@@ -620,7 +638,6 @@ def self_test():
         print("[self-test] blind check is structural: on-topic 'contaminated/class' prose passes, leaked key raises: ok")
 
     # immutable artifacts: a second write to the same run dir is refused; skipped never overwrites completed.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         rd = os.path.join(d, "runs", "fake-completed-x"); os.makedirs(rd)
         write_immutable(rd, {"status": "completed", "backend": "fake", "model_id": "x", "run_id": "r", "campaign_id": "c"},
@@ -712,7 +729,11 @@ def main(argv):
     if not args.campaign:
         ap.print_help()
         return 2
-    return run_cli(args.campaign, backend=args.backend, only_candidate=args.candidate, model_cmd=args.model_cmd)
+    try:
+        return run_cli(args.campaign, backend=args.backend, only_candidate=args.candidate, model_cmd=args.model_cmd)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"invalid campaign input: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

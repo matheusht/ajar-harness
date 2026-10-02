@@ -1312,17 +1312,29 @@ def check_finding_lifecycle():
     control_fixture = os.path.join(ROOT, "fixtures", "lifecycle-control-kind")
     if os.path.isdir(control_fixture):
         from finding_lifecycle import Gates, g2_control
+        fixture_root = os.path.join(ROOT, "fixtures")
+        cases_dir = os.path.join(control_fixture, "cases")
 
         def control_case(name):
-            case = os.path.join(control_fixture, "cases", name)
-            finding = load_json(os.path.join(case, "finding.json"))
-            attest = load_json(os.path.join(case, "attest.json"))
+            case = os.path.join(cases_dir, name)
+            finding = read_conformance_json(
+                os.path.join(case, "finding.json"), f"lifecycle-control-kind/{name}/finding.json",
+                (fixture_root, control_fixture, cases_dir, case),
+            )
+            attest = read_conformance_json(
+                os.path.join(case, "attest.json"), f"lifecycle-control-kind/{name}/attest.json",
+                (fixture_root, control_fixture, cases_dir, case),
+            )
+            if finding is None or attest is None:
+                return None
             gate = Gates()
             g2_control(finding, attest, gate, control_fixture)
             return gate.rows[0]
 
         replay = control_case("replay-as-control")
         matched = control_case("matched-control")
+        if replay is None or matched is None:
+            return
         record(not replay["ok"], "lifecycle-control-kind: replay-as-control blocks G2",
                replay["detail"])
         record(matched["ok"], "lifecycle-control-kind: matched control clears G2",

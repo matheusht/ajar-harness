@@ -21,8 +21,23 @@ def scan(root, mode):
     rows = []
     module.record = lambda ok, label, detail="": rows.append((ok, label, detail))
     with contextlib.redirect_stdout(io.StringIO()):
-        (module.check_secrets if mode == "secrets" else module.check_oracles)()
-    print(json.dumps(rows))
+        if mode == "secrets":
+            module.check_secrets()
+            result = rows
+        elif mode == "oracles":
+            module.check_oracles()
+            result = rows
+        elif mode == "casebooks":
+            module.subprocess.run = lambda *args, **kwargs: type(
+                "Result", (), {"returncode": 0, "stdout": "", "stderr": ""}
+            )()
+            module.check_casebooks({"pattern.safe"})
+            result = rows
+        else:
+            ids = module.collect_pattern_ids()
+            module.check_cards("patterns", ids, set())
+            result = {"ids": ids, "rows": rows}
+    print(json.dumps(result))
 
 
 def run_scan(root, mode="secrets"):
@@ -109,8 +124,177 @@ def main():
         except Exception as exc:
             oracle_failures.append(f"regular card: {exc}")
 
+        oracle_dir.rename(root / "skills" / "oracles-saved")
+        outside_root = Path(tmp) / "outside-oracles"
+        outside_root.mkdir()
+        (outside_root / "external.md").write_text(oracle)
+        oracle_dir.symlink_to(outside_root, target_is_directory=True)
+        try:
+            rows = run_scan(root, "oracles")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            oracle_failures.append(f"oracle root symlink: {exc}")
+
     assert not oracle_failures, "\n".join(oracle_failures)
-    print("conformance filesystem E2E passed (secret and oracle scans)")
+
+    card_failures = []
+    with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        patterns = root / "skills" / "patterns"
+        patterns.mkdir(parents=True)
+
+        fifo_dir = patterns / "fifo-card"
+        fifo_dir.mkdir()
+        os.mkfifo(fifo_dir / "SKILL.md")
+        try:
+            result = run_scan(root, "cards")
+            rows = result["rows"]
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), result
+        except Exception as exc:
+            card_failures.append(f"FIFO card: {exc}")
+        (fifo_dir / "SKILL.md").unlink()
+        fifo_dir.rmdir()
+
+        card = "---\nid: pattern.external\ntype: pattern\nactivation:\n  strong: evidence\n  weak: signal\n  negative: control\n---\n"
+        outside = Path(tmp) / "outside.md"
+        outside.write_text(card)
+        leaf_dir = patterns / "leaf-link"
+        leaf_dir.mkdir()
+        leaf = leaf_dir / "SKILL.md"
+        leaf.symlink_to(outside)
+        try:
+            result = run_scan(root, "cards")
+            assert "pattern.external" not in result["ids"], result
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            card_failures.append(f"card file symlink: {exc}")
+        leaf.unlink()
+        leaf_dir.rmdir()
+
+        outside_dir = Path(tmp) / "outside-card-dir"
+        outside_dir.mkdir()
+        (outside_dir / "SKILL.md").write_text(card)
+        dir_link = patterns / "dir-link"
+        dir_link.symlink_to(outside_dir, target_is_directory=True)
+        try:
+            result = run_scan(root, "cards")
+            assert "pattern.external" not in result["ids"], result
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            card_failures.append(f"card directory symlink: {exc}")
+        dir_link.unlink()
+
+        regular_dir = patterns / "regular-card"
+        regular_dir.mkdir()
+        (regular_dir / "SKILL.md").write_text(card.replace("pattern.external", "pattern.regular"))
+        try:
+            result = run_scan(root, "cards")
+            assert "pattern.regular" in result["ids"], result
+            assert all(row[0] for row in result["rows"]), result
+        except Exception as exc:
+            card_failures.append(f"regular pattern card: {exc}")
+
+    with tempfile.TemporaryDirectory(prefix="card-root-symlink-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        skills = root / "skills"
+        skills.mkdir(parents=True)
+        outside = Path(tmp) / "outside-patterns"
+        outside.mkdir()
+        (outside / "external").mkdir()
+        (outside / "external" / "SKILL.md").write_text(
+            "---\nid: pattern.external\ntype: pattern\nactivation:\n  strong: x\n  weak: y\n  negative: z\n---\n"
+        )
+        (skills / "patterns").symlink_to(outside, target_is_directory=True)
+        result = run_scan(root, "cards")
+        assert "pattern.external" not in result["ids"], result
+        assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+
+    with tempfile.TemporaryDirectory(prefix="skills-root-symlink-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        root.mkdir()
+        outside = Path(tmp) / "outside-skills"
+        patterns = outside / "patterns" / "external"
+        patterns.mkdir(parents=True)
+        (patterns / "SKILL.md").write_text(
+            "---\nid: pattern.external\ntype: pattern\nactivation:\n  strong: x\n  weak: y\n  negative: z\n---\n"
+        )
+        oracles = outside / "oracles"
+        oracles.mkdir()
+        (oracles / "external.md").write_text("---\nid: oracle.external\ntype: oracle\n---\n")
+        (root / "skills").symlink_to(outside, target_is_directory=True)
+        result = run_scan(root, "cards")
+        assert "pattern.external" not in result["ids"], result
+        assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        rows = run_scan(root, "oracles")
+        assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+
+    assert not card_failures, "\n".join(card_failures)
+
+    casebook_failures = []
+    with tempfile.TemporaryDirectory(prefix="casebook-scan-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        casebooks = root / "casebooks"
+        casebooks.mkdir(parents=True)
+
+        fifo_dir = casebooks / "fifo-book"
+        fifo_dir.mkdir()
+        os.mkfifo(fifo_dir / "refs.md")
+        try:
+            rows = run_scan(root, "casebooks")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            casebook_failures.append(f"FIFO casebook: {exc}")
+        (fifo_dir / "refs.md").unlink()
+        fifo_dir.rmdir()
+
+        outside_file = Path(tmp) / "outside-refs.md"
+        outside_file.write_text("pattern.safe")
+        file_link_dir = casebooks / "file-link"
+        file_link_dir.mkdir()
+        file_link = file_link_dir / "refs.md"
+        file_link.symlink_to(outside_file)
+        try:
+            rows = run_scan(root, "casebooks")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            casebook_failures.append(f"casebook file symlink: {exc}")
+        file_link.unlink()
+        file_link_dir.rmdir()
+
+        outside_dir = Path(tmp) / "outside-casebook"
+        outside_dir.mkdir()
+        (outside_dir / "refs.md").write_text("pattern.safe")
+        dir_link = casebooks / "dir-link"
+        dir_link.symlink_to(outside_dir, target_is_directory=True)
+        try:
+            rows = run_scan(root, "casebooks")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            casebook_failures.append(f"casebook directory symlink: {exc}")
+        dir_link.unlink()
+
+        regular = casebooks / "regular-book"
+        regular.mkdir()
+        (regular / "refs.md").write_text("pattern.safe")
+        try:
+            rows = run_scan(root, "casebooks")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            casebook_failures.append(f"regular casebook: {exc}")
+
+    with tempfile.TemporaryDirectory(prefix="casebook-root-symlink-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        outside = Path(tmp) / "outside-casebooks"
+        outside.mkdir()
+        (outside / "external").mkdir()
+        (outside / "external" / "refs.md").write_text("pattern.safe")
+        root.mkdir()
+        (root / "casebooks").symlink_to(outside, target_is_directory=True)
+        rows = run_scan(root, "casebooks")
+        assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+
+    assert not casebook_failures, "\n".join(casebook_failures)
+    print("conformance filesystem E2E passed (secret, oracle, card, and casebook scans)")
 
 
 if __name__ == "__main__":

@@ -81,13 +81,21 @@ def get_key(fm, key):
 
 
 def list_cards(subdir):
+    skills_root = os.path.join(ROOT, "skills")
     base = os.path.join(ROOT, "skills", subdir)
+    if os.path.islink(skills_root) or os.path.islink(base):
+        record(False, f"{subdir}: card directory is not a symlink",
+               "unsafe symlinked skill directory")
+        return []
     if not os.path.isdir(base):
         return []
     out = []
     for name in sorted(os.listdir(base)):
-        path = os.path.join(base, name, "SKILL.md")
-        if os.path.isfile(path):
+        card_dir = os.path.join(base, name)
+        path = os.path.join(card_dir, "SKILL.md")
+        if os.path.islink(card_dir):
+            out.append((name, card_dir))
+        elif os.path.lexists(path):
             out.append((name, path))
     return out
 
@@ -95,7 +103,13 @@ def list_cards(subdir):
 def collect_pattern_ids():
     ids = {}
     for name, path in list_cards("patterns"):
-        fm = front_matter(open(path).read()) or ""
+        try:
+            text = read_regular_text(path, no_follow=True)
+        except OSError as exc:
+            record(False, f"patterns/{name}: regular card input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
+        fm = front_matter(text) or ""
         cid = get_key(fm, "id")
         if cid:
             ids[cid] = name
@@ -105,7 +119,12 @@ def collect_pattern_ids():
 def check_cards(subdir, pattern_ids, cap_ids):
     print(f"\n[cards] skills/{subdir}/")
     for name, path in list_cards(subdir):
-        text = open(path).read()
+        try:
+            text = read_regular_text(path, no_follow=True)
+        except OSError as exc:
+            record(False, f"{subdir}/{name}: regular card input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
         fm = front_matter(text)
         record(fm is not None, f"{subdir}/{name}: front-matter present")
         if fm is None:
@@ -600,7 +619,11 @@ def check_payload_proposals():
 
 def check_oracles():
     print("\n[oracles] skills/oracles/")
+    skills_root = os.path.join(ROOT, "skills")
     base = os.path.join(ROOT, "skills", "oracles")
+    if os.path.islink(skills_root) or os.path.islink(base):
+        record(False, "oracles: source directory is safe", "unsafe symlinked directory")
+        return
     if not os.path.isdir(base):
         return
     for fn in sorted(os.listdir(base)):
@@ -624,15 +647,31 @@ def check_casebooks(pattern_ids):
     base = os.path.join(ROOT, "casebooks")
     if not os.path.isdir(base):
         return
+    if os.path.islink(base):
+        record(False, "casebooks: source directory is safe", "unsafe symlinked directory")
+        return
     for name in sorted(os.listdir(base)):
         cdir = os.path.join(base, name)
-        if name.startswith("_") or not os.path.isdir(cdir):
+        if name.startswith("_"):
+            continue
+        if os.path.islink(cdir):
+            record(False, f"casebooks/{name}: source directory is safe",
+                   "unsafe symlinked directory")
+            continue
+        if not os.path.isdir(cdir):
             continue
         refs = set()
         for fn in os.listdir(cdir):
             fp = os.path.join(cdir, fn)
-            if os.path.isfile(fp):
-                refs |= set(re.findall(r"pattern\.[a-z0-9-]+", open(fp).read()))
+            if not os.path.lexists(fp) or (os.path.isdir(fp) and not os.path.islink(fp)):
+                continue
+            try:
+                text = read_regular_text(fp, no_follow=True)
+            except OSError as exc:
+                record(False, f"casebooks/{name}/{fn}: regular input is safe to read",
+                       f"unsafe input: {exc.strerror or 'not a regular file'}")
+                continue
+            refs |= set(re.findall(r"pattern\.[a-z0-9-]+", text))
         unknown = sorted(r for r in refs if r not in pattern_ids)
         record(not unknown, f"casebooks/{name}: pattern refs resolve",
                f"unknown: {unknown}" if unknown else "")

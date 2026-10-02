@@ -12,6 +12,7 @@ A candidate is BLOCKED if any of these hold:
     hermetic targets, schemas, budgets) — the 'what winning means' set;
   - its declared budget differs from the campaign budget (no buying extra budget);
   - a frozen campaign input's sha256 has drifted (benchmark/evaluator tamper);
+  - a diff, evidence bundle, or frozen input path escapes the repository root;
   - its diff hash does not match the diff file (candidate tamper);
   - its evidence bundle is missing;
   - it is a baseline but is not a no-op (a control must touch nothing).
@@ -92,6 +93,19 @@ def candidate_dir(campaign_path, candidate_id):
     return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
 
 
+def repo_file_path(root, relative_path):
+    """Resolve a repository-relative artifact path, rejecting absolute and symlink escapes."""
+    if not isinstance(relative_path, str) or not relative_path or os.path.isabs(relative_path):
+        return None
+    root = os.path.realpath(root)
+    path = os.path.join(root, relative_path)
+    resolved = os.path.realpath(path)
+    try:
+        return path if os.path.commonpath((root, resolved)) == root else None
+    except ValueError:
+        return None
+
+
 def git_patch_analysis(diff_path, root):
     """Derive touched paths and detect UNSUPPORTED patch forms using git's own parser. The header-only
     parser missed mode-only, binary, rename, copy, and symlink patches — a candidate could change a
@@ -170,9 +184,11 @@ def gate(campaign, candidate, root):
     # mutation-target / immutable checks against the UNION, so a file hidden from touched_files but
     # present in the diff still blocks.
     diff = candidate.get("diff")
-    diff_path = os.path.join(root, diff) if diff else None
+    diff_path = repo_file_path(root, diff) if diff else None
     derived = set()
-    if not diff or not os.path.isfile(diff_path):
+    if diff and diff_path is None:
+        reasons.append("diff path must be repository-relative and remain inside the repository")
+    elif not diff or not os.path.isfile(diff_path):
         if not is_baseline:
             reasons.append(f"diff missing: {diff}")
     else:
@@ -210,11 +226,18 @@ def gate(campaign, candidate, root):
         reasons.append("candidate budget differs from campaign budget")
 
     eb = candidate.get("evidence_bundle")
-    if not eb or not os.path.isfile(os.path.join(root, eb)):
+    evidence_path = repo_file_path(root, eb) if eb else None
+    if eb and evidence_path is None:
+        reasons.append("evidence_bundle path must be repository-relative and remain inside the repository")
+    elif not eb or not os.path.isfile(evidence_path):
         reasons.append(f"evidence bundle missing: {eb}")
 
     for name, spec in campaign.get("frozen_inputs", {}).items():
-        p = os.path.join(root, spec.get("path", ""))
+        frozen_path = spec.get("path", "")
+        p = repo_file_path(root, frozen_path)
+        if p is None:
+            reasons.append(f"frozen input '{name}' path must be repository-relative and remain inside the repository: {frozen_path}")
+            continue
         if not os.path.isfile(p):
             reasons.append(f"frozen input '{name}' missing: {spec.get('path')}")
         elif sha256_file(p) != spec.get("sha256"):
@@ -329,6 +352,33 @@ def self_test():
         expect("clean candidate allows", base, "allow")
         expect("candidate ID cannot escape the candidate directory",
                dict(base, candidate_id="../../outside"), "block")
+
+        with tempfile.TemporaryDirectory(prefix="campaign-artifacts-outside-") as outside:
+            outside_diff = os.path.join(outside, "candidate.diff")
+            with open(outside_diff, "w") as handle:
+                handle.write(_diff_for([CARD]))
+            outside_hash = sha256_file(outside_diff)
+            outside_rel = os.path.relpath(outside_diff, root)
+            expect("candidate diff outside repository blocks",
+                   dict(base, diff=outside_rel, candidate_hash=outside_hash), "block")
+            expect("absolute candidate diff blocks",
+                   dict(base, diff=outside_diff, candidate_hash=outside_hash), "block")
+
+            symlink_diff = os.path.join(root, "evals/c/outside.diff")
+            os.symlink(outside_diff, symlink_diff)
+            expect("candidate diff symlink outside repository blocks",
+                   dict(base, diff=os.path.relpath(symlink_diff, root), candidate_hash=outside_hash), "block")
+
+            outside_evidence = os.path.join(outside, "evidence.md")
+            with open(outside_evidence, "w") as handle:
+                handle.write("# Evidence bundle\n\n- campaign: c\n- mutation target: x\n- eligibility: candidate\n")
+            expect("evidence bundle outside repository blocks",
+                   dict(base, evidence_bundle=os.path.relpath(outside_evidence, root)), "block")
+
+            frozen_campaign = dict(campaign, frozen_inputs={"outside": {
+                "path": outside_rel, "sha256": outside_hash,
+            }})
+            expect("frozen input outside repository blocks", base, "block", camp=frozen_campaign)
 
         arrow_campaign = dict(
             campaign,

@@ -282,7 +282,13 @@ def materialize_candidate(campaign, candidate, root=ROOT):
 
     measured = []
     diff = candidate.get("diff")
-    diff_abs = (diff if os.path.isabs(diff) else os.path.join(root, diff)) if diff else None
+    diff_abs = CC.repo_file_path(root, diff) if diff else None
+    if diff and diff_abs is None:
+        reason = "candidate diff path must be repository-relative and remain inside the repository"
+        res["apply"] = "block"
+        res["measured_reasons"] = [reason]
+        res["reasons"] = sorted(set(pf_reasons + [reason]))
+        return res
     live_target = os.path.join(root, target_rel) if target_rel else None
     before = sha256_file(live_target) if live_target else None
 
@@ -551,6 +557,34 @@ def self_test():
             ok = False; print(f"[self-test] isolation apply failed: {iso}, live changed={before != after}")
         else:
             print("[self-test] isolated apply: clean diff applies, live tree byte-identical: ok")
+
+        with tempfile.TemporaryDirectory(prefix="candidate-diff-outside-") as outside:
+            outside_diff = os.path.join(outside, "candidate.diff")
+            with open(outside_diff, "w") as fh:
+                fh.write(diff)
+            evidence = os.path.join(repo, "evidence.md")
+            with open(evidence, "w") as fh:
+                fh.write("# Evidence bundle\n\n- campaign: c\n- mutation target: demo\n- eligibility: candidate\n")
+            mutation_target = "skills/techniques/demo/"
+            campaign = {"campaign_id": "c", "tracks": [{"name": "demo", "mutation_target": mutation_target}],
+                        "mutable_allowlist": [mutation_target], "immutable": [], "frozen_inputs": {}, "budgets": {}}
+            candidate = {"candidate_id": "cand-outside", "campaign_id": "c",
+                         "mutation_target": mutation_target, "touched_files": [tgt],
+                         "diff": os.path.relpath(outside_diff, repo),
+                         "candidate_hash": hashlib.sha256(diff.encode()).hexdigest(),
+                         "evidence_bundle": "evidence.md"}
+            original_measure_conformance = globals()["measure_conformance"]
+            globals()["measure_conformance"] = lambda _: True
+            try:
+                measured_outside = materialize_candidate(campaign, candidate, repo)
+            finally:
+                globals()["measure_conformance"] = original_measure_conformance
+            outside_blocked = (measured_outside["verdict"] == "block"
+                               and measured_outside["apply"] != "pass")
+            if not outside_blocked:
+                ok = False; print(f"[self-test] out-of-repository diff reached measured apply: {materialization_summary(measured_outside)}")
+            else:
+                print("[self-test] out-of-repository diff is blocked before measured apply: ok")
 
         # a non-applying diff is reported as such, and the live tree still does not change
         bad = os.path.join(repo, "bad.diff")

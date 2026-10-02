@@ -39,7 +39,7 @@ import sys
 import tempfile
 import time
 
-from regular_file_io import load_json
+from regular_file_io import load_json, read_regular_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -264,10 +264,13 @@ def evidence_complete(bundle_rel):
     provenance fields. An empty or stub bundle fails."""
     if not bundle_rel:
         return False
-    p = os.path.join(ROOT, bundle_rel)
-    if not os.path.isfile(p):
+    p = CC.repo_file_path(ROOT, bundle_rel)
+    if not p or not os.path.isfile(p):
         return False
-    text = open(p).read()
+    try:
+        text = read_regular_text(p, encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
     if len(text.strip()) < 40:
         return False
     low = text.lower()
@@ -500,9 +503,10 @@ def base_manifest(campaign, campaign_path, backend, status, run_dir, model_id=""
         cm = os.path.join(ROOT, entry["manifest"])
         cand = load(cm) if os.path.isfile(cm) else {}
         techniques.add(cand.get("technique", ""))
+        diff_path = CC.repo_file_path(ROOT, cand.get("diff")) if cand.get("diff") else None
         cand_hashes[entry["candidate_id"]] = {
             "candidate_manifest": APE.sha256_file(cm),
-            "diff": APE.sha256_file(os.path.join(ROOT, cand["diff"])) if cand.get("diff") else None,
+            "diff": APE.sha256_file(diff_path) if diff_path and os.path.isfile(diff_path) else None,
             "incumbent_card": sha256_text(APE_read_head(measure_target(cand))) if cand.get("mutation_target") else None,
         }
     ep_hashes = {t: APE.sha256_file(os.path.join(EPISODES_DIR, f"{t}.json")) for t in sorted(techniques) if t}
@@ -681,13 +685,19 @@ def self_test():
     with _tf.TemporaryDirectory() as d:
         rel = os.path.relpath(os.path.join(d, "b.md"), ROOT)
         open(os.path.join(d, "b.md"), "w").write("")
-        empty_ok = not evidence_complete(rel)
         open(os.path.join(d, "b.md"), "w").write("# bundle\n\n- campaign: c\n- mutation target: x\n- eligibility: candidate\n")
-        full_ok = evidence_complete(rel)
-        if not (empty_ok and full_ok):
-            ok = False; print("[self-test] evidence completeness must be structural (empty fails, structured passes)")
+        outside_ok = not evidence_complete(rel)
+        with _tf.TemporaryDirectory(dir=ROOT) as inside:
+            inside_rel = os.path.relpath(os.path.join(inside, "b.md"), ROOT)
+            open(os.path.join(inside, "b.md"), "w").write("")
+            empty_ok = not evidence_complete(inside_rel)
+            open(os.path.join(inside, "b.md"), "w").write(
+                "# bundle\n\n- campaign: c\n- mutation target: x\n- eligibility: candidate\n")
+            full_ok = evidence_complete(inside_rel)
+        if not (outside_ok and empty_ok and full_ok):
+            ok = False; print(f"[self-test] evidence path/structure wrong (outside={outside_ok}, empty={empty_ok}, full={full_ok})")
         else:
-            print("[self-test] evidence completeness is structural (empty bundle fails): ok")
+            print("[self-test] external evidence rejected; in-repo structure is checked: ok")
 
     # model backend without a configured command -> ModelUnavailable (honest non-success at the adapter)
     try:
@@ -712,6 +722,23 @@ def self_test():
         else:
             print("[self-test] completed model run pins a redacted backend command (no raw cmd/secret): ok")
 
+    with _tf.TemporaryDirectory() as outside, _tf.TemporaryDirectory(dir=ROOT) as inside:
+        diff_path = os.path.join(outside, "candidate.diff")
+        open(diff_path, "w").write("--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n base\n+candidate\n")
+        candidate_path = os.path.join(inside, "candidate-manifest.json")
+        with open(candidate_path, "w") as fh:
+            json.dump({"candidate_id": "cand-external", "technique": "task-reframing",
+                       "diff": diff_path}, fh)
+        path_campaign = {"campaign_id": "c", "candidates": [{
+            "candidate_id": "cand-external", "manifest": os.path.relpath(candidate_path, ROOT),
+        }]}
+        path_manifest = base_manifest(path_campaign, cpath, "fake", "failed", rd)
+        diff_hash = path_manifest["candidate_hashes"]["cand-external"]["diff"]
+        if diff_hash is not None:
+            ok = False; print("[self-test] run manifest must not hash an external candidate diff")
+        else:
+            print("[self-test] run manifest omits an external candidate diff hash: ok")
+
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -731,7 +758,7 @@ def main(argv):
         return 2
     try:
         return run_cli(args.campaign, backend=args.backend, only_candidate=args.candidate, model_cmd=args.model_cmd)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         print(f"invalid campaign input: {exc}", file=sys.stderr)
         return 2
 

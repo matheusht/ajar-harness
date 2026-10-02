@@ -414,7 +414,10 @@ def scope_flag_problems(registry_text, template_text):
 
 def check_capability_scope_flags():
     tmpl = os.path.join(ROOT, "engagements", "_TEMPLATE", "scope.md")
-    if not os.path.isfile(tmpl):
+    template_text = read_conformance_text(
+        tmpl, "capability scope template", (os.path.dirname(tmpl),), encoding="utf-8"
+    )
+    if template_text is None:
         return
     src = ""
     for fn in ("registry.yaml", "classes.yaml"):
@@ -422,7 +425,7 @@ def check_capability_scope_flags():
         text = _read_capability_input(fp, f"capabilities/{fn}")
         if text is not None:
             src += text + "\n"
-    problems = scope_flag_problems(src, open(tmpl).read())
+    problems = scope_flag_problems(src, template_text)
     record(not problems, "capabilities: every required scope flag is declared in _TEMPLATE/scope.md",
            "; ".join(problems) if problems else "")
 
@@ -459,7 +462,9 @@ def check_capability_must_reject():
     print("\n[capabilities] _must_reject corpus (the keyhole must fail closed)")
     cap_ids = collect_capability_ids()
     tmpl = os.path.join(ROOT, "engagements", "_TEMPLATE", "scope.md")
-    tmpl_text = open(tmpl).read() if os.path.isfile(tmpl) else ""
+    tmpl_text = read_conformance_text(
+        tmpl, "capability scope template", (os.path.dirname(tmpl),), encoding="utf-8"
+    ) or ""
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
         if not os.path.lexists(fp):

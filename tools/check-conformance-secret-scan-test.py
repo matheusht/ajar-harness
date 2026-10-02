@@ -306,6 +306,50 @@ def main():
 
     assert not fixture_failures, "\n".join(fixture_failures)
 
+    scope_template_failures = []
+    with tempfile.TemporaryDirectory(prefix="capability-scope-template-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        fixture_dir = root / "fixtures" / "capabilities" / "_must_reject"
+        fixture_dir.mkdir(parents=True)
+        (root / "capabilities").mkdir()
+        (root / "capabilities" / "registry.yaml").write_text("capabilities: []\n")
+        template_dir = root / "engagements" / "_TEMPLATE"
+        template_dir.mkdir(parents=True)
+        template = template_dir / "scope.md"
+        (fixture_dir / "missing-scope-flag.yaml").write_text(
+            "capabilities:\n"
+            "  - id: external.bad.scope\n"
+            "    requires: [scope_allows_external]\n"
+        )
+        outside = Path(tmp) / "outside-scope.md"
+        outside.write_text("scope_allows_external: no\n")
+        template.symlink_to(outside)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+            assert any(row[0] and "missing-scope-flag.yaml" in row[1] for row in rows), rows
+        except Exception as exc:
+            scope_template_failures.append(f"scope template symlink: {exc}")
+
+        template.unlink()
+        template.write_text("ordinary local scope template\n")
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            scope_template_failures.append(f"regular scope template: {exc}")
+
+        template.unlink()
+        os.mkfifo(template)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+            assert any(row[0] and "missing-scope-flag.yaml" in row[1] for row in rows), rows
+        except Exception as exc:
+            scope_template_failures.append(f"scope template FIFO: {exc}")
+
+    assert not scope_template_failures, "\n".join(scope_template_failures)
+
     finding_fixture_failures = []
     with tempfile.TemporaryDirectory(prefix="finding-fixture-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -1041,7 +1085,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

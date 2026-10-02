@@ -1918,7 +1918,12 @@ def check_cited_fixtures():
     pat = re.compile(r"evals/[A-Za-z0-9_./-]*?fixtures/([A-Za-z0-9._-]+)/")
     for subdir in ("vulns", "patterns", "techniques"):
         for name, path in list_cards(subdir):
-            text = open(path).read()
+            try:
+                text = read_regular_text(path, no_follow=True)
+            except OSError as exc:
+                record(False, f"{subdir}/{name}: regular card input is safe to read",
+                       f"unsafe input: {exc.strerror or 'not a regular file'}")
+                continue
             fm = front_matter(text) or ""
             planned = re.search(r"^fixture_status:\s*planned\s*$", fm, re.MULTILINE) is not None
             cited = sorted({m.group(0) for m in pat.finditer(text)})

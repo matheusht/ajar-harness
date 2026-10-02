@@ -69,6 +69,9 @@ def scan(root, mode):
         elif mode == "finding-traps":
             module.check_finding_traps()
             result = rows
+        elif mode == "cited-fixtures":
+            module.check_cited_fixtures()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -416,6 +419,40 @@ def main():
             attestation_failures.append(f"attestation FIFO: {exc}")
 
     assert not attestation_failures, "\n".join(attestation_failures)
+
+    cited_fixture_failures = []
+    with tempfile.TemporaryDirectory(prefix="cited-fixture-card-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        for subdir in ("vulns", "patterns", "techniques"):
+            (root / "skills" / subdir).mkdir(parents=True)
+        (root / "evals" / "demo" / "fixtures" / "case-one").mkdir(parents=True)
+        external = Path(tmp) / "outside-card.md"
+        external.write_text("This card cites evals/demo/fixtures/case-one/example.json.\n")
+        link = root / "skills" / "vulns" / "linked-card" / "SKILL.md"
+        link.parent.mkdir()
+        link.symlink_to(external)
+        fifo = root / "skills" / "patterns" / "blocked-card" / "SKILL.md"
+        fifo.parent.mkdir()
+        regular = root / "skills" / "techniques" / "local-card" / "SKILL.md"
+        regular.parent.mkdir()
+        regular.write_text("This card cites evals/demo/fixtures/case-one/example.json.\n")
+        try:
+            rows = run_scan(root, "cited-fixtures")
+            assert rows and any(not row[0] and "unsafe input" in row[2] for row in rows), rows
+            assert any(row[0] and "cited fixture exists" in row[1] for row in rows), rows
+        except Exception as exc:
+            cited_fixture_failures.append(f"external card symlink: {exc}")
+
+        link.unlink()
+        os.mkfifo(fifo)
+        try:
+            rows = run_scan(root, "cited-fixtures")
+            assert rows and any(not row[0] and "unsafe input" in row[2] for row in rows), rows
+            assert any(row[0] and "cited fixture exists" in row[1] for row in rows), rows
+        except Exception as exc:
+            cited_fixture_failures.append(f"FIFO card: {exc}")
+
+    assert not cited_fixture_failures, "\n".join(cited_fixture_failures)
 
     family_failures = []
     with tempfile.TemporaryDirectory(prefix="tool-family-e2e-") as tmp:
@@ -909,7 +946,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

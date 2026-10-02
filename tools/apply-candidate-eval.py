@@ -424,7 +424,7 @@ def run_cli(campaign_path, only_candidate=None, backend="deterministic"):
     results = []
     for cand in candidates:
         entry = evaluate_candidate(campaign, cand, scoreboard, backend)
-        cdir = os.path.join(os.path.dirname(campaign_path), "candidates", cand["candidate_id"])
+        cdir = CC.candidate_dir(campaign_path, cand.get("candidate_id"))
         write_json(os.path.join(cdir, "applied-eval.json"), entry)
         results.append(entry)
 
@@ -677,7 +677,7 @@ def main(argv):
         return 2
     try:
         return run_cli(args.campaign, only_candidate=args.candidate, backend=args.backend)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         print(f"invalid campaign input: {exc}", file=sys.stderr)
         return 2
 

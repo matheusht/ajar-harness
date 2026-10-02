@@ -394,7 +394,7 @@ def choose_backend(name):
 
 
 def candidate_dir(campaign_path, candidate_id):
-    return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
+    return CC.candidate_dir(campaign_path, candidate_id)
 
 
 def write_candidate(campaign_path, campaign, track, backend_result, repo_rel, old_text, include_budget=True):
@@ -552,7 +552,7 @@ def write_candidate_scores(campaign_path):
     for row in report["candidates"]:
         cid = row["candidate_id"]
         shadow_verdict = (row.get("keep_discard") or {}).get("verdict")
-        bundle_path = os.path.join(camp_dir, "candidates", cid, "promotion", "promotion-bundle.json")
+        bundle_path = os.path.join(candidate_dir(campaign_path, cid), "promotion", "promotion-bundle.json")
         bundle = load(bundle_path) if os.path.isfile(bundle_path) else {}
         materialization_verdict = (bundle.get("materialization") or {}).get("verdict")
         authoritative_verdict = bundle.get("authoritative_verdict", shadow_verdict)
@@ -574,7 +574,7 @@ def write_candidate_scores(campaign_path):
                     "measured materialization boundary when it blocks, else the replay-adjusted shadow "
                     "verdict; shadow_verdict is the unapplied scoreboard view and is not authoritative alone.",
         }
-        write_json(os.path.join(camp_dir, "candidates", cid, "scores.json"), score)
+        write_json(os.path.join(candidate_dir(campaign_path, cid), "scores.json"), score)
 
 
 def discover_campaign_candidates(campaign_path):
@@ -617,7 +617,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
 
     static, eligible = {}, []
     for cid in discover_campaign_candidates(campaign_path):
-        cand = load(os.path.join(camp_dir, "candidates", cid, "candidate-manifest.json"))
+        cand = load(os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json"))
         measured = BE.measure_candidate(campaign, cand)
         mat = measured["materialization"]
         in_scope, violations = scope_check(mat.get("patched_card_text") or "")
@@ -631,7 +631,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             "coverage_delta": None, "fdr_invalids": None, "cost": None, "replay": None,
             "promotable": False,
             "links": {"materialization": _mat_links(mat),
-                      "diff": rel(os.path.join(camp_dir, "candidates", cid, "candidate.diff")),
+                      "diff": rel(os.path.join(candidate_dir(campaign_path, cid), "candidate.diff")),
                       "broker_events": None, "behavioral_run": None},
         }
         if mat["verdict"] != "allow":
@@ -666,7 +666,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             "mutable_allowlist": campaign["mutable_allowlist"], "immutable": campaign["immutable"],
             "frozen_inputs": {},
             "candidates": [{"candidate_id": cid, "eligibility": "candidate",
-                            "manifest": rel(os.path.join(camp_dir, "candidates", cid, "candidate-manifest.json"))}
+                            "manifest": rel(os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json"))}
                            for cid in eligible],
         })
         rc = BE.run_cli(sub_path, backend=backend, model_cmd=model_cmd)
@@ -695,7 +695,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
 
     for cid, rec in static.items():
         rec["behavioral_backend"] = backend   # so promotion can refuse to promote a fake/simulator allow
-        write_json(os.path.join(camp_dir, "candidates", cid, "bridge-result.json"), rec)
+        write_json(os.path.join(candidate_dir(campaign_path, cid), "bridge-result.json"), rec)
     summary = {
         "campaign_id": campaign["campaign_id"], "behavioral_backend": backend,
         "behavioral_status": behavioral_status, "eligible_for_behavioral": eligible,
@@ -890,7 +890,7 @@ def main(argv):
             behavioral_backend=args.behavioral_backend,
             behavioral_model_cmd=args.behavioral_model_cmd,
         )
-    except (OSError, UnicodeError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
         print(f"invalid campaign input: {e}", file=sys.stderr)
         return 2
     except Exception as e:

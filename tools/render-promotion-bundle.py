@@ -348,7 +348,7 @@ def render_pr_body(bundle, promotable):
 
 def render_cli(campaign_path, candidate_id):
     camp_dir = os.path.dirname(campaign_path)
-    cand_dir = os.path.join(camp_dir, "candidates", candidate_id)
+    cand_dir = APE.CC.candidate_dir(campaign_path, candidate_id)
     out_dir = os.path.join(cand_dir, "promotion")
     if _under_skills(out_dir):
         raise ValueError("renderer must not write under skills/")
@@ -597,7 +597,7 @@ def main(argv):
         return 2
     try:
         return render_cli(camp, cand)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         print(f"invalid renderer input: {exc}", file=sys.stderr)
         return 2
 

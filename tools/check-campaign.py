@@ -53,6 +53,7 @@ DEFAULT_IMMUTABLE = [
     "casebooks/",
     "schemas/",
 ]
+CANDIDATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z", re.ASCII)
 
 
 def load(path):
@@ -79,6 +80,16 @@ def immutable_paths(campaign):
     paths.extend(spec["path"] for spec in campaign.get("frozen_inputs", {}).values()
                  if isinstance(spec, dict) and isinstance(spec.get("path"), str) and spec["path"])
     return paths
+
+
+def valid_candidate_id(candidate_id):
+    return isinstance(candidate_id, str) and CANDIDATE_ID_RE.fullmatch(candidate_id) is not None
+
+
+def candidate_dir(campaign_path, candidate_id):
+    if not valid_candidate_id(candidate_id):
+        raise ValueError("candidate_id must be a safe path component")
+    return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
 
 
 def git_patch_analysis(diff_path, root):
@@ -137,6 +148,9 @@ def git_patch_analysis(diff_path, root):
 def gate(campaign, candidate, root):
     """Return (verdict, reasons). verdict is 'allow' or 'block'."""
     reasons = []
+
+    if not valid_candidate_id(candidate.get("candidate_id")):
+        reasons.append("candidate_id must be a safe path component (1-128 ASCII letters, digits, '.', '_', or '-')")
 
     if candidate.get("campaign_id") != campaign.get("campaign_id"):
         reasons.append(f"campaign_id mismatch: candidate {candidate.get('campaign_id')} != {campaign.get('campaign_id')}")
@@ -313,6 +327,8 @@ def self_test():
                 ok = False
 
         expect("clean candidate allows", base, "allow")
+        expect("candidate ID cannot escape the candidate directory",
+               dict(base, candidate_id="../../outside"), "block")
 
         arrow_campaign = dict(
             campaign,

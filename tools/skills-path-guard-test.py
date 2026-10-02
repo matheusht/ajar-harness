@@ -35,11 +35,11 @@ def lifecycle_blocks(path):
     return False
 
 
-def renderer_blocks(path):
+def renderer_blocks(path, candidate_id="c", expected_error="skills"):
     module = load_module("renderer_guard_test", "render-promotion-bundle.py")
     output_attempts = []
     module.load = lambda value: (
-        {"candidates": [{"candidate_id": "c"}], "baseline_scoreboard": {}}
+        {"candidates": [{"candidate_id": candidate_id}], "baseline_scoreboard": {}}
         if value.endswith("report.json") else {}
     )
     module.read = lambda value: ""
@@ -61,9 +61,9 @@ def renderer_blocks(path):
     os.makedirs = capture_output
     try:
         try:
-            module.render_cli(path, "c")
+            module.render_cli(path, candidate_id)
         except ValueError as exc:
-            return "skills" in str(exc) and not output_attempts
+            return expected_error in str(exc) and not output_attempts
         except OSError:
             return False
     finally:
@@ -88,6 +88,9 @@ def main():
              os.path.join(alias, "guard-test", "campaign.json")),
             ("renderer optimized case alias", renderer_blocks,
              os.path.join(ROOT, "SKILLS", "guard-test", "campaign.json")),
+            ("renderer candidate-ID traversal",
+             lambda path: renderer_blocks(path, "../../outside", "candidate_id"),
+             os.path.join(ROOT, "evals", "guard-test", "campaign.json")),
         )
         failures = []
         for label, check, path in cases:

@@ -29,11 +29,16 @@ def main():
             failures.append("FIFO campaign blocks or is not rejected cleanly")
 
     with tempfile.TemporaryDirectory(prefix="replay-candidate-regular-") as temp:
-        campaign = os.path.join(temp, "campaign.json")
+        campaign_dir = os.path.join(temp, "evals", "campaign")
+        os.makedirs(campaign_dir)
+        campaign = os.path.join(campaign_dir, "campaign.json")
         with open(campaign, "w", encoding="utf-8") as handle:
             json.dump({"campaign_id": "input-test", "budgets": {}, "frozen_inputs": {}}, handle)
-        with open(os.path.join(temp, "report.json"), "w", encoding="utf-8") as handle:
-            json.dump({"baseline_scoreboard": {}, "candidates": []}, handle)
+        with open(os.path.join(campaign_dir, "report.json"), "w", encoding="utf-8") as handle:
+            json.dump({"baseline_scoreboard": {
+                "routing": [], "hermetic_bola": {"passed": False, "target_calls": 0},
+                "false_discovery": {"passed": True}, "hermetic_fakemodel": [], "hermetic_api": [],
+            }, "candidates": []}, handle)
         result = subprocess.run(
             [sys.executable, SCRIPT, "--campaign", campaign],
             cwd=ROOT, capture_output=True, text=True, timeout=5, check=False,
@@ -42,6 +47,25 @@ def main():
         print(f"{'ok' if regular_ok else 'FAIL'} regular campaign still runs")
         if not regular_ok:
             failures.append(f"regular campaign failed: exit={result.returncode} {result.stderr}")
+
+        with open(os.path.join(campaign_dir, "report.json"), "w", encoding="utf-8") as handle:
+            json.dump({"baseline_scoreboard": {
+                "routing": [], "hermetic_bola": {"passed": False, "target_calls": 0},
+                "false_discovery": {"passed": True}, "hermetic_fakemodel": [], "hermetic_api": [],
+            }, "candidates": [{
+                "candidate_id": "../../escape", "gate": "allow", "scored": True,
+                "keep_discard": {"verdict": "allow"},
+            }]}, handle)
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--campaign", campaign],
+            cwd=ROOT, capture_output=True, text=True, timeout=5, check=False,
+        )
+        escaped = os.path.join(temp, "evals", "escape", "replays")
+        traversal_ok = (result.returncode == 2 and "candidate_id" in result.stderr
+                        and "Traceback" not in result.stderr and not os.path.exists(escaped))
+        print(f"{'ok' if traversal_ok else 'FAIL'} report candidate ID cannot write outside candidates/")
+        if not traversal_ok:
+            failures.append(f"unsafe report candidate ID escaped: exit={result.returncode} {result.stderr}")
 
     if failures:
         print("\n".join(failures), file=sys.stderr)

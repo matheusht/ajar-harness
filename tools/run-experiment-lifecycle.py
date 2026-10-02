@@ -93,7 +93,7 @@ def assemble_lifecycle_result(campaign_path, candidate_id):
     bridge-result (materialization > scope > behavioral) and promotability from the promotion bundle."""
     camp_dir = os.path.dirname(campaign_path)
     campaign_id = load(campaign_path).get("campaign_id")
-    cdir = os.path.join(camp_dir, "candidates", candidate_id)
+    cdir = GR.CC.candidate_dir(campaign_path, candidate_id)
     br = load(os.path.join(cdir, "bridge-result.json"))
     links = br.get("links", {}) or {}
     mat = links.get("materialization", {}) or {}
@@ -171,7 +171,7 @@ def run_lifecycle(campaign_path, backend="deterministic", behavioral_backend="no
     rows = []
     for cid in cids:
         result = assemble_lifecycle_result(campaign_path, cid)
-        write_json(os.path.join(camp_dir, "candidates", cid, "lifecycle-result.json"), result)
+        write_json(os.path.join(GR.CC.candidate_dir(campaign_path, cid), "lifecycle-result.json"), result)
         rows.append({k: result[k] for k in ("candidate_id", "status", "authoritative_stage",
                                             "authoritative_verdict", "promotable")})
     report = {
@@ -314,8 +314,12 @@ def main(argv):
     if not os.path.isfile(args.campaign):
         print("invalid campaign input: expected a regular file", file=sys.stderr)
         return 2
-    report = run_lifecycle(args.campaign, backend=args.backend, behavioral_backend=args.behavioral_backend,
-                           behavioral_model_cmd=args.behavioral_model_cmd, only_candidate=args.candidate)
+    try:
+        report = run_lifecycle(args.campaign, backend=args.backend, behavioral_backend=args.behavioral_backend,
+                               behavioral_model_cmd=args.behavioral_model_cmd, only_candidate=args.candidate)
+    except ValueError as exc:
+        print(f"invalid campaign input: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(report, indent=2))
     return 0
 

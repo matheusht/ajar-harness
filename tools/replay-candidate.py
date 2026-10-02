@@ -146,6 +146,7 @@ def generate_for_campaign(campaign_path):
     camp_dir = os.path.dirname(campaign_path)
     report = load(os.path.join(camp_dir, "report.json"))
     RG = _mod("run_gepa_shadow", "run-gepa-shadow.py")
+    CC = _mod("check_campaign", "check-campaign.py")
 
     sb = report["baseline_scoreboard"]
     version = _benchmark_version(campaign)
@@ -159,11 +160,12 @@ def generate_for_campaign(campaign_path):
                                  "note": "blocked at contract gate; no replay"})
             continue
 
+        rdir = os.path.join(CC.candidate_dir(campaign_path, cid), "replays")
+
         runs = [_run_record(sb, RG, cid, i, version, budget) for i in range(1 + MIN_REPLAYS)]
         claimed_new = cand["scored"] and []  # shadow: candidate reproduces incumbent, no claimed new coverage
         result = assess(runs, cand["keep_discard"]["verdict"], [], budget, version)
 
-        rdir = os.path.join(camp_dir, "candidates", cid, "replays")
         os.makedirs(rdir, exist_ok=True)
         for r in runs:
             with open(os.path.join(rdir, r["run_id"] + ".json"), "w") as fh:
@@ -241,7 +243,7 @@ def main(argv):
     if len(argv) == 3 and argv[1] == "--campaign":
         try:
             return generate_for_campaign(argv[2])
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             print(f"invalid campaign input: {exc}", file=sys.stderr)
             return 2
     print(__doc__)

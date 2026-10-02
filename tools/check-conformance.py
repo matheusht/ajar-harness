@@ -1665,6 +1665,10 @@ def check_intervention_corpus():
     Absent corpus is not a failure; the check returns early."""
     print("\n[interventions] operator-intervention ledger")
     base = os.path.join(ROOT, "fixtures", "interventions")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "interventions: corpus directories are safe", "unsafe symlinked corpus directory")
+        return
     if not os.path.isdir(base):
         return
     files = sorted(f for f in os.listdir(base) if f.endswith(".json"))
@@ -1672,7 +1676,9 @@ def check_intervention_corpus():
         return
     seen = {}
     for fn in files:
-        doc = load_json(os.path.join(base, fn))
+        doc = read_conformance_json(os.path.join(base, fn), f"interventions/{fn}", (fixture_root, base))
+        if doc is None:
+            continue
         entries = doc.get("entries", [])
         record(len(entries) > 0, f"interventions/{fn}: corpus non-empty")
         record(bool(doc.get("method")), f"interventions/{fn}: declares its method",

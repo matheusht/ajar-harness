@@ -60,6 +60,9 @@ def scan(root, mode):
         elif mode == "framing-probe":
             module.check_framing_probe()
             result = rows
+        elif mode == "interventions":
+            module.check_intervention_corpus()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -622,6 +625,56 @@ def main():
 
     assert not packet_failures, "\n".join(packet_failures)
 
+    intervention_failures = []
+    with tempfile.TemporaryDirectory(prefix="intervention-ledger-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        ledger_dir = root / "fixtures" / "interventions"
+        ledger_dir.mkdir(parents=True)
+        valid_ledger = {"method": "controlled fixture", "entries": [{
+            "intervention_id": "I-1", "source_refs": [{"quote": "Observed operator action."}],
+            "provenance": "live",
+        }]}
+        outside = Path(tmp) / "outside-ledger.json"
+        outside.write_text(json.dumps(valid_ledger))
+        (ledger_dir / "external.json").symlink_to(outside)
+        try:
+            rows = run_scan(root, "interventions")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            intervention_failures.append(f"ledger file symlink: {exc}")
+
+        (ledger_dir / "external.json").unlink()
+        os.mkfifo(ledger_dir / "blocked.json")
+        try:
+            rows = run_scan(root, "interventions")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            intervention_failures.append(f"ledger FIFO: {exc}")
+
+        (ledger_dir / "blocked.json").unlink()
+        (ledger_dir / "regular.json").write_text(json.dumps(valid_ledger))
+        try:
+            rows = run_scan(root, "interventions")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            intervention_failures.append(f"regular ledger: {exc}")
+
+        (ledger_dir / "regular.json").unlink()
+        ledger_dir.rmdir()
+        (root / "fixtures").rmdir()
+        outside_fixtures = Path(tmp) / "outside-fixtures"
+        outside_ledger = outside_fixtures / "interventions"
+        outside_ledger.mkdir(parents=True)
+        (outside_ledger / "external.json").write_text(json.dumps(valid_ledger))
+        (root / "fixtures").symlink_to(outside_fixtures, target_is_directory=True)
+        try:
+            rows = run_scan(root, "interventions")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            intervention_failures.append(f"fixtures root symlink: {exc}")
+
+    assert not intervention_failures, "\n".join(intervention_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -779,7 +832,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static corpus, framing, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static, framing, intervention, and tool-family scans)")
 
 
 if __name__ == "__main__":

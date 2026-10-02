@@ -46,8 +46,7 @@ def sha256_file(path):
 
 def find_preregs():
     return sorted(candidate for candidate in glob.glob(PREREG_GLOB, recursive=True)
-                  if pinned_path(os.path.relpath(candidate, ROOT)) is not None
-                  and os.path.isfile(candidate))
+                  if pinned_path(os.path.relpath(candidate, ROOT)) is not None)
 
 
 def pinned_path(relative):
@@ -57,6 +56,9 @@ def pinned_path(relative):
     try:
         path = (root / relative).resolve()
         path.relative_to(root)
+        # A repository-local hard link can still alias a path outside ROOT.
+        if not path.is_file() or path.stat().st_nlink != 1:
+            return None
         return path
     except (OSError, ValueError):
         return None
@@ -71,7 +73,7 @@ def inspect(path):
     for entry in overlay.get("files", []):
         rel = entry["path"]
         full = pinned_path(rel)
-        if full is None or not full.is_file():
+        if full is None:
             rows.append({"path": rel, "pinned": entry.get("sha256"), "actual": None,
                          "state": "missing"})
             continue

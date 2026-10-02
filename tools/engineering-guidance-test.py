@@ -83,8 +83,11 @@ def main():
         try:
             link = root / "outside-link.txt"
             link.symlink_to(outside)
+            hardlink = root / "outside-hardlink.txt"
+            hardlink.hardlink_to(outside)
             digest = "sha256:" + hashlib.sha256(outside.read_bytes()).hexdigest()
-            escaped_paths = [os.path.relpath(outside, root), str(outside), "outside-link.txt"]
+            escaped_paths = [os.path.relpath(outside, root), str(outside), "outside-link.txt",
+                             "outside-hardlink.txt"]
             escaped_prereg = root / "evals/synthetic/escape/preregistration.json"
             escaped_prereg.parent.mkdir(parents=True)
             escaped_doc = {"status": "frozen", "execution_authorized": True,
@@ -114,6 +117,15 @@ def main():
             prereg_link = root / "evals/synthetic/link/preregistration.json"
             prereg_link.parent.mkdir(parents=True)
             prereg_link.symlink_to(outside_prereg)
+            outside_before = outside_prereg.read_bytes()
+            run("overlay_pins.py", "repin", "--apply", contains="nothing to refresh")
+            assert outside_prereg.read_bytes() == outside_before
+            prereg_link.unlink()
+            outside_prereg.write_text(json.dumps({
+                "status": "draft_not_authorized", "execution_authorized": False,
+                "common_safety_overlay": {"files": [{"path": "AGENTS.md", "sha256": "sha256:old"}]},
+            }))
+            prereg_link.hardlink_to(outside_prereg)
             outside_before = outside_prereg.read_bytes()
             run("overlay_pins.py", "repin", "--apply", contains="nothing to refresh")
             assert outside_prereg.read_bytes() == outside_before

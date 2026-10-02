@@ -1568,6 +1568,10 @@ def check_framing_probe():
     none of the three vector patterns matched."""
     print("\n[framing-probe] evidence packets carry no severity signal")
     pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2")
+    guarded_dirs = (os.path.join(ROOT, "fixtures"), os.path.dirname(pk), pk)
+    if any(os.path.islink(path) for path in guarded_dirs):
+        record(False, "framing-probe: packet directories are safe", "unsafe symlinked packet directory")
+        return
     if not os.path.isdir(pk):
         return
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -1577,10 +1581,15 @@ def check_framing_probe():
         record(False, "framing-probe: module is importable", str(exc))
         return
 
-    packets = sorted(f for f in os.listdir(pk) if f.endswith(".packet.json"))
+    packets = []
+    for fn in sorted(os.listdir(pk)):
+        if not fn.endswith(".packet.json"):
+            continue
+        packet = read_conformance_json(os.path.join(pk, fn), f"framing-probe/{fn}", guarded_dirs)
+        if packet is not None:
+            packets.append(packet)
     record(len(packets) >= 3, "framing-probe: packets exist", f"{len(packets)} packet(s)")
-    for name in packets:
-        p = json.load(open(os.path.join(pk, name)))
+    for p in packets:
         leaked = FP.leaks(p["body"])
         record(not leaked, f"framing-probe/{p['finding_id']}: zero severity signals survive",
                f"{len(leaked)} leak(s): {[t for _, t in leaked[:3]]}")
@@ -1598,7 +1607,7 @@ def check_framing_probe():
 
     # Three framings, one packet: the evidence must be byte-identical across them.
     if packets:
-        p = json.load(open(os.path.join(pk, packets[0])))
+        p = packets[0]
         record(len(set(FP.FRAMINGS.values())) == 3,
                "framing-probe: the three framings are distinct texts")
         record(all(p["body"] not in v for v in FP.FRAMINGS.values()),

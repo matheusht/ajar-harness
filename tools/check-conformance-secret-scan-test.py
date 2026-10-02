@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """E2E checks that conformance scans reject hostile filesystem entries."""
 import contextlib
+import hashlib
 import io
 import importlib.util
 import json
@@ -55,6 +56,9 @@ def scan(root, mode):
         elif mode == "static-corpora":
             module.check_false_discovery_corpus()
             module.check_adversarial_candidates()
+            result = rows
+        elif mode == "framing-probe":
+            module.check_framing_probe()
             result = rows
         else:
             ids = module.collect_pattern_ids()
@@ -566,6 +570,58 @@ def main():
 
     assert not static_corpus_failures, "\n".join(static_corpus_failures)
 
+    packet_failures = []
+    with tempfile.TemporaryDirectory(prefix="framing-probe-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        packet_dir = root / "fixtures" / "framing-probe" / "packets-v2"
+        packet_dir.mkdir(parents=True)
+        body = "Sanitized evidence without a severity label."
+        packet = {"finding_id": "F-TEST", "body": body,
+                  "body_sha256": hashlib.sha256(body.encode()).hexdigest()}
+        outside = Path(tmp) / "outside.packet.json"
+        outside.write_text(json.dumps(packet))
+        (packet_dir / "external.packet.json").symlink_to(outside)
+        try:
+            rows = run_scan(root, "framing-probe")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            packet_failures.append(f"packet file symlink: {exc}")
+
+        (packet_dir / "external.packet.json").unlink()
+        os.mkfifo(packet_dir / "blocked.packet.json")
+        try:
+            rows = run_scan(root, "framing-probe")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            packet_failures.append(f"packet FIFO: {exc}")
+
+        (packet_dir / "blocked.packet.json").unlink()
+        packet_dir.rmdir()
+        outside_packets = Path(tmp) / "outside-packets"
+        outside_packets.mkdir()
+        for index in range(3):
+            data = dict(packet, finding_id=f"F-OUTSIDE-{index}")
+            (outside_packets / f"{index}.packet.json").write_text(json.dumps(data))
+        packet_dir.symlink_to(outside_packets, target_is_directory=True)
+        try:
+            rows = run_scan(root, "framing-probe")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            packet_failures.append(f"packet directory symlink: {exc}")
+
+        packet_dir.unlink()
+        packet_dir.mkdir()
+        for index in range(3):
+            data = dict(packet, finding_id=f"F-LOCAL-{index}")
+            (packet_dir / f"{index}.packet.json").write_text(json.dumps(data))
+        try:
+            rows = run_scan(root, "framing-probe")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            packet_failures.append(f"regular packets: {exc}")
+
+    assert not packet_failures, "\n".join(packet_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -723,7 +779,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static corpus, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static corpus, framing, and tool-family scans)")
 
 
 if __name__ == "__main__":

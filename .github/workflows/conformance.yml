@@ -73,6 +73,8 @@ jobs:
         run: python3 tools/preflight-holdout-input-test.py
       - name: Ideation mapper JSON input CLI (FIFO rejection)
         run: python3 tools/ideation-input-test.py
+      - name: Conformance secret scanner filesystem-input E2E
+        run: python3 tools/check-conformance-secret-scan-test.py
       - name: Replay campaign input CLI (FIFO rejection)
         run: python3 tools/replay-candidate-input-test.py
       - name: Replay & variance gate (self-test)

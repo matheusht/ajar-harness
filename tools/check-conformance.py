@@ -36,6 +36,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -659,10 +660,34 @@ def check_secrets():
         base = os.path.join(ROOT, sub)
         if not os.path.isdir(base):
             continue
-        for dirpath, _, files in os.walk(base):
+        if os.path.islink(base):
+            hits.append(f"{sub}: scan root is a symlink")
+            continue
+        for dirpath, dirnames, files in os.walk(base):
+            for name in dirnames[:]:
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path):
+                    hits.append(f"{os.path.relpath(path, ROOT)}: symlinked directory")
+                    dirnames.remove(name)
             for fn in files:
                 fp = os.path.join(dirpath, fn)
-                text = open(fp, errors="ignore").read()
+                fd = None
+                try:
+                    fd = os.open(fp, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        hits.append(f"{os.path.relpath(fp, ROOT)}: not a regular file")
+                        continue
+                    with os.fdopen(fd, "r", errors="ignore") as handle:
+                        fd = None
+                        text = handle.read()
+                except OSError as exc:
+                    hits.append(
+                        f"{os.path.relpath(fp, ROOT)}: cannot safely scan ({exc.strerror})"
+                    )
+                    continue
+                finally:
+                    if fd is not None:
+                        os.close(fd)
                 for pat, desc in SECRET_PATTERNS:
                     for m in re.finditer(pat, text):
                         hits.append(f"{os.path.relpath(fp, ROOT)}: {desc} :: {m.group(0)[:24]}")

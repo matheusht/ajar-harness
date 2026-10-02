@@ -44,6 +44,8 @@ import subprocess
 import sys
 import tempfile
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
@@ -63,8 +65,7 @@ BE = _mod("run_behavioral_eval", "run-behavioral-eval.py")   # Phase 13 behavior
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def write_json(path, obj):
@@ -791,6 +792,21 @@ def generate(campaign_path, backend_name="auto", max_metric_calls=8, run_chain=T
 def self_test():
     ok = True
 
+    with tempfile.TemporaryDirectory(prefix="gepa-real-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     # scope guard (Phase 12): the actual Phase-11 drift card must be flagged off-scope; a real in-scope
     # technique card must pass clean.
     offscope = ('name: "Memory Corruption via Double-Free"\n'
@@ -874,6 +890,9 @@ def main(argv):
             behavioral_backend=args.behavioral_backend,
             behavioral_model_cmd=args.behavioral_model_cmd,
         )
+    except (OSError, UnicodeError, json.JSONDecodeError) as e:
+        print(f"invalid campaign input: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"GEPA adapter run failed: {type(e).__name__}: {e}")
         return 1

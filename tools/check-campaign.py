@@ -100,6 +100,7 @@ def candidate_manifest_path(root, campaign_path, entry):
     if not isinstance(manifest, str) or not manifest or os.path.isabs(manifest):
         raise ValueError("candidate manifest path must be repository-relative")
     root = os.path.realpath(root)
+    campaign_path = os.path.realpath(os.path.abspath(campaign_path))
     expected = os.path.abspath(os.path.join(candidate_dir(campaign_path, entry["candidate_id"]), "candidate-manifest.json"))
     expected_rel = os.path.relpath(expected, root).replace(os.sep, "/")
     resolved = repo_file_path(root, manifest)

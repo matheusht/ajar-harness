@@ -77,17 +77,17 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v26-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v27-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v26-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v27-2026-10-02`
 
-Revision 26 preserves earlier evidence while pinning no-follow finding-trap attestations, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
+Revision 27 preserves earlier evidence while pinning no-follow cited-fixture card reads, finding-trap attestations, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
 adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
 oracles, and casebooks.
 It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 26 has no executed
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 27 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
 
@@ -102,6 +102,12 @@ rejecting symlinked guidance files. Its manifest and candidate artifacts remain 
 Revision 25 added the doctrine-mirror no-follow check. Revision 26 supersedes it after the finding-trap attestation
 scan began rejecting symlinked and special-file attestations. Its manifest and candidate artifacts remain unchanged,
 with no executed candidate run or efficacy claim.
+
+### Historical revision 26
+
+Revision 26 added no-follow finding-trap attestation reads. Revision 27 supersedes it after cited-fixture checks
+began rejecting symlinked and special-file cards. Its manifest and candidate artifacts remain unchanged, with no
+executed candidate run or efficacy claim.
 
 ### Historical revision 23
 

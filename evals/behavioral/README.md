@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v5-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v4-2026-09-13`
+## Canonical campaign: `behavioral-canonical-v5-2026-10-02`
 
-Revision 4 retains the existing candidate definitions and patch bytes and freezes the current
-conformance checker after queue/guidance changes. Revision 3 was already drifted on main before
-#113, and #113 changes the checker further. Its manifest and prior results are preserved rather
-than retroactively re-pinned. Revision 4 has no executed candidate run or new efficacy claim.
-Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+Revision 5 preserves revision 4 and earlier evidence while pinning the campaign gate and its
+regular-file reader. It keeps the candidate definitions and technique patches unchanged. Revision 4
+remains immutable history rather than being re-pinned. Revision 5 has no executed candidate run or
+new efficacy claim. Future changes to a frozen input require another explicit revision; do not refresh
+this pin in place.
+
+### Historical revision 4
+
+Revision 4 preserved revision 3 and froze the conformance checker after queue and engineering-guidance
+changes. It has no executed candidate run or efficacy claim. Its manifest and candidate artifacts are
+preserved; the current gate is revision 5.
 
 ### Historical revision 3
 

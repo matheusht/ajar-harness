@@ -68,6 +68,12 @@ def _rel(path):
 
 
 def _under_skills(path):
+    try:
+        parts = Path(os.path.abspath(path)).relative_to(ROOT).parts
+        if parts and parts[0].casefold() == "skills":
+            return True
+    except ValueError:
+        pass
     skills_root = Path(ROOT, "skills").resolve()
     current = Path(path).resolve()
     while True:

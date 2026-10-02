@@ -45,8 +45,15 @@ def sha256_file(path):
 
 
 def find_preregs():
-    return sorted(candidate for candidate in glob.glob(PREREG_GLOB, recursive=True)
-                  if pinned_path(os.path.relpath(candidate, ROOT)) is not None)
+    paths, unsafe = [], []
+    for candidate in glob.glob(PREREG_GLOB, recursive=True):
+        if pinned_path(os.path.relpath(candidate, ROOT)) is None:
+            unsafe.append(os.path.relpath(candidate, ROOT))
+        else:
+            paths.append(candidate)
+    if unsafe:
+        raise ValueError(f"unsafe preregistration path(s): {', '.join(sorted(unsafe))}")
+    return sorted(paths)
 
 
 def pinned_path(relative):
@@ -174,7 +181,11 @@ def main():
     r = sub.add_parser("repin"); r.add_argument("--apply", action="store_true")
     r.set_defaults(fn=cmd_repin)
     args = ap.parse_args()
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except ValueError as exc:
+        print(f"REFUSING {exc}")
+        return 1
 
 
 if __name__ == "__main__":

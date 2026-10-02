@@ -77,18 +77,25 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v22-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v23-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v22-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v23-2026-10-02`
 
-Revision 22 preserves earlier evidence while pinning no-follow reads for false-discovery and adversarial evaluator
-corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards, oracles, and casebooks.
+Revision 23 preserves earlier evidence while pinning no-follow reads for framing-probe packets, false-discovery and
+adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
+oracles, and casebooks.
 It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 22 has no executed
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 23 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 22
+
+Revision 22 pinned no-follow evaluator, tool-family, finding, capability, card, oracle, and casebook reads.
+Revision 23 supersedes it after framing-probe packet reads also began rejecting symlink and special-file inputs.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 21
 

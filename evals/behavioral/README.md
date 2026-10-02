@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v6-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v7-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v6-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v7-2026-10-02`
 
-Revision 6 preserves revision 5 and earlier evidence while pinning the campaign gate and its
-regular-file reader after the gate began blocking candidate changes to frozen inputs. It keeps the
-candidate definitions and technique patches unchanged. Revisions 5 and earlier remain immutable
-history rather than being re-pinned. Revision 6 has no executed candidate run or efficacy claim.
+Revision 7 preserves revision 6 and earlier evidence while pinning the campaign gate and its
+regular-file reader after filename parsing was switched to Git's NUL-delimited numstat output. It
+keeps the candidate definitions and technique patches unchanged. Revisions 6 and earlier remain
+immutable history rather than being re-pinned. Revision 7 has no executed candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 6
+
+Revision 6 froze the gate after it began treating frozen input paths as immutable. Revision 7
+supersedes it after the gate learned to preserve legal filenames containing arrow delimiters. Its
+manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 5
 
@@ -99,7 +105,7 @@ unchanged, with no executed candidate run or efficacy claim.
 
 Revision 4 preserved revision 3 and froze the conformance checker after queue and engineering-guidance
 changes. It has no executed candidate run or efficacy claim. Its manifest and candidate artifacts are
-preserved; the current gate is revision 6.
+preserved; the current gate is revision 7.
 
 ### Historical revision 3
 

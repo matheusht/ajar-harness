@@ -81,27 +81,6 @@ def immutable_paths(campaign):
     return paths
 
 
-def _rename_paths(p):
-    """A numstat path may encode a rename as 'old => new' or 'pre/{old => new}/post'."""
-    if "=>" not in p:
-        return {p}
-    p = p.replace("{", "").replace("}", "")
-    if "{" not in p and " => " in p and "/" not in p.split(" => ")[0].split("/")[-1]:
-        pass
-    out = set()
-    # generic: split on ' => ', recombine brace context if present
-    if "{" in p or "/" in p:
-        # best-effort: take both sides verbatim
-        left, right = p.split(" => ", 1)
-        out.add(left.strip())
-        out.add(right.strip())
-    else:
-        left, right = p.split(" => ", 1)
-        out.add(left.strip())
-        out.add(right.strip())
-    return {x for x in out if x}
-
-
 def git_patch_analysis(diff_path, root):
     """Derive touched paths and detect UNSUPPORTED patch forms using git's own parser. The header-only
     parser missed mode-only, binary, rename, copy, and symlink patches — a candidate could change a
@@ -109,15 +88,17 @@ def git_patch_analysis(diff_path, root):
     and so derived no paths. Returns (paths, unsupported_reasons). Fail closed: callers must block on
     any unsupported reason and on a non-empty patch that yields no paths."""
     paths, unsupported = set(), []
-    num = subprocess.run(["git", "-C", root, "apply", "--numstat", diff_path], capture_output=True, text=True)
+    num = subprocess.run(["git", "-C", root, "apply", "--numstat", "-z", diff_path],
+                         capture_output=True, text=True)
     if num.returncode == 0:
-        for ln in num.stdout.splitlines():
-            parts = ln.split("\t")
+        for record in num.stdout.split("\0"):
+            parts = record.split("\t", 2)
             if len(parts) == 3:
                 added, removed, p = parts
                 if added == "-" and removed == "-":
                     unsupported.append(f"binary patch: {p}")
-                paths |= _rename_paths(p)
+                if p:
+                    paths.add(p)
     else:
         unsupported.append(f"git could not parse the patch: {num.stderr.strip()[:120]}")
     summ = subprocess.run(["git", "-C", root, "apply", "--summary", diff_path], capture_output=True, text=True)
@@ -328,6 +309,25 @@ def self_test():
                 ok = False
 
         expect("clean candidate allows", base, "allow")
+
+        arrow_campaign = dict(
+            campaign,
+            tracks=[{"name": "docs", "mutation_target": "docs/"}],
+            mutable_allowlist=["docs/"], frozen_inputs={},
+        )
+        for name, arrow_path in (("plain-arrow", "docs/frozen=>input.txt"),
+                                 ("spaced-arrow", "docs/frozen => input.txt")):
+            arrow_diff, arrow_hash = mkdiff(name, [arrow_path])
+            arrow_candidate = dict(
+                base, candidate_id=f"cand-{name}", track="docs", mutation_target="docs/",
+                touched_files=[arrow_path], diff=arrow_diff, candidate_hash=arrow_hash,
+            )
+            try:
+                expect(f"literal arrow in '{arrow_path}' is preserved", arrow_candidate, "allow",
+                       camp=arrow_campaign)
+            except Exception as exc:
+                ok = False
+                print(f"[self-test] filename containing => crashed the gate: {type(exc).__name__}: {exc}")
 
         stray_diff, stray_h = mkdiff("stray", [CARD, "engine/routing.md"])
         expect("undeclared (out-of-target) file blocks",

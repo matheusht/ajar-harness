@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Evaluator changes get a NEW campaign revision; prior revisions are preserved append-only, never
 # mutated/replaced in place (see the superseding SUPERSEDED.md note).
-CAMP_ID = "behavioral-canonical-v32-2026-10-02"
+CAMP_ID = "behavioral-canonical-v34-2026-10-02"
 CAMP_DIR = os.path.join(ROOT, "evals", "behavioral", "campaigns", CAMP_ID)
 
 

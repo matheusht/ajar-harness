@@ -77,24 +77,36 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v32-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v34-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v32-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v34-2026-10-02`
 
-Revision 32 preserves earlier evidence while pinning no-follow lifecycle-control finding and attestation reads, constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
+Revision 34 preserves earlier evidence while pinning the guarded Decision 0005 and corpus-enumeration fixture reads, no-follow package tarball reads, lifecycle-control finding and attestation, constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
 adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
 oracles, and casebooks.
 It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 32 has no executed
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 34 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 33
+
+Revision 33 pinned Decision 0005 and corpus-enumeration fixture reads and preceding filesystem checks. Revision 34
+supersedes it after the remaining single-use conformance JSON wrapper was removed. Its manifest and candidate
+artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 32
+
+Revision 32 pinned lifecycle-control fixture reads and earlier filesystem-input checks. Revision 33 superseded
+it after Decision 0005 and corpus-enumeration JSON and package tarball reads gained guarded, no-follow input handling.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 31
 
 Revision 31 pinned constrained KB ablation-fixture reads and preceding filesystem-input checks. Revision 32
-supersedes it after lifecycle-control finding and attestation reads began rejecting symlinked and special-file
+superseded it after lifecycle-control finding and attestation reads began rejecting symlinked and special-file
 inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 24

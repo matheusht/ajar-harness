@@ -19,7 +19,11 @@ Usage:
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGETS_DIR = os.path.join(ROOT, "evals", "hermetic", "targets")
@@ -34,8 +38,7 @@ DENY = (401, 403)
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _ok_status(req):
@@ -199,6 +202,21 @@ def _effectless_primary(t):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="hermetic-api-input-") as tmp:
+        fifo = os.path.join(tmp, "target.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO target input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     targets = bundled_targets()
     if len(targets) < 5:
         ok = False
@@ -236,7 +254,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 2:
-        t = load(argv[1])
+        try:
+            t = load(argv[1])
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            print(f"invalid target input: {exc}", file=sys.stderr)
+            return 2
         return 0 if report(t, run(t)) else 1
     ok = True
     for t in bundled_targets():

@@ -45,6 +45,8 @@ import subprocess
 import sys
 import tempfile
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
@@ -67,8 +69,7 @@ SC = _mod("score_candidate", "score-candidate.py")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def write_json(path, obj):
@@ -488,6 +489,21 @@ def _fake_scoreboard(coverage_cases, fdr_rate=0.0, protected_extra=None):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="candidate-eval-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     incumbent_sb = _fake_scoreboard(["case-a", "case-b"])
     inc = RG.incumbent_eval(incumbent_sb)
     cand = {"candidate_id": "c", "campaign_id": "x"}
@@ -647,7 +663,11 @@ def main(argv):
     if not args.campaign:
         ap.print_help()
         return 2
-    return run_cli(args.campaign, only_candidate=args.candidate, backend=args.backend)
+    try:
+        return run_cli(args.campaign, only_candidate=args.candidate, backend=args.backend)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"invalid campaign input: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

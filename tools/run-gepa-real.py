@@ -820,7 +820,7 @@ def self_test():
     else:
         print(f"[self-test] scope guard flags off-scope (double-free/gadget/CVE) and passes in-scope: ok")
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
         camp_path = os.path.join(tmp, "campaign-manifest.json")
         campaign = {
             "campaign_id": "phase8-self-test",

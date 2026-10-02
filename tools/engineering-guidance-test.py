@@ -76,6 +76,35 @@ def main():
         guidance(code=1, contains="authorized record's pins are intact")
         run("overlay_pins.py", "repin", "--apply", code=1, contains="REFUSING")
         assert prereg.read_bytes() == before
+        prereg.unlink()
+
+        outside = root.parent / f"{root.name}-outside.txt"
+        outside.write_text("external pin target\n")
+        try:
+            link = root / "outside-link.txt"
+            link.symlink_to(outside)
+            digest = "sha256:" + hashlib.sha256(outside.read_bytes()).hexdigest()
+            escaped_paths = [os.path.relpath(outside, root), str(outside), "outside-link.txt"]
+            escaped_prereg = root / "evals/synthetic/escape/preregistration.json"
+            escaped_prereg.parent.mkdir(parents=True)
+            escaped_doc = {"status": "frozen", "execution_authorized": True,
+                           "common_safety_overlay": {"files": [{"path": p, "sha256": digest} for p in escaped_paths]}}
+            escaped_prereg.write_text(json.dumps(escaped_doc))
+            checked = subprocess.run([sys.executable, str(root / "tools/overlay_pins.py"), "check", "--json"],
+                                      cwd=root, env=env, capture_output=True, text=True)
+            checked_doc = json.loads(checked.stdout)
+            escaped_rows = next(r["rows"] for r in checked_doc["results"]
+                                if r["preregistration"] == "evals/synthetic/escape/preregistration.json")
+            assert all(r["actual"] is None and r["state"] == "missing" for r in escaped_rows), (checked.stdout, checked.stderr)
+
+            escaped_doc["execution_authorized"] = False
+            escaped_doc["common_safety_overlay"]["files"][0]["sha256"] = "sha256:old"
+            escaped_prereg.write_text(json.dumps(escaped_doc))
+            before = escaped_prereg.read_bytes()
+            run("overlay_pins.py", "repin", "--apply", code=1, contains="no longer exist")
+            assert escaped_prereg.read_bytes() == before
+        finally:
+            outside.unlink(missing_ok=True)
     print("engineering guidance: public CLI navigation, mirror, history and draft/frozen pin controls passed")
 
 

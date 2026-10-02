@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PREREG_GLOB = os.path.join(ROOT, "evals", "**", "preregistration.json")
@@ -47,6 +48,18 @@ def find_preregs():
     return sorted(glob.glob(PREREG_GLOB, recursive=True))
 
 
+def pinned_path(relative):
+    if not isinstance(relative, str) or os.path.isabs(relative):
+        return None
+    root = Path(ROOT).resolve()
+    try:
+        path = (root / relative).resolve()
+        path.relative_to(root)
+        return path
+    except (OSError, ValueError):
+        return None
+
+
 def inspect(path):
     """Return (doc, rows). rows = [{path, pinned, actual, state}] for every overlay file."""
     with open(path) as fh:
@@ -55,8 +68,8 @@ def inspect(path):
     rows = []
     for entry in overlay.get("files", []):
         rel = entry["path"]
-        full = os.path.join(ROOT, rel)
-        if not os.path.isfile(full):
+        full = pinned_path(rel)
+        if full is None or not full.is_file():
             rows.append({"path": rel, "pinned": entry.get("sha256"), "actual": None,
                          "state": "missing"})
             continue

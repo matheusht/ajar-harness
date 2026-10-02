@@ -41,6 +41,10 @@ def scan(root, mode):
         elif mode == "capability-fixtures":
             module.check_capability_must_reject()
             result = rows
+        elif mode == "finding-fixtures":
+            module.validate_record = lambda *args, **kwargs: []
+            module.check_finding_fixtures()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -269,6 +273,81 @@ def main():
 
     assert not fixture_failures, "\n".join(fixture_failures)
 
+    finding_fixture_failures = []
+    with tempfile.TemporaryDirectory(prefix="finding-fixture-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        finding_dir = root / "fixtures" / "findings"
+        finding_dir.mkdir(parents=True)
+        valid_finding = {
+            "id": "finding.external", "engagement": "fixture", "owasp": "LLM01",
+            "surface": "chat", "objective": "benign", "scope_class": "self",
+            "severity": "info", "confidence": "low", "attempt_id": "attempt-1",
+            "control_attempt_id": "attempt-0", "oracle_verdict": "needs_review",
+            "dedup_key": "external", "status": "unproven", "recorded_date": "2020-01-01",
+        }
+        outside = Path(tmp) / "outside.json"
+        outside.write_text(json.dumps(valid_finding))
+        (finding_dir / "external.json").symlink_to(outside)
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"finding file symlink: {exc}")
+
+        (finding_dir / "external.json").unlink()
+        os.mkfifo(finding_dir / "blocked.json")
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"top-level finding FIFO: {exc}")
+
+        (finding_dir / "blocked.json").unlink()
+        reject_dir = finding_dir / "_must_reject"
+        reject_dir.mkdir()
+        os.mkfifo(reject_dir / "blocked.json")
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"must-reject FIFO: {exc}")
+
+        (reject_dir / "blocked.json").unlink()
+        reject_dir.rmdir()
+        outside_reject = Path(tmp) / "outside-must-reject"
+        outside_reject.mkdir()
+        (outside_reject / "external.json").write_text(json.dumps({"recorded_date": "2026-10-01"}))
+        reject_dir.symlink_to(outside_reject, target_is_directory=True)
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"must-reject directory symlink: {exc}")
+
+        reject_dir.unlink()
+        (finding_dir / "regular.json").write_text(json.dumps(valid_finding))
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"regular finding fixture: {exc}")
+
+        (finding_dir / "regular.json").unlink()
+        finding_dir.rmdir()
+        (root / "fixtures").rmdir()
+        outside_fixtures = Path(tmp) / "outside-fixtures"
+        outside_findings = outside_fixtures / "findings"
+        outside_findings.mkdir(parents=True)
+        (outside_findings / "external.json").write_text(json.dumps(valid_finding))
+        (root / "fixtures").symlink_to(outside_fixtures, target_is_directory=True)
+        try:
+            rows = run_scan(root, "finding-fixtures")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            finding_fixture_failures.append(f"finding corpus root symlink: {exc}")
+
+    assert not finding_fixture_failures, "\n".join(finding_fixture_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -426,7 +505,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, and fixture scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, and finding scans)")
 
 
 if __name__ == "__main__":

@@ -771,6 +771,17 @@ def load_json(path):
         return json.load(fh)
 
 
+def _load_finding_fixture(path, label):
+    try:
+        return json.loads(read_regular_text(path, encoding="utf-8", no_follow=True))
+    except OSError as exc:
+        record(False, f"{label}: regular fixture is safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+    except json.JSONDecodeError:
+        record(False, f"{label}: fixture JSON is valid", "invalid JSON fixture")
+    return None
+
+
 def finding_is_new(f):
     d = f.get("recorded_date")
     return bool(d) and d >= POLICY_CUTOFF
@@ -779,13 +790,19 @@ def finding_is_new(f):
 def check_finding_fixtures():
     print("\n[findings] evidence-contract gate (necessary, not sufficient)")
     base = os.path.join(ROOT, "fixtures", "findings")
+    if os.path.islink(os.path.join(ROOT, "fixtures")) or os.path.islink(base):
+        record(False, "findings: fixture directories are safe",
+               "unsafe symlinked finding fixture directory")
+        return
     if not os.path.isdir(base):
         return
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not fn.endswith(".json") or not os.path.isfile(fp):
+        if not fn.endswith(".json") or not os.path.lexists(fp):
             continue
-        f = load_json(fp)
+        f = _load_finding_fixture(fp, f"findings/{fn}")
+        if f is None:
+            continue
         missing = [k for k in FINDING_BASE_REQUIRED if k not in f]
         record(not missing, f"findings/{fn}: base required fields", f"missing {missing}" if missing else "")
         record("recorded_date" in f, f"findings/{fn}: recorded_date present (drives the migration gate)",
@@ -801,12 +818,20 @@ def check_finding_fixtures():
             record(True, f"findings/{fn}: legacy finding advisory-only")
 
     mr = os.path.join(base, "_must_reject")
+    if os.path.islink(mr):
+        record(False, "findings/_must_reject: fixture directory is safe",
+               "unsafe symlinked must-reject directory")
+        return
     if os.path.isdir(mr):
         for fn in sorted(os.listdir(mr)):
             fp = os.path.join(mr, fn)
             if not fn.endswith(".json"):
                 continue
-            f = load_json(fp)
+            if not os.path.lexists(fp):
+                continue
+            f = _load_finding_fixture(fp, f"findings/_must_reject/{fn}")
+            if f is None:
+                continue
             schema_errors = validate_record(f, "finding-v2-legacy")
             caught = finding_is_new(f) and ("evidence_contract" not in f or bool(schema_errors))
             record(caught, f"findings/_must_reject/{fn}: caught by full schema + policy gate (invalid-accept guard)",

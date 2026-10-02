@@ -77,23 +77,30 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v9-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v10-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v9-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v10-2026-10-02`
 
-Revision 9 preserves revision 8 and earlier evidence while pinning candidate-ID path validation in the
-campaign gate. It keeps the candidate definitions and technique patches unchanged. Revisions 8 and earlier
-remain immutable history rather than being re-pinned. Revision 9 has no executed candidate run or efficacy
-claim.
+Revision 10 preserves revision 9 and earlier evidence while pinning repository-confined candidate artifact
+paths in preflight, materialization, and the behavioral runner. It keeps the candidate definitions and
+technique patches unchanged. Revisions 9 and earlier remain immutable history rather than being re-pinned.
+Revision 10 has no executed candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 9
+
+Revision 9 froze candidate-ID path validation in the campaign gate. Revision 10 supersedes it after diff,
+evidence, and frozen-input paths were constrained to repository-local files at both preflight and measured
+materialization. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or
+efficacy claim.
 
 ### Historical revision 8
 
 Revision 8 froze the campaign gate and regular-file reader after invalid UTF-8 patches were made to fail
-closed. Revision 9 supersedes it after candidate IDs were constrained to safe path components at every
-candidate artifact path. Its manifest and candidate artifacts remain unchanged, with no executed candidate
+closed. Revision 9 supersedes it after candidate IDs were constrained to safe path components for
+candidate artifact paths. Its manifest and candidate artifacts remain unchanged, with no executed candidate
 run or efficacy claim.
 
 ### Historical revision 7
@@ -118,7 +125,7 @@ unchanged, with no executed candidate run or efficacy claim.
 
 Revision 4 preserved revision 3 and froze the conformance checker after queue and engineering-guidance
 changes. It has no executed candidate run or efficacy claim. Its manifest and candidate artifacts are
-preserved; the current gate is revision 9.
+preserved; the current gate is revision 10.
 
 ### Historical revision 3
 

@@ -416,7 +416,7 @@ def tool_hashes():
 def run_cli(campaign_path, backend="fake", only_candidate=None, model_cmd=None):
     campaign = load(campaign_path)
     for entry in campaign.get("candidates", []):
-        CC.candidate_manifest_path(ROOT, campaign_path, entry)
+        CC.load_candidate_manifest(ROOT, campaign_path, entry)
     config = {"model_cmd": model_cmd} if model_cmd else {}
 
     # honest model-unavailability: try to construct a model researcher; if it cannot, record skipped.
@@ -446,7 +446,7 @@ def run_cli(campaign_path, backend="fake", only_candidate=None, model_cmd=None):
         "promotion still requires an OS-isolated qualification and human PR review.")
     try:
         for entry in entries:
-            cand = load(CC.candidate_manifest_path(ROOT, campaign_path, entry))
+            cand = CC.load_candidate_manifest(ROOT, campaign_path, entry)
             technique = cand["technique"]
             eligibility = entry.get("eligibility", cand.get("eligibility", "candidate"))
             episode_set = load_episodes(technique)
@@ -503,7 +503,7 @@ def base_manifest(campaign, campaign_path, backend, status, run_dir, model_id=""
     cand_hashes, techniques = {}, set()
     for entry in campaign.get("candidates", []):
         cm = CC.candidate_manifest_path(ROOT, campaign_path, entry)
-        cand = load(cm)
+        cand = CC.load_candidate_manifest(ROOT, campaign_path, entry)
         techniques.add(cand.get("technique", ""))
         diff_path = CC.repo_file_path(ROOT, cand.get("diff")) if cand.get("diff") else None
         cand_hashes[entry["candidate_id"]] = {
@@ -767,6 +767,19 @@ def self_test():
             ok = False; print("[self-test] candidate manifest for a different ID was read or hashed (want rejection)")
         except ValueError:
             print("[self-test] candidate manifest for a different ID is rejected: ok")
+
+        mismatch_path = os.path.join(inside, "candidates", "cand-mismatch", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(mismatch_path))
+        with open(mismatch_path, "w") as fh:
+            json.dump({"candidate_id": "cand-other", "technique": "task-reframing", "diff": "missing.diff"}, fh)
+        mismatch_campaign = {"campaign_id": "c", "candidates": [{
+            "candidate_id": "cand-mismatch", "manifest": os.path.relpath(mismatch_path, ROOT),
+        }]}
+        try:
+            base_manifest(mismatch_campaign, cpath, "fake", "failed", rd)
+            ok = False; print("[self-test] candidate manifest ID mismatch was accepted (want rejection)")
+        except ValueError:
+            print("[self-test] candidate manifest ID must match its directory: ok")
 
         linked_campaign = os.path.join(inside, "linked-campaign-manifest.json")
         linked_path = os.path.join(inside, "candidates", "cand-linked", "candidate-manifest.json")

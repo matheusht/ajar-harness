@@ -214,7 +214,7 @@ def discover_candidates(campaign_manifest_path, root=ROOT):
         mf = os.path.join(cdir, name, "candidate-manifest.json")
         if os.path.lexists(mf):
             entry = {"candidate_id": name, "manifest": os.path.relpath(mf, root).replace(os.sep, "/")}
-            out.append(load(CC.candidate_manifest_path(root, campaign_manifest_path, entry)))
+            out.append(CC.load_candidate_manifest(root, campaign_manifest_path, entry))
     return out
 
 
@@ -331,6 +331,23 @@ def self_test():
         except ValueError:
             rejected = True
         print("[self-test] symlinked candidate manifest is rejected before read:", "ok" if rejected else "FAIL")
+        if not rejected:
+            ok = False
+
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-identity-") as tmp:
+        campaign_path = os.path.join(tmp, "campaign-manifest.json")
+        with open(campaign_path, "w") as fh:
+            json.dump({}, fh)
+        manifest = os.path.join(tmp, "candidates", "cand-folder", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, "w") as fh:
+            json.dump({"candidate_id": "cand-other"}, fh)
+        try:
+            discover_candidates(campaign_path, tmp)
+            rejected = False
+        except ValueError:
+            rejected = True
+        print("[self-test] manifest candidate_id must match its directory:", "ok" if rejected else "FAIL")
         if not rejected:
             ok = False
 

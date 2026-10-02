@@ -114,6 +114,13 @@ def candidate_manifest_path(root, campaign_path, entry):
     return expected
 
 
+def load_candidate_manifest(root, campaign_path, entry):
+    candidate = load_json(candidate_manifest_path(root, campaign_path, entry))
+    if not isinstance(candidate, dict) or candidate.get("candidate_id") != entry["candidate_id"]:
+        raise ValueError("candidate manifest candidate_id must match its campaign directory")
+    return candidate
+
+
 def repo_file_path(root, relative_path):
     """Resolve a repository-relative artifact path, rejecting absolute and symlink escapes."""
     if not isinstance(relative_path, str) or not relative_path or os.path.isabs(relative_path):

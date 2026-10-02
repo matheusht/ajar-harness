@@ -33,6 +33,11 @@ def scan(root, mode):
             )()
             module.check_casebooks({"pattern.safe"})
             result = rows
+        elif mode == "capabilities":
+            ids = module.collect_capability_ids()
+            module.check_capabilities()
+            module.check_capability_classes()
+            result = {"ids": sorted(ids), "rows": rows}
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -136,6 +141,62 @@ def main():
             oracle_failures.append(f"oracle root symlink: {exc}")
 
     assert not oracle_failures, "\n".join(oracle_failures)
+
+    capability_failures = []
+    with tempfile.TemporaryDirectory(prefix="capability-scan-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        capability_dir = root / "capabilities"
+        capability_dir.mkdir(parents=True)
+        external = Path(tmp) / "outside-registry.yaml"
+        external.write_text(
+            "- id: capability.external\n"
+            "  authority: sensor_only\n"
+            "  forbidden_actions: [injector]\n"
+            "  source: fixture\n"
+            "  license: test\n"
+            "  allowed_actions: [observe]\n"
+        )
+        (capability_dir / "registry.yaml").symlink_to(external)
+        try:
+            result = run_scan(root, "capabilities")
+            assert "capability.external" not in result["ids"], result
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            capability_failures.append(f"registry file symlink: {exc}")
+
+        (capability_dir / "registry.yaml").unlink()
+        os.mkfifo(capability_dir / "registry.yaml")
+        try:
+            result = run_scan(root, "capabilities")
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            capability_failures.append(f"registry FIFO: {exc}")
+
+        (capability_dir / "registry.yaml").unlink()
+        capability_dir.rmdir()
+        external_dir = Path(tmp) / "outside-capabilities"
+        external_dir.mkdir()
+        (external_dir / "registry.yaml").write_text(external.read_text())
+        capability_dir.symlink_to(external_dir, target_is_directory=True)
+        try:
+            result = run_scan(root, "capabilities")
+            assert "capability.external" not in result["ids"], result
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            capability_failures.append(f"capability directory symlink: {exc}")
+
+        capability_dir.unlink()
+        capability_dir.mkdir()
+        outside_classes = Path(tmp) / "outside-classes.yaml"
+        outside_classes.write_text("- id: oracle\n  authority: oracle\n")
+        (capability_dir / "classes.yaml").symlink_to(outside_classes)
+        try:
+            result = run_scan(root, "capabilities")
+            assert any(not row[0] and "unsafe" in row[2] for row in result["rows"]), result
+        except Exception as exc:
+            capability_failures.append(f"class file symlink: {exc}")
+
+    assert not capability_failures, "\n".join(capability_failures)
 
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
@@ -294,7 +355,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, and casebook scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, and capability scans)")
 
 
 if __name__ == "__main__":

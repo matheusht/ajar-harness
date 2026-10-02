@@ -251,10 +251,25 @@ def check_routes_to(name, subdir, fm, pattern_ids):
 def collect_capability_ids():
     ids = set()
     path = os.path.join(ROOT, "capabilities", "registry.yaml")
-    if os.path.isfile(path):
-        for m in re.finditer(r"^\s*-\s*id:\s*([A-Za-z0-9._-]+)", open(path).read(), re.MULTILINE):
+    text = _read_capability_input(path, "capabilities/registry.yaml")
+    if text is not None:
+        for m in re.finditer(r"^\s*-\s*id:\s*([A-Za-z0-9._-]+)", text, re.MULTILINE):
             ids.add(m.group(1))
     return ids
+
+
+def _read_capability_input(path, label):
+    if not os.path.lexists(path):
+        return None
+    if os.path.islink(os.path.join(ROOT, "capabilities")):
+        record(False, f"{label}: regular input is safe to read", "unsafe symlinked capabilities directory")
+        return None
+    try:
+        return read_regular_text(path, no_follow=True)
+    except OSError as exc:
+        record(False, f"{label}: regular input is safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+        return None
 
 
 def _capability_blocks(text):
@@ -335,9 +350,10 @@ def check_capability_classes():
     default-disabled, gated, and forbidden from oracle/judge/verdict authority; only `oracle` may judge."""
     print("\n[capabilities] capability classes (authority model)")
     path = os.path.join(ROOT, "capabilities", "classes.yaml")
-    if not os.path.isfile(path):
+    text = _read_capability_input(path, "capabilities/classes.yaml")
+    if text is None:
         return
-    blocks = _capability_blocks(open(path).read())
+    blocks = _capability_blocks(text)
     record(len(blocks) > 0, "classes: non-empty")
     by_id = {cid: body for cid, body in blocks}
     for cid, body in blocks:
@@ -362,9 +378,9 @@ def check_capabilities():
     """The narrow keyhole: every external capability must be sensor_only and declare its fences."""
     print("\n[capabilities] external capability registry")
     path = os.path.join(ROOT, "capabilities", "registry.yaml")
-    if not os.path.isfile(path):
+    text = _read_capability_input(path, "capabilities/registry.yaml")
+    if text is None:
         return
-    text = open(path).read()
     blocks = _capability_blocks(text)
     record(len(blocks) > 0, "capabilities: registry non-empty")
     for cid, body in blocks:
@@ -388,8 +404,9 @@ def check_capability_scope_flags():
     src = ""
     for fn in ("registry.yaml", "classes.yaml"):
         fp = os.path.join(ROOT, "capabilities", fn)
-        if os.path.isfile(fp):
-            src += open(fp).read() + "\n"
+        text = _read_capability_input(fp, f"capabilities/{fn}")
+        if text is not None:
+            src += text + "\n"
     problems = scope_flag_problems(src, open(tmpl).read())
     record(not problems, "capabilities: every required scope flag is declared in _TEMPLATE/scope.md",
            "; ".join(problems) if problems else "")

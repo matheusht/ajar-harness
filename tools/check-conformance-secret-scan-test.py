@@ -72,6 +72,9 @@ def scan(root, mode):
         elif mode == "cited-fixtures":
             module.check_cited_fixtures()
             result = rows
+        elif mode == "active-guidance":
+            module.check_active_guidance()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -453,6 +456,46 @@ def main():
             cited_fixture_failures.append(f"FIFO card: {exc}")
 
     assert not cited_fixture_failures, "\n".join(cited_fixture_failures)
+
+    guidance_failures = []
+    with tempfile.TemporaryDirectory(prefix="active-guidance-reader-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        (root / "docs" / "decisions").mkdir(parents=True)
+        (root / "docs" / "wiki").mkdir(parents=True)
+        (root / "docs" / "decision-0005-implementation-architecture.md").write_text("local\n")
+        (root / "docs" / "decisions" / "README.md").write_text("local\n")
+        (root / "docs" / "wiki" / "index.md").write_text("local\n")
+        (root / "README.md").write_text(
+            "](docs/decisions/README.md) ](docs/wiki/index.md)\n"
+        )
+        (root / "docs" / "architecture.md").write_text(
+            "](decisions/README.md) ](decision-0005-implementation-architecture.md)\n"
+        )
+        guidance = "](docs/decisions/README.md)\n"
+        (root / "AGENTS.md").write_text(guidance)
+        (root / "CLAUDE.md").write_text(guidance)
+        readme = root / "README.md"
+        readme.unlink()
+        outside = Path(tmp) / "outside-README.md"
+        outside.write_text("](docs/decisions/README.md) ](docs/wiki/index.md)\n")
+        readme.symlink_to(outside)
+        try:
+            rows = run_scan(root, "active-guidance")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+            assert any(row[0] and "guidance/docs/architecture.md" in row[1] for row in rows), rows
+        except Exception as exc:
+            guidance_failures.append(f"README symlink: {exc}")
+
+        readme.unlink()
+        os.mkfifo(readme)
+        try:
+            rows = run_scan(root, "active-guidance")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+            assert any(row[0] and "guidance/docs/architecture.md" in row[1] for row in rows), rows
+        except Exception as exc:
+            guidance_failures.append(f"README FIFO: {exc}")
+
+    assert not guidance_failures, "\n".join(guidance_failures)
 
     family_failures = []
     with tempfile.TemporaryDirectory(prefix="tool-family-e2e-") as tmp:
@@ -946,7 +989,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

@@ -1742,14 +1742,18 @@ def check_active_guidance():
         ("AGENTS.md", ("docs/decisions/README.md",)),
     ):
         path = os.path.join(ROOT, source)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"guidance/{source}", (os.path.dirname(path),)
+        ) or ""
         for destination in destinations:
             record((f"]({destination})" in text or f"`{destination}`" in text)
                    and os.path.isfile(os.path.join(os.path.dirname(path), destination)),
                    f"guidance/{source}: {destination} is linked and exists")
     for source in ("AGENTS.md", "CLAUDE.md"):
         path = os.path.join(ROOT, source)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"guidance/{source}", (os.path.dirname(path),)
+        ) or ""
         for missing in ("docs/agents/issue-tracker.md", "docs/agents/domain.md"):
             record(missing not in text, f"guidance/{source}: absent setup reference {missing} stays removed")
 

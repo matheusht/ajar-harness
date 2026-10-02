@@ -415,6 +415,8 @@ def tool_hashes():
 
 def run_cli(campaign_path, backend="fake", only_candidate=None, model_cmd=None):
     campaign = load(campaign_path)
+    for entry in campaign.get("candidates", []):
+        CC.candidate_manifest_path(ROOT, campaign_path, entry)
     config = {"model_cmd": model_cmd} if model_cmd else {}
 
     # honest model-unavailability: try to construct a model researcher; if it cannot, record skipped.
@@ -444,7 +446,7 @@ def run_cli(campaign_path, backend="fake", only_candidate=None, model_cmd=None):
         "promotion still requires an OS-isolated qualification and human PR review.")
     try:
         for entry in entries:
-            cand = load(os.path.join(ROOT, entry["manifest"]))     # canonical candidate manifest
+            cand = load(CC.candidate_manifest_path(ROOT, campaign_path, entry))
             technique = cand["technique"]
             eligibility = entry.get("eligibility", cand.get("eligibility", "candidate"))
             episode_set = load_episodes(technique)
@@ -500,8 +502,8 @@ def APE_read_head(repo_rel):
 def base_manifest(campaign, campaign_path, backend, status, run_dir, model_id="", model_cmd=None):
     cand_hashes, techniques = {}, set()
     for entry in campaign.get("candidates", []):
-        cm = os.path.join(ROOT, entry["manifest"])
-        cand = load(cm) if os.path.isfile(cm) else {}
+        cm = CC.candidate_manifest_path(ROOT, campaign_path, entry)
+        cand = load(cm)
         techniques.add(cand.get("technique", ""))
         diff_path = CC.repo_file_path(ROOT, cand.get("diff")) if cand.get("diff") else None
         cand_hashes[entry["candidate_id"]] = {
@@ -725,7 +727,9 @@ def self_test():
     with _tf.TemporaryDirectory() as outside, _tf.TemporaryDirectory(dir=ROOT) as inside:
         diff_path = os.path.join(outside, "candidate.diff")
         open(diff_path, "w").write("--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n base\n+candidate\n")
-        candidate_path = os.path.join(inside, "candidate-manifest.json")
+        cpath = os.path.join(inside, "campaign-manifest.json"); open(cpath, "w").write("{}")
+        candidate_path = os.path.join(inside, "candidates", "cand-external", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(candidate_path))
         with open(candidate_path, "w") as fh:
             json.dump({"candidate_id": "cand-external", "technique": "task-reframing",
                        "diff": diff_path}, fh)
@@ -738,6 +742,44 @@ def self_test():
             ok = False; print("[self-test] run manifest must not hash an external candidate diff")
         else:
             print("[self-test] run manifest omits an external candidate diff hash: ok")
+
+        outside_manifest = os.path.join(outside, "candidate-manifest.json")
+        with open(outside_manifest, "w") as fh:
+            json.dump({"candidate_id": "cand-external", "technique": "task-reframing", "diff": "missing.diff"}, fh)
+        escaped_campaign = {"campaign_id": "c", "candidates": [{
+            "candidate_id": "cand-external", "manifest": os.path.relpath(outside_manifest, ROOT),
+        }]}
+        try:
+            base_manifest(escaped_campaign, cpath, "fake", "failed", rd)
+            ok = False; print("[self-test] candidate manifest escape was read or hashed (want rejection)")
+        except ValueError:
+            print("[self-test] candidate manifest outside its campaign is rejected before reading: ok")
+
+        wrong_path = os.path.join(inside, "candidates", "cand-other", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(wrong_path))
+        with open(wrong_path, "w") as fh:
+            json.dump({"candidate_id": "cand-external", "technique": "task-reframing", "diff": "missing.diff"}, fh)
+        wrong_campaign = {"campaign_id": "c", "candidates": [{
+            "candidate_id": "cand-external", "manifest": os.path.relpath(wrong_path, ROOT),
+        }]}
+        try:
+            base_manifest(wrong_campaign, cpath, "fake", "failed", rd)
+            ok = False; print("[self-test] candidate manifest for a different ID was read or hashed (want rejection)")
+        except ValueError:
+            print("[self-test] candidate manifest for a different ID is rejected: ok")
+
+        linked_campaign = os.path.join(inside, "linked-campaign-manifest.json")
+        linked_path = os.path.join(inside, "candidates", "cand-linked", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(linked_path))
+        os.symlink(outside_manifest, linked_path)
+        linked = {"campaign_id": "c", "candidates": [{
+            "candidate_id": "cand-linked", "manifest": os.path.relpath(linked_path, ROOT),
+        }]}
+        try:
+            base_manifest(linked, linked_campaign, "fake", "failed", rd)
+            ok = False; print("[self-test] symlinked candidate manifest was read or hashed (want rejection)")
+        except ValueError:
+            print("[self-test] symlinked candidate manifest is rejected: ok")
 
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

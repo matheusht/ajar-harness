@@ -93,6 +93,26 @@ def candidate_dir(campaign_path, candidate_id):
     return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
 
 
+def candidate_manifest_path(root, campaign_path, entry):
+    if not isinstance(entry, dict) or not valid_candidate_id(entry.get("candidate_id")):
+        raise ValueError("candidate entry must have a safe candidate_id")
+    manifest = entry.get("manifest")
+    if not isinstance(manifest, str) or not manifest or os.path.isabs(manifest):
+        raise ValueError("candidate manifest path must be repository-relative")
+    root = os.path.realpath(root)
+    expected = os.path.abspath(os.path.join(candidate_dir(campaign_path, entry["candidate_id"]), "candidate-manifest.json"))
+    expected_rel = os.path.relpath(expected, root).replace(os.sep, "/")
+    resolved = repo_file_path(root, manifest)
+    try:
+        expected_inside = os.path.commonpath((root, os.path.realpath(expected))) == root
+    except ValueError:
+        expected_inside = False
+    if (manifest != expected_rel or resolved is None or not expected_inside or os.path.abspath(resolved) != expected
+            or os.path.realpath(expected) != expected or not os.path.isfile(expected)):
+        raise ValueError("candidate manifest must be a regular file at this campaign's candidates/<id>/candidate-manifest.json")
+    return expected
+
+
 def repo_file_path(root, relative_path):
     """Resolve a repository-relative artifact path, rejecting absolute and symlink escapes."""
     if not isinstance(relative_path, str) or not relative_path or os.path.isabs(relative_path):

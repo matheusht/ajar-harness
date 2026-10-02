@@ -615,9 +615,12 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
     shadow = load(shadow_path) if os.path.isfile(shadow_path) else {"candidates": []}
     shadow_by_id = {c["candidate_id"]: c for c in shadow.get("candidates", [])}
 
-    static, eligible = {}, []
+    static, eligible, candidate_manifests = {}, [], {}
     for cid in discover_campaign_candidates(campaign_path):
-        cand = load(os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json"))
+        source_manifest = os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json")
+        cand = CC.load_candidate_manifest(ROOT, campaign_path,
+                                         {"candidate_id": cid, "manifest": rel(source_manifest)})
+        candidate_manifests[cid] = cand
         measured = BE.measure_candidate(campaign, cand)
         mat = measured["materialization"]
         in_scope, violations = scope_check(mat.get("patched_card_text") or "")
@@ -655,8 +658,21 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             rec["behavioral_status"] = "not_run"
     elif eligible:
         sub_dir = os.path.join(camp_dir, "behavioral")
-        os.makedirs(sub_dir, exist_ok=True)
         sub_path = os.path.join(sub_dir, "campaign-manifest.json")
+        if (CC.repo_file_path(ROOT, rel(sub_path)) is None
+                or os.path.realpath(sub_path) != os.path.abspath(sub_path)):
+            raise ValueError("behavioral subcampaign path must be a regular in-repository path")
+        candidates = []
+        for cid in eligible:
+            manifest_path = os.path.join(candidate_dir(sub_path, cid), "candidate-manifest.json")
+            manifest_rel = rel(manifest_path)
+            if (CC.repo_file_path(ROOT, manifest_rel) is None
+                    or os.path.realpath(manifest_path) != os.path.abspath(manifest_path)):
+                raise ValueError("behavioral candidate manifest path must be a regular in-repository path")
+            if os.path.exists(manifest_path) and os.stat(manifest_path, follow_symlinks=False).st_nlink != 1:
+                raise ValueError("behavioral candidate manifest must not be hard-linked")
+            write_json(manifest_path, candidate_manifests[cid])
+            candidates.append({"candidate_id": cid, "eligibility": "candidate", "manifest": manifest_rel})
         write_json(sub_path, {
             # MUST match the candidates' campaign_id or the contract gate rejects them at preflight.
             "campaign_id": campaign["campaign_id"],
@@ -665,9 +681,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             "budgets": campaign["budgets"], "tracks": campaign["tracks"],
             "mutable_allowlist": campaign["mutable_allowlist"], "immutable": campaign["immutable"],
             "frozen_inputs": {},
-            "candidates": [{"candidate_id": cid, "eligibility": "candidate",
-                            "manifest": rel(os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json"))}
-                           for cid in eligible],
+            "candidates": candidates,
         })
         rc = BE.run_cli(sub_path, backend=backend, model_cmd=model_cmd)
         behavioral_status = {0: "completed", 2: "skipped", 3: "failed"}.get(rc, "unknown")

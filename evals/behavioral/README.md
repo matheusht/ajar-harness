@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v15-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v16-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v15-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v16-2026-10-02`
 
-Revision 15 preserves earlier evidence while pinning shared regular-file reads and the holdout/conformance
-scanners' safe handling of symlinks and non-regular files. It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 15 has no executed
+Revision 16 preserves earlier evidence while pinning fail-closed oracle-card reads in the conformance checker.
+It keeps candidate definitions and technique patches unchanged. Earlier revisions remain immutable history rather
+than being re-pinned. Revision 16 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 15
+
+Revision 15 pinned shared regular-file reads and the holdout/conformance scanners' safe handling of symlinks and
+non-regular files. Revision 16 supersedes it after oracle-card reads began rejecting symlinks and special files.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 14
 

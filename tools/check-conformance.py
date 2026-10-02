@@ -606,7 +606,13 @@ def check_oracles():
     for fn in sorted(os.listdir(base)):
         if not fn.endswith(".md"):
             continue
-        fm = front_matter(open(os.path.join(base, fn)).read())
+        try:
+            text = read_regular_text(os.path.join(base, fn), no_follow=True)
+        except OSError as exc:
+            record(False, f"oracles/{fn}: regular input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
+        fm = front_matter(text)
         record(fm is not None, f"oracles/{fn}: front-matter present")
         if fm is not None:
             record(get_key(fm, "id") is not None, f"oracles/{fn}: has id")

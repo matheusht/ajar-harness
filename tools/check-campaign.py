@@ -31,7 +31,7 @@ import subprocess
 import sys
 import tempfile
 
-from regular_file_io import load_json
+from regular_file_io import load_json, read_regular_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,7 +108,11 @@ def git_patch_analysis(diff_path, root):
             unsupported.append(t)
         if "120000" in t:
             unsupported.append(f"symlink: {t}")
-    text = open(diff_path).read()
+    try:
+        text = read_regular_text(diff_path, encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        unsupported.append(f"diff cannot be read as UTF-8: {exc}")
+        text = ""
     for ln in text.splitlines():
         m = re.match(r"diff --git a/(.+?) b/(.+)$", ln)
         if m:
@@ -422,6 +426,19 @@ def self_test():
                                "rename from skills/techniques/task-reframing/SKILL.md\nrename to skills/techniques/x.md\n")
         expect("P0: rename patch -> block",
                dict(base, candidate_id="cand-ren", touched_files=[CARD], diff=ren_rel, candidate_hash=ren_h), "block")
+
+        invalid_rel = "evals/c/invalid-utf8.diff"
+        invalid_path = os.path.join(root, invalid_rel)
+        with open(invalid_path, "wb") as handle:
+            handle.write(f"--- a/{CARD}\n+++ b/{CARD}\n@@ -1 +1,2 @@\n base\n+".encode() + b"\xff\n")
+        invalid_hash = sha256_file(invalid_path)
+        invalid_patch = dict(base, candidate_id="cand-invalid-utf8", touched_files=[CARD],
+                             diff=invalid_rel, candidate_hash=invalid_hash)
+        try:
+            expect("non-UTF-8 patch blocks", invalid_patch, "block")
+        except Exception as exc:
+            ok = False
+            print(f"[self-test] non-UTF-8 patch crashed the gate: {type(exc).__name__}: {exc}")
 
         expect("non-empty baseline diff blocks",
                dict(baseline, candidate_id="cand-baseline-nonempty", touched_files=[],

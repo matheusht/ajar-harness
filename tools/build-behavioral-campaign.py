@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Evaluator changes get a NEW campaign revision; prior revisions are preserved append-only, never
 # mutated/replaced in place (see the superseding SUPERSEDED.md note).
-CAMP_ID = "behavioral-canonical-v7-2026-10-02"
+CAMP_ID = "behavioral-canonical-v8-2026-10-02"
 CAMP_DIR = os.path.join(ROOT, "evals", "behavioral", "campaigns", CAMP_ID)
 
 
@@ -140,9 +140,9 @@ def build():
 
     campaign = {
         "campaign_id": CAMP_ID, "created": "2026-10-02",
-        "note": "Canonical behavioral campaign revision 7. Preserves revisions 2-6 and historical evidence "
+        "note": "Canonical behavioral campaign revision 8. Preserves revisions 2-7 and historical evidence "
                 "while pinning the campaign gate and its regular-file reader after frozen-input mutation "
-                "and patch-path parsing hardening. "
+                "and patch parsing hardening. "
                 "Built deterministically by tools/build-behavioral-campaign.py and consumed with the "
                 "canonical contract gate plus measured patched-workspace conformance.",
         "tracks": [{"name": "task-reframing", "mutation_target": "skills/techniques/task-reframing/", "kind": "existing-card-variant"},

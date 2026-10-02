@@ -77,19 +77,25 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v31-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v32-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v31-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v32-2026-10-02`
 
-Revision 31 preserves earlier evidence while pinning constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
+Revision 32 preserves earlier evidence while pinning no-follow lifecycle-control finding and attestation reads, constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
 adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
 oracles, and casebooks.
 It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 31 has no executed
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 32 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 31
+
+Revision 31 pinned constrained KB ablation-fixture reads and preceding filesystem-input checks. Revision 32
+supersedes it after lifecycle-control finding and attestation reads began rejecting symlinked and special-file
+inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 24
 

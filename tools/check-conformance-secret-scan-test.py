@@ -69,6 +69,19 @@ def scan(root, mode):
         elif mode == "finding-traps":
             module.check_finding_traps()
             result = rows
+        elif mode == "lifecycle-control-fixture":
+            fixture = Path(root) / "fixtures" / "lifecycle-control-kind"
+            cases = fixture / "cases"
+            for name in ("finding.json", "attest.json"):
+                label = f"lifecycle-control-kind/replay-as-control/{name}"
+                result = module.read_conformance_json(
+                    cases / "replay-as-control" / name,
+                    label,
+                    (Path(root) / "fixtures", fixture, cases, cases / "replay-as-control"),
+                )
+                if result is not None:
+                    module.record(True, f"{label}: regular JSON is safe")
+            result = rows
         elif mode == "cited-fixtures":
             module.check_cited_fixtures()
             result = rows
@@ -193,6 +206,55 @@ def main():
             oracle_failures.append(f"oracle root symlink: {exc}")
 
     assert not oracle_failures, "\n".join(oracle_failures)
+
+    with tempfile.TemporaryDirectory(prefix="lifecycle-control-fixture-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        outside = Path(tmp) / "outside-fixtures"
+        case = outside / "lifecycle-control-kind" / "cases" / "replay-as-control"
+        case.mkdir(parents=True)
+        (case / "finding.json").write_text('{"finding":"outside"}')
+        (case / "attest.json").write_text('{"attest":"outside"}')
+        (root / "fixtures").parent.mkdir(parents=True)
+        (root / "fixtures").symlink_to(outside, target_is_directory=True)
+        rows = run_scan(root, "lifecycle-control-fixture")
+        assert len(rows) == 2 and all(not row[0] and "unsafe" in row[2] for row in rows), rows
+
+        (root / "fixtures").unlink()
+        fixtures = root / "fixtures" / "lifecycle-control-kind" / "cases" / "replay-as-control"
+        fixtures.mkdir(parents=True)
+        for name in ("finding.json", "attest.json"):
+            external = Path(tmp) / f"outside-{name}"
+            external.write_text("{}")
+            (fixtures / name).symlink_to(external)
+        rows = run_scan(root, "lifecycle-control-fixture")
+        assert len(rows) == 2 and all(not row[0] and "unsafe" in row[2] for row in rows), rows
+        for path in fixtures.iterdir():
+            path.unlink()
+        for name in ("finding.json", "attest.json"):
+            (fixtures / name).write_text("{}")
+
+        control_root = fixtures.parents[1]
+        cases = control_root / "cases"
+        outside_cases = Path(tmp) / "outside-cases"
+        outside_case = outside_cases / "replay-as-control"
+        outside_case.mkdir(parents=True)
+        for name in ("finding.json", "attest.json"):
+            (outside_case / name).write_text("{}")
+        saved_cases = control_root / "cases-saved"
+        cases.rename(saved_cases)
+        cases.symlink_to(outside_cases, target_is_directory=True)
+        rows = run_scan(root, "lifecycle-control-fixture")
+        assert len(rows) == 2 and all(not row[0] and "unsafe" in row[2] for row in rows), rows
+        cases.unlink()
+        saved_cases.rename(cases)
+        fixtures = cases / "replay-as-control"
+        rows = run_scan(root, "lifecycle-control-fixture")
+        assert len(rows) == 2 and all(row[0] for row in rows), rows
+
+        (fixtures / "finding.json").unlink()
+        os.mkfifo(fixtures / "finding.json")
+        rows = run_scan(root, "lifecycle-control-fixture")
+        assert len(rows) == 2 and any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     capability_failures = []
     with tempfile.TemporaryDirectory(prefix="capability-scan-e2e-") as tmp:
@@ -1131,7 +1193,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, KB ablation fixture, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, KB ablation fixture, casebook, capability, finding, finding-trap attestation, lifecycle-control finding/attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

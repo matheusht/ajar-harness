@@ -74,6 +74,13 @@ def _under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 
+def immutable_paths(campaign):
+    paths = list(DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    paths.extend(spec["path"] for spec in campaign.get("frozen_inputs", {}).values()
+                 if isinstance(spec, dict) and isinstance(spec.get("path"), str) and spec["path"])
+    return paths
+
+
 def _rename_paths(p):
     """A numstat path may encode a rename as 'old => new' or 'pre/{old => new}/post'."""
     if "=>" not in p:
@@ -194,7 +201,7 @@ def gate(campaign, candidate, root):
         if stray:
             reasons.append(f"touches files outside mutation_target '{mt}': {stray}")
 
-    immutable = list(DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    immutable = immutable_paths(campaign)
     leaked = sorted(f for f in effective if any(_under(f, p) for p in immutable))
     if leaked:
         reasons.append(f"touches immutable (evaluator/gold/casebook/budget/schema) files: {leaked}")
@@ -351,6 +358,22 @@ def self_test():
         )
         expect("P0: candidate cannot change the gate's file reader -> block",
                reader_candidate, "block", camp=reader_campaign)
+
+        pinned_rel = "docs/frozen-input.txt"
+        pinned_hash = sha256_file(_write(root, pinned_rel, "frozen\n"))
+        pinned_campaign = dict(
+            campaign,
+            tracks=[{"name": "docs", "mutation_target": "docs/"}],
+            mutable_allowlist=["docs/"],
+            frozen_inputs={"frozen-doc": {"path": pinned_rel, "sha256": pinned_hash}},
+        )
+        pinned_diff, pinned_diff_hash = mkdiff("pinned", [pinned_rel])
+        pinned_candidate = dict(
+            base, candidate_id="cand-pinned-input", mutation_target="docs/",
+            touched_files=[pinned_rel], diff=pinned_diff, candidate_hash=pinned_diff_hash,
+        )
+        expect("P0: candidate cannot change a frozen input -> block",
+               pinned_candidate, "block", camp=pinned_campaign)
 
         # touched_files claims a file the diff does not actually touch.
         expect("declared != diff-derived paths blocks",

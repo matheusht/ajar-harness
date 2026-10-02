@@ -273,7 +273,7 @@ def materialize_candidate(campaign, candidate, root=ROOT):
     mt = candidate.get("mutation_target", "") or ""
     target_rel = (mt + "SKILL.md") if mt.endswith("/") else mt
     allowlist = list(campaign.get("mutable_allowlist", [])) or ([mt] if mt else [])
-    immutable = list(CC.DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    immutable = CC.immutable_paths(campaign)
     res = _blank_materialization(declared, is_baseline, target_rel)
 
     pf_verdict, pf_reasons = CC.gate(campaign, candidate, root)     # PREFLIGHT — cannot authorize
@@ -573,6 +573,18 @@ def self_test():
              "target_regular": True}
     if measured_policy(clean)[0]:
         ok = False; print(f"[self-test] clean card variant must pass measured policy; got {measured_policy(clean)[0]}")
+
+    frozen_rel = "docs/frozen-input.txt"
+    frozen_campaign = {"immutable": [], "frozen_inputs": {
+        "pinned-doc": {"path": frozen_rel, "sha256": "0" * 64},
+    }}
+    frozen_facts = dict(
+        clean, declared=[frozen_rel], actual=[frozen_rel], mt="docs/",
+        allowlist=["docs/"], immutable=CC.immutable_paths(frozen_campaign),
+        modes={frozen_rel: "100644"}, target_rel=frozen_rel,
+    )
+    if not measured_policy(frozen_facts)[0]:
+        ok = False; print("[self-test] measured policy must block a changed frozen input")
 
     adversarial = {
         "exec-bit mode change": dict(clean, modes={card: "100755"}),

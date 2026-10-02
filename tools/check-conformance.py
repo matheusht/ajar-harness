@@ -66,6 +66,20 @@ def record(ok, label, detail=""):
         FAILS.append(f"{label}  {detail}")
 
 
+def read_conformance_text(path, label, guarded_dirs=()):
+    if any(os.path.islink(directory) for directory in guarded_dirs):
+        record(False, f"{label}: regular input is safe to read", "unsafe symlinked source directory")
+        return None
+    if not os.path.lexists(path):
+        return None
+    try:
+        return read_regular_text(path, no_follow=True)
+    except OSError as exc:
+        record(False, f"{label}: regular input is safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+        return None
+
+
 def front_matter(text):
     if not text.startswith("---"):
         return None
@@ -259,17 +273,7 @@ def collect_capability_ids():
 
 
 def _read_capability_input(path, label):
-    if not os.path.lexists(path):
-        return None
-    if os.path.islink(os.path.join(ROOT, "capabilities")):
-        record(False, f"{label}: regular input is safe to read", "unsafe symlinked capabilities directory")
-        return None
-    try:
-        return read_regular_text(path, no_follow=True)
-    except OSError as exc:
-        record(False, f"{label}: regular input is safe to read",
-               f"unsafe input: {exc.strerror or 'not a regular file'}")
-        return None
+    return read_conformance_text(path, label, (os.path.join(ROOT, "capabilities"),))
 
 
 def _capability_blocks(text):
@@ -547,20 +551,29 @@ TOOL_FAMILY_CONTRACT_OWNED = {"st3gg", "p4rs3lt0ngv3", "foundry-slither"}
 def check_tool_family_manifests():
     """Family manifests: detection-first, machine-checkable, staged authority. Fail closed."""
     base = os.path.join(ROOT, "tool-families")
+    if os.path.islink(base):
+        record(False, "tool-families: source directory is safe", "unsafe symlinked directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[tool-families] family manifests (manifest holds authority; advanced surfaces gated)")
     for fam in sorted(os.listdir(base)):
         if fam not in TOOL_FAMILY_CONTRACT_OWNED:
             continue
-        mpath = os.path.join(base, fam, "manifest.yaml")
-        if os.path.isfile(mpath):
-            problems = tool_family_manifest_problems(open(mpath).read())
+        family_dir = os.path.join(base, fam)
+        if os.path.islink(family_dir):
+            record(False, f"tool-families/{fam}: source directory is safe", "unsafe symlinked directory")
+            continue
+        mpath = os.path.join(family_dir, "manifest.yaml")
+        text = read_conformance_text(mpath, f"tool-families/{fam}/manifest.yaml", (base, family_dir))
+        if text is not None:
+            problems = tool_family_manifest_problems(text)
             record(not problems, f"tool-families/{fam}/manifest.yaml: detection-first + staged authority",
                    "; ".join(problems) if problems else "")
-        apath = os.path.join(base, fam, "AGENT.md")
-        if os.path.isfile(apath):
-            atext = open(apath).read().lower()
+        apath = os.path.join(family_dir, "AGENT.md")
+        atext = read_conformance_text(apath, f"tool-families/{fam}/AGENT.md", (base, family_dir))
+        if atext is not None:
+            atext = atext.lower()
             record("plane 1/2" in atext and "raw" in atext,
                    f"tool-families/{fam}/AGENT.md: states raw payloads not stored in Plane 1/2")
 
@@ -568,14 +581,20 @@ def check_tool_family_manifests():
 def check_tool_family_must_reject():
     """Permanent negatives: a malformed family manifest MUST be rejected by the same predicate."""
     base = os.path.join(ROOT, "fixtures", "tool-families", "_must_reject")
+    guarded_dirs = (os.path.join(ROOT, "fixtures"), os.path.dirname(base), base)
+    if any(os.path.islink(directory) for directory in guarded_dirs):
+        record(False, "tool-families _must_reject: fixture directories are safe",
+               "unsafe symlinked fixture directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[tool-families] _must_reject corpus (the manifest must fail closed)")
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not os.path.isfile(fp):
+        text = read_conformance_text(fp, f"_must_reject/{fn}", guarded_dirs)
+        if text is None:
             continue
-        problems = tool_family_manifest_problems(open(fp).read())
+        problems = tool_family_manifest_problems(text)
         record(bool(problems), f"_must_reject/{fn}: rejected [{'; '.join(problems) or 'NONE'}]",
                "fixture should be rejected but passed all checks" if not problems else "")
 

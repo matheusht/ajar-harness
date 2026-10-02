@@ -45,6 +45,10 @@ def scan(root, mode):
             module.validate_record = lambda *args, **kwargs: []
             module.check_finding_fixtures()
             result = rows
+        elif mode == "tool-families":
+            module.check_tool_family_manifests()
+            module.check_tool_family_must_reject()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -348,6 +352,84 @@ def main():
 
     assert not finding_fixture_failures, "\n".join(finding_fixture_failures)
 
+    family_failures = []
+    with tempfile.TemporaryDirectory(prefix="tool-family-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        family_dir = root / "tool-families" / "st3gg"
+        family_dir.mkdir(parents=True)
+        valid_manifest = (
+            "family_id: st3gg\n"
+            "reviewed_commit: abc123\n"
+            "license: MIT\n"
+            "integration: detection-only\n"
+            "allowed_actions: [observe]\n"
+        )
+        outside_manifest = Path(tmp) / "outside-manifest.yaml"
+        outside_manifest.write_text(valid_manifest)
+        (family_dir / "manifest.yaml").symlink_to(outside_manifest)
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"family manifest symlink: {exc}")
+
+        (family_dir / "manifest.yaml").unlink()
+        (family_dir / "manifest.yaml").write_text(valid_manifest)
+        outside_agent = Path(tmp) / "outside-agent.md"
+        outside_agent.write_text("Plane 1/2 does not store raw payloads.\n")
+        (family_dir / "AGENT.md").symlink_to(outside_agent)
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"family guidance symlink: {exc}")
+
+        (family_dir / "AGENT.md").unlink()
+        fixture_dir = root / "fixtures" / "tool-families" / "_must_reject"
+        fixture_dir.mkdir(parents=True)
+        outside_fixture = Path(tmp) / "outside-family-fixture.yaml"
+        outside_fixture.write_text("not a valid family manifest\n")
+        (fixture_dir / "external.yaml").symlink_to(outside_fixture)
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"must-reject fixture symlink: {exc}")
+
+        (fixture_dir / "external.yaml").unlink()
+        os.mkfifo(fixture_dir / "blocked.yaml")
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"must-reject fixture FIFO: {exc}")
+
+        (fixture_dir / "blocked.yaml").unlink()
+        fixture_dir.rmdir()
+        outside_corpus = Path(tmp) / "outside-family-corpus"
+        outside_corpus.mkdir()
+        (outside_corpus / "external.yaml").write_text("not a valid family manifest\n")
+        fixture_dir.symlink_to(outside_corpus, target_is_directory=True)
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"must-reject corpus symlink: {exc}")
+
+        outside_families = Path(tmp) / "outside-families"
+        outside_family = outside_families / "st3gg"
+        outside_family.mkdir(parents=True)
+        (outside_family / "manifest.yaml").write_text(valid_manifest)
+        (root / "tool-families").rename(root / "tool-families-saved")
+        (root / "tool-families").symlink_to(outside_families, target_is_directory=True)
+        try:
+            rows = run_scan(root, "tool-families")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            family_failures.append(f"tool-families root symlink: {exc}")
+
+    assert not family_failures, "\n".join(family_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -505,7 +587,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, and finding scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, and tool-family scans)")
 
 
 if __name__ == "__main__":

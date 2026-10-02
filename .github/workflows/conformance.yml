@@ -63,6 +63,16 @@ jobs:
         run: python3 tools/researcher_adapter.py --self-test
       - name: Keep/discard candidate policy (self-test)
         run: python3 tools/score-candidate.py --self-test
+      - name: Versioned scorer input contract (CLI E2E)
+        run: python3 tools/score-candidate-v2-test.py
+      - name: Skills output guards under optimized Python
+        run: python3 -O tools/skills-path-guard-test.py
+      - name: Framing probe JSON input CLI (FIFO rejection)
+        run: python3 tools/framing-probe-input-test.py
+      - name: Holdout preflight JSON input CLI (FIFO rejection)
+        run: python3 tools/preflight-holdout-input-test.py
+      - name: Ideation mapper JSON input CLI (FIFO rejection)
+        run: python3 tools/ideation-input-test.py
       - name: Replay & variance gate (self-test)
         run: python3 tools/replay-candidate.py --self-test
       - name: Promotion bundle renderer (self-test)

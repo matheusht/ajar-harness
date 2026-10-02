@@ -86,7 +86,7 @@ def evaluate(inventory_path: Path, matrix_path: Path) -> dict:
 
 
 def self_test() -> int:
-    import tempfile, json
+    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp); matrix={"schema_version":1,"matrix_id":"matrix-test","cases":[],"policy":{"target_contact":False,"artifact_execution":False,"zone2_creation":False,"historical_answers_exposed_to_runner":False}}; mp=root/'matrix.json';mp.write_bytes(canonical_json_bytes(matrix));inv={"schema_version":1,"mode":"dry_run","inventory_hash":"sha256:"+'0'*64,"counts":{"total":0,"representable":0,"needs_review":0},"entries":[],"classifications":{"structured_valid":0,"structured_drifted":0,"narrative_only":0,"artifact":0,"report":0,"submission_like":0,"unknown":0},"invented_attempts":0,"source_bytes_modified":False};ip=root/'inventory.json';ip.write_bytes(canonical_json_bytes(inv));report=evaluate(ip,mp);ok=report['artifact_replay']['executed']==0 and report['claims']['demonstrated_efficacy']=='not_demonstrated' and report['claims']['prospective_release']=='not_qualified'
     print(f"RETROSPECTIVE EVALUATION SELF-TEST: {'PASS' if ok else 'FAIL'}");return 0 if ok else 1

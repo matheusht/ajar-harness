@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import re
+import select
 import shutil
 import stat
 import subprocess
@@ -19,11 +19,13 @@ from typing import Any, Sequence
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import read_governed_file, read_ledger
 from task_notice import compile_hunter_notices
+from _hunter_view_watchdog import _remove as _remove_view_tree
 
 
 VIEW_VERSION = "hunter-current-v1"
 COMPILER_VERSION = 1
 DEFAULT_BYTE_BUDGET = 512 * 1024
+_WATCHDOG_READY_TIMEOUT_SECONDS = 5.0
 EXCLUDED_CLASSES = (
     "engagement-ledgers", "findings", "reviews", "reports", "submissions", "cleanup",
     "portable-memory", "casebooks", "evaluation-gold", "other-hypotheses",
@@ -281,6 +283,7 @@ class HunterView:
     _lifetime_fd: int
     _watchdog: subprocess.Popen[bytes]
     _root: Path
+    _root_identity: tuple[int, int]
 
     def close(self) -> None:
         if self._lifetime_fd >= 0:
@@ -289,10 +292,33 @@ class HunterView:
         try:
             self._watchdog.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            self._watchdog.kill(); self._watchdog.wait(timeout=2)
+            self._watchdog.kill()
+            try:
+                self._watchdog.wait(timeout=2)
+            except subprocess.TimeoutExpired as exc:
+                raise HunterViewError("hunter_view_cleanup_failed") from exc
+        try:
+            current = self._root.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise HunterViewError("hunter_view_cleanup_failed") from exc
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino) != self._root_identity
+        ):
             raise HunterViewError("hunter_view_cleanup_failed")
-        if self._watchdog.returncode != 0 or self._root.exists():
-            raise HunterViewError("hunter_view_cleanup_failed")
+        try:
+            _remove_view_tree(self._root)
+        except OSError as exc:
+            raise HunterViewError("hunter_view_cleanup_failed") from exc
+        try:
+            self._root.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise HunterViewError("hunter_view_cleanup_failed") from exc
+        raise HunterViewError("hunter_view_cleanup_failed")
 
     def __enter__(self) -> "HunterView":
         return self
@@ -414,6 +440,9 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
     if sum(len(data) for _path, data in files) > byte_budget:
         raise HunterViewError("hunter_view_budget_exceeded")
     root = Path(tempfile.mkdtemp(prefix=f".hunter-view-{view_digest[7:19]}-", dir=workspace))
+    root_entry = root.lstat()
+    lifetime_read = lifetime_write = ready_read = ready_write = -1
+    watchdog: subprocess.Popen[bytes] | None = None
     projection = root / "view"
     runtime = root / "runtime"
     try:
@@ -431,22 +460,60 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
             shutil.copyfile(Path(__file__).with_name(name), destination)
             os.chmod(destination, 0o444)
         os.chmod(runtime_tools, 0o555); os.chmod(runtime, 0o555); os.chmod(projection, 0o555); os.chmod(root, 0o555)
-        entry = root.stat(follow_symlinks=False)
         lifetime_read, lifetime_write = os.pipe(); ready_read, ready_write = os.pipe()
         watchdog = subprocess.Popen(
-            [sys.executable, str(Path(__file__).with_name("_hunter_view_watchdog.py")), str(lifetime_read), str(ready_write), str(root), str(entry.st_dev), str(entry.st_ino)],
+            [sys.executable, str(Path(__file__).with_name("_hunter_view_watchdog.py")), str(lifetime_read), str(ready_write), str(root), str(root_entry.st_dev), str(root_entry.st_ino)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             pass_fds=(lifetime_read, ready_write), start_new_session=True,
         )
-        os.close(lifetime_read); os.close(ready_write)
-        if os.read(ready_read, 1) != b"1":
+        os.close(lifetime_read); lifetime_read = -1
+        os.close(ready_write); ready_write = -1
+        readable, _, _ = select.select(
+            [ready_read], [], [], _WATCHDOG_READY_TIMEOUT_SECONDS
+        )
+        if not readable or os.read(ready_read, 1) != b"1":
             raise HunterViewError("hunter_view_watchdog_unavailable")
-        os.close(ready_read)
-        return HunterView(projection, runtime, view_digest, corpus_digest, manifest, lifetime_write, watchdog, root)
+        os.close(ready_read); ready_read = -1
+        view = HunterView(
+            projection,
+            runtime,
+            view_digest,
+            corpus_digest,
+            manifest,
+            lifetime_write,
+            watchdog,
+            root,
+            (root_entry.st_dev, root_entry.st_ino),
+        )
+        lifetime_write = -1
+        watchdog = None
+        return view
     except BaseException:
+        for descriptor in (lifetime_read, ready_read, ready_write, lifetime_write):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        if watchdog is not None:
+            try:
+                watchdog.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    watchdog.kill()
+                except OSError:
+                    pass
+                try:
+                    watchdog.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
         try:
-            os.chmod(root, 0o700)
-            shutil.rmtree(root)
+            current = root.lstat()
+            if (
+                (current.st_dev, current.st_ino) == (root_entry.st_dev, root_entry.st_ino)
+                and stat.S_ISDIR(current.st_mode)
+            ):
+                _remove_view_tree(root)
         except OSError: pass
         raise
 

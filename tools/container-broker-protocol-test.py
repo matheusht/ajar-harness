@@ -23,6 +23,7 @@ import container_broker_client as client
 import driver_action_admission as admission
 import network_scope
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
+from network_scope_test_support import scope_with_network_policy
 
 
 CONTAINER_ID = "a" * 64
@@ -371,7 +372,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         )
 
     def test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay(self) -> None:
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
         state = {"scope_hash": sha256_bytes(scope)}
@@ -412,7 +413,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual((first[0], replay[0]), (1, 1))
         self.assertEqual(effect.call_count, 1)
 
-        changed_scope = network_scope.scope_with_network_policy(
+        changed_scope = scope_with_network_policy(
             host="sink.invalid", path="/reattested", method="GET"
         )
         changed_state = {"scope_hash": sha256_bytes(changed_scope)}
@@ -466,7 +467,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
 
         server = threading.Thread(target=serve, daemon=True)
         server.start()
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
         state = {"scope_hash": sha256_bytes(scope)}
@@ -610,6 +611,174 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
             expired.exception.code, "driver_action_execution_deadline_exceeded"
         )
         self.assertEqual(self.broker._admission["status"], "armed")
+
+    def test_wire_schema_versions_require_integer_one(self) -> None:
+        invalid_manifest = copy.deepcopy(self.manifest)
+        invalid_manifest["schema_version"] = True
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client.validate_manifest(invalid_manifest)
+
+        invalid_manifest = copy.deepcopy(self.manifest)
+        invalid_manifest["inline_inputs"][0]["format"] = []
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client.validate_manifest(invalid_manifest)
+
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client._validate_relay_request(
+                {
+                    "schema_version": True,
+                    "request_kind": "action",
+                    "command": "validate",
+                    "arguments": [],
+                }
+            )
+
+        request_pair = socket.socketpair()
+        try:
+            request_pair[0].sendall(
+                canonical_json_bytes(
+                    {
+                        "schema_version": True,
+                        "command": "validate",
+                        "arguments": [],
+                        "runtime_session_ref": RUNTIME_REF,
+                    }
+                )
+            )
+            request_pair[0].shutdown(socket.SHUT_WR)
+            with self.assertRaises(RecordError) as bad_request:
+                self.broker._read_request(request_pair[1])
+            self.assertEqual(
+                bad_request.exception.code,
+                "driver_action_broker_request_invalid",
+            )
+        finally:
+            request_pair[0].close()
+            request_pair[1].close()
+
+        response = self.broker._container_response(
+            request_nonce=base64.b64encode(b"v" * 32).decode("ascii"),
+            returncode=0,
+            output=b"{}\n",
+        )
+        response["schema_version"] = True
+        unsigned = dict(response)
+        unsigned.pop("mac_base64")
+        response["mac_base64"] = client._mac(KEY, client.RESPONSE_DOMAIN, unsigned)
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client._validate_response(
+                self.manifest, KEY, response, response["request_nonce"]
+            )
+
+        envelope = client._envelope(
+            self.manifest,
+            KEY,
+            {
+                "request_kind": "action",
+                "command": "validate",
+                "arguments": [],
+                "runtime_session_ref": RUNTIME_REF,
+                "inline_inputs": [],
+            },
+        )
+        envelope["schema_version"] = True
+        unsigned_envelope = dict(envelope)
+        unsigned_envelope.pop("mac_base64")
+        envelope["mac_base64"] = client._mac(
+            KEY, client.REQUEST_DOMAIN, unsigned_envelope
+        )
+        with self.assertRaises(RecordError) as bad_envelope:
+            self.broker._authenticate_container_request(envelope)
+        self.assertEqual(bad_envelope.exception.code, "driver_action_scope_mismatch")
+
+    def test_unhashable_target_fetch_methods_fail_as_protocol_errors(self) -> None:
+        url = "https://sink.invalid/allowed"
+        request_id = client.target_fetch_request_id(
+            self.manifest, url=url, method=[]  # type: ignore[arg-type]
+        )
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client._validate_relay_request(
+                {
+                    "schema_version": 1,
+                    "request_kind": "target_fetch",
+                    "request_id": request_id,
+                    "url": url,
+                    "method": [],
+                }
+            )
+        with self.assertRaises(client.ContainerBrokerClientError):
+            client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=request_id,
+                url=url,
+                method=[],  # type: ignore[arg-type]
+            )
+
+        envelope = client._envelope(
+            self.manifest,
+            KEY,
+            {
+                "request_kind": "target_fetch",
+                "operation": "target_fetch",
+                "request_id": request_id,
+                "url": url,
+                "method": [],
+                "runtime_session_ref": RUNTIME_REF,
+            },
+        )
+        with self.assertRaises(RecordError) as rejected:
+            self.broker._authenticate_container_request(envelope)
+        self.assertEqual(rejected.exception.code, "driver_target_fetch_invalid")
+
+        provider_payload = {
+            "request_kind": "provider_request",
+            "method": "POST",
+            "path": [],
+            "headers": {},
+            "body_base64": base64.b64encode(b"{}").decode("ascii"),
+            "runtime_session_ref": RUNTIME_REF,
+        }
+        provider_envelope = client._envelope(self.manifest, KEY, provider_payload)
+        with self.assertRaises(RecordError) as provider_rejected:
+            self.broker._authenticate_container_request(provider_envelope)
+        self.assertEqual(
+            provider_rejected.exception.code, "driver_provider_request_invalid"
+        )
+
+        malformed_body = canonical_json_bytes(
+            {
+                "model": "fixture-container-model",
+                "max_tokens": 1,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": [],
+                                "source": {
+                                    "type": "url",
+                                    "url": "https://untrusted.invalid/document",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        capability_payload = {
+            **provider_payload,
+            "path": "/v1/messages",
+            "body_base64": base64.b64encode(malformed_body).decode("ascii"),
+        }
+        capability_envelope = client._envelope(
+            self.manifest, KEY, capability_payload
+        )
+        with self.assertRaises(RecordError) as capability_rejected:
+            self.broker._authenticate_container_request(capability_envelope)
+        self.assertEqual(
+            capability_rejected.exception.code, "driver_provider_request_invalid"
+        )
 
     def test_inline_set_rejects_missing_extra_duplicate_size_digest_and_oversize(self) -> None:
         record = broker_admission()
@@ -830,7 +999,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         invalid_manifest = copy.deepcopy(self.manifest)
         invalid_manifest["runtime_identity"]["container_id"] = "A" * 64
         with self.assertRaises(client.ContainerBrokerClientError):
-            client._validate_manifest(invalid_manifest)
+            client.validate_manifest(invalid_manifest)
 
     def test_environment_loading_keeps_the_session_key_private(self) -> None:
         key_path = self.root / "session.key"
@@ -900,12 +1069,31 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
     def test_stalled_frame_does_not_terminate_the_broker(self) -> None:
         endpoint = self.broker.tcp_endpoint
         self.assertIsNotNone(endpoint)
-        with mock.patch.object(admission, "_BROKER_IO_TIMEOUT_SECONDS", 0.05):
+        original_recv_exact = admission._recv_exact
+        frame_timed_out = threading.Event()
+
+        def observe_frame_timeout(
+            connection: socket.socket,
+            size: int,
+            *,
+            cancel_event: threading.Event | None = None,
+        ) -> bytes:
+            try:
+                return original_recv_exact(connection, size, cancel_event=cancel_event)
+            except socket.timeout:
+                if size == 10:
+                    frame_timed_out.set()
+                raise
+
+        with (
+            mock.patch.object(admission, "_BROKER_IO_TIMEOUT_SECONDS", 0.05),
+            mock.patch.object(admission, "_recv_exact", side_effect=observe_frame_timeout),
+        ):
             stalled = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 stalled.connect(endpoint)
                 stalled.sendall(struct.pack("!I", 10) + b"{")
-                time.sleep(0.15)
+                self.assertTrue(frame_timed_out.wait(1.0))
             finally:
                 stalled.close()
 
@@ -950,6 +1138,48 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         )
         self.assertEqual((returncode, json.loads(output)), (0, {}))
         self.assertEqual(len(observed), 1)
+
+    def test_unix_broker_request_has_one_total_read_deadline(self) -> None:
+        clock = {"now": 0.0}
+        raw = canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "command": "validate",
+                "arguments": [],
+                "runtime_session_ref": RUNTIME_REF,
+            }
+        )
+
+        class SlowConnection:
+            def __init__(self) -> None:
+                self.data = bytearray(raw)
+                self.timeout: float | None = 2.0
+
+            def gettimeout(self) -> float | None:
+                return self.timeout
+
+            def settimeout(self, timeout: float | None) -> None:
+                self.timeout = timeout
+
+            def recv(self, size: int) -> bytes:
+                if not self.data:
+                    return b""
+                delay = 0.5
+                if self.timeout is not None and self.timeout < delay:
+                    raise socket.timeout("total request deadline")
+                clock["now"] += delay
+                count = min(16, size, len(self.data))
+                chunk = bytes(self.data[:count])
+                del self.data[:count]
+                return chunk
+
+        connection = SlowConnection()
+        with (
+            mock.patch.object(admission.time, "monotonic", side_effect=lambda: clock["now"]),
+            self.assertRaises(socket.timeout),
+        ):
+            self.broker._read_request(connection)  # type: ignore[arg-type]
+        self.assertEqual(connection.timeout, 2.0)
 
     def test_action_request_budget_cannot_starve_stop(self) -> None:
         raw = canonical_json_bytes({"kind": "fixture"})
@@ -1032,6 +1262,24 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(action["action_version"], 3)
         self.assertEqual(action["executor_id"], "local-uid-501:broker")
         self.assertEqual(action["session_id"], "session-posix-501-77")
+        malformed_version = {
+            "action": {
+                "argument": "--action-file",
+                "value": {"action_version": []},
+            }
+        }
+        with mock.patch.object(
+            admission,
+            "_parent_recorder_identity",
+            return_value=("local-uid-501:broker", "session-posix-501-77"),
+        ):
+            untouched = admission._stamp_parent_recorder_documents(
+                malformed_version,
+                command="request-authority",
+                runtime_session_ref=RUNTIME_REF,
+                runtime_model="fixture-container-model",
+            )
+        self.assertEqual(untouched["action"]["value"]["action_version"], [])
 
     def test_network_receipt_is_redacted_bounded_and_persistent(self) -> None:
         receipt = {
@@ -1062,7 +1310,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(self.broker.network_audit[-1]["status"], "uncertain")
 
     def test_recovered_target_receipt_tombstones_only_same_admission_request(self) -> None:
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
         state = {"scope_hash": sha256_bytes(scope)}
@@ -1159,6 +1407,39 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
             )
         self.assertEqual(corrupt.exception.code, "driver_network_receipt_invalid")
 
+        path.write_text('{"schema_version":1,"operation":[]}\n')
+        with self.assertRaises(RecordError) as malformed_operation:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={
+                    "container_id": CONTAINER_ID,
+                    "container_config_digest": CONFIG_DIGEST,
+                },
+                docker_session_key=KEY,
+            )
+        self.assertEqual(
+            malformed_operation.exception.code, "driver_network_receipt_invalid"
+        )
+        with self.assertRaises(RecordError) as boolean_version:
+            admission.DriverActionBroker._decode_network_receipts(
+                admission.canonical_json_bytes(
+                    {
+                        "schema_version": True,
+                        "runtime_session_ref": "session",
+                        "action_id": "action",
+                        "operation": "provider_request",
+                        "method": "POST",
+                        "status": "ok",
+                    }
+                )
+            )
+        self.assertEqual(
+            boolean_version.exception.code, "driver_network_receipt_invalid"
+        )
+
         path.unlink()
         outside = self.root / "outside-receipt"
         outside.write_text('{}\n')
@@ -1189,14 +1470,25 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
 
     def test_close_cancels_stalled_container_worker_within_absolute_deadline(self) -> None:
         assert self.broker.tcp_endpoint is not None
+
+        class ObservedStopEvent(threading.Event):
+            def __init__(self) -> None:
+                super().__init__()
+                self.read_waiting = threading.Event()
+
+            def wait(self, timeout: float | None = None) -> bool:
+                self.read_waiting.set()
+                return super().wait(timeout)
+
+        stop = ObservedStopEvent()
+        self.broker._stop = stop
         peer = socket.create_connection(self.broker.tcp_endpoint, timeout=1.0)
         try:
-            deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline:
-                with self.broker._container_workers_lock:
-                    if self.broker._container_workers:
-                        break
-                time.sleep(0.01)
+            # Withhold the body until the worker reaches the cancellation-aware read wait.
+            peer.sendall(struct.pack("!I", 1))
+            self.assertTrue(stop.read_waiting.wait(1.0))
+            with self.broker._container_workers_lock:
+                self.assertTrue(self.broker._container_workers)
             started = time.monotonic()
             self.broker.close()
             self.assertLess(time.monotonic() - started, 0.5)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic read-only inventory and operator-reviewed migration proposals."""
 from __future__ import annotations
-import argparse, json, mimetypes, os, re, shutil, stat, tempfile
+import argparse, mimetypes, os, re, shutil, stat, tempfile
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -204,7 +204,11 @@ def _snapshot_bound_engagement(source_fd: int, destination: Path) -> None:
                 continue
             if not stat.S_ISREG(identity.st_mode) or stat.S_ISLNK(identity.st_mode):
                 raise ValueError("migration source contains an unsafe directory entry")
-            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current_fd)
+            fd = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=current_fd,
+            )
             try:
                 before = os.fstat(fd)
                 if not stat.S_ISREG(before.st_mode):
@@ -244,7 +248,11 @@ def _read_bound_regular(root_fd: int, relative: str) -> bytes:
             )
             os.close(parent_fd)
             parent_fd = child
-        fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        fd = os.open(
+            parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
+        )
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode):

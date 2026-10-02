@@ -35,7 +35,7 @@ import importlib.util
 import json
 import os
 import sys
-import tempfile
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -65,6 +65,20 @@ def write_json(path, obj):
 
 def _rel(path):
     return os.path.relpath(path, ROOT) if path else None
+
+
+def _under_skills(path):
+    skills_root = Path(ROOT, "skills").resolve()
+    current = Path(path).resolve()
+    while True:
+        try:
+            if os.path.samefile(current, skills_root):
+                return True
+        except OSError:
+            pass
+        if current.parent == current:
+            return False
+        current = current.parent
 
 
 def assemble_lifecycle_result(campaign_path, candidate_id):
@@ -131,8 +145,10 @@ def assemble_lifecycle_result(campaign_path, candidate_id):
 
 def run_lifecycle(campaign_path, backend="deterministic", behavioral_backend="none",
                   behavioral_model_cmd=None, only_candidate=None):
+    campaign_path = os.path.abspath(campaign_path)
     camp_dir = os.path.dirname(campaign_path)
-    assert "skills/" not in os.path.abspath(camp_dir) + os.sep, "lifecycle must not run under skills/"
+    if _under_skills(camp_dir):
+        raise ValueError("lifecycle must not run under skills/")
 
     # 1. generate candidates + shadow score + replay + promotion (no behavioral yet)
     GR.generate(campaign_path, backend_name=backend, run_chain=True, behavioral_backend="none")
@@ -184,11 +200,31 @@ def _tmp_campaign():
 
 def self_test():
     import shutil
+    import subprocess
     ok = True
     camp_path, d = _tmp_campaign()
     try:
-        # deterministic generation + fake behavioral: CI-safe, exercises the whole canonical flow.
-        run_lifecycle(camp_path, backend="deterministic", behavioral_backend="fake")
+        fifo = os.path.join(d, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            fifo_result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fifo_result = None
+        fifo_ok = fifo_result is not None and fifo_result.returncode == 2 and "regular file" in fifo_result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
+        # A bare campaign filename exercises the canonical entrypoint's current-directory path handling.
+        previous_cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            run_lifecycle(os.path.basename(camp_path), backend="deterministic", behavioral_backend="fake")
+        finally:
+            os.chdir(previous_cwd)
         results = {cid: load(os.path.join(d, "candidates", cid, "lifecycle-result.json"))
                    for cid in GR.discover_campaign_candidates(camp_path)}
         verdicts = {cid: (r["authoritative_verdict"], r["authoritative_stage"], r["status"]) for cid, r in results.items()}
@@ -268,6 +304,9 @@ def main(argv):
         return self_test()
     if not args.campaign:
         ap.print_help()
+        return 2
+    if not os.path.isfile(args.campaign):
+        print("invalid campaign input: expected a regular file", file=sys.stderr)
         return 2
     report = run_lifecycle(args.campaign, backend=args.backend, behavioral_backend=args.behavioral_backend,
                            behavioral_model_cmd=args.behavioral_model_cmd, only_candidate=args.candidate)

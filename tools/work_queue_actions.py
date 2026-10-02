@@ -21,6 +21,19 @@ EXECUTION_PRINCIPALS = frozenset({"broker", "operator_only"})
 QUEUE_INSPECTION_COMMANDS = frozenset({"next", "list", "gate"})
 
 
+def queue_item_identity(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "class": item.get("class"),
+        "entity": item.get("entity"),
+        "predicate": item.get("predicate"),
+        "closes_when": item.get("closes_when"),
+    }
+
+
+def queue_item_ref(item: dict[str, Any]) -> str:
+    return sha256_bytes(canonical_json_bytes(queue_item_identity(item)))
+
+
 def queue_command_payload(command: str, state: dict[str, Any], engagement: Path) -> dict[str, Any]:
     """Build one canonical inspection envelope from an already-bound reduction."""
 

@@ -64,6 +64,7 @@ from driver_action_admission import (
 )
 from frozen_corpus import require_enumerated_count_matches, resolve_frozen_corpus_denominator
 from hunter_view import HunterView, HunterViewError, compile_hunter_view
+from work_queue_actions import queue_command_payload, queue_item_ref
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -344,11 +345,6 @@ def _reduce(bound: BoundRun) -> dict[str, Any]:
 
 
 def _queue_payload(state: dict[str, Any], engagement: Path) -> dict[str, Any]:
-    # Imported here so the #74 queue contract remains the only source of item selection policy.
-    try:
-        from work_queue_actions import queue_command_payload
-    except ImportError as exc:  # pragma: no cover - dependency enforced by conformance
-        raise DriverError("driver_queue_contract_unavailable") from exc
     try:
         payload = queue_command_payload("next", state, engagement)
     except RecordError as exc:
@@ -363,16 +359,6 @@ def _queue_payload(state: dict[str, Any], engagement: Path) -> dict[str, Any]:
     ):
         raise DriverError("driver_queue_contract_invalid")
     return payload
-
-
-def _item_ref(item: dict[str, Any]) -> str:
-    stable = {
-        "class": item.get("class"),
-        "entity": item.get("entity"),
-        "predicate": item.get("predicate"),
-        "closes_when": item.get("closes_when"),
-    }
-    return sha256_bytes(canonical_json_bytes(stable))
 
 
 def _blocking_items(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1077,7 +1063,7 @@ def record_budget_boundary(
             prior_stop = _state_stop(state)
             if prior_stop is not None:
                 return prior_stop, state
-            current_refs = {_item_ref(item) for item in _blocking_items(state)}
+            current_refs = {queue_item_ref(item) for item in _blocking_items(state)}
             seen_item_refs.update(current_refs)
             recorded_at = utc_now()
             projected = project_current_terminal_work_state(
@@ -1144,7 +1130,7 @@ def _result(
     model: str,
     reviewer_pool: tuple[str, ...],
 ) -> dict[str, Any]:
-    current_refs = {_item_ref(item) for item in _blocking_items(state)}
+    current_refs = {queue_item_ref(item) for item in _blocking_items(state)}
     seen_item_refs.update(current_refs)
     wall_seconds = round(time.monotonic() - started_at, 6)
     wall_deadline_overrun_seconds = round(
@@ -1215,39 +1201,32 @@ def run_driver(
     history: list[dict[str, Any]] = []
     settings: dict[str, Any] | None = None
 
+    def finish(
+        status: str, final_state: dict[str, Any], budget_kind: str | None = None
+    ) -> dict[str, Any]:
+        return _result(
+            run_ref=run_ref,
+            status=status,
+            budget_kind=budget_kind,
+            budget=budget,
+            sessions_started=sessions_started,
+            started_at=started_at,
+            state=final_state,
+            seen_item_refs=seen_item_refs,
+            history=history,
+            model=model,
+            reviewer_pool=reviewer_pool,
+        )
+
     with bind_run(workspace, engagement) as bound:
         state = _reduce(bound)
         while True:
-            seen_item_refs.update(_item_ref(item) for item in _blocking_items(state))
+            seen_item_refs.update(queue_item_ref(item) for item in _blocking_items(state))
             stop = _state_stop(state)
             if stop is not None:
-                return _result(
-                    run_ref=run_ref,
-                    status=stop,
-                    budget_kind=None,
-                    budget=budget,
-                    sessions_started=sessions_started,
-                    started_at=started_at,
-                    state=state,
-                    seen_item_refs=seen_item_refs,
-                    history=history,
-                    model=model,
-                    reviewer_pool=reviewer_pool,
-                )
+                return finish(stop, state)
             if stop_requested():
-                return _result(
-                    run_ref=run_ref,
-                    status="interrupted_unrecorded",
-                    budget_kind=None,
-                    budget=budget,
-                    sessions_started=sessions_started,
-                    started_at=started_at,
-                    state=state,
-                    seen_item_refs=seen_item_refs,
-                    history=history,
-                    model=model,
-                    reviewer_pool=reviewer_pool,
-                )
+                return finish("interrupted_unrecorded", state)
 
             elapsed = time.monotonic() - started_at
             budget_kind = None
@@ -1266,18 +1245,10 @@ def run_driver(
                     seen_item_refs=seen_item_refs,
                     corpus_enumeration_ref=corpus_enumeration_ref,
                 )
-                return _result(
-                    run_ref=run_ref,
-                    status=status,
+                return finish(
+                    status,
+                    state,
                     budget_kind=budget_kind if status == "budget_spent" else None,
-                    budget=budget,
-                    sessions_started=sessions_started,
-                    started_at=started_at,
-                    state=state,
-                    seen_item_refs=seen_item_refs,
-                    history=history,
-                    model=model,
-                    reviewer_pool=reviewer_pool,
                 )
 
             payload = _queue_payload(state, bound.engagement)
@@ -1287,7 +1258,7 @@ def run_driver(
             item = payload.get("item")
             if not isinstance(item, dict) or item.get("blocking") is not True:
                 raise DriverError("driver_next_item_invalid")
-            item_ref = _item_ref(item)
+            item_ref = queue_item_ref(item)
             action = item.get("next_action")
             if not isinstance(action, dict):
                 raise DriverError("driver_next_action_invalid")
@@ -1303,19 +1274,7 @@ def run_driver(
                     reviewer_pool=reviewer_pool,
                 )
                 if session_model is None:
-                    return _result(
-                        run_ref=run_ref,
-                        status="reviewer_model_unavailable",
-                        budget_kind=None,
-                        budget=budget,
-                        sessions_started=sessions_started,
-                        started_at=started_at,
-                        state=state,
-                        seen_item_refs=seen_item_refs,
-                        history=history,
-                        model=model,
-                        reviewer_pool=reviewer_pool,
-                    )
+                    return finish("reviewer_model_unavailable", state)
             else:
                 raise DriverError("driver_session_kind_invalid")
             before_hash = sha256_bytes(canonical_json_bytes(state))
@@ -1475,33 +1434,9 @@ def run_driver(
             terminal_status = _state_stop(state)
             if terminal_status is not None:
                 history.append(history_entry)
-                return _result(
-                    run_ref=run_ref,
-                    status=terminal_status,
-                    budget_kind=None,
-                    budget=budget,
-                    sessions_started=sessions_started,
-                    started_at=started_at,
-                    state=state,
-                    seen_item_refs=seen_item_refs,
-                    history=history,
-                    model=model,
-                    reviewer_pool=reviewer_pool,
-                )
+                return finish(terminal_status, state)
             if docker_interrupted:
-                return _result(
-                    run_ref=run_ref,
-                    status="interrupted_unrecorded",
-                    budget_kind=None,
-                    budget=budget,
-                    sessions_started=sessions_started,
-                    started_at=started_at,
-                    state=state,
-                    seen_item_refs=seen_item_refs,
-                    history=history,
-                    model=model,
-                    reviewer_pool=reviewer_pool,
-                )
+                return finish("interrupted_unrecorded", state)
             history.append(history_entry)
 
 

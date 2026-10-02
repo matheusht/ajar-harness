@@ -9,19 +9,17 @@ with ``HARNESS_RUN_EGRESS_DOCKER=1`` and never pulls an image.  Results can be s
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import os
 import socket
-import sys
-import tempfile
-import threading
+import struct
 import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import container_session_supervisor as supervisor
+from network_scope_test_support import scope_with_network_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,10 +75,78 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
             finally:
                 left.close(); right.close()
 
+    def test_provider_request_read_has_one_total_deadline(self) -> None:
+        clock = {"now": 0.0}
+
+        class SlowConnection:
+            def __init__(self) -> None:
+                self.chunks = [
+                    b"POST /v1/messages HTTP/1.1\r\nContent-Length: 3\r\n\r\n",
+                    b"a",
+                    b"b",
+                    b"c",
+                ]
+                self.timeout: float | None = None
+
+            def settimeout(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            def recv(self, _size: int) -> bytes:
+                delay = 0.4
+                if self.timeout is not None and self.timeout < delay:
+                    raise socket.timeout("total request deadline")
+                clock["now"] += delay
+                return self.chunks.pop(0)
+
+        connection = SlowConnection()
+        with (
+            mock.patch.object(supervisor, "PROVIDER_IO_TIMEOUT_SECONDS", 1.0),
+            mock.patch.object(supervisor.time, "monotonic", side_effect=lambda: clock["now"]),
+            self.assertRaises(socket.timeout),
+        ):
+            supervisor._ProviderProxy._read_request(connection)  # type: ignore[arg-type]
+
+    def test_provider_stream_accepts_exact_optional_beta_query(self) -> None:
+        import container_broker_client as client
+
+        manifest = {"endpoint": {"host": "127.0.0.1", "port": 1}}
+        response_frames = iter((
+            {
+                "returncode": 0,
+                "output": client.canonical_json_bytes(
+                    {"stream": "headers", "status": 200, "headers": []}
+                ),
+            },
+            {
+                "returncode": 0,
+                "output": client.canonical_json_bytes({"stream": "end", "sequence": 0}),
+            },
+        ))
+        connection = mock.Mock()
+        received_headers: list[tuple[int, list[list[str]]]] = []
+        with (
+            mock.patch.object(client, "validate_manifest", return_value=manifest),
+            mock.patch.object(client, "_envelope", return_value={"nonce": "fixture"}),
+            mock.patch.object(client, "send_frame"),
+            mock.patch.object(client, "recv_frame", side_effect=lambda _connection: next(response_frames)),
+            mock.patch.object(client, "_validate_response", side_effect=lambda _manifest, _key, frame, _nonce: frame),
+            mock.patch.object(client.socket, "socket", return_value=connection),
+        ):
+            total = client.stream_provider(
+                manifest,
+                b"key",
+                path="/v1/messages?beta=true",
+                headers={},
+                body=b"{}",
+                on_headers=lambda status, headers: received_headers.append((status, headers)),
+                on_chunk=lambda _chunk: self.fail("unexpected provider chunk"),
+            )
+        self.assertEqual(total, 0)
+        self.assertEqual(received_headers, [(200, [])])
     def test_expired_absolute_deadline_stops_before_dns(self) -> None:
         import network_scope
 
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="fixture.invalid", path="/allowed", method="GET"
         )
         policy = network_scope.parse_network_policy(
@@ -95,7 +161,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
             )
         self.assertEqual(resolver.call_count, 0)
 
-    def test_socket_matrix_and_fastopen_are_fail_closed(self) -> None:
+    def test_socket_matrix_is_fail_closed(self) -> None:
         decide = getattr(supervisor, "_socket_policy", None)
         self.assertTrue(callable(decide), "missing inherited socket policy")
         allowed = (
@@ -118,9 +184,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
         for values in denied:
             with self.subTest(values=values):
                 self.assertFalse(decide(*values))
-        self.assertTrue(callable(getattr(supervisor, "_message_flags_allowed", None)))
-        self.assertFalse(supervisor._message_flags_allowed(getattr(socket, "MSG_FASTOPEN", 0x20000000)))
-        record("socket-family-type-protocol-and-fastopen-matrix", True)
+        record("socket-family-type-protocol-matrix", True)
 
     def test_connect_copies_sockaddr_once_and_emulates_on_exact_duplicate(self) -> None:
         emulate = getattr(supervisor, "_emulate_brokered_connect", None)
@@ -133,7 +197,12 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
         notification.data.arguments[0] = 7
         notification.data.arguments[1] = 0x1000
         notification.data.arguments[2] = 16
-        copied = supervisor._sockaddr_in_bytes("203.0.113.9", 443)
+        copied = (
+            struct.pack("=H", socket.AF_INET)
+            + struct.pack("!H", 443)
+            + socket.inet_aton("203.0.113.9")
+            + b"\0" * 8
+        )
         calls: list[tuple[str, object]] = []
 
         class Duplicate:
@@ -165,12 +234,18 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
             import network_scope
         except ImportError as exc:
             self.fail(f"missing parent network policy gateway: {exc}")
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="fixture.invalid", path="/allowed", method="GET"
         )
         digest = network_scope.sha256_bytes(scope)
         policy = network_scope.parse_network_policy(scope, expected_scope_hash=digest)
         self.assertTrue(policy.allows("target_fetch", "https", "fixture.invalid", 443, "/allowed", "GET"))
+        boolean_version_scope = scope.replace(b'"schema_version":1', b'"schema_version":true')
+        with self.assertRaises(network_scope.NetworkScopeError):
+            network_scope.parse_network_policy(
+                boolean_version_scope,
+                expected_scope_hash=network_scope.sha256_bytes(boolean_version_scope),
+            )
         for values in (
             ("target_fetch", "https", "denied.invalid", 443, "/allowed", "GET"),
             ("target_fetch", "https", "fixture.invalid", 443, "/denied", "GET"),
@@ -193,7 +268,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
             ("fixture.invalid.", "/allowed"),
         ):
             with self.subTest(host=host, path=path):
-                scope = network_scope.scope_with_network_policy(
+                scope = scope_with_network_policy(
                     host=host, path=path, method="GET"
                 )
                 with self.assertRaises(network_scope.NetworkScopeError):
@@ -223,7 +298,7 @@ class ExternalNetworkPolicyWorkflow(unittest.TestCase):
     def test_parent_transport_rejects_alias_and_headers_before_sink_contact(self) -> None:
         import network_scope
 
-        scope = network_scope.scope_with_network_policy(
+        scope = scope_with_network_policy(
             host="fixture.invalid", path="/allowed", method="GET"
         )
         policy = network_scope.parse_network_policy(

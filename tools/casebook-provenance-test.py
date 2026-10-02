@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -413,6 +414,18 @@ os.open = _open
 
 def main() -> int:
     checks: list[tuple[str, bool, str]] = []
+    index_globals = runpy.run_path(str(TOOL))
+    valid_token = {"device": 1, "inode": 2, "birthtime_ns": 3, "generation": 4}
+    boolean_identity_rejected = True
+    for field, value in (("device", False), ("inode", True), ("birthtime_ns", True), ("generation", True)):
+        token = {**valid_token, field: value}
+        instance = {name: dict(token) for name in ("root", "events", "scope_snapshot")}
+        boolean_identity_rejected &= not index_globals["_valid_instance"](instance)
+    checks.append((
+        "filesystem identity rejects booleans in integer fields",
+        boolean_identity_rejected,
+        "boolean fstat identity value was accepted",
+    ))
     with tempfile.TemporaryDirectory(prefix="casebook-provenance-test-") as temporary:
         root = Path(temporary).resolve()
         casebooks = root / "casebooks"
@@ -452,6 +465,41 @@ def main() -> int:
 
         source = root / "source-fixture"
         _healthy_source(source)
+        fifo_source = root / "fifo-source"
+        _healthy_source(fifo_source)
+        attestation = next(
+            row
+            for row in map(json.loads, fifo_source.joinpath("events.jsonl").read_text().splitlines())
+            if row.get("event_type") == "scope.attested"
+        )
+        scope_snapshot = fifo_source / attestation["payload"]["scope_snapshot_path"]
+        scope_snapshot.unlink()
+        os.mkfifo(scope_snapshot)
+        relative_snapshot = attestation["payload"]["scope_snapshot_path"]
+        fifo_probe = (
+            "import os, runpy, sys\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, str(Path(sys.argv[1]).parent))\n"
+            "index = runpy.run_path(sys.argv[1])\n"
+            "root = os.open(sys.argv[2], os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))\n"
+            "index['_open_relative_regular'](root, sys.argv[3])\n"
+        )
+        try:
+            fifo_read = subprocess.run(
+                [sys.executable, "-c", fifo_probe, str(TOOL), str(fifo_source), relative_snapshot],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fifo_read = None
+        checks.append((
+            "engagement source FIFO is rejected without blocking provenance reads",
+            fifo_read is not None and fifo_read.returncode != 0,
+            "timed out" if fifo_read is None else fifo_read.stdout + fifo_read.stderr,
+        ))
         derived = casebooks / "engagement-derived"
         _casebook(derived, "dynamicrevocationterm")
         derived_attest = _run(
@@ -476,9 +524,37 @@ def main() -> int:
             derived_attest.stdout + derived_attest.stderr + resolved_result.stdout + resolved_result.stderr,
         ))
 
+        provenance_path = derived / "source-provenance.json"
+        original_provenance = provenance_path.read_bytes()
+        malformed_provenance = json.loads(original_provenance)
+        malformed_provenance["schema_version"] = True
+        provenance_path.write_bytes(canonical_json_bytes(malformed_provenance))
+        bool_provenance_result, bool_provenance_rows = _query(
+            casebooks, "dynamicrevocationterm", resolver
+        )
+        provenance_path.write_bytes(original_provenance)
+        checks.append((
+            "boolean-version provenance cannot qualify a portable casebook",
+            bool_provenance_result.returncode == 0 and bool_provenance_rows == [],
+            bool_provenance_result.stdout + bool_provenance_result.stderr,
+        ))
+
         resolver_document = json.loads(resolver.read_text())
         origin = next(iter(resolver_document["origins"]))
         correct_source = resolver_document["origins"][origin]
+
+        resolver_document["schema_version"] = True
+        resolver.write_bytes(canonical_json_bytes(resolver_document))
+        bool_resolver_result, bool_resolver_rows = _query(
+            casebooks, "dynamicrevocationterm", resolver
+        )
+        resolver_document["schema_version"] = 1
+        resolver.write_bytes(canonical_json_bytes(resolver_document))
+        checks.append((
+            "boolean-version source resolver cannot qualify an engagement-derived casebook",
+            bool_resolver_result.returncode == 0 and bool_resolver_rows == [],
+            bool_resolver_result.stdout + bool_resolver_result.stderr,
+        ))
 
         stale_copy = root / "stale-parent" / source.name
         shutil.copytree(source, stale_copy)

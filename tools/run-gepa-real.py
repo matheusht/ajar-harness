@@ -35,7 +35,6 @@ Usage:
 """
 
 import argparse
-import difflib
 import hashlib
 import importlib.util
 import json

@@ -33,6 +33,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -41,6 +42,20 @@ TOOLS = os.path.join(ROOT, "tools")
 def load(path):
     with open(path) as fh:
         return json.load(fh)
+
+
+def _under_skills(path):
+    skills_root = Path(ROOT, "skills").resolve()
+    current = Path(path).resolve()
+    while True:
+        try:
+            if os.path.samefile(current, skills_root):
+                return True
+        except OSError:
+            pass
+        if current.parent == current:
+            return False
+        current = current.parent
 
 
 def read(path):
@@ -325,10 +340,14 @@ def render_pr_body(bundle, promotable):
 
 
 def render_cli(campaign_path, candidate_id):
-    campaign = load(campaign_path)
     camp_dir = os.path.dirname(campaign_path)
-    report = load(os.path.join(camp_dir, "report.json"))
     cand_dir = os.path.join(camp_dir, "candidates", candidate_id)
+    out_dir = os.path.join(cand_dir, "promotion")
+    if _under_skills(out_dir):
+        raise ValueError("renderer must not write under skills/")
+
+    campaign = load(campaign_path)
+    report = load(os.path.join(camp_dir, "report.json"))
     candidate_manifest = load(os.path.join(cand_dir, "candidate-manifest.json"))
 
     rc = next((c for c in report["candidates"] if c["candidate_id"] == candidate_id), None)
@@ -371,8 +390,6 @@ def render_cli(campaign_path, candidate_id):
         print(f"bundle invalid, missing: {missing}")
         return 1
 
-    out_dir = os.path.join(cand_dir, "promotion")
-    assert "skills/" not in out_dir
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "promotion-bundle.json"), "w") as fh:
         json.dump(bundle, fh, indent=2); fh.write("\n")

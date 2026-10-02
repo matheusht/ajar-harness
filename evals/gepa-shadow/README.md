@@ -38,7 +38,10 @@ campaigns/<campaign-id>/
   zero false-discovery, no protected regression, complete evidence contract, unchanged budget, single
   mutation) are hard vetoes → `block`. An eligible candidate is `allow` only if it adds a distinct
   clean confirmed coverage case or preserves coverage at ≥10% lower cost; otherwise `probe`. A
-  `judge_note` is advisory and can never override the mechanical verdict.
+  `judge_note` is advisory and can never override the mechanical verdict. This file remains frozen
+  for campaigns that pin its v1 bytes. Use `tools/score-candidate-v2.py` for new direct CLI scoring;
+  it validates the input types used by the hard gates and blocks missing or malformed metrics. Its E2E
+  contract is `tools/score-candidate-v2-test.py`.
 - `tools/replay-candidate.py` — the replay & variance gate (Phase 4). Primary + two fresh-session
   replays at identical benchmark version and budget; downgrades a non-reproducible `allow` to `probe`,
   never upgrades. Writes `candidates/<id>/replays/` + a campaign `replay-report`.

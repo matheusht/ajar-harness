@@ -9,6 +9,7 @@ import io
 import json
 import os
 import signal
+import socket
 import stat
 import struct
 import subprocess
@@ -19,11 +20,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import container_broker_client as broker_client
 import container_session_supervisor as supervisor
 
 
 def source_hashes() -> str:
-    return supervisor._canonical_json_bytes(
+    return broker_client.canonical_json_bytes(
         {
             "events.jsonl": "sha256:" + "1" * 64,
             "attempts.jsonl": "sha256:" + "2" * 64,
@@ -91,7 +93,7 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def write_session(self, value: dict[str, object]) -> str:
-        raw = supervisor._canonical_json_bytes(value)
+        raw = broker_client.canonical_json_bytes(value)
         self.session_path.write_bytes(raw)
         os.chmod(self.session_path, 0o400)
         return supervisor._sha256(raw)
@@ -187,17 +189,35 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
             struct.pack_into("q", raw, 24, -error_number)
             raw[32] = 1
             self.assertTrue(
-                supervisor._syscall_info_is_storage_failure(bytes(raw), 33)
+                supervisor._syscall_exit_is_storage_failure(
+                    supervisor._decode_syscall_info(bytes(raw), 33),
+                    syscall_number=supervisor.AARCH64_NR_IO_SETUP,
+                )
+            )
+            self.assertFalse(
+                supervisor._syscall_exit_is_storage_failure(
+                    supervisor._decode_syscall_info(bytes(raw), 33),
+                    syscall_number=supervisor.AARCH64_NR_WRITE,
+                )
+            )
+            self.assertFalse(
+                supervisor._syscall_exit_is_storage_failure(
+                    supervisor._decode_syscall_info(bytes(raw), 33),
+                    syscall_number=supervisor.AARCH64_NR_PWRITE64,
+                )
             )
 
         successful = bytearray(raw)
         struct.pack_into("q", successful, 24, 0)
         successful[32] = 0
         self.assertFalse(
-            supervisor._syscall_info_is_storage_failure(bytes(successful), 33)
+            supervisor._syscall_exit_is_storage_failure(
+                supervisor._decode_syscall_info(bytes(successful), 33),
+                syscall_number=supervisor.AARCH64_NR_IO_SETUP,
+            )
         )
         with self.assertRaises(supervisor.SupervisorError):
-            supervisor._syscall_info_is_storage_failure(bytes(raw[:32]), 32)
+            supervisor._decode_syscall_info(bytes(raw[:32]), 32)
 
     def test_inherited_filter_closes_unobservable_storage_paths(self) -> None:
         instructions = supervisor._tracee_filter_instructions()
@@ -239,6 +259,7 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
             self.fail("seccomp program did not return")
 
         unavailable = supervisor.SECCOMP_RET_ERRNO | errno.ENOSYS
+        fastopen_denied = supervisor.SECCOMP_RET_ERRNO | errno.EPERM
         self.assertEqual(
             set(supervisor._UNAVAILABLE_TRACE_SYSCALLS),
             {
@@ -284,6 +305,18 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
             evaluate(supervisor.AARCH64_NR_PWRITE64),
             supervisor.SECCOMP_RET_USER_NOTIF,
         )
+        fastopen = getattr(socket, "MSG_FASTOPEN", 0x20000000)
+        for syscall_number, flags_argument in (
+            (supervisor.AARCH64_NR_SENDTO, "argument3"),
+            (supervisor.AARCH64_NR_SENDMSG, "argument2"),
+            (supervisor.AARCH64_NR_SENDMMSG, "argument3"),
+        ):
+            with self.subTest(syscall_number=syscall_number):
+                self.assertEqual(
+                    evaluate(syscall_number, **{flags_argument: fastopen}),
+                    fastopen_denied,
+                )
+                self.assertEqual(evaluate(syscall_number), supervisor.SECCOMP_RET_ALLOW)
         self.assertEqual(
             evaluate(supervisor.AARCH64_REVIEWED_SYSCALL_LIMIT - 1),
             supervisor.SECCOMP_RET_ALLOW,
@@ -506,7 +539,21 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
 
     def test_bootstrap_key_is_canonical_and_never_materialized_for_child(self) -> None:
         key = b"s" * supervisor.broker_client.SESSION_KEY_BYTES
-        raw = supervisor._canonical_json_bytes(
+        invalid_raw = broker_client.canonical_json_bytes(
+            {
+                "schema_version": True,
+                "environment": {"ANTHROPIC_API_KEY": "fixture-secret"},
+                "broker_session_key_base64": base64.b64encode(key).decode("ascii"),
+            }
+        )
+        invalid_stream = io.TextIOWrapper(io.BytesIO(invalid_raw), encoding="utf-8")
+        with (
+            mock.patch.object(supervisor.sys, "stdin", invalid_stream),
+            self.assertRaises(supervisor.SupervisorError),
+        ):
+            supervisor._read_bootstrap()
+
+        raw = broker_client.canonical_json_bytes(
             {
                 "schema_version": 1,
                 "environment": {"ANTHROPIC_API_KEY": "fixture-secret"},
@@ -567,7 +614,58 @@ class ContainerSessionSupervisorTest(unittest.TestCase):
                 relay.close()
         self.assertEqual(len(request_seen), 1)
         self.assertEqual(request_seen[0]["request_kind"], "action")
-        self.assertNotIn(key, supervisor._canonical_json_bytes(request_seen[0]))
+        self.assertNotIn(key, broker_client.canonical_json_bytes(request_seen[0]))
+
+    def test_local_relay_enforces_one_total_frame_read_deadline(self) -> None:
+        clock = {"now": 0.0}
+
+        class SlowFrameConnection:
+            def __init__(self) -> None:
+                self.header = bytearray(struct.pack("!I", 4))
+                self.body = bytearray(b"null")
+                self.timeout: float | None = None
+                self.received_bytes = 0
+                self.sent_bytes = b""
+
+            def settimeout(self, timeout: float | None) -> None:
+                self.timeout = timeout
+
+            def gettimeout(self) -> float | None:
+                return self.timeout
+
+            def recv(self, size: int) -> bytes:
+                source = self.header if self.header else self.body
+                if source is self.body:
+                    delay = 0.06
+                    if self.timeout is not None and self.timeout < delay:
+                        raise socket.timeout("total frame deadline")
+                    clock["now"] += delay
+                    size = min(size, 2)
+                chunk = bytes(source[:size])
+                del source[:size]
+                self.received_bytes += len(chunk)
+                return chunk
+
+            def sendall(self, data: bytes) -> None:
+                self.sent_bytes += data
+
+        connection = SlowFrameConnection()
+        relay = object.__new__(supervisor._BrokerRelay)
+        relay._manifest = {}
+        relay._key = b"r" * supervisor.broker_client.SESSION_KEY_BYTES
+        relay._peer_is_local_runtime = lambda _connection: True  # type: ignore[method-assign]
+        with (
+            mock.patch.object(supervisor, "RELAY_IO_TIMEOUT_SECONDS", 0.1),
+            mock.patch.object(supervisor.time, "monotonic", side_effect=lambda: clock["now"]),
+            mock.patch.object(
+                supervisor.broker_client,
+                "handle_relay_request",
+                side_effect=AssertionError("incomplete frame reached relay handler"),
+            ),
+        ):
+            relay._serve_one(connection)  # type: ignore[arg-type]
+        self.assertEqual(connection.received_bytes, 6)
+        self.assertTrue(connection.sent_bytes)
 
     def test_session_shape_rejects_redirects_and_duplicate_source_keys(self) -> None:
         valid = session(["/bin/true"])

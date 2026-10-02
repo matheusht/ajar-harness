@@ -6,6 +6,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -199,6 +202,29 @@ class FrozenCorpusDenominatorTests(unittest.TestCase):
         with self.assertRaises(RecordError) as raised:
             self.resolve()
         self.assertEqual(raised.exception.code, "frozen_corpus_artifact_unavailable")
+
+    def test_registered_fifo_fails_closed_without_blocking(self) -> None:
+        path = self.engagement / "evidence" / "corpus-enumeration.tsv"
+        path.unlink()
+        os.mkfifo(path)
+        script = (
+            "import json,sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0,'tools')\n"
+            "from frozen_corpus import _read_registered_bytes\n"
+            "from engagement_records import RecordError\n"
+            "record=json.loads(sys.argv[2])\n"
+            "try:\n _read_registered_bytes(Path(sys.argv[1]),record)\n"
+            "except RecordError as exc:\n print(exc.code)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(self.engagement), json.dumps(self.artifacts[1])],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "frozen_corpus_artifact_size_mismatch")
 
     def test_future_manifest_or_tsv_registration_fails_closed(self) -> None:
         for index in (0, 1):

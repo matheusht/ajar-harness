@@ -706,7 +706,7 @@ def _create_command(
     return command
 
 
-def _network_labels(nonce: str) -> dict[str, str]:
+def _owner_nonce_labels(nonce: str) -> dict[str, str]:
     return {OWNER_LABEL: OWNER_LABEL_VALUE, NONCE_LABEL: nonce}
 
 
@@ -721,7 +721,7 @@ def _validate_network(
         or value.get("Ingress") is True
         or value.get("Attachable") is True
         or value.get("Internal") is not internal
-        or value.get("Labels") != _network_labels(nonce)
+        or value.get("Labels") != _owner_nonce_labels(nonce)
     ):
         raise DockerRuntimeError("docker_network_manifest_mismatch")
 
@@ -927,7 +927,7 @@ def _validate_container(
             "name": network_name,
             "internal": prepared.spec.network_internal,
         },
-        "labels": {OWNER_LABEL: OWNER_LABEL_VALUE, NONCE_LABEL: nonce},
+        "labels": _owner_nonce_labels(nonce),
         "mounts": actual_mounts,
         "host_config": {
             "readonly_root": True,

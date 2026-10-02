@@ -44,6 +44,8 @@ import re
 import sys
 from collections import Counter
 
+from regular_file_io import read_regular_text
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 STOP = set("""a an the and or of to in for with on at by is are be as it its this that from
@@ -75,7 +77,7 @@ def fragment_hooks(source_dir):
     for fn in sorted(os.listdir(hooks_dir)):
         if not fn.endswith(".go") or fn.endswith("_test.go"):
             continue
-        text = open(os.path.join(hooks_dir, fn), errors="replace").read()
+        text = read_regular_text(os.path.join(hooks_dir, fn), errors="replace")
         for m in HOOK_RE.finditer(text):
             doc = " ".join(l.strip("/ ").strip() for l in m.group(1).splitlines() if l.strip())
             out.append({
@@ -190,7 +192,7 @@ def cmd_fragment(args):
 def cmd_map(args):
     cards = load_cards()
     idf, dflt = idf_table(cards)
-    doc = json.load(open(args.hypotheses))
+    doc = json.loads(read_regular_text(args.hypotheses))
     hyps = doc if isinstance(doc, list) else doc.get("hypotheses", [])
     rows, counts = [], Counter()
     unreadable = []
@@ -285,7 +287,11 @@ def main():
     p.add_argument("--threshold", type=float, default=0.60)
     p.set_defaults(func=cmd_selftest)
     args = ap.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

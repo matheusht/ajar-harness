@@ -41,6 +41,11 @@ Tollbooth export (raw, ephemeral)
   -> evidence bundle (Plane-3, append-only)         # broker/oracle stay authoritative; digest is a 2nd witness
 ```
 
+Covert-evidence `flow_ref` values are positional (`flow-0`, `flow-1`, …) within the input file; the
+raw export's reference is never copied into the sanitized output.
+The scanner accepts either the flat hermetic flow fixture or the native Tollbooth `traffic` export;
+for native exports it scans only request/response content in memory and drops headers and metadata.
+
 Reconcile the digest's observed hosts/model-calls against the broker ledger (`events.jsonl`):
 a mismatch or unexpected host is a **flag-only sensor signal**, never a verdict.
 

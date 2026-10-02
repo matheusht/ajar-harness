@@ -44,15 +44,12 @@ import os
 import re
 import stat
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from engagement_quarantine import (
     inspect_quarantine,
-    is_quarantined,
-    quarantined_ancestor,
     require_safe_offline_input,
 )
 from engagement_records import RecordError
@@ -66,7 +63,6 @@ from engagement_state import (
 
 UNPROVEN = "unproven"
 PROVEN = "findings"
-LOG = "lifecycle.jsonl"
 
 # Privilege ladder. A proof may run at or BELOW the claimed position, never above.
 # Proving from less privilege than claimed is a stronger result, so it passes.
@@ -83,17 +79,6 @@ PRIVILEGE_RANK = {
 # blocks as a STATEMENT rather than as an omission, which is the difference between "we know this is
 # missing" and "nobody looked".
 NOT_ESTABLISHED = "not-established"
-
-
-def now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def load_json(path):
-    try:
-        return json.load(open(path))
-    except (OSError, ValueError):
-        return None
 
 
 def _snapshot_engagement(engagement):
@@ -563,7 +548,6 @@ def g5_severity(pkg, finding, g, docs=None):
     for m in hits:
         got = cvss31_base(*m.groups())
         tail = (blob + "\n" + str(vector))[m.end():m.end() + 120]
-        import re
         stated = re.search(r"=?\s*\**(\d{1,2}\.\d)\b", tail)
         if stated and abs(float(stated.group(1)) - got) >= 0.05:
             g.add("G5", False, "the CVSS vector recomputes to its stated score",
@@ -758,22 +742,13 @@ def gk_kernel(engagement, g, snapshot=None):
           f"{KERNEL_WAIVER}=1 to record an explicit, visible waiver.")
 
 
-def _run_gates_snapshot(pkg, engagement=None, snapshot=None, package_relative=None):
+def _run_gates_snapshot(pkg, engagement, snapshot, package_relative=None):
     g = Gates()
-    if snapshot is None and (quarantined_ancestor(Path(pkg)) or (engagement and is_quarantined(Path(engagement)))):
-        g.add("GQ", False, "the source engagement is admissible", "engagement evidence is quarantined")
-        return g, {}
-    if snapshot is None:
-        finding = load_json(os.path.join(pkg, "finding.json")) or {}
-        attest = load_json(os.path.join(pkg, "attest.json")) or {}
-        docs = None
-        package_files = None
-    else:
-        finding = _snapshot_json(snapshot, f"{package_relative}/finding.json") or {}
-        attest = _snapshot_json(snapshot, f"{package_relative}/attest.json") or {}
-        docs = _package_docs(snapshot, package_relative)
-        prefix = package_relative.rstrip("/") + "/"
-        package_files = {relative[len(prefix):] for relative in snapshot if relative.startswith(prefix)}
+    finding = _snapshot_json(snapshot, f"{package_relative}/finding.json") or {}
+    attest = _snapshot_json(snapshot, f"{package_relative}/attest.json") or {}
+    docs = _package_docs(snapshot, package_relative)
+    prefix = package_relative.rstrip("/") + "/"
+    package_files = {relative[len(prefix):] for relative in snapshot if relative.startswith(prefix)}
     gk_kernel(engagement, g, snapshot)
     g0_existence(pkg, g, docs, package_files)
     g1_real_path(finding, attest, g, engagement, snapshot)
@@ -839,7 +814,7 @@ def run_gates(pkg, engagement=None, snapshot=None, package_relative=None):
             with bound_engagement_source(logical) as bound:
                 admitted, package_prefix = _snapshot_package(bound, relative)
                 result = _run_gates_snapshot(
-                    pkg, snapshot=admitted, package_relative=package_prefix
+                    pkg, None, admitted, package_relative=package_prefix
                 )
                 _require_bound_package_current(logical, bound, portable=False)
                 return result
@@ -851,7 +826,7 @@ def run_gates(pkg, engagement=None, snapshot=None, package_relative=None):
                 for relative, data in _snapshot_engagement(bound).items()
             }
             result = _run_gates_snapshot(
-                pkg, snapshot=admitted, package_relative=prefix
+                pkg, None, admitted, package_relative=prefix
             )
             _require_bound_package_current(package, bound, portable=True)
             return result
@@ -873,79 +848,6 @@ def _bound_root_fd(engagement):
     if not (len(parts) == 4 and parts[1:3] == ("dev", "fd") and parts[3].isdigit()):
         raise ValueError("lifecycle mutation requires a bound engagement")
     return int(parts[3])
-
-
-def _open_state_directory(root_fd, name, *, create=False):
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    if create:
-        try:
-            os.mkdir(name, 0o700, dir_fd=root_fd)
-        except FileExistsError:
-            pass
-    return os.open(name, flags, dir_fd=root_fd)
-
-
-def _bound_move(engagement, source_state, destination_state, finding_id):
-    if not finding_id or finding_id in {".", ".."} or "/" in finding_id:
-        raise ValueError("invalid finding id")
-    root_fd = _bound_root_fd(engagement)
-    source_fd = _open_state_directory(root_fd, source_state)
-    try:
-        destination_fd = _open_state_directory(root_fd, destination_state, create=True)
-        try:
-            source = os.stat(finding_id, dir_fd=source_fd, follow_symlinks=False)
-            if stat.S_ISLNK(source.st_mode) or not stat.S_ISDIR(source.st_mode):
-                raise ValueError("finding package is not a regular directory")
-            try:
-                os.stat(finding_id, dir_fd=destination_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                pass
-            else:
-                return False
-            os.rename(
-                finding_id,
-                finding_id,
-                src_dir_fd=source_fd,
-                dst_dir_fd=destination_fd,
-            )
-            os.fsync(source_fd)
-            os.fsync(destination_fd)
-            return True
-        finally:
-            os.close(destination_fd)
-    finally:
-        os.close(source_fd)
-
-
-def _append_log_bound(engagement, record):
-    root_fd = _bound_root_fd(engagement)
-    fd = os.open(
-        LOG,
-        os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-        dir_fd=root_fd,
-    )
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode):
-            raise ValueError("lifecycle log is not a regular file")
-        original_size = before.st_size
-        data = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
-        try:
-            view = memoryview(data)
-            written = 0
-            while written < len(view):
-                count = os.write(fd, view[written:])
-                if count <= 0:
-                    raise OSError("lifecycle append made no progress")
-                written += count
-            os.fsync(fd)
-        except Exception:
-            os.ftruncate(fd, original_size)
-            os.fsync(fd)
-            raise
-    finally:
-        os.close(fd)
 
 
 def _bound_finding_rows(engagement):

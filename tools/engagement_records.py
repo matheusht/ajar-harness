@@ -156,7 +156,7 @@ def _read_bound_regular_file(path: os.PathLike[str] | str) -> bytes | None:
             directory_fd = child
         fd = os.open(
             relative[-1],
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=directory_fd,
         )
         try:
@@ -189,7 +189,10 @@ def load_json(path: os.PathLike[str] | str) -> Any:
         bound = _read_bound_regular_file(path)
         if bound is not None:
             return json.loads(bound.decode("utf-8"), object_pairs_hook=_reject_duplicate_pairs)
-        with open(path, "r", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("JSON input is not a regular file")
             return json.load(handle, object_pairs_hook=_reject_duplicate_pairs)
     except RecordError:
         raise
@@ -210,7 +213,10 @@ def sha256_file(path: os.PathLike[str] | str) -> str:
     if bound is not None:
         return sha256_bytes(bound)
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError("hash input is not a regular file")
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return "sha256:" + digest.hexdigest()
@@ -556,7 +562,11 @@ def build_reference_index(engagement_dir: os.PathLike[str] | str) -> dict[str, l
                 child = os.open(component, flags, dir_fd=parent_fd)
                 os.close(parent_fd)
                 parent_fd = child
-            fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+            fd = os.open(
+                parts[-1],
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=parent_fd,
+            )
             try:
                 before = os.fstat(fd)
                 if not stat.S_ISREG(before.st_mode):

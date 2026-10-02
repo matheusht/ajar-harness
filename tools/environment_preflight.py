@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import stat
@@ -43,7 +42,7 @@ def _argv_is_reproducible(argv: list[str]) -> bool:
 
 
 def _stable_file(path: Path) -> tuple[bytes | None, str | None, bool]:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError:
@@ -67,7 +66,7 @@ def _stable_file(path: Path) -> tuple[bytes | None, str | None, bool]:
 
 
 def _stable_file_at(directory_fd: int, name: str) -> tuple[bytes | None, bool]:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try: descriptor = os.open(name, flags, dir_fd=directory_fd)
     except FileNotFoundError: return None, True
     except OSError: return None, False
@@ -317,13 +316,6 @@ def collect_preflight(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValueError("Decision-0006 collector actor/session provenance is required")
     if kwargs.get("operator_redaction_attested"):
         raise ValueError("collector cannot claim operator redaction attestation")
-    return _collect_preflight_core(*args, **kwargs)
-
-
-def _collect_legacy_preflight(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Trusted Decision-0005 regression compatibility; never exposed by the public CLI."""
-    if any(kwargs.get(name) is not None for name in ("actor_role", "actor_id", "session_id")):
-        raise ValueError("legacy preflight cannot carry Decision-0006 actor fields")
     return _collect_preflight_core(*args, **kwargs)
 
 

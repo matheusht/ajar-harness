@@ -30,7 +30,12 @@ from engagement_records import (
     sha256_file,
     validate_record,
 )
-from decision6_capabilities import classify_command, classify_event
+from decision6_capabilities import (
+    classify_command,
+    classify_event,
+    load_capability_matrix,
+    validate_capability_matrix,
+)
 from driver_action_admission import (
     DriverActionBroker,
     _MODEL_JSON_LIMIT,
@@ -944,6 +949,11 @@ class WorkQueueDriverTest(unittest.TestCase):
         self.assertEqual(terminal_block["tier"], "authority")
         self.assertEqual(terminal_block["allowed_roles"], ["operator"])
         self.assertEqual(terminal_block["blocking_scope"], "global")
+
+    def test_decision6_matrix_rejects_boolean_schema_version(self) -> None:
+        matrix = copy.deepcopy(load_capability_matrix())
+        matrix["schema_version"] = True
+        self.assertTrue(validate_capability_matrix(matrix))
 
     def test_generic_append_event_cannot_set_driver_loop_boundary(self) -> None:
         state = reduce_engagement(self.engagement)

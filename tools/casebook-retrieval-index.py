@@ -143,7 +143,11 @@ def _casebook_snapshot(casebook: Path) -> tuple[str, dict[str, str]]:
 def _valid_provenance(value: Any, *, expected_casebook: str) -> bool:
     if not isinstance(value, dict) or set(value) != _PROVENANCE_KEYS:
         return False
-    if value.get("schema_version") != 1 or value.get("casebook_id") != expected_casebook:
+    if (
+        type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+        or value.get("casebook_id") != expected_casebook
+    ):
         return False
     source_kind = value.get("source_kind")
     if source_kind not in SOURCE_KINDS:
@@ -192,7 +196,7 @@ def _identity_token(identity: os.stat_result, *, directory: bool) -> dict[str, i
         "device": identity.st_dev,
         "inode": identity.st_ino,
         "birthtime_ns": int(float(birthtime) * 1_000_000_000) if birthtime is not None else None,
-        "generation": int(generation) if isinstance(generation, int) and generation > 0 else None,
+        "generation": int(generation) if type(generation) is int and generation > 0 else None,
     }
 
 
@@ -212,7 +216,7 @@ def _open_relative_regular(root_fd: int, relative: str) -> int:
             directory_fd = child_fd
         fd = os.open(
             path.parts[-1],
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=directory_fd,
         )
     except OSError as exc:
@@ -254,16 +258,16 @@ def _valid_instance(value: Any) -> bool:
     for token in value.values():
         if not isinstance(token, dict) or set(token) != {"device", "inode", "birthtime_ns", "generation"}:
             return False
-        if not isinstance(token.get("device"), int) or token["device"] < 0:
+        if type(token.get("device")) is not int or token["device"] < 0:
             return False
-        if not isinstance(token.get("inode"), int) or token["inode"] <= 0:
+        if type(token.get("inode")) is not int or token["inode"] <= 0:
             return False
         if token.get("birthtime_ns") is not None and (
-            not isinstance(token["birthtime_ns"], int) or token["birthtime_ns"] <= 0
+            type(token["birthtime_ns"]) is not int or token["birthtime_ns"] <= 0
         ):
             return False
         if token.get("generation") is not None and (
-            not isinstance(token["generation"], int) or token["generation"] <= 0
+            type(token["generation"]) is not int or token["generation"] <= 0
         ):
             return False
     return True
@@ -325,7 +329,11 @@ def _require_bound_source_current(source: Path, fd: int, identity: os.stat_resul
 
 def _parse_resolver(data: bytes) -> dict[str, dict[str, Any]]:
     value = _decode_closed_json(data)
-    if set(value) != {"schema_version", "origins"} or value.get("schema_version") != 1:
+    if (
+        set(value) != {"schema_version", "origins"}
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+    ):
         raise ProvenanceError()
     origins = value.get("origins")
     if not isinstance(origins, dict) or len(origins) > 10000:
@@ -419,7 +427,11 @@ def _read_regular_at(
     limit: int = _MAX_JSON_BYTES,
 ) -> bytes:
     try:
-        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        fd = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
+        )
     except FileNotFoundError:
         raise
     except OSError as exc:

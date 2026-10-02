@@ -96,7 +96,12 @@ def parse_network_policy(scope: bytes, *, expected_scope_hash: str) -> NetworkPo
         raise
     except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise NetworkScopeError("network_policy_invalid") from exc
-    if not isinstance(value, dict) or set(value) != {"schema_version", "permissions"} or value.get("schema_version") != 1:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "permissions"}
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+    ):
         raise NetworkScopeError("network_policy_invalid")
     entries = value.get("permissions")
     if not isinstance(entries, list) or len(entries) > 64:
@@ -133,23 +138,6 @@ def parse_network_policy(scope: bytes, *, expected_scope_hash: str) -> NetworkPo
             raise NetworkScopeError("network_policy_invalid")
         permissions.append(permission)
     return NetworkPolicy(tuple(permissions))
-
-
-def scope_with_network_policy(*, host: str, path: str, method: str) -> bytes:
-    policy = {
-        "schema_version": 1,
-        "permissions": [{
-            "operation": "target_fetch",
-            "scheme": "https",
-            "host": host,
-            "port": 443,
-            "path": path,
-            "method": method,
-        }],
-    }
-    return b"# signed scope fixture\n\n" + POLICY_START + json.dumps(
-        policy, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8") + POLICY_END + b"\n"
 
 
 def address_allowed(value: str) -> bool:

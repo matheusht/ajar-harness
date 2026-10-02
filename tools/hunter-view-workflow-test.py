@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from engagement_records import canonical_json_bytes, sha256_bytes  # noqa: E402
 from engagement_state import materialize_ledger_record  # noqa: E402
+import hunter_view  # noqa: E402
 from hunter_view import HunterViewError, compile_hunter_view, inspect_hunter_view  # noqa: E402
 
 
@@ -265,6 +267,107 @@ class HunterViewWorkflowTest(unittest.TestCase):
         self.assertNotIn("owned marker", rendered)
         packet.close()
         self.assertFalse(projection.exists())
+
+    def test_failed_watchdog_handshake_closes_pipe_and_reaps_child(self) -> None:
+        started = []
+        real_popen = subprocess.Popen
+
+        def bad_readiness(argv, **kwargs):
+            lifetime_fd, ready_fd = argv[2:4]
+            script = (
+                "import os, sys\n"
+                "lifetime_fd, ready_fd = map(int, sys.argv[1:3])\n"
+                "os.write(ready_fd, b'0')\n"
+                "os.close(ready_fd)\n"
+                "while os.read(lifetime_fd, 4096): pass\n"
+                "os.close(lifetime_fd)\n"
+            )
+            process = real_popen(
+                [sys.executable, "-c", script, lifetime_fd, ready_fd], **kwargs
+            )
+            started.append(process)
+            return process
+
+        with (
+            mock.patch.object(hunter_view.subprocess, "Popen", side_effect=bad_readiness),
+            self.assertRaises(HunterViewError),
+        ):
+            self.compile()
+
+        try:
+            self.assertEqual(len(started), 1)
+            self.assertEqual(started[0].wait(timeout=2), 0)
+            self.assertEqual(list(self.workspace.glob(".hunter-view-*")), [])
+        finally:
+            for process in started:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=2)
+
+    def test_watchdog_readiness_handshake_has_a_total_deadline(self) -> None:
+        script = f'''import json, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / "tools")!r})
+import hunter_view
+from hunter_view import HunterViewError
+real_popen = subprocess.Popen
+def delayed_readiness(argv, **kwargs):
+    lifetime_fd, ready_fd = argv[2:4]
+    child = "import os,sys,time\\n" \\
+            "lifetime_fd,ready_fd=map(int,sys.argv[1:3])\\n" \\
+            "time.sleep(.25)\\n" \\
+            "os.write(ready_fd,b'1')\\n" \\
+            "os.close(ready_fd)\\n" \\
+            "while os.read(lifetime_fd,4096): pass\\n"
+    return real_popen([sys.executable, "-c", child, lifetime_fd, ready_fd], **kwargs)
+hunter_view._WATCHDOG_READY_TIMEOUT_SECONDS = .05
+hunter_view.subprocess.Popen = delayed_readiness
+try:
+    hunter_view.compile_hunter_view(
+        workspace=Path({str(self.workspace)!r}),
+        engagement=Path({str(self.engagement)!r}),
+        state=json.loads({json.dumps(json.dumps(self.state))}),
+        item=json.loads({json.dumps(json.dumps(self.item))}),
+        target_inputs=(Path({str(self.workspace / "src" / "route.txt")!r}),),
+        methodology_root=Path({str(self.cards)!r}),
+        byte_budget=65536,
+    )
+except HunterViewError as exc:
+    if exc.code != "hunter_view_watchdog_unavailable": raise
+    print("bounded watchdog readiness failure")
+else:
+    raise SystemExit("watchdog became ready after the total deadline")
+'''
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("bounded watchdog readiness failure", result.stdout)
+        self.assertEqual(list(self.workspace.glob(".hunter-view-*")), [])
+
+    def test_failed_watchdog_cleanup_falls_back_only_for_owned_view_tree(self) -> None:
+        packet = self.compile()
+        root = packet._root
+        held_lifetime = os.dup(packet._lifetime_fd)
+        real_watchdog = packet._watchdog
+        failed_watchdog = mock.Mock()
+        failed_watchdog.returncode = 1
+        failed_watchdog.wait.return_value = 1
+        packet._watchdog = failed_watchdog
+        try:
+            packet.close()
+            self.assertFalse(root.exists())
+        finally:
+            if packet._lifetime_fd >= 0:
+                os.close(packet._lifetime_fd)
+                packet._lifetime_fd = -1
+            os.close(held_lifetime)
+            real_watchdog.wait(timeout=2)
 
     def test_parent_death_cleanup(self) -> None:
         marker = self.root / "projection-path"

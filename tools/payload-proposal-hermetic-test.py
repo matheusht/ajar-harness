@@ -12,7 +12,6 @@ Usage: python3 tools/payload-proposal-hermetic-test.py --self-test   (exit 0 = c
 """
 
 import importlib.util
-import json
 import os
 import sys
 

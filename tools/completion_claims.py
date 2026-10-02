@@ -181,7 +181,10 @@ def _json_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _manifest_bytes() -> tuple[bytes, FileIdentity]:
     """Read the fixed manifest once without following it, retaining its exact identity."""
     try:
-        fd = os.open(MANIFEST_PATH, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(
+            MANIFEST_PATH,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        )
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode):
@@ -211,7 +214,7 @@ def _parse_pins(raw: bytes) -> dict[str, tuple[str, int]]:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_json_no_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise _failure("completion_claims_manifest_invalid") from exc
-    if raw != canonical_json_bytes(value) or not isinstance(value, dict) or set(value) != {"schema_version", "pins"} or value.get("schema_version") != 1 or not isinstance(value["pins"], list):
+    if raw != canonical_json_bytes(value) or not isinstance(value, dict) or set(value) != {"schema_version", "pins"} or type(value.get("schema_version")) is not int or value["schema_version"] != 1 or not isinstance(value["pins"], list):
         raise _failure("completion_claims_manifest_invalid")
     pins: dict[str, tuple[str, int]] = {}
     tuples: list[tuple[str, str, int]] = []
@@ -252,7 +255,11 @@ class _DirectoryFrame:
 
 
 def _read_regular(parent_fd: int, name: str, expected: FileIdentity | None = None) -> tuple[bytes, FileIdentity]:
-    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+    fd = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=parent_fd,
+    )
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
@@ -316,7 +323,11 @@ def _scan_regular(
 ) -> tuple[str, FileIdentity, int]:
     """Stream one regular file into a digest and bounded completion-claim matcher."""
 
-    fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+    fd = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=parent_fd,
+    )
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):

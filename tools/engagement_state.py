@@ -10,7 +10,6 @@ import os
 import re
 import secrets
 import stat
-import tempfile
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,9 +22,7 @@ from engagement_records import (
     detect_secret_classes,
     load_json,
     resolve_schema_name,
-    scan_file_secret_classes,
     sha256_bytes,
-    sha256_file,
     validate_record,
     validate_record_references,
 )
@@ -1238,7 +1235,11 @@ def _open_parent_fd(root: Path, parts: tuple[str, ...], *, create: bool) -> tupl
 def read_governed_file(path: Path, *, require_single_link: bool = False) -> bytes:
     root, parts = _governed_root(path); parent_fd, name = _open_parent_fd(root, parts, create=False)
     try:
-        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        fd = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
+        )
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode) or (require_single_link and before.st_nlink != 1): raise RecordError("unsafe_governed_path", str(path))

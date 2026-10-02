@@ -15,6 +15,7 @@ the harness's own stdlib converters.
 Usage:
   python3 tools/covert-channel-evidence.py --self-test
   python3 tools/covert-channel-evidence.py --flows raw_flows.json --expect-canary benign-preamble-canary
+    (flat hermetic shape or native Tollbooth traffic export)
 """
 
 import argparse
@@ -22,7 +23,10 @@ import importlib.util
 import json
 import os
 import re
+import stat
+import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -86,29 +90,66 @@ def _decode_candidates(text):
     return cands
 
 
-def scan_flow(flow, expect_canary):
+def scan_flow(flow, expect_canary, flow_index):
     """Return a SANITIZED evidence record for one raw flow — no raw text, no secrets."""
+    if not isinstance(flow, dict):
+        raise ValueError("flow must be a JSON object")
     text = flow.get("text", "")
+    if not isinstance(text, str):
+        raise ValueError("flow text must be a string")
     decoded_present = any(expect_canary in c for c in _decode_candidates(text)) if expect_canary else None
     return {
         "kind": "covert_evidence",       # sensor signal, NON-authoritative
         "authoritative": False,
-        "flow_ref": flow.get("ref"),
+        "flow_ref": f"flow-{flow_index}",  # Positional; never copy a caller-supplied reference.
         "channels_detected": detect_channels(text),
         "decoded_expected_canary_present": decoded_present,
     }
 
 
 def scan(flows, expect_canary):
-    return [scan_flow(f, expect_canary) for f in flows]
+    return [scan_flow(flow, expect_canary, index) for index, flow in enumerate(flows)]
+
+
+def normalize_flow_export(export):
+    """Accept flat hermetic flows and native Tollbooth traffic without retaining raw metadata."""
+    if not isinstance(export, dict):
+        raise ValueError("flow export must be a JSON object")
+    if "traffic" not in export:
+        flows = export.get("flows", [])
+        if not isinstance(flows, list):
+            raise ValueError("flows must be a JSON array")
+        return flows
+    traffic = export["traffic"]
+    if not isinstance(traffic, list):
+        raise ValueError("traffic must be a JSON array")
+    flows = []
+    for flow in traffic:
+        if not isinstance(flow, dict):
+            raise ValueError("traffic entries must be JSON objects")
+        contents = []
+        for direction in ("request", "response"):
+            section = flow.get(direction)
+            if section is None:
+                continue
+            if not isinstance(section, dict):
+                raise ValueError(f"{direction} must be a JSON object")
+            content = section.get("content")
+            if content is not None:
+                contents.append(
+                    content if isinstance(content, str)
+                    else json.dumps(content, sort_keys=True, ensure_ascii=False)
+                )
+        flows.append({"text": "\n".join(contents)})
+    return flows
 
 
 def _golden_flows(canary):
     return [
-        {"ref": "f1", "text": _cov.encode("homoglyph", f"see {canary}")},
-        {"ref": "f2", "text": _steg.embed("an ordinary carrier", canary)},
-        {"ref": "f3", "text": _obf.encode("base64", f"see {canary}")},
-        {"ref": "f4", "text": "ordinary clean text nothing hidden here at all"},
+        {"text": _cov.encode("homoglyph", f"see {canary}")},
+        {"text": _steg.embed("an ordinary carrier", canary)},
+        {"text": _obf.encode("base64", f"see {canary}")},
+        {"text": "ordinary clean text nothing hidden here at all"},
     ]
 
 
@@ -117,14 +158,14 @@ def self_test():
     results = scan(_golden_flows(canary), canary)
     by = {r["flow_ref"]: r for r in results}
     checks = [
-        ("homoglyph flow detected + decoded", "homoglyph" in by["f1"]["channels_detected"]
-         and by["f1"]["decoded_expected_canary_present"]),
-        ("zero-width stego flow detected + decoded", "zero-width" in by["f2"]["channels_detected"]
-         and by["f2"]["decoded_expected_canary_present"]),
-        ("base64 flow detected + decoded", "base64-likely" in by["f3"]["channels_detected"]
-         and by["f3"]["decoded_expected_canary_present"]),
-        ("clean flow is clean", by["f4"]["channels_detected"] == []
-         and not by["f4"]["decoded_expected_canary_present"]),
+        ("homoglyph flow detected + decoded", "homoglyph" in by["flow-0"]["channels_detected"]
+         and by["flow-0"]["decoded_expected_canary_present"]),
+        ("zero-width stego flow detected + decoded", "zero-width" in by["flow-1"]["channels_detected"]
+         and by["flow-1"]["decoded_expected_canary_present"]),
+        ("base64 flow detected + decoded", "base64-likely" in by["flow-2"]["channels_detected"]
+         and by["flow-2"]["decoded_expected_canary_present"]),
+        ("clean flow is clean", by["flow-3"]["channels_detected"] == []
+         and not by["flow-3"]["decoded_expected_canary_present"]),
     ]
     blob = json.dumps(results)
     sanitized = (canary not in blob                      # no raw decoded payload echoed
@@ -134,6 +175,75 @@ def self_test():
     for name, ok in checks:
         print(f"  {'ok  ' if ok else 'FAIL'} {name}")
     print(f"  {'ok  ' if sanitized else 'FAIL'} evidence is sanitized (no raw text/canary, no judge key)")
+    with tempfile.TemporaryDirectory(prefix="covert-flow-fifo-") as temp:
+        fifo = os.path.join(temp, "flows.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--flows", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print(f"  {'ok  ' if fifo_ok else 'FAIL'} FIFO input is rejected promptly")
+        if not fifo_ok:
+            fails.append("FIFO input blocks or is not rejected")
+    with tempfile.TemporaryDirectory(prefix="covert-flow-ref-") as temp:
+        path = os.path.join(temp, "flows.json")
+        secret_ref = "Authorization: Bearer sk_test-do-not-emit"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"flows": [{"ref": secret_ref, "text": "ordinary clean text"}]}, fh)
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--flows", path],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        output = json.loads(result.stdout) if result.returncode == 0 else []
+        ref_ok = output == [{
+            "kind": "covert_evidence", "authoritative": False, "flow_ref": "flow-0",
+            "channels_detected": [], "decoded_expected_canary_present": None,
+        }]
+        no_secret = secret_ref not in result.stdout
+        print(f"  {'ok  ' if ref_ok and no_secret else 'FAIL'} output reference is positional and contains no raw ref")
+        if not (ref_ok and no_secret):
+            fails.append("raw flow reference escaped into sanitized output")
+    with tempfile.TemporaryDirectory(prefix="covert-native-flow-") as temp:
+        path = os.path.join(temp, "traffic.json")
+        encoded = _obf.encode("base64", f"see {canary}")
+        native = {"total": 1, "traffic": [{
+            "flow_id": "raw-secret-flow-id", "is_llm_api": True,
+            "request": {"content": encoded, "headers": {"Authorization": "Bearer fake-secret"}},
+            "response": {"content": "ok"},
+        }]}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(native, fh)
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--flows", path, "--expect-canary", canary],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        output = json.loads(result.stdout) if result.returncode == 0 else []
+        native_ok = (
+            len(output) == 1 and output[0].get("flow_ref") == "flow-0"
+            and "base64-likely" in output[0].get("channels_detected", [])
+            and output[0].get("decoded_expected_canary_present") is True
+            and "raw-secret-flow-id" not in result.stdout and encoded not in result.stdout
+            and canary not in result.stdout and "fake-secret" not in result.stdout
+        )
+        print(f"  {'ok  ' if native_ok else 'FAIL'} native Tollbooth export is decoded without echoing raw fields")
+        if not native_ok:
+            fails.append("native Tollbooth export was not decoded or raw fields escaped")
+    with tempfile.TemporaryDirectory(prefix="covert-invalid-flow-") as temp:
+        path = os.path.join(temp, "flows.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"flows": [{"text": 7}]}, fh)
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--flows", path],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        invalid_ok = result.returncode == 2 and "flow text must be a string" in result.stderr
+        print(f"  {'ok  ' if invalid_ok else 'FAIL'} malformed flow text is rejected cleanly")
+        if not invalid_ok:
+            fails.append("malformed flow input crashes instead of returning a clean error")
     if fails or not sanitized:
         print("COVERT-CHANNEL-EVIDENCE: FAIL")
         return 1
@@ -151,9 +261,17 @@ def main():
     if a.self_test:
         return self_test()
     if a.flows:
-        with open(a.flows) as fh:
-            flows = json.load(fh).get("flows", [])
-        print(json.dumps(scan(flows, a.expect_canary), indent=2))
+        try:
+            fd = os.open(a.flows, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            with os.fdopen(fd) as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    raise OSError("flow input is not a regular file")
+                flows = normalize_flow_export(json.load(fh))
+            evidence = scan(flows, a.expect_canary)
+        except (OSError, UnicodeError, ValueError) as exc:
+            print(f"invalid flow input: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(evidence, indent=2))
         return 0
     ap.print_help()
     return 0

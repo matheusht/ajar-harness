@@ -142,7 +142,11 @@ def _locate_marker_entry(engagement: Path) -> dict[str, int] | None:
 def _read_marker(engagement: Path) -> tuple[bytes, dict[str, int]]:
     parent_fd = _open_marker_parent(engagement, create=False)
     try:
-        fd = os.open(MARKER_PARTS[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        fd = os.open(
+            MARKER_PARTS[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
+        )
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode) or before.st_size > _MAX_MARKER_BYTES:
@@ -440,7 +444,7 @@ def read_safe_offline_file(path: Path) -> bytes:
         )
         fd = os.open(
             resolved.name,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=parent_fd,
         )
         try:
@@ -546,7 +550,7 @@ def read_safe_offline_tree(path: Path) -> dict[str, bytes]:
                 raise ValueError("offline input directory contains a non-regular entry")
             fd = os.open(
                 name,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
                 dir_fd=directory_fd,
             )
             try:

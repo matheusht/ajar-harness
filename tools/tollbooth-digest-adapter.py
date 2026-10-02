@@ -30,10 +30,12 @@ Usage:
 
 import argparse
 import json
+import os
 import re
+import stat
+import subprocess
 import sys
-
-KEEP_FLOW_FIELDS = ("timestamp", "method", "host", "path", "status", "model", "token_counts")
+import tempfile
 
 # secret shapes that must NEVER survive into a digest (superset of the conformance secret scan)
 SECRET_PATTERNS = [
@@ -180,7 +182,33 @@ def self_test():
     print(f"  {'ok  ' if not nsurvived else 'FAIL'} native shape: no planted secret in digest "
           f"({len(nsurvived)} survived)")
     print(f"  {'ok  ' if nkept else 'FAIL'} native shape: allowlist fields retained after normalize")
-    if survived or not kept_ok or nsurvived or not nkept:
+    with tempfile.TemporaryDirectory(prefix="tollbooth-export-fifo-") as temp:
+        export = os.path.join(temp, "valid-export.json")
+        with open(export, "w") as fh:
+            json.dump(_golden_export(), fh)
+        fifo = os.path.join(temp, "export.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--export", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print(f"  {'ok  ' if fifo_ok else 'FAIL'} FIFO export is rejected promptly")
+        output_fifo = os.path.join(temp, "output.json")
+        os.mkfifo(output_fifo)
+        try:
+            output_result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--export", export, "--out", output_fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            output_result = None
+        output_fifo_ok = output_result is not None and output_result.returncode == 2 and "invalid output:" in output_result.stderr
+        print(f"  {'ok  ' if output_fifo_ok else 'FAIL'} FIFO output is rejected promptly")
+    if survived or not kept_ok or nsurvived or not nkept or not fifo_ok or not output_fifo_ok:
         if survived:
             print(f"  FAIL survived: {survived}")
         if nsurvived:
@@ -201,12 +229,28 @@ def main():
     if a.self_test:
         return self_test()
     if a.export:
-        with open(a.export) as fh:
-            digest = build_digest(normalize_export(json.load(fh)))
+        try:
+            fd = os.open(a.export, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            with os.fdopen(fd) as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    raise OSError("export input is not a regular file")
+                digest = build_digest(normalize_export(json.load(fh)))
+        except (OSError, UnicodeError, ValueError) as exc:
+            print(f"invalid export: {exc}", file=sys.stderr)
+            return 2
         out = json.dumps(digest, indent=2)
         if a.out:
-            with open(a.out, "w") as fh:
-                fh.write(out + "\n")
+            try:
+                fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0), 0o666)
+                with os.fdopen(fd, "w") as fh:
+                    if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                        raise OSError("output is not a regular file")
+                    fh.seek(0)
+                    fh.truncate()
+                    fh.write(out + "\n")
+            except (OSError, UnicodeError, ValueError) as exc:
+                print(f"invalid output: {exc}", file=sys.stderr)
+                return 2
             print(f"wrote {a.out} ({digest['flow_count']} flows, {len(digest['hosts'])} hosts)")
         else:
             print(out)

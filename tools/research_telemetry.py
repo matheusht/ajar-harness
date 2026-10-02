@@ -88,7 +88,7 @@ def _remove_published_output(path: Path, expected: bytes) -> None:
         _require_bound_parent_safe(parent_fd, resolved_parent, absolute.name, output=True)
         fd = os.open(
             absolute.name,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=parent_fd,
         )
         try:

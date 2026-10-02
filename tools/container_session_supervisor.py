@@ -23,7 +23,6 @@ import errno
 import hashlib
 import http.client
 import json
-import math
 import os
 import re
 import select
@@ -331,14 +330,6 @@ def _socket_policy(family: int, kind: int, protocol: int) -> bool:
         and base_kind == socket.SOCK_STREAM
         and protocol in {0, socket.IPPROTO_TCP}
     )
-
-
-def _message_flags_allowed(flags: int) -> bool:
-    return not flags & getattr(socket, "MSG_FASTOPEN", 0x20000000)
-
-
-def _sockaddr_in_bytes(address: str, port: int) -> bytes:
-    return struct.pack("=H", socket.AF_INET) + struct.pack("!H", port) + socket.inet_aton(address) + b"\0" * 8
 
 
 def _harden_process_memory() -> None:
@@ -1104,12 +1095,14 @@ def _decode_syscall_info(raw: bytes, returned_size: int) -> _SyscallObservation:
     raise SupervisorError("ptrace_syscall_info_invalid")
 
 
-def _syscall_info_is_storage_failure(raw: bytes, returned_size: int) -> bool:
-    observation = _decode_syscall_info(raw, returned_size)
+def _syscall_exit_is_storage_failure(
+    observation: _SyscallObservation, *, syscall_number: int | None
+) -> bool:
     return (
         observation.operation == PTRACE_SYSCALL_INFO_EXIT
         and observation.is_error
         and observation.result in {-errno.ENOSPC, -errno.EDQUOT}
+        and syscall_number not in {AARCH64_NR_WRITE, AARCH64_NR_PWRITE64}
     )
 
 
@@ -1239,11 +1232,8 @@ def _run_traced_command(
                     pending_syscalls[waited_pid] = observation.number
                 else:
                     syscall_number = pending_syscalls.pop(waited_pid, None)
-                    if (
-                        observation.is_error
-                        and observation.result in {-errno.ENOSPC, -errno.EDQUOT}
-                        and syscall_number
-                        not in {AARCH64_NR_WRITE, AARCH64_NR_PWRITE64}
+                    if _syscall_exit_is_storage_failure(
+                        observation, syscall_number=syscall_number
                     ):
                         return STORAGE_EXIT_CODE
                 if broker.storage_exhausted.is_set():
@@ -1280,13 +1270,6 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise SupervisorError("duplicate_json_key")
         value[key] = item
     return value
-
-
-def _canonical_json_bytes(value: Any) -> bytes:
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        + "\n"
-    ).encode("utf-8")
 
 
 def _sha256(raw: bytes) -> str:
@@ -1430,7 +1413,7 @@ def _read_bootstrap() -> tuple[dict[str, str], bytes]:
         "schema_version",
         "environment",
         "broker_session_key_base64",
-    } or value.get("schema_version") != 1:
+    } or type(value.get("schema_version")) is not int or value["schema_version"] != 1:
         raise SupervisorError("auth_invalid")
     environment = value.get("environment")
     if (
@@ -1567,7 +1550,9 @@ class _BrokerRelay:
         try:
             if not self._peer_is_local_runtime(connection):
                 raise SupervisorError("broker_relay_peer_invalid")
-            request = broker_client.recv_frame(connection)
+            request = broker_client.recv_frame(
+                connection, timeout=RELAY_IO_TIMEOUT_SECONDS
+            )
             returncode, output = broker_client.handle_relay_request(
                 self._manifest, self._key, request
             )
@@ -1595,10 +1580,8 @@ class _BrokerRelay:
                 continue
             except OSError:
                 return
-            try:
+            with connection:
                 self._serve_one(connection)
-            finally:
-                connection.close()
 
     def close(self) -> None:
         self._stop.set()
@@ -1633,9 +1616,20 @@ class _ProviderProxy:
 
     @staticmethod
     def _read_request(connection: socket.socket) -> tuple[dict[str, str], bytes, str]:
+        deadline = time.monotonic() + PROVIDER_IO_TIMEOUT_SECONDS
+
+        def recv_before_deadline(size: int) -> bytes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout("provider request deadline")
+            connection.settimeout(remaining)
+            return connection.recv(size)
+
         data = bytearray()
         while b"\r\n\r\n" not in data:
-            chunk = connection.recv(min(4096, MAX_PROVIDER_HEADER_BYTES + 1 - len(data)))
+            chunk = recv_before_deadline(
+                min(4096, MAX_PROVIDER_HEADER_BYTES + 1 - len(data))
+            )
             if not chunk:
                 raise SupervisorError("provider_request_invalid")
             data.extend(chunk)
@@ -1670,7 +1664,7 @@ class _ProviderProxy:
             raise SupervisorError("provider_request_invalid")
         body = bytearray(body_prefix)
         while len(body) < content_length:
-            chunk = connection.recv(content_length - len(body))
+            chunk = recv_before_deadline(content_length - len(body))
             if not chunk:
                 raise SupervisorError("provider_request_invalid")
             body.extend(chunk)

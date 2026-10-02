@@ -26,6 +26,8 @@ import re
 import subprocess
 import sys
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -98,7 +100,11 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    prereg = json.load(open(args.prereg))
+    try:
+        prereg = load_json(args.prereg)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     withheld = prereg.get("holdout", {}).get("paths", [])
     if not withheld:
         print("preregistration declares no holdout paths; nothing to enforce")

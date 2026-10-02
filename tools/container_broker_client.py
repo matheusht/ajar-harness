@@ -20,6 +20,7 @@ import socket
 import stat
 import struct
 import sys
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -160,7 +161,8 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             "frame_limit",
             "raw_input_limit",
         }
-        or value.get("schema_version") != PROTOCOL_VERSION
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != PROTOCOL_VERSION
         or value.get("transport") != "tcp_hmac_sha256"
     ):
         raise ContainerBrokerClientError("container_broker_manifest_invalid")
@@ -201,6 +203,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             or not isinstance(entry.get("argument"), str)
             or not entry["argument"].startswith("--")
             or not isinstance(entry.get("attribute"), str)
+            or not isinstance(entry.get("format"), str)
             or entry.get("format") not in {"bytes", "json"}
             or type(entry.get("max_bytes")) is not int
             or not 0 <= entry["max_bytes"] <= RAW_INPUT_LIMIT
@@ -209,12 +212,6 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             raise ContainerBrokerClientError("container_broker_manifest_invalid")
         seen.add(entry["argument"])
     return value
-
-
-# Compatibility aliases for the existing protocol self-test.  Production callers use the named
-# public helpers because the supervisor and model client are two halves of one local protocol.
-_validate_manifest = validate_manifest
-_canonical_json_bytes = canonical_json_bytes
 
 
 def load_manifest_from_environment() -> dict[str, Any]:
@@ -322,23 +319,44 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
     connection.sendall(struct.pack("!I", len(data)) + data)
 
 
-def _recv_exact(connection: socket.socket, size: int) -> bytes:
+def _recv_exact(
+    connection: socket.socket, size: int, *, deadline: float | None = None
+) -> bytes:
     result = bytearray()
-    while len(result) < size:
-        chunk = connection.recv(size - len(result))
-        if not chunk:
-            raise ContainerBrokerClientError("container_broker_response_invalid")
-        result.extend(chunk)
+    previous_timeout = connection.gettimeout() if deadline is not None else None
+    try:
+        while len(result) < size:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("container broker frame deadline")
+                timeout = (
+                    remaining
+                    if previous_timeout is None
+                    else min(previous_timeout, remaining)
+                )
+                connection.settimeout(timeout)
+            chunk = connection.recv(size - len(result))
+            if not chunk:
+                raise ContainerBrokerClientError("container_broker_response_invalid")
+            result.extend(chunk)
+    finally:
+        if deadline is not None:
+            connection.settimeout(previous_timeout)
     return bytes(result)
 
 
-def recv_frame(connection: socket.socket) -> dict[str, Any]:
-    length = struct.unpack("!I", _recv_exact(connection, 4))[0]
+def recv_frame(
+    connection: socket.socket, *, timeout: float | None = None
+) -> dict[str, Any]:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    length = struct.unpack("!I", _recv_exact(connection, 4, deadline=deadline))[0]
     if length <= 0 or length > FRAME_LIMIT:
         raise ContainerBrokerClientError("container_broker_response_invalid")
     try:
         value = json.loads(
-            _recv_exact(connection, length), object_pairs_hook=_reject_duplicate_pairs
+            _recv_exact(connection, length, deadline=deadline),
+            object_pairs_hook=_reject_duplicate_pairs,
         )
     except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
         raise ContainerBrokerClientError("container_broker_response_invalid") from exc
@@ -375,7 +393,8 @@ def _validate_response(
         raise ContainerBrokerClientError("container_broker_response_auth_invalid")
     payload = response.get("payload")
     if (
-        response.get("schema_version") != PROTOCOL_VERSION
+        type(response.get("schema_version")) is not int
+        or response["schema_version"] != PROTOCOL_VERSION
         or response.get("message_kind") != "response"
         or response.get("runtime_identity") != manifest["runtime_identity"]
         or response.get("runtime_session_ref") != manifest["runtime_session_ref"]
@@ -493,7 +512,7 @@ def stream_provider(
         raise ContainerBrokerClientError("container_broker_provider_invalid")
     # Reuse the request validation and payload shape without performing a second exchange.
     if (
-        path != "/v1/messages"
+        path not in {"/v1/messages", "/v1/messages?beta=true"}
         or not isinstance(headers, dict)
         or any(
             not isinstance(name, str)
@@ -583,6 +602,7 @@ def forward_target_fetch(
         or request_id != expected_request_id
         or not isinstance(url, str)
         or not 1 <= len(url) <= 8192
+        or not isinstance(method, str)
         or method not in {"GET", "HEAD"}
     ):
         raise ContainerBrokerClientError("container_broker_target_fetch_invalid")
@@ -616,7 +636,11 @@ def target_fetch_request_id(
 
 
 def _validate_relay_request(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or value.get("schema_version") != PROTOCOL_VERSION:
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != PROTOCOL_VERSION
+    ):
         raise ContainerBrokerClientError("container_broker_relay_request_invalid")
     kind = value.get("request_kind")
     if kind == "action":
@@ -673,7 +697,8 @@ def _validate_relay_request(value: Any) -> dict[str, Any]:
             or SHA256_RE.fullmatch(value["request_id"]) is None
             or not isinstance(value.get("url"), str)
             or not 1 <= len(value["url"]) <= 8192
-            or value.get("method") not in {"GET", "HEAD"}
+            or not isinstance(value.get("method"), str)
+            or value["method"] not in {"GET", "HEAD"}
         ):
             raise ContainerBrokerClientError("container_broker_relay_request_invalid")
     else:
@@ -759,7 +784,8 @@ def _relay_exchange(request: dict[str, Any]) -> tuple[int, bytes]:
         connection.close()
     if (
         set(response) != {"schema_version", "returncode", "output_base64"}
-        or response.get("schema_version") != PROTOCOL_VERSION
+        or type(response.get("schema_version")) is not int
+        or response["schema_version"] != PROTOCOL_VERSION
         or type(response.get("returncode")) is not int
         or not 0 <= response["returncode"] <= 255
         or not isinstance(response.get("output_base64"), str)
@@ -899,7 +925,7 @@ def run_stop_hook() -> int:
     except Exception:
         # This executable is a Claude Stop hook boundary. Never echo raw deliveries, target paths,
         # transport details, or broker errors: exit-zero ``{}`` is the platform's fail-open form.
-        output = _canonical_json_bytes({})
+        output = canonical_json_bytes({})
     sys.stdout.buffer.write(output)
     return 0
 
@@ -972,7 +998,7 @@ def main() -> int:
         return returncode
     except (ContainerBrokerClientError, json.JSONDecodeError):
         sys.stdout.buffer.write(
-            _canonical_json_bytes(
+            canonical_json_bytes(
                 {"valid": False, "error": {"code": "container_broker_client_failed"}}
             )
         )

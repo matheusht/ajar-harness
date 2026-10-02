@@ -324,6 +324,35 @@ def main():
         w = copy.deepcopy(worksheet); w.pop('source_sha256')
         w['M6_overlap'] = {'both_arms': 0, 'arm_a_only': 0, 'arm_b_only': 0}
         invoke(m=old, w=w, a={**assessment, 'packages': []}, expected='inconclusive')
+        fifo_root = root / 'fifo-race-source'; fifo_root.mkdir()
+        (fifo_root / 'input.txt').write_text('regular before open\n')
+        fifo_hook = root / 'fifo-race-hook-fired'
+        fifo_probe = (
+            "import os, runpy, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "module = runpy.run_path(sys.argv[2])\n"
+            "root_fd = os.open(sys.argv[3], os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))\n"
+            "original_open = os.open\n"
+            "def race_open(path, flags, mode=0o777, *, dir_fd=None):\n"
+            "    if path == 'input.txt' and sys._getframe(1).f_code.co_name == 'visit':\n"
+            "        with open(sys.argv[4], 'w', encoding='utf-8') as handle: handle.write('reached')\n"
+            "        os.unlink(path, dir_fd=dir_fd)\n"
+            "        os.mkfifo(path, dir_fd=dir_fd)\n"
+            "    return original_open(path, flags, mode, dir_fd=dir_fd)\n"
+            "module['os'].open = race_open\n"
+            "module['_snapshot_bound_tree'](root_fd)\n"
+        )
+        try:
+            fifo_snapshot = subprocess.run(
+                [sys.executable, '-c', fifo_probe, str(TOOL.parent), str(TOOL), str(fifo_root), str(fifo_hook)],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fifo_snapshot = None
+        checks += 1
+        assert fifo_snapshot is not None and fifo_snapshot.returncode != 0 and fifo_hook.is_file(), (
+            "Q-02 must reject a regular-to-FIFO replacement without blocking"
+        )
     print(f'Q02 ADMISSION SELF-TEST: PASS ({checks} public controls)')
     return 0
 

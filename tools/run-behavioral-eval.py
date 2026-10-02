@@ -79,16 +79,6 @@ def _redact_cmd(cmd):
     return {"program": os.path.basename(prog), "sha256": sha256_text(s)}
 
 
-def sha256_file(path):
-    if not os.path.isfile(path):
-        return None
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def load_episodes(technique):
     return load(os.path.join(EPISODES_DIR, f"{technique}.json"))
 
@@ -412,7 +402,7 @@ def render_md(report, manifest):
 
 
 def tool_hashes():
-    return {name: sha256_file(os.path.join(TOOLS, name)) for name in
+    return {name: APE.sha256_file(os.path.join(TOOLS, name)) for name in
             ("run-behavioral-eval.py", "score-candidate.py", "check-campaign.py",
              "apply-candidate-eval.py", "researcher_adapter.py", "fake-researcher-cli.py")}
 
@@ -508,16 +498,16 @@ def base_manifest(campaign, campaign_path, backend, status, run_dir, model_id=""
         cand = load(cm) if os.path.isfile(cm) else {}
         techniques.add(cand.get("technique", ""))
         cand_hashes[entry["candidate_id"]] = {
-            "candidate_manifest": sha256_file(cm),
-            "diff": sha256_file(os.path.join(ROOT, cand["diff"])) if cand.get("diff") else None,
+            "candidate_manifest": APE.sha256_file(cm),
+            "diff": APE.sha256_file(os.path.join(ROOT, cand["diff"])) if cand.get("diff") else None,
             "incumbent_card": sha256_text(APE_read_head(measure_target(cand))) if cand.get("mutation_target") else None,
         }
-    ep_hashes = {t: sha256_file(os.path.join(EPISODES_DIR, f"{t}.json")) for t in sorted(techniques) if t}
+    ep_hashes = {t: APE.sha256_file(os.path.join(EPISODES_DIR, f"{t}.json")) for t in sorted(techniques) if t}
     return {
         "run_id": os.path.basename(run_dir), "status": status, "backend": backend,
         "model_id": model_id, "model_cmd": (_redact_cmd(model_cmd) if backend == "model" else None),
         "campaign_id": campaign["campaign_id"],
-        "campaign_manifest_sha256": sha256_file(campaign_path),
+        "campaign_manifest_sha256": APE.sha256_file(campaign_path),
         "seed": campaign.get("seed"), "behavioral_budget": campaign.get("behavioral_budget"),
         "gate_budgets": campaign.get("budgets"),
         "episode_hashes": ep_hashes, "candidate_hashes": cand_hashes, "tool_hashes": tool_hashes(),

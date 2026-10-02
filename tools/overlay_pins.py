@@ -184,7 +184,11 @@ def main():
     try:
         return args.fn(args)
     except ValueError as exc:
-        print(f"REFUSING {exc}")
+        if args.cmd == "check" and args.json:
+            print(json.dumps({"error": str(exc), "failures": 1, "results": [], "stale": 0},
+                             indent=2, sort_keys=True))
+        else:
+            print(f"REFUSING {exc}")
         return 1
 
 

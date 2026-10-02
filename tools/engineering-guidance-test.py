@@ -118,7 +118,9 @@ def main():
             prereg_link.parent.mkdir(parents=True)
             prereg_link.symlink_to(outside_prereg)
             outside_before = outside_prereg.read_bytes()
-            run("overlay_pins.py", "check", code=1, contains="REFUSING unsafe preregistration path")
+            unsafe_check = json.loads(run("overlay_pins.py", "check", "--json", code=1,
+                                          contains="unsafe preregistration path"))
+            assert "unsafe preregistration path" in unsafe_check["error"]
             run("overlay_pins.py", "repin", "--apply", code=1,
                 contains="REFUSING unsafe preregistration path")
             assert outside_prereg.read_bytes() == outside_before

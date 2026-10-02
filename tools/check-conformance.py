@@ -896,12 +896,24 @@ def check_decision5_record_schemas():
     ref_suite = validate_reference_fixture_suite()
     record(not ref_suite["failures"], f"record-reference fixtures: {ref_suite['case_count']} expected outcomes",
            str(ref_suite["failures"]) if ref_suite["failures"] else "")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    record_dir = os.path.join(fixture_root, "engagement-records")
     corpus_root = os.path.join(ROOT, "fixtures", "engagement-records", "legacy-corpus")
     produced = legacy_finding_inventory(corpus_root)
-    corpus_expected = load_json(os.path.join(ROOT, "fixtures", "engagement-records", "legacy-corpus-expected.json"))
+    corpus_expected = read_conformance_json(
+        os.path.join(record_dir, "legacy-corpus-expected.json"),
+        "engagement-records/legacy-corpus-expected.json", (fixture_root, record_dir),
+    )
+    if corpus_expected is None:
+        return
     record(produced == corpus_expected, "synthetic legacy corpus inventory matches exact counts, hashes, and root digest",
            "regenerate only after intentional fixture review" if produced != corpus_expected else "")
-    expected = load_json(os.path.join(ROOT, "fixtures", "engagement-records", "legacy-drift-expected.json"))
+    expected = read_conformance_json(
+        os.path.join(record_dir, "legacy-drift-expected.json"),
+        "engagement-records/legacy-drift-expected.json", (fixture_root, record_dir),
+    )
+    if expected is None:
+        return
     counts = expected.get("expected_counts", {})
     record(counts.get("total") == 124 and counts.get("schema_version_2") == 124,
            "legacy inventory baseline exposes 124 version-2 findings")
@@ -1995,12 +2007,16 @@ def check_cited_fixtures():
 
 def _build_fixture_npm_tarball(source_dir, destination):
     """Build a byte-stable npm-style tarball from a checked-in source fixture."""
+    if os.path.islink(source_dir):
+        raise OSError(f"fixture source directory is a symlink: {source_dir}")
     with (
         open(destination, "wb") as raw,
         gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
     ):
         for root, dirs, files in os.walk(source_dir):
+            if any(os.path.islink(os.path.join(root, name)) for name in dirs):
+                raise OSError(f"fixture contains a symlinked directory: {root}")
             dirs.sort()
             for name in sorted(files):
                 path = os.path.join(root, name)
@@ -2009,7 +2025,7 @@ def _build_fixture_npm_tarball(source_dir, destination):
                 info.uid = info.gid = 0
                 info.uname = info.gname = ""
                 info.mtime = 0
-                with open(path, "rb") as handle:
+                with open_regular_file(path, binary=True, no_follow=True) as handle:
                     archive.addfile(info, handle)
 
 
@@ -2027,15 +2043,37 @@ def check_corpus_enumeration():
     if not all(os.path.isfile(path) for path in required):
         return
 
-    expected = load_json(expected_path)
+    expected = read_conformance_json(
+        expected_path, "corpus-enumeration/expected.json",
+        (os.path.join(ROOT, "fixtures"), fixture),
+    )
+    if expected is None:
+        return
     with tempfile.TemporaryDirectory() as temp:
         tarballs = os.path.join(temp, "tarballs")
         os.mkdir(tarballs)
         pin_rows = []
+        packages_root = os.path.join(fixture, "packages")
         for package in expected["packages"]:
-            source = os.path.join(fixture, "packages", package["fixture"])
-            tarball = os.path.join(tarballs, f"{package['fixture']}.tgz")
-            _build_fixture_npm_tarball(source, tarball)
+            fixture_name = package.get("fixture")
+            if (not isinstance(fixture_name, str) or not fixture_name or fixture_name in (".", "..")
+                    or os.path.isabs(fixture_name) or os.path.basename(fixture_name) != fixture_name
+                    or "\\" in fixture_name):
+                record(False, "corpus enumeration: package fixture path stays within packages",
+                       f"unsafe fixture path: {fixture_name!r}")
+                return
+            source = os.path.join(packages_root, fixture_name)
+            if any(os.path.islink(path) for path in (os.path.join(ROOT, "fixtures"), fixture, packages_root, source)):
+                record(False, f"corpus enumeration/{fixture_name}: package fixture directories are safe",
+                       "symlinked fixture directory")
+                return
+            tarball = os.path.join(tarballs, f"{fixture_name}.tgz")
+            try:
+                _build_fixture_npm_tarball(source, tarball)
+            except OSError as exc:
+                record(False, f"corpus enumeration/{fixture_name}: package fixture files are regular",
+                       str(exc))
+                return
             with open(tarball, "rb") as handle:
                 digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
             pin_rows.append((package["status"], package["name"], package["version"], digest))

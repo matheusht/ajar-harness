@@ -82,6 +82,25 @@ def scan(root, mode):
                 if result is not None:
                     module.record(True, f"{label}: regular JSON is safe")
             result = rows
+        elif mode == "decision5-record-json":
+            module.validate_schema_documents = lambda: []
+            module.validate_fixture_suite = lambda: {"failures": [], "case_count": 0}
+            module.validate_reference_fixture_suite = lambda: {"failures": [], "case_count": 0}
+            module.legacy_finding_inventory = lambda path: {}
+            module.check_decision5_record_schemas()
+            result = rows
+        elif mode == "corpus-enumeration-json":
+            module.check_corpus_enumeration()
+            result = rows
+        elif mode == "fixture-tarball":
+            source = Path(root) / "packages" / "fixture"
+            try:
+                module._build_fixture_npm_tarball(source, Path(root) / "fixture.tgz")
+            except OSError as exc:
+                module.record(False, "fixture tarball input is regular and safe", str(exc))
+            else:
+                module.record(True, "fixture tarball input is regular and safe")
+            result = rows
         elif mode == "cited-fixtures":
             module.check_cited_fixtures()
             result = rows
@@ -206,6 +225,71 @@ def main():
             oracle_failures.append(f"oracle root symlink: {exc}")
 
     assert not oracle_failures, "\n".join(oracle_failures)
+
+    record_json_failures = []
+    with tempfile.TemporaryDirectory(prefix="decision5-record-json-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        record_dir = root / "fixtures" / "engagement-records"
+        (record_dir / "legacy-corpus").mkdir(parents=True)
+        expected_counts = {
+            "total": 124, "schema_version_2": 124, "forbidden_base_model": 116,
+            "unsupported_scope_class": 5,
+        }
+        (record_dir / "legacy-drift-expected.json").write_text(json.dumps({"expected_counts": expected_counts}))
+        outside = Path(tmp) / "outside-expected.json"
+        outside.write_text("{}")
+        expected = record_dir / "legacy-corpus-expected.json"
+        expected.symlink_to(outside)
+        rows = run_scan(root, "decision5-record-json")
+        assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        expected.unlink()
+        expected.write_text("{}")
+        rows = run_scan(root, "decision5-record-json")
+        assert rows and all(row[0] for row in rows), rows
+
+    with tempfile.TemporaryDirectory(prefix="corpus-enumeration-json-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        fixture = root / "fixtures" / "corpus-enumeration"
+        fixture.mkdir(parents=True)
+        (root / "tools").mkdir()
+        (root / "schemas").mkdir()
+        (root / "tools" / "corpus_enumeration.py").write_text("pass\n")
+        (root / "schemas" / "corpus-enumeration.schema.json").write_text("{}\n")
+        outside = Path(tmp) / "outside-corpus-expected.json"
+        outside.write_text("{}")
+        expected = fixture / "expected.json"
+        expected.symlink_to(outside)
+        rows = run_scan(root, "corpus-enumeration-json")
+        assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        expected.unlink()
+        expected.write_text(json.dumps({"packages": [{"fixture": "../outside"}]}))
+        rows = run_scan(root, "corpus-enumeration-json")
+        assert rows and any(not row[0] and "unsafe fixture path" in row[2] for row in rows), rows
+
+    with tempfile.TemporaryDirectory(prefix="fixture-tarball-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        source = root / "packages" / "fixture"
+        source.mkdir(parents=True)
+        outside = Path(tmp) / "outside.js"
+        outside.write_text("export const marker = true;\n")
+        (source / "linked.js").symlink_to(outside)
+        rows = run_scan(root, "fixture-tarball")
+        assert rows and not rows[0][0] and "marker" not in rows[0][2], rows
+        (source / "linked.js").unlink()
+        outside_dir = Path(tmp) / "outside-dir"
+        outside_dir.mkdir()
+        (outside_dir / "external.js").write_text("export const marker = true;\n")
+        (source / "linked-dir").symlink_to(outside_dir, target_is_directory=True)
+        rows = run_scan(root, "fixture-tarball")
+        assert rows and not rows[0][0], rows
+        (source / "linked-dir").unlink()
+        os.mkfifo(source / "blocked.js")
+        rows = run_scan(root, "fixture-tarball")
+        assert rows and not rows[0][0], rows
+        (source / "blocked.js").unlink()
+        (source / "ordinary.js").write_text("export const local = true;\n")
+        rows = run_scan(root, "fixture-tarball")
+        assert rows and rows[0][0], rows
 
     with tempfile.TemporaryDirectory(prefix="lifecycle-control-fixture-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -1193,7 +1277,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, KB ablation fixture, casebook, capability, finding, finding-trap attestation, lifecycle-control finding/attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, capability scope template, KB ablation fixture, casebook, capability, finding, finding-trap and lifecycle-control attestation, Decision 0005 and corpus-enumeration JSON, fixture tarballs, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

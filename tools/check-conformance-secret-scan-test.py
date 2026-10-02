@@ -66,6 +66,9 @@ def scan(root, mode):
         elif mode == "doctrine-mirror":
             module.check_doctrine_mirror()
             result = rows
+        elif mode == "finding-traps":
+            module.check_finding_traps()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -368,6 +371,51 @@ def main():
             finding_fixture_failures.append(f"finding corpus root symlink: {exc}")
 
     assert not finding_fixture_failures, "\n".join(finding_fixture_failures)
+
+    attestation_failures = []
+    with tempfile.TemporaryDirectory(prefix="finding-trap-attestation-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        package = root / "fixtures" / "finding-traps" / "control-clean-attested"
+        package.mkdir(parents=True)
+        (package / "REPORT.md").write_text(
+            "# Finding: unauthenticated debug endpoint\n"
+            "Severity: Medium\n"
+            "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N = 5.3\n"
+            "The oracle reported a positive signal. The space is covered-dry for this prefix.\n"
+            "Related advisory GHSA-9v8p-frvj-2pcm covers a different route.\n"
+        )
+        attest_json = (
+            '{"enumeration":"census.md:1-40 enumerates all 12 call sites",'
+            '"negative-control":"controls/nc-404.txt random path returns 404",'
+            '"refetch-external":"re-fetched GHSA-9v8p on 2026-08-08, state=published"}\n'
+        )
+        attest = package / "attest.json"
+        attest.write_text(attest_json)
+        try:
+            rows = run_scan(root, "finding-traps")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            attestation_failures.append(f"regular attestation: {exc}")
+
+        attest.unlink()
+        outside = Path(tmp) / "outside-attest.json"
+        outside.write_text(attest_json)
+        attest.symlink_to(outside)
+        try:
+            rows = run_scan(root, "finding-traps")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            attestation_failures.append(f"external attestation symlink: {exc}")
+
+        attest.unlink()
+        os.mkfifo(attest)
+        try:
+            rows = run_scan(root, "finding-traps")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            attestation_failures.append(f"attestation FIFO: {exc}")
+
+    assert not attestation_failures, "\n".join(attestation_failures)
 
     family_failures = []
     with tempfile.TemporaryDirectory(prefix="tool-family-e2e-") as tmp:
@@ -861,7 +909,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

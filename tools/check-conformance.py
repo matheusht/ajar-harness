@@ -1151,7 +1151,13 @@ def check_finding_traps():
         if not os.path.isdir(pkg):
             continue
         attest_path = os.path.join(pkg, "attest.json")
-        attest = load_json(attest_path) if os.path.isfile(attest_path) else None
+        attest = None
+        if os.path.lexists(attest_path):
+            attest = read_conformance_json(
+                attest_path, f"finding-traps/{name}/attest.json", (base, pkg)
+            )
+            if attest is None:
+                continue
         res, _ = score(pkg, attest)
         blocked = bool(res.failures)
         want_block = not name.startswith("control-")

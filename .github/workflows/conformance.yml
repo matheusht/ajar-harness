@@ -86,14 +86,14 @@ jobs:
       - name: DSPy spike — routing normalizer baseline (deterministic, self-test)
         run: python3 experiments/dspy-routing-normalizer/normalize.py --self-test
       # Frozen-input integrity is gated against the CURRENT canonical campaign, not historical
-      # revisions. Revision 29 freezes queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine-mirror, intervention, framing-probe, static evaluator, tool-family, finding-fixture, capability, card, oracle, and casebook reads; prior
+      # revisions. Revision 30 freezes scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine-mirror, intervention, framing-probe, static evaluator, tool-family, finding-fixture, capability, card, oracle, and casebook reads; prior
       # revisions remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
       # their frozen_inputs pin
       # Phase-8-era tool and gold hashes that later evaluator hardening (10F/10G/10H0) and gold rotation
       # legitimately drifted — the drift detector working as designed. See each campaign's SUPERSEDED.md.
       # Re-pinning historical revisions to silence CI is forbidden (it would rewrite superseded history).
       - name: Canonical behavioral campaign frozen-input integrity
-        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v29-2026-10-02/campaign-manifest.json
+        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v30-2026-10-02/campaign-manifest.json
       # The promotion bundle hash-pin / drift machinery is exercised by render-promotion-bundle --self-test
       # (verify_drift: intact -> clean, tampered gold -> drift). There is no live promotion bundle to pin
       # against until a real-model qualification produces one.

@@ -37,8 +37,11 @@ Usage:
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -46,8 +49,7 @@ EXAMPLES = os.path.join(ROOT, "evals", "qualification", "examples")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _mod(name, filename):
@@ -297,6 +299,21 @@ def _write(root, rel, text):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     with tempfile.TemporaryDirectory() as root:
         _write(root, "c/baseline/candidate.diff", "")
         bh = CC.sha256_file(os.path.join(root, "c/baseline/candidate.diff"))
@@ -346,7 +363,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--campaign":
-        return run_cli(argv[2])
+        try:
+            return run_cli(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            print(f"invalid campaign input: {exc}", file=sys.stderr)
+            return 2
     print(__doc__)
     return 2
 

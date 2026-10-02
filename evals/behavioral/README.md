@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v19-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v20-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v19-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v20-2026-10-02`
 
-Revision 19 preserves earlier evidence while pinning no-follow reads for capability registry, class, capability
-negative-fixture, card, oracle, and casebook conformance scans. It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 19 has no executed
+Revision 20 preserves earlier evidence while pinning no-follow reads for finding fixtures, capability registry,
+class and negative-fixture sources, cards, oracles, and casebooks. It keeps candidate definitions and technique patches
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 20 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 19
+
+Revision 19 pinned no-follow capability registry, class, and negative-fixture reads alongside card, oracle, and
+casebook scans. Revision 20 supersedes it after the finding-fixture corpus also began rejecting unsafe symlink and
+special-file inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 18
 

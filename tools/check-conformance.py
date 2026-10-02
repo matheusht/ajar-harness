@@ -820,11 +820,6 @@ FINDING_BASE_REQUIRED = [
 ]
 
 
-def load_json(path):
-    with open(path) as fh:
-        return json.load(fh)
-
-
 def _load_finding_fixture(path, label):
     return read_conformance_json(path, label)
 
@@ -2146,7 +2141,8 @@ def check_corpus_enumeration():
                "hostile control characters cannot enter a frozen entrypoint path",
                (hostile.stdout + hostile.stderr).strip())
 
-        manifest = load_json(freeze)
+        with open(freeze, encoding="utf-8") as handle:
+            manifest = json.load(handle)
         record(manifest.get("generated_by", {}).get("mode") == "syntactic" and
                manifest.get("generated_by", {}).get("model_involvement") is False,
                "freeze records syntactic generation with no model involvement")

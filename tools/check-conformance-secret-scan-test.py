@@ -75,6 +75,9 @@ def scan(root, mode):
         elif mode == "active-guidance":
             module.check_active_guidance()
             result = rows
+        elif mode == "queue-stop-doctrine":
+            module.check_queue_stop_doctrine()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -496,6 +499,55 @@ def main():
             guidance_failures.append(f"README FIFO: {exc}")
 
     assert not guidance_failures, "\n".join(guidance_failures)
+
+    doctrine_failures = []
+    with tempfile.TemporaryDirectory(prefix="queue-stop-reader-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        engine = root / "engine"
+        engine.mkdir(parents=True)
+        loop = (
+            "The computed work queue is the single loop condition. A dry round is a round that enqueued no new work.\n"
+            "No blocking item may remain.\n"
+            "if reduced.queue_control.status == parked: exit_objective_noncompletion\n"
+            "if reduced.coverage != active:\n"
+            "if any(item.blocking for item in work) and not has_valid_ending_override(reduced):\n"
+            "record_state_invariant_error\n"
+            "if reduced.coverage == coverage_dry: complete_objective\n"
+            "exit_objective_noncompletion                    # budget_bounded / blocked remain resumable\n"
+            "if any(item.blocking for item in work): continue_objective\n"
+            "if work: pause_objective; complete_objective\n"
+            "The single loop condition is the computed work queue.\n"
+        )
+        loop_path = engine / "loop.md"
+        loop_path.write_text(loop)
+        (engine / "persistence.md").write_text("The computed work queue has no blocking item.\n")
+        (engine / "multi-round-orchestration.md").write_text("The computed work queue has no blocking item.\n")
+        (engine / "runtime.json").write_text('{"mode":"active"}\n')
+        try:
+            rows = run_scan(root, "queue-stop-doctrine")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            doctrine_failures.append(f"local doctrine control: {exc}")
+
+        loop_path.unlink()
+        outside = Path(tmp) / "outside-loop.md"
+        outside.write_text(loop)
+        loop_path.symlink_to(outside)
+        try:
+            rows = run_scan(root, "queue-stop-doctrine")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            doctrine_failures.append(f"external loop symlink: {exc}")
+
+        loop_path.unlink()
+        os.mkfifo(loop_path)
+        try:
+            rows = run_scan(root, "queue-stop-doctrine")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            doctrine_failures.append(f"loop FIFO: {exc}")
+
+    assert not doctrine_failures, "\n".join(doctrine_failures)
 
     family_failures = []
     with tempfile.TemporaryDirectory(prefix="tool-family-e2e-") as tmp:
@@ -989,7 +1041,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, cited fixtures, active guidance, queue-stop doctrine, casebook, capability, finding, finding-trap attestation, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

@@ -66,14 +66,14 @@ def record(ok, label, detail=""):
         FAILS.append(f"{label}  {detail}")
 
 
-def read_conformance_text(path, label, guarded_dirs=()):
+def read_conformance_text(path, label, guarded_dirs=(), *, encoding=None, errors="strict"):
     if any(os.path.islink(directory) for directory in guarded_dirs):
         record(False, f"{label}: regular input is safe to read", "unsafe symlinked source directory")
         return None
     if not os.path.lexists(path):
         return None
     try:
-        return read_regular_text(path, no_follow=True)
+        return read_regular_text(path, encoding=encoding, errors=errors, no_follow=True)
     except OSError as exc:
         record(False, f"{label}: regular input is safe to read",
                f"unsafe input: {exc.strerror or 'not a regular file'}")
@@ -1743,7 +1743,7 @@ def check_active_guidance():
     ):
         path = os.path.join(ROOT, source)
         text = read_conformance_text(
-            path, f"guidance/{source}", (os.path.dirname(path),)
+            path, f"guidance/{source}", (os.path.dirname(path),), encoding="utf-8"
         ) or ""
         for destination in destinations:
             record((f"]({destination})" in text or f"`{destination}`" in text)
@@ -1752,7 +1752,7 @@ def check_active_guidance():
     for source in ("AGENTS.md", "CLAUDE.md"):
         path = os.path.join(ROOT, source)
         text = read_conformance_text(
-            path, f"guidance/{source}", (os.path.dirname(path),)
+            path, f"guidance/{source}", (os.path.dirname(path),), encoding="utf-8"
         ) or ""
         for missing in ("docs/agents/issue-tracker.md", "docs/agents/domain.md"):
             record(missing not in text, f"guidance/{source}: absent setup reference {missing} stays removed")
@@ -1775,9 +1775,14 @@ def check_queue_stop_doctrine():
         (re.compile(r"\b(?:round|dry[-_\s]+round)\s+(?:bound|floor)\b", re.IGNORECASE), "round bound or floor"),
         (re.compile(r"\bfloor\s+applies\b", re.IGNORECASE), "implicit round floor"),
     )
+    core_texts = {}
     for relative in core_doctrine_paths:
         path = os.path.join(ROOT, relative)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"queue stop doctrine {relative}", (os.path.dirname(path),), encoding="utf-8"
+        )
+        core_texts[relative] = text
+        text = text or ""
         record(bool(text), f"queue stop doctrine: {relative} exists")
         record("computed work queue" in text.lower(),
                f"queue stop doctrine: {relative} names the computed work queue")
@@ -1804,10 +1809,16 @@ def check_queue_stop_doctrine():
                     operational_paths.add(os.path.relpath(os.path.join(directory, name), ROOT))
     doctrine_offenders = []
     for relative in sorted(operational_paths):
-        path = os.path.join(ROOT, relative)
-        if not os.path.isfile(path):
+        if relative in core_texts:
+            text = core_texts[relative]
+        else:
+            path = os.path.join(ROOT, relative)
+            text = read_conformance_text(
+                path, f"queue stop doctrine {relative}", (os.path.dirname(path),),
+                encoding="utf-8", errors="replace",
+            )
+        if text is None:
             continue
-        text = open(path, encoding="utf-8", errors="replace").read()
         for pattern, description in forbidden_stops:
             match = pattern.search(text)
             if match:
@@ -1828,7 +1839,7 @@ def check_queue_stop_doctrine():
            "queue stop doctrine: guard recognizes numeric and semantic consecutive-pass stops",
            ", ".join(missed_doctrine_spellings))
 
-    loop_text = open(os.path.join(ROOT, "engine/loop.md"), encoding="utf-8").read()
+    loop_text = core_texts.get("engine/loop.md") or ""
     record("A dry round is a round that enqueued no new work." in loop_text,
            "queue stop doctrine: a dry round is defined only as an observation")
     record("single loop condition" in loop_text.lower(),
@@ -1891,7 +1902,12 @@ def check_queue_stop_doctrine():
                     continue
                 relative = os.path.relpath(path, ROOT)
                 scanned_runtime_paths.add(relative)
-                text = open(path, encoding="utf-8", errors="replace").read()
+                text = read_conformance_text(
+                    path, f"queue runtime source {relative}", (directory,),
+                    encoding="utf-8", errors="replace",
+                )
+                if text is None:
+                    continue
                 for pattern in runtime_counter_patterns:
                     match = pattern.search(text)
                     if match:

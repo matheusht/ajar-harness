@@ -14,6 +14,7 @@ Usage:
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -72,6 +73,20 @@ def self_test():
         if not check_manifest(legacy_manifest):
             ok = False
             print("[self-test] legacy manifest drift was not detected")
+        if hasattr(os, "mkfifo"):
+            fifo = os.path.join(d, "manifest.fifo")
+            os.mkfifo(fifo)
+            try:
+                result = subprocess.run(
+                    [sys.executable, os.path.abspath(__file__), "--check", fifo],
+                    capture_output=True, text=True, timeout=2,
+                )
+                rejected = result.returncode == 1 and "manifest: unreadable" in result.stdout
+            except subprocess.TimeoutExpired:
+                rejected = False
+            if not rejected:
+                ok = False
+                print("[self-test] FIFO manifest did not return unreadable promptly")
     print("[self-test] hash stable + change-sensitive:", "ok" if ok else "FAIL")
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

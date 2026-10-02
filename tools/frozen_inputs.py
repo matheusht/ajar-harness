@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 
+from regular_file_io import read_regular_text
+
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -51,7 +53,7 @@ def check_manifest(manifest_path: os.PathLike[str] | str) -> list[str]:
     """Return deterministic drift descriptions; malformed manifests fail closed as drift."""
     path = Path(manifest_path)
     try:
-        document = json.loads(path.read_text())
+        document = json.loads(read_regular_text(path))
         if not isinstance(document, dict):
             raise TypeError("manifest root must be an object")
         base = _manifest_base(path, document)

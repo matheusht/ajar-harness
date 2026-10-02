@@ -49,6 +49,13 @@ def scan(root, mode):
             module.check_tool_family_manifests()
             module.check_tool_family_must_reject()
             result = rows
+        elif mode == "payload-proposals":
+            module.check_payload_proposals()
+            result = rows
+        elif mode == "static-corpora":
+            module.check_false_discovery_corpus()
+            module.check_adversarial_candidates()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -430,6 +437,135 @@ def main():
 
     assert not family_failures, "\n".join(family_failures)
 
+    proposal_failures = []
+    with tempfile.TemporaryDirectory(prefix="payload-proposal-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        proposal_dir = root / "fixtures" / "payload-proposals"
+        proposal_dir.mkdir(parents=True)
+        valid_proposal = {
+            "objective_id": "obj.safe", "payload_class": "text_prompt", "risk_tier": "benign_canary",
+            "approved_objective_ref": "scope#objective", "generator_capability_id": "generator.safe",
+            "artifact_metadata": {}, "required_controls": ["scope"], "containment_plan": "local",
+            "cleanup_plan": "delete", "non_authority_attestation": {
+                "proposal_only": True, "executes_nothing": True, "emits_no_verdict": True,
+            },
+        }
+        outside = Path(tmp) / "outside-proposal.json"
+        outside.write_text(json.dumps(valid_proposal))
+        (proposal_dir / "external.json").symlink_to(outside)
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"proposal file symlink: {exc}")
+
+        (proposal_dir / "external.json").unlink()
+        os.mkfifo(proposal_dir / "blocked.json")
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"top-level proposal FIFO: {exc}")
+
+        (proposal_dir / "blocked.json").unlink()
+        reject_dir = proposal_dir / "_must_reject"
+        reject_dir.mkdir()
+        os.mkfifo(reject_dir / "blocked.json")
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"must-reject FIFO: {exc}")
+
+        (reject_dir / "blocked.json").unlink()
+        reject_dir.rmdir()
+        outside_reject = Path(tmp) / "outside-proposal-rejects"
+        outside_reject.mkdir()
+        (outside_reject / "external.json").write_text("{}\n")
+        reject_dir.symlink_to(outside_reject, target_is_directory=True)
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"must-reject directory symlink: {exc}")
+
+        reject_dir.unlink()
+        (proposal_dir / "regular.json").write_text(json.dumps(valid_proposal))
+        (reject_dir := proposal_dir / "_must_reject").mkdir()
+        (reject_dir / "invalid.json").write_text("{}\n")
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"regular proposal fixtures: {exc}")
+
+        (proposal_dir / "regular.json").unlink()
+        (reject_dir / "invalid.json").unlink()
+        reject_dir.rmdir()
+        proposal_dir.rmdir()
+        (root / "fixtures").rmdir()
+        outside_fixtures = Path(tmp) / "outside-proposal-fixtures"
+        outside_proposals = outside_fixtures / "payload-proposals"
+        outside_proposals.mkdir(parents=True)
+        (outside_proposals / "external.json").write_text(json.dumps(valid_proposal))
+        (root / "fixtures").symlink_to(outside_fixtures, target_is_directory=True)
+        try:
+            rows = run_scan(root, "payload-proposals")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            proposal_failures.append(f"fixture root symlink: {exc}")
+
+    assert not proposal_failures, "\n".join(proposal_failures)
+
+    static_corpus_failures = []
+    with tempfile.TemporaryDirectory(prefix="static-corpus-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        false_dir = root / "fixtures" / "false-discovery"
+        adversarial_dir = root / "fixtures" / "adversarial-candidates"
+        false_dir.mkdir(parents=True)
+        adversarial_dir.mkdir(parents=True)
+        valid_false = {"entries": [{
+            "id": "trap-1", "trap_class": "missing-control", "observation": "observation",
+            "correct_verdict": "needs_review", "missing_control": "oracle", "why": "control absent",
+        }]}
+        valid_adversarial = {"entries": [
+            {"id": "additive", "expected_disposition": "retain", "touches_immutable": False},
+            {"id": "gaming", "expected_disposition": "block", "touches_immutable": True},
+        ]}
+        outside_false = Path(tmp) / "outside-false.json"
+        outside_false.write_text(json.dumps(valid_false))
+        outside_adversarial = Path(tmp) / "outside-adversarial.json"
+        outside_adversarial.write_text(json.dumps(valid_adversarial))
+        (false_dir / "corpus.json").symlink_to(outside_false)
+        (adversarial_dir / "corpus.json").symlink_to(outside_adversarial)
+        try:
+            rows = run_scan(root, "static-corpora")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            static_corpus_failures.append(f"corpus file symlinks: {exc}")
+
+        (false_dir / "corpus.json").unlink()
+        (adversarial_dir / "corpus.json").unlink()
+        os.mkfifo(false_dir / "corpus.json")
+        os.mkfifo(adversarial_dir / "corpus.json")
+        try:
+            rows = run_scan(root, "static-corpora")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            static_corpus_failures.append(f"corpus FIFOs: {exc}")
+
+        (false_dir / "corpus.json").unlink()
+        (adversarial_dir / "corpus.json").unlink()
+        (false_dir / "corpus.json").write_text(json.dumps(valid_false))
+        (adversarial_dir / "corpus.json").write_text(json.dumps(valid_adversarial))
+        try:
+            rows = run_scan(root, "static-corpora")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            static_corpus_failures.append(f"regular corpora: {exc}")
+
+    assert not static_corpus_failures, "\n".join(static_corpus_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -587,7 +723,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static corpus, and tool-family scans)")
 
 
 if __name__ == "__main__":

@@ -80,6 +80,17 @@ def read_conformance_text(path, label, guarded_dirs=()):
         return None
 
 
+def read_conformance_json(path, label, guarded_dirs=()):
+    text = read_conformance_text(path, label, guarded_dirs)
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        record(False, f"{label}: fixture JSON is valid", "invalid JSON fixture")
+        return None
+
+
 def front_matter(text):
     if not text.startswith("---"):
         return None
@@ -643,22 +654,41 @@ def payload_proposal_problems(obj):
 def check_payload_proposals():
     """PG-2: the inert payload-proposal schema gate. Valid example passes; malformed ones must reject."""
     base = os.path.join(ROOT, "fixtures", "payload-proposals")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "payload-proposals: fixture directories are safe",
+               "unsafe symlinked proposal fixture directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[payload-proposals] inert proposal schema gate (PG-2)")
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not (fn.endswith(".json") and os.path.isfile(fp)):
+        if not fn.endswith(".json") or not os.path.lexists(fp):
             continue
-        problems = payload_proposal_problems(load_json(fp))
+        obj = read_conformance_json(fp, f"payload-proposals/{fn}", (fixture_root, base))
+        if obj is None:
+            continue
+        problems = payload_proposal_problems(obj)
         record(not problems, f"payload-proposals/{fn}: valid proposal",
                "; ".join(problems) if problems else "")
     mr = os.path.join(base, "_must_reject")
+    if os.path.islink(mr):
+        record(False, "payload-proposals/_must_reject: fixture directory is safe",
+               "unsafe symlinked must-reject directory")
+        return
     if os.path.isdir(mr):
         for fn in sorted(os.listdir(mr)):
             if not fn.endswith(".json"):
                 continue
-            problems = payload_proposal_problems(load_json(os.path.join(mr, fn)))
+            fp = os.path.join(mr, fn)
+            if not os.path.lexists(fp):
+                continue
+            obj = read_conformance_json(fp, f"payload-proposals/_must_reject/{fn}",
+                                        (fixture_root, base, mr))
+            if obj is None:
+                continue
+            problems = payload_proposal_problems(obj)
             record(bool(problems), f"payload-proposals/_must_reject/{fn}: rejected [{'; '.join(problems) or 'NONE'}]",
                    "malformed proposal should be rejected but passed" if not problems else "")
 
@@ -791,14 +821,7 @@ def load_json(path):
 
 
 def _load_finding_fixture(path, label):
-    try:
-        return json.loads(read_regular_text(path, encoding="utf-8", no_follow=True))
-    except OSError as exc:
-        record(False, f"{label}: regular fixture is safe to read",
-               f"unsafe input: {exc.strerror or 'not a regular file'}")
-    except json.JSONDecodeError:
-        record(False, f"{label}: fixture JSON is valid", "invalid JSON fixture")
-    return None
+    return read_conformance_json(path, label)
 
 
 def finding_is_new(f):
@@ -886,9 +909,15 @@ def check_decision5_record_schemas():
 def check_false_discovery_corpus():
     print("\n[false-discovery] invalid-accept guard")
     fp = os.path.join(ROOT, "fixtures", "false-discovery", "corpus.json")
-    if not os.path.isfile(fp):
+    fixture_root = os.path.join(ROOT, "fixtures")
+    base = os.path.dirname(fp)
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "false-discovery: corpus directories are safe", "unsafe symlinked corpus directory")
         return
-    entries = load_json(fp).get("entries", [])
+    corpus = read_conformance_json(fp, "false-discovery/corpus.json", (fixture_root, base))
+    if corpus is None:
+        return
+    entries = corpus.get("entries", [])
     record(len(entries) > 0, "false-discovery: corpus non-empty")
     confirmable = [e.get("id", "?") for e in entries if e.get("correct_verdict") == "confirmed"]
     record(not confirmable, "false-discovery: invalid_accept_rate == 0 (no trap's correct verdict is 'confirmed')",
@@ -902,9 +931,15 @@ def check_false_discovery_corpus():
 def check_adversarial_candidates():
     print("\n[adversarial-candidates] Phase-3 gate fixture (staged, not launched)")
     fp = os.path.join(ROOT, "fixtures", "adversarial-candidates", "corpus.json")
-    if not os.path.isfile(fp):
+    fixture_root = os.path.join(ROOT, "fixtures")
+    base = os.path.dirname(fp)
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "adversarial: corpus directories are safe", "unsafe symlinked corpus directory")
         return
-    entries = load_json(fp).get("entries", [])
+    corpus = read_conformance_json(fp, "adversarial/corpus.json", (fixture_root, base))
+    if corpus is None:
+        return
+    entries = corpus.get("entries", [])
     retain = [e.get("id", "?") for e in entries if e.get("expected_disposition") == "retain"]
     block = [e.get("id", "?") for e in entries if e.get("expected_disposition") == "block"]
     record(len(retain) >= 1, "adversarial: at least one valid additive candidate to retain",

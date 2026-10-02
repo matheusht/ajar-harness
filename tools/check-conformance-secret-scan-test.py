@@ -229,7 +229,8 @@ def main():
     record_json_failures = []
     with tempfile.TemporaryDirectory(prefix="decision5-record-json-e2e-") as tmp:
         root = Path(tmp) / "repo"
-        record_dir = root / "fixtures" / "engagement-records"
+        outside_fixtures = Path(tmp) / "outside-fixtures"
+        record_dir = outside_fixtures / "engagement-records"
         (record_dir / "legacy-corpus").mkdir(parents=True)
         expected_counts = {
             "total": 124, "schema_version_2": 124, "forbidden_base_model": 116,
@@ -238,6 +239,17 @@ def main():
         (record_dir / "legacy-drift-expected.json").write_text(json.dumps({"expected_counts": expected_counts}))
         outside = Path(tmp) / "outside-expected.json"
         outside.write_text("{}")
+        expected = record_dir / "legacy-corpus-expected.json"
+        expected.write_text("{}")
+        (root / "fixtures").parent.mkdir(parents=True)
+        (root / "fixtures").symlink_to(outside_fixtures, target_is_directory=True)
+        rows = run_scan(root, "decision5-record-json")
+        assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        (root / "fixtures").unlink()
+
+        record_dir = root / "fixtures" / "engagement-records"
+        (record_dir / "legacy-corpus").mkdir(parents=True)
+        (record_dir / "legacy-drift-expected.json").write_text(json.dumps({"expected_counts": expected_counts}))
         expected = record_dir / "legacy-corpus-expected.json"
         expected.symlink_to(outside)
         rows = run_scan(root, "decision5-record-json")

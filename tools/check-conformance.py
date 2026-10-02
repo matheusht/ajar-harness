@@ -899,6 +899,9 @@ def check_decision5_record_schemas():
     fixture_root = os.path.join(ROOT, "fixtures")
     record_dir = os.path.join(fixture_root, "engagement-records")
     corpus_root = os.path.join(ROOT, "fixtures", "engagement-records", "legacy-corpus")
+    if any(os.path.islink(path) for path in (fixture_root, record_dir, corpus_root)):
+        record(False, "engagement-records: fixture directories are safe", "unsafe symlinked fixture directory")
+        return
     produced = legacy_finding_inventory(corpus_root)
     corpus_expected = read_conformance_json(
         os.path.join(record_dir, "legacy-corpus-expected.json"),

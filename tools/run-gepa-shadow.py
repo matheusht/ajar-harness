@@ -205,15 +205,16 @@ def evaluate_campaign(campaign, candidates, root, scoreboard):
     }
 
 
-def discover_candidates(campaign_manifest_path):
+def discover_candidates(campaign_manifest_path, root=ROOT):
     cdir = os.path.join(os.path.dirname(campaign_manifest_path), "candidates")
     out = []
     if not os.path.isdir(cdir):
         return out
     for name in sorted(os.listdir(cdir)):
         mf = os.path.join(cdir, name, "candidate-manifest.json")
-        if os.path.isfile(mf):
-            out.append(load(mf))
+        if os.path.lexists(mf):
+            entry = {"candidate_id": name, "manifest": os.path.relpath(mf, root).replace(os.sep, "/")}
+            out.append(load(CC.candidate_manifest_path(root, campaign_manifest_path, entry)))
     return out
 
 
@@ -314,6 +315,25 @@ def self_test():
         if not fifo_ok:
             ok = False
 
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-candidate-") as tmp:
+        campaign_path = os.path.join(tmp, "campaign-manifest.json")
+        with open(campaign_path, "w") as fh:
+            json.dump({}, fh)
+        outside = os.path.join(tmp, "outside.json")
+        with open(outside, "w") as fh:
+            json.dump({"candidate_id": "cand-escape", "marker": "must not be read"}, fh)
+        manifest = os.path.join(tmp, "candidates", "cand-escape", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(manifest))
+        os.symlink(outside, manifest)
+        try:
+            discover_candidates(campaign_path, tmp)
+            rejected = False
+        except ValueError:
+            rejected = True
+        print("[self-test] symlinked candidate manifest is rejected before read:", "ok" if rejected else "FAIL")
+        if not rejected:
+            ok = False
+
     with tempfile.TemporaryDirectory() as root:
         _write(root, "c/baseline/candidate.diff", "")
         bh = CC.sha256_file(os.path.join(root, "c/baseline/candidate.diff"))
@@ -365,7 +385,7 @@ def main(argv):
     if len(argv) == 3 and argv[1] == "--campaign":
         try:
             return run_cli(argv[2])
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             print(f"invalid campaign input: {exc}", file=sys.stderr)
             return 2
     print(__doc__)

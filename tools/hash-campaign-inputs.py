@@ -87,6 +87,17 @@ def self_test():
             if not rejected:
                 ok = False
                 print("[self-test] FIFO manifest did not return unreadable promptly")
+            try:
+                result = subprocess.run(
+                    [sys.executable, os.path.abspath(__file__), fifo],
+                    capture_output=True, text=True, timeout=2,
+                )
+                rejected = result.returncode == 2 and "input error:" in result.stderr
+            except subprocess.TimeoutExpired:
+                rejected = False
+            if not rejected:
+                ok = False
+                print("[self-test] FIFO hash input did not return an input error promptly")
     print("[self-test] hash stable + change-sensitive:", "ok" if ok else "FAIL")
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
@@ -98,7 +109,11 @@ def main(argv):
     if len(argv) == 3 and argv[1] == "--check":
         return check(argv[2])
     if len(argv) >= 2:
-        print(json.dumps(emit(argv[1:]), indent=2))
+        try:
+            print(json.dumps(emit(argv[1:]), indent=2))
+        except OSError as exc:
+            print(f"input error: {exc}", file=sys.stderr)
+            return 2
         return 0
     print(__doc__)
     return 2

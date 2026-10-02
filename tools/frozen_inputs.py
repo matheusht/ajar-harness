@@ -7,14 +7,14 @@ import json
 import os
 from pathlib import Path
 
-from regular_file_io import read_regular_text
+from regular_file_io import open_regular_file, read_regular_text
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
 def sha256_file(path: os.PathLike[str] | str) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
+    with open_regular_file(path, binary=True) as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()

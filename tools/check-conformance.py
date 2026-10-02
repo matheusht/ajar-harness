@@ -48,7 +48,7 @@ from engagement_records import (
     validate_reference_fixture_suite,
     validate_schema_documents,
 )
-from regular_file_io import read_regular_text
+from regular_file_io import open_regular_file, read_regular_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1711,11 +1711,18 @@ def check_doctrine_mirror():
     print("\n[doctrine] CLAUDE.md / AGENTS.md mirror")
     a = os.path.join(ROOT, "CLAUDE.md")
     b = os.path.join(ROOT, "AGENTS.md")
-    if not (os.path.isfile(a) and os.path.isfile(b)):
+    if not (os.path.lexists(a) and os.path.lexists(b)):
         record(False, "doctrine mirror: both CLAUDE.md and AGENTS.md are present")
         return
-    da = hashlib.sha256(open(a, "rb").read()).hexdigest()
-    db = hashlib.sha256(open(b, "rb").read()).hexdigest()
+    try:
+        with open_regular_file(a, binary=True, no_follow=True) as handle:
+            da = hashlib.sha256(handle.read()).hexdigest()
+        with open_regular_file(b, binary=True, no_follow=True) as handle:
+            db = hashlib.sha256(handle.read()).hexdigest()
+    except OSError as exc:
+        record(False, "doctrine mirror: guidance files are safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+        return
     record(da == db, "AGENTS.md is byte-identical to CLAUDE.md",
            f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
 

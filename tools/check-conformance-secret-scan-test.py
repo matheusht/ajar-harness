@@ -63,6 +63,9 @@ def scan(root, mode):
         elif mode == "interventions":
             module.check_intervention_corpus()
             result = rows
+        elif mode == "doctrine-mirror":
+            module.check_doctrine_mirror()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -675,6 +678,32 @@ def main():
 
     assert not intervention_failures, "\n".join(intervention_failures)
 
+    mirror_failures = []
+    with tempfile.TemporaryDirectory(prefix="doctrine-mirror-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        root.mkdir()
+        external = Path(tmp) / "outside-guidance.md"
+        external.write_text("One shared external guidance source.\n")
+        (root / "AGENTS.md").symlink_to(external)
+        (root / "CLAUDE.md").symlink_to(external)
+        try:
+            rows = run_scan(root, "doctrine-mirror")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            mirror_failures.append(f"shared guidance symlink: {exc}")
+
+        (root / "AGENTS.md").unlink()
+        (root / "CLAUDE.md").unlink()
+        (root / "AGENTS.md").write_bytes(b"Identical repo guidance.\r\n")
+        (root / "CLAUDE.md").write_bytes(b"Identical repo guidance.\r\n")
+        try:
+            rows = run_scan(root, "doctrine-mirror")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            mirror_failures.append(f"regular mirrored guidance: {exc}")
+
+    assert not mirror_failures, "\n".join(mirror_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -832,7 +861,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static, framing, intervention, and tool-family scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, finding, payload, static, framing, intervention, doctrine, and tool-family scans)")
 
 
 if __name__ == "__main__":

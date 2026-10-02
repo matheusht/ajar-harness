@@ -434,6 +434,11 @@ def check_capability_must_reject():
     """Permanent negative tests: every fixture MUST be rejected by the SAME validation predicates.
     Converts the manual gate-bites into CI-enforced regressions (mirrors fixtures/findings/_must_reject)."""
     base = os.path.join(ROOT, "fixtures", "capabilities", "_must_reject")
+    for path in (os.path.join(ROOT, "fixtures"), os.path.dirname(base), base):
+        if os.path.islink(path):
+            record(False, "capabilities _must_reject: fixture directories are safe",
+                   "unsafe symlinked fixture directory")
+            return
     if not os.path.isdir(base):
         return
     print("\n[capabilities] _must_reject corpus (the keyhole must fail closed)")
@@ -442,9 +447,14 @@ def check_capability_must_reject():
     tmpl_text = open(tmpl).read() if os.path.isfile(tmpl) else ""
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not os.path.isfile(fp):
+        if not os.path.lexists(fp):
             continue
-        content = open(fp).read()
+        try:
+            content = read_regular_text(fp, no_follow=True)
+        except OSError as exc:
+            record(False, f"_must_reject/{fn}: regular fixture is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
         if fn.endswith(".md"):
             problems = card_capability_problems(front_matter(content) or "", cap_ids)
         elif "scope-flag" in fn:

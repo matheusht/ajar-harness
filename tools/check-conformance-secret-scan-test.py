@@ -38,6 +38,9 @@ def scan(root, mode):
             module.check_capabilities()
             module.check_capability_classes()
             result = {"ids": sorted(ids), "rows": rows}
+        elif mode == "capability-fixtures":
+            module.check_capability_must_reject()
+            result = rows
         else:
             ids = module.collect_pattern_ids()
             module.check_cards("patterns", ids, set())
@@ -198,6 +201,74 @@ def main():
 
     assert not capability_failures, "\n".join(capability_failures)
 
+    fixture_failures = []
+    with tempfile.TemporaryDirectory(prefix="capability-fixture-e2e-") as tmp:
+        root = Path(tmp) / "repo"
+        fixture_dir = root / "fixtures" / "capabilities" / "_must_reject"
+        fixture_dir.mkdir(parents=True)
+        rejected_fixture = (
+            "- id: external.fixture\n"
+            "  authority: sensor_only\n"
+            "  forbidden_actions: [injector]\n"
+            "  source: fixture\n"
+            "  license: test\n"
+            "  allowed_actions: [injector]\n"
+        )
+        outside = Path(tmp) / "outside.yaml"
+        outside.write_text(rejected_fixture)
+        (fixture_dir / "external.yaml").symlink_to(outside)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            fixture_failures.append(f"fixture file symlink: {exc}")
+
+        (fixture_dir / "external.yaml").unlink()
+        os.mkfifo(fixture_dir / "blocked.yaml")
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            fixture_failures.append(f"fixture FIFO: {exc}")
+
+        (fixture_dir / "blocked.yaml").unlink()
+        fixture_dir.rmdir()
+        outside_dir = Path(tmp) / "outside-fixtures"
+        outside_dir.mkdir()
+        (outside_dir / "external.yaml").write_text(rejected_fixture)
+        fixture_dir.symlink_to(outside_dir, target_is_directory=True)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            fixture_failures.append(f"fixture root symlink: {exc}")
+
+        fixture_dir.unlink()
+        fixture_dir.mkdir()
+        (fixture_dir / "local.yaml").write_text(rejected_fixture)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert rows and all(row[0] for row in rows), rows
+        except Exception as exc:
+            fixture_failures.append(f"regular fixture: {exc}")
+
+        (fixture_dir / "local.yaml").unlink()
+        fixture_dir.rmdir()
+        (root / "fixtures" / "capabilities").rmdir()
+        (root / "fixtures").rmdir()
+        external_root = Path(tmp) / "outside-fixture-root"
+        external_base = external_root / "capabilities" / "_must_reject"
+        external_base.mkdir(parents=True)
+        (external_base / "external.yaml").write_text(rejected_fixture)
+        (root / "fixtures").symlink_to(external_root, target_is_directory=True)
+        try:
+            rows = run_scan(root, "capability-fixtures")
+            assert rows and any(not row[0] and "unsafe" in row[2] for row in rows), rows
+        except Exception as exc:
+            fixture_failures.append(f"fixtures parent symlink: {exc}")
+
+    assert not fixture_failures, "\n".join(fixture_failures)
+
     card_failures = []
     with tempfile.TemporaryDirectory(prefix="card-scan-e2e-") as tmp:
         root = Path(tmp) / "repo"
@@ -355,7 +426,7 @@ def main():
         assert any(not row[0] and "unsafe" in row[2] for row in rows), rows
 
     assert not casebook_failures, "\n".join(casebook_failures)
-    print("conformance filesystem E2E passed (secret, oracle, card, casebook, and capability scans)")
+    print("conformance filesystem E2E passed (secret, oracle, card, casebook, capability, and fixture scans)")
 
 
 if __name__ == "__main__":

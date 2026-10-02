@@ -119,11 +119,28 @@ def main():
             prereg_link.symlink_to(outside_prereg)
             outside_before = outside_prereg.read_bytes()
             unsafe_check = json.loads(run("overlay_pins.py", "check", "--json", code=1,
-                                          contains="unsafe preregistration path"))
-            assert "unsafe preregistration path" in unsafe_check["error"]
+                                          contains="unsafe preregistration discovery path"))
+            assert "unsafe preregistration discovery path" in unsafe_check["error"]
             run("overlay_pins.py", "repin", "--apply", code=1,
-                contains="REFUSING unsafe preregistration path")
+                contains="REFUSING unsafe preregistration discovery path")
             assert outside_prereg.read_bytes() == outside_before
+            outside_evals = root.parent / f"{root.name}-outside-evals"
+            nested_prereg = outside_evals / "nested/preregistration.json"
+            nested_prereg.parent.mkdir(parents=True)
+            nested_prereg.write_text(json.dumps({
+                "status": "draft_not_authorized", "execution_authorized": False,
+                "common_safety_overlay": {"files": [{"path": "AGENTS.md", "sha256": "sha256:old"}]},
+            }))
+            directory_link = root / "evals/synthetic/external"
+            directory_link.symlink_to(outside_evals, target_is_directory=True)
+            nested_before = nested_prereg.read_bytes()
+            discovered = run("overlay_pins.py", "check", code=1,
+                             contains="REFUSING unsafe preregistration discovery path")
+            assert "evals/synthetic/external" in discovered
+            assert "external/nested/preregistration.json" not in discovered
+            run("overlay_pins.py", "repin", "--apply", code=1,
+                contains="REFUSING unsafe preregistration discovery path")
+            assert nested_prereg.read_bytes() == nested_before
             prereg_link.unlink()
             outside_prereg.write_text(json.dumps({
                 "status": "draft_not_authorized", "execution_authorized": False,
@@ -132,11 +149,12 @@ def main():
             prereg_link.hardlink_to(outside_prereg)
             outside_before = outside_prereg.read_bytes()
             run("overlay_pins.py", "repin", "--apply", code=1,
-                contains="REFUSING unsafe preregistration path")
+                contains="REFUSING unsafe preregistration discovery path")
             assert outside_prereg.read_bytes() == outside_before
         finally:
             outside.unlink(missing_ok=True)
             (root.parent / f"{root.name}-outside-preregistration.json").unlink(missing_ok=True)
+            shutil.rmtree(root.parent / f"{root.name}-outside-evals", ignore_errors=True)
     print("engineering guidance: public CLI navigation, mirror, history and draft/frozen pin controls passed")
 
 

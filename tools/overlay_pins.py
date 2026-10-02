@@ -28,7 +28,6 @@ Usage:
 """
 
 import argparse
-import glob
 import hashlib
 import json
 import os
@@ -36,7 +35,7 @@ import sys
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREREG_GLOB = os.path.join(ROOT, "evals", "**", "preregistration.json")
+EVALS_DIR = os.path.join(ROOT, "evals")
 
 
 def sha256_file(path):
@@ -46,13 +45,20 @@ def sha256_file(path):
 
 def find_preregs():
     paths, unsafe = [], []
-    for candidate in glob.glob(PREREG_GLOB, recursive=True):
-        if pinned_path(os.path.relpath(candidate, ROOT)) is None:
-            unsafe.append(os.path.relpath(candidate, ROOT))
-        else:
-            paths.append(candidate)
+    for parent, directories, files in os.walk(EVALS_DIR):
+        for name in directories[:]:
+            path = os.path.join(parent, name)
+            if os.path.islink(path):
+                unsafe.append(os.path.relpath(path, ROOT))
+                directories.remove(name)
+        if "preregistration.json" in files:
+            candidate = os.path.join(parent, "preregistration.json")
+            if pinned_path(os.path.relpath(candidate, ROOT)) is None:
+                unsafe.append(os.path.relpath(candidate, ROOT))
+            else:
+                paths.append(candidate)
     if unsafe:
-        raise ValueError(f"unsafe preregistration path(s): {', '.join(sorted(unsafe))}")
+        raise ValueError(f"unsafe preregistration discovery path(s): {', '.join(sorted(unsafe))}")
     return sorted(paths)
 
 

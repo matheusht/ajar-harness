@@ -7,8 +7,11 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def open_regular_file(path, *, binary=False, encoding=None, errors="strict"):
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+def open_regular_file(path, *, binary=False, encoding=None, errors="strict", no_follow=False):
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    if no_follow:
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
     options = {} if binary else {"encoding": encoding, "errors": errors}
     try:
         handle = os.fdopen(fd, "rb" if binary else "r", **options)
@@ -21,8 +24,8 @@ def open_regular_file(path, *, binary=False, encoding=None, errors="strict"):
         yield handle
 
 
-def read_regular_text(path, *, encoding=None, errors="strict"):
-    with open_regular_file(path, encoding=encoding, errors=errors) as handle:
+def read_regular_text(path, *, encoding=None, errors="strict", no_follow=False):
+    with open_regular_file(path, encoding=encoding, errors=errors, no_follow=no_follow) as handle:
         return handle.read()
 
 

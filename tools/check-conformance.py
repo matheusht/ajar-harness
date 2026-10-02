@@ -36,7 +36,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tarfile
@@ -49,6 +48,7 @@ from engagement_records import (
     validate_reference_fixture_suite,
     validate_schema_documents,
 )
+from regular_file_io import read_regular_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -671,23 +671,13 @@ def check_secrets():
                     dirnames.remove(name)
             for fn in files:
                 fp = os.path.join(dirpath, fn)
-                fd = None
                 try:
-                    fd = os.open(fp, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-                    if not stat.S_ISREG(os.fstat(fd).st_mode):
-                        hits.append(f"{os.path.relpath(fp, ROOT)}: not a regular file")
-                        continue
-                    with os.fdopen(fd, "r", errors="ignore") as handle:
-                        fd = None
-                        text = handle.read()
+                    text = read_regular_text(fp, errors="ignore", no_follow=True)
                 except OSError as exc:
                     hits.append(
                         f"{os.path.relpath(fp, ROOT)}: cannot safely scan ({exc.strerror})"
                     )
                     continue
-                finally:
-                    if fd is not None:
-                        os.close(fd)
                 for pat, desc in SECRET_PATTERNS:
                     for m in re.finditer(pat, text):
                         hits.append(f"{os.path.relpath(fp, ROOT)}: {desc} :: {m.group(0)[:24]}")

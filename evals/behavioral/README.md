@@ -77,16 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v14-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v15-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v14-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v15-2026-10-02`
 
-Revision 14 preserves earlier evidence while pinning the conformance scanner's safe handling of symlinks and
-non-regular files. It keeps candidate definitions and technique patches unchanged. Earlier revisions remain
-immutable history rather than being re-pinned. Revision 14 has no executed candidate run or efficacy claim.
+Revision 15 preserves earlier evidence while pinning shared regular-file reads and the holdout/conformance
+scanners' safe handling of symlinks and non-regular files. It keeps candidate definitions and technique patches
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 15 has no executed
+candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 14
+
+Revision 14 pinned the conformance secret scanner's non-regular-file and symlink handling. Revision 15
+supersedes it after the scanner reused the shared regular-file reader with no-follow support. Its manifest and
+candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 13
 

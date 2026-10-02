@@ -40,14 +40,15 @@ import json
 import os
 import sys
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 MIN_REPLAYS = 2
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _mod(name, filename):
@@ -238,7 +239,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--campaign":
-        return generate_for_campaign(argv[2])
+        try:
+            return generate_for_campaign(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            print(f"invalid campaign input: {exc}", file=sys.stderr)
+            return 2
     print(__doc__)
     return 2
 

@@ -35,13 +35,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _under_skills(path):
@@ -404,6 +405,25 @@ def render_cli(campaign_path, candidate_id):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="promotion-renderer-input-") as tmp:
+        for label, args in (
+            ("campaign", ["--campaign", "{path}", "--candidate", "candidate"]),
+            ("bundle", ["--verify", "{path}"]),
+        ):
+            fifo = os.path.join(tmp, f"{label}.fifo")
+            os.mkfifo(fifo)
+            try:
+                result = subprocess.run(
+                    [sys.executable, os.path.abspath(__file__), *[arg.format(path=fifo) for arg in args]],
+                    capture_output=True, text=True, timeout=2, check=False,
+                )
+            except subprocess.TimeoutExpired:
+                result = None
+            input_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+            print(f"[self-test] FIFO {label} input is rejected promptly:", "ok" if input_ok else "FAIL")
+            if not input_ok:
+                ok = False
+
     campaign = {"campaign_id": "camp"}
     scoreboard = {"false_discovery": {"invalid_accept_rate": 0.0, "passed": True},
                   "hermetic_bola": {"target_calls": 5}}
@@ -552,7 +572,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--verify":
-        return verify_cli(argv[2])
+        try:
+            return verify_cli(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            print(f"invalid renderer input: {exc}", file=sys.stderr)
+            return 2
     camp = cand = None
     i = 1
     while i < len(argv):
@@ -565,7 +589,11 @@ def main(argv):
     if not camp or not cand:
         print(__doc__)
         return 2
-    return render_cli(camp, cand)
+    try:
+        return render_cli(camp, cand)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"invalid renderer input: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

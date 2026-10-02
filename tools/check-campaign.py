@@ -31,6 +31,8 @@ import subprocess
 import sys
 import tempfile
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Built-in immutable set: enforced regardless of what a campaign manifest declares. These are the
@@ -42,6 +44,7 @@ DEFAULT_IMMUTABLE = [
     "tools/run-hermetic-bola.py",
     "tools/check-conformance.py",
     "tools/check-campaign.py",
+    "tools/regular_file_io.py",
     "evals/routing/gold/",
     "evals/qualification/crosswalk.json",
     "evals/hermetic/targets/",
@@ -53,8 +56,7 @@ DEFAULT_IMMUTABLE = [
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def sha256_file(path):
@@ -276,6 +278,40 @@ def self_test():
             "touched_files": [CARD], "diff": card_diff, "candidate_hash": card_h, "evidence_bundle": bundle,
         }
 
+        campaign_file = _write(root, "evals/c/campaign.json", json.dumps(campaign))
+        if hasattr(os, "mkfifo"):
+            candidate_file = _write(root, "evals/c/candidate.json", json.dumps(base))
+            for label, campaign_arg, candidate_arg in (
+                ("FIFO campaign input", os.path.join(root, "evals/c/campaign.fifo"), candidate_file),
+                ("FIFO candidate input", campaign_file, os.path.join(root, "evals/c/candidate.fifo")),
+            ):
+                fifo = campaign_arg if label == "FIFO campaign input" else candidate_arg
+                os.mkfifo(fifo)
+                try:
+                    result = subprocess.run(
+                        [sys.executable, os.path.abspath(__file__), "--campaign", campaign_arg,
+                         "--candidate", candidate_arg],
+                        capture_output=True, text=True, timeout=2,
+                    )
+                    rejected = result.returncode == 2 and "input error:" in result.stderr
+                except subprocess.TimeoutExpired:
+                    rejected = False
+                if not rejected:
+                    ok = False
+                    print(f"[self-test] {label} was not rejected promptly")
+
+        invalid_candidate = os.path.join(root, "evals/c/invalid-candidate.json")
+        with open(invalid_candidate, "wb") as handle:
+            handle.write(b"\xff")
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--campaign", campaign_file,
+             "--candidate", invalid_candidate],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode != 2 or "input error:" not in result.stderr or "Traceback" in result.stderr:
+            ok = False
+            print("[self-test] invalid UTF-8 candidate returned an unhandled error")
+
         def expect(label, cand, want, camp=campaign):
             nonlocal ok
             verdict, reasons = gate(camp, cand, root)
@@ -301,6 +337,20 @@ def self_test():
         expect("P0: diff edits an immutable checker but declares only the card -> block",
                dict(base, candidate_id="cand-p0-hidden", touched_files=[CARD],
                     diff=p0_diff, candidate_hash=p0_h), "block")
+
+        reader_diff, reader_h = mkdiff("reader", ["tools/regular_file_io.py"])
+        reader_campaign = dict(
+            campaign,
+            tracks=[{"name": "reader", "mutation_target": "tools/"}],
+            mutable_allowlist=["tools/"],
+        )
+        reader_candidate = dict(
+            base, candidate_id="cand-reader", mutation_target="tools/",
+            touched_files=["tools/regular_file_io.py"], diff=reader_diff,
+            candidate_hash=reader_h,
+        )
+        expect("P0: candidate cannot change the gate's file reader -> block",
+               reader_candidate, "block", camp=reader_campaign)
 
         # touched_files claims a file the diff does not actually touch.
         expect("declared != diff-derived paths blocks",
@@ -363,13 +413,17 @@ def main(argv):
         return self_test()
     camp = cand = None
     i = 1
-    while i < len(argv):
-        if argv[i] == "--campaign":
-            camp = load(argv[i + 1]); i += 2
-        elif argv[i] == "--candidate":
-            cand = load(argv[i + 1]); i += 2
-        else:
-            i += 1
+    try:
+        while i < len(argv):
+            if argv[i] == "--campaign":
+                camp = load(argv[i + 1]); i += 2
+            elif argv[i] == "--candidate":
+                cand = load(argv[i + 1]); i += 2
+            else:
+                i += 1
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"input error: {exc}", file=sys.stderr)
+        return 2
     if camp is None or cand is None:
         print(__doc__)
         return 2

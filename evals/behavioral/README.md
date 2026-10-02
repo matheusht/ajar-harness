@@ -77,17 +77,17 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v27-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v28-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v27-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v28-2026-10-02`
 
-Revision 27 preserves earlier evidence while pinning no-follow cited-fixture card reads, finding-trap attestations, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
+Revision 28 preserves earlier evidence while pinning no-follow active-guidance reads, cited-fixture card reads, finding-trap attestations, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
 adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
 oracles, and casebooks.
 It keeps candidate definitions and technique patches
-unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 27 has no executed
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 28 has no executed
 candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
 
@@ -108,6 +108,12 @@ with no executed candidate run or efficacy claim.
 Revision 26 added no-follow finding-trap attestation reads. Revision 27 supersedes it after cited-fixture checks
 began rejecting symlinked and special-file cards. Its manifest and candidate artifacts remain unchanged, with no
 executed candidate run or efficacy claim.
+
+### Historical revision 27
+
+Revision 27 added no-follow reads for cited-fixture cards. Revision 28 supersedes it after active-guidance navigation
+checks began rejecting symlinked and special-file Markdown inputs. Its manifest and candidate artifacts remain
+unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 23
 

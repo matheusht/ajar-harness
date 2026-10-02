@@ -91,7 +91,7 @@ jobs:
       # legitimately drifted — the drift detector working as designed. See each campaign's SUPERSEDED.md.
       # Re-pinning historical revisions to silence CI is forbidden (it would rewrite superseded history).
       - name: Canonical behavioral campaign frozen-input integrity
-        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v8-2026-10-02/campaign-manifest.json
+        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v9-2026-10-02/campaign-manifest.json
       # The promotion bundle hash-pin / drift machinery is exercised by render-promotion-bundle --self-test
       # (verify_drift: intact -> clean, tampered gold -> drift). There is no live promotion bundle to pin
       # against until a real-model qualification produces one.

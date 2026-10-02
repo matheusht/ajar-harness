@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v12-2026-10-02/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v13-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v12-2026-10-02`
+## Canonical campaign: `behavioral-canonical-v13-2026-10-02`
 
-Revision 12 preserves revision 11 and earlier evidence while pinning canonical campaign-path resolution in
-the shared manifest guard. It keeps the candidate definitions and technique patches unchanged. Revisions 11
-and earlier remain immutable history rather than being re-pinned. Revision 12 has no executed candidate run
-or efficacy claim.
+Revision 13 preserves revision 12 and earlier evidence while pinning candidate-manifest identity checks in
+the shared loader and behavioral runner. It keeps the candidate definitions and technique patches unchanged.
+Revisions 12 and earlier remain immutable history rather than being re-pinned. Revision 13 has no executed
+candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 12
+
+Revision 12 froze canonical campaign-path resolution for candidate manifest paths. Revision 13 supersedes
+it after the shared loader began requiring the JSON candidate_id to match the directory/entry ID. Its
+manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
 
 ### Historical revision 11
 

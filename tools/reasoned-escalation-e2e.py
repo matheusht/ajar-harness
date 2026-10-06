@@ -11,10 +11,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from engagement_records import build_reference_index, canonical_json_bytes, sha256_bytes, sha256_file
-from engagement_state import base_event, compute_review_input_hash, reduce_engagement, utc_now
+from engagement_state import base_event, compute_review_input_hash, reduce_engagement
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,10 @@ SESSION = f"session-posix-{os.getuid()}-{os.getsid(0)}"
 ZERO_COST = {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "input_tokens": None, "output_tokens": None, "cost_usd": None, "human_review_seconds": 0}
 CARD_ID = "bola.broken-object-level-authz"
 CARD = ROOT / "skills/vulns/broken-object-level-authz/SKILL.md"
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def command(output: Path, name: str, *argv: str, env: dict[str, str] | None = None, ok: bool = True, error: str | None = None) -> dict:
@@ -46,7 +51,7 @@ def key(private_dir: Path, output: Path, identity: str) -> tuple[Path, Path]:
 
 def event(engagement: Path, event_id: str, event_type: str, payload: dict, *, origin: str, changes: list[dict] | None = None, reviews: list[str] | None = None) -> dict:
     value = base_event(
-        event_id=event_id, engagement_id=engagement.name, recorded_at=utc_now(),
+        event_id=event_id, engagement_id=engagement.name, recorded_at=now(),
         actor_role="broker", actor_id=BROKER, event_type=event_type,
         rationale=f"Synthetic {event_type} for reasoned escalation acceptance.", payload=payload,
         entity_refs=[origin] if origin else [], review_refs=reviews or [],
@@ -95,16 +100,16 @@ def setup(output: Path, operator_key: Path, operator_signers: Path, reviewer_sig
     engagement.mkdir(parents=True)
     scope = engagement / "scope.md"
     scope.write_text(scope_text(operator_signers, reviewer_signers, ceiling=ceiling), encoding="utf-8")
-    now = utc_now()
-    challenge = {"schema_version": 1, "namespace": "llm-redteam-harness-operator-v1", "engagement_id": engagement.name, "scope_hash": sha256_file(scope), "ledger_hash": None, "operation": f"initialize-engagement:{now}", "operator_id": "operator-e2e"}
+    init_time = now()
+    challenge = {"schema_version": 1, "namespace": "llm-redteam-harness-operator-v1", "engagement_id": engagement.name, "scope_hash": sha256_file(scope), "ledger_hash": None, "operation": f"initialize-engagement:{init_time}", "operator_id": "operator-e2e"}
     challenge_file = output / "init-challenge.json"
     challenge_file.write_bytes(canonical_json_bytes(challenge))
     subprocess.run(["/usr/bin/ssh-keygen", "-Y", "sign", "-f", str(operator_key), "-n", "llm-redteam-harness-operator-v1", str(challenge_file)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env = {**os.environ, "HARNESS_OPERATOR_SIGNATURE_FILE": str(challenge_file) + ".sig", "HARNESS_OPERATOR_ALLOWED_SIGNERS_FILE": str(operator_signers)}
-    command(output, "signed-init", sys.executable, str(RUN), "init", "--engagement", str(engagement), "--recorded-at", now, env=env)
+    command(output, "signed-init", sys.executable, str(RUN), "init", "--engagement", str(engagement), "--recorded-at", init_time, env=env)
     source = output / "owned-canary-source.txt"
     source.write_text("synthetic owned canary source only\n", encoding="utf-8")
-    command(output, "preflight", sys.executable, str(RUN), "preflight", "--engagement", str(engagement), "--preflight-id", "env-owned", "--mode", "local_runtime", "--target", str(source), "--expected-identity", sha256_file(source), "--runtime", "/bin/sh", "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]), "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION, "--recorded-at", utc_now())
+    command(output, "preflight", sys.executable, str(RUN), "preflight", "--engagement", str(engagement), "--preflight-id", "env-owned", "--mode", "local_runtime", "--target", str(source), "--expected-identity", sha256_file(source), "--runtime", "/bin/sh", "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]), "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION, "--recorded-at", now())
     append(output, engagement, event(engagement, "event-observed", "observation.recorded", {"entity_id": "owned-canary", "entity_type": "target_model", "status": "observed", "environment_ref": "env-owned"}, origin=""))
     return engagement
 
@@ -127,11 +132,15 @@ def route(engagement: Path, *, effect: str = "cross-user", signal: bool = True, 
     }
 
 
-def propose(output: Path, engagement: Path, *, route_value: dict | None, hypothesis_id: str = "hyp-route", select: bool = True) -> None:
+def propose(output: Path, engagement: Path, *, route_value: dict | None, hypothesis_id: str = "hyp-route", select: bool = True, error: str | None = None) -> None:
     payload = {"hypothesis_id": hypothesis_id, "origin_type": "target_model", "origin_ref": "event-observed", "hypothesis_statement": "A direct canary route may cross the owned-principal boundary.", "suspected_invariant": "An owner guard must bind the object selector.", "trust_boundary": "owned principal A to owned principal B", "attacker_path": ["owned selector", "canary read"], "impact_ceiling": "owned fixture only", "bounded_space": "One canary and matched control.", "lens_ids": ["authorization"], "card_ids": [CARD_ID], "expected_confirming_evidence": [{"evidence_type": "trace", "description": "canary output", "required": True}], "decisive_falsifiers": ["owner guard blocks selector"], "cost_estimate": ZERO_COST, "constraints": ["local synthetic only"], "next_experiment": "compare owned canary and control", "completion_criteria": ["canary and control recorded"], "status": "queued"}
     if route_value:
         payload["higher_impact_route"] = route_value
-    append(output, engagement, event(engagement, f"event-{hypothesis_id}-created", "hypothesis.created", payload, origin="event-observed", changes=[{"dimension": "search", "entity_id": hypothesis_id, "previous": None, "current": "queued"}]))
+    before = (engagement / "events.jsonl").read_bytes()
+    append(output, engagement, event(engagement, f"event-{hypothesis_id}-created", "hypothesis.created", payload, origin="event-observed", changes=[{"dimension": "search", "entity_id": hypothesis_id, "previous": None, "current": "queued"}]), ok=error is None, error=error)
+    if error:
+        assert (engagement / "events.jsonl").read_bytes() == before
+        return
     if select:
         append(output, engagement, event(engagement, f"event-{hypothesis_id}-selected", "hypothesis.status_changed", {"hypothesis_id": hypothesis_id, "status": "selected", "reason": "select bounded direct route", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "Selected direct owned-canary test.", "unresolved_questions": [], "next_route": None}, origin=hypothesis_id, changes=[{"dimension": "search", "entity_id": hypothesis_id, "previous": "queued", "current": "selected"}]))
 
@@ -144,7 +153,7 @@ def review(output: Path, engagement: Path, reviewer_key: Path, reviewer_signers:
     state = reduce_engagement(engagement)
     route_value = state["hypotheses"]["hyp-route"]["higher_impact_route"]
     review_id = f"review-route-{verdict}-{int(edge)}-{int(bounded)}"
-    row = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "higher_impact_route", "proposed_finding_id": None, "recorded_at": utc_now(), "entity_ref": "hyp-route", "finding_revision": None, "input_refs": ["event-hyp-route-created", *route_value["evidence_refs"]], "input_hash": "sha256:" + "0" * 64, "evidence_refs": [], "rationale": "Independently challenge the observed output-to-precondition edge and the bounded canary test.", "conflicting_evidence": [], "verdict": verdict, "corrections": [], "required_next_actions": [], "route_digest": sha256_bytes(canonical_json_bytes(route_value)), "causal_edge_valid": edge, "test_discriminates": True, "controls_present": True, "severity_bounded": bounded, "blocked_reason": reason, "independence": {"reviewer_id": "reviewer-e2e", "reviewer_run_id": f"run-{review_id}", "reviewer_session_id": f"session-{review_id}", "reviewer_signer_fingerprint": None, "reviewer_model": "reviewer-model-e2e", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Find a broken causal edge or overclaim before the direct test.", "originating_run_id": "event-hyp-route-created"}}
+    row = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "higher_impact_route", "proposed_finding_id": None, "recorded_at": now(), "entity_ref": "hyp-route", "finding_revision": None, "input_refs": ["event-hyp-route-created", *route_value["evidence_refs"]], "input_hash": "sha256:" + "0" * 64, "evidence_refs": [], "rationale": "Independently challenge the observed output-to-precondition edge and the bounded canary test.", "conflicting_evidence": [], "verdict": verdict, "corrections": [], "required_next_actions": [], "route_digest": sha256_bytes(canonical_json_bytes(route_value)), "causal_edge_valid": edge, "test_discriminates": True, "controls_present": True, "severity_bounded": bounded, "blocked_reason": reason, "independence": {"reviewer_id": "reviewer-e2e", "reviewer_run_id": f"run-{review_id}", "reviewer_session_id": f"session-{review_id}", "reviewer_signer_fingerprint": None, "reviewer_model": "reviewer-model-e2e", "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Find a broken causal edge or overclaim before the direct test.", "originating_run_id": "event-hyp-route-created"}}
     row["independence"].pop("reviewer_signer_fingerprint")
     if same_model:
         row["independence"]["reviewer_model"] = "proposer-model-e2e"
@@ -233,10 +242,16 @@ def main() -> int:
     assert next_action(same_model_dir, same_model_target)["action_id"] == "record_higher_impact_route_review"
     cases["same_model_review"] = "rejected before admission"
 
+    future_dir = output / "missing-evidence"
+    shutil.copytree(base, future_dir)
+    future = future_dir / "target/engagements/synthetic"
+    propose(future_dir, future, route_value=route(future, evidence=["event-not-recorded"]), select=False, error="record_reference_invalid")
+    cases["missing_evidence"] = "proposal refused before append"
+
     stale_dir, stale = case("stale-environment")
     stale_review = review(stale_dir, stale, reviewer_key, reviewer_signers, verdict="admit")
     source = stale_dir / "owned-canary-source.txt"
-    command(stale_dir, "second-preflight", sys.executable, str(RUN), "preflight", "--engagement", str(stale), "--preflight-id", "env-new", "--mode", "local_runtime", "--target", str(source), "--expected-identity", sha256_file(source), "--runtime", "/bin/sh", "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]), "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION, "--recorded-at", utc_now())
+    command(stale_dir, "second-preflight", sys.executable, str(RUN), "preflight", "--engagement", str(stale), "--preflight-id", "env-new", "--mode", "local_runtime", "--target", str(source), "--expected-identity", sha256_file(source), "--runtime", "/bin/sh", "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]), "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION, "--recorded-at", now())
     assert next_action(stale_dir, stale)["action_id"] == "hold_higher_impact_hypothesis"
     append(stale_dir, stale, run_event(stale, stale_review), ok=False, error="higher_impact_authority_stale")
     cases["stale_environment"] = "held after new preflight"

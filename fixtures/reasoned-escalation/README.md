@@ -15,6 +15,7 @@ Freeze these failure modes before implementation:
 | --- | --- |
 | Direct owned-canary route with a current observation, signed scope, allowed rung, named safe signal, control plan, and independent causal review | Review is recorded; the exact route may enter `running` without a fabricated lower-rung attempt. This is permission to test, not impact confirmation. |
 | Evidence predates active scope/environment, or scope/environment changes after review | Route is held with a specific stale-evidence/authority reason; no run transition. |
+| Route cites an evidence ID absent when proposed | Proposal is refused before any ledger append. |
 | Requested effect exceeds the signed ceiling or names an unscoped surface | Route is held; other queue items remain available. |
 | Safe-signal card or signed benign objective is absent | Route is held. |
 | No discriminating test or control plan | Route is held. |

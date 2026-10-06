@@ -118,6 +118,9 @@ TRANSITIONS = {
 }
 
 WORK_QUEUE_CLASS_ORDER = (
+    "source_unobserved",
+    "source_unrouted",
+    "source_unhypothesized",
     "hypothesis_ran_unadjudicated",
     "hypothesis_running_unattempted",
     "hypothesis_unrouted",
@@ -134,6 +137,18 @@ WORK_QUEUE_CLASS_ORDER = (
     "coverage_review_missing",
 )
 WORK_QUEUE_RULES = {
+    "source_unobserved": (
+        "signed source has no bound observation",
+        "a source-bound observation is recorded",
+    ),
+    "source_unrouted": (
+        "source observation has no justified card routing assessment, including a deferred no-route decision",
+        "a source-bound routing assessment activates a card",
+    ),
+    "source_unhypothesized": (
+        "positive source routing has no bounded hypothesis",
+        "a hypothesis binds the observation and exact routing assessment",
+    ),
     "hypothesis_ran_unadjudicated": (
         "a matching attempt_id is absent from experiment_refs and control_refs",
         "every matching attempt_id is present in experiment_refs or control_refs",
@@ -613,6 +628,15 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
             "predicate": predicate,
             "closes_when": closes_when,
         })
+
+    intake = state.get("intake")
+    if isinstance(intake, dict) and state.get("coverage") == "active":
+        if intake["status"] == "unread":
+            add("source_unobserved", "engagement", state["engagement_id"])
+        elif intake["status"] in {"observed", "deferred"}:
+            add("source_unrouted", "engagement", state["engagement_id"])
+        elif intake["hypothesis_ref"] is None and intake["activation_strength"] in {"strong", "weak"}:
+            add("source_unhypothesized", "engagement", state["engagement_id"])
 
     attempts_by_hypothesis: dict[str, set[str]] = {}
     for attempt in attempts:
@@ -1782,7 +1806,127 @@ def verify_file_authority(engagement: Path, events: list[dict[str, Any]], artifa
         raise RecordError("orphan_artifact_file", ", ".join(orphan_artifacts))
 
 
-def _scope_metadata(scope_path: Path) -> dict[str, str]:
+def _intake_source_bytes(engagement: Path, relative: str) -> bytes:
+    """Read the signed, target-local source without following any path component."""
+
+    parts = Path(relative).parts
+    if not parts or Path(relative).is_absolute() or any(part in {"", ".", ".."} for part in parts) or parts[0] == "engagements":
+        raise RecordError("intake_source_path_invalid", relative)
+    bound_fd: int | None = None
+    if engagement.parts[:3] == ("/", "dev", "fd") and len(engagement.parts) == 4 and engagement.parts[3].isdigit():
+        # Broker transactions carry an already-open engagement directory as /dev/fd/N.
+        # Recover its named target root, then prove that name still points at the bound inode.
+        bound_fd = int(engagement.parts[3])
+        try:
+            if hasattr(fcntl, "F_GETPATH"):
+                raw_path = fcntl.fcntl(bound_fd, fcntl.F_GETPATH, b"\0" * 1024)
+                named = Path(raw_path.split(b"\0", 1)[0].decode())
+            else:
+                named = Path(os.readlink(f"/proc/self/fd/{bound_fd}"))
+            if os.stat(named, follow_symlinks=False).st_ino != os.fstat(bound_fd).st_ino or os.stat(named, follow_symlinks=False).st_dev != os.fstat(bound_fd).st_dev:
+                raise RecordError("intake_engagement_source_changed", str(engagement))
+            engagement = named
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RecordError("intake_engagement_source_changed", str(engagement)) from exc
+    if engagement.parent.name != "engagements":
+        raise RecordError("intake_engagement_layout_invalid", str(engagement))
+    try:
+        parent_fd, name = _open_parent_fd(engagement.parent.parent, parts, create=False)
+        try:
+            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+            try:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode) or before.st_size > 256 * 1024:
+                    raise RecordError("intake_source_file_invalid", relative)
+                chunks: list[bytes] = []
+                remaining = before.st_size
+                while remaining:
+                    chunk = os.read(fd, remaining)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                data = b"".join(chunks)
+                after = os.fstat(fd)
+                if len(data) != before.st_size or (before.st_dev, before.st_ino, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_mtime_ns):
+                    raise RecordError("intake_source_changed_during_read", relative)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+    except (OSError, RecordError) as exc:
+        if isinstance(exc, RecordError):
+            raise
+        raise RecordError("intake_source_file_invalid", relative) from exc
+    if not data or detect_secret_classes(data):
+        raise RecordError("intake_source_unsafe", relative)
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RecordError("intake_source_not_text", relative) from exc
+    if bound_fd is not None:
+        try:
+            named_stat = os.stat(engagement, follow_symlinks=False)
+            bound_stat = os.fstat(bound_fd)
+            if (named_stat.st_dev, named_stat.st_ino) != (bound_stat.st_dev, bound_stat.st_ino):
+                raise RecordError("intake_engagement_source_changed", str(engagement))
+        except OSError as exc:
+            raise RecordError("intake_engagement_source_changed", str(engagement)) from exc
+    return data
+
+
+def _scope_intake(text: str) -> dict[str, Any] | None:
+    labels = ("Intake source path", "Intake source SHA256", "Intake allowed cards")
+    if "## Source intake" not in text and not any(label in text for label in labels):
+        return None
+    values: dict[str, str] = {}
+    for label in labels:
+        matches = re.findall(rf"^- {re.escape(label)}: `([^`]+)`\s*$", text, re.MULTILINE)
+        if len(matches) != 1:
+            raise RecordError("intake_scope_fields_invalid", label)
+        values[label] = matches[0]
+    source_hash = values["Intake source SHA256"]
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", source_hash) is None:
+        raise RecordError("intake_scope_fields_invalid", "source hash")
+    cards = [item.strip() for item in values["Intake allowed cards"].split(",")]
+    if not cards or len(set(cards)) != len(cards) or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", item) is None for item in cards):
+        raise RecordError("intake_scope_fields_invalid", "allowed cards")
+    return {"source_path": values["Intake source path"], "source_hash": source_hash, "card_ids": cards}
+
+
+def _validate_intake_cards(card_ids: list[str]) -> None:
+    card_root = Path(__file__).resolve().parent.parent / "skills"
+    for card_id in card_ids:
+        if "/" in card_id or ".." in card_id:
+            raise RecordError("intake_card_invalid", card_id)
+        matches: list[tuple[str, Path, str]] = []
+        for category in ("patterns", "vulns"):
+            for card in (card_root / category).glob("*/SKILL.md"):
+                try:
+                    if not stat.S_ISREG(card.lstat().st_mode):
+                        continue
+                    text = card.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                front = text.split("---", 2)
+                if len(front) >= 3 and front[0] == "" and re.search(rf"^id:\s*{re.escape(card_id)}\s*$", front[1], re.MULTILINE):
+                    matches.append((category, card, front[1]))
+        if len(matches) != 1:
+            raise RecordError("intake_card_invalid", card_id)
+        category, card, front = matches[0]
+        if category == "vulns" and re.search(r"^safe_signal:\s*(?:\S|\n\s+proxy:\s*\S)", front, re.MULTILINE) is None:
+            raise RecordError("intake_card_unsafe", card_id)
+
+
+def _validate_intake_source(engagement: Path, intake: dict[str, Any]) -> int:
+    data = _intake_source_bytes(engagement, intake["source_path"])
+    if sha256_bytes(data) != intake["source_hash"]:
+        raise RecordError("intake_source_digest_mismatch", intake["source_path"])
+    _validate_intake_cards(intake["card_ids"])
+    return len(data)
+
+
+def _scope_metadata(scope_path: Path) -> dict[str, Any]:
     try: scope_bytes = read_governed_file(scope_path); text = scope_bytes.decode("utf-8")
     except FileNotFoundError: raise RecordError("scope_missing", str(scope_path))
     except (OSError, UnicodeDecodeError) as exc: raise RecordError("scope_missing", str(scope_path), [str(exc)]) from exc
@@ -1800,7 +1944,7 @@ def _scope_metadata(scope_path: Path) -> dict[str, str]:
     signed = re.search(r"^- Date:\s*(\d{4}-\d{2}-\d{2})\s*$", text, re.MULTILINE)
     if not operator or not signed or operator.group(1).strip().startswith("["):
         raise RecordError("scope_signature_missing", "operator and ISO date are required")
-    return {"operator": operator.group(1).strip(), "date": signed.group(1), "scope_hash": sha256_bytes(scope_bytes), "record_kernel": kernels[0]}
+    return {"operator": operator.group(1).strip(), "date": signed.group(1), "scope_hash": sha256_bytes(scope_bytes), "record_kernel": kernels[0], "intake": _scope_intake(text)}
 
 
 def require_scope_zone2_authorized(engagement: Path, scope_hash: str, category: str = "zone2_artifact_creation") -> None:
@@ -1841,6 +1985,13 @@ def validate_scope_event_snapshot(engagement: Path, event: dict[str, Any]) -> No
     signed_operator = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
     if metadata["scope_hash"] != payload["scope_hash"] or metadata["date"] != payload.get("signed_date") or metadata["record_kernel"] != payload.get("record_kernel") or event["actor"] != {"role": "operator", "id": signed_operator} or payload.get("operator_id") != signed_operator:
         raise RecordError("historical_scope_attestation_mismatch", event["event_id"])
+    intake = metadata["intake"]
+    fields = ("source_path", "source_hash", "source_size", "card_ids")
+    if intake is None:
+        if any(field in payload for field in fields):
+            raise RecordError("historical_intake_attestation_mismatch", event["event_id"])
+    elif (payload.get("source_path") != intake["source_path"] or payload.get("source_hash") != intake["source_hash"] or payload.get("card_ids") != intake["card_ids"] or not isinstance(payload.get("source_size"), int) or payload["source_size"] < 1):
+        raise RecordError("historical_intake_attestation_mismatch", event["event_id"])
 
 
 def quarantine_authority_context(engagement: Path) -> dict[str, Any]:
@@ -1930,9 +2081,12 @@ def initialize_engagement(
 ) -> dict[str, Any]:
     engagement = engagement.absolute()
     logical_engagement_id = engagement_id or engagement.name
+    source_engagement = engagement
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
         metadata = _scope_metadata(engagement / "scope.md")
+        if metadata["intake"] is not None:
+            metadata["intake"]["source_size"] = _validate_intake_source(source_engagement, metadata["intake"])
         existing = read_ledger(engagement, "event")
         if existing:
             first = existing[0]
@@ -1964,7 +2118,7 @@ def initialize_engagement(
                 event_id=f"event-scope-{metadata['scope_hash'][-12:]}", engagement_id=logical_engagement_id,
                 recorded_at=recorded_at or utc_now(), actor_role="operator", actor_id=operator_id,
                 event_type="scope.attested", rationale="Operator-signed scope bytes attested for the Decision 0005 record kernel.",
-                payload={"scope_hash": metadata["scope_hash"], "scope_snapshot_path": scope_snapshot_path, "operator_id": operator_id, "signed_date": metadata["date"], "record_kernel": metadata["record_kernel"], "supersedes_scope_hash": None},
+                payload={"scope_hash": metadata["scope_hash"], "scope_snapshot_path": scope_snapshot_path, "operator_id": operator_id, "signed_date": metadata["date"], "record_kernel": metadata["record_kernel"], "supersedes_scope_hash": None, **(metadata["intake"] or {})},
                 entity_refs=[logical_engagement_id],
                 state_changes=[
                     {"dimension": "engagement", "entity_id": logical_engagement_id, "previous": None, "current": "active"},
@@ -2479,7 +2633,7 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
         "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
         "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "ending_overrides": [], "budget_redeclaration_cycles": [], "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
-        "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
+        "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [], "intake": None,
     }
 
 
@@ -2531,6 +2685,25 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         validate_event_semantics(event)
         validate_temporal_search_reference(event, seen_events, index, engagement)
         payload = event["payload"]
+        intake = state["intake"]
+        if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "source_intake":
+            if not isinstance(intake, dict) or intake["observation_ref"] is not None or payload.get("status") != "recorded" or payload.get("source_path") != intake["source_path"] or payload.get("source_hash") != intake["source_hash"] or payload.get("source_size") != intake["source_size"] or payload.get("scope_hash") != state["scope_hash"] or payload.get("environment_ref") != state["active_environment_ref"]:
+                raise RecordError("intake_observation_binding_invalid", event["event_id"])
+        if event["event_type"] == "routing.assessed" and isinstance(intake, dict) and payload.get("source_observation_ref") == intake["observation_ref"]:
+            cards = payload.get("card_ids", [])
+            route_decision_valid = (
+                payload.get("status") == "assessed" and payload.get("activation_strength") in {"strong", "weak", "negative"} and bool(cards)
+            ) or (
+                payload.get("status") == "deferred" and payload.get("activation_strength") == "none" and cards == []
+            )
+            if intake["routing_ref"] is not None or not route_decision_valid or not set(cards).issubset(intake["card_ids"]) or payload.get("source_path") != intake["source_path"] or payload.get("source_hash") != intake["source_hash"] or payload.get("source_size") != intake["source_size"] or payload.get("scope_hash") != state["scope_hash"] or payload.get("environment_ref") != intake["environment_ref"]:
+                raise RecordError("intake_routing_binding_invalid", event["event_id"])
+        elif event["event_type"] == "routing.assessed" and payload.get("activation_strength") == "none":
+            raise RecordError("intake_no_route_outside_source", event["event_id"])
+        if event["event_type"] == "hypothesis.created" and isinstance(intake, dict) and payload.get("origin_type") == "target_model" and payload.get("origin_ref") == intake["observation_ref"]:
+            routing = seen_events.get(intake["routing_ref"])
+            if intake["hypothesis_ref"] is not None or routing is None or intake["activation_strength"] not in {"strong", "weak"} or payload.get("routing_review_ref") != intake["routing_ref"] or not payload.get("card_ids") or not set(payload["card_ids"]).issubset(routing["payload"]["card_ids"]) or payload.get("scope_hash") != state["scope_hash"] or payload.get("environment_ref") != intake["environment_ref"] or payload.get("source_hash") != intake["source_hash"]:
+                raise RecordError("intake_hypothesis_binding_invalid", event["event_id"])
         typed_review_resolutions: set[str] = set()
         authority_request_target: dict[str, Any] | None = None
         authority_request_application: dict[str, Any] | None = None
@@ -3157,6 +3330,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             if event["sequence"] > 1 and payload.get("supersedes_scope_hash") != prior:
                 raise RecordError("scope_reattestation_mismatch", event["event_id"])
             state["scope_hash"] = payload["scope_hash"]
+            state["intake"] = ({"source_path": payload["source_path"], "source_hash": payload["source_hash"], "source_size": payload["source_size"], "card_ids": payload["card_ids"], "denominator": 1, "status": "unread", "observation_ref": None, "routing_ref": None, "deferred_ref": None, "hypothesis_ref": None, "activation_strength": None, "environment_ref": None} if "source_path" in payload else None)
             if event["sequence"] > 1:
                 state["active_environment_ref"] = None
                 for request in state["authority_requests"].values():
@@ -3206,6 +3380,10 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
             for authority_request in state["authority_requests"].values():
                 if authority_request["status"] in {"pending_authority", "approved"} and authority_request["environment_ref"] != state["active_environment_ref"]: authority_request["status"] = "superseded"
+        elif event_type == "observation.recorded" and payload.get("entity_type") == "source_intake":
+            state["intake"]["observation_ref"] = event["event_id"]
+            state["intake"]["environment_ref"] = payload["environment_ref"]
+            state["intake"]["status"] = "observed"
         elif event_type == "cleanup.updated":
             obligations = {item["obligation_id"]: item for item in state["cleanup"]["obligations"]}
             for item in payload["cleanup_obligations"]:
@@ -3213,8 +3391,17 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             state["cleanup"]["obligations"] = [obligations[key] for key in sorted(obligations)]
             state["cleanup"]["open_count"] = sum(item["status"] in {"open", "blocked"} for item in obligations.values())
             state["cleanup"]["recorded"] = True
-        elif event_type == "routing.assessed" and payload["activation_strength"] == "negative":
-            state["control_candidates"].append({"routing_event_id": event["event_id"], "source_observation_ref": payload["source_observation_ref"], "card_ids": payload["card_ids"], "status": "likely_held", "rationale": event["rationale"]})
+        elif event_type == "routing.assessed":
+            if isinstance(state["intake"], dict) and payload["source_observation_ref"] == state["intake"]["observation_ref"]:
+                if payload["status"] == "deferred":
+                    state["intake"]["deferred_ref"] = event["event_id"]
+                    state["intake"]["status"] = "deferred"
+                else:
+                    state["intake"]["routing_ref"] = event["event_id"]
+                    state["intake"]["activation_strength"] = payload["activation_strength"]
+                    state["intake"]["status"] = "routed"
+            if payload["activation_strength"] == "negative" and payload["status"] == "assessed":
+                state["control_candidates"].append({"routing_event_id": event["event_id"], "source_observation_ref": payload["source_observation_ref"], "card_ids": payload["card_ids"], "status": "likely_held", "rationale": event["rationale"]})
         elif event_type == "candidate.proposed":
             state["candidates"][payload["candidate_id"]] = {"status": payload["status"], "rationale": event["rationale"], "source_observation_ref": payload["source_observation_ref"], "routing_review_ref": payload["routing_review_ref"], "activation_strength": payload["activation_strength"], "card_ids": payload["card_ids"], "ex_ante": event["ex_ante"]}
         elif event_type in {"candidate.selected", "candidate.skipped", "candidate.deferred", "candidate.reopened"}:
@@ -3231,6 +3418,9 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 hypothesis["rationale"] = payload["reopening_condition"]
         elif event_type == "hypothesis.created":
             state["hypotheses"][payload["hypothesis_id"]] = {"status": payload["status"], "rationale": event["rationale"], "origin_type": payload["origin_type"], "origin_ref": payload["origin_ref"], "statement": payload["hypothesis_statement"], "suspected_invariant": payload["suspected_invariant"], "trust_boundary": payload["trust_boundary"], "attacker_path": payload["attacker_path"], "impact_ceiling": payload["impact_ceiling"], "bounded_space": payload["bounded_space"], "lens_ids": payload["lens_ids"], "card_ids": payload["card_ids"], "expected_confirming_evidence": payload["expected_confirming_evidence"], "decisive_falsifiers": payload["decisive_falsifiers"], "cost_estimate": payload["cost_estimate"], "constraints": payload["constraints"], "next_experiment": payload["next_experiment"], "running_event_ref": None, "completion_criteria": payload["completion_criteria"], "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "unresolved_questions": [], "next_route": None}
+            if isinstance(state["intake"], dict) and payload["origin_type"] == "target_model" and payload["origin_ref"] == state["intake"]["observation_ref"]:
+                state["intake"]["hypothesis_ref"] = payload["hypothesis_id"]
+                state["intake"]["status"] = "hypothesized"
             if payload["origin_type"] == "reviewer_challenge":
                 for item in state["outstanding_reviews"]:
                     if item["review_ref"] == payload["origin_ref"] and item["status"] == "pending":
@@ -3544,6 +3734,7 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
     """Trusted kernel producer path; never expose this as a public command."""
     # The append, reduction, snapshot, and views share one lock so concurrent writers cannot publish
     # a projection older than the authoritative ledger tail.
+    source_engagement = engagement.absolute()
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
         if completion_claims_token is not None:
@@ -3558,6 +3749,9 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         if proposal.get("engagement_id") != current_events[0]["engagement_id"]:
             raise RecordError("cross_engagement_event", str(proposal.get("event_id")))
         latest_scope_hash = next(event["payload"]["scope_hash"] for event in reversed(current_events) if event["event_type"] == "scope.attested")
+        active_scope = next(event["payload"] for event in reversed(current_events) if event["event_type"] == "scope.attested")
+        if proposal.get("event_type") in {"observation.recorded", "routing.assessed", "hypothesis.created"} and "source_path" in active_scope:
+            _validate_intake_source(source_engagement, active_scope)
         if proposal.get("event_type") not in {"scope.attested", "scope.amendment_proposed"}:
             draft_bytes = read_governed_file(engagement/"scope.md"); draft_digest = sha256_bytes(draft_bytes)
             if draft_digest != latest_scope_hash and not any(event["event_type"] == "scope.amendment_proposed" and event["payload"].get("draft_digest") == draft_digest for event in current_events):
@@ -3574,6 +3768,10 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         if proposal.get("event_type") == "scope.attested":
             payload = proposal.get("payload", {})
             metadata = _scope_metadata(engagement / "scope.md")
+            if metadata["intake"] is not None:
+                metadata["intake"]["source_size"] = _validate_intake_source(source_engagement, metadata["intake"])
+            if any(payload.get(field) != (metadata["intake"] or {}).get(field) for field in ("source_path", "source_hash", "source_size", "card_ids")):
+                raise RecordError("scope_intake_reattestation_mismatch", proposal["event_id"])
             signed_operator_id = re.sub(r"[^A-Za-z0-9._:-]+", "-", metadata["operator"]).strip("-") or "operator"
             if payload.get("scope_hash") != metadata["scope_hash"] or payload.get("supersedes_scope_hash") != latest_scope_hash:
                 raise RecordError("scope_reattestation_mismatch", "fresh scope attestation must bind current bytes and supersede the active hash")
@@ -3699,8 +3897,11 @@ def _register_artifact_core(engagement: Path, file_path: Path, metadata: dict[st
 
 
 def append_attempt(engagement: Path, proposal: dict[str, Any]) -> dict[str, Any]:
+    source_engagement = engagement.absolute()
     with engagement_lock(engagement) as engagement:
-        reduce_engagement(engagement)  # scope and existing ledgers must be authoritative before write
+        current_state = reduce_engagement(engagement)  # scope and existing ledgers must be authoritative before write
+        if isinstance(current_state["intake"], dict):
+            _validate_intake_source(source_engagement, current_state["intake"])
         records = read_ledger(engagement, "attempt")
         preview = materialize_ledger_record("attempt", proposal, records)
         reference_errors = validate_record_references(preview, "attempt-v2", build_reference_index(engagement))

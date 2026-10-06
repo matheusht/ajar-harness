@@ -808,6 +808,9 @@ def _evaluate_predicate(
                 and bool(actual_set)
                 and actual_set.issubset(expected_set)
             )
+        elif operator == "subset_of":
+            actual_set, expected_set = _string_set(actual), _string_set(expected)
+            matched = actual_set is not None and expected_set is not None and actual_set.issubset(expected_set)
         elif operator == "length_equals":
             matched = isinstance(actual, list) and isinstance(expected, int) and not isinstance(expected, bool) and len(actual) == expected
         elif operator == "timestamp_after":

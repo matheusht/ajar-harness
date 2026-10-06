@@ -412,7 +412,8 @@
           "enum": [
             "strong",
             "weak",
-            "negative"
+            "negative",
+            "none"
           ]
         },
         "card_ids": {

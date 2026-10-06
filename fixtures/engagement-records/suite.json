@@ -2082,6 +2082,7 @@
     {
       "id": "state-snapshot-minimum",
       "record": {
+        "intake": null,
         "active_blockers": [],
         "active_environment_ref": null,
         "artifact_count": 0,
@@ -2154,6 +2155,7 @@
     {
       "id": "state-snapshot-rich",
       "record": {
+        "intake": null,
         "active_blockers": [
           "review pending"
         ],

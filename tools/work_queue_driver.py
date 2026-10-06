@@ -40,6 +40,7 @@ from docker_session_runtime import (
 )
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import (
+    _validate_intake_source,
     _append_kernel_event_idempotent,
     _open_absolute_directory,
     _reduce_engagement_unchecked,
@@ -628,6 +629,7 @@ def _session_prompt(item: dict[str, Any], state: dict[str, Any], item_ref: str) 
         "state_binding": {
             "ledger_hash": state.get("ledger_hash"),
             "source_hashes": copy.deepcopy(state.get("source_hashes")),
+            "intake": copy.deepcopy(state.get("intake")),
         },
         "constraints": [
             "Work only in the target repository that is already your cwd.",
@@ -1281,6 +1283,11 @@ def run_driver(
             if sha256_bytes(canonical_json_bytes(launch_state)) != before_hash:
                 state = launch_state
                 continue
+            if isinstance(state.get("intake"), dict):
+                try:
+                    _validate_intake_source(bound.engagement, state["intake"])
+                except RecordError as exc:
+                    raise DriverError(f"driver_{exc.code}") from exc
             if stop_requested():
                 continue
             remaining_wall = budget.max_wall_seconds - (time.monotonic() - started_at)

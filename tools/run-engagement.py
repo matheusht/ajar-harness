@@ -3271,6 +3271,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         checks.append(("generic CLI and public notebook append boundaries cannot future-forge objective authority expiry", forged_expiry_cli.returncode == 1 and forged_expiry_cli_code == "canonical_notebook_command_required" and forged_expiry_helper_code == "canonical_notebook_command_required", forged_expiry_cli.stdout + forged_expiry_cli.stderr + str(forged_expiry_helper_code)))
 
         synthetic_queue_state = copy.deepcopy(initial_reduction)
+        synthetic_queue_state["intake"] = {"source_path": "inert-source.txt", "source_hash": "sha256:" + "1" * 64, "source_size": 1, "card_ids": ["pattern.legacy-route-differential"], "observation_ref": "event-synthetic-source-observation", "routing_ref": "event-synthetic-source-routing", "environment_ref": "preflight-selftest"}
         synthetic_queue_state["hypotheses"] = {
             "entity-hypothesis_ran_unadjudicated": {"status": "running", "next_route": None, "unresolved_questions": []},
             "entity-hypothesis_running_unattempted": {"status": "running", "running_event_ref": "event-entity-hypothesis-running", "next_route": None, "unresolved_questions": []},
@@ -3318,6 +3319,9 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         synthetic_queue_state["regrade_reviews"] = {}
         synthetic_queue_state["latest_coverage_review"] = None
         entity_types = {
+            "source_unobserved": "engagement",
+            "source_unrouted": "engagement",
+            "source_unhypothesized": "engagement",
             "hypothesis_ran_unadjudicated": "hypothesis",
             "hypothesis_running_unattempted": "hypothesis",
             "hypothesis_unrouted": "hypothesis",
@@ -3336,6 +3340,9 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         entity_ids = {item_class: f"entity-{item_class}" for item_class in WORK_QUEUE_CLASS_ORDER}
         entity_ids["review_obligation_open"] = "review-obligation-open"
         expected_actions = {
+            "source_unobserved": "record_source_observation",
+            "source_unrouted": "route_source_observation",
+            "source_unhypothesized": "create_source_hypothesis",
             "hypothesis_ran_unadjudicated": "record_hypothesis_disposition",
             "hypothesis_running_unattempted": "requeue_unattempted_hypothesis",
             "hypothesis_unrouted": "record_hypothesis_disposition",

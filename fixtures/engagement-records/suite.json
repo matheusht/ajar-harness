@@ -2115,6 +2115,7 @@
         "proof_reviews": {},
         "regrade_reviews": {},
         "reviewer_run_models": {},
+        "higher_impact_route_reviews": {},
         "queue_control": {
           "last_resume": null,
           "last_stop": null,
@@ -2293,6 +2294,7 @@
         ],
         "proof_reviews": {},
         "regrade_reviews": {},
+        "higher_impact_route_reviews": {},
         "reviewer_run_models": {
           "run-review-1": "claude-fixture-reviewer-20260710"
         },

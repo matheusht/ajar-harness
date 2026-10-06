@@ -3476,7 +3476,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                     state["intake"]["routing_ref"] = event["event_id"]
                     state["intake"]["activation_strength"] = payload["activation_strength"]
                     state["intake"]["status"] = "routed"
-            if payload["activation_strength"] == "negative" and payload["status"] == "assessed":
+            if payload["activation_strength"] == "negative":
                 state["control_candidates"].append({"routing_event_id": event["event_id"], "source_observation_ref": payload["source_observation_ref"], "card_ids": payload["card_ids"], "status": "likely_held", "rationale": event["rationale"]})
         elif event_type == "candidate.proposed":
             state["candidates"][payload["candidate_id"]] = {"status": payload["status"], "rationale": event["rationale"], "source_observation_ref": payload["source_observation_ref"], "routing_review_ref": payload["routing_review_ref"], "activation_strength": payload["activation_strength"], "card_ids": payload["card_ids"], "ex_ante": event["ex_ante"]}

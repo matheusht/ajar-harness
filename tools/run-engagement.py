@@ -75,6 +75,7 @@ from engagement_state import (
     compute_record_hash,
     compute_review_input_hash,
     engagement_may_end,
+    enforce_current_terminal_work_admission,
     finding_revision_lane_id,
     hypothesis_dispositions_hash,
     bound_engagement_lock,
@@ -3962,6 +3963,19 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         pending_keys = stage_classes(pending_filing)
         past_deadline_pending = copy.deepcopy(pending_filing); past_deadline_pending["authority_requests"]["request-v2-pending"]["expires_at"] = "2000-01-01T00:00:00Z"
         checks.append(("current v2 pending authority suppresses its exact filing-ready rows and expiry remains explicit record state", pending_keys == [("awaiting_operator", "request-v2-pending")] and stage_classes(past_deadline_pending) == pending_keys, str(pending_keys)))
+        pending_terminal = {**pending_filing, "coverage": "coverage_dry", "cleanup": {"recorded": True, "obligations": []}}
+        close_proposal = {"event_type": "engagement.closed", "event_id": "event-pending-filing-close", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": []}
+        coverage_proposal = {"event_type": "coverage.status_changed", "event_id": "event-pending-filing-coverage", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "coverage_dry"}]}
+        budget_proposal = {"event_type": "coverage.status_changed", "event_id": "event-pending-filing-budget", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "budget_bounded"}]}
+        blocked_proposal = {"event_type": "engagement.blocked", "event_id": "event-pending-filing-blocked", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "blocked"}]}
+        def terminal_admission_error(snapshot: dict, proposal: dict) -> str | None:
+            try:
+                enforce_current_terminal_work_admission(snapshot, [], proposal)
+            except RecordError as exc:
+                return exc.code
+            return None
+        reflected_terminal = {**pending_terminal, "findings": reflected_confirmed["findings"], "proof_reviews": {"finding-current:r2": {"terminal_status": "verified"}}, "outstanding_reviews": [], "authority_requests": {"request-ordinary": {"request_id": "request-ordinary", "status": "pending_authority"}}}
+        checks.append(("pending finding authority cannot hide an unreflected fileable adjudication from new completion admission", terminal_admission_error(pending_terminal, close_proposal) == "engagement_closure_work_remaining" and terminal_admission_error(pending_terminal, coverage_proposal) == "coverage_terminal_work_remaining" and terminal_admission_error(pending_terminal, budget_proposal) == "coverage_terminal_work_remaining" and terminal_admission_error(pending_terminal, blocked_proposal) is None and terminal_admission_error(reflected_terminal, close_proposal) is None and stage_classes(pending_terminal) == [("awaiting_operator", "request-v2-pending")], str({"close": terminal_admission_error(pending_terminal, close_proposal), "coverage": terminal_admission_error(pending_terminal, coverage_proposal), "budget": terminal_admission_error(pending_terminal, budget_proposal), "blocked": terminal_admission_error(pending_terminal, blocked_proposal), "reflected": terminal_admission_error(reflected_terminal, close_proposal)})))
         blocked_poc_filing = {**pending_filing, "outstanding_reviews": [*eligible_reviews, *ineligible_reviews]}
         blocked_poc_keys = stage_classes(blocked_poc_filing)
         checks.append(("blocked pocinator debt prevents filing suppression and remains ahead of revision work", ("finding_revision_pending", "finding-current") in blocked_poc_keys and ("review_obligation_open", "review-blocked") in blocked_poc_keys and blocked_poc_keys.index(("review_obligation_open", "review-blocked")) < blocked_poc_keys.index(("finding_revision_pending", "finding-current")), str(blocked_poc_keys)))

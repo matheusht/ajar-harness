@@ -600,6 +600,24 @@ def _validate_revise_finding_v2_action(
     return copy.deepcopy(target)
 
 
+def _unreflected_fileable_adjudications(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    findings = state.get("findings", {})
+    pending: dict[str, dict[str, Any]] = {}
+    for finding_id, latest in state.get("claim_adjudications", {}).items():
+        if latest.get("status") not in FILEABLE_CLAIM_STATES:
+            continue
+        finding = findings.get(finding_id)
+        if finding is not None and (
+            finding.get("revision") == latest.get("expected_filing_revision")
+            and finding.get("status") == latest.get("status")
+            and finding.get("adjudication_review_ref") == latest.get("review_ref")
+            and finding.get("adjudication_event_ref") == latest.get("event_ref")
+        ):
+            continue
+        pending[finding_id] = latest
+    return pending
+
+
 def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Project deterministic outstanding work from already validated reducer inputs."""
 
@@ -664,20 +682,7 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
 
     findings = state.get("findings", {})
     adjudications = state.get("claim_adjudications", {})
-    filing_pending: dict[str, dict[str, Any]] = {}
-    for finding_id in set(findings) | set(adjudications):
-        finding = findings.get(finding_id)
-        latest = adjudications.get(finding_id)
-        reflected = bool(
-            finding is not None
-            and latest is not None
-            and finding.get("revision") == latest.get("expected_filing_revision")
-            and finding.get("status") == latest.get("status")
-            and finding.get("adjudication_review_ref") == latest.get("review_ref")
-            and finding.get("adjudication_event_ref") == latest.get("event_ref")
-        )
-        if latest is not None and latest.get("status") in FILEABLE_CLAIM_STATES and not reflected:
-            filing_pending[finding_id] = latest
+    filing_pending = _unreflected_fileable_adjudications(state)
 
     matching_pending_targets: dict[str, list[dict[str, Any]]] = {}
     approved_generations: set[tuple[Any, ...]] = set()
@@ -948,6 +953,19 @@ def enforce_current_terminal_work_admission(
         raise RecordError(
             error_code or "coverage_terminal_work_remaining",
             json.dumps(blockers, sort_keys=True),
+        )
+    unreflected = (
+        _unreflected_fileable_adjudications(state)
+        if event_type == "engagement.closed" or terminal_coverage in {"coverage_dry", "budget_bounded"}
+        else {}
+    )
+    if unreflected:
+        raise RecordError(
+            error_code or "coverage_terminal_work_remaining",
+            json.dumps([
+                {"class": "finding_revision_pending", "entity": {"type": "finding", "id": finding_id, "detail": None}}
+                for finding_id in sorted(unreflected)
+            ], sort_keys=True),
         )
     if event_type == "engagement.closed":
         cleanup = state.get("cleanup", {})

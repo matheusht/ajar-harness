@@ -633,7 +633,7 @@ def compute_work_queue(state: dict[str, Any], attempts: list[dict[str, Any]]) ->
         })
 
     intake = state.get("intake")
-    if isinstance(intake, dict) and state.get("coverage") == "active":
+    if isinstance(intake, dict):
         if intake["status"] == "unread":
             add("source_unobserved", "engagement", state["engagement_id"])
         elif intake["status"] in {"observed", "deferred"}:
@@ -2920,6 +2920,15 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
     latest_preflight_ref: str | None = None
     consumed_authority_actions: set[str] = set()
     last_budget_declaration: dict[str, str] | None = None
+    def activate_environment(environment_ref: str, status: str) -> None:
+        next_ref = environment_ref if status == "ready" else None
+        if next_ref is not None and next_ref != state["active_environment_ref"] and isinstance(state["intake"], dict):
+            state["intake"].update({
+                "status": "unread", "observation_ref": None, "routing_ref": None,
+                "deferred_ref": None, "hypothesis_ref": None,
+                "activation_strength": None, "environment_ref": None,
+            })
+        state["active_environment_ref"] = next_ref
     def consume_exact_authority(event: dict[str, Any], request: dict[str, Any] | None, action: dict[str, Any]) -> bool:
         reference = event["payload"].get("authority_request_ref")
         if request is None or reference in consumed_authority_actions or request["action_digest"] != sha256_bytes(canonical_json_bytes(action)): return False
@@ -3731,14 +3740,14 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 state["active_blockers"].append(event["rationale"])
         elif event_type == "environment.review_recorded":
             current = state["environment_preflights"][payload["environment_ref"]]; current["status"] = payload["status"]; current["operator_review_ref"] = payload["review_ref"]
-            state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
+            activate_environment(payload["environment_ref"], payload["status"])
             for authority_request in state["authority_requests"].values():
                 if authority_request["status"] in {"pending_authority", "approved"} and authority_request["environment_ref"] != state["active_environment_ref"]: authority_request["status"] = "superseded"
         elif event_type == "environment.preflight_recorded":
             environment_entry = _index_entry(index, payload["environment_ref"], "environment", engagement_id)
             environment = load_json(engagement / environment_entry["path"])
             state["environment_preflights"][payload["environment_ref"]] = {"status": payload["status"], "identity_hash": payload["identity_hash"], "scope_hash": environment["scope_hash"], "operator_review_ref": None}
-            state["active_environment_ref"] = payload["environment_ref"] if payload["status"] == "ready" else None
+            activate_environment(payload["environment_ref"], payload["status"])
             for authority_request in state["authority_requests"].values():
                 if authority_request["status"] in {"pending_authority", "approved"} and authority_request["environment_ref"] != state["active_environment_ref"]: authority_request["status"] = "superseded"
         elif event_type == "observation.recorded" and payload.get("entity_type") == "source_intake":

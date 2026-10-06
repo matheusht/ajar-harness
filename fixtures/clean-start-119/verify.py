@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from engagement_state import base_event  # noqa: E402
+from engagement_state import base_event, blocking_work_identities, project_current_terminal_work_state, read_ledger  # noqa: E402
 
 TOOL = ROOT / "tools" / "run-engagement.py"
 STAMP = "2026-10-06T12:00:00Z"
@@ -193,6 +193,19 @@ def main() -> int:
         (output / "result.json").write_bytes(encoded(outcome))
         return 1
 
+    def terminal_source_projection(target: Path, source_class: str) -> dict[str, object]:
+        state = json.loads((target / "state.snapshot.json").read_text())
+        attempts = read_ledger(target, "attempt")
+        result: dict[str, object] = {}
+        for coverage in ("coverage_dry", "budget_bounded"):
+            projected = project_current_terminal_work_state(state, attempts, coverage=coverage)
+            source_rows = [item for item in projected["work_queue"] if item["class"] == source_class and item["entity"]["id"] == engagement.name]
+            blockers = blocking_work_identities(projected)
+            result[coverage] = {"source_rows": len(source_rows), "blocking": len(source_rows) == 1 and source_rows[0]["blocking"] is True, "in_blockers": {"class": source_class, "entity": {"type": "engagement", "id": engagement.name, "detail": None}} in blockers}
+        return result
+
+    outcome["terminal_projection_initial"] = terminal_source_projection(engagement, "source_unobserved")
+
     host_workspace = output / "host-replay" / "target"
     shutil.copytree(workspace, host_workspace)
     host_result = run("host-replay", [sys.executable, str(Path(__file__).with_name("host_replay.py")), "--workspace", str(host_workspace), "--output", str(output / "host-replay" / "run")])
@@ -235,6 +248,37 @@ def main() -> int:
         if append("observation", observation).returncode != 0:
             raise RuntimeError("observation append failed")
 
+        refresh_root = output / "preflight-refresh" / "target"
+        shutil.copytree(workspace, refresh_root)
+        refresh_engagement = refresh_root / "engagements" / engagement.name
+        refresh_ref = "preflight-clean-start-refreshed"
+        refresh_preflight = run("preflight-refresh", [
+            sys.executable, str(TOOL), "preflight", "--engagement", str(refresh_engagement),
+            "--preflight-id", refresh_ref, "--mode", "local_runtime",
+            "--target", str(refresh_root / "inert-source.txt"), "--expected-identity", source_hash,
+            "--runtime", "/usr/bin/true", "--reproduction-argv", '["/usr/bin/true"]',
+            "--actor-role", "broker", "--actor-id", identity["actor_id"],
+            "--session-id", identity["session_id"], "--recorded-at", "2026-10-06T12:00:01.500Z",
+        ])
+        refresh_state = json.loads((refresh_engagement / "state.snapshot.json").read_text())
+        refresh_next = run("next-after-preflight-refresh", [sys.executable, str(TOOL), "next", "--engagement", str(refresh_engagement)])
+        refreshed_observation = copy.deepcopy(observation)
+        refreshed_observation["event_id"] = "event-intake-observation-refreshed"
+        refreshed_observation["recorded_at"] = "2026-10-06T12:00:01.600Z"
+        refreshed_observation["payload"]["entity_id"] = "source-observation-refreshed"
+        refreshed_observation["payload"]["environment_ref"] = refresh_ref
+        refresh_write = append("observation-after-preflight-refresh", refreshed_observation, refresh_engagement)
+        refresh_after = json.loads((refresh_engagement / "state.snapshot.json").read_text())
+        outcome["preflight_refresh"] = {
+            "preflight_exit": refresh_preflight.returncode,
+            "preflight_status": json.loads(refresh_preflight.stdout).get("status") if refresh_preflight.returncode == 0 else None,
+            "active_environment_ref": refresh_state["active_environment_ref"],
+            "intake_after_preflight": refresh_state["intake"],
+            "next_class": json.loads(refresh_next.stdout)["item"]["class"] if refresh_next.returncode == 0 else None,
+            "reobservation_exit": refresh_write.returncode,
+            "intake_after_reobservation": refresh_after["intake"],
+        }
+
         next_item("source_unrouted")
         negative_route_root = output / "negative-events" / "routing" / "target"
         shutil.copytree(workspace, negative_route_root)
@@ -255,6 +299,7 @@ def main() -> int:
         deferred_state = json.loads((deferred_engagement / "state.snapshot.json").read_text()) if deferred_write.returncode == 0 else {}
         deferred_queue = json.loads(deferred_next.stdout) if deferred_next.returncode == 0 else {}
         outcome["deferred_no_route"] = {"append_exit": deferred_write.returncode, "next_exit": deferred_next.returncode, "denominator": deferred_state.get("intake", {}).get("denominator"), "status": deferred_state.get("intake", {}).get("status"), "hypothesis_ref": deferred_state.get("intake", {}).get("hypothesis_ref"), "next_class": deferred_queue.get("item", {}).get("class"), "should_block": deferred_queue.get("queue", {}).get("should_block")}
+        outcome["terminal_projection_deferred"] = terminal_source_projection(deferred_engagement, "source_unrouted") if deferred_write.returncode == 0 else {}
         negative_routes: list[dict[str, object]] = []
         for name, payload_key, value in (
             ("offscope-card", "card_ids", ["pattern.ui-only-policy-enforcement"]),
@@ -321,6 +366,19 @@ def main() -> int:
             outcome["queue_classes"] == ["source_unobserved", "source_unrouted", "source_unhypothesized", "hypothesis_unrouted"]
             and outcome["initial_intake"] == {"denominator": 1, "status": "unread", "observation_ref": None}
             and outcome["deferred_no_route"] == {"append_exit": 0, "next_exit": 0, "denominator": 1, "status": "deferred", "hypothesis_ref": None, "next_class": "source_unrouted", "should_block": True}
+            and all(case == {"source_rows": 1, "blocking": True, "in_blockers": True} for case in outcome["terminal_projection_initial"].values())
+            and all(case == {"source_rows": 1, "blocking": True, "in_blockers": True} for case in outcome["terminal_projection_deferred"].values())
+            and outcome["preflight_refresh"]["preflight_exit"] == 0
+            and outcome["preflight_refresh"]["preflight_status"] == "ready"
+            and outcome["preflight_refresh"]["active_environment_ref"] == "preflight-clean-start-refreshed"
+            and outcome["preflight_refresh"]["intake_after_preflight"]["source_hash"] == source_hash
+            and outcome["preflight_refresh"]["intake_after_preflight"]["denominator"] == 1
+            and outcome["preflight_refresh"]["intake_after_preflight"]["status"] == "unread"
+            and outcome["preflight_refresh"]["intake_after_preflight"]["observation_ref"] is None
+            and outcome["preflight_refresh"]["next_class"] == "source_unobserved"
+            and outcome["preflight_refresh"]["reobservation_exit"] == 0
+            and outcome["preflight_refresh"]["intake_after_reobservation"]["environment_ref"] == "preflight-clean-start-refreshed"
+            and outcome["preflight_refresh"]["intake_after_reobservation"]["status"] == "observed"
             and snapshot["intake"]["hypothesis_ref"] == hypothesis_id
             and snapshot["intake"]["denominator"] == 1
             and snapshot["intake"]["status"] == "hypothesized"

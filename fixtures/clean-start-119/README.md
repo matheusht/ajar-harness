@@ -19,6 +19,8 @@ Failure modes frozen before implementation:
 | Model supplies another source digest, scope hash, environment, or observation reference | Broker/kernel reject the event; the queue still names the same work. |
 | Run stops after any one write | Reducer resumes at the next source step without a seeded event or duplicate. |
 | No route is justified | Source remains visibly unread/deferred; coverage cannot claim dry. |
+| Terminal coverage is projected while source is unread or deferred | The source row remains blocking under `coverage_dry` and `budget_bounded`. |
+| A new ready preflight replaces the observed environment | The source pin and denominator remain; intake returns to `unread` and can be observed under the new environment. |
 | Valid source and allowed signal | Observation, route, and a bounded hypothesis are linked; `next` exposes its experiment. |
 
 Run with the repository's pinned Python:
@@ -44,6 +46,10 @@ source does not make historical reduction fail while new research writes stop.
 The `negative-no-preflight` target proves a signed genesis alone cannot record
 a source observation or launch a model session; its one-event ledger remains at
 `scope.attested`.
+The verifier projects both terminal coverage states from the actual signed initial
+and deferred snapshots, then checks that their source rows still block closure.
+It also records a second ready preflight after observation and verifies that the
+source can be re-observed against the new active environment.
 The host replay must start three sessions, derive its observation from the source
 text, bind all three research records to `preflight-clean-start`, and record the
 same event sequence. A separate changed-source host replay must fail before

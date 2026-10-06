@@ -351,10 +351,45 @@
                   "null"
                 ],
                 "format": "date-time"
+              },
+              "effect_name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              },
+              "effect_sha256": {
+                "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
               }
             }
           }
         },
+        "scoped_cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["effect_name", "effect_sha256", "root_dev", "root_ino", "open_event_ref", "create_event_ref", "observed_sha256", "checked_absent"],
+          "properties": {
+            "effect_name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+            "effect_sha256": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+            "root_dev": {"type": "integer", "minimum": 0},
+            "root_ino": {"type": "integer", "minimum": 0},
+            "open_event_ref": {"type": ["string", "null"]},
+            "create_event_ref": {"type": ["string", "null"]},
+            "observed_sha256": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}, {"type": "null"}]},
+            "checked_absent": {"type": "boolean"}
+          }
+        },
+        "scoped_effect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["effect_name", "effect_sha256", "root_dev", "root_ino", "cleanup_obligation_ref"],
+          "properties": {
+            "effect_name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+            "effect_sha256": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+            "root_dev": {"type": "integer", "minimum": 0},
+            "root_ino": {"type": "integer", "minimum": 0},
+            "cleanup_obligation_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}
+          }
+        },
+        "scoped_closure": {"type": "boolean"},
         "memory_disposition": {
           "type": "string"
         },

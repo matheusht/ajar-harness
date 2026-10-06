@@ -44,6 +44,7 @@ LEDGERS = {
     "attempt": ("attempts.jsonl", "attempt-v2", "attempt_id"),
     "artifact": ("artifacts.jsonl", "artifact", "artifact_id"),
 }
+SCOPED_EFFECT_BYTES = b"synthetic-scoped-effect-v1\n"
 STATE_VALUES = {
     "claim": {"needs_review", "supported", "confirmed", "contaminated", "refuted"},
     "search": {"queued", "selected", "running", "held", "exhausted", "deferred", "blocked", "closed"},
@@ -948,6 +949,14 @@ def enforce_current_terminal_work_admission(
             error_code or "coverage_terminal_work_remaining",
             json.dumps(blockers, sort_keys=True),
         )
+    if event_type == "engagement.closed":
+        cleanup = state.get("cleanup", {})
+        remaining = [item for item in cleanup.get("obligations", []) if item.get("status") in {"open", "blocked"}]
+        if not cleanup.get("recorded") or remaining:
+            raise RecordError(
+                "engagement_closure_cleanup_remaining",
+                json.dumps({"recorded": cleanup.get("recorded"), "obligations": remaining}, sort_keys=True),
+            )
 
 
 def work_disposition_digest(
@@ -1816,6 +1825,51 @@ def require_scope_zone2_authorized(engagement: Path, scope_hash: str, category: 
     if not authorized or category.lower() not in categories or ceiling != "artifact_creation" or not containment or containment in placeholders or len(containment) < 8 or any(token in containment for token in ("<", ">", "[", "]", "{", "}", "___", "*")) or any(marker in containment for marker in ("tbd", "unknown", "placeholder", "todo", "none", "n/a", "to be determined")): raise RecordError("zone2_not_authorized_by_scope", category)
 
 
+def scoped_cleanup_root(engagement: Path, scope_hash: str) -> Path:
+    """Read the exact local containment directory from the attested scope bytes."""
+    snapshot = engagement / "scope-attestations" / f"{scope_hash.removeprefix('sha256:')}.md"
+    try:
+        data = read_governed_file(snapshot)
+        if sha256_bytes(data) != scope_hash:
+            raise ValueError("scope hash changed")
+        text = data.decode("utf-8")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise RecordError("scoped_cleanup_scope_invalid", scope_hash) from exc
+    grant = re.findall(r"^- scoped_cleanup_closure: `([^`]*)`\s*$", text, re.MULTILINE)
+    roots = re.findall(r"^- scoped_cleanup_root: `([^`]*)`\s*$", text, re.MULTILINE)
+    if len(grant) != 1 or grant[0] != "yes" or len(roots) != 1:
+        raise RecordError("scoped_cleanup_not_authorized", scope_hash)
+    if _scope_metadata(snapshot)["record_kernel"] != "decision-0006-v1":
+        raise RecordError("scoped_cleanup_kernel_required", scope_hash)
+    root = Path(roots[0])
+    if not root.is_absolute() or roots[0] == "/" or any(part in {".", ".."} for part in roots[0].split("/")):
+        raise RecordError("scoped_cleanup_root_invalid", roots[0])
+    return root
+
+
+def scoped_cleanup_root_identity(root: Path) -> tuple[int, int]:
+    """Identify the physical signed root, without following replaced path components."""
+    try:
+        fd = _open_absolute_directory(root)
+    except OSError as exc:
+        raise RecordError("scoped_cleanup_root_unavailable", str(root)) from exc
+    try:
+        metadata = os.fstat(fd)
+        if metadata.st_uid != os.getuid() or metadata.st_mode & 0o022:
+            raise RecordError("scoped_cleanup_root_unsafe", str(root))
+        return metadata.st_dev, metadata.st_ino
+    finally:
+        os.close(fd)
+
+
+def _scoped_broker_event(event: dict[str, Any], operation_class: str) -> bool:
+    actor = event.get("actor", {})
+    match = re.fullmatch(r"local-uid-([0-9]+):broker", str(actor.get("id", "")))
+    return bool(match and actor.get("role") == "broker"
+                and event.get("operation_class") == operation_class
+                and re.fullmatch(rf"session-posix-{match.group(1)}-[0-9]+", str(event.get("provenance", {}).get("session_id", ""))))
+
+
 def persist_scope_snapshot(engagement: Path, scope_hash: str) -> str:
     source = engagement / "scope.md"
     data = read_governed_file(source)
@@ -2610,11 +2664,65 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             action_path = engagement / str(request.get("action_path", "")) if request else engagement/"missing"; stored_action = load_json(action_path) if _governed_file_exists(action_path) else {}
             migration_exact = bool(request and payload.get("action_digest") == request["action_digest"] and stored_action.get("proposal_digest") == payload.get("proposal_digest") and sha256_bytes(str(stored_action.get("destination", "")).encode()) == payload.get("destination_digest") and consume_exact_authority(event, request, stored_action))
             if not broker_authorized or not migration_exact or payload.get("status") != "authorized": raise RecordError("migration_apply_authority_invalid", event["event_id"])
+        if event["event_type"] == "observation.recorded" and payload.get("scoped_effect") is not None:
+            if states["engagement"].get(engagement_id) == "closed":
+                raise RecordError("scoped_effect_after_closure", event["event_id"])
+            effect = payload["scoped_effect"]
+            scoped_cleanup_root(engagement, state["scope_hash"])
+            opening = seen_events.get(effect["cleanup_obligation_ref"])
+            opening_scoped = opening["payload"].get("scoped_cleanup") if opening else None
+            opening_item = next((item for item in opening["payload"]["cleanup_obligations"] if item["obligation_id"] == payload.get("entity_id", "").removeprefix("effect-")), None) if opening and opening["event_type"] == "cleanup.updated" else None
+            current_item = next((item for item in state["cleanup"]["obligations"] if item["obligation_id"] == opening_item.get("obligation_id")), None) if opening_item else None
+            if (not _scoped_broker_event(event, "notebook") or payload.get("entity_type") != "scoped_local_effect" or payload.get("status") != "created"
+                or effect["effect_sha256"] != sha256_bytes(SCOPED_EFFECT_BYTES) or opening_item is None
+                or opening["payload"].get("scoped_cleanup") is None or opening_item.get("status") != "open"
+                or scoped_cleanup_root(engagement, opening["payload"]["scope_hash"]) != scoped_cleanup_root(engagement, state["scope_hash"])
+                or opening_scoped["root_dev"] != effect["root_dev"] or opening_scoped["root_ino"] != effect["root_ino"]
+                or current_item is None or current_item["status"] != "open"
+                or (opening_item.get("effect_name"), opening_item.get("effect_sha256")) != (effect["effect_name"], effect["effect_sha256"])
+                or effect["cleanup_obligation_ref"] not in event["entity_refs"]
+                or any(prior.get("payload", {}).get("scoped_effect", {}).get("cleanup_obligation_ref") == effect["cleanup_obligation_ref"] for prior in seen_events.values())):
+                raise RecordError("scoped_effect_obligation_invalid", event["event_id"])
         if event["event_type"] == "cleanup.updated":
-            cleanup_action = {"action_kind": "record-cleanup", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"], "reason": event["rationale"], "entity_id": payload.get("entity_id"), "status": payload.get("status"), "cleanup_obligations": payload.get("cleanup_obligations")}
-            cleanup_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, cleanup_action)
-            if not cleanup_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or payload.get("updated_at") != event["recorded_at"]:
-                raise RecordError("cleanup_authority_invalid", event["event_id"])
+            scoped = payload.get("scoped_cleanup")
+            if scoped is not None:
+                if states["engagement"].get(engagement_id) == "closed":
+                    raise RecordError("scoped_cleanup_after_closure", event["event_id"])
+                scoped_cleanup_root(engagement, state["scope_hash"])
+                items = payload.get("cleanup_obligations", [])
+                item = items[0] if len(items) == 1 else {}
+                opening = seen_events.get(scoped["open_event_ref"]) if scoped["open_event_ref"] else None
+                opening_scoped = opening["payload"].get("scoped_cleanup") if opening else None
+                creation = seen_events.get(scoped["create_event_ref"]) if scoped["create_event_ref"] else None
+                current_item = next((row for row in state["cleanup"]["obligations"] if row["obligation_id"] == payload.get("entity_id")), None)
+                shared_valid = (_scoped_broker_event(event, "authority") and request is None
+                    and payload.get("operator_id") == active_scope_operator and payload.get("scope_hash") == state["scope_hash"]
+                    and (opening is None or scoped_cleanup_root(engagement, opening["payload"]["scope_hash"]) == scoped_cleanup_root(engagement, state["scope_hash"]))
+                    and (opening_scoped is None or (opening_scoped["root_dev"], opening_scoped["root_ino"]) == (scoped["root_dev"], scoped["root_ino"]))
+                    and payload.get("updated_at") == event["recorded_at"] and item.get("obligation_id") == payload.get("entity_id")
+                    and item.get("kind") == "scoped_local_file" and item.get("status") == payload.get("status")
+                    and item.get("effect_name") == scoped["effect_name"] and item.get("effect_sha256") == scoped["effect_sha256"] == sha256_bytes(SCOPED_EFFECT_BYTES))
+                if payload.get("status") == "open":
+                    valid = (current_item is None and scoped["open_event_ref"] is None and scoped["create_event_ref"] is None
+                        and scoped["observed_sha256"] is None and scoped["checked_absent"] is True and item.get("closed_at") is None)
+                elif payload.get("status") in {"completed", "blocked", "not_applicable"}:
+                    opened_item = next((row for row in opening["payload"]["cleanup_obligations"] if row["obligation_id"] == payload.get("entity_id")), None) if opening and opening["event_type"] == "cleanup.updated" else None
+                    creation_valid = bool(creation and creation["event_type"] == "observation.recorded" and creation["payload"].get("scoped_effect", {}).get("cleanup_obligation_ref") == scoped["open_event_ref"]
+                        and creation["payload"]["scoped_effect"].get("effect_name") == scoped["effect_name"] and creation["payload"]["scoped_effect"].get("effect_sha256") == scoped["effect_sha256"])
+                    valid = (current_item is not None and current_item["status"] in {"open", "blocked"} and opened_item is not None and opened_item["status"] == "open"
+                        and opened_item.get("effect_name") == scoped["effect_name"] and opened_item.get("effect_sha256") == scoped["effect_sha256"]
+                        and scoped["open_event_ref"] in event["entity_refs"] and (scoped["create_event_ref"] is None or scoped["create_event_ref"] in event["entity_refs"])
+                        and (payload["status"] != "completed" or (creation_valid and scoped["checked_absent"] is True and scoped["observed_sha256"] in {None, scoped["effect_sha256"]} and item.get("closed_at") == event["recorded_at"]))
+                        and (payload["status"] != "not_applicable" or (current_item["status"] == "open" and creation is None and scoped["create_event_ref"] is None and scoped["observed_sha256"] is None and scoped["checked_absent"] is True and item.get("closed_at") == event["recorded_at"])))
+                else:
+                    valid = False
+                if not shared_valid or not valid:
+                    raise RecordError("scoped_cleanup_binding_invalid", event["event_id"])
+            else:
+                cleanup_action = {"action_kind": "record-cleanup", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "recorded_at": event["recorded_at"], "reason": event["rationale"], "entity_id": payload.get("entity_id"), "status": payload.get("status"), "cleanup_obligations": payload.get("cleanup_obligations")}
+                cleanup_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, cleanup_action)
+                if not cleanup_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or payload.get("updated_at") != event["recorded_at"]:
+                    raise RecordError("cleanup_authority_invalid", event["event_id"])
         if event["event_type"] == "memory.disposition_recorded":
             entry = _index_entry(index, payload.get("disposition_ref"), "memory-disposition", engagement_id)
             if entry is None: raise RecordError("memory_disposition_record_missing", event["event_id"])
@@ -2626,10 +2734,14 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         if event["event_type"] == "engagement.closed":
             memory = state["memory_disposition"]
             reports_current = all(any(report["finding_id"] == finding_id and report["finding_revision"] == finding["revision"] and report["status"] in {"accepted", "submitted"} for report in state["reports"].values()) for finding_id, finding in state["findings"].items())
-            cleanup_terminal = state["cleanup"]["recorded"] and all(item["status"] in {"completed", "not_applicable", "blocked"} for item in state["cleanup"]["obligations"])
+            scoped_close = payload.get("scoped_closure") is True
+            cleanup_statuses = {"completed", "not_applicable"} if scoped_close else {"completed", "not_applicable", "blocked"}
+            cleanup_terminal = state["cleanup"]["recorded"] and all(item["status"] in cleanup_statuses for item in state["cleanup"]["obligations"])
             memory_bound = memory is not None and payload.get("disposition_ref") == memory["disposition_ref"] and payload.get("disposition_digest") == memory["disposition_digest"]
             close_action = {"action_kind": "close", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "reason": event["rationale"], "recorded_at": event["recorded_at"]}
-            close_authority_exact = event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action)
+            if scoped_close:
+                scoped_cleanup_root(engagement, state["scope_hash"])
+            close_authority_exact = (_scoped_broker_event(event, "authority") and request is None) if scoped_close else (event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action))
             terminal_coverage = states["coverage"].get(engagement_id, "active")
             projected_end = project_terminal_work_state(
                 state,
@@ -2642,7 +2754,9 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                     "engagement_closure_work_remaining",
                     json.dumps(blocking_work_identities(projected_end), sort_keys=True),
                 )
-            if not close_authority_exact or (event["actor"] != {"role": "operator", "id": active_scope_operator} and not broker_authorized) or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or terminal_coverage not in {"coverage_dry", "budget_bounded", "blocked"} or not reports_current:
+            broker_closure_allowed = close_authority_exact if scoped_close else (event["actor"] == {"role": "operator", "id": active_scope_operator} or broker_authorized)
+            allowed_coverage = {"coverage_dry", "budget_bounded"} if scoped_close else {"coverage_dry", "budget_bounded", "blocked"}
+            if not close_authority_exact or not broker_closure_allowed or payload.get("operator_id") != active_scope_operator or payload.get("scope_hash") != state["scope_hash"] or not memory_bound or not cleanup_terminal or terminal_coverage not in allowed_coverage or not reports_current:
                 raise RecordError("engagement_closure_gate_failed", event["event_id"])
         if event["event_type"] == "engagement.ending_overridden":
             terminal_kind = payload["terminal_kind"]
@@ -3511,6 +3625,8 @@ def assert_resume_current(engagement: Path) -> dict[str, Any]:
 def append_event(engagement: Path, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
     """Public notebook append boundary; authority and typed reviews use dedicated commands."""
     capability = classify_event(proposal.get("event_type", ""), proposal.get("payload", {}))
+    if proposal.get("event_type") == "observation.recorded" and (proposal.get("payload", {}).get("scoped_effect") is not None or proposal.get("payload", {}).get("entity_type") == "scoped_local_effect"):
+        raise RecordError("canonical_notebook_command_required", "create-scoped-effect")
     if proposal.get("event_type") == "authority.expired":
         raise RecordError("canonical_notebook_command_required", "authority.expired")
     if proposal.get("event_type") == "coverage.status_changed" and proposal.get("payload", {}).get("status") == "budget_bounded":

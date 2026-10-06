@@ -133,6 +133,15 @@ closed for this engagement.
 - Approval is digest-, lane-, environment-, executor/session-, and expiry-bound; it is never retrospective.
 - Real-world / Zone-2 creation still requires a fresh live confirmation immediately before bytes/effects.
 
+## Scoped cleanup and closure
+- scoped_cleanup_closure: `no`
+- scoped_cleanup_root: `none`
+
+Set these only for a target-local containment directory whose inert files the broker may create and
+remove. The broker checks the cleanup obligation before creation and verifies file absence after
+revert. This grant does not authorize live target effects, other file kinds, external filing, or
+operator-owned memory and report decisions.
+
 ## Authorization
 - Operator allowed signers file: `<operator-controlled path; private key stays outside agent access>`
 - Operator allowed signers SHA256: `<sha256:...>`

@@ -2595,6 +2595,170 @@ def compute_review_input_hash(engagement: Path, review: dict[str, Any], index: d
     return sha256_bytes(canonical_json_bytes(committed_inputs))
 
 
+def _validate_confirmation_proof(
+    review: dict[str, Any], state: dict[str, Any], attempts: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]], index: dict[str, list[dict[str, Any]]],
+    committed_entity_ids: set[str], context: str,
+) -> None:
+    """Require committed, matched evidence before a claim may become confirmed."""
+    profile = review.get("confirmation_profile")
+    if not isinstance(profile, dict) or review.get("claim_tuple_hash") != claim_tuple_hash(profile):
+        raise RecordError("confirmation_profile_missing_or_unbound", context)
+    if review["independence"]["fresh_context"] is not True:
+        raise RecordError("confirmation_reviewer_not_fresh", context)
+    finding_id = review["proposed_finding_id"]
+    next_revision = state["findings"].get(finding_id, {}).get("revision", 0) + 1
+    provenance = profile["scope_provenance"]
+    if (profile["finding_id"] != finding_id or profile["revision"] != next_revision
+            or profile["claim_state"] != "confirmed" or provenance.get("scope_hash") != state["scope_hash"]
+            or provenance.get("environment_ref") != state["active_environment_ref"]
+            or provenance.get("provenance", {}).get("actor") != {"role": "reviewer", "id": review["independence"]["reviewer_id"]}
+            or provenance.get("provenance", {}).get("session_id") != review["independence"].get("reviewer_session_id")
+            or provenance.get("provenance", {}).get("model") != review["independence"].get("reviewer_model")
+            or provenance.get("provenance", {}).get("provider") != review.get("provenance", {}).get("provider")):
+        raise RecordError("confirmation_profile_not_current", context)
+    profile_record = {
+        **profile, "schema_version": 3, "engagement_id": state["engagement_id"],
+        "supersedes_revision": state["findings"].get(finding_id, {}).get("revision"),
+        "recorded_at": review["recorded_at"], "change_reason": "Independent review confirms the exact proof tuple.",
+        "adjudication": {"review_ref": review["review_id"], "justification": review["rationale"]},
+        "search_linkage": {"candidate_refs": [], "hypothesis_refs": []},
+    }
+    reference_errors = validate_record_references(profile_record, "finding-v3", index)
+    if reference_errors:
+        raise RecordError("confirmation_profile_reference_invalid", context, reference_errors)
+    environment_ref = state["active_environment_ref"]
+    environment = state["environment_preflights"].get(environment_ref)
+    if (environment_ref not in committed_entity_ids or environment is None
+            or environment["status"] != "ready" or environment["scope_hash"] != state["scope_hash"]
+            or not environment["identity_hash"]):
+        raise RecordError("confirmation_environment_not_committed", context)
+    if (profile["claims"]["conflicting_evidence"] or review["conflicting_evidence"]
+            or profile["proof"]["contamination_disposition"] != "ruled_out"):
+        raise RecordError("confirmation_conflict_or_contamination_unresolved", context)
+
+    attempt_by_id = {item["attempt_id"]: item for item in attempts}
+    artifact_by_id = {item["artifact_id"]: item for item in artifacts}
+    proof = profile["proof"]
+    stage_ids = {stage: set(proof[f"{stage}_refs"]) for stage in (
+        "primary_attempt", "negative_control", "positive_control", "replay")}
+    primary_ids = stage_ids["primary_attempt"]
+    if not primary_ids:
+        raise RecordError("confirmation_primary_missing", context)
+    stages = (
+        ("primary_attempt", "primary", {"suspected_signal"}),
+        ("negative_control", "negative_control", {"held", "no_signal"}),
+        ("positive_control", "positive_control", {"suspected_signal"}),
+        ("replay", "replay", {"suspected_signal"}),
+    )
+    applicability = proof["control_applicability"]
+    for stage, _, _ in stages[1:]:
+        policy = "negative" if stage == "negative_control" else "positive" if stage == "positive_control" else "replay"
+        if (policy in {"negative", "replay"} or applicability[policy] == "required") and not stage_ids[stage]:
+            raise RecordError("confirmation_required_stage_missing", f"{context}:{policy}")
+    if review["independence"]["originating_run_id"] not in primary_ids:
+        raise RecordError("confirmation_origin_not_primary", context)
+    if stage_ids["replay"] and not proof["fresh_state_properties"]:
+        raise RecordError("confirmation_replay_state_missing", context)
+    replay_rows = review.get("replay_freshness", [])
+    freshness = {item["attempt_ref"]: item["fresh"] for item in replay_rows}
+    if len(replay_rows) != len(freshness) or set(freshness) != stage_ids["replay"] or not all(freshness.values()):
+        raise RecordError("confirmation_replay_not_fresh", context)
+    control_rows = review["control_applicability"]
+    controls_reviewed = {item["attempt_ref"] for item in control_rows if item["applicable"]}
+    if (len(control_rows) != len({item["attempt_ref"] for item in control_rows})
+            or not (stage_ids["negative_control"] | stage_ids["positive_control"]).issubset(controls_reviewed)):
+        raise RecordError("confirmation_control_not_reviewed", context)
+
+    all_attempt_ids = set().union(*stage_ids.values())
+    inputs = set(review["input_refs"])
+    evidence = set(review["evidence_refs"])
+    if not all_attempt_ids.issubset(inputs & evidence) or state["active_environment_ref"] not in inputs:
+        raise RecordError("confirmation_inputs_missing", context)
+    output_by_attempt: dict[str, set[str]] = {}
+    for stage, expected_kind, expected_assessments in stages:
+        for attempt_id in stage_ids[stage]:
+            item = attempt_by_id.get(attempt_id)
+            if (item is None or item["kind"] != expected_kind or item["assessment"] not in expected_assessments
+                    or item["observation"]["source"] == "model_report"
+                    or item["scope_hash"] != state["scope_hash"]
+                    or item["environment_ref"] != state["active_environment_ref"]
+                    or item["contamination"]["status"] != "none_observed"
+                    or (stage != "primary_attempt" and not primary_ids.intersection(item["control_of"]))):
+                raise RecordError("confirmation_attempt_invalid", f"{context}:{attempt_id}")
+            producer = item["provenance"]
+            reviewer = review["independence"]
+            producer_session = producer.get("runtime_session_ref") or producer.get("session_id")
+            if (reviewer["reviewer_id"] == producer["actor"]["id"]
+                    or (producer_session and reviewer.get("reviewer_session_id") == producer_session)
+                    or (producer.get("model") and reviewer.get("reviewer_model") == producer["model"])):
+                raise RecordError("confirmation_reviewer_not_independent_of_attempt", f"{context}:{attempt_id}")
+            outputs = {ref for ref in item["evidence_refs"] if ref in artifact_by_id
+                       and artifact_by_id[ref]["environment_ref"] == state["active_environment_ref"]
+                       and artifact_by_id[ref]["acquisition_method"] in {"broker", "runtime", "source_inspection", "operator"}}
+            output_by_attempt[attempt_id] = outputs
+    for attempt_id, outputs in output_by_attempt.items():
+        if not outputs.intersection(inputs & evidence):
+            raise RecordError("confirmation_raw_output_missing", f"{context}:{attempt_id}")
+    unique_output_by_attempt = {
+        attempt_id: outputs.difference(*(
+            other for other_id, other in output_by_attempt.items() if other_id != attempt_id
+        )) & inputs & evidence
+        for attempt_id, outputs in output_by_attempt.items()
+    }
+    if any(not outputs for outputs in unique_output_by_attempt.values()):
+        raise RecordError("confirmation_stage_output_not_distinct", context)
+    primary_outputs = set().union(*(unique_output_by_attempt[ref] for ref in primary_ids))
+    replay_outputs = set().union(*(unique_output_by_attempt[ref] for ref in stage_ids["replay"]))
+    if min(artifact_by_id[ref]["sequence"] for ref in replay_outputs) <= max(artifact_by_id[ref]["sequence"] for ref in primary_outputs):
+        raise RecordError("confirmation_replay_output_not_new", context)
+    claimed_targets = set(provenance["target_refs"])
+    if claimed_targets and not claimed_targets.issubset(set().union(*(
+            set(artifact_by_id[ref]["target_refs"]) for ref in primary_outputs
+    ))):
+        raise RecordError("confirmation_primary_target_mismatch", context)
+
+    claim_rows = [profile["claims"]["mechanism"], profile["claims"]["reachability"], *profile["claims"]["impact_claims"]]
+    claim_ids = [claim["claim_id"] for claim in claim_rows]
+    mappings = proof["claim_proofs"]
+    if (len(claim_ids) != len(set(claim_ids)) or len(mappings) != len(claim_ids)
+            or {mapping["claim_id"] for mapping in mappings} != set(claim_ids)):
+        raise RecordError("confirmation_atomic_claim_map_invalid", context)
+    claim_by_id = {claim["claim_id"]: claim for claim in claim_rows}
+    required_controls = stage_ids["negative_control"] | stage_ids["positive_control"]
+    for mapping in mappings:
+        claim = claim_by_id[mapping["claim_id"]]
+        mapping_primary = set(mapping["attempt_refs"])
+        mapping_artifacts = set(mapping["artifact_refs"])
+        claim_evidence = set(claim["evidence_refs"])
+        if (not mapping_primary or not mapping_primary.issubset(primary_ids)
+                or set(mapping["control_refs"]) != required_controls
+                or set(mapping["replay_refs"]) != stage_ids["replay"]
+                or not mapping_artifacts or not claim_evidence
+                or not claim_evidence.issubset(mapping_primary | mapping_artifacts)
+                or not claim_evidence.intersection(set().union(*(unique_output_by_attempt[ref] for ref in mapping_primary)))):
+            raise RecordError("confirmation_atomic_claim_proof_invalid", f"{context}:{mapping['claim_id']}")
+        for ref in required_controls | stage_ids["replay"]:
+            if not mapping_primary.intersection(attempt_by_id[ref]["control_of"]):
+                raise RecordError("confirmation_atomic_control_unmatched", f"{context}:{mapping['claim_id']}:{ref}")
+        if "status" in claim and claim["status"] != "demonstrated":
+            raise RecordError("confirmation_impact_not_demonstrated", f"{context}:{mapping['claim_id']}")
+        if not claim_evidence.intersection(mapping_artifacts):
+            raise RecordError("confirmation_claim_evidence_unmatched", f"{context}:{mapping['claim_id']}")
+
+    referenced_artifacts = {ref for ref in proof["evidence_refs"] if ref in artifact_by_id} | {ref for mapping in mappings for ref in mapping["artifact_refs"]}
+    referenced_artifacts |= {ref for claim in claim_rows for ref in claim["evidence_refs"] if ref in artifact_by_id}
+    if not referenced_artifacts.issubset(inputs & evidence):
+        raise RecordError("confirmation_artifact_not_reviewed", context)
+    for ref in referenced_artifacts:
+        artifact = artifact_by_id.get(ref)
+        if artifact is None or artifact["environment_ref"] != state["active_environment_ref"]:
+            raise RecordError("confirmation_artifact_environment_invalid", f"{context}:{ref}")
+    schema_errors = validate_record(profile_record, "finding-v3")
+    if schema_errors:
+        raise RecordError("confirmation_profile_invalid", context, schema_errors)
+
+
 def validate_committed_record_precedence(engagement: Path, event: dict[str, Any], index: dict[str, list[dict[str, Any]]], committed_entity_ids: set[str]) -> None:
     payload = event["payload"]
     record = load_json(engagement / payload["record_path"])
@@ -3139,6 +3303,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             required_statuses = {row.get("required_claim_status") for row in filing_rows if row.get("required_claim_status") is not None}
             if required_statuses and (len(required_statuses) != 1 or payload["status"] not in required_statuses):
                 raise RecordError("claim_review_obligation_disposition_mismatch", event["event_id"])
+            if payload["status"] == "confirmed" and payload.get("confirmation_policy_version") == 1:
+                _validate_confirmation_proof(review, state, attempts, artifacts, index, committed_entity_ids, event["event_id"])
         if event["event_type"] == "legacy.record_imported" and payload.get("imported_finding_id") is not None:
             finding_id, revision = payload["imported_finding_id"], payload["imported_revision"]
             commitment=committed_records.get(finding_id);finding_entry=_index_entry(index,finding_id,"finding",engagement_id,revision)
@@ -3244,6 +3410,11 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             review = load_json(engagement / review_entry["path"]) if review_entry is not None else {}
             if review_entry is None or payload["adjudication_review_ref"] not in committed_entity_ids or _governed_sha256_file(engagement / review_entry["path"]) != payload["adjudication_review_digest"] or review.get("proposed_finding_id") != finding_id or review.get("finding_revision") != expected_supersedes or finding.get("scope_provenance", {}).get("provenance", {}).get("actor", {}).get("id") != review.get("independence", {}).get("reviewer_id"):
                 raise RecordError("finding_adjudication_review_mismatch", event["event_id"])
+            if payload["status"] == "confirmed" and adjudication_event["payload"].get("confirmation_policy_version") == 1:
+                profile = review.get("confirmation_profile")
+                profile_fields = ("finding_id", "revision", "claim_state", "classification", "scope_provenance", "claims", "proof")
+                if not isinstance(profile, dict) or any(finding.get(key) != profile.get(key) for key in profile_fields):
+                    raise RecordError("finding_confirmation_profile_mismatch", event["event_id"])
             if states["claim"].get(finding_id) != payload["status"] or finding_id not in event["finding_refs"] or payload["adjudication_review_ref"] not in event["review_refs"]:
                 raise RecordError("finding_claim_state_mismatch", event["event_id"])
         if event["event_type"] == "review.higher_impact_route_completed":
@@ -3830,6 +4001,10 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         if not current_events:
             raise RecordError("scope_attestation_missing", "initialize engagement first")
         proposal = copy.deepcopy(proposal)
+        if (proposal.get("event_type") == "claim.adjudicated"
+                and proposal.get("payload", {}).get("status") == "confirmed"
+                and proposal.get("payload", {}).get("confirmation_policy_version") != 1):
+            raise RecordError("confirmation_policy_version_required", str(proposal.get("event_id")))
         if proposal.get("engagement_id") != current_events[0]["engagement_id"]:
             raise RecordError("cross_engagement_event", str(proposal.get("event_id")))
         latest_scope_hash = next(event["payload"]["scope_hash"] for event in reversed(current_events) if event["event_type"] == "scope.attested")

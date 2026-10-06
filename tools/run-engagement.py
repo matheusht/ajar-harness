@@ -3023,7 +3023,7 @@ def _run_in_pty(argv: list[str], stdin_text: str) -> str:
     return chunks.decode(errors="replace")
 
 
-def state_self_test() -> list[tuple[str, bool, str]]:
+def state_self_test(proof_output: Path | None = None) -> list[tuple[str, bool, str]]:
     append_event = _append_kernel_event
     collect_preflight = _collect_legacy_preflight
     checks: list[tuple[str, bool, str]] = []
@@ -3943,7 +3943,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         try:
             append_event(engagement, invalid)
         except RecordError as exc:
-            invalid_caught = exc.code in {"invalid_state_transition", "record_reference_invalid"}
+            invalid_caught = exc.code in {"invalid_state_transition", "record_reference_invalid", "confirmation_policy_version_required"}
         checks.append(("invalid confirmation shortcut is rejected before append", invalid_caught and (engagement / "events.jsonl").read_bytes() == before, "invalid event changed ledger"))
         zero_cost = {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "input_tokens": None, "output_tokens": None, "cost_usd": None, "human_review_seconds": 0}
         mismatch = base_event(event_id="event-mismatch", engagement_id=engagement.name, recorded_at="2026-07-10T00:01:30Z", actor_role="operator", actor_id="operator-selftest", event_type="candidate.proposed", rationale="Payload/state entity mismatch must fail.", payload={"candidate_id": "candidate-a", "source_observation_ref": "event-source", "routing_review_ref": "event-route", "activation_strength": "strong", "card_ids": ["card-1"], "status": "queued", "expected_information_gain": 1, "safety_class": "clear_local", "cost_estimate": zero_cost}, entity_refs=["event-source", "event-route"], state_changes=[{"dimension": "search", "entity_id": "candidate-b", "previous": None, "current": "queued"}]); mismatch["ex_ante"] = {"probability": 0.5, "ordinal": "strong", "recorded_before_outcome": True}
@@ -4640,8 +4640,17 @@ def state_self_test() -> list[tuple[str, bool, str]]:
             ("attempt-positive", "2026-07-10T00:15:12Z", "positive_control", "suspected_signal", "Owned known-positive fixture emits the expected marker.", ["attempt-primary"]),
             ("attempt-replay", "2026-07-10T00:15:13Z", "replay", "suspected_signal", "Fresh-state replay reproduces the bounded trace.", ["attempt-primary"]),
         ]
+        stage_output_ids = {}
         for spec in attempt_specs:
-            append_attempt(engagement, attempt_proposal(*spec))
+            output_id = f"artifact-{spec[0]}-output"
+            output_path = engagement / "evidence" / f"{spec[0]}-output.txt"
+            output_path.write_text(f"{spec[0]}: {spec[4]}\n", encoding="utf-8")
+            output_metadata = {**artifact_metadata, "artifact_id": output_id, "created_at": spec[1]}
+            _register_legacy_artifact(engagement, output_path, output_metadata)
+            proposal = attempt_proposal(*spec)
+            proposal["evidence_refs"].append(output_id)
+            append_attempt(engagement, proposal)
+            stage_output_ids[spec[0]] = output_id
         routing_control = attempt_proposal(
             "attempt-routing-negative-control",
             "2026-07-10T00:15:13.500000Z",
@@ -4853,7 +4862,17 @@ def state_self_test() -> list[tuple[str, bool, str]]:
 
         reviews_dir = engagement / "reviews"; reviews_dir.mkdir(exist_ok=True)
         def claim_review(review_id: str, recorded_at: str, verdict: str, entity_ref: str, finding_revision: int | None, origin_run: str) -> dict:
-            return {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "claim_adjudication", "proposed_finding_id": "F-selftest", "entity_ref": entity_ref, "finding_revision": finding_revision, "recorded_at": recorded_at, "input_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "preflight-selftest"], "input_hash": "sha256:" + ("3" if finding_revision is None else "4") * 64, "evidence_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "artifact-selftest"], "conflicting_evidence": [], "independence": {"reviewer_id": "reviewer-selftest", "reviewer_model": "independent-reviewer", "reviewer_run_id": f"run-{review_id}", "reviewer_session_id": f"session-{review_id}", "originating_run_id": origin_run, "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Refute the bounded mechanism and control linkage."}, "verdict": verdict, "rationale": "Primary trace, matched controls, and replay support only the bounded claim.", "corrections": [], "required_next_actions": ["preserve bounded language"], "control_applicability": [{"attempt_ref": "attempt-negative", "applicable": True, "rationale": "Matched negative branch."}, {"attempt_ref": "attempt-positive", "applicable": True, "rationale": "Known-positive detector check."}, {"attempt_ref": "attempt-replay", "applicable": True, "rationale": "Fresh-state replay."}]}
+            value = {"schema_version": 1, "review_id": review_id, "engagement_id": engagement.name, "review_type": "claim_adjudication", "proposed_finding_id": "F-selftest", "entity_ref": entity_ref, "finding_revision": finding_revision, "recorded_at": recorded_at, "input_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "artifact-selftest", "preflight-selftest"], "input_hash": "sha256:" + ("3" if finding_revision is None else "4") * 64, "evidence_refs": ["attempt-primary", "attempt-negative", "attempt-positive", "attempt-replay", "artifact-selftest"], "conflicting_evidence": [], "independence": {"reviewer_id": "reviewer-selftest", "reviewer_model": "independent-reviewer", "reviewer_run_id": f"run-{review_id}", "reviewer_session_id": f"session-{review_id}", "originating_run_id": origin_run, "fresh_context": True, "prior_verdict_visible": False, "disconfirming_objective": "Refute the bounded mechanism and control linkage."}, "verdict": verdict, "rationale": "Primary trace, matched controls, and replay support only the bounded claim.", "corrections": [], "required_next_actions": ["preserve bounded language"], "control_applicability": [{"attempt_ref": "attempt-negative", "applicable": True, "rationale": "Matched negative branch."}, {"attempt_ref": "attempt-positive", "applicable": True, "rationale": "Known-positive detector check."}, {"attempt_ref": "attempt-replay", "applicable": True, "rationale": "Fresh-state replay."}]}
+            value["input_refs"].extend(stage_output_ids.values())
+            value["evidence_refs"].extend(stage_output_ids.values())
+            return value
+        def confirmed_profile(source: dict[str, Any], revision: int, review: dict[str, Any], uncertainty: list[str] | None = None) -> dict[str, Any]:
+            profile = {key: copy.deepcopy(source[key]) for key in ("finding_id", "revision", "claim_state", "classification", "scope_provenance", "claims", "proof")}
+            profile.update(revision=revision, claim_state="confirmed")
+            profile["scope_provenance"]["provenance"].update({"actor": {"role": "reviewer", "id": review["independence"]["reviewer_id"]}, "session_id": review["independence"]["reviewer_session_id"], "model": review["independence"]["reviewer_model"], "provider": review.get("provenance", {}).get("provider")})
+            if uncertainty is not None:
+                profile["claims"]["uncertainty"] = uncertainty
+            return profile
         review1_path = reviews_dir / "review-claim-1.json"; review1 = claim_review("review-claim-1", "2026-07-10T00:15:20Z", "supported", "F-selftest", None, "event-hypothesis-running"); review1["input_hash"] = compute_review_input_hash(engagement, review1, build_reference_index(engagement)); review1_path.write_bytes(canonical_json_bytes(review1))
         review1_commit = base_event(event_id="event-review-claim-1-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:21Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit independent claim review.", payload={"record_path": "reviews/review-claim-1.json", "record_digest": sha256_file(review1_path), "record_type": "review", "record_id": "review-claim-1", "record_revision": None}); append_event(engagement, review1_commit)
         adjudication1 = base_event(event_id="event-claim-supported", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:22Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Independent review supports the bounded primitive.", payload={"entity_id": "F-selftest", "status": "supported", "review_ref": "review-claim-1", "review_digest": sha256_file(review1_path)}, review_refs=["review-claim-1"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": None, "current": "supported"}]); append_event(engagement, adjudication1)
@@ -4863,18 +4882,19 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         finding1.update({"finding_id": "F-selftest", "engagement_id": engagement.name, "revision": 1, "supersedes_revision": None, "recorded_at": "2026-07-10T00:15:23Z", "change_reason": "Initial bounded adjudication.", "claim_state": "supported"})
         finding1["scope_provenance"].update({"scope_hash": snapshot["scope_hash"], "environment_ref": "preflight-selftest", "target_refs": []}); finding1["scope_provenance"]["provenance"]["actor"] = {"role": "reviewer", "id": "reviewer-selftest"}
         finding1["adjudication"] = {"review_ref": "review-claim-1", "justification": "Independent review bound primary evidence, both controls, and replay."}; finding1["search_linkage"] = {"candidate_refs": ["candidate-c1"], "hypothesis_refs": ["hypothesis-h1"]}
-        for claim_name in ("mechanism", "reachability"): finding1["claims"][claim_name]["evidence_refs"] = ["artifact-selftest"]
-        for impact in finding1["claims"]["impact_claims"]: impact["evidence_refs"] = ["artifact-selftest"]
-        proof = finding1["proof"]; proof.update({"primary_attempt_refs": ["attempt-primary"], "negative_control_refs": ["attempt-negative"], "positive_control_refs": ["attempt-positive"], "replay_refs": ["attempt-replay"], "evidence_refs": ["artifact-selftest"], "control_applicability": {"negative": "required", "positive": "required", "replay": "required", "rationale": "Matched negative, known-positive, and fresh replay are all required."}})
-        for mapping in proof["claim_proofs"]: mapping.update({"attempt_refs": ["attempt-primary"], "artifact_refs": ["artifact-selftest"], "control_refs": ["attempt-negative", "attempt-positive"], "replay_refs": ["attempt-replay"]})
+        primary_stage_output = stage_output_ids["attempt-primary"]
+        for claim_name in ("mechanism", "reachability"): finding1["claims"][claim_name]["evidence_refs"] = ["artifact-selftest", primary_stage_output]
+        for impact in finding1["claims"]["impact_claims"]: impact["evidence_refs"] = ["artifact-selftest", primary_stage_output]
+        proof = finding1["proof"]; proof.update({"primary_attempt_refs": ["attempt-primary"], "negative_control_refs": ["attempt-negative"], "positive_control_refs": ["attempt-positive"], "replay_refs": ["attempt-replay"], "evidence_refs": ["artifact-selftest", primary_stage_output], "control_applicability": {"negative": "required", "positive": "required", "replay": "required", "rationale": "Matched negative, known-positive, and fresh replay are all required."}})
+        for mapping in proof["claim_proofs"]: mapping.update({"attempt_refs": ["attempt-primary"], "artifact_refs": ["artifact-selftest", primary_stage_output], "control_refs": ["attempt-negative", "attempt-positive"], "replay_refs": ["attempt-replay"]})
         finding_dir = engagement / "findings" / "F-selftest"; finding_dir.mkdir(parents=True); finding1_path = finding_dir / "rev-1.json"; finding1_path.write_bytes(canonical_json_bytes(finding1))
         finding1_commit = base_event(event_id="event-finding-1-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:24Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit finding revision one.", payload={"record_path": "findings/F-selftest/rev-1.json", "record_digest": sha256_file(finding1_path), "record_type": "finding-v3", "record_id": "F-selftest", "record_revision": 1}); append_event(engagement, finding1_commit)
         filing1 = base_event(event_id="event-finding-revision-1", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:25Z", actor_role="operator", actor_id="operator-selftest", event_type="finding.revised", rationale="Operator files the independently supported bounded claim.", payload={"finding_id": "F-selftest", "finding_revision": 1, "status": "supported", "finding_digest": sha256_file(finding1_path), "adjudication_review_ref": "review-claim-1", "adjudication_review_digest": sha256_file(review1_path), "adjudication_event_ref": "event-claim-supported", "supersedes_revision": None, "change_reason": "Initial bounded adjudication."}, entity_refs=["F-selftest", "event-claim-supported"], finding_refs=["F-selftest"], review_refs=["review-claim-1"]); append_event(engagement, filing1)
 
-        review2_path = reviews_dir / "review-claim-2.json"; review2 = claim_review("review-claim-2", "2026-07-10T00:15:26Z", "confirmed", "F-selftest", 1, "event-hypothesis-running"); review2["input_refs"].append("F-selftest"); review2["input_hash"] = compute_review_input_hash(engagement, review2, build_reference_index(engagement)); review2_path.write_bytes(canonical_json_bytes(review2))
+        review2_path = reviews_dir / "review-claim-2.json"; review2 = claim_review("review-claim-2", "2026-07-10T00:15:26Z", "confirmed", "F-selftest", 1, "attempt-primary"); review2["input_refs"].append("F-selftest"); review2["confirmation_profile"] = confirmed_profile(finding1, 2, review2); review2["claim_tuple_hash"] = claim_tuple_hash(review2["confirmation_profile"]); review2["replay_freshness"] = [{"attempt_ref": "attempt-replay", "fresh": True, "rationale": "Fresh owned-state replay."}]; review2["input_hash"] = compute_review_input_hash(engagement, review2, build_reference_index(engagement)); review2_path.write_bytes(canonical_json_bytes(review2))
         review2_commit = base_event(event_id="event-review-claim-2-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:27Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit fresh confirmation review.", payload={"record_path": "reviews/review-claim-2.json", "record_digest": sha256_file(review2_path), "record_type": "review", "record_id": "review-claim-2", "record_revision": None}); append_event(engagement, review2_commit)
-        adjudication2 = base_event(event_id="event-claim-confirmed", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:28Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Fresh independent review confirms the bounded primitive.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-2", "review_digest": sha256_file(review2_path)}, review_refs=["review-claim-2"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "supported", "current": "confirmed"}]); append_event(engagement, adjudication2)
-        finding2 = json.loads(json.dumps(finding1)); finding2.update({"revision": 2, "supersedes_revision": 1, "recorded_at": "2026-07-10T00:15:29Z", "change_reason": "Fresh independent replay review confirmed the bounded primitive.", "claim_state": "confirmed"}); finding2["adjudication"] = {"review_ref": "review-claim-2", "justification": "Fresh reviewer confirmed the exact bounded claim tuple."}
+        adjudication2 = base_event(event_id="event-claim-confirmed", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:28Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Fresh independent review confirms the bounded primitive.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-2", "review_digest": sha256_file(review2_path), "confirmation_policy_version": 1}, review_refs=["review-claim-2"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "supported", "current": "confirmed"}]); append_event(engagement, adjudication2)
+        finding2 = json.loads(json.dumps(finding1)); finding2.update({"revision": 2, "supersedes_revision": 1, "recorded_at": "2026-07-10T00:15:29Z", "change_reason": "Fresh independent replay review confirmed the bounded primitive.", "claim_state": "confirmed"}); finding2["adjudication"] = {"review_ref": "review-claim-2", "justification": "Fresh reviewer confirmed the exact bounded claim tuple."}; finding2["scope_provenance"] = copy.deepcopy(review2["confirmation_profile"]["scope_provenance"])
         finding2_path = finding_dir / "rev-2.json"; finding2_path.write_bytes(canonical_json_bytes(finding2))
         finding2_commit = base_event(event_id="event-finding-2-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:29Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit contiguous finding revision two.", payload={"record_path": "findings/F-selftest/rev-2.json", "record_digest": sha256_file(finding2_path), "record_type": "finding-v3", "record_id": "F-selftest", "record_revision": 2}); append_event(engagement, finding2_commit)
         filing2 = base_event(event_id="event-finding-revision-2", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:30Z", actor_role="operator", actor_id="operator-selftest", event_type="finding.revised", rationale="Operator files contiguous confirmed revision without rewriting revision one.", payload={"finding_id": "F-selftest", "finding_revision": 2, "status": "confirmed", "finding_digest": sha256_file(finding2_path), "adjudication_review_ref": "review-claim-2", "adjudication_review_digest": sha256_file(review2_path), "adjudication_event_ref": "event-claim-confirmed", "supersedes_revision": 1, "change_reason": "Fresh independent replay review confirmed the bounded primitive."}, entity_refs=["F-selftest", "event-claim-confirmed"], finding_refs=["F-selftest"], review_refs=["review-claim-2"]); append_event(engagement, filing2)
@@ -4965,14 +4985,14 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         except RecordError as exc:
             correction_block_code = exc.code
         checks.append(("confirmed_with_correction blocks filing until a fresh correction-bound adjudication", correction_block_code == "review_adjudication_not_fresh", str(correction_block_code or "unresolved correction allowed finding revision")))
-        review3_path = reviews_dir / "review-claim-3.json"; review3 = claim_review("review-claim-3", "2026-07-10T00:15:54Z", "confirmed", "F-selftest", 2, "event-regrade-correction"); review3["input_refs"].extend(["event-regrade-escalation", "attempt-escalation", "artifact-escalation", "event-regrade-correction", "event-review-poc-mismatch", "event-review-poc-reward-1", "review-poc-reward-2"]); review3["input_refs"] = sorted(set(review3["input_refs"])); review3["input_hash"] = compute_review_input_hash(engagement, review3, build_reference_index(engagement)); review3_path.write_bytes(canonical_json_bytes(review3))
+        review3_path = reviews_dir / "review-claim-3.json"; review3 = claim_review("review-claim-3", "2026-07-10T00:15:54Z", "confirmed", "F-selftest", 2, "attempt-primary"); review3["input_refs"].extend(["event-regrade-escalation", "attempt-escalation", "artifact-escalation", "event-regrade-correction", "event-review-poc-mismatch", "event-review-poc-reward-1", "review-poc-reward-2"]); review3["input_refs"] = sorted(set(review3["input_refs"])); review3["confirmation_profile"] = confirmed_profile(finding2, 3, review3, ["future versions not assessed"]); review3["claim_tuple_hash"] = claim_tuple_hash(review3["confirmation_profile"]); review3["replay_freshness"] = [{"attempt_ref": "attempt-replay", "fresh": True, "rationale": "Fresh owned-state replay."}]; review3["input_hash"] = compute_review_input_hash(engagement, review3, build_reference_index(engagement)); review3_path.write_bytes(canonical_json_bytes(review3))
         review3_commit = base_event(event_id="event-review-claim-3-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:55Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit correction adjudication.", payload={"record_path": "reviews/review-claim-3.json", "record_digest": sha256_file(review3_path), "record_type": "review", "record_id": "review-claim-3", "record_revision": None}); append_event(engagement, review3_commit)
-        adjudication3 = base_event(event_id="event-claim-correction-confirmed", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:56Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Independent review confirms corrected bounded claim.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-3", "review_digest": sha256_file(review3_path)}, review_refs=["review-claim-3"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]); append_event(engagement, adjudication3)
+        adjudication3 = base_event(event_id="event-claim-correction-confirmed", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:56Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="Independent review confirms corrected bounded claim.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-3", "review_digest": sha256_file(review3_path), "confirmation_policy_version": 1}, review_refs=["review-claim-3"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]); append_event(engagement, adjudication3)
         adjudicated_correction_state = reduce_engagement(engagement)
         missing_escalation_evidence = copy.deepcopy(adjudicated_correction_state); missing_escalation_evidence["claim_adjudications"]["F-selftest"]["input_refs"].remove("artifact-escalation")
         missing_second_review = copy.deepcopy(adjudicated_correction_state); missing_second_review["claim_adjudications"]["F-selftest"]["input_refs"].remove("review-poc-reward-2")
         checks.append(("filing adjudication binds both routed evidence and the distinct second Pocinator review", _filing_blocking_review_error(adjudicated_correction_state, "F-selftest") is None and _filing_blocking_review_error(missing_escalation_evidence, "F-selftest") == "review_adjudication_inputs_missing" and _filing_blocking_review_error(missing_second_review, "F-selftest") == "review_adjudication_inputs_missing", str(adjudicated_correction_state["outstanding_reviews"])))
-        finding3 = json.loads(json.dumps(finding2)); finding3.update({"revision": 3, "supersedes_revision": 2, "recorded_at": "2026-07-10T00:15:57Z", "change_reason": "Resolve regrade correction and evidence-routed escalation.", "claim_state": "confirmed"}); finding3["claims"]["uncertainty"] = ["future versions not assessed"]; finding3["adjudication"] = {"review_ref": "review-claim-3", "justification": "Fresh review confirms the corrected bounded tuple."}
+        finding3 = json.loads(json.dumps(finding2)); finding3.update({"revision": 3, "supersedes_revision": 2, "recorded_at": "2026-07-10T00:15:57Z", "change_reason": "Resolve regrade correction and evidence-routed escalation.", "claim_state": "confirmed"}); finding3["claims"]["uncertainty"] = ["future versions not assessed"]; finding3["adjudication"] = {"review_ref": "review-claim-3", "justification": "Fresh review confirms the corrected bounded tuple."}; finding3["scope_provenance"] = copy.deepcopy(review3["confirmation_profile"]["scope_provenance"])
         finding3_path = finding_dir / "rev-3.json"; finding3_path.write_bytes(canonical_json_bytes(finding3)); finding3_commit = base_event(event_id="event-finding-3-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:57.500000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit corrected finding revision three.", payload={"record_path": "findings/F-selftest/rev-3.json", "record_digest": sha256_file(finding3_path), "record_type": "finding-v3", "record_id": "F-selftest", "record_revision": 3}); append_event(engagement, finding3_commit)
         filing3 = base_event(event_id="event-finding-revision-3", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:58Z", actor_role="operator", actor_id="operator-selftest", event_type="finding.revised", rationale="Operator files correction-bound contiguous revision.", payload={"finding_id": "F-selftest", "finding_revision": 3, "status": "confirmed", "finding_digest": sha256_file(finding3_path), "adjudication_review_ref": "review-claim-3", "adjudication_review_digest": sha256_file(review3_path), "adjudication_event_ref": "event-claim-correction-confirmed", "supersedes_revision": 2, "change_reason": "Resolve regrade correction and evidence-routed escalation.", "resolves_review_refs": ["event-regrade-escalation", "event-regrade-correction"]}, entity_refs=["F-selftest", "event-claim-correction-confirmed"], finding_refs=["F-selftest"], review_refs=["review-claim-3"]); append_event(engagement, filing3)
         corrected_state = reduce_engagement(engagement)
@@ -4988,11 +5008,11 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         refuted_open_state = reduce_engagement(refuted_case)
         refuted_row = next(item for item in refuted_open_state["outstanding_reviews"] if item["review_ref"] == "event-regrade-refuted")
 
-        confirmation_shop = claim_review("review-claim-confirmation-shop", "2026-07-10T00:15:59.300000Z", "confirmed", "F-selftest", 3, "event-regrade-refuted"); confirmation_shop["input_refs"] = sorted({*review3["input_refs"], "event-regrade-refuted"}); confirmation_shop["input_hash"] = compute_review_input_hash(refuted_case, confirmation_shop, build_reference_index(refuted_case)); confirmation_shop_path = refuted_reviews / "claim-confirmation-shop.json"; confirmation_shop_path.write_bytes(canonical_json_bytes(confirmation_shop))
+        confirmation_shop = claim_review("review-claim-confirmation-shop", "2026-07-10T00:15:59.300000Z", "confirmed", "F-selftest", 3, "attempt-primary"); confirmation_shop["input_refs"] = sorted({*review3["input_refs"], "event-regrade-refuted"}); confirmation_shop["confirmation_profile"] = confirmed_profile(finding3, 4, confirmation_shop); confirmation_shop["claim_tuple_hash"] = claim_tuple_hash(confirmation_shop["confirmation_profile"]); confirmation_shop["replay_freshness"] = [{"attempt_ref": "attempt-replay", "fresh": True, "rationale": "Claimed fresh owned-state replay."}]; confirmation_shop["input_hash"] = compute_review_input_hash(refuted_case, confirmation_shop, build_reference_index(refuted_case)); confirmation_shop_path = refuted_reviews / "claim-confirmation-shop.json"; confirmation_shop_path.write_bytes(canonical_json_bytes(confirmation_shop))
         _append_kernel_event(refuted_case, base_event(event_id="event-claim-confirmation-shop-commit", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.400000Z", actor_role="operator", actor_id="operator-selftest", event_type="record.committed", rationale="Commit an adversarial later confirmation review.", payload={"record_path": "reviews/claim-confirmation-shop.json", "record_digest": sha256_file(confirmation_shop_path), "record_type": "review", "record_id": "review-claim-confirmation-shop", "record_revision": None}))
         confirmation_shop_code = None
         try:
-            _append_kernel_event(refuted_case, base_event(event_id="event-claim-confirmation-shop", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.500000Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="A later confirmation must not erase independent refutation debt.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-confirmation-shop", "review_digest": sha256_file(confirmation_shop_path)}, review_refs=["review-claim-confirmation-shop"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]))
+            _append_kernel_event(refuted_case, base_event(event_id="event-claim-confirmation-shop", engagement_id=engagement.name, recorded_at="2026-07-10T00:15:59.500000Z", actor_role="reviewer", actor_id="reviewer-selftest", event_type="claim.adjudicated", rationale="A later confirmation must not erase independent refutation debt.", payload={"entity_id": "F-selftest", "status": "confirmed", "review_ref": "review-claim-confirmation-shop", "review_digest": sha256_file(confirmation_shop_path), "confirmation_policy_version": 1}, review_refs=["review-claim-confirmation-shop"], state_changes=[{"dimension": "claim", "entity_id": "F-selftest", "previous": "confirmed", "current": "confirmed"}]))
         except RecordError as exc:
             confirmation_shop_code = exc.code
 
@@ -5427,12 +5447,24 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         prior_attempts = {item["attempt_id"]: item for item in read_ledger(engagement, "attempt")}
         canonical_attempt_specs = (("attempt-canonical-primary", "attempt-primary", []), ("attempt-canonical-negative", "attempt-negative", ["attempt-canonical-primary"]), ("attempt-canonical-positive", "attempt-positive", ["attempt-canonical-primary"]), ("attempt-canonical-replay", "attempt-replay", ["attempt-canonical-primary"]))
         for new_id, source_id, controls in canonical_attempt_specs:
-            attempt = {key: value for key, value in json.loads(json.dumps(prior_attempts[source_id])).items() if key not in {"sequence", "previous_hash", "record_hash"}}; attempt.update({"attempt_id": new_id, "recorded_at": now_text, "actor": {"role": "broker", "id": broker_id}, "environment_ref": current_environment, "evidence_refs": ["artifact-canonical-public"], "control_of": controls, "operation_class": "notebook"}); attempt["provenance"].update({"actor": {"role": "broker", "id": broker_id}, "session_id": broker_session}); append_attempt(engagement, attempt)
-        canonical_review = claim_review("review-canonical-public", now_text, "supported", "F-canonical-public", None, "event-hypothesis-running"); canonical_review["proposed_finding_id"] = "F-canonical-public"; canonical_review["entity_ref"] = "F-canonical-public"; canonical_review["input_refs"] = ["attempt-canonical-primary", "attempt-canonical-negative", "attempt-canonical-positive", "attempt-canonical-replay", current_environment]; canonical_review["evidence_refs"] = ["attempt-canonical-primary", "attempt-canonical-negative", "attempt-canonical-positive", "attempt-canonical-replay", "artifact-canonical-public"]; canonical_review["control_applicability"] = [{"attempt_ref": "attempt-canonical-negative", "applicable": True, "rationale": "Matched negative branch."}, {"attempt_ref": "attempt-canonical-positive", "applicable": True, "rationale": "Known-positive detector check."}, {"attempt_ref": "attempt-canonical-replay", "applicable": True, "rationale": "Fresh-state replay."}]; canonical_review["independence"]["reviewer_id"] = "reviewer-external-canonical"; canonical_review["input_hash"] = compute_review_input_hash(engagement, canonical_review, build_reference_index(engagement)); canonical_review_path = root / "canonical-review.json"; canonical_review_path.write_bytes(canonical_json_bytes(canonical_review))
+            output_id = f"artifact-{new_id}-output"
+            output_source = root / f"{new_id}-output.txt"; output_source.write_text(f"{new_id}: {prior_attempts[source_id]['observation']['statement']}\n")
+            output_path = engagement / "evidence" / f"{new_id}-output.txt"
+            output_metadata = {**canonical_metadata, "artifact_id": output_id, "acquisition_method": "broker"}
+            output_metadata_path = root / f"{new_id}-metadata.json"; output_metadata_path.write_bytes(canonical_json_bytes(output_metadata))
+            output_classification_path = root / f"{new_id}-classification.json"
+            command_classify_artifact(argparse.Namespace(engagement=engagement, metadata=output_metadata_path, source=output_source, planned_sha256=None, planned_size=None, relative_path=Path("evidence") / output_path.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, session_id=broker_session, output=output_classification_path, model=None, provider=None, tool_version=[]))
+            shutil.copyfile(output_source, output_path)
+            command_register_artifact(argparse.Namespace(engagement=engagement, file=output_path, metadata=output_metadata_path, classification=output_classification_path))
+            attempt = {key: value for key, value in json.loads(json.dumps(prior_attempts[source_id])).items() if key not in {"sequence", "previous_hash", "record_hash"}}; attempt.update({"attempt_id": new_id, "recorded_at": now_text, "actor": {"role": "broker", "id": broker_id}, "environment_ref": current_environment, "evidence_refs": [output_id], "control_of": controls, "operation_class": "notebook"}); attempt["provenance"].update({"actor": {"role": "broker", "id": broker_id}, "session_id": broker_session}); append_attempt(engagement, attempt)
+        canonical_attempt_ids = [item[0] for item in canonical_attempt_specs]
+        canonical_output_ids = [f"artifact-{attempt_id}-output" for attempt_id in canonical_attempt_ids]
+        canonical_review = claim_review("review-canonical-public", now_text, "supported", "F-canonical-public", None, "event-hypothesis-running"); canonical_review["proposed_finding_id"] = "F-canonical-public"; canonical_review["entity_ref"] = "F-canonical-public"; canonical_review["input_refs"] = [*canonical_attempt_ids, "artifact-canonical-public", *canonical_output_ids, current_environment]; canonical_review["evidence_refs"] = [*canonical_attempt_ids, "artifact-canonical-public", *canonical_output_ids]; canonical_review["control_applicability"] = [{"attempt_ref": "attempt-canonical-negative", "applicable": True, "rationale": "Matched negative branch."}, {"attempt_ref": "attempt-canonical-positive", "applicable": True, "rationale": "Known-positive detector check."}, {"attempt_ref": "attempt-canonical-replay", "applicable": True, "rationale": "Fresh-state replay."}]; canonical_review["independence"]["reviewer_id"] = "reviewer-external-canonical"; canonical_review["input_hash"] = compute_review_input_hash(engagement, canonical_review, build_reference_index(engagement)); canonical_review_path = root / "canonical-review.json"; canonical_review_path.write_bytes(canonical_json_bytes(canonical_review))
         canonical_event = base_event(event_id="event-canonical-claim-supported", engagement_id=engagement.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, event_type="claim.adjudicated", rationale="Record an external independent supported verdict without self-filing.", payload={"entity_id": "F-canonical-public", "status": "supported", "review_ref": canonical_review["review_id"], "reviewer_id": "reviewer-external-canonical", "review_digest": sha256_file(canonical_review_path)}, review_refs=[canonical_review["review_id"]], state_changes=[{"dimension": "claim", "entity_id": "F-canonical-public", "previous": None, "current": "supported"}], session_id=broker_session, operation_class="notebook"); canonical_event_path = root / "canonical-review-event.json"; canonical_event_path.write_bytes(canonical_json_bytes(canonical_event))
         subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-review-v1", str(canonical_review_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); review_signature = Path(str(canonical_review_path) + ".sig")
         review_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "record-review", "--engagement", str(engagement), "--file", str(canonical_review_path), "--event", str(canonical_event_path), "--actor-id", broker_id, "--session-id", broker_session, "--signature", str(review_signature), "--allowed-signers", str(allowed_signers_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         if review_cli.returncode != 0: raise RecordError("canonical_review_subprocess_failed", review_cli.stdout + review_cli.stderr)
+        claim_proof_base = root / "claim-proof-base"; shutil.copytree(engagement, claim_proof_base); claim_proof_base_state = reduce_engagement(claim_proof_base)
         forged_event = json.loads(json.dumps(canonical_event)); forged_event["event_id"] = "event-forged-reviewer"; forged_event["payload"]["reviewer_id"] = "forged-reviewer"; forged_path = root / "forged-review-event.json"; forged_path.write_bytes(canonical_json_bytes(forged_event)); forged_reviewer_blocked = False
         forged_cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "record-review", "--engagement", str(engagement), "--file", str(canonical_review_path), "--event", str(forged_path), "--actor-id", broker_id, "--session-id", broker_session, "--signature", str(review_signature), "--allowed-signers", str(allowed_signers_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         try: forged_reviewer_blocked = forged_cli.returncode != 0 and json.loads(forged_cli.stdout)["error"]["code"] == "canonical_review_binding_invalid"
@@ -5447,6 +5479,137 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         canonical_finding["proof"].update({"primary_attempt_refs": ["attempt-canonical-primary"], "negative_control_refs": ["attempt-canonical-negative"], "positive_control_refs": ["attempt-canonical-positive"], "replay_refs": ["attempt-canonical-replay"], "evidence_refs": ["artifact-canonical-public"]})
         for mapping in canonical_finding["proof"]["claim_proofs"]: mapping.update({"attempt_refs": ["attempt-canonical-primary"], "artifact_refs": ["artifact-canonical-public"], "control_refs": ["attempt-canonical-negative", "attempt-canonical-positive"], "replay_refs": ["attempt-canonical-replay"]})
         canonical_finding_path = root / "canonical-finding.json"; canonical_finding_path.write_bytes(canonical_json_bytes(canonical_finding)); finding_digest = sha256_file(canonical_finding_path)
+
+        confirmation_profile = {key: copy.deepcopy(canonical_finding[key]) for key in ("finding_id", "revision", "claim_state", "classification", "scope_provenance", "claims", "proof")}
+        confirmation_profile["claim_state"] = "confirmed"
+        primary_output = "artifact-attempt-canonical-primary-output"
+        for claim_name in ("mechanism", "reachability"):
+            confirmation_profile["claims"][claim_name]["evidence_refs"] = [primary_output]
+        confirmation_profile["claims"]["impact_claims"][0]["evidence_refs"] = [primary_output]
+        confirmation_profile["proof"]["evidence_refs"] = ["artifact-canonical-public", primary_output]
+        for mapping in confirmation_profile["proof"]["claim_proofs"]:
+            mapping["artifact_refs"] = ["artifact-canonical-public", primary_output]
+
+        def claim_proof_review(case: Path, name: str, verdict: str, previous: str | None, *, tweak=None) -> tuple[subprocess.CompletedProcess[str], dict[str, Any] | None, bytes]:
+            review = copy.deepcopy(canonical_review)
+            review["review_id"] = f"review-proof-{name}"
+            review["recorded_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            review["verdict"] = verdict
+            review["independence"]["reviewer_run_id"] = f"run-proof-{name}"
+            review["independence"]["reviewer_session_id"] = f"session-proof-{name}"
+            if verdict == "confirmed":
+                review["confirmation_profile"] = copy.deepcopy(confirmation_profile)
+                review["independence"]["originating_run_id"] = "attempt-canonical-primary"
+                review["confirmation_profile"]["scope_provenance"]["provenance"].update({"actor": {"role": "reviewer", "id": review["independence"]["reviewer_id"]}, "session_id": review["independence"]["reviewer_session_id"], "model": review["independence"]["reviewer_model"], "provider": review.get("provenance", {}).get("provider")})
+                review["claim_tuple_hash"] = claim_tuple_hash(review["confirmation_profile"])
+                review["replay_freshness"] = [{"attempt_ref": "attempt-canonical-replay", "fresh": True, "rationale": "Fresh owned-state replay."}]
+            if tweak is not None:
+                tweak(review)
+            if verdict == "confirmed" and "confirmation_profile" in review:
+                review["claim_tuple_hash"] = claim_tuple_hash(review["confirmation_profile"])
+            review["input_hash"] = compute_review_input_hash(case, review, build_reference_index(case))
+            review_path = root / f"{name}-review.json"; review_path.write_bytes(canonical_json_bytes(review))
+            event_payload = {"entity_id": "F-canonical-public", "status": verdict, "review_ref": review["review_id"], "reviewer_id": review["independence"]["reviewer_id"], "review_digest": sha256_file(review_path)}
+            if verdict == "confirmed": event_payload["confirmation_policy_version"] = 1
+            event = base_event(event_id=f"event-proof-{name}", engagement_id=engagement.name, recorded_at=review["recorded_at"], actor_role="broker", actor_id=broker_id, event_type="claim.adjudicated", rationale="Independent synthetic review of bounded committed proof.", payload=event_payload, review_refs=[review["review_id"]], state_changes=[{"dimension": "claim", "entity_id": "F-canonical-public", "previous": previous, "current": verdict}], session_id=broker_session, operation_class="notebook")
+            event_path = root / f"{name}-event.json"; event_path.write_bytes(canonical_json_bytes(event))
+            subprocess.run(["/usr/bin/ssh-keygen", "-q", "-Y", "sign", "-f", str(reviewer_key), "-n", "llm-redteam-harness-review-v1", str(review_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            before = (case / "events.jsonl").read_bytes()
+            cli = subprocess.run([sys.executable, str(Path(__file__).resolve()), "record-review", "--engagement", str(case), "--file", str(review_path), "--event", str(event_path), "--actor-id", broker_id, "--session-id", broker_session, "--signature", str(review_path) + ".sig", "--allowed-signers", str(allowed_signers_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            state = reduce_engagement(case) if cli.returncode == 0 or (case / "events.jsonl").read_bytes() == before else None
+            return cli, state, before
+
+        complete_proof = root / "claim-proof-complete"; shutil.copytree(claim_proof_base, complete_proof)
+        complete_cli, complete_state, _ = claim_proof_review(complete_proof, "complete", "confirmed", "supported")
+        checks.append(("claim proof before confirmation: signed public review confirms complete committed synthetic proof without filing authority", complete_cli.returncode == 0 and complete_state is not None and complete_state["claim_adjudications"]["F-canonical-public"]["status"] == "confirmed" and "F-canonical-public" not in complete_state["findings"] and complete_state["authority_requests"] == claim_proof_base_state["authority_requests"], complete_cli.stdout + complete_cli.stderr))
+
+        legacy_replay = root / "claim-proof-legacy-replay"; shutil.copytree(claim_proof_base, legacy_replay)
+        legacy_review = copy.deepcopy(canonical_review); legacy_review["review_id"] = "review-proof-legacy"; legacy_review["verdict"] = "confirmed"; legacy_review["independence"]["reviewer_run_id"] = "run-proof-legacy"; legacy_review["independence"]["reviewer_session_id"] = "session-proof-legacy"; legacy_review["input_hash"] = compute_review_input_hash(legacy_replay, legacy_review, build_reference_index(legacy_replay))
+        legacy_review_path = legacy_replay / "reviews/review-proof-legacy.json"; legacy_review_path.write_bytes(canonical_json_bytes(legacy_review))
+        legacy_commit = base_event(event_id="event-review-proof-legacy-commit", engagement_id=engagement.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, event_type="record.committed", rationale="Simulate an immutable historical review without the new confirmation profile.", payload={"record_path": "reviews/review-proof-legacy.json", "record_digest": sha256_file(legacy_review_path), "record_type": "review", "record_id": "review-proof-legacy", "record_revision": None}, session_id=broker_session, operation_class="notebook"); append_ledger_record(legacy_replay, "event", legacy_commit)
+        legacy_event = base_event(event_id="event-proof-legacy-confirmed", engagement_id=engagement.name, recorded_at=now_text, actor_role="broker", actor_id=broker_id, event_type="claim.adjudicated", rationale="Simulate a pre-policy confirmed adjudication without rewriting its evidence.", payload={"entity_id": "F-canonical-public", "status": "confirmed", "review_ref": legacy_review["review_id"], "reviewer_id": legacy_review["independence"]["reviewer_id"], "review_digest": sha256_file(legacy_review_path)}, review_refs=[legacy_review["review_id"]], state_changes=[{"dimension": "claim", "entity_id": "F-canonical-public", "previous": "supported", "current": "confirmed"}], session_id=broker_session, operation_class="notebook")
+        missing_marker_code = None
+        try: _append_kernel_event(legacy_replay, legacy_event)
+        except RecordError as exc: missing_marker_code = exc.code
+        append_ledger_record(legacy_replay, "event", legacy_event)
+        legacy_state = reduce_engagement(legacy_replay)
+        checks.append(("unmarked historical confirmation replays but a new unmarked confirmation cannot append", missing_marker_code == "confirmation_policy_version_required" and legacy_state["claim_adjudications"]["F-canonical-public"]["status"] == "confirmed", str({"new_append": missing_marker_code, "legacy": legacy_state["claim_adjudications"].get("F-canonical-public")})))
+
+        claim_proof_arms = {
+            "missing-profile": (lambda review: review.pop("confirmation_profile"), "confirmation_profile_missing_or_unbound"),
+            "missing-primary": (lambda review: review["confirmation_profile"]["proof"].update(primary_attempt_refs=[]), "confirmation_primary_missing"),
+            "missing-negative": (lambda review: review["confirmation_profile"]["proof"].update(negative_control_refs=[]), "confirmation_required_stage_missing"),
+            "missing-positive": (lambda review: review["confirmation_profile"]["proof"].update(positive_control_refs=[]), "confirmation_required_stage_missing"),
+            "missing-replay": (lambda review: review["confirmation_profile"]["proof"].update(replay_refs=[]), "confirmation_required_stage_missing"),
+            "negative-not-applicable": (lambda review: review["confirmation_profile"]["proof"].update(negative_control_refs=[], control_applicability={**review["confirmation_profile"]["proof"]["control_applicability"], "negative": "not_applicable"}), "confirmation_required_stage_missing"),
+            "replay-not-applicable": (lambda review: review["confirmation_profile"]["proof"].update(replay_refs=[], control_applicability={**review["confirmation_profile"]["proof"]["control_applicability"], "replay": "not_applicable"}), "confirmation_required_stage_missing"),
+            "wrong-kind": (lambda review: review["confirmation_profile"]["proof"].update(negative_control_refs=["attempt-canonical-primary"]), "confirmation_attempt_invalid"),
+            "wrong-scope": (lambda review: review["confirmation_profile"]["scope_provenance"].update(scope_hash="sha256:" + "0" * 64), "confirmation_profile_not_current"),
+            "wrong-environment": (lambda review: review["confirmation_profile"]["scope_provenance"].update(environment_ref="preflight-selftest"), "confirmation_profile_not_current"),
+            "unresolved-contamination": (lambda review: review["confirmation_profile"]["proof"].update(contamination_disposition="unresolved"), "confirmation_conflict_or_contamination_unresolved"),
+            "unbound-output": (lambda review: review["input_refs"].remove(primary_output), "confirmation_raw_output_missing"),
+            "missing-impact-map": (lambda review: review["confirmation_profile"]["proof"]["claim_proofs"].pop(), "confirmation_atomic_claim_map_invalid"),
+            "duplicate-impact-map": (lambda review: review["confirmation_profile"]["proof"]["claim_proofs"].append(copy.deepcopy(review["confirmation_profile"]["proof"]["claim_proofs"][-1])), "confirmation_atomic_claim_map_invalid"),
+            "inferred-impact": (lambda review: review["confirmation_profile"]["claims"]["impact_claims"][0].update(status="inferred"), "confirmation_impact_not_demonstrated"),
+            "wrong-impact-link": (lambda review: review["confirmation_profile"]["claims"]["impact_claims"][0].update(evidence_refs=["artifact-canonical-public"]), "confirmation_atomic_claim_proof_invalid"),
+            "stale-replay": (lambda review: review["replay_freshness"][0].update(fresh=False), "confirmation_replay_not_fresh"),
+            "missing-review-control": (lambda review: review["control_applicability"][0].update(applicable=False), "confirmation_control_not_reviewed"),
+            "unmatched-control": (lambda review: review["confirmation_profile"]["proof"]["claim_proofs"][0].update(control_refs=[]), "confirmation_atomic_claim_proof_invalid"),
+            "unbound-reviewer": (lambda review: review["independence"].update(reviewer_id="orchestrator-selftest"), "reviewer_signature_invalid"),
+            "stale-review-context": (lambda review: review["independence"].update(fresh_context=False), "confirmation_reviewer_not_fresh"),
+            "wrong-origin": (lambda review: review["independence"].update(originating_run_id="event-hypothesis-running"), "confirmation_origin_not_primary"),
+            "wrong-review-session": (lambda review: review["confirmation_profile"]["scope_provenance"]["provenance"].update(session_id="session-not-reviewer"), "confirmation_profile_not_current"),
+        }
+        for arm_name, (tweak, expected_error) in claim_proof_arms.items():
+            case = root / f"claim-proof-{arm_name}"; shutil.copytree(claim_proof_base, case)
+            cli, state, before = claim_proof_review(case, arm_name, "confirmed", "supported", tweak=tweak)
+            try: actual_error = json.loads(cli.stdout)["error"]["code"]
+            except (json.JSONDecodeError, KeyError): actual_error = None
+            unchanged = (case / "events.jsonl").read_bytes() == before and state is not None and state["claim_adjudications"]["F-canonical-public"]["status"] == "supported"
+            checks.append((f"claim proof before confirmation: {arm_name} cannot confirm", cli.returncode != 0 and unchanged and actual_error == expected_error, cli.stdout + cli.stderr))
+
+        for arm_name, output_ref, expected_error in (
+            ("reused-replay-output", primary_output, "confirmation_stage_output_not_distinct"),
+            ("stale-replay-output", "artifact-canonical-public", "confirmation_replay_output_not_new"),
+        ):
+            case = root / f"claim-proof-{arm_name}"; shutil.copytree(claim_proof_base, case)
+            replay_id = f"attempt-canonical-replay-{arm_name}"
+            replay_attempt = copy.deepcopy(next(item for item in read_ledger(case, "attempt") if item["attempt_id"] == "attempt-canonical-replay"))
+            for ledger_field in ("sequence", "previous_hash", "record_hash"):
+                replay_attempt.pop(ledger_field, None)
+            replay_attempt.update({"attempt_id": replay_id, "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "evidence_refs": [output_ref]})
+            append_attempt(case, replay_attempt)
+            def use_replay_variant(review: dict[str, Any]) -> None:
+                review["confirmation_profile"]["proof"]["replay_refs"] = [replay_id]
+                for mapping in review["confirmation_profile"]["proof"]["claim_proofs"]:
+                    mapping["replay_refs"] = [replay_id]
+                review["replay_freshness"] = [{"attempt_ref": replay_id, "fresh": True, "rationale": "Adversarial replay output binding."}]
+                review["input_refs"].append(replay_id)
+                review["evidence_refs"].append(replay_id)
+            cli, state, before = claim_proof_review(case, arm_name, "confirmed", "supported", tweak=use_replay_variant)
+            try: actual_error = json.loads(cli.stdout)["error"]["code"]
+            except (json.JSONDecodeError, KeyError): actual_error = None
+            unchanged = (case / "events.jsonl").read_bytes() == before and state is not None and state["claim_adjudications"]["F-canonical-public"]["status"] == "supported"
+            checks.append((f"claim proof before confirmation: {arm_name} cannot confirm", cli.returncode != 0 and unchanged and actual_error == expected_error, cli.stdout + cli.stderr))
+
+        model_only = root / "claim-proof-model-only"; shutil.copytree(claim_proof_base, model_only)
+        unresolved_cli, unresolved_state, _ = claim_proof_review(model_only, "needs-review", "needs_review", "supported")
+        model_cli, model_state, model_before = claim_proof_review(model_only, "model-agrees", "confirmed", "needs_review", tweak=lambda review: review.pop("confirmation_profile"))
+        try: model_error = json.loads(model_cli.stdout)["error"]["code"]
+        except (json.JSONDecodeError, KeyError): model_error = None
+        checks.append(("claim proof before confirmation: model agreement without proof stays needs_review", unresolved_cli.returncode == 0 and unresolved_state is not None and model_cli.returncode != 0 and model_error == "invalid_state_transition" and (model_only / "events.jsonl").read_bytes() == model_before and model_state is not None and model_state["claim_adjudications"]["F-canonical-public"]["status"] == "needs_review", unresolved_cli.stdout + model_cli.stdout + model_cli.stderr))
+
+        if proof_output is not None:
+            destination = proof_output.absolute()
+            destination.mkdir(parents=True, exist_ok=False)
+            saved_cases = ("complete", "missing-profile", "missing-negative", "negative-not-applicable", "missing-replay", "replay-not-applicable", "reused-replay-output", "stale-replay-output", "wrong-origin", "wrong-review-session")
+            for name in saved_cases:
+                shutil.copytree(root / f"claim-proof-{name}", destination / name)
+                shutil.copy2(root / f"{name}-review.json", destination / f"{name}-review.json")
+                shutil.copy2(root / f"{name}-event.json", destination / f"{name}-event.json")
+            source = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=True).stdout.strip()
+            artifact_manifest = {"source_commit": source, "suite": "run-engagement --self-test", "cases": list(saved_cases), "checks": [{"label": label, "passed": passed} for label, passed, _ in checks if label.startswith("claim proof before confirmation:")]}
+            (destination / "manifest.json").write_bytes(canonical_json_bytes(artifact_manifest))
 
         v2_source = root / "v2-finding-source"; shutil.copytree(engagement, v2_source)
         def prepare_v2_request(target_engagement: Path, request_name: str, proposal: dict[str, Any], request_time: str, *, action_executor: str | None = None, request_environment: object = ..., expires_at: str | None = "2099-07-10T00:00:00Z") -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -5571,7 +5734,7 @@ def state_self_test() -> list[tuple[str, bool, str]]:
     return checks
 
 
-def self_test() -> int:
+def self_test(proof_output: Path | None = None) -> int:
     checks: list[tuple[str, bool, str]] = []
 
     schema_problems = validate_schema_documents()
@@ -5642,7 +5805,7 @@ def self_test() -> int:
     except json.JSONDecodeError:
         unavailable_ok = False
     checks.append(("missing validator emits structured fail-closed output", unavailable_ok, unavailable.stdout + unavailable.stderr))
-    checks.extend(state_self_test())
+    checks.extend(state_self_test(proof_output))
     quarantine_test = subprocess.run(
         [sys.executable, str(Path(__file__).with_name("quarantine-self-test.py"))],
         stdin=subprocess.DEVNULL,
@@ -5668,6 +5831,7 @@ def self_test() -> int:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--self-test", action="store_true", help="run hermetic schema/record tests")
+    result.add_argument("--self-test-proof-output", type=Path, help="save synthetic claim-proof E2E records outside the temporary test directory")
     subcommands = result.add_subparsers(dest="command")
     validate = subcommands.add_parser("validate", help="validate schemas, records, fixtures, or a read-only legacy inventory")
     validate.add_argument("--schema", choices=["finding-v3", "attempt-v2", "artifact", "review", "engagement-event", "state-snapshot", "environment-preflight", "environment-preflight-v2", "report-manifest", "memory-disposition", "migration-manifest", "migration-artifact-review", "research-telemetry", "historical-case-manifest", "retrospective-evaluation", "ab-preregistration", "ab-study-evidence", "ab-readiness-report", "finding-v2-legacy"])
@@ -5942,7 +6106,7 @@ def main() -> int:
     args = parser().parse_args()
     try:
         if args.self_test:
-            return self_test()
+            return self_test(args.self_test_proof_output)
         engagement_argument = getattr(args, "engagement", None)
         if engagement_argument is not None and isinstance(args.command, str):
             forwarded = forward_action_to_broker(

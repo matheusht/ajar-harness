@@ -291,6 +291,20 @@
         }
       ]
     },
+    "confirmation_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "revision", "claim_state", "classification", "scope_provenance", "claims", "proof"],
+      "properties": {
+        "finding_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+        "revision": {"type": "integer", "minimum": 1},
+        "claim_state": {"const": "confirmed"},
+        "classification": {"$ref": "https://llm-redteam-harness.local/schemas/finding-v3.schema.json#/properties/classification"},
+        "scope_provenance": {"$ref": "https://llm-redteam-harness.local/schemas/finding-v3.schema.json#/properties/scope_provenance"},
+        "claims": {"$ref": "https://llm-redteam-harness.local/schemas/finding-v3.schema.json#/properties/claims"},
+        "proof": {"$ref": "https://llm-redteam-harness.local/schemas/finding-v3.schema.json#/properties/proof"}
+      }
+    },
     "module_level_only": {
       "type": "boolean"
     },

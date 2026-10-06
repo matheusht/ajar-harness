@@ -728,6 +728,9 @@
         "review_digest": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
         },
+        "confirmation_policy_version": {
+          "const": 1
+        },
         "reopen_hypothesis_id": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
         },

@@ -5536,7 +5536,7 @@ def state_self_test(proof_output: Path | None = None) -> list[tuple[str, bool, s
             "missing-replay": (lambda review: review["confirmation_profile"]["proof"].update(replay_refs=[]), "confirmation_required_stage_missing"),
             "negative-not-applicable": (lambda review: review["confirmation_profile"]["proof"].update(negative_control_refs=[], control_applicability={**review["confirmation_profile"]["proof"]["control_applicability"], "negative": "not_applicable"}), "confirmation_required_stage_missing"),
             "replay-not-applicable": (lambda review: review["confirmation_profile"]["proof"].update(replay_refs=[], control_applicability={**review["confirmation_profile"]["proof"]["control_applicability"], "replay": "not_applicable"}), "confirmation_required_stage_missing"),
-            "wrong-kind": (lambda review: review["confirmation_profile"]["proof"].update(negative_control_refs=["attempt-canonical-primary"]), "confirmation_attempt_invalid"),
+            "wrong-kind": (lambda review: (review["confirmation_profile"]["proof"].update(negative_control_refs=["attempt-canonical-primary"]), review["control_applicability"].append({"attempt_ref": "attempt-canonical-primary", "applicable": True, "rationale": "Review the mislabeled negative stage."})), "confirmation_attempt_invalid"),
             "wrong-scope": (lambda review: review["confirmation_profile"]["scope_provenance"].update(scope_hash="sha256:" + "0" * 64), "confirmation_profile_not_current"),
             "wrong-environment": (lambda review: review["confirmation_profile"]["scope_provenance"].update(environment_ref="preflight-selftest"), "confirmation_profile_not_current"),
             "unresolved-contamination": (lambda review: review["confirmation_profile"]["proof"].update(contamination_disposition="unresolved"), "confirmation_conflict_or_contamination_unresolved"),
@@ -5549,7 +5549,7 @@ def state_self_test(proof_output: Path | None = None) -> list[tuple[str, bool, s
             "missing-review-control": (lambda review: review["control_applicability"][0].update(applicable=False), "confirmation_control_not_reviewed"),
             "unmatched-control": (lambda review: review["confirmation_profile"]["proof"]["claim_proofs"][0].update(control_refs=[]), "confirmation_atomic_claim_proof_invalid"),
             "unbound-reviewer": (lambda review: review["independence"].update(reviewer_id="orchestrator-selftest"), "reviewer_signature_invalid"),
-            "stale-review-context": (lambda review: review["independence"].update(fresh_context=False), "confirmation_reviewer_not_fresh"),
+            "stale-review-context": (lambda review: review["independence"].update(fresh_context=False), "canonical_review_invalid"),
             "wrong-origin": (lambda review: review["independence"].update(originating_run_id="event-hypothesis-running"), "confirmation_origin_not_primary"),
             "wrong-review-session": (lambda review: review["confirmation_profile"]["scope_provenance"]["provenance"].update(session_id="session-not-reviewer"), "confirmation_profile_not_current"),
         }

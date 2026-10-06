@@ -12,6 +12,8 @@ Failure modes frozen before implementation:
 | Failure | Required observation |
 | --- | --- |
 | Scope is unsigned or its intake source/card fields are absent or malformed | `init` refuses before a research record. |
+| Signed genesis has no ready environment preflight | Source observation is rejected and the genesis ledger stays unchanged. |
+| Driver starts from signed genesis with no ready preflight | No model session starts and no research record is added. |
 | Source path escapes the target, is a symlink/non-regular file, changes bytes, or contains a secret shape | Intake refuses before a research event or model session. |
 | A routed card is outside the signed allowlist, missing, or a vuln card without `safe_signal` | The route is rejected without advancing the source frontier. |
 | Model supplies another source digest, scope hash, environment, or observation reference | Broker/kernel reject the event; the queue still names the same work. |
@@ -39,6 +41,9 @@ The verifier asserts a one-file frozen denominator, the initial
 and a `deferred` no-route branch that remains blocking. It also checks that
 invalid scope/source/card bindings fail without a new event and that a changed
 source does not make historical reduction fail while new research writes stop.
+The `negative-no-preflight` target proves a signed genesis alone cannot record
+a source observation or launch a model session; its one-event ledger remains at
+`scope.attested`.
 The host replay must start three sessions, derive its observation from the source
 text, bind all three research records to `preflight-clean-start`, and record the
 same event sequence. A separate changed-source host replay must fail before

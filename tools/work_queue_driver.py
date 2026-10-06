@@ -1283,6 +1283,12 @@ def run_driver(
             if sha256_bytes(canonical_json_bytes(launch_state)) != before_hash:
                 state = launch_state
                 continue
+            if item.get("class") in {"source_unobserved", "source_unrouted", "source_unhypothesized"}:
+                environment_ref = state["active_environment_ref"]
+                preflight = state["environment_preflights"].get(environment_ref)
+                intake = state["intake"]
+                if environment_ref is None or preflight is None or preflight["status"] != "ready" or preflight["scope_hash"] != state["scope_hash"] or (intake["observation_ref"] is not None and intake["environment_ref"] != environment_ref):
+                    raise DriverError("driver_intake_environment_not_ready")
             if isinstance(state.get("intake"), dict):
                 try:
                     _validate_intake_source(bound.engagement, state["intake"])

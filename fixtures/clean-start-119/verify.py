@@ -16,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from engagement_state import base_event, blocking_work_identities, project_current_terminal_work_state, read_ledger  # noqa: E402
+from engagement_state import base_event, blocking_work_identities, enforce_current_terminal_work_admission, project_current_terminal_work_state, read_ledger  # noqa: E402
+from engagement_records import RecordError  # noqa: E402
 
 TOOL = ROOT / "tools" / "run-engagement.py"
 STAMP = "2026-10-06T12:00:00Z"
@@ -288,6 +289,10 @@ def main() -> int:
         deferred_engagement = deferred_root / "engagements" / engagement.name
         routing_id = "event-intake-routing"
         routing = event(routing_id, "2026-10-06T12:00:02Z", "routing.assessed", "The text weakly activates a legacy-route differential; execution and access control are unproven.", {"entity_id": "source-routing", "source_observation_ref": observation_id, "activation_strength": "weak", "card_ids": ["pattern.legacy-route-differential"], "status": "assessed", "source_path": "inert-source.txt", "source_hash": source_hash, "source_size": source.stat().st_size, "scope_hash": scope_hash, "environment_ref": ENVIRONMENT_REF}, refs=[observation_id])
+        stale_route = copy.deepcopy(routing)
+        stale_route["event_id"] = "event-stale-route-after-refresh"
+        stale_route_write = append("stale-route-after-refresh", stale_route, refresh_engagement)
+        outcome["stale_refresh_route"] = {"exit_code": stale_route_write.returncode, "error_code": json.loads(stale_route_write.stdout).get("error", {}).get("code")}
         deferred = copy.deepcopy(routing)
         deferred["event_id"] = "event-intake-deferred"
         deferred["payload"]["activation_strength"] = "none"
@@ -321,6 +326,26 @@ def main() -> int:
         if append("routing", routing).returncode != 0:
             raise RuntimeError("routing append failed")
 
+        stale_workspace = output / "stale-after-route" / "target"
+        shutil.copytree(workspace, stale_workspace)
+        stale_engagement = stale_workspace / "engagements" / engagement.name
+        stale_preflight = run("preflight-stale-after-route", [
+            sys.executable, str(TOOL), "preflight", "--engagement", str(stale_engagement),
+            "--preflight-id", "preflight-stale-after-route", "--mode", "local_runtime",
+            "--target", str(stale_workspace / "inert-source.txt"), "--expected-identity", source_hash,
+            "--runtime", "/usr/bin/true", "--reproduction-argv", '["/usr/bin/true"]',
+            "--actor-role", "broker", "--actor-id", identity["actor_id"],
+            "--session-id", identity["session_id"], "--recorded-at", "2026-10-06T12:00:02.500Z",
+        ])
+        if stale_preflight.returncode != 0:
+            raise RuntimeError("stale-reference preflight failed")
+        stale_candidate = event("event-stale-candidate-after-refresh", "2026-10-06T12:00:02.700Z", "candidate.proposed", "An old source route must not create a current candidate.", {"candidate_id": "candidate-stale", "source_observation_ref": observation_id, "routing_review_ref": routing_id, "activation_strength": "weak", "card_ids": ["pattern.legacy-route-differential"], "status": "queued", "expected_information_gain": 1, "safety_class": "clear_local", "cost_estimate": {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "human_review_seconds": 0}}, refs=[observation_id, routing_id], changes=[{"dimension": "search", "entity_id": "candidate-stale", "previous": None, "current": "queued"}])
+        stale_candidate["ex_ante"] = {"probability": 0.5, "ordinal": "weak", "recorded_before_outcome": True}
+        stale_candidate_target = output / "stale-candidate" / "target"
+        shutil.copytree(stale_workspace, stale_candidate_target)
+        stale_candidate_write = append("stale-candidate-after-refresh", stale_candidate, stale_candidate_target / "engagements" / engagement.name)
+        outcome["stale_refresh_candidate"] = {"exit_code": stale_candidate_write.returncode, "error_code": json.loads(stale_candidate_write.stdout).get("error", {}).get("code")}
+
         next_item("source_unhypothesized")
         negative_hypothesis_root = output / "negative-events" / "hypothesis" / "target"
         shutil.copytree(workspace, negative_hypothesis_root)
@@ -328,6 +353,8 @@ def main() -> int:
         hypothesis_id = "hypothesis-intake-route"
         cost = {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "human_review_seconds": 0}
         hypothesis = event("event-intake-hypothesis", "2026-10-06T12:00:03Z", "hypothesis.created", "The source difference warrants one bounded local experiment, not a finding.", {"hypothesis_id": hypothesis_id, "origin_type": "target_model", "origin_ref": observation_id, "routing_review_ref": routing_id, "source_hash": source_hash, "scope_hash": scope_hash, "environment_ref": ENVIRONMENT_REF, "hypothesis_statement": "A local fixture may show the legacy route omits the owner guard used by the new route.", "suspected_invariant": "Both route variants must apply the same owner guard.", "trust_boundary": "caller owner id to route authorization guard", "attacker_path": ["inert fixture request", "legacy route", "owner guard"], "impact_ceiling": "local inert fixture only", "bounded_space": "Compare exactly two route variants using one benign owner id.", "lens_ids": ["authorization"], "card_ids": ["pattern.legacy-route-differential"], "expected_confirming_evidence": [{"evidence_type": "trace", "description": "local traces show different guard decisions for the same benign request", "required": True}], "decisive_falsifiers": ["both variants call the same guard before reading"], "cost_estimate": cost, "constraints": ["no live target", "no impact demonstration"], "next_experiment": "Run one inert, same-actor route comparison in a contained local fixture and capture guard traces.", "completion_criteria": ["both route decisions and the guard trace are recorded"], "status": "queued"}, refs=[observation_id, routing_id], changes=[{"dimension": "search", "entity_id": hypothesis_id, "previous": None, "current": "queued"}])
+        stale_hypothesis_write = append("stale-hypothesis-after-refresh", hypothesis, stale_engagement)
+        outcome["stale_refresh_hypothesis"] = {"exit_code": stale_hypothesis_write.returncode, "error_code": json.loads(stale_hypothesis_write.stdout).get("error", {}).get("code")}
         negative_hypotheses: list[dict[str, object]] = []
         for name, payload_key, value in (
             ("wrong-routing", "routing_review_ref", "event-nonexistent"),
@@ -349,6 +376,15 @@ def main() -> int:
 
         next_item("hypothesis_unrouted")
         snapshot = json.loads((engagement / "state.snapshot.json").read_text())
+        terminal_snapshot = copy.deepcopy(snapshot)
+        terminal_snapshot["coverage"] = "coverage_dry"
+        ready_after_terminal = {"event_type": "environment.preflight_recorded", "event_id": "event-ready-after-terminal", "payload": {"status": "ready", "environment_ref": "preflight-after-terminal"}}
+        try:
+            enforce_current_terminal_work_admission(terminal_snapshot, [], ready_after_terminal)
+            terminal_preflight_error = None
+        except RecordError as exc:
+            terminal_preflight_error = exc.code
+        outcome["terminal_preflight_admission"] = terminal_preflight_error
         outcome["hypothesis_ref"] = hypothesis_id
         outcome["ledger_events"] = [json.loads(line)["event_type"] for line in (engagement / "events.jsonl").read_text().splitlines()]
         outcome["snapshot_intake"] = snapshot.get("intake") if isinstance(snapshot, dict) else None
@@ -379,6 +415,8 @@ def main() -> int:
             and outcome["preflight_refresh"]["reobservation_exit"] == 0
             and outcome["preflight_refresh"]["intake_after_reobservation"]["environment_ref"] == "preflight-clean-start-refreshed"
             and outcome["preflight_refresh"]["intake_after_reobservation"]["status"] == "observed"
+            and all(outcome[key] == {"exit_code": 1, "error_code": "intake_source_superseded"} for key in ("stale_refresh_route", "stale_refresh_candidate", "stale_refresh_hypothesis"))
+            and outcome["terminal_preflight_admission"] == "intake_coverage_reopen_required"
             and snapshot["intake"]["hypothesis_ref"] == hypothesis_id
             and snapshot["intake"]["denominator"] == 1
             and snapshot["intake"]["status"] == "hypothesized"

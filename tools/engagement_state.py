@@ -902,6 +902,14 @@ def enforce_current_terminal_work_admission(
 
     event_type = proposal.get("event_type")
     payload = proposal.get("payload", {})
+    if (
+        event_type in {"environment.preflight_recorded", "environment.review_recorded"}
+        and payload.get("status") == "ready"
+        and state.get("coverage") in {"coverage_dry", "budget_bounded", "blocked"}
+        and isinstance(state.get("intake"), dict)
+        and payload.get("environment_ref") != state.get("active_environment_ref")
+    ):
+        raise RecordError("intake_coverage_reopen_required", str(proposal.get("event_id", "unknown")))
     terminal_coverage: str | None = None
     error_code: str | None = None
     if event_type == "engagement.closed":
@@ -3813,6 +3821,20 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
             reduce_engagement(engagement, allowed_record_orphans={proposal["payload"]["record_path"]})
         elif proposal.get("event_type") != "scope.attested":
             current_state = reduce_engagement(engagement)  # blocks every ordinary write after scope drift
+            event_type = proposal.get("event_type")
+            payload = proposal.get("payload", {})
+            source_ref = (
+                payload.get("source_observation_ref") if event_type in {"routing.assessed", "candidate.proposed"}
+                else payload.get("origin_ref") if event_type == "hypothesis.created" and payload.get("origin_type") == "target_model"
+                else None
+            )
+            source_event = next((event for event in reversed(current_events) if event["event_id"] == source_ref), None) if source_ref is not None else None
+            if source_event is not None and source_event["event_type"] == "observation.recorded" and source_event["payload"].get("entity_type") == "source_intake":
+                intake = current_state.get("intake")
+                if not isinstance(intake, dict) or source_ref != intake["observation_ref"] or intake["environment_ref"] != current_state["active_environment_ref"]:
+                    raise RecordError("intake_source_superseded", str(proposal.get("event_id", "unknown")))
+                if event_type == "candidate.proposed" and payload.get("routing_review_ref") != intake["routing_ref"]:
+                    raise RecordError("intake_source_superseded", str(proposal.get("event_id", "unknown")))
             enforce_current_terminal_work_admission(
                 current_state,
                 read_ledger(engagement, "attempt"),

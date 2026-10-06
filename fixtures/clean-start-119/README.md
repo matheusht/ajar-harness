@@ -21,6 +21,8 @@ Failure modes frozen before implementation:
 | No route is justified | Source remains visibly unread/deferred; coverage cannot claim dry. |
 | Terminal coverage is projected while source is unread or deferred | The source row remains blocking under `coverage_dry` and `budget_bounded`. |
 | A new ready preflight replaces the observed environment | The source pin and denominator remain; intake returns to `unread` and can be observed under the new environment. |
+| A route, candidate, or hypothesis cites the old source observation after that refresh | New public appends reject the superseded reference. |
+| A ready preflight would reopen source intake while coverage is terminal | The append requires an explicit coverage reopen first; active-coverage refresh remains allowed. |
 | Valid source and allowed signal | Observation, route, and a bounded hypothesis are linked; `next` exposes its experiment. |
 
 Run with the repository's pinned Python:

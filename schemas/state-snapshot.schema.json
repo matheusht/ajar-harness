@@ -42,6 +42,7 @@
     "cleanup",
     "memory_disposition",
     "source_hashes",
+    "intake",
     "integrity_errors"
   ],
   "properties": {
@@ -787,6 +788,9 @@
         "properties": {
           "class": {
             "enum": [
+              "source_unobserved",
+              "source_unrouted",
+              "source_unhypothesized",
               "hypothesis_ran_unadjudicated",
               "hypothesis_running_unattempted",
               "hypothesis_unrouted",
@@ -1241,6 +1245,30 @@
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
         }
       }
+    },
+    "intake": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_path", "source_hash", "source_size", "card_ids", "denominator", "status", "observation_ref", "routing_ref", "deferred_ref", "hypothesis_ref", "activation_strength", "environment_ref"],
+          "properties": {
+            "source_path": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/relative_path"},
+            "source_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+            "source_size": {"type": "integer", "minimum": 1},
+            "card_ids": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"},
+            "denominator": {"const": 1},
+            "status": {"enum": ["unread", "observed", "deferred", "routed", "hypothesized"]},
+            "observation_ref": {"type": ["string", "null"]},
+            "routing_ref": {"type": ["string", "null"]},
+            "deferred_ref": {"type": ["string", "null"]},
+            "hypothesis_ref": {"type": ["string", "null"]},
+            "activation_strength": {"enum": ["strong", "weak", "negative", null]},
+            "environment_ref": {"type": ["string", "null"]}
+          }
+        }
+      ]
     },
     "integrity_errors": {
       "type": "array",

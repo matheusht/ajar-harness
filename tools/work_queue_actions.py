@@ -11,6 +11,7 @@ from typing import Any
 
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 from engagement_state import WORK_QUEUE_CLASS_ORDER, _filing_blocking_review_error, finding_revision_lane_id, hypothesis_dispositions_hash
+from reasoned_escalation import current_card_matches, route_digest, route_holds
 from work_queue_admission import build_action_admission
 
 
@@ -390,6 +391,19 @@ def _hypothesis_action(item_class: str, engagement: Path, entity_id: str, detail
             requirements.extend(["changes queued to selected", "records the exact selected next experiment"])
             effect = "advances_item"
         elif status == "selected":
+            route = hypothesis.get("higher_impact_route")
+            if route:
+                reasons = route_holds(engagement, route, state, hypothesis["higher_impact_evidence"], proposed_at=hypothesis["created_at"])
+                if route.get("safe_signal_card_snapshot") and not current_card_matches(route):
+                    reasons.append("higher_impact_safe_signal_stale")
+                admission = state.get("higher_impact_route_reviews", {}).get(entity_id)
+                if reasons or (admission and admission.get("verdict") == "hold"):
+                    if not reasons:
+                        reasons = ["higher_impact_review_held"]
+                    return _event_action("hold_higher_impact_hypothesis", engagement, "<higher-impact-held-event-json>", [f"binds exact hypothesis {entity_id}", "changes selected to held", *reasons], effect="closes_item")
+                if admission is None:
+                    return _review_action("record_higher_impact_route_review", engagement, review_type="higher_impact_route", entity_type="hypothesis", entity_id=entity_id, requirements=[f"route digest {route_digest(route)}", "challenges output-to-precondition causal edge, discriminating test, controls, and bounded impact", "records admit or hold without claiming impact"], effect="advances_item")
+                return _event_action("run_higher_impact_hypothesis", engagement, "<higher-impact-running-event-json>", [f"binds exact hypothesis {entity_id}", f"route_digest is {route_digest(route)}", f"route_review_ref is {admission['review_ref']}", "changes selected to running only after current signed review; target execution remains separately governed"], effect="advances_item")
             requirements.extend(["changes selected to running", "records the bounded route now being executed"])
         else:
             raise RecordError("work_queue_hypothesis_status_invalid", f"{entity_id}:{status}")

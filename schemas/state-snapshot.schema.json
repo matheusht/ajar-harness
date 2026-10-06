@@ -25,6 +25,7 @@
     "outstanding_reviews",
     "proof_reviews",
     "regrade_reviews",
+    "higher_impact_route_reviews",
     "reviewer_run_models",
     "latest_coverage_review",
     "coverage",
@@ -350,6 +351,21 @@
               "null"
             ]
           },
+          "higher_impact_route": {"$ref": "https://llm-redteam-harness.local/schemas/engagement-event.schema.json#/properties/payload/properties/higher_impact_route"},
+          "higher_impact_evidence": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object", "additionalProperties": false,
+              "required": ["recorded_at", "scope_hash", "environment_ref"],
+              "properties": {
+                "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
+                "scope_hash": {"type": ["string", "null"]},
+                "environment_ref": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "created_event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "created_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"},
           "cost_estimate": {
             "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/cost"
           },
@@ -1398,6 +1414,20 @@
             ]
           },
           "verdict": {"enum": ["confirmed", "confirmed_with_correction", "needs_more_evidence", "escalation_found", "blocked", "refuted"]}
+        }
+      }
+    },
+    "higher_impact_route_reviews": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["review_ref", "event_ref", "verdict", "route_digest", "recorded_at"],
+        "properties": {
+          "review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "verdict": {"enum": ["admit", "hold"]},
+          "route_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+          "recorded_at": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"}
         }
       }
     },

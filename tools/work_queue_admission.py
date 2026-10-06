@@ -9,6 +9,7 @@ from typing import Any
 
 from engagement_records import RecordError
 from engagement_state import TRANSITIONS, _filing_ready_review_refs
+from reasoned_escalation import route_digest
 
 
 def _constraint(document: str, path: list[str], operator: str, value: Any) -> dict[str, Any]:
@@ -38,6 +39,7 @@ def _review(review_type: str, entity_ref: str, finding_revision: int | None, *co
         "coverage": "review.coverage_completed",
         "regrade": "review.regrade_completed",
         "pocinator": "review.pocinator_completed",
+        "higher_impact_route": "review.higher_impact_route_completed",
     }
     try:
         event_type = event_types[review_type]
@@ -353,6 +355,27 @@ def build_action_admission(
 
     if action_id in {"record_hypothesis_disposition", "requeue_unattempted_hypothesis"}:
         return _hypothesis_disposition(item, state, engagement, entity_id)
+    if action_id == "record_higher_impact_route_review":
+        hypothesis = state["hypotheses"][entity_id]
+        digest = route_digest(hypothesis["higher_impact_route"])
+        return _review(
+            "higher_impact_route", entity_id, None,
+            _constraint("proposal", ["route_digest"], "equals", digest),
+            _constraint("proposal", ["independence", "originating_run_id"], "equals", hypothesis["created_event_ref"]),
+            _constraint("event", ["payload", "hypothesis_id"], "equals", entity_id),
+            _constraint("event", ["payload", "route_digest"], "equals", digest),
+        )
+    if action_id in {"hold_higher_impact_hypothesis", "run_higher_impact_hypothesis"}:
+        hypothesis = state["hypotheses"][entity_id]
+        admission = _hypothesis_status_event(entity_id, hypothesis, target_status="held" if action_id.startswith("hold") else "running")
+        if action_id.startswith("run"):
+            review = state["higher_impact_route_reviews"][entity_id]
+            admission["constraints"].extend([
+                _constraint("proposal", ["payload", "route_digest"], "equals", route_digest(hypothesis["higher_impact_route"])),
+                _constraint("proposal", ["payload", "route_review_ref"], "equals", review["review_ref"]),
+                _constraint("proposal", ["review_refs"], "set_equals", [review["review_ref"]]),
+            ])
+        return admission
     if action_id == "route_review_obligation":
         return _created_hypothesis("reviewer_challenge", entity_id)
     if action_id in {"select_review_hypothesis", "run_review_hypothesis", "requeue_review_hypothesis"}:

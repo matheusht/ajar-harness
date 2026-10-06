@@ -47,7 +47,8 @@
         "regrade",
         "pocinator",
         "operator",
-        "candidate_outcome"
+        "candidate_outcome",
+        "higher_impact_route"
       ]
     },
     "proposed_finding_id": {
@@ -302,11 +303,20 @@
         "null"
       ]
     },
+    "route_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+    "causal_edge_valid": {"type": "boolean"},
+    "test_discriminates": {"type": "boolean"},
+    "controls_present": {"type": "boolean"},
+    "severity_bounded": {"type": "boolean"},
     "review_cost": {
       "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/cost"
     }
   },
   "allOf": [
+    {
+      "if": {"properties": {"review_type": {"const": "higher_impact_route"}}, "required": ["review_type"]},
+      "then": {"properties": {"proposed_finding_id": {"type": "null"}, "finding_revision": {"type": "null"}, "verdict": {"enum": ["admit", "hold"]}}, "required": ["route_digest", "causal_edge_valid", "test_discriminates", "controls_present", "severity_bounded"]}
+    },
     {
       "if": {
         "properties": {

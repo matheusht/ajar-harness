@@ -78,6 +78,7 @@
         "finding.revised",
         "review.challenge_recorded",
         "review.regrade_completed",
+        "review.higher_impact_route_completed",
         "review.pocinator_completed",
         "review.coverage_completed",
         "coverage.reopened",
@@ -432,6 +433,27 @@
           "type": "string",
           "minLength": 1
         },
+        "higher_impact_route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope_hash", "environment_ref", "evidence_refs", "surface", "effect_rung", "source_output", "target_precondition", "discriminating_test", "control_plan", "safe_signal_card_id", "safe_signal_card_digest", "safe_signal_card_snapshot", "safe_signal_objective", "proposed_impact"],
+          "properties": {
+            "scope_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+            "environment_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "evidence_refs": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"},
+            "surface": {"type": "string"},
+            "effect_rung": {"enum": ["self", "stored/persistent", "cross-user"]},
+            "source_output": {"type": "string"},
+            "target_precondition": {"type": "string"},
+            "discriminating_test": {"type": "string"},
+            "control_plan": {"type": "string"},
+            "safe_signal_card_id": {"type": "string"},
+            "safe_signal_card_digest": {"type": "string"},
+            "safe_signal_card_snapshot": {"type": "string"},
+            "safe_signal_objective": {"type": "string"},
+            "proposed_impact": {"type": "string"}
+          }
+        },
         "bounded_space": {
           "type": "string",
           "minLength": 1
@@ -538,6 +560,8 @@
             "null"
           ]
         },
+        "route_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
+        "route_review_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
         "coverage_review_ref": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
         },
@@ -1201,6 +1225,10 @@
           }
         }
       }
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "review.higher_impact_route_completed"}}, "required": ["event_type"]},
+      "then": {"properties": {"payload": {"required": ["review_type", "hypothesis_id", "review_ref", "reviewer_id", "verdict", "route_digest"]}}}
     },
     {
       "if": {

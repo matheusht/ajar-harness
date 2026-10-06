@@ -145,6 +145,7 @@
     "report.generated": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "filed_finding_revision"], "tier": "authority"},
     "review.challenge_recorded": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
     "review.coverage_completed": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
+    "review.higher_impact_route_completed": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
     "review.pocinator_completed": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
     "review.regrade_completed": {"allowed_roles": ["reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["independent_review"], "tier": "notebook"},
     "routing.assessed": {"allowed_roles": ["orchestrator", "reviewer", "broker"], "blocking_scope": "none", "required_evidence": ["observation"], "tier": "notebook"},

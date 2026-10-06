@@ -38,6 +38,7 @@ from operator_signature import (
     operator_challenge_bytes,
     verify_embedded_operator_signature,
 )
+from reasoned_escalation import current_card_matches, route_digest, route_holds
 
 LEDGERS = {
     "event": ("events.jsonl", "engagement-event", "event_id"),
@@ -68,6 +69,7 @@ EVENT_STATE_RULES = {
     "claim.adjudicated": ({"claim"}, {"claim"}),
     "finding.revised": (set(), set()),
     "review.regrade_completed": (set(), set()),
+    "review.higher_impact_route_completed": (set(), set()),
     "review.pocinator_completed": (set(), set()),
     "coverage.reopened": ({"coverage"}, {"coverage"}),
     "coverage.status_changed": ({"coverage"}, {"coverage"}),
@@ -107,7 +109,7 @@ COMMITTED_RECORD_SCHEMAS = {
 
 TRANSITIONS = {
     "claim": {None: {"needs_review", "supported"}, "needs_review": {"supported", "contaminated", "refuted"}, "supported": {"confirmed", "needs_review", "contaminated", "refuted"}, "confirmed": {"needs_review", "contaminated", "refuted"}, "contaminated": {"needs_review", "refuted"}, "refuted": {"needs_review"}},
-    "search": {None: {"queued"}, "queued": {"selected", "deferred", "blocked", "closed"}, "selected": {"running", "deferred", "blocked"}, "running": {"queued", "held", "exhausted", "deferred", "blocked", "closed"}, "held": {"queued", "closed"}, "exhausted": {"queued", "closed"}, "deferred": {"queued", "closed"}, "blocked": {"queued", "deferred", "closed"}, "closed": {"queued"}},
+    "search": {None: {"queued"}, "queued": {"selected", "deferred", "blocked", "closed"}, "selected": {"running", "held", "deferred", "blocked"}, "running": {"queued", "held", "exhausted", "deferred", "blocked", "closed"}, "held": {"queued", "closed"}, "exhausted": {"queued", "closed"}, "deferred": {"queued", "closed"}, "blocked": {"queued", "deferred", "closed"}, "closed": {"queued"}},
     "coverage": {None: {"active"}, "active": {"blocked", "coverage_dry", "budget_bounded"}, "blocked": {"active", "coverage_dry", "budget_bounded"}, "coverage_dry": {"active"}, "budget_bounded": {"active"}},
     "report": {None: {"none", "draft"}, "none": {"draft"}, "draft": {"accepted", "none"}, "accepted": {"submitted", "draft"}, "submitted": {"draft"}},
     "cleanup": {None: {"open", "completed", "not_applicable", "blocked"}, "open": {"completed", "not_applicable", "blocked"}, "blocked": {"completed", "not_applicable"}, "completed": set(), "not_applicable": set()},
@@ -2074,6 +2076,9 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
     if event_type == "review.coverage_completed":
         if event.get("actor", {}).get("role") not in ({"reviewer", "broker"} if payload.get("reviewer_id") else {"reviewer"}) or not event.get("review_refs") or payload.get("review_type") != "coverage" or payload.get("verdict") not in {"continue", "coverage_dry", "blocked"}:
             raise RecordError("coverage_review_event_invalid", event.get("event_id", "unknown"))
+    if event_type == "review.higher_impact_route_completed":
+        if event.get("actor", {}).get("role") not in {"reviewer", "broker"} or payload.get("review_type") != "higher_impact_route" or payload.get("verdict") not in {"admit", "hold"} or payload.get("review_ref") not in event.get("review_refs", []) or event.get("state_changes"):
+            raise RecordError("higher_impact_review_event_invalid", event.get("event_id", "unknown"))
     if event_type == "coverage.reopened":
         change = by_dimension.get("coverage")
         if event.get("actor", {}).get("role") != "orchestrator" or payload.get("entity_id") != engagement_id or payload.get("status") != "active" or not isinstance(payload.get("reason"), str) or not payload["reason"].strip() or payload["reason"] != event.get("rationale") or change is None or change.get("entity_id") != engagement_id or change.get("previous") not in {"coverage_dry", "budget_bounded"} or change.get("current") != "active":
@@ -2478,9 +2483,34 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
         "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
-        "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "ending_overrides": [], "budget_redeclaration_cycles": [], "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
+        "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "higher_impact_route_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "ending_overrides": [], "budget_redeclaration_cycles": [], "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [],
     }
+
+
+def _higher_impact_evidence(
+    refs: list[str], state: dict[str, Any], seen_events: dict[str, dict[str, Any]],
+    attempts: list[dict[str, Any]], artifacts: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Freeze provenance for evidence named by a route at proposal time."""
+
+    authority_sequence = max((row["sequence"] for row in seen_events.values() if row["event_type"] in {"scope.attested", "environment.preflight_recorded", "environment.review_recorded"}), default=0)
+    authority_recorded_at = max((row["recorded_at"] for row in seen_events.values() if row["event_type"] in {"scope.attested", "environment.preflight_recorded", "environment.review_recorded"}), default="")
+    attempt_by_id = {row["attempt_id"]: row for row in attempts}
+    artifact_by_id = {row["artifact_id"]: row for row in artifacts}
+    result: dict[str, dict[str, Any]] = {}
+    for ref in refs:
+        event = seen_events.get(ref)
+        if event and event["event_type"] in {"observation.recorded", "claim.adjudicated", "finding.revised"}:
+            result[ref] = {"recorded_at": event["recorded_at"], "scope_hash": state["scope_hash"] if event["sequence"] > authority_sequence else None, "environment_ref": state["active_environment_ref"] if event["sequence"] > authority_sequence else None}
+        elif ref in attempt_by_id:
+            row = attempt_by_id[ref]
+            result[ref] = {"recorded_at": row["recorded_at"], "scope_hash": row["scope_hash"], "environment_ref": row["environment_ref"]}
+        elif ref in artifact_by_id:
+            row = artifact_by_id[ref]
+            artifact_after_authority = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")) > datetime.fromisoformat(authority_recorded_at.replace("Z", "+00:00")) if authority_recorded_at else False
+            result[ref] = {"recorded_at": row["created_at"], "scope_hash": state["scope_hash"] if artifact_after_authority else None, "environment_ref": row.get("environment_ref")}
+    return result
 
 
 def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
@@ -2593,7 +2623,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                     relevant_revisions.add(review["finding_revision"] - 1)
                 permitted_prior_types = {"claim_adjudication", "regrade"} if review["review_type"] == "regrade" else ({"regrade", "pocinator"} if review["review_type"] == "pocinator" else set())
                 prior_subjects_match = all(review_run_subjects.get(prior, (None, None, "", ""))[0] == review.get("proposed_finding_id") and review_run_subjects.get(prior, (None, None, "", ""))[1] in relevant_revisions and review_run_subjects.get(prior, (None, None, "", ""))[2] in permitted_prior_types and review_run_subjects.get(prior, (None, None, "", ""))[3] == review.get("entity_ref") for prior in prior_run_ids) if prior_run_ids else True
-                independence_required = review["review_type"] in {"claim_adjudication", "regrade", "pocinator", "coverage"}; strict_independence = independence_required and event["actor"]["role"] == "broker"; reviewer_session = independence.get("reviewer_session_id"); reviewer_model = independence.get("reviewer_model"); origin_runtime_session = origin_provenance.get("runtime_session_ref"); legacy_origin_session = origin_provenance.get("session_id") if origin_actor.get("role") != "broker" else None; origin_session = origin_runtime_session or legacy_origin_session; origin_model = origin_provenance.get("model"); origin_time = datetime.fromisoformat(origin_record["recorded_at"].replace("Z", "+00:00")) if origin_record else None; review_time = datetime.fromisoformat(review["recorded_at"].replace("Z", "+00:00")); origin_precedes = bool(origin_time and (origin_time < review_time <= event_time if strict_independence else origin_time <= event_time)); same_principal = strict_independence and (independence.get("reviewer_id") == origin_actor.get("id") or reviewer_session == origin_session); same_model = strict_independence and reviewer_model == origin_model
+                independence_required = review["review_type"] in {"claim_adjudication", "regrade", "pocinator", "coverage", "higher_impact_route"}; strict_independence = independence_required and event["actor"]["role"] == "broker"; reviewer_session = independence.get("reviewer_session_id"); reviewer_model = independence.get("reviewer_model"); origin_runtime_session = origin_provenance.get("runtime_session_ref"); legacy_origin_session = origin_provenance.get("session_id") if origin_actor.get("role") != "broker" else None; origin_session = origin_runtime_session or legacy_origin_session; origin_model = origin_provenance.get("model"); origin_time = datetime.fromisoformat(origin_record["recorded_at"].replace("Z", "+00:00")) if origin_record else None; review_time = datetime.fromisoformat(review["recorded_at"].replace("Z", "+00:00")); origin_precedes = bool(origin_time and (origin_time < review_time <= event_time if strict_independence else origin_time <= event_time)); same_principal = strict_independence and (independence.get("reviewer_id") == origin_actor.get("id") or reviewer_session == origin_session); same_model = strict_independence and reviewer_model == origin_model
                 signer_fingerprint_missing = strict_independence and review["review_type"] in {"regrade", "pocinator"} and not isinstance(independence.get("reviewer_signer_fingerprint"), str)
                 if run_id in reviewer_run_ids or run_id in prior_run_ids or not prior_run_ids.issubset(reviewer_run_ids) or not prior_subjects_match or (review["review_type"] in {"regrade", "pocinator"} and not prior_run_ids) or not origin_entries or origin_record is None or not origin_precedes or (strict_independence and (not reviewer_session or not origin_session or not reviewer_model or not origin_model)) or signer_fingerprint_missing or same_principal or same_model or independence.get("prior_verdict_visible") is not False:
                     raise RecordError("review_freshness_not_bound", review["review_id"])
@@ -3031,6 +3061,40 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 raise RecordError("finding_adjudication_review_mismatch", event["event_id"])
             if states["claim"].get(finding_id) != payload["status"] or finding_id not in event["finding_refs"] or payload["adjudication_review_ref"] not in event["review_refs"]:
                 raise RecordError("finding_claim_state_mismatch", event["event_id"])
+        if event["event_type"] == "review.higher_impact_route_completed":
+            hypothesis_id = payload["hypothesis_id"]
+            hypothesis = state["hypotheses"].get(hypothesis_id)
+            route = hypothesis.get("higher_impact_route") if hypothesis else None
+            review_ref = payload["review_ref"]
+            entry = _index_entry(index, review_ref, "review", engagement_id)
+            if not route or hypothesis.get("status") != "selected" or review_ref not in committed_entity_ids or entry is None:
+                raise RecordError("higher_impact_review_subject_invalid", event["event_id"])
+            review = load_json(engagement / entry["path"])
+            digest = route_digest(route)
+            if (review.get("review_type") != "higher_impact_route" or review.get("entity_ref") != hypothesis_id or review.get("route_digest") != digest or payload.get("route_digest") != digest or review.get("verdict") != payload["verdict"] or review.get("independence", {}).get("reviewer_id") != payload["reviewer_id"] or review.get("independence", {}).get("originating_run_id") != hypothesis["created_event_ref"] or not {hypothesis["created_event_ref"], *route["evidence_refs"]}.issubset(set(review.get("input_refs", [])))):
+                raise RecordError("higher_impact_review_binding_invalid", event["event_id"])
+            reasons = route_holds(engagement, route, state, hypothesis["higher_impact_evidence"], proposed_at=hypothesis["created_at"])
+            checks = ("causal_edge_valid", "test_discriminates", "controls_present", "severity_bounded")
+            if payload["verdict"] == "admit" and (reasons or not all(review.get(key) is True for key in checks) or review.get("blocked_reason")):
+                raise RecordError("higher_impact_review_admission_invalid", event["event_id"])
+            if payload["verdict"] == "hold" and not review.get("blocked_reason"):
+                raise RecordError("higher_impact_review_hold_reason_missing", event["event_id"])
+            if hypothesis_id in state["higher_impact_route_reviews"]:
+                raise RecordError("higher_impact_review_already_recorded", event["event_id"])
+        if event["event_type"] == "hypothesis.status_changed" and payload["status"] == "running":
+            hypothesis = state["hypotheses"].get(payload["hypothesis_id"])
+            route = hypothesis.get("higher_impact_route") if hypothesis else None
+            if route:
+                reasons = route_holds(engagement, route, state, hypothesis["higher_impact_evidence"], proposed_at=hypothesis["created_at"])
+                if reasons:
+                    raise RecordError(reasons[0], event["event_id"])
+                admission = state["higher_impact_route_reviews"].get(payload["hypothesis_id"])
+                if admission is None:
+                    raise RecordError("higher_impact_review_missing", event["event_id"])
+                if admission["verdict"] != "admit":
+                    raise RecordError("higher_impact_review_held", event["event_id"])
+                if payload.get("route_digest") != route_digest(route) or payload.get("route_review_ref") != admission["review_ref"] or admission["review_ref"] not in event["review_refs"]:
+                    raise RecordError("higher_impact_run_binding_invalid", event["event_id"])
         if event["event_type"] == "hypothesis.created":
             origin_type, origin_ref = payload["origin_type"], payload["origin_ref"]
             if origin_type == "candidate":
@@ -3231,6 +3295,9 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 hypothesis["rationale"] = payload["reopening_condition"]
         elif event_type == "hypothesis.created":
             state["hypotheses"][payload["hypothesis_id"]] = {"status": payload["status"], "rationale": event["rationale"], "origin_type": payload["origin_type"], "origin_ref": payload["origin_ref"], "statement": payload["hypothesis_statement"], "suspected_invariant": payload["suspected_invariant"], "trust_boundary": payload["trust_boundary"], "attacker_path": payload["attacker_path"], "impact_ceiling": payload["impact_ceiling"], "bounded_space": payload["bounded_space"], "lens_ids": payload["lens_ids"], "card_ids": payload["card_ids"], "expected_confirming_evidence": payload["expected_confirming_evidence"], "decisive_falsifiers": payload["decisive_falsifiers"], "cost_estimate": payload["cost_estimate"], "constraints": payload["constraints"], "next_experiment": payload["next_experiment"], "running_event_ref": None, "completion_criteria": payload["completion_criteria"], "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "unresolved_questions": [], "next_route": None}
+            if payload.get("higher_impact_route"):
+                route = payload["higher_impact_route"]
+                state["hypotheses"][payload["hypothesis_id"]].update({"higher_impact_route": copy.deepcopy(route), "higher_impact_evidence": _higher_impact_evidence(route["evidence_refs"], state, seen_events, attempts, artifacts), "created_event_ref": event["event_id"], "created_at": event["recorded_at"]})
             if payload["origin_type"] == "reviewer_challenge":
                 for item in state["outstanding_reviews"]:
                     if item["review_ref"] == payload["origin_ref"] and item["status"] == "pending":
@@ -3248,6 +3315,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                         if evidence_is_new:
                             item["status"] = "evidence_collected"
                             item["resolution_input_refs"] = list(payload["supporting_evidence_refs"])
+        elif event_type == "review.higher_impact_route_completed":
+            state["higher_impact_route_reviews"][payload["hypothesis_id"]] = {"review_ref": payload["review_ref"], "event_ref": event["event_id"], "verdict": payload["verdict"], "route_digest": payload["route_digest"], "recorded_at": event["recorded_at"]}
         elif event_type == "claim.adjudicated":
             review_entry = _index_entry(index, payload["review_ref"], "review", engagement_id)
             adjudication_review = load_json(engagement / review_entry["path"])
@@ -3546,6 +3615,9 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
     # a projection older than the authoritative ledger tail.
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
+        route = proposal.get("payload", {}).get("higher_impact_route") if proposal.get("event_type") == "hypothesis.created" else None
+        if route is not None and route.get("safe_signal_card_snapshot") and not current_card_matches(route):
+            raise RecordError("higher_impact_safe_signal_missing", str(proposal.get("event_id", "unknown")))
         if completion_claims_token is not None:
             # This is before every private append-path write, including a scope-draft
             # preservation write that can precede the proposed ledger record.
@@ -3594,6 +3666,11 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
             reduce_engagement(engagement, allowed_record_orphans={proposal["payload"]["record_path"]})
         elif proposal.get("event_type") != "scope.attested":
             current_state = reduce_engagement(engagement)  # blocks every ordinary write after scope drift
+            if proposal.get("event_type") == "hypothesis.status_changed" and proposal.get("payload", {}).get("status") == "running":
+                hypothesis = current_state["hypotheses"].get(proposal["payload"].get("hypothesis_id"), {})
+                route = hypothesis.get("higher_impact_route")
+                if route is not None and not current_card_matches(route):
+                    raise RecordError("higher_impact_safe_signal_stale", str(proposal.get("event_id", "unknown")))
             enforce_current_terminal_work_admission(
                 current_state,
                 read_ledger(engagement, "attempt"),

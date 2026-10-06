@@ -157,6 +157,28 @@ def main() -> int:
         return 1
     identity = json.loads(identity_result.stdout)
     scope_hash = digest(scope.read_bytes())
+    no_preflight_workspace = output / "negative-no-preflight" / "target"
+    shutil.copytree(workspace, no_preflight_workspace)
+    no_preflight_engagement = no_preflight_workspace / "engagements" / engagement.name
+    no_preflight_event = base_event(
+        event_id="event-observation-without-preflight", engagement_id=engagement.name,
+        recorded_at="2026-10-06T12:00:01Z", actor_role="broker",
+        actor_id=identity["actor_id"], event_type="observation.recorded",
+        rationale="This source observation must be refused before a ready preflight.",
+        payload={"entity_id": "source-observation-without-preflight", "entity_type": "source_intake", "status": "recorded", "source_path": "inert-source.txt", "source_hash": source_hash, "source_size": source.stat().st_size, "scope_hash": scope_hash, "environment_ref": None},
+        session_id=identity["session_id"], operation_class="notebook",
+    )
+    no_preflight_proposal = proposals / "observation-without-preflight.json"
+    no_preflight_proposal.write_bytes(encoded(no_preflight_event))
+    no_preflight_write = run("observation-without-preflight", [sys.executable, str(TOOL), "append-event", "--engagement", str(no_preflight_engagement), "--file", str(no_preflight_proposal)])
+    try:
+        no_preflight_code = json.loads(no_preflight_write.stdout)["error"]["code"]
+    except (KeyError, ValueError):
+        no_preflight_code = None
+    outcome["no_preflight"] = {"exit_code": no_preflight_write.returncode, "error_code": no_preflight_code, "event_count": len((no_preflight_engagement / "events.jsonl").read_text().splitlines())}
+    no_preflight_driver = run("driver-without-preflight", [sys.executable, str(Path(__file__).with_name("host_replay.py")), "--workspace", str(no_preflight_workspace), "--output", str(output / "negative-no-preflight" / "run")])
+    no_preflight_driver_summary = json.loads((output / "negative-no-preflight" / "run" / "result.json").read_text())
+    outcome["no_preflight_driver"] = {"exit_code": no_preflight_driver.returncode, "error": no_preflight_driver_summary.get("error"), "event_count": len((no_preflight_engagement / "events.jsonl").read_text().splitlines()), "session_transcripts": len(list((output / "negative-no-preflight" / "run").glob("fake-session-*.json")))}
     preflight = run("preflight", [
         sys.executable, str(TOOL), "preflight", "--engagement", str(engagement),
         "--preflight-id", ENVIRONMENT_REF, "--mode", "local_runtime",
@@ -304,6 +326,8 @@ def main() -> int:
             and snapshot["intake"]["status"] == "hypothesized"
             and all(row["exit_code"] != 0 and row["event_count"] == 0 for row in negative_inits)
             and outcome["preflight"] == {"exit_code": 0, "status": "ready", "environment_ref": ENVIRONMENT_REF}
+            and outcome["no_preflight"] == {"exit_code": 1, "error_code": "intake_environment_not_ready", "event_count": 1}
+            and outcome["no_preflight_driver"] == {"exit_code": 1, "error": "driver_intake_environment_not_ready", "event_count": 1, "session_transcripts": 0}
             and snapshot["intake"]["environment_ref"] == ENVIRONMENT_REF
             and host_summary.get("intake", {}).get("environment_ref") == ENVIRONMENT_REF
             and all(row["exit_code"] != 0 and row["event_count"] == 4 for row in negative_routes)

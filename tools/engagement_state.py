@@ -2716,6 +2716,18 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         validate_temporal_search_reference(event, seen_events, index, engagement)
         payload = event["payload"]
         intake = state["intake"]
+        source_step = (
+            event["event_type"] == "observation.recorded" and payload.get("entity_type") == "source_intake"
+        ) or (
+            event["event_type"] == "routing.assessed" and isinstance(intake, dict) and payload.get("source_observation_ref") == intake["observation_ref"]
+        ) or (
+            event["event_type"] == "hypothesis.created" and isinstance(intake, dict) and payload.get("origin_type") == "target_model" and payload.get("origin_ref") == intake["observation_ref"]
+        )
+        if source_step:
+            active_environment = state["active_environment_ref"]
+            preflight = state["environment_preflights"].get(active_environment)
+            if active_environment is None or preflight is None or preflight["status"] != "ready" or preflight["scope_hash"] != state["scope_hash"] or payload.get("environment_ref") != active_environment:
+                raise RecordError("intake_environment_not_ready", event["event_id"])
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "source_intake":
             if not isinstance(intake, dict) or intake["observation_ref"] is not None or payload.get("status") != "recorded" or payload.get("source_path") != intake["source_path"] or payload.get("source_hash") != intake["source_hash"] or payload.get("source_size") != intake["source_size"] or payload.get("scope_hash") != state["scope_hash"] or payload.get("environment_ref") != state["active_environment_ref"]:
                 raise RecordError("intake_observation_binding_invalid", event["event_id"])

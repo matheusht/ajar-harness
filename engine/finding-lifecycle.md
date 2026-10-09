@@ -45,10 +45,13 @@ Nothing objected, because nothing had to. See `fixtures/preregistration/spotify-
 | stage revision evidence | researcher/orchestrator | evidence collection does not create active membership |
 | independent claim adjudication | authenticated reviewer | judgement remains separate from filing authority |
 | action-version 3 activation | signed scope operator + bound broker settlement | the exact bytes, scope, environment, lane, session, review, and ledger state are bound |
+| confirmed internal revision or draft | bound broker with active signed scope | `resolve-internal-authority` checks the exact pending request, current confirmation, and internal effect before normal settlement or `generate-report` |
 | legacy `promote` | any caller | inspection-only; always returns blocked and moves nothing |
 | legacy `demote` | any caller | inspection-only retired alias; never moves canonical bytes |
 
-The signed operator accepts the exact activation; this does not replace independent adjudication.
+The operator may accept the exact activation. For a confirmed claim, the broker may instead resolve
+only an internal finding revision or draft report from the active signed scope. External report
+acceptance and submission still require the operator. Neither route replaces independent adjudication.
 The gates check committed typed records rather than unsigned `attest.json` truth flags.
 
 ## 4. The gates

@@ -1859,6 +1859,38 @@ def command_resolve_authority(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_resolve_internal_authority(args: argparse.Namespace) -> int:
+    """Approve only a confirmed internal revision or draft from the active signed scope."""
+    require_actor(classify_command("resolve-internal-authority"), "broker")
+    _require_decision6_kernel(args.engagement)
+    _require_local_provenance("broker", args.executor_id, args.session_id)
+    recorded = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00"))
+    if abs((recorded - datetime.now(timezone.utc)).total_seconds()) > 60:
+        raise RecordError("internal_authority_time_not_current", args.request_id)
+    with engagement_lock(args.engagement.absolute()) as engagement:
+        state = reduce_engagement(engagement)
+        request = state["authority_requests"].get(args.request_id)
+        if request is not None and request["status"] == "approved":
+            prior = next((item for item in read_ledger(engagement, "event") if item["event_id"] == request["resolution_event_ref"]), None)
+            if (prior is not None and prior["event_type"] == "authority.resolved" and prior["actor"] == {"role": "broker", "id": args.executor_id}
+                    and prior["provenance"]["session_id"] == args.session_id and prior["payload"].get("scope_derived") is True
+                    and prior["payload"]["action_digest"] == request["action_digest"]):
+                emit({"ok": True, "request_id": args.request_id, "resolution": "approved", "resolution_event_ref": prior["event_id"], "replayed": True})
+                return 0
+        if request is None or request["status"] != "pending_authority":
+            raise RecordError("internal_authority_request_invalid", args.request_id)
+        event = base_event(event_id=f"event-internal-resolution-{args.request_id}", engagement_id=state["engagement_id"],
+                           recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="authority.resolved",
+                           rationale="Approve exact confirmed internal effect from signed scope; external filing remains operator-owned.",
+                           payload={"request_id": args.request_id, "request_event_ref": request["request_event_ref"],
+                                    "action_digest": request["action_digest"], "resolution": "approved", "resolved_at": args.recorded_at,
+                                    "scope_derived": True}, entity_refs=[request["request_event_ref"]],
+                           session_id=args.session_id, operation_class="authority")
+        applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+    emit({"ok": True, "request_id": args.request_id, "resolution": "approved", "resolution_event_ref": applied["event_id"], "replayed": False})
+    return 0
+
+
 def command_settle_approved_revision(args: argparse.Namespace) -> int:
     """Atomically apply a live approved revision or record its objective expiry."""
 
@@ -1917,6 +1949,21 @@ def command_settle_approved_revision(args: argparse.Namespace) -> int:
         elif request.get("status") != "approved":
             raise RecordError("approved_revision_settlement_invalid", args.authority_request_id)
         else:
+            target = request["target"]
+            filed = state["findings"].get(target["id"])
+            supplied_digest = sha256_bytes(canonical_json_bytes(supplied_finding))
+            activation = next((item for item in read_ledger(bound_engagement, "event") if item["event_type"] == "finding.revised" and item["payload"].get("authority_request_ref") == args.authority_request_id), None)
+            if (filed is not None and activation is not None and filed["revision"] == target["expected_revision"]
+                    and filed["digest"] == target["file_digest"] == supplied_digest and filed["status"] == target["claim_state"]
+                    and filed["adjudication_event_ref"] == target["adjudication_event_ref"]
+                    and filed["adjudication_review_ref"] == target["adjudication_review_ref"]
+                    and activation["actor"] == {"role": "broker", "id": args.executor_id}
+                    and activation["provenance"]["session_id"] == args.session_id
+                    and activation["payload"].get("operator_id") == args.operator_id
+                    and _governed_optional_regular_digest(bound_engagement / supplied_relative) == supplied_digest):
+                emit({"ok": True, "request_id": args.authority_request_id, "status": "applied", "finding_id": target["id"],
+                      "revision": target["expected_revision"], "event_ref": activation["event_id"], "replayed": True})
+                return 0
             expires_at = datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00")) if request.get("expires_at") is not None else None
             if expires_at is not None and now > expires_at:
                 if recorded <= expires_at:
@@ -3247,7 +3294,29 @@ def command_generate_report(args: argparse.Namespace) -> int:
         if "=" not in value:
             raise RecordError("invalid_omitted_claim", "use --omit-claim claim-id=rationale")
         claim_id, rationale = value.split("=", 1); omitted.append({"claim_id": claim_id, "rationale": rationale})
-    action = _authority_action("generate-report", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, finding_id=args.finding_id, revision=args.revision, included_claim_ids=args.include_claim, omitted_claims=omitted, operator_id=args.operator_id, recorded_at=args.recorded_at); _require_async_authority(args, action, args.recorded_at)
+    action = _authority_action("generate-report", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, finding_id=args.finding_id, revision=args.revision, included_claim_ids=args.include_claim, omitted_claims=omitted, operator_id=args.operator_id, recorded_at=args.recorded_at)
+    try:
+        _require_async_authority(args, action, args.recorded_at)
+    except RecordError as exc:
+        if exc.code != "authority_request_already_consumed":
+            raise
+        with engagement_lock(args.engagement.absolute()) as engagement:
+            state = reduce_engagement(engagement)
+            report_id = f"report-{args.finding_id}-r{args.revision}"
+            report = state["reports"].get(report_id)
+            generated = next((item for item in read_ledger(engagement, "event") if item["event_type"] == "report.generated" and item["payload"].get("report_ref") == report_id), None)
+            manifest_path = engagement / f"reports/{args.finding_id}-r{args.revision}.manifest.json"
+            manifest_bytes = _governed_regular_bytes_or_none(manifest_path) if report is not None and generated is not None else None
+            manifest = json.loads(manifest_bytes) if manifest_bytes is not None else {}
+            if (report is None or generated is None or report["finding_id"] != args.finding_id or report["finding_revision"] != args.revision
+                    or generated["payload"].get("authority_request_ref") != args.authority_request_id
+                    or generated["actor"] != {"role": "broker", "id": args.executor_id}
+                    or generated["provenance"]["session_id"] != args.session_id
+                    or manifest.get("generated_at") != args.recorded_at or manifest.get("included_claim_ids") != args.include_claim
+                    or manifest.get("omitted_claims") != omitted):
+                raise
+        emit({"valid": True, "report_id": report_id, "report_digest": manifest["report_digest"], "status": report["status"], "replayed": True})
+        return 0
     try:
         manifest = generate_report(args.engagement, args.finding_id, args.revision, args.include_claim, omitted, args.operator_id, args.recorded_at, args.authority_request_id, args.executor_id, args.session_id)
     except ValueError as exc:
@@ -6302,6 +6371,8 @@ def parser() -> argparse.ArgumentParser:
     request_authority.add_argument("--engagement", type=Path, required=True); request_authority.add_argument("--request-id", required=True); request_authority.add_argument("--action-kind", required=True); request_authority.add_argument("--action-file", type=Path, required=True); request_authority.add_argument("--lane-id", required=True); request_authority.add_argument("--actor-role", choices=["broker"], required=True); request_authority.add_argument("--actor-id", required=True); request_authority.add_argument("--session-id", required=True); request_authority.add_argument("--recorded-at", required=True); request_authority.add_argument("--expires-at", required=True); request_authority.add_argument("--reason", required=True)
     resolve_authority = subcommands.add_parser("resolve-authority", help="operator-resolve one exact pending authority request")
     resolve_authority.add_argument("--engagement", type=Path, required=True); resolve_authority.add_argument("--request-id", required=True); resolve_authority.add_argument("--resolution", choices=["approved", "rejected", "expired", "superseded"], required=True); resolve_authority.add_argument("--operator-id", required=True); resolve_authority.add_argument("--session-id", required=True); resolve_authority.add_argument("--recorded-at", required=True); resolve_authority.add_argument("--reason", required=True)
+    internal_authority = subcommands.add_parser("resolve-internal-authority", help="broker-resolve only a confirmed internal revision or draft from signed scope")
+    internal_authority.add_argument("--engagement", type=Path, required=True); internal_authority.add_argument("--request-id", required=True); internal_authority.add_argument("--executor-id", required=True); internal_authority.add_argument("--session-id", required=True); internal_authority.add_argument("--recorded-at", required=True)
     settle_revision = subcommands.add_parser("settle-approved-revision", help="atomically apply one live approved finding revision or record its objective expiry")
     settle_revision.add_argument("--engagement", type=Path, required=True); settle_revision.add_argument("--file", type=Path, required=True); settle_revision.add_argument("--resolve-review", action="append"); settle_revision.add_argument("--operator-id", required=True); settle_revision.add_argument("--recorded-at", required=True); settle_revision.add_argument("--authority-request-id", required=True); settle_revision.add_argument("--lane-id", required=True); settle_revision.add_argument("--executor-id", required=True); settle_revision.add_argument("--session-id", required=True)
     confirm_zone2 = subcommands.add_parser("confirm-zone2", help="record one fresh operator confirmation before one Zone-2 artifact is created")
@@ -6386,6 +6457,7 @@ def _command_handlers() -> dict[str, object]:
             "override-ending": command_override_ending,
             "request-authority": command_request_authority,
             "resolve-authority": command_resolve_authority,
+            "resolve-internal-authority": command_resolve_internal_authority,
             "settle-approved-revision": command_settle_approved_revision,
             "confirm-zone2": command_confirm_zone2,
             "register-artifact": command_register_artifact,

@@ -427,6 +427,30 @@ def build_action_admission(
             _constraint("proposal", ["observation", "source"], "one_of", ["broker", "runtime", "source_inspection", "model_report"]),
             *_attempt_scope(state),
         )
+    if action_id == "record_hunter_pair":
+        hypothesis = state.get("hypotheses", {}).get(entity_id)
+        comparison = hypothesis.get("source_comparison") if isinstance(hypothesis, dict) else None
+        if not isinstance(comparison, dict) or hypothesis.get("status") != "running" or not isinstance(hypothesis.get("running_event_ref"), str):
+            raise RecordError("work_queue_admission_hypothesis_missing", entity_id)
+        constraints = [_constraint("proposal", ["schema_version"], "equals", 1)]
+        for name, kind, assessment, source in (
+            ("primary", "primary", "suspected_signal", comparison["primary_path"]),
+            ("control", "negative_control", "held", comparison["control_path"]),
+        ):
+            constraints.extend([
+                _constraint("proposal", [name, "kind"], "equals", kind),
+                _constraint("proposal", [name, "assessment"], "equals", assessment),
+                _constraint("proposal", [name, "surface"], "equals", source),
+                _constraint("proposal", [name, "hypothesis_ref"], "equals", entity_id),
+                _constraint("proposal", [name, "experiment_ref"], "equals", hypothesis["running_event_ref"]),
+                _constraint("proposal", [name, "scope_hash"], "equals", state.get("scope_hash")),
+                _constraint("proposal", [name, "environment_ref"], "equals", state.get("active_environment_ref")),
+            ])
+        constraints.extend([
+            _constraint("proposal", ["primary", "control_of"], "set_equals", []),
+            _constraint("proposal", ["control", "control_of"], "length_equals", 1),
+        ])
+        return _spec([{"name": "proposal", "argument": "--file"}], constraints)
     if action_id == "route_review_obligation":
         return _created_hypothesis("reviewer_challenge", entity_id)
     if action_id in {"select_review_hypothesis", "run_review_hypothesis", "requeue_review_hypothesis"}:

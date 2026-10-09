@@ -183,6 +183,12 @@ class HunterViewWorkflowTest(unittest.TestCase):
         for path in (outside, link, linked_directory / outside.name, hard, fifo, git / "object"):
             with self.subTest(path=path), self.assertRaises(HunterViewError):
                 self.compile(target_inputs=(path,))
+        hard.unlink()
+        (self.workspace / "src" / "route.txt").write_text('password="synthetic-password-value"\n', encoding="utf-8")
+        with self.assertRaises(HunterViewError) as secret:
+            self.compile()
+        self.assertEqual(secret.exception.code, "hunter_view_target_input_secret_shaped")
+        (self.workspace / "src" / "route.txt").write_text("owned marker\n", encoding="utf-8")
         with self.assertRaises(HunterViewError):
             self.compile(byte_budget=1)
         vuln = self.cards / "vulns" / "fixture-vuln" / "SKILL.md"

@@ -29,6 +29,7 @@ from pathlib import Path
 from unittest import mock
 
 import work_queue_driver as queue_driver
+import driver_action_admission
 from claude_work_session import MODEL_AUTH_ENV_KEYS
 from docker_session_runtime import (
     OWNER_LABEL,
@@ -36,6 +37,7 @@ from docker_session_runtime import (
     DockerRuntimeLimits,
 )
 from engagement_records import (
+    RecordError,
     build_reference_index,
     canonical_json_bytes,
     sha256_bytes,
@@ -290,6 +292,69 @@ if result.returncode != 0 or json.loads(result.stdout).get("ok") is not True:
 print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01}))
 '''
 
+FAKE_HUNTER_PAIR = r'''#!/usr/local/bin/python3
+import json
+import pathlib
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+view = pathlib.Path("/workspace")
+prompt = json.loads(sys.argv[-1])
+brief = json.loads((view / "brief.json").read_text())
+proposal = json.loads((view / "contracts/proposal-template.json").read_text())
+comparison = brief["hypothesis"]["source_comparison"]
+for name, attempt_id, source in (("primary", "attempt-hunter-primary", comparison["primary_path"]), ("control", "attempt-hunter-control", comparison["control_path"])):
+    attempt = proposal[name]
+    attempt["attempt_id"] = attempt_id
+    attempt["recorded_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    attempt["surface"] = source
+    attempt["action_summary"] = "Claimed impact without parent proof."
+    attempt["observation"]["statement"] = "Parent must replace this child statement."
+    attempt["assessment"] = "suspected_signal" if name == "primary" else "held"
+proposal["primary_raw_sha256"] = next(row["digest"] for row in brief["target_inputs"] if row["source_path"] == comparison["primary_path"])
+proposal["control_raw_sha256"] = next(row["digest"] for row in brief["target_inputs"] if row["source_path"] == comparison["control_path"])
+proposal["control"]["control_of"] = [proposal["primary"]["attempt_id"]]
+argv = list(prompt["container_action_transport"]["argv"])
+index = argv.index("--arguments-json") + 1
+arguments = json.loads(argv[index])
+proposal_path = pathlib.Path("/scratch/hunter-pair.json")
+argv[index] = json.dumps([str(proposal_path) if value == "/scratch/hunter-action-input.json" else value for value in arguments], separators=(",", ":"))
+
+def submit(candidate):
+    proposal_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n")
+    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return result.returncode, json.loads(result.stdout)
+
+bad_hash = json.loads(json.dumps(proposal))
+bad_hash["primary_raw_sha256"] = "sha256:" + "0" * 64
+if submit(bad_hash)[0] == 0:
+    raise SystemExit(77)
+missing_control = json.loads(json.dumps(proposal))
+del missing_control["control"]
+if submit(missing_control)[0] == 0:
+    raise SystemExit(78)
+wrong_source = json.loads(json.dumps(proposal))
+wrong_source["primary"]["surface"] = "src/not-allowlisted.txt"
+if submit(wrong_source)[0] == 0:
+    raise SystemExit(79)
+secret_claim = json.loads(json.dumps(proposal))
+secret_claim["primary"]["action_summary"] = 'password="synthetic-password-value"'
+secret_result = submit(secret_claim)
+if secret_result[0] == 0 or secret_result[1].get("error", {}).get("code") != "driver_hunter_output_secret_shaped":
+    raise SystemExit(81)
+result = submit(proposal)
+if EXPECT_LOST_ACK:
+    accepted = result[0] != 0 and result[1].get("error", {}).get("code") == "driver_action_broker_execution_failed"
+else:
+    accepted = result[0] == 0 and result[1].get("ok") is True
+if not accepted:
+    raise SystemExit(73)
+if submit(proposal)[0] == 0:
+    raise SystemExit(80)
+print(json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01}))
+'''
+
 
 def _docker_owned_ids(docker: Path, kind: str) -> frozenset[str]:
     if kind == "container":
@@ -502,7 +567,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
 
-    def _seed_running_hypothesis(self, engagement: Path) -> None:
+    def _seed_running_hypothesis(self, engagement: Path, source_comparison: dict | None = None) -> None:
         zero_cost = {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 0, "input_tokens": None, "output_tokens": None, "cost_usd": None, "human_review_seconds": 0}
         cards = ["llm07.system-prompt-leakage", "task-reframing", "adjudication-oracle"]
         events = [
@@ -514,7 +579,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
         events.extend([
             candidate,
             base_event(event_id="event-hunter-selected", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:07Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="candidate.selected", rationale="Choose the only bounded synthetic candidate.", payload={"candidate_id": "candidate-hunter", "status": "selected", "reason": "only bounded synthetic candidate"}, state_changes=[{"dimension": "search", "entity_id": "candidate-hunter", "previous": "queued", "current": "selected"}]),
-            base_event(event_id="event-hunter-hypothesis", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:08Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.created", rationale="Create the one bounded current hypothesis.", payload={"hypothesis_id": "hypothesis-hunter", "origin_type": "candidate", "origin_ref": "candidate-hunter", "candidate_ref": "candidate-hunter", "hypothesis_statement": "The owned route contains the distinctive benign marker.", "suspected_invariant": "Only the allowlisted route exposes the marker.", "trust_boundary": "owned source reader to owned route", "attacker_path": ["owned reader", "route"], "impact_ceiling": "clear_local source inspection", "bounded_space": "one allowlisted route file", "lens_ids": ["authorization"], "card_ids": cards, "expected_confirming_evidence": [{"evidence_type": "trace", "description": "exact benign marker", "required": True}], "decisive_falsifiers": ["marker absent"], "cost_estimate": zero_cost, "constraints": ["read only", "no target contact"], "next_experiment": "read the exact allowlisted route once", "completion_criteria": ["truthful primary attempt"], "status": "queued"}, entity_refs=["candidate-hunter"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": None, "current": "queued"}]),
+            base_event(event_id="event-hunter-hypothesis", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:08Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.created", rationale="Create the one bounded current hypothesis.", payload={"hypothesis_id": "hypothesis-hunter", "origin_type": "candidate", "origin_ref": "candidate-hunter", "candidate_ref": "candidate-hunter", "hypothesis_statement": "The owned route contains the distinctive benign marker.", "suspected_invariant": "Only the allowlisted route exposes the marker.", "trust_boundary": "owned source reader to owned route", "attacker_path": ["owned reader", "route"], "impact_ceiling": "clear_local source inspection", "bounded_space": "one allowlisted route file", "lens_ids": ["authorization"], "card_ids": cards, "expected_confirming_evidence": [{"evidence_type": "trace", "description": "exact benign marker", "required": True}], "decisive_falsifiers": ["marker absent"], "cost_estimate": zero_cost, "constraints": ["read only", "no target contact"], "next_experiment": "read the exact allowlisted route once", "completion_criteria": ["truthful primary attempt"], "status": "queued", **({"source_comparison": source_comparison} if source_comparison is not None else {})}, entity_refs=["candidate-hunter"], state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": None, "current": "queued"}]),
             base_event(event_id="event-hunter-hypothesis-selected", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:09Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.status_changed", rationale="Select the bounded hypothesis.", payload={"hypothesis_id": "hypothesis-hunter", "status": "selected", "reason": "execute bounded source inspection", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "selected for one attempt", "unresolved_questions": [], "next_route": "read exact route"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": "queued", "current": "selected"}]),
             base_event(event_id="event-hunter-hypothesis-running", engagement_id=engagement.name, recorded_at="2026-08-26T12:00:10Z", actor_role="orchestrator", actor_id="orchestrator-docker-queue", event_type="hypothesis.status_changed", rationale="Begin the bounded source inspection.", payload={"hypothesis_id": "hypothesis-hunter", "status": "running", "reason": "execute bounded source inspection", "experiment_refs": [], "control_refs": [], "supporting_evidence_refs": [], "conflicting_evidence_refs": [], "disposition_rationale": "await one primary attempt", "unresolved_questions": [], "next_route": "read exact route"}, state_changes=[{"dimension": "search", "entity_id": "hypothesis-hunter", "previous": "selected", "current": "running"}]),
         ])
@@ -887,6 +952,161 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
             self.assertEqual(manifest["view_digest"], entry["cognitive_view"]["view_digest"])
             self.assertIn("exclusion_policy", manifest)
             self.assertEqual(validate_record(result, "work-queue-driver"), [])
+
+    @unittest.skipUnless(
+        LIVE_IMAGE,
+        "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
+    )
+    def test_real_docker_hunter_parent_records_matched_source_pair(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("the strong Docker runtime currently supports local Docker Desktop on Darwin")
+        docker_text = shutil.which("docker")
+        if docker_text is None or not SSH_KEYGEN.is_file():
+            self.skipTest("Docker or ssh-keygen unavailable")
+        docker = Path(docker_text).resolve(strict=True)
+        before_containers = _docker_owned_ids(docker, "container")
+        before_networks = _docker_owned_ids(docker, "network")
+        lose_ack = os.environ.get("HARNESS_HUNTER_RESULT_LOST_ACK") == "1"
+        with tempfile.TemporaryDirectory(prefix="docker-hunter-pair-") as temporary:
+            root = Path(temporary).resolve()
+            workspace = root / "target"
+            engagement = workspace / "engagements" / "docker-hunter-pair"
+            engagement.mkdir(parents=True)
+            self._seed_current_signed_dry_review(root, workspace, engagement)
+            primary = workspace / "src" / "a-primary.txt"
+            control = workspace / "src" / "b-control.txt"
+            primary.parent.mkdir()
+            primary.write_text("owned synthetic marker green\n", encoding="utf-8")
+            control.write_text("owned synthetic marker blue\n", encoding="utf-8")
+            collect_preflight(
+                engagement, preflight_id="preflight-docker-hunter-pair", mode="package",
+                target=primary, expected_identity=sha256_file(primary),
+                runtime=Path(sys.executable).resolve(),
+                reproduction_argv=[str(Path(sys.executable).resolve()), "-c", "pass"],
+                operator_id="operator-docker-queue-test",
+                recorded_at="2026-08-26T12:00:03.500000Z",
+                operator_redaction_attested=True, endpoint_identity="local", account_role="owner",
+            )
+            self._seed_running_hypothesis(engagement, {
+                "primary_path": "src/a-primary.txt",
+                "control_path": "src/b-control.txt",
+                "signal": "green",
+            })
+            state = reduce_engagement(engagement)
+            item = queue_command_payload("next", state, engagement)["item"]
+            self.assertEqual(item["next_action"]["action_id"], "record_hunter_pair")
+            stale_view = compile_hunter_view(
+                workspace=workspace, engagement=engagement, state=state, item=item,
+                target_inputs=(primary, control), methodology_root=ROOT / "skills",
+            )
+            try:
+                control.write_text("changed control output\n", encoding="utf-8")
+                with self.assertRaises(HunterViewError):
+                    stale_view.assert_current(workspace=workspace, engagement=engagement, state=state, item=item, methodology_root=ROOT / "skills")
+            finally:
+                stale_view.close()
+                control.write_text("owned synthetic marker blue\n", encoding="utf-8")
+            control.write_text('password="synthetic-password-value"\n', encoding="utf-8")
+            with self.assertRaises(HunterViewError) as secret_output:
+                compile_hunter_view(workspace=workspace, engagement=engagement, state=state, item=item, target_inputs=(primary, control), methodology_root=ROOT / "skills")
+            self.assertEqual(secret_output.exception.code, "hunter_view_target_input_secret_shaped")
+            control.write_text("owned synthetic marker blue\n", encoding="utf-8")
+            self.assertEqual(read_ledger(engagement, "attempt"), [])
+            inspected = subprocess.run([
+                sys.executable, str(ROOT / "tools" / "run-work-queue.py"), "inspect-hunter-view",
+                "--workspace", str(workspace), "--engagement", str(engagement),
+                "--read-only-input", str(primary), "--read-only-input", str(control),
+            ], cwd=workspace, text=True, capture_output=True, check=False)
+            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+            self.assertEqual(json.loads(inspected.stdout)["inspection"]["view_type"], "hunter-current-v1")
+            direct = self._run_cli(workspace, "record-hunter-pair", "--engagement", str(engagement), "--file", str(primary))
+            self.assertNotEqual(direct.returncode, 0)
+            self.assertIn("hunter_pair_requires_parent_broker", direct.stdout + direct.stderr)
+            self.assertEqual(read_ledger(engagement, "attempt"), [])
+            original_compile = queue_driver.compile_hunter_view
+
+            def compile_with_test_provider(**arguments: object) -> object:
+                packet = original_compile(**arguments)  # type: ignore[arg-type]
+                os.chmod(packet.runtime, 0o700)
+                provider = packet.runtime / "fake-claude"
+                provider.write_text(textwrap.dedent(FAKE_HUNTER_PAIR).replace("/usr/local/bin/python3", LIVE_PYTHON).replace("EXPECT_LOST_ACK", str(lose_ack)), encoding="utf-8")
+                provider.chmod(0o555)
+                os.chmod(packet.runtime, 0o555)
+                return packet
+
+            backend = DockerQueueBackend(
+                image=LIVE_IMAGE, python_executable=LIVE_PYTHON, docker_executable=docker,
+                limits=DockerRuntimeLimits(memory_bytes=256 * 1024 * 1024, cpu_count=1.0, pids=64, nofile=256, scratch_bytes=16 * 1024 * 1024, scratch_inodes=2048, shm_bytes=4 * 1024 * 1024, shm_inodes=256),
+            )
+            module = driver_action_admission._run_engagement_module()
+            original_execute = module.execute_broker_command
+
+            def execute_with_optional_lost_ack(**arguments: object) -> object:
+                outcome = original_execute(**arguments)
+                if lose_ack and arguments.get("command") == "record-hunter-pair" and outcome[0] == 0:
+                    raise RuntimeError("simulated lost acknowledgment after commit")
+                return outcome
+
+            try:
+                with (
+                    mock.patch("work_queue_driver.compile_hunter_view", side_effect=compile_with_test_provider),
+                    mock.patch.dict(os.environ, {**{key: "" for key in MODEL_AUTH_ENV_KEYS}, "ANTHROPIC_API_KEY": "fixture-parent-api-key"}, clear=False),
+                    mock.patch.object(module, "execute_broker_command", side_effect=execute_with_optional_lost_ack),
+                ):
+                    result = run_driver(
+                        workspace=workspace, engagement=engagement,
+                        executable=Path("/harness/fake-claude"), model=WORKER_MODEL,
+                        reviewer_model=REVIEWER_MODEL,
+                        budget=DriverBudget(1, 45.0, 30.0, None),
+                        docker_backend=backend, read_only_inputs=(primary, control),
+                    )
+            finally:
+                self.assertEqual(_docker_owned_ids(docker, "container"), before_containers)
+                self.assertEqual(_docker_owned_ids(docker, "network"), before_networks)
+            attempts = read_ledger(engagement, "attempt")
+            pair = [row for row in attempts if row["attempt_id"] in {"attempt-hunter-primary", "attempt-hunter-control"}]
+            self.assertEqual(len(pair), 2, result)
+            self.assertEqual([row["kind"] for row in pair], ["primary", "negative_control"])
+            self.assertEqual(pair[1]["control_of"], [pair[0]["attempt_id"]])
+            self.assertEqual(pair[0]["observation"]["source"], "broker")
+            self.assertEqual(pair[1]["observation"]["source"], "broker")
+            self.assertIn(sha256_file(primary), pair[0]["observation"]["statement"])
+            self.assertIn(sha256_file(control), pair[1]["observation"]["statement"])
+            self.assertNotIn("Parent must replace", repr(pair))
+            self.assertNotIn("Claimed impact", repr(pair))
+            self.assertIn("hypothesis_ran_unadjudicated", {row["class"] for row in reduce_engagement(engagement)["work_queue"]})
+            bad_contract = next(row for row in read_ledger(engagement, "event") if row["event_id"] == "event-hunter-hypothesis")
+            bad_contract = {key: json.loads(json.dumps(value)) for key, value in bad_contract.items() if key not in {"sequence", "previous_hash", "record_hash"}}
+            bad_contract["event_id"] = "event-hunter-bad-comparison"
+            bad_contract["recorded_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            bad_contract["payload"]["hypothesis_id"] = "hypothesis-bad-comparison"
+            bad_contract["state_changes"][0]["entity_id"] = "hypothesis-bad-comparison"
+            bad_contract["payload"]["source_comparison"]["signal"] = 'password="synthetic-password-value"'
+            before_events = (engagement / "events.jsonl").read_bytes()
+            with self.assertRaises(RecordError) as unsafe:
+                _append_kernel_event(engagement, bad_contract)
+            self.assertEqual(unsafe.exception.code, "source_comparison_invalid")
+            self.assertEqual((engagement / "events.jsonl").read_bytes(), before_events)
+            output_text = os.environ.get("HARNESS_HUNTER_RESULT_OUTPUT_DIR")
+            if output_text:
+                output = Path(output_text).resolve()
+                output.mkdir(parents=True, exist_ok=False)
+                shutil.copyfile(primary, output / "primary.txt")
+                shutil.copyfile(control, output / "control.txt")
+                shutil.copyfile(engagement / "attempts.jsonl", output / "attempts.jsonl")
+                retained = result["history"][0]["view_manifest"]
+                shutil.copyfile(engagement / retained["relative_path"], output / "view-manifest.json")
+                source_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
+                (output / "result.json").write_bytes(canonical_json_bytes({
+                    "schema_version": 1, "source_head": source_head, "driver_status": result["status"],
+                    "run_ref": result["run_ref"], "attempt_ids": [row["attempt_id"] for row in pair],
+                    "docker_image": LIVE_IMAGE, "docker_python": LIVE_PYTHON,
+                    "provider": "owned fake provider", "budget": result["budget"],
+                    "lost_ack_simulated": lose_ack,
+                    "source_hashes": [sha256_file(primary), sha256_file(control)],
+                    "manifest_digest": retained["digest"],
+                    "queue_classes": [row["class"] for row in reduce_engagement(engagement)["work_queue"]],
+                }))
 
     @unittest.skipUnless(
         LIVE_IMAGE,

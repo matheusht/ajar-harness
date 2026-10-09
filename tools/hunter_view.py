@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
+from engagement_records import RecordError, canonical_json_bytes, detect_secret_classes, sha256_bytes
 from engagement_state import read_governed_file, read_ledger
 from task_notice import compile_hunter_notices
 
@@ -37,6 +37,7 @@ REQUIRED_HYPOTHESIS_FIELDS = (
 )
 EXPOSED_HYPOTHESIS_FIELDS = REQUIRED_HYPOTHESIS_FIELDS + (
     "supporting_evidence_refs", "conflicting_evidence_refs", "unresolved_questions", "next_route",
+    "source_comparison",
 )
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -154,6 +155,8 @@ def _regular_target_input(workspace: Path, supplied: Path) -> tuple[str, bytes]:
         data = _read_relative_regular(workspace, relative, max_bytes=DEFAULT_BYTE_BUDGET, one_link=True)
     except HunterViewError as exc:
         raise HunterViewError("hunter_view_target_input_invalid") from exc
+    if detect_secret_classes(data):
+        raise HunterViewError("hunter_view_target_input_secret_shaped")
     return relative.as_posix(), data
 
 
@@ -220,6 +223,28 @@ def _attempt_template(*, state: dict[str, Any], action: dict[str, Any], hypothes
         "contamination": {"status": "none_observed", "sources": [], "note": "Current-only compiled view; report any observed contamination instead."},
         "cost": {"wall_seconds": 0, "model_seconds": 0, "tool_seconds": 0, "target_calls": 0, "model_calls": 1, "input_tokens": None, "output_tokens": None, "cost_usd": None, "human_review_seconds": 0},
     }
+
+
+def _proposal_template(*, state: dict[str, Any], action: dict[str, Any], hypothesis_id: str, hypothesis: dict[str, Any]) -> dict[str, Any]:
+    primary = _attempt_template(state=state, action=action, hypothesis_id=hypothesis_id)
+    comparison = hypothesis.get("source_comparison")
+    if comparison is None:
+        return primary
+    control = copy.deepcopy(primary)
+    primary["experiment_ref"] = hypothesis["running_event_ref"]
+    control["experiment_ref"] = hypothesis["running_event_ref"]
+    primary["surface"] = comparison["primary_path"]
+    primary["observation"]["source"] = "broker"
+    primary["assessment"] = "suspected_signal"
+    control["attempt_id"] = "attempt-REPLACE-WITH-CONTROL-ID"
+    control["surface"] = comparison["control_path"]
+    control["observation"]["source"] = "broker"
+    control["kind"] = "negative_control"
+    control["assessment"] = "held"
+    control["control_of"] = [primary["attempt_id"]]
+    return {"schema_version": 1, "primary": primary, "control": control,
+            "primary_raw_sha256": "sha256:REPLACE-WITH-PRIMARY-HASH",
+            "control_raw_sha256": "sha256:REPLACE-WITH-CONTROL-HASH"}
 
 
 def _evidence_inputs(engagement: Path, state: dict[str, Any], hypothesis: dict[str, Any]) -> list[tuple[dict[str, Any], bytes]]:
@@ -303,7 +328,7 @@ class HunterView:
     def assert_current(self, *, workspace: Path, engagement: Path, state: dict[str, Any], item: dict[str, Any], methodology_root: Path, schema_root: Path | None = None) -> None:
         hypothesis_id = self.manifest["hypothesis_id"]
         current_hypothesis = state.get("hypotheses", {}).get(hypothesis_id)
-        current_view = {field: copy.deepcopy(current_hypothesis.get(field)) for field in EXPOSED_HYPOTHESIS_FIELDS} if isinstance(current_hypothesis, dict) else None
+        current_view = {field: copy.deepcopy(current_hypothesis.get(field)) for field in EXPOSED_HYPOTHESIS_FIELDS if field in current_hypothesis or field != "source_comparison"} if isinstance(current_hypothesis, dict) else None
         if _stable_action(item) != self.manifest["action"] or current_view != self.manifest["hypothesis"] or state.get("scope_hash") != self.manifest["scope_digest"]:
             raise HunterViewError("hunter_view_stale")
         current_cards = _methodology_cards(methodology_root.resolve(strict=True), [row["id"] for row in self.manifest["methodology"]])
@@ -321,7 +346,7 @@ class HunterView:
         if _current_task_notices(engagement, hypothesis_id)["commitment"] != self.manifest["task_notices"]:
             raise HunterViewError("hunter_view_stale")
         schemas = Path(__file__).resolve().parents[1] / "schemas" if schema_root is None else schema_root.resolve(strict=True)
-        current_template = _attempt_template(state=state, action=self.manifest["action"], hypothesis_id=hypothesis_id)
+        current_template = _proposal_template(state=state, action=self.manifest["action"], hypothesis_id=hypothesis_id, hypothesis=current_view)
         current_contract = {
             "proposal_template_digest": sha256_bytes(canonical_json_bytes(current_template)),
             "attempt_schema_digest": sha256_bytes(_read_relative_regular(schemas, Path("attempt-v2.schema.json"), max_bytes=DEFAULT_BYTE_BUDGET, one_link=False)),
@@ -341,7 +366,7 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
     hypothesis = state.get("hypotheses", {}).get(hypothesis_id)
     if not isinstance(hypothesis, dict) or hypothesis.get("status") != "running" or any(field not in hypothesis or hypothesis[field] is None for field in REQUIRED_HYPOTHESIS_FIELDS):
         raise HunterViewError("hunter_view_hypothesis_invalid")
-    hypothesis_view = {field: copy.deepcopy(hypothesis.get(field)) for field in EXPOSED_HYPOTHESIS_FIELDS}
+    hypothesis_view = {field: copy.deepcopy(hypothesis.get(field)) for field in EXPOSED_HYPOTHESIS_FIELDS if field in hypothesis or field != "source_comparison"}
     action = _stable_action(item)
     cards = _methodology_cards(methodology_root.resolve(strict=True), hypothesis_view["card_ids"])
     scope_hash = state.get("scope_hash")
@@ -362,12 +387,23 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
         {"slot": f"input-{index:03d}", "target_relative_path": path, "reason": "explicitly_allowlisted_for_admitted_experiment", "digest": sha256_bytes(data), "size": len(data)}
         for index, (path, data) in enumerate(inputs)
     ]
+    comparison = hypothesis_view.get("source_comparison")
+    if comparison is not None and (
+        not isinstance(comparison, dict)
+        or set(comparison) != {"primary_path", "control_path", "signal"}
+        or {comparison["primary_path"], comparison["control_path"]} != {entry["target_relative_path"] for entry in input_entries}
+        or len(input_entries) != 2
+        or not isinstance(comparison["signal"], str)
+        or not comparison["signal"].isascii()
+        or not comparison["signal"].isprintable()
+    ):
+        raise HunterViewError("hunter_view_source_comparison_invalid")
     evidence = _evidence_inputs(engagement, state, hypothesis_view)
     evidence_entries = [metadata for metadata, _data in evidence]
     task_notices = _current_task_notices(engagement, hypothesis_id)
     treatment = "compiled_current_only_with_task_notices" if task_notices["commitment"] else "compiled_current_only"
     corpus_digest = sha256_bytes(canonical_json_bytes({"target_inputs": input_entries, "evidence_inputs": evidence_entries, "task_notices": task_notices["commitment"]}))
-    proposal_template = _attempt_template(state=state, action=action, hypothesis_id=hypothesis_id)
+    proposal_template = _proposal_template(state=state, action=action, hypothesis_id=hypothesis_id, hypothesis=hypothesis_view)
     schemas = Path(__file__).resolve().parents[1] / "schemas" if schema_root is None else schema_root.resolve(strict=True)
     attempt_schema = _read_relative_regular(schemas, Path("attempt-v2.schema.json"), max_bytes=DEFAULT_BYTE_BUDGET, one_link=False)
     common_schema = _read_relative_regular(schemas, Path("research-common.schema.json"), max_bytes=DEFAULT_BYTE_BUDGET, one_link=False)
@@ -375,7 +411,7 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
         "proposal_template_digest": sha256_bytes(canonical_json_bytes(proposal_template)),
         "attempt_schema_digest": sha256_bytes(attempt_schema),
         "common_schema_digest": sha256_bytes(common_schema),
-        "recorder_owned_fields": ["sequence", "previous_hash", "record_hash", "actor", "provenance.actor", "provenance.session_id", "provenance.runtime_session_ref", "provenance.model", "provenance.provider", "provenance.cognitive_principal", "provenance.view_type", "provenance.view_digest", "provenance.input_corpus_digest", "provenance.treatment"],
+        "recorder_owned_fields": ["sequence", "previous_hash", "record_hash", "actor", "provenance.actor", "provenance.session_id", "provenance.runtime_session_ref", "provenance.model", "provenance.provider", "provenance.cognitive_principal", "provenance.view_type", "provenance.view_digest", "provenance.input_corpus_digest", "provenance.treatment", *(["recorded_at", "action_summary", "observation", "redaction_attestation"] if comparison is not None else [])],
     }
     commitment = {
         "compiler_version": COMPILER_VERSION, "view_type": VIEW_VERSION, "principal": "hunter",
@@ -390,14 +426,14 @@ def compile_hunter_view(*, workspace: Path, engagement: Path, state: dict[str, A
     manifest = {**commitment, "view_digest": view_digest}
     brief = {
         "schema_version": 1, "principal": "hunter", "view_digest": view_digest, "treatment": treatment,
-        "task": f"Execute exactly one bounded experiment and submit exactly one truthful {proposal_template['kind']} attempt through the authenticated broker.",
+        "task": ("Compare the exact primary and held-control source bytes and submit both under one broker admission." if comparison is not None else f"Execute exactly one bounded experiment and submit exactly one truthful {proposal_template['kind']} attempt through the authenticated broker."),
         "hypothesis": hypothesis_view, "action": action,
         "safety_constraints": {"signed_scope": "scope.md", "scope_digest": scope_hash, "impact_ceiling": hypothesis_view["impact_ceiling"], "constraints": hypothesis_view["constraints"]},
-        "target_inputs": [{"slot": entry["slot"], "path": f"target-inputs/{entry['slot']}", "reason": entry["reason"], "digest": entry["digest"]} for entry in input_entries],
+        "target_inputs": [{"slot": entry["slot"], "path": f"target-inputs/{entry['slot']}", "reason": entry["reason"], "digest": entry["digest"], **({"source_path": entry["target_relative_path"]} if comparison is not None else {})} for entry in input_entries],
         "evidence_inputs": [{"reference": entry["reference"], "path": f"evidence/{entry['slot']}", "reason": entry["reason"], "digest": entry["digest"], "media_type": entry["media_type"]} for entry in evidence_entries],
         "task_notices": task_notices["brief"],
         "unknowns": list(hypothesis_view.get("unresolved_questions", [])),
-        "stop_conditions": ["one broker-accepted attempt is recorded", "the experiment reaches a scope or capability ceiling", "required evidence is unavailable"],
+        "stop_conditions": ["one broker-accepted primary/control pair is recorded" if comparison is not None else "one broker-accepted attempt is recorded", "the experiment reaches a scope or capability ceiling", "required evidence is unavailable"],
         "forbidden": list(EXCLUDED_CLASSES),
     }
     submit = b"Read brief.json and contracts/proposal-template.json. Replace every REPLACE value truthfully. Do not add sequence, previous_hash, or record_hash; the broker materializes them. Save the proposal in /scratch and invoke the exact container_action_transport argv from the session prompt. The broker overwrites recorder and cognitive provenance and accepts the action once.\n"

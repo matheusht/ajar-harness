@@ -2367,6 +2367,16 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         raise RecordError("duplicate_event_state_dimension", event["event_id"])
     payload = event.get("payload", {})
     engagement_id = event.get("engagement_id")
+    if event_type == "hypothesis.created" and "source_comparison" in payload:
+        comparison = payload["source_comparison"]
+        paths = [comparison["primary_path"], comparison["control_path"]]
+        if (paths[0] == paths[1] or any(
+            not isinstance(path, str) or path.startswith("/") or "\\" in path
+            or any(part in {"", ".", "..", ".git", "engagements"} for part in path.split("/"))
+            for path in paths
+        ) or not comparison["signal"].isascii() or not comparison["signal"].isprintable()
+            or any(detect_secret_classes(value.encode("utf-8")) for value in [*paths, comparison["signal"]])):
+            raise RecordError("source_comparison_invalid", "bounded source comparison is unsafe")
     if event_type == "engagement.blocked" and event.get("actor", {}).get("role") != "operator":
         raise RecordError("engagement_block_not_operator", event.get("event_id", "unknown"))
     capability = classify_event(event_type, payload)
@@ -3971,6 +3981,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             if payload.get("higher_impact_route"):
                 route = payload["higher_impact_route"]
                 state["hypotheses"][payload["hypothesis_id"]].update({"higher_impact_route": copy.deepcopy(route), "higher_impact_evidence": _higher_impact_evidence(route["evidence_refs"], state, seen_events, attempts, artifacts), "created_event_ref": event["event_id"], "created_at": event["recorded_at"]})
+            if "source_comparison" in payload:
+                state["hypotheses"][payload["hypothesis_id"]]["source_comparison"] = copy.deepcopy(payload["source_comparison"])
             if payload["origin_type"] == "reviewer_challenge":
                 for item in state["outstanding_reviews"]:
                     if item["review_ref"] == payload["origin_ref"] and item["status"] == "pending":
@@ -4529,3 +4541,38 @@ def append_attempt(engagement: Path, proposal: dict[str, Any]) -> dict[str, Any]
         from engagement_views import write_views
         write_views(engagement, snapshot)
         return record
+
+
+def append_attempt_pair(engagement: Path, primary_proposal: dict[str, Any], control_proposal: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Commit a broker-observed primary and its held control as one ledger replacement."""
+
+    with engagement_lock(engagement) as engagement:
+        reduce_engagement(engagement)
+        records = read_ledger(engagement, "attempt")
+        primary = materialize_ledger_record("attempt", primary_proposal, records)
+        control = materialize_ledger_record("attempt", control_proposal, [*records, primary])
+        if (primary["kind"] != "primary" or control["kind"] != "negative_control"
+                or control["assessment"] != "held" or control["control_of"] != [primary["attempt_id"]]
+                or any(control[key] != primary[key] for key in ("hypothesis_ref", "experiment_ref", "scope_hash", "environment_ref"))):
+            raise RecordError("hunter_attempt_pair_invalid", "primary and held control must share the selected experiment")
+        index = build_reference_index(engagement)
+        errors = validate_record_references(primary, "attempt-v2", index)
+        index.setdefault(primary["attempt_id"], []).append({
+            "type": "attempt", "engagement_id": primary["engagement_id"],
+            "revision": None, "path": "attempts.jsonl", "recorded_at": primary["recorded_at"],
+        })
+        errors.extend(validate_record_references(control, "attempt-v2", index))
+        if errors:
+            raise RecordError("record_reference_invalid", "hunter pair references do not resolve", errors)
+        ledger_path = engagement / LEDGERS["attempt"][0]
+        prior = read_governed_file(ledger_path)
+        atomic_write(ledger_path, prior + canonical_json_bytes(primary) + canonical_json_bytes(control))
+        try:
+            snapshot = reduce_engagement(engagement)
+        except Exception:
+            atomic_write(ledger_path, prior)
+            raise
+        write_snapshot(engagement, snapshot)
+        from engagement_views import write_views
+        write_views(engagement, snapshot)
+        return primary, control

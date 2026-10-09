@@ -183,11 +183,13 @@ body reads and redirects. Shutdown closes active client and upstream sockets, th
 250 ms cancellation/reaping grace; an expired worker fails closed after owned descriptors are
 released and the close state is made retry-safe.
 
-Before acknowledging completion, the parent persists a redacted receipt to
+Before target contact, the parent persists a redacted `begun` receipt. Before acknowledging
+completion, it persists the final receipt to
 `.work-queue-network-receipts.jsonl` under the engagement lock. The file contains at most 256 rows
 and 256 KiB, never request headers or bodies, and is reloaded on broker restart. Corrupt, symlinked,
-or hard-linked receipt storage fails closed. If persistence fails, the network result remains
-uncertain and is not acknowledged to the worker.
+or hard-linked receipt storage fails closed. Current-session `begun` markers survive receipt
+rotation. If persistence fails, target contact does not start or the result remains uncertain
+and is not acknowledged to the worker.
 
 Explicit target access is narrower still. A `network-policy-v1` block in the current signed
 `scope.md` must authorize the exact `target_fetch` operation, scheme, lowercase DNS hostname,
@@ -286,6 +288,11 @@ run, register that exact manifest plus its linked enumeration as artifacts.
 `--corpus-enumeration-ref` takes the manifest artifact ID, not that digest. If a budget boundary is
 reached without the option, the driver returns `operator_required` and does not record
 `budget_bounded`.
+
+For a hunter session, the parent keeps the full view manifest in the target engagement under
+`driver-view-manifests/`. The run history gives its relative path and digest. The disposable
+hunter projection is still removed after the session; the retained manifest lets an operator
+check included files, reasons, and exclusions against the recorded view digest.
 
 ## What the test lanes prove
 

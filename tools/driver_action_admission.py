@@ -1548,13 +1548,20 @@ class DriverActionBroker:
                 prior = read_governed_file(path, require_single_link=True)
             except FileNotFoundError:
                 prior = b""
-            self._decode_network_receipts(prior)
+            prior_records = self._decode_network_receipts(prior)
             rows = prior.splitlines(keepends=True)
-            if len(rows) >= NETWORK_RECEIPTS_MAX_ROWS:
-                rows = rows[-(NETWORK_RECEIPTS_MAX_ROWS - 1):]
             combined = b"".join(rows) + data
-            while len(combined) > NETWORK_RECEIPTS_MAX_BYTES and rows:
-                rows.pop(0)
+            while (len(rows) >= NETWORK_RECEIPTS_MAX_ROWS or len(combined) > NETWORK_RECEIPTS_MAX_BYTES) and rows:
+                removable = next((index for index, old in enumerate(prior_records) if not (
+                    old["operation"] == "target_fetch"
+                    and old["status"] == "begun"
+                    and old["runtime_session_ref"] == self._admission.get("runtime_session_ref")
+                    and old["action_id"] == self._admission.get("action_id")
+                )), None)
+                if removable is None:
+                    raise RecordError("driver_network_receipt_oversize", str(row.get("operation")))
+                rows.pop(removable)
+                prior_records.pop(removable)
                 combined = b"".join(rows) + data
             if len(combined) > NETWORK_RECEIPTS_MAX_BYTES:
                 raise RecordError("driver_network_receipt_oversize", str(row.get("operation")))
@@ -2500,6 +2507,13 @@ class DriverActionBroker:
                     or not _neutral_tail_is_allowed(self._admission, state, bound)
                 ):
                     raise RecordError("driver_target_fetch_state_stale", "admission")
+            self._persist_network_receipt({
+                "operation": "target_fetch",
+                "request_id": request_id,
+                "method": request["method"],
+                "url_sha256": sha256_bytes(request["url"].encode("utf-8")),
+                "status": "begun",
+            })
             status, headers, body = self._network_scope.pinned_request(
                 policy=policy,
                 operation="target_fetch",

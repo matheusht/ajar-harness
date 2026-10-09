@@ -128,6 +128,15 @@
             "scope_hash": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
           }
         },
+        "view_manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relative_path", "digest"],
+          "properties": {
+            "relative_path": {"type": "string", "pattern": "^driver-view-manifests/driver-[0-9a-f]{32}-[1-9][0-9]*\\.json$"},
+            "digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"}
+          }
+        },
         "cognitive_view": {
             "type": "object",
             "additionalProperties": false,

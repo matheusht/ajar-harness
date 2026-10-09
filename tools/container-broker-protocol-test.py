@@ -374,6 +374,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         scope = network_scope.scope_with_network_policy(
             host="sink.invalid", path="/allowed", method="GET"
         )
+        (self.root / "scope.md").write_bytes(scope)
         state = {"scope_hash": sha256_bytes(scope)}
         self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
         logical_request = client.target_fetch_request_id(
@@ -387,7 +388,6 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         with (
             mock.patch.object(admission, "bound_engagement_lock", bound),
             mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
-            mock.patch.object(admission, "read_governed_file", return_value=scope),
             mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
             mock.patch.object(
                 network_scope,
@@ -415,13 +415,13 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         changed_scope = network_scope.scope_with_network_policy(
             host="sink.invalid", path="/reattested", method="GET"
         )
+        (self.root / "scope.md").write_bytes(changed_scope)
         changed_state = {"scope_hash": sha256_bytes(changed_scope)}
         with (
             mock.patch.object(admission, "bound_engagement_lock", bound),
             mock.patch.object(
                 admission, "_reduce_engagement_unchecked", return_value=changed_state
             ),
-            mock.patch.object(admission, "read_governed_file", return_value=changed_scope),
             mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
             mock.patch.object(
                 network_scope,
@@ -1130,6 +1130,71 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(self.broker._network_gateway.request_budget, 32)
         self.assertEqual(self.broker._network_gateway._started, set())
         self.assertEqual(self.broker._network_gateway._uncertain, {request_id})
+
+    def test_target_contact_crash_retains_request_tombstone(self) -> None:
+        # Failure modes: death after contact but before response, then a restarted parent
+        # with the same admission must neither forget the ID nor contact the target again.
+        scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        (self.root / "scope.md").write_bytes(scope)
+        state = {"scope_hash": sha256_bytes(scope)}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        request_id = client.target_fetch_request_id(
+            self.manifest, url="https://sink.invalid/allowed", method="GET"
+        )
+        request = {
+            "request_id": request_id,
+            "url": "https://sink.invalid/allowed",
+            "method": "GET",
+        }
+        with (
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(network_scope, "pinned_request", side_effect=SystemExit("parent died")) as sink,
+        ):
+            with self.assertRaises(SystemExit):
+                self.broker._execute_target_fetch(request)
+        sink.assert_called_once()
+        receipt_path = self.root / admission.NETWORK_RECEIPTS_FILE
+        self.assertTrue(receipt_path.exists(), "contact began without a durable request marker")
+        self.broker.close()
+        recovered_admission = broker_admission()
+        recovered_admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        self.broker = admission.DriverActionBroker(
+            engagement_fd=self.engagement_fd,
+            logical_engagement=self.root,
+            admission=recovered_admission,
+            execution_deadline=time.monotonic() + 30.0,
+            docker_identity={"container_id": CONTAINER_ID, "container_config_digest": CONFIG_DIGEST},
+            docker_session_key=KEY,
+        )
+        self.broker.activate_docker()
+        with mock.patch.object(network_scope, "pinned_request") as repeated_contact:
+            result = self.broker._execute_target_fetch(request)
+        self.assertEqual(result[0], 1)
+        repeated_contact.assert_not_called()
+        receipts = [json.loads(line) for line in receipt_path.read_bytes().splitlines()]
+        self.assertTrue(any(row.get("request_id") == request_id for row in receipts))
+
+    def test_receipt_rotation_keeps_current_target_request_marker(self) -> None:
+        # Failure mode: unrelated provider receipts evict the only marker before restart.
+        request_id = "sha256:" + "a" * 64
+        marker = {
+            "operation": "target_fetch", "request_id": request_id,
+            "method": "GET", "url_sha256": sha256_bytes(b"https://sink.invalid/allowed"),
+            "status": "begun",
+        }
+        with mock.patch.object(admission, "NETWORK_RECEIPTS_MAX_ROWS", 4):
+            self.broker._persist_network_receipt(marker)
+            for _ in range(5):
+                self.broker._persist_network_receipt({
+                    "operation": "provider_request", "method": "POST",
+                    "host": "api.anthropic.com", "path": "/v1/messages",
+                    "status": "complete",
+                })
+        rows = [json.loads(line) for line in (self.root / admission.NETWORK_RECEIPTS_FILE).read_bytes().splitlines()]
+        self.assertTrue(any(row.get("request_id") == request_id for row in rows))
 
     def test_corrupt_network_receipt_blocks_restart_and_persist_failure_is_not_acknowledged(self) -> None:
         path = self.root / admission.NETWORK_RECEIPTS_FILE

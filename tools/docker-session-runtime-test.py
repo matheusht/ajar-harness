@@ -28,8 +28,11 @@ import docker_session_runtime as runtime
 TOOLS = Path(__file__).resolve().parent
 HARNESS = TOOLS.parent.resolve()
 DOCKER = Path("/usr/local/bin/docker")
-IMAGE_DIGEST = "05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc"
-IMAGE = f"python@sha256:{IMAGE_DIGEST}"
+DEFAULT_IMAGE_DIGEST = "05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc"
+IMAGE = os.environ.get(
+    "HARNESS_DOCKER_RUNTIME_TEST_IMAGE", f"python@sha256:{DEFAULT_IMAGE_DIGEST}"
+)
+IMAGE_DIGEST = IMAGE.rsplit("@sha256:", 1)[-1]
 IMAGE_ID = f"sha256:{IMAGE_DIGEST}"
 RUN_DOCKER_INTEGRATION = os.environ.get("HARNESS_RUN_DOCKER_INTEGRATION") == "1"
 EVASIVE_READY_PATH = "/scratch/lrh-evader-ready"
@@ -157,7 +160,7 @@ class DockerRuntimeUnitTest(unittest.TestCase):
 
     def test_only_immutable_digest_references_are_accepted(self) -> None:
         repository, digest = runtime._validate_image_reference(IMAGE)
-        self.assertEqual(repository, "python")
+        self.assertEqual(repository, IMAGE.split("@", 1)[0])
         self.assertEqual(digest, IMAGE_DIGEST)
         self.assertEqual(
             runtime._validate_image_reference(f"localhost:5000/team/golang@sha256:{IMAGE_DIGEST}"),
@@ -434,7 +437,7 @@ class DockerRuntimeIntegrationTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         if sys.platform != "darwin" or not DOCKER.is_file():
             raise unittest.SkipTest("Docker Desktop integration requires this Darwin host")
-        image = _docker("image", "inspect", IMAGE_ID, check=False)
+        image = _docker("image", "inspect", IMAGE, check=False)
         if image.returncode != 0:
             raise unittest.SkipTest("immutable Python image is not cached; test refuses to pull")
         values = json.loads(image.stdout)

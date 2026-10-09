@@ -1,0 +1,102 @@
+{
+  "actual_billed_study": {
+    "calls": 24,
+    "cost_usd": null,
+    "input_tokens": 363404,
+    "model_elapsed_seconds": 365.5572649569949,
+    "output_tokens": 8280
+  },
+  "actual_candidate_calls": {
+    "calls": 20,
+    "cost_usd": null,
+    "input_tokens": 307481,
+    "model_elapsed_seconds": 254.89906645701558,
+    "output_tokens": 5332
+  },
+  "actual_evaluation_overhead": {
+    "calls": 4,
+    "cost_usd": null,
+    "input_tokens": 55923,
+    "model_elapsed_seconds": 110.65819849997933,
+    "output_tokens": 2948
+  },
+  "blind_grade_summary": {
+    "board": {
+      "decisions": {
+        "ambiguous": 1,
+        "wrong": 2
+      },
+      "used_released_information": 2,
+      "useful_correction_true": 1
+    },
+    "direct": {
+      "decisions": {
+        "wrong": 3
+      },
+      "used_released_information": 1,
+      "useful_correction_true": 0
+    },
+    "serial": {
+      "decisions": {
+        "correct": 2,
+        "wrong": 1
+      },
+      "used_released_information": 3,
+      "useful_correction_true": 0
+    }
+  },
+  "decision": "Keep serial/direct as defaults. Board had zero correct grades, no improvement over direct sufficient for adoption, and added a storage/projection mechanism. Three cases do not estimate reliability.",
+  "derived_cost_rule": "Shared worker note generation is billed once in actual aggregate and charged in full to both direct and board standalone estimates. Dollar cost is unknown.",
+  "derived_standalone_per_arm": {
+    "board": {
+      "calls": 10,
+      "cost_usd": null,
+      "input_tokens": 139441,
+      "model_elapsed_seconds": 96.48215424899536,
+      "output_tokens": 1684
+    },
+    "direct": {
+      "calls": 10,
+      "cost_usd": null,
+      "input_tokens": 167664,
+      "model_elapsed_seconds": 156.89164387500205,
+      "output_tokens": 3533
+    },
+    "serial": {
+      "calls": 6,
+      "cost_usd": null,
+      "input_tokens": 83363,
+      "model_elapsed_seconds": 43.70794441601902,
+      "output_tokens": 650
+    }
+  },
+  "interpretation_limits": [
+    "A factually correct notice-derived statement can still have a primary-source verification gap.",
+    "The grader saw fixed references and anonymized finals only; it did not see assembler access records.",
+    "Model dollars are unavailable and remain unknown. Human coordination and total labor were not measured."
+  ],
+  "matched_coordination": {
+    "board_operations": 13,
+    "details_ref": "coordination.json",
+    "direct_operations": 13
+  },
+  "notice_receipt_counts": {
+    "complementary": {
+      "board": 2,
+      "direct": 2
+    },
+    "complete": {
+      "board": 2,
+      "direct": 2
+    },
+    "late": {
+      "board": 3,
+      "direct": 3
+    }
+  },
+  "source_access": {
+    "board": "canonical advisory notice projection only; zero primary source bytes at final assembler",
+    "direct": "advisory notice payloads only; zero primary source bytes at final assembler",
+    "serial": "all released primary source bytes"
+  }
+}

@@ -1,0 +1,19 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+You receive advisory worker communications only. Treat later predecessor-linked notices as corrections.
+RECEIVED PACKET:
+{"event_id":"event-task-notice-late-notice-1","schema_version":1,"task_notice":{"applicability":"Only task-late.","notice_id":"late-notice-1","notice_version":1,"observation":"binding-v1.md (rev binding-v1): booklet-binding starts at 09:00 in Room Willow; capacity is 10 spaces. Materials supply is not stated.","predecessor_event_ref":null,"principal_id":"worker-1","source_event_ref":"event-initial-late-1","source_revision":"binding-v1.md","task_id":"task-late","uncertainty":"Whether materials are supplied is unknown."}}
+
+{"event_id":"event-task-notice-late-notice-2","schema_version":1,"task_notice":{"applicability":"Only task-late.","notice_id":"late-notice-2","notice_version":1,"observation":"materials-v1.md: Participants bring their own paper. Supplied sources do not specify other materials.","predecessor_event_ref":null,"principal_id":"worker-2","source_event_ref":"event-initial-late-2","source_revision":"materials-v1.md","task_id":"task-late","uncertainty":"Unknown whether any other materials are required or provided."}}
+
+{"event_id":"event-task-notice-late-notice-correction","schema_version":1,"task_notice":{"applicability":"Only task-late.","notice_id":"late-notice-correction","notice_version":1,"observation":"binding-v2 corrects binding-v1: 10:30 in Room Pine; 10 spaces and materials-v1 guidance are unchanged.","predecessor_event_ref":"event-task-notice-late-notice-1","principal_id":"worker-1","source_event_ref":"event-correction-late-1","source_revision":"binding-v2.md","task_id":"task-late","uncertainty":"Primary correction source controls."}}
+
+PRE-CORRECTION DRAFT:
+Initial observation (frozen): Only advisory notices were provided; the source sheet and released documents were not. Therefore, no substantive answer can yet be verified. The notices point to `binding-v1.md` (rev `binding-v1`) and `materials-v1.md`, but cannot establish their claims as authority. The task question and all workshop details remain unknown pending those sources.
+Produce the final attendee-facing note. Cite revisions present in the packet and retain unknowns.

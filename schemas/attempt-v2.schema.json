@@ -43,6 +43,36 @@
         "note": {"type": "string"}
       }
     },
+    "execution_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privilege_position", "impact_state"],
+      "properties": {
+        "privilege_position": {
+          "enum": ["unauthenticated", "authenticated-user", "privileged-user", "admin", "system", "root", "not-established"]
+        },
+        "impact_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "synthesized_setup"],
+          "properties": {
+            "mode": {"enum": ["real-path", "none-required", "synthesized", "not-established"]},
+            "synthesized_setup": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["element", "reachability_basis"],
+                "properties": {
+                  "element": {"type": "string", "minLength": 1},
+                  "reachability_basis": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "cost": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/cost"}
   }
 }

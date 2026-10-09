@@ -38,6 +38,35 @@ The latter runs the harness-owned PID-1 supervisor, action client, and Stop hook
 `/harness` mount. Pin and review the image that supplies those runtimes. A digest pin proves byte
 identity, not provenance or trust by itself.
 
+The repository includes a Darwin/Apple-Silicon qualification recipe at
+`docker/claude-runtime/`. It pins the official Node base manifest, Claude Code 2.1.278, the registry
+integrity values for the main and Linux arm64 packages, and Python. Its script builds locally, runs
+`claude --version`, `claude --help`, and `python3 --version`, pushes to an operator-owned registry so
+Docker records a usable `RepoDigest`, pulls that exact digest, repeats the checks, and prints the
+exact locally cached image reference:
+
+```sh
+CLAUDE_RUNTIME_REPOSITORY=registry.example/owned/claude-runtime \
+  docker/claude-runtime/build-and-qualify.sh
+```
+
+The printed `repository@sha256:...` reference can be passed to `--docker-image`. Registry upload is
+an explicit operator preparation write; the queue runner still uses `--pull never`. For a
+credential-free local build check that performs no registry write, set `QUALIFY_LOCAL_ONLY=1`; its
+tag is not accepted by the queue runner and is not a substitute for the digest-qualified result.
+The recipe contains no credentials and does not exercise a provider request. A live qualification
+still requires an explicitly supplied supported Claude credential at queue-run time.
+
+On 2026-09-22 the locally built 2.1.278 image also completed one credential-free request against an
+owned fake Anthropic server and consumed its streamed text response. That probe observed one
+`POST /v1/messages?beta=true`; request body keys were `context_management`, `max_tokens`,
+`messages`, `metadata`, `model`, `stream`, `system`, `thinking`, and `tools`. Each client tool used
+the keys `description`, `input_schema`, and `name`. Header names included `x-api-key`,
+`anthropic-version`, `anthropic-beta`, `x-claude-code-session-id`, `x-app`, and the `x-stainless-*`
+runtime metadata family. No secret value or real provider inference was used. Network policy for
+this client version therefore has to account for the exact `beta=true` query while retaining the
+typed inference-body and destination restrictions.
+
 ## Mount and lifecycle boundary
 
 The driver creates a uniquely named bridge network and a stopped container, then inspects both
@@ -93,12 +122,30 @@ Preparation and activation are deliberately two phase:
    Docker logs.
 
 PID 1 keeps the broker key in hardened process memory and exposes a bounded Unix relay at
-`/scratch/.lrh-broker.sock`. The model-side client can request only the typed `action` and
-`session_end_check` operations. PID 1 validates the semantic request, signs the exact canonical
+`/scratch/.lrh-broker.sock`. The model-side client can request only the typed `action`,
+`session_end_check`, provider inference, and signed-scope `target_fetch` operations. PID 1 validates
+the semantic request, signs the exact canonical
 frame, and sends it over the per-session network to the host broker. The host verifies HMAC,
 nonce/replay state, deadlines, container identity, admission, exact inline files and digests, and
 the target-local state before it executes anything. A model cannot gain host path authority by
 putting a path in a broker request.
+
+The Docker bridge is deliberately an ordinary bridge. Docker Desktop does not route
+`host.docker.internal` from an internal bridge, so making the bridge internal would also cut PID
+1's authenticated parent channel. The bridge is defense in depth, not the authorization boundary:
+the inherited child seccomp filter permits only AF_UNIX stream/seqpacket sockets and AF_INET TCP
+stream sockets, then emulates every child `connect` on the exact duplicated descriptor to one fixed
+PID-1 loopback provider listener. It copies the tracee sockaddr once and never continues the
+original syscall. IPv6, UDP, raw/packet/netlink/vsock, TCP Fast Open, child `bind`/`listen`/`accept`,
+io_uring, and unreviewed arm64 syscalls fail closed across fork and exec. PID 1 owns the parent TCP
+connection and is outside that child filter. No connected or listening network descriptor crosses
+model exec; the local relay connection is established afterwards.
+
+This is not universal socket compatibility. Descendants cannot run IP servers or arbitrary network
+clients. AF_UNIX remains available only for local process IPC, with the broker relay destination
+fixed by connect emulation. Linux/arm64 has no `socketcall` multiplexor, and syscall numbers beyond
+the reviewed table are unavailable. A newly supported architecture needs its own syscall matrix and
+qualification.
 
 The additional Claude settings register only the top-level `Stop` hook. Inside the container it
 runs:
@@ -113,14 +160,45 @@ Malformed or unavailable Stop input uses Claude's fail-open `{}` response withou
 or credential details. Queue truth and action consumption remain parent-owned; the Stop hook is only
 the session-end backstop.
 
-The child receives only `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-`CLAUDE_CODE_OAUTH_TOKEN`, and `ANTHROPIC_BASE_URL` when the operator has set them, plus bounded
-runtime and ledger-binding variables. Host Git, SSH, operator-signing, Docker, and unrelated
-environment authority are not forwarded. The session bridge permits general outbound network access
-because Claude Code needs provider egress; it is not endpoint-allowlisted to Anthropic. Container
-teardown removes that process and network authority, but it cannot undo a credential or data
-disclosure that occurred before teardown and does not revoke the upstream token. Use appropriately
-scoped, short-lived provider credentials.
+The parent currently supports only `ANTHROPIC_API_KEY`. A token-only
+`ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` profile is rejected before container
+preparation; it is never reinterpreted as `x-api-key`. The child receives a dummy key and a local
+PID-1 URL. The real key, configured production origin, TLS connection, and redacted audit stay in
+the parent. Production is fixed to verified TLS at `api.anthropic.com:443`, with only
+`POST /v1/messages` and the observed exact `POST /v1/messages?beta=true` accepted; all other query
+forms and redirects are denied. Plain HTTP loopback provider origins exist only through an explicit
+test-only constructor.
+
+Before any provider contact, the parent duplicate-safely parses the bounded JSON request. The
+request model must exactly equal the runtime model in the parent-owned action admission, and
+`max_tokens` cannot exceed that admission's 32,768-token output ceiling. It allows
+ordinary inference and client-side tool definitions (`name`, `description`, JSON `input_schema`,
+and the bounded client-tool metadata fields). It rejects all typed server tools, including web
+fetch/search/code and unknown future types, plus remote MCP configuration, remote URL image/document
+sources, and container/skills extensions. URL-looking prose and JSON-schema string fields remain
+data. Provider response headers and body chunks are authenticated independently and streamed through
+PID 1 as they arrive, with aggregate size, inactivity, absolute session-deadline, and disconnect
+bounds. One absolute parent deadline covers DNS, connect, TLS, request write, response headers,
+body reads and redirects. Shutdown closes active client and upstream sockets, then allows a bounded
+250 ms cancellation/reaping grace; an expired worker fails closed after owned descriptors are
+released and the close state is made retry-safe.
+
+Before acknowledging completion, the parent persists a redacted receipt to
+`.work-queue-network-receipts.jsonl` under the engagement lock. The file contains at most 256 rows
+and 256 KiB, never request headers or bodies, and is reloaded on broker restart. Corrupt, symlinked,
+or hard-linked receipt storage fails closed. If persistence fails, the network result remains
+uncertain and is not acknowledged to the worker.
+
+Explicit target access is narrower still. A `network-policy-v1` block in the current signed
+`scope.md` must authorize the exact `target_fetch` operation, scheme, lowercase DNS hostname,
+default port, path, and method. The only supported methods are GET and HEAD, only ports 80 and 443
+are accepted, and paths use a conservative unencoded safe character set. The parent rejects
+credentials, ambiguous encodings, controls, duplicate headers, non-public/IPv6 DNS answers, and
+redirect hops not separately present in policy; it pins one checked IPv4 answer per connection and
+uses ordinary TLS verification. Logical request IDs are consumed before effects and retain an
+uncertainty tombstone. The ID is derived from the runtime session, admitted action, URL, and method,
+so neither a new envelope nonce nor a child-selected replacement ID can replay a lost receipt. This
+is a typed fetch capability, not general outgoing application compatibility.
 
 ## Aggregate storage boundary
 
@@ -221,7 +299,10 @@ parent-death cleanup, exact-ID ownership, aggregate byte/inode/sparse exhaustion
 short-write/delete/exit attempt from a detached descendant, a nonleader-thread partial pipe write,
 zero usable model capabilities, stable thread-scoped descriptor duplication, rejection of untraced
 clone and unobservable file-transfer paths, pthread fallback, PID-1 relay, and the Stop/broker path
-without contacting Anthropic. This is
+without contacting Anthropic. Its network scenario also checks IPv6/UDP/raw/FastOpen/io_uring,
+direct host-IP and sockaddr-race attempts, inherited descriptor hygiene, IP listening/acceptance,
+fork/exec inheritance, five provider-side network capability denials with zero sink requests, and
+first-chunk delivery before a gated fake provider completes. This is
 authoritative evidence for the local containment mechanism, not evidence that a particular Claude
 image can authenticate or complete a provider request.
 

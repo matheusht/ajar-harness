@@ -1,0 +1,11 @@
+2026-09-22 Docker Desktop internal-bridge diagnostic
+
+Image: golang@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80
+Network: temporary bridge created with --internal and removed after the check
+Host mapping: host.docker.internal:host-gateway
+Observed resolution: host.docker.internal -> 192.168.65.254
+Observed connect result: [Errno 101] Network is unreachable
+
+Conclusion: on this Docker Desktop host, an internal bridge prevents PID 1 from reaching the
+parent-owned TCP broker through the host gateway. The retained ordinary bridge is not the
+authorization boundary; inherited child seccomp connect emulation is.

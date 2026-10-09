@@ -1,0 +1,15 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+You receive advisory worker communications only. Treat later predecessor-linked notices as corrections.
+RECEIVED PACKET:
+{"event_id":"event-task-notice-complementary-notice-1","schema_version":1,"task_notice":{"applicability":"Only task-complementary.","notice_id":"complementary-notice-1","notice_version":1,"observation":"attendance-v1.md: 36 attendees need one sheet each, so 36 sheets are required. Supplied stock quantity is not stated.","predecessor_event_ref":null,"principal_id":"worker-1","source_event_ref":"event-initial-complementary-1","source_revision":"attendance-v1.md","task_id":"task-complementary","uncertainty":"Stock sufficiency, spare count, and restocking status are unknown."}}
+
+{"event_id":"event-task-notice-complementary-notice-2","schema_version":1,"task_notice":{"applicability":"Only task-complementary.","notice_id":"complementary-notice-2","notice_version":1,"observation":"stock-v1.md: Supply box has 6 sealed packs with 6 sheets each (36 sheets total); no extra loose sheets are listed.","predecessor_event_ref":null,"principal_id":"worker-2","source_event_ref":"event-initial-complementary-2","source_revision":"stock-v1.md","task_id":"task-complementary","uncertainty":"Restocking arrangements are unknown."}}
+
+Produce the final attendee-facing note. Cite revisions present in the packet and retain unknowns.

@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 27.97729816699575,
+  "id": "grader-late",
+  "output": "{\"A\":{\"decision\":\"wrong\",\"correct_facts\":[\"Session starts at 10:30\",\"Session is in Room Pine\",\"There are 10 spaces\",\"Participants bring their own paper\",\"Other materials remain unknown\",\"Cites binding-v2\",\"Cites materials-v1\"],\"missing_facts\":[\"binding-v2 corrects and supersedes binding-v1\"],\"stale_revision\":false,\"unsupported_claims\":[],\"used_released_information\":true,\"useful_correction\":false,\"rationale\":\"The attendee details and materials status match the reference, but the note does not explicitly recognize that binding-v2 corrects binding-v1, which the reference requires.\"},\"B\":{\"decision\":\"wrong\",\"correct_facts\":[\"Materials other than paper remain unknown\"],\"missing_facts\":[\"Session starts at 10:30\",\"Session is in Room Pine\",\"There are 10 spaces\",\"Participants bring their own paper\",\"binding-v2 corrects and supersedes binding-v1\"],\"stale_revision\":false,\"unsupported_claims\":[\"The packet contains only advisory notices\",\"binding-v2 and materials-v1 have not been released\"],\"used_released_information\":false,\"useful_correction\":null,\"rationale\":\"It withholds the required attendee-facing facts and incorrectly treats the released sources as unavailable or non-authoritative.\"},\"C\":{\"decision\":\"wrong\",\"correct_facts\":[\"Session starts at 10:30\",\"Session is in Room Pine\",\"There are 10 spaces\",\"Participants bring their own paper\",\"Other materials remain unknown\",\"binding-v2 corrects binding-v1\",\"Cites materials-v1\"],\"missing_facts\":[],\"stale_revision\":false,\"unsupported_claims\":[\"Only advisory notices were provided\",\"The released documents were not provided\",\"No verified workshop announcement can be issued\",\"The binding-v2 and materials-v1 details require further confirmation\"],\"used_released_information\":false,\"useful_correction\":true,\"rationale\":\"The designated attendee note contains all required substantive facts and the useful revision correction, but misrepresents released information as unverified advisory claims and refuses to issue a verified announcement.\"}}",
+  "prompt_sha256": "sha256:2246cde861a2c9876f24976030f57a4681d4b22f58c44fe54133dbf162d88b5c",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14130,
+    "output_tokens": 766,
+    "reasoning_output_tokens": 338
+  }
+}

@@ -149,4 +149,4 @@ operator-owned memory and report decisions.
 - Operator: [name]
 - Date: [date]
 - Signed: [ ]
-- Record kernel: `decision-0006-v1`
+- Record kernel: `decision-0006-v2`

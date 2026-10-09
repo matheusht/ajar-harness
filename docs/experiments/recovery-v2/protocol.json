@@ -1,0 +1,29 @@
+{
+  "arms": [
+    "baseline",
+    "sdk"
+  ],
+  "assignments": 6,
+  "cases": [
+    "late-correction",
+    "cooperative-pause",
+    "lost-receipt"
+  ],
+  "claims_not_established": [
+    "exactly-once external effects",
+    "provider recovery",
+    "production runtime acceptance"
+  ],
+  "frozen_at": "2026-09-22T18:00:00Z",
+  "schema_version": 1,
+  "sdk_checkout": "/tmp/redteam-recovery-sdk",
+  "sdk_commit": "f1f35031d364f9f0d8e94dda0853c92abefdccff",
+  "sdk_lock_sha256": "sha256:dc8e8af7cf4774cd33caa4aba30e4b324acfb68de1cc88628e69e5015b5c6229",
+  "stop_rules": [
+    "retain unsupported native-interface outcomes",
+    "record exact received arguments",
+    "no invented provider receipt"
+  ],
+  "study_id": "recovery-v2-executed-sdk-pilot",
+  "trace_export": false
+}

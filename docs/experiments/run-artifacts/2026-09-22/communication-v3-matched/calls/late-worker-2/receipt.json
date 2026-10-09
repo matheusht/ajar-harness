@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 8.016465583001263,
+  "id": "late-worker-2",
+  "output": "{\"observation\":\"materials-v1.md: Participants bring their own paper. Supplied sources do not specify other materials.\",\"uncertainty\":\"Unknown whether any other materials are required or provided.\"}",
+  "prompt_sha256": "sha256:0362129d3c31c38d5a55b1bbe43e29c7ae34b7d5550c6bf064122341cd923316",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 13818,
+    "output_tokens": 98,
+    "reasoning_output_tokens": 53
+  }
+}

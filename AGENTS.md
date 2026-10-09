@@ -80,9 +80,11 @@ reads markdown; deterministic — the orchestrator, not the model, picks the car
    grade leads top-to-bottom through the funnel, backtrack / redo recon rather than tunnel-vision, and
    keep the rigor bar and gates unchanged.
 5. **Adjudicate & record** — emit `attempt` always, `finding` only on oracle `confirmed`, `pattern`
-   only on manual scrubbed promotion. **A finding is written to `unproven/` and has no status field;
-   it reaches `findings/` only by passing the promotion gates** (`engine/finding-lifecycle.md`).
-   Hunters write there and move nothing; only the orchestrator promotes; any role may demote.
+   only on manual scrubbed promotion. Store immutable finding revision bytes before activation.
+   For `decision-0006-v2`, active finding membership comes only from an exact signed
+   `revise-finding` action-version 3 activation. Legacy packages under `unproven/` remain available
+   for inspection, but directory placement, package moves, and actor strings never file a finding.
+   Read `engine/finding-lifecycle.md` before filing.
 6. **Review, triage, clean up** — operator review; run the cleanup ledger; redact secrets always.
 
 ## 5. Records & memory

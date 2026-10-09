@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import contextmanager
@@ -20,6 +21,7 @@ from unittest import mock
 
 import container_broker_client as client
 import driver_action_admission as admission
+import network_scope
 from engagement_records import RecordError, canonical_json_bytes, sha256_bytes
 
 
@@ -59,6 +61,7 @@ def broker_admission() -> dict[str, object]:
         "status": "armed",
         "runtime_session_ref": RUNTIME_REF,
         "runtime_model": "fixture-container-model",
+        "provider_max_tokens": 32768,
         "runtime_session_kind": "ordinary_bounded",
         "hook_session_ref": HOOK_REF,
         "os_session_id": None,
@@ -88,6 +91,7 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="container-broker-test-")
         self.root = Path(self.temporary.name)
+        (self.root / ".record-kernel.lock").touch()
         self.engagement_fd = os.open(
             self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         )
@@ -365,6 +369,198 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         self.assertEqual(
             separated.exception.code, "container_broker_response_auth_invalid"
         )
+
+    def test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay(self) -> None:
+        scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        logical_request = client.target_fetch_request_id(
+            self.manifest, url="https://sink.invalid/allowed", method="GET"
+        )
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "read_governed_file", return_value=scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(
+                network_scope,
+                "pinned_request",
+                side_effect=TimeoutError("lost receipt"),
+            ) as effect,
+        ):
+            first = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=logical_request,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+            replay = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=logical_request,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+        self.assertEqual((first[0], replay[0]), (1, 1))
+        self.assertEqual(effect.call_count, 1)
+
+        changed_scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/reattested", method="GET"
+        )
+        changed_state = {"scope_hash": sha256_bytes(changed_scope)}
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(
+                admission, "_reduce_engagement_unchecked", return_value=changed_state
+            ),
+            mock.patch.object(admission, "read_governed_file", return_value=changed_scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(
+                network_scope,
+                "pinned_request",
+                side_effect=AssertionError("effect began for stale admission"),
+            ),
+        ):
+            stale = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest,
+                    url="https://sink.invalid/reattested",
+                    method="GET",
+                ),
+                url="https://sink.invalid/reattested",
+                method="GET",
+            )
+        self.assertEqual(stale[0], 1)
+
+    def test_target_fetch_real_broker_reaches_only_the_approved_owned_sink(self) -> None:
+        sink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sink.bind(("127.0.0.1", 0))
+        sink.listen(1)
+        sink.settimeout(5.0)
+        sink_port = sink.getsockname()[1]
+        sink_requests: list[bytes] = []
+
+        def serve() -> None:
+            try:
+                connection, _ = sink.accept()
+                with connection:
+                    request = bytearray()
+                    while b"\r\n\r\n" not in request:
+                        request.extend(connection.recv(4096))
+                    sink_requests.append(bytes(request))
+                    connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    )
+            finally:
+                sink.close()
+
+        server = threading.Thread(target=serve, daemon=True)
+        server.start()
+        scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        class FixtureTls:
+            @staticmethod
+            def wrap_socket(raw: socket.socket, *, server_hostname: str) -> socket.socket:
+                self.assertEqual(server_hostname, "sink.invalid")
+                return raw
+
+        original_request = network_scope.pinned_request
+        governed_read = admission.read_governed_file
+        real_create_connection = socket.create_connection
+
+        def fixture_request(**arguments: object) -> tuple[int, list[tuple[str, str]], bytes]:
+            return original_request(
+                **arguments,
+                resolver=lambda _host, _port: "93.184.216.34",
+            )
+
+        def fixture_connection(_address: object, *, timeout: float) -> socket.socket:
+            return real_create_connection(("127.0.0.1", sink_port), timeout=timeout)
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(
+                admission,
+                "read_governed_file",
+                side_effect=lambda path, **kwargs: (
+                    scope
+                    if Path(path).name == "scope.md"
+                    else governed_read(path, **kwargs)
+                ),
+            ),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(network_scope, "pinned_request", side_effect=fixture_request),
+            mock.patch.object(
+                network_scope.socket,
+                "create_connection",
+                side_effect=fixture_connection,
+            ),
+            mock.patch.object(
+                network_scope.ssl,
+                "create_default_context",
+                return_value=FixtureTls(),
+            ),
+        ):
+            approved = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://sink.invalid/allowed", method="GET"
+                ),
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+            denied_host = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://other.invalid/allowed", method="GET"
+                ),
+                url="https://other.invalid/allowed",
+                method="GET",
+            )
+            denied_path = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=client.target_fetch_request_id(
+                    self.manifest, url="https://sink.invalid/denied", method="GET"
+                ),
+                url="https://sink.invalid/denied",
+                method="GET",
+            )
+            with self.assertRaises(client.ContainerBrokerClientError):
+                client.forward_target_fetch(
+                    self.manifest,
+                    KEY,
+                    request_id=client.target_fetch_request_id(
+                        self.manifest, url="https://sink.invalid/allowed", method="POST"
+                    ),
+                    url="https://sink.invalid/allowed",
+                    method="POST",
+                )
+        server.join(timeout=5.0)
+        self.assertEqual((approved[0], denied_host[0], denied_path[0]), (0, 1, 1))
+        self.assertEqual(len(sink_requests), 1)
+        self.assertIn(b"GET /allowed HTTP/1.1", sink_requests[0])
 
     def test_every_runtime_binding_and_the_host_deadline_fail_closed(self) -> None:
         proposal = self.root / "proposal.json"
@@ -808,6 +1004,221 @@ class ContainerBrokerProtocolTest(unittest.TestCase):
         )
         self.assertEqual(request["request_kind"], "session_end_check")
         self.assertIsNone(inline_inputs)
+
+    def test_v3_filing_action_is_stamped_to_the_authenticated_broker(self) -> None:
+        forged = {
+            "action": {
+                "argument": "--action-file",
+                "value": {
+                    "action_kind": "revise-finding",
+                    "action_version": 3,
+                    "executor_id": "forged-executor",
+                    "session_id": "forged-session",
+                },
+            }
+        }
+        with mock.patch.object(
+            admission,
+            "_parent_recorder_identity",
+            return_value=("local-uid-501:broker", "session-posix-501-77"),
+        ):
+            stamped = admission._stamp_parent_recorder_documents(
+                forged,
+                command="request-authority",
+                runtime_session_ref=RUNTIME_REF,
+                runtime_model="fixture-container-model",
+            )
+        action = stamped["action"]["value"]
+        self.assertEqual(action["action_version"], 3)
+        self.assertEqual(action["executor_id"], "local-uid-501:broker")
+        self.assertEqual(action["session_id"], "session-posix-501-77")
+
+    def test_network_receipt_is_redacted_bounded_and_persistent(self) -> None:
+        receipt = {
+            "operation": "provider_request", "method": "POST",
+            "host": "api.anthropic.com", "path": "/v1/messages?beta=true",
+            "status": "uncertain",
+        }
+        self.broker._persist_network_receipt(receipt)
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual(rows[-1]["status"], "uncertain")
+        self.assertEqual(rows[-1]["runtime_session_ref"], RUNTIME_REF)
+        self.assertNotIn("headers", rows[-1])
+        self.assertNotIn("body", rows[-1])
+
+        self.broker.close()
+        self.broker = admission.DriverActionBroker(
+            engagement_fd=self.engagement_fd,
+            logical_engagement=self.root,
+            admission=broker_admission(),
+            execution_deadline=time.monotonic() + 30.0,
+            docker_identity={
+                "container_id": CONTAINER_ID,
+                "container_config_digest": CONFIG_DIGEST,
+            },
+            docker_session_key=KEY,
+        )
+        self.assertEqual(self.broker.network_audit[-1]["status"], "uncertain")
+
+    def test_recovered_target_receipt_tombstones_only_same_admission_request(self) -> None:
+        scope = network_scope.scope_with_network_policy(
+            host="sink.invalid", path="/allowed", method="GET"
+        )
+        state = {"scope_hash": sha256_bytes(scope)}
+        admission_value = broker_admission()
+        admission_value["state_binding"] = {"scope_hash": state["scope_hash"]}
+        self.broker._admission["state_binding"] = {"scope_hash": state["scope_hash"]}
+        request_id = client.target_fetch_request_id(
+            self.manifest, url="https://sink.invalid/allowed", method="GET"
+        )
+        self.broker._persist_network_receipt({
+            "operation": "target_fetch",
+            "request_id": request_id,
+            "method": "GET",
+            "url_sha256": sha256_bytes(b"https://sink.invalid/allowed"),
+            "status": 200,
+        })
+        # A prior session must remain auditable without consuming this admission's request budget.
+        self.broker._persist_network_receipt({
+            "operation": "target_fetch",
+            "request_id": "sha256:" + "f" * 64,
+            "method": "GET",
+            "url_sha256": sha256_bytes(b"https://sink.invalid/other"),
+            "status": "denied_or_uncertain",
+        })
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[-1]["runtime_session_ref"] = "other-session"
+        path.write_bytes(b"".join(canonical_json_bytes(row) for row in rows))
+
+        self.broker.close()
+        self.broker = admission.DriverActionBroker(
+            engagement_fd=self.engagement_fd,
+            logical_engagement=self.root,
+            admission=admission_value,
+            execution_deadline=time.monotonic() + 30.0,
+            docker_identity={
+                "container_id": CONTAINER_ID,
+                "container_config_digest": CONFIG_DIGEST,
+            },
+            docker_session_key=KEY,
+        )
+        self.broker.activate_docker()
+        self.manifest = self.broker.container_manifest()
+
+        @contextmanager
+        def bound(*_args: object, **_kwargs: object):
+            yield self.root
+
+        with (
+            mock.patch.object(admission, "bound_engagement_lock", bound),
+            mock.patch.object(admission, "_reduce_engagement_unchecked", return_value=state),
+            mock.patch.object(admission, "read_governed_file", return_value=scope),
+            mock.patch.object(admission, "_neutral_tail_is_allowed", return_value=True),
+            mock.patch.object(network_scope, "pinned_request") as sink,
+        ):
+            replay = client.forward_target_fetch(
+                self.manifest,
+                KEY,
+                request_id=request_id,
+                url="https://sink.invalid/allowed",
+                method="GET",
+            )
+        self.assertEqual(replay[0], 1)
+        sink.assert_not_called()
+        self.assertEqual(self.broker._network_gateway.request_budget, 32)
+        self.assertEqual(self.broker._network_gateway._started, set())
+        self.assertEqual(self.broker._network_gateway._uncertain, {request_id})
+
+    def test_corrupt_network_receipt_blocks_restart_and_persist_failure_is_not_acknowledged(self) -> None:
+        path = self.root / admission.NETWORK_RECEIPTS_FILE
+        before = list(self.broker.network_audit)
+        with mock.patch.object(admission, "atomic_write", side_effect=OSError("fixture")):
+            with self.assertRaises(OSError):
+                self.broker._persist_network_receipt({
+                    "operation": "target_fetch", "method": "GET",
+                    "request_id": "sha256:" + "b" * 64,
+                    "url_sha256": "sha256:" + "a" * 64, "status": "uncertain",
+                })
+        self.assertEqual(self.broker.network_audit, before)
+
+        self.broker.close()
+        path.write_bytes(b'{"schema_version":1')
+        with self.assertRaises(RecordError) as corrupt:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={
+                    "container_id": CONTAINER_ID,
+                    "container_config_digest": CONFIG_DIGEST,
+                },
+                docker_session_key=KEY,
+            )
+        self.assertEqual(corrupt.exception.code, "driver_network_receipt_invalid")
+
+        path.unlink()
+        outside = self.root / "outside-receipt"
+        outside.write_text('{}\n')
+        path.symlink_to(outside)
+        with self.assertRaises(RecordError) as symlinked:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={"container_id": CONTAINER_ID, "container_config_digest": CONFIG_DIGEST},
+                docker_session_key=KEY,
+            )
+        self.assertEqual(symlinked.exception.code, "driver_network_receipt_invalid")
+
+        path.unlink()
+        os.link(outside, path)
+        with self.assertRaises(RecordError) as hardlinked:
+            admission.DriverActionBroker(
+                engagement_fd=self.engagement_fd,
+                logical_engagement=self.root,
+                admission=broker_admission(),
+                execution_deadline=time.monotonic() + 30.0,
+                docker_identity={"container_id": CONTAINER_ID, "container_config_digest": CONFIG_DIGEST},
+                docker_session_key=KEY,
+            )
+        self.assertEqual(hardlinked.exception.code, "driver_network_receipt_invalid")
+
+    def test_close_cancels_stalled_container_worker_within_absolute_deadline(self) -> None:
+        assert self.broker.tcp_endpoint is not None
+        peer = socket.create_connection(self.broker.tcp_endpoint, timeout=1.0)
+        try:
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                with self.broker._container_workers_lock:
+                    if self.broker._container_workers:
+                        break
+                time.sleep(0.01)
+            started = time.monotonic()
+            self.broker.close()
+            self.assertLess(time.monotonic() - started, 0.5)
+            with self.broker._container_workers_lock:
+                self.assertFalse(self.broker._container_workers)
+        finally:
+            peer.close()
+
+    def test_expired_deadline_shutdown_is_bounded_closes_descriptors_and_is_retry_safe(self) -> None:
+        worker = threading.Thread(target=lambda: time.sleep(1.0), daemon=True)
+        with self.broker._container_workers_lock:
+            self.broker._container_workers.add(worker)
+        worker.start()
+        self.broker._execution_deadline = time.monotonic() - 1.0
+        started = time.monotonic()
+        with self.assertRaises(RecordError) as raised:
+            self.broker.close()
+        self.assertEqual(raised.exception.code, "driver_action_broker_shutdown_timeout")
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertTrue(self.broker._closed)
+        self.assertEqual(self.broker._engagement_fd, -1)
+        self.broker.close()
 
 
 if __name__ == "__main__":

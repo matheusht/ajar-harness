@@ -1,0 +1,26 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+CURRENT SOURCES:
+FILE display-v1.md:
+# display-v1
+
+The kite display is Tuesday at 14:00 in Room Maple. There are 8 seats. Task: state day, time, room, capacity and whether lunch is promised.
+
+
+FILE display-notes-v1.md:
+# display-notes-v1
+
+This is a display, not a class. Lunch and accessibility arrangements are not specified.
+
+RECEIVED BOARD PACKET (advisory; check primary sources):
+{"event_id":"event-task-notice-complete-notice-1","schema_version":1,"task_notice":{"applicability":"Only task-complete.","notice_id":"complete-notice-1","notice_version":1,"observation":"display-v1.md: Tuesday, 14:00, Room Maple, capacity 8. Lunch is not stated, so whether it is promised is unknown.","predecessor_event_ref":null,"principal_id":"worker-1","source_event_ref":"event-initial-complete-1","source_revision":"display-v1.md","task_id":"task-complete","uncertainty":"Primary source check remains required."}}
+
+{"event_id":"event-task-notice-complete-notice-2","schema_version":1,"task_notice":{"applicability":"Only task-complete.","notice_id":"complete-notice-2","notice_version":1,"observation":"display-notes-v1.md: It is a display, not a class. Lunch and accessibility arrangements remain unknown.","predecessor_event_ref":null,"principal_id":"worker-2","source_event_ref":"event-initial-complete-2","source_revision":"display-notes-v1.md","task_id":"task-complete","uncertainty":"Primary source check remains required."}}
+
+Produce final attendee-facing note. Follow current revisions, cite filenames, and do not invent facts. No tools.

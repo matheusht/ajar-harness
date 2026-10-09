@@ -15,6 +15,7 @@ import copy
 import fcntl
 import hashlib
 import hmac
+import http.client
 import importlib.util
 import json
 import math
@@ -28,6 +29,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,9 @@ from work_queue_actions import queue_command_payload
 
 
 ADMISSION_FILE = ".work-queue-action-admission.json"
+NETWORK_RECEIPTS_FILE = ".work-queue-network-receipts.jsonl"
+NETWORK_RECEIPTS_MAX_BYTES = 256 * 1024
+NETWORK_RECEIPTS_MAX_ROWS = 256
 TOKEN_ENV = "HARNESS_EXPECTED_ACTION_TOKEN"
 SESSION_ENV = "HARNESS_EXPECTED_RUNTIME_SESSION_REF"
 BROKER_ENDPOINT_ENV = "HARNESS_DRIVER_ACTION_BROKER"
@@ -61,13 +66,56 @@ _CONTAINER_SESSION_KEY_BYTES = 32
 _CONTAINER_NONCE_BYTES = 32
 _CONTAINER_FRAME_LIMIT = 12 * 1024 * 1024
 _CONTAINER_RAW_INPUT_LIMIT = _RPC_LIMIT
+_PROVIDER_MAX_OUTPUT_TOKENS = 32768
 _CONTAINER_ACTION_NONCE_BUDGET = 32
+_CONTAINER_PROVIDER_NONCE_BUDGET = 32
+_CONTAINER_TARGET_FETCH_NONCE_BUDGET = 32
 _CONTAINER_REQUEST_DOMAIN = b"llm-redteam-harness:container-broker:request:v1\0"
 _CONTAINER_RESPONSE_DOMAIN = b"llm-redteam-harness:container-broker:response:v1\0"
+_TARGET_FETCH_ID_DOMAIN = b"llm-redteam-harness:target-fetch-id:v1\0"
 _CONTAINER_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _STOP_BLOCK_BUDGET = 6
 _STOP_REQUEST_BUDGET = _STOP_BLOCK_BUDGET + 1
+_PROVIDER_FORBIDDEN_CAPABILITY_FIELDS = frozenset(
+    {"container", "mcp_servers", "skills"}
+)
+_PROVIDER_INFERENCE_FIELDS = frozenset(
+    {
+        "cache_control",
+        "context_management",
+        "inference_geo",
+        "max_tokens",
+        "messages",
+        "metadata",
+        "model",
+        "output_config",
+        "output_format",
+        "service_tier",
+        "speed",
+        "stop_sequences",
+        "stream",
+        "system",
+        "temperature",
+        "thinking",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_p",
+    }
+)
+_PROVIDER_CLIENT_TOOL_FIELDS = frozenset(
+    {
+        "allowed_callers",
+        "cache_control",
+        "description",
+        "input_examples",
+        "input_schema",
+        "name",
+        "strict",
+        "type",
+    }
+)
 _SESSION_AUDIT_STATE_KEYS = frozenset(
     {"event_count", "last_event_id", "ledger_hash", "source_hashes"}
 )
@@ -92,6 +140,7 @@ _ALLOWED_ADMISSION_KEYS = {
     "token_hash",
     "runtime_session_ref",
     "runtime_model",
+    "provider_max_tokens",
     "runtime_session_kind",
     "hook_session_ref",
     "os_session_id",
@@ -105,6 +154,11 @@ _ALLOWED_ADMISSION_KEYS = {
     "argument_template",
     "action_hash",
     "predicate",
+    "cognitive_principal",
+    "view_type",
+    "view_digest",
+    "input_corpus_digest",
+    "treatment",
 }
 
 
@@ -379,6 +433,7 @@ def arm_action_admission(
     runtime_session_ref: str,
     runtime_model: str,
     token: str,
+    view_binding: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Arm an unactivated one-shot record on the already-bound engagement inode."""
 
@@ -407,6 +462,7 @@ def arm_action_admission(
         "token_hash": _token_hash(token),
         "runtime_session_ref": runtime_session_ref,
         "runtime_model": runtime_model,
+        "provider_max_tokens": _PROVIDER_MAX_OUTPUT_TOKENS,
         "runtime_session_kind": action.get("session_kind"),
         "hook_session_ref": sha256_bytes(
             b"llm-redteam-harness:session-end:v1:" + runtime_session_ref.encode("utf-8")
@@ -418,6 +474,7 @@ def arm_action_admission(
             "ledger_hash": state.get("ledger_hash"),
             "source_hashes": copy.deepcopy(source_hashes),
             "event_count": state.get("event_count"),
+            "scope_hash": state.get("scope_hash"),
         },
         "item_ref": item_ref,
         "item_identity": _item_identity(item),
@@ -426,7 +483,27 @@ def arm_action_admission(
         "argument_template": copy.deepcopy(action.get("arguments")),
         "action_hash": sha256_bytes(canonical_json_bytes(_normalized_action(action))),
         "predicate": copy.deepcopy(action["admission"]),
+        "cognitive_principal": None,
+        "view_type": None,
+        "view_digest": None,
+        "input_corpus_digest": None,
+        "treatment": None,
     }
+    if view_binding is not None:
+        required_view = {"cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment"}
+        if (
+            set(view_binding) != required_view
+            or action.get("principal") != "hunter"
+            or view_binding.get("cognitive_principal") != "hunter"
+            or view_binding.get("view_type") != "hunter-current-v1"
+            or view_binding.get("treatment") not in {"compiled_current_only", "compiled_current_only_with_task_notices"}
+            or _SHA256_RE.fullmatch(str(view_binding.get("view_digest"))) is None
+            or _SHA256_RE.fullmatch(str(view_binding.get("input_corpus_digest"))) is None
+        ):
+            raise RecordError("driver_action_view_binding_invalid", str(record.get("action_id")))
+        record.update(view_binding)
+    if action.get("principal") == "hunter" and not all(record[key] for key in ("cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment")):
+        raise RecordError("driver_action_view_binding_missing", str(record.get("action_id")))
     if (
         set(record) != _ALLOWED_ADMISSION_KEYS
         or not isinstance(record["action_id"], str)
@@ -434,6 +511,8 @@ def arm_action_admission(
         or not isinstance(record["argument_template"], list)
         or any(not isinstance(value, str) for value in record["argument_template"])
         or record["runtime_session_kind"] not in {"ordinary_bounded", "fresh_independent_reviewer"}
+        or type(record["provider_max_tokens"]) is not int
+        or record["provider_max_tokens"] <= 0
     ):
         raise RecordError("driver_action_admission_invalid", str(record.get("action_id")))
     with bound_engagement_lock(engagement_fd, create=False) as bound:
@@ -615,9 +694,11 @@ def _match_argument_template(template: list[str], actual: list[str]) -> None:
     if len(template) != len(actual):
         raise RecordError("driver_action_arguments_mismatch", "length")
     replacements: dict[str, str] = {}
+    prior_option = None
     for expected, received in zip(template, actual, strict=True):
         is_placeholder = expected.startswith("<") and expected.endswith(">")
-        if not is_placeholder and expected != received:
+        engagement_alias = prior_option == "--engagement" and received == "/workspace"
+        if not is_placeholder and expected != received and not engagement_alias:
             raise RecordError("driver_action_arguments_mismatch", expected)
         if is_placeholder:
             if not received or (received.startswith("<") and received.endswith(">")):
@@ -625,6 +706,7 @@ def _match_argument_template(template: list[str], actual: list[str]) -> None:
             prior = replacements.setdefault(expected, received)
             if prior != received:
                 raise RecordError("driver_action_input_inconsistent", expected)
+        prior_option = expected
 
 
 def _document_value(document: Any, path: list[str]) -> Any:
@@ -656,6 +738,56 @@ def _json_document_from_bytes(raw: bytes, *, error_code: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RecordError(error_code, "inline JSON")
     return value
+
+
+def _validate_provider_inference_body(
+    raw: bytes, *, expected_model: str, max_tokens: int
+) -> None:
+    """Admit inference plus client tools, never provider-side network capabilities."""
+
+    try:
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_pairs)
+    except (RecordError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise RecordError("driver_provider_request_invalid", "JSON") from exc
+    if (
+        not isinstance(value, dict)
+        or _PROVIDER_FORBIDDEN_CAPABILITY_FIELDS.intersection(value)
+        or not set(value).issubset(_PROVIDER_INFERENCE_FIELDS)
+        or value.get("model") != expected_model
+        or type(value.get("max_tokens")) is not int
+        or value["max_tokens"] <= 0
+        or value["max_tokens"] > max_tokens
+        or not isinstance(value.get("messages"), list)
+    ):
+        raise RecordError("driver_provider_capability_denied", "request capability")
+    tools = value.get("tools", [])
+    if not isinstance(tools, list):
+        raise RecordError("driver_provider_request_invalid", "tools")
+    for tool in tools:
+        if (
+            not isinstance(tool, dict)
+            or not set(tool).issubset(_PROVIDER_CLIENT_TOOL_FIELDS)
+            or tool.get("type", "custom") != "custom"
+            or not isinstance(tool.get("name"), str)
+            or not tool["name"]
+            or not isinstance(tool.get("input_schema"), dict)
+        ):
+            raise RecordError("driver_provider_capability_denied", "tool")
+
+    pending: list[Any] = [value.get("messages"), value.get("system")]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            source = item.get("source")
+            if (
+                item.get("type") in {"document", "image"}
+                and isinstance(source, dict)
+                and (source.get("type") == "url" or "url" in source)
+            ):
+                raise RecordError("driver_provider_capability_denied", "remote content")
+            pending.extend(item.values())
 
 
 def _expected_inline_inputs(record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -867,6 +999,7 @@ def _state_binding(state: dict[str, Any]) -> dict[str, Any]:
         "ledger_hash": state.get("ledger_hash"),
         "source_hashes": copy.deepcopy(state.get("source_hashes")),
         "event_count": state.get("event_count"),
+        "scope_hash": state.get("scope_hash"),
     }
 
 
@@ -1001,6 +1134,7 @@ def _stamp_parent_recorder_documents(
     command: str,
     runtime_session_ref: str,
     runtime_model: str,
+    view_binding: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Replace forgeable recorder metadata while retaining authenticated producer identity.
 
@@ -1037,7 +1171,9 @@ def _stamp_parent_recorder_documents(
             provenance["runtime_session_ref"] = runtime_session_ref
             provenance["model"] = runtime_model
             provenance["provider"] = None
-        elif command == "request-authority" and value.get("action_version") == 2:
+            if view_binding is not None:
+                provenance.update(view_binding)
+        elif command == "request-authority" and value.get("action_version") in {2, 3}:
             value["executor_id"] = actor_id
             value["session_id"] = session_id
         entry["bytes"] = canonical_json_bytes(value)
@@ -1171,6 +1307,7 @@ class DriverActionBroker:
         execution_deadline: float | None = None,
         docker_identity: dict[str, str] | None = None,
         docker_session_key: bytes | None = None,
+        provider_fixture_origin: str | None = None,
     ) -> None:
         if execution_deadline is not None and (
             not isinstance(execution_deadline, (int, float))
@@ -1200,7 +1337,32 @@ class DriverActionBroker:
         self._docker_session_key = b""
         self._container_nonces: dict[str, str] = {}
         self._container_nonce_lock = threading.Lock()
+        self._container_workers: set[threading.Thread] = set()
+        self._container_workers_lock = threading.Lock()
+        self._container_connections: set[socket.socket] = set()
+        self._container_connections_lock = threading.Lock()
+        self._provider_upstreams: set[socket.socket] = set()
+        self._provider_upstreams_lock = threading.Lock()
         self._container_deadline_ref: str | None = None
+        configured_provider = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+        self._provider_base_url = provider_fixture_origin or configured_provider
+        self._provider_fixture = provider_fixture_origin is not None
+        self._provider_api_key = os.environ.get("ANTHROPIC_API_KEY")
+        # Network/TLS libraries stay parent-only. Model children import this module solely for the
+        # local action client and must not acquire extra dynamic-library read requirements.
+        import network_scope
+        self._network_scope = network_scope
+        self._network_gateway = (
+            self._network_scope.NetworkGateway(request_budget=32, deadline=self._execution_deadline)
+            if self._execution_deadline is not None
+            else None
+        )
+        self.network_audit: list[dict[str, Any]] = []
+        try:
+            self._load_network_receipts()
+        except BaseException:
+            os.close(self._engagement_fd)
+            raise
         self.tcp_endpoint: tuple[str, int] | None = None
         try:
             if docker_identity is None and docker_session_key is None:
@@ -1241,6 +1403,7 @@ class DriverActionBroker:
         except BaseException:
             os.close(self._engagement_fd)
             raise
+
         try:
             if self._transport_kind == "unix":
                 root = _ensure_broker_root()
@@ -1274,7 +1437,7 @@ class DriverActionBroker:
             self._server.listen(8)
             self._server.settimeout(0.1)
             # Freeze the mutation implementation and all of its imports before the untrusted
-            # process starts.  Broker correctness cannot depend on a later pathname lookup.
+            # process starts. Broker correctness cannot depend on a later pathname lookup.
             _run_engagement_module()
             self._thread = threading.Thread(
                 target=self._serve,
@@ -1297,6 +1460,109 @@ class DriverActionBroker:
                     ) == endpoint_identity:
                         self.endpoint.unlink()
             raise
+
+    def _load_network_receipts(self) -> None:
+        """Recover bounded redacted receipts so a restarted parent sees uncertainty."""
+
+        with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+            try:
+                raw = read_governed_file(
+                    bound / NETWORK_RECEIPTS_FILE, require_single_link=True
+                )
+            except FileNotFoundError:
+                return
+            except (OSError, RecordError) as exc:
+                raise RecordError("driver_network_receipt_invalid", "unsafe path") from exc
+        recovered = self._decode_network_receipts(raw)
+        self.network_audit.extend(recovered)
+        if self._network_gateway is not None:
+            for receipt in recovered:
+                if (
+                    receipt["operation"] == "target_fetch"
+                    and receipt["runtime_session_ref"] == self._admission.get("runtime_session_ref")
+                    and receipt["action_id"] == self._admission.get("action_id")
+                ):
+                    # A persisted completion or uncertainty receipt proves that this logical
+                    # request began. Restore it as a tombstone without charging an unrelated
+                    # historical request against this admission's fresh request budget.
+                    self._network_gateway.mark_uncertain(receipt["request_id"])
+
+    @staticmethod
+    def _decode_network_receipts(raw: bytes) -> list[dict[str, Any]]:
+        """Validate the complete bounded receipt file before it can be extended or trusted."""
+
+        if len(raw) > NETWORK_RECEIPTS_MAX_BYTES:
+            raise RecordError("driver_network_receipt_invalid", "oversize")
+        lines = raw.splitlines()
+        if len(lines) > NETWORK_RECEIPTS_MAX_ROWS or (raw and not raw.endswith(b"\n")):
+            raise RecordError("driver_network_receipt_invalid", "bounds")
+        recovered: list[dict[str, Any]] = []
+        common = {
+            "schema_version", "runtime_session_ref", "action_id", "operation",
+            "method", "status",
+        }
+        operation_fields = {
+            "provider_request": {"host", "path", "request_bytes", "response_bytes"},
+            "target_fetch": {"request_id", "url_sha256", "request_bytes", "response_bytes"},
+        }
+        for line in lines:
+            try:
+                row = json.loads(line, object_pairs_hook=_reject_duplicate_pairs)
+            except (UnicodeDecodeError, json.JSONDecodeError, RecordError) as exc:
+                raise RecordError("driver_network_receipt_invalid", "JSON") from exc
+            operation = row.get("operation") if isinstance(row, dict) else None
+            allowed = common | operation_fields.get(operation, set())
+            if (
+                not isinstance(row, dict)
+                or operation not in operation_fields
+                or not common.issubset(row)
+                or not set(row).issubset(allowed)
+                or row.get("schema_version") != 1
+                or not isinstance(row.get("runtime_session_ref"), str)
+                or not isinstance(row.get("action_id"), str)
+                or not isinstance(row.get("method"), str)
+                or type(row.get("status")) not in {str, int}
+                or (
+                    operation == "target_fetch"
+                    and (
+                        _SHA256_RE.fullmatch(str(row.get("request_id"))) is None
+                        or _SHA256_RE.fullmatch(str(row.get("url_sha256"))) is None
+                    )
+                )
+            ):
+                raise RecordError("driver_network_receipt_invalid", "shape")
+            recovered.append(copy.deepcopy(row))
+        return recovered
+
+    def _persist_network_receipt(self, receipt: dict[str, Any]) -> None:
+        """Persist one redacted bounded receipt before returning network completion."""
+
+        row = {
+            "schema_version": 1,
+            "runtime_session_ref": self._admission.get("runtime_session_ref"),
+            "action_id": self._admission.get("action_id"),
+            **receipt,
+        }
+        data = canonical_json_bytes(row)
+        self._decode_network_receipts(data)
+        with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+            path = bound / NETWORK_RECEIPTS_FILE
+            try:
+                prior = read_governed_file(path, require_single_link=True)
+            except FileNotFoundError:
+                prior = b""
+            self._decode_network_receipts(prior)
+            rows = prior.splitlines(keepends=True)
+            if len(rows) >= NETWORK_RECEIPTS_MAX_ROWS:
+                rows = rows[-(NETWORK_RECEIPTS_MAX_ROWS - 1):]
+            combined = b"".join(rows) + data
+            while len(combined) > NETWORK_RECEIPTS_MAX_BYTES and rows:
+                rows.pop(0)
+                combined = b"".join(rows) + data
+            if len(combined) > NETWORK_RECEIPTS_MAX_BYTES:
+                raise RecordError("driver_network_receipt_oversize", str(row.get("operation")))
+            atomic_write(path, combined)
+        self.network_audit.append(copy.deepcopy(receipt))
 
     def activate(self, os_session_id: int) -> None:
         runtime_identity = _posix_runtime_identity(os_session_id)
@@ -1748,6 +2014,10 @@ class DriverActionBroker:
                     command=request["command"],
                     runtime_session_ref=runtime_session_ref,
                     runtime_model=runtime_model,
+                    view_binding=(
+                        {key: self._admission[key] for key in ("cognitive_principal", "view_type", "view_digest", "input_corpus_digest", "treatment")}
+                        if self._admission.get("cognitive_principal") is not None else None
+                    ),
                 )
                 returncode, output = module.execute_broker_command(
                     command=request["command"],
@@ -1927,12 +2197,77 @@ class DriverActionBroker:
                 raise RecordError("driver_action_broker_request_invalid", "Stop")
             self._remember_container_nonce(nonce, "session_end_check")
             return copy.deepcopy(payload), None, nonce
+        if request_kind == "provider_request":
+            if (
+                set(payload) != {
+                    "request_kind", "method", "path", "headers", "body_base64", "runtime_session_ref"
+                }
+                or payload.get("method") != "POST"
+                or payload.get("path") not in {"/v1/messages", "/v1/messages?beta=true"}
+                or payload.get("runtime_session_ref") != self._admission.get("runtime_session_ref")
+                or not isinstance(payload.get("headers"), dict)
+                or any(
+                    not isinstance(name, str)
+                    or not isinstance(value, str)
+                    or name not in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+                    or "\r" in value
+                    or "\n" in value
+                    for name, value in payload["headers"].items()
+                )
+                or not isinstance(payload.get("body_base64"), str)
+            ):
+                raise RecordError("driver_provider_request_invalid", "shape")
+            try:
+                body = base64.b64decode(payload["body_base64"], validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise RecordError("driver_provider_request_invalid", "body") from exc
+            if len(body) > _CONTAINER_RAW_INPUT_LIMIT:
+                raise RecordError("driver_provider_request_invalid", "body")
+            _validate_provider_inference_body(
+                body,
+                expected_model=str(self._admission.get("runtime_model")),
+                max_tokens=int(self._admission.get("provider_max_tokens", 0)),
+            )
+            self._remember_container_nonce(nonce, "provider_request")
+            request = copy.deepcopy(payload)
+            request["body"] = body
+            del request["body_base64"]
+            return request, None, nonce
+        if request_kind == "target_fetch":
+            expected_request_id = sha256_bytes(
+                _TARGET_FETCH_ID_DOMAIN
+                + canonical_json_bytes(
+                    {
+                        "runtime_session_ref": payload.get("runtime_session_ref"),
+                        "action_id": self._admission.get("action_id"),
+                        "url": payload.get("url"),
+                        "method": payload.get("method"),
+                    }
+                )
+            )
+            if (
+                set(payload) != {
+                    "request_kind", "operation", "request_id", "url", "method", "runtime_session_ref"
+                }
+                or payload.get("operation") != "target_fetch"
+                or payload.get("runtime_session_ref") != self._admission.get("runtime_session_ref")
+                or not isinstance(payload.get("request_id"), str)
+                or payload["request_id"] != expected_request_id
+                or not isinstance(payload.get("url"), str)
+                or not 1 <= len(payload["url"]) <= 8192
+                or payload.get("method") not in {"GET", "HEAD"}
+            ):
+                raise RecordError("driver_target_fetch_invalid", "shape")
+            self._remember_container_nonce(nonce, "target_fetch")
+            return copy.deepcopy(payload), None, nonce
         raise RecordError("driver_action_broker_request_invalid", "request kind")
 
     def _remember_container_nonce(self, nonce: str, request_kind: str) -> None:
         budgets = {
             "action": _CONTAINER_ACTION_NONCE_BUDGET,
             "session_end_check": _STOP_REQUEST_BUDGET,
+            "provider_request": _CONTAINER_PROVIDER_NONCE_BUDGET,
+            "target_fetch": _CONTAINER_TARGET_FETCH_NONCE_BUDGET,
         }
         budget = budgets.get(request_kind)
         if budget is None:
@@ -1989,6 +2324,223 @@ class DriverActionBroker:
             ).decode("ascii"),
         }
 
+    def _serve_provider_stream(
+        self, connection: socket.socket, request: dict[str, Any], nonce: str
+    ) -> None:
+        parsed = urllib.parse.urlsplit(self._provider_base_url)
+        production = (
+            not self._provider_fixture
+            and parsed.scheme == "https"
+            and parsed.hostname == "api.anthropic.com"
+            and parsed.port in {None, 443}
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.username is None
+        )
+        fixture = (
+            self._provider_fixture
+            and parsed.scheme == "http"
+            and parsed.hostname in {"127.0.0.1", "localhost"}
+            and parsed.port is not None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+            and parsed.username is None
+        )
+        if not (production or fixture) or request.get("path") not in {"/v1/messages", "/v1/messages?beta=true"} or not self._provider_api_key:
+            raise RecordError("driver_provider_unavailable", "configuration")
+        with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+            state = _reduce_engagement_unchecked(bound)
+            scope = read_governed_file(bound / "scope.md")
+            if (
+                sha256_bytes(scope) != state.get("scope_hash")
+                or self._admission.get("state_binding", {}).get("scope_hash")
+                != state.get("scope_hash")
+                or not _neutral_tail_is_allowed(self._admission, state, bound)
+            ):
+                raise RecordError("driver_provider_scope_stale", "scope")
+        port = parsed.port or 443
+        deadline = self._execution_deadline or time.monotonic()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RecordError("driver_provider_failed", "deadline")
+        address = "127.0.0.1" if fixture else self._network_scope.resolve_pinned(
+            parsed.hostname, port, deadline=deadline
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RecordError("driver_provider_failed", "deadline")
+        upstream = socket.create_connection(
+            (address, port), timeout=min(30.0, remaining)
+        )
+        with self._provider_upstreams_lock:
+            self._provider_upstreams.add(upstream)
+        total = 0
+        sent_headers = False
+        try:
+            if production:
+                import ssl
+                upstream.settimeout(max(0.001, deadline - time.monotonic()))
+                wrapped = ssl.create_default_context().wrap_socket(
+                    upstream, server_hostname=parsed.hostname
+                )
+                with self._provider_upstreams_lock:
+                    self._provider_upstreams.discard(upstream)
+                    self._provider_upstreams.add(wrapped)
+                upstream = wrapped
+            headers = {
+                name.lower(): value
+                for name, value in request["headers"].items()
+                if name.lower() in {"accept", "content-type", "anthropic-version", "anthropic-beta"}
+            }
+            headers["host"] = parsed.hostname
+            headers["x-api-key"] = self._provider_api_key
+            headers["content-length"] = str(len(request["body"]))
+            headers["connection"] = "close"
+            request_path = request["path"]
+            raw = (
+                f"POST {request_path} HTTP/1.1\r\n"
+                + "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+                + "\r\n"
+            ).encode("ascii") + request["body"]
+            upstream.settimeout(max(0.001, deadline - time.monotonic()))
+            upstream.sendall(raw)
+            upstream.settimeout(max(0.001, deadline - time.monotonic()))
+            response = http.client.HTTPResponse(upstream, method="POST")
+            response.begin()
+            response_headers = [
+                [name.lower(), value]
+                for name, value in response.getheaders()
+                if name.lower() in {"content-type", "request-id", "anthropic-request-id"}
+                and "\r" not in value
+                and "\n" not in value
+            ]
+            _send_container_frame(
+                connection,
+                self._container_response(
+                    request_nonce=nonce,
+                    returncode=0,
+                    output=canonical_json_bytes({
+                        "stream": "headers",
+                        "status": response.status,
+                        "headers": response_headers,
+                    }),
+                ),
+            )
+            sent_headers = True
+            sequence = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RecordError("driver_provider_failed", "deadline")
+                upstream.settimeout(min(30.0, remaining))
+                chunk = response.read1(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _CONTAINER_RAW_INPUT_LIMIT:
+                    raise RecordError("driver_provider_response_oversize", "body")
+                _send_container_frame(
+                    connection,
+                    self._container_response(
+                        request_nonce=nonce,
+                        returncode=0,
+                        output=canonical_json_bytes({
+                            "stream": "chunk",
+                            "sequence": sequence,
+                            "body_base64": base64.b64encode(chunk).decode("ascii"),
+                        }),
+                    ),
+                )
+                sequence += 1
+            self._persist_network_receipt({
+                "operation": "provider_request",
+                "method": "POST",
+                "host": parsed.hostname,
+                "path": request_path,
+                "status": response.status,
+                "request_bytes": len(request["body"]),
+                "response_bytes": total,
+            })
+            _send_container_frame(
+                connection,
+                self._container_response(
+                    request_nonce=nonce,
+                    returncode=0,
+                    output=canonical_json_bytes({"stream": "end", "sequence": sequence}),
+                ),
+            )
+        except BaseException:
+            self._persist_network_receipt({
+                "operation": "provider_request",
+                "method": "POST",
+                "host": parsed.hostname,
+                "path": request.get("path"),
+                "status": "uncertain" if sent_headers else "failed",
+            })
+            raise
+        finally:
+            with self._provider_upstreams_lock:
+                self._provider_upstreams.discard(upstream)
+            upstream.close()
+
+    def _execute_target_fetch(self, request: dict[str, Any]) -> tuple[int, bytes]:
+        request_id = request["request_id"]
+        try:
+            if self._network_gateway is None:
+                raise self._network_scope.NetworkScopeError("network_gateway_unavailable")
+            self._network_gateway.begin(request_id)
+            with bound_engagement_lock(self._engagement_fd, create=False) as bound:
+                state = _reduce_engagement_unchecked(bound)
+                scope = read_governed_file(bound / "scope.md")
+                policy = self._network_scope.parse_network_policy(
+                    scope, expected_scope_hash=str(state.get("scope_hash"))
+                )
+                if (
+                    self._admission.get("state_binding", {}).get("scope_hash")
+                    != state.get("scope_hash")
+                    or not _neutral_tail_is_allowed(self._admission, state, bound)
+                ):
+                    raise RecordError("driver_target_fetch_state_stale", "admission")
+            status, headers, body = self._network_scope.pinned_request(
+                policy=policy,
+                operation="target_fetch",
+                url=request["url"],
+                method=request["method"],
+                deadline=self._execution_deadline,
+            )
+            safe_headers = [
+                [name, value]
+                for name, value in headers
+                if name in {"content-type", "content-length", "etag", "last-modified"}
+            ]
+            output = canonical_json_bytes({
+                "status": status,
+                "headers": safe_headers,
+                "body_base64": base64.b64encode(body).decode("ascii"),
+            })
+            self._persist_network_receipt({
+                "operation": "target_fetch",
+                "request_id": request_id,
+                "method": request["method"],
+                "url_sha256": sha256_bytes(request["url"].encode("utf-8")),
+                "status": status,
+                "response_bytes": len(body),
+            })
+            return 0, output
+        except (self._network_scope.NetworkScopeError, OSError, TimeoutError, RecordError) as exc:
+            if self._network_gateway is not None:
+                self._network_gateway.mark_uncertain(request_id)
+            self._persist_network_receipt({
+                "operation": "target_fetch",
+                "request_id": request_id,
+                "method": request.get("method"),
+                "url_sha256": sha256_bytes(str(request.get("url", "")).encode("utf-8")),
+                "status": "denied_or_uncertain",
+            })
+            return _broker_error(RecordError("driver_target_fetch_denied", type(exc).__name__))
+
     def _serve_container_connection(self, connection: socket.socket) -> None:
         envelope: dict[str, Any] | None = None
         try:
@@ -1998,6 +2550,11 @@ class DriverActionBroker:
             )
             if request.get("request_kind") == "session_end_check":
                 returncode, output = self._execute_stop(request)
+            elif request.get("request_kind") == "provider_request":
+                self._serve_provider_stream(connection, request, nonce)
+                return
+            elif request.get("request_kind") == "target_fetch":
+                returncode, output = self._execute_target_fetch(request)
             else:
                 returncode, output = self._execute(request, inline_inputs)
         except RecordError as exc:
@@ -2016,6 +2573,30 @@ class DriverActionBroker:
         except (OSError, RecordError):
             pass
 
+    def _serve_container_worker(self, connection: socket.socket) -> None:
+        try:
+            with connection:
+                connection.settimeout(_BROKER_IO_TIMEOUT_SECONDS)
+                try:
+                    self._serve_container_connection(connection)
+                except (
+                    OSError,
+                    TimeoutError,
+                    UnicodeError,
+                    TypeError,
+                    ValueError,
+                    RecursionError,
+                    OverflowError,
+                ):
+                    # A peer that stalls or truncates a frame has no authenticated nonce to bind
+                    # a response to. Close only this connection.
+                    pass
+        finally:
+            with self._container_connections_lock:
+                self._container_connections.discard(connection)
+            with self._container_workers_lock:
+                self._container_workers.discard(threading.current_thread())
+
     def _serve(self) -> None:
         while not self._stop.is_set():
             try:
@@ -2024,25 +2605,20 @@ class DriverActionBroker:
                 continue
             except OSError:
                 return
+            if self._transport_kind == "tcp_hmac_sha256":
+                worker = threading.Thread(
+                    target=self._serve_container_worker,
+                    args=(connection,),
+                    daemon=True,
+                )
+                with self._container_connections_lock:
+                    self._container_connections.add(connection)
+                with self._container_workers_lock:
+                    self._container_workers.add(worker)
+                worker.start()
+                continue
             with connection:
                 connection.settimeout(_BROKER_IO_TIMEOUT_SECONDS)
-                if self._transport_kind == "tcp_hmac_sha256":
-                    try:
-                        self._serve_container_connection(connection)
-                    except (
-                        OSError,
-                        TimeoutError,
-                        UnicodeError,
-                        TypeError,
-                        ValueError,
-                        RecursionError,
-                        OverflowError,
-                    ):
-                        # A peer that stalls or truncates a frame has not supplied a request nonce,
-                        # so no authenticated response is possible.  Close only that connection;
-                        # malformed container traffic must never terminate the broker thread.
-                        pass
-                    continue
                 try:
                     if not self._peer_is_runtime(connection):
                         raise RecordError("driver_action_scope_mismatch", "peer session")
@@ -2089,9 +2665,63 @@ class DriverActionBroker:
                 return
             self._stop.set()
             self._server.close()
-            # Cancellation is unsafe once an admitted transaction starts.  The broker retains its
-            # duplicated engagement descriptor and shutdown requires worker quiescence.
-            self._thread.join()
+            connections_lock = getattr(self, "_container_connections_lock", None)
+            connections_set = getattr(self, "_container_connections", None)
+            if connections_lock is not None and connections_set is not None:
+                with connections_lock:
+                    connections = tuple(connections_set)
+            else:
+                connections = ()
+            for connection in connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                connection.close()
+            upstreams_lock = getattr(self, "_provider_upstreams_lock", None)
+            upstreams_set = getattr(self, "_provider_upstreams", None)
+            if upstreams_lock is not None and upstreams_set is not None:
+                with upstreams_lock:
+                    upstreams = tuple(upstreams_set)
+            else:
+                upstreams = ()
+            for upstream in upstreams:
+                try:
+                    upstream.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                upstream.close()
+            # Network workers share one parent-owned absolute session deadline. Closing their
+            # sockets cancels blocked I/O; the deadline bounds DNS and any remaining teardown.
+            shutdown_deadline = getattr(self, "_execution_deadline", None)
+            cleanup_deadline = (
+                None
+                if shutdown_deadline is None
+                else max(shutdown_deadline, time.monotonic() + 0.25)
+            )
+            if shutdown_deadline is None:
+                self._thread.join()
+            else:
+                self._thread.join(timeout=max(0.0, cleanup_deadline - time.monotonic()))
+            workers_lock = getattr(self, "_container_workers_lock", None)
+            workers_set = getattr(self, "_container_workers", None)
+            shutdown_timed_out = False
+            if workers_lock is not None and workers_set is not None:
+                while True:
+                    with workers_lock:
+                        workers = tuple(workers_set)
+                    if not workers:
+                        break
+                    for worker in workers:
+                        timeout = None if cleanup_deadline is None else max(
+                            0.0, cleanup_deadline - time.monotonic()
+                        )
+                        worker.join(timeout=timeout)
+                    if cleanup_deadline is not None and time.monotonic() >= cleanup_deadline:
+                        with workers_lock:
+                            if workers_set:
+                                shutdown_timed_out = True
+                                break
             os.close(self._engagement_fd)
             self._engagement_fd = -1
             self._closed = True
@@ -2105,6 +2735,11 @@ class DriverActionBroker:
                     if (entry.st_dev, entry.st_ino) == self._endpoint_identity:
                         endpoint.unlink()
             self._docker_session_key = b""
+            if shutdown_timed_out:
+                raise RecordError(
+                    "driver_action_broker_shutdown_timeout",
+                    str(self._admission.get("action_id")),
+                )
 
     def __enter__(self) -> "DriverActionBroker":
         return self

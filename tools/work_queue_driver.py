@@ -22,7 +22,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Sequence
 
 from claude_work_session import (
-    MODEL_AUTH_ENV_KEYS,
     SessionLaunchError,
     SessionResult,
     _summary_from_output,
@@ -65,6 +64,7 @@ from driver_action_admission import (
     new_container_broker_session_key,
 )
 from frozen_corpus import require_enumerated_count_matches, resolve_frozen_corpus_denominator
+from hunter_view import HunterView, HunterViewError, compile_hunter_view
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -677,6 +677,36 @@ def _container_session_prompt(
     return canonical_json_bytes(value).decode("utf-8")
 
 
+def _hunter_container_prompt(*, item: dict[str, Any], view_digest: str, python_executable: str) -> str:
+    action = item.get("next_action")
+    if not isinstance(action, dict) or action.get("principal") != "hunter" or not isinstance(action.get("arguments"), list):
+        raise DriverError("driver_next_action_invalid")
+    arguments = list(action["arguments"])
+    for index, value in enumerate(arguments):
+        if index and arguments[index - 1] == "--engagement":
+            arguments[index] = "/workspace"
+        elif isinstance(value, str) and value.startswith("<") and value.endswith(">"):
+            arguments[index] = "/scratch/hunter-action-input.json"
+    return canonical_json_bytes({
+        "schema_version": 1,
+        "task": "Read /workspace/brief.json, execute exactly its one bounded experiment, write the exact admitted input document under /scratch, submit it through the authenticated broker, then stop.",
+        "principal": "hunter",
+        "view_type": "hunter-current-v1",
+        "view_digest": view_digest,
+        "container_action_transport": {
+            "kind": "authenticated_supervisor_relay",
+            "python": python_executable,
+            "client": CONTAINER_BROKER_CLIENT,
+            "argv": [python_executable, CONTAINER_BROKER_CLIENT, "action", "--command", action["command"], "--arguments-json", json.dumps(arguments, separators=(",", ":"))],
+        },
+        "constraints": [
+            "Use only files present under /workspace and /scratch.",
+            "Do not infer or request hidden engagement state, prior verdicts, memory, gold, or unrelated source.",
+            "Return observed evidence truthfully; only the orchestrator adjudicates.",
+        ],
+    }).decode("utf-8")
+
+
 def _container_stop_hook_settings(python_executable: str) -> dict[str, Any]:
     command = " ".join(
         (
@@ -712,6 +742,7 @@ def _docker_session_bytes(
     session_ref: str,
     state: dict[str, Any],
     max_budget_usd: float | None,
+    view_binding: dict[str, str] | None = None,
 ) -> bytes:
     executable_text = os.fspath(executable)
     if not _is_absolute_container_executable(executable_text):
@@ -737,8 +768,10 @@ def _docker_session_bytes(
     command.append(prompt)
     environment = {
         **_driver_binding_values(state, runtime_session_ref=session_ref),
-        "HARNESS_ACTIVE_ENGAGEMENT": _container_engagement_path(bound),
+        "HARNESS_ACTIVE_ENGAGEMENT": "/workspace" if view_binding is not None else _container_engagement_path(bound),
     }
+    if view_binding is not None:
+        environment.update({"HARNESS_COGNITIVE_PRINCIPAL": "hunter", "HARNESS_HUNTER_VIEW_DIGEST": view_binding["view_digest"]})
     raw = canonical_json_bytes({
         "schema_version": 1,
         "command": command,
@@ -752,28 +785,29 @@ def _docker_session_bytes(
 def _model_auth_bootstrap(session_key: bytes) -> bytes:
     if not isinstance(session_key, bytes) or len(session_key) != 32:
         raise DriverError("driver_container_broker_key_invalid")
-    authority: dict[str, str] = {}
-    for key in sorted(MODEL_AUTH_ENV_KEYS):
-        value = os.environ.get(key)
-        if value is None or value == "":
-            continue
-        if (
-            not isinstance(value, str)
-            or "\x00" in value
-            or len(value.encode("utf-8")) > 32 * 1024
-        ):
-            raise DriverError("driver_model_auth_invalid")
-        authority[key] = value
     raw = canonical_json_bytes(
         {
             "schema_version": 1,
-            "environment": authority,
+            "environment": {},
             "broker_session_key_base64": base64.b64encode(session_key).decode("ascii"),
         }
     )
     if len(raw) > 64 * 1024:
         raise DriverError("driver_model_auth_invalid")
     return raw
+
+
+def _validate_parent_provider_auth() -> None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        if any(
+            os.environ.get(name)
+            for name in ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+        ):
+            raise DriverError("driver_provider_auth_unsupported")
+        raise DriverError("driver_provider_auth_missing")
+    if "\x00" in api_key or len(api_key.encode("utf-8")) > 32 * 1024:
+        raise DriverError("driver_provider_auth_invalid")
 
 
 def _run_docker_queue_session(
@@ -792,7 +826,12 @@ def _run_docker_queue_session(
     admission_token: str,
     execution_deadline: float,
     stop_requested: Callable[[], bool],
+    workspace_mount: Path | None = None,
+    harness_mount: Path | None = None,
+    view_binding: dict[str, str] | None = None,
+    cognitive_view: HunterView | None = None,
 ) -> _QueueSessionExecution:
+    _validate_parent_provider_auth()
     session_bytes = _docker_session_bytes(
         bound=bound,
         backend=backend,
@@ -802,6 +841,7 @@ def _run_docker_queue_session(
         session_ref=session_ref,
         state=state,
         max_budget_usd=max_budget_usd,
+        view_binding=view_binding,
     )
     session_digest = sha256_bytes(session_bytes)
     spec = DockerRuntimeSpec(
@@ -814,8 +854,8 @@ def _run_docker_queue_session(
             "--session-sha256",
             session_digest,
         ),
-        workspace=bound.workspace,
-        harness=ROOT,
+        workspace=bound.workspace if workspace_mount is None else workspace_mount,
+        harness=ROOT if harness_mount is None else harness_mount,
         read_only_inputs=read_only_inputs,
         limits=backend.limits,
         docker_executable=backend.docker_executable,
@@ -856,6 +896,12 @@ def _run_docker_queue_session(
                         bound.engagement, bound.engagement_fd
                     ):
                         raise DriverError("driver_target_identity_changed")
+                    if cognitive_view is not None:
+                        try:
+                            current_state = _reduce(bound)
+                            cognitive_view.assert_current(workspace=bound.workspace, engagement=bound.engagement, state=current_state, item=_queue_payload(current_state, bound.engagement)["item"], methodology_root=ROOT / "skills")
+                        except HunterViewError as exc:
+                            raise DriverError(exc.code) from exc
                     activate_docker_action_admission(
                         engagement_fd=bound.engagement_fd,
                         token=admission_token,
@@ -1304,8 +1350,30 @@ def run_driver(
             admission_token = new_admission_token()
             os_session_id: int | None = None
             docker_interrupted = False
+            hunter_view: HunterView | None = None
 
             try:
+                if action.get("principal") == "hunter":
+                    if docker_backend is None:
+                        raise DriverError("driver_hunter_requires_docker")
+                    try:
+                        hunter_view = compile_hunter_view(
+                            workspace=bound.workspace,
+                            engagement=bound.engagement,
+                            state=state,
+                            item=item,
+                            target_inputs=frozen_read_only_inputs,
+                            methodology_root=ROOT / "skills",
+                        )
+                    except HunterViewError as exc:
+                        raise DriverError(exc.code) from exc
+                view_binding = None if hunter_view is None else {
+                    "cognitive_principal": "hunter",
+                    "view_type": "hunter-current-v1",
+                    "view_digest": hunter_view.view_digest,
+                    "input_corpus_digest": hunter_view.input_corpus_digest,
+                    "treatment": hunter_view.manifest["treatment"],
+                }
                 admission = arm_action_admission(
                     engagement_fd=bound.engagement_fd,
                     state=state,
@@ -1315,6 +1383,7 @@ def run_driver(
                     runtime_session_ref=runtime_session_ref,
                     runtime_model=session_model,
                     token=admission_token,
+                    view_binding=view_binding,
                 )
                 try:
                     if docker_backend is not None:
@@ -1323,21 +1392,24 @@ def run_driver(
                             backend=docker_backend,
                             executable=executable,
                             model=session_model,
-                            prompt=_container_session_prompt(
-                                item,
-                                state,
-                                item_ref,
-                                python_executable=docker_backend.python_executable,
+                            prompt=(
+                                _hunter_container_prompt(item=item, view_digest=hunter_view.view_digest, python_executable=docker_backend.python_executable)
+                                if hunter_view is not None else
+                                _container_session_prompt(item, state, item_ref, python_executable=docker_backend.python_executable)
                             ),
                             session_ref=runtime_session_ref,
                             state=state,
                             timeout_seconds=timeout,
                             max_budget_usd=budget.session_max_budget_usd,
-                            read_only_inputs=frozen_read_only_inputs,
+                            read_only_inputs=() if hunter_view is not None else frozen_read_only_inputs,
                             admission=admission,
                             admission_token=admission_token,
                             execution_deadline=started_at + budget.max_wall_seconds,
                             stop_requested=stop_requested,
+                            workspace_mount=None if hunter_view is None else hunter_view.projection,
+                            harness_mount=None if hunter_view is None else hunter_view.runtime,
+                            view_binding=view_binding,
+                            cognitive_view=hunter_view,
                         )
                         session = execution.session
                         docker_interrupted = execution.interrupted
@@ -1389,6 +1461,9 @@ def run_driver(
                 raise DriverError(f"driver_admission_{exc.code}") from exc
             except SessionLaunchError as exc:
                 raise DriverError(f"driver_{exc.code}") from exc
+            finally:
+                if hunter_view is not None:
+                    hunter_view.close()
             sessions_started += 1
             state = _reduce(bound)
             history_entry = {
@@ -1404,6 +1479,12 @@ def run_driver(
                 "after_state_hash": sha256_bytes(canonical_json_bytes(state)),
                 "runtime": session.as_dict(),
             }
+            if view_binding is not None:
+                history_entry["cognitive_view"] = copy.deepcopy(view_binding)
+                # The hunter never sees reducer commitments. The parent retains the full current
+                # ledger/source binding separately so unrelated hidden changes cannot perturb the
+                # cognitive digest while admission remains bound to all authoritative inputs.
+                history_entry["admission_state_binding"] = copy.deepcopy(admission["state_binding"])
             terminal_status = _state_stop(state)
             if terminal_status is not None:
                 history.append(history_entry)

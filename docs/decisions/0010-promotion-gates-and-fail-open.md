@@ -20,6 +20,13 @@ unattended run produces confident garbage and looks productive.
 
 ## Decision
 
+**2026-09-22 update:** Decision-0006-v2 supersedes the production move described below. Retained
+predicates now run at signed action-version 3 activation; package `promote` is inspection-only.
+Historical records keep their original replay semantics, while new old-version activations fail at
+the authenticated kernel boundary. Typed attempt execution context supplies G3 and G6, CVSS
+recomputation supplies G5, and independent review remains distinct from the applicable G4 corpus
+heuristic. Refuted and contaminated revisions are durable negative records rather than positive proof.
+
 **A finding has a LOCATION, not a status.** It is written to `unproven/`. It reaches `findings/`
 only by running `promote`, which runs gates that can each say no. A broken unattended run now
 produces nothing, which is visible and harmless.

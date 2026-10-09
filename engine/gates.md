@@ -61,6 +61,13 @@ one contiguous revision, while operator authority, reviewer adjudication, eviden
 distinct. Regrade and Pocinator review truth/proof; report acceptance remains another operator-owned
 transition. Severity escalation (self → stored/persistent → cross-user) remains rung-by-rung.
 
+For `decision-0006-v2`, action-version 3 retains GQ, GK, and G0-G6 at this one signed activation.
+G3 privilege and G6 impact-state facts come from the exact primary attempt's typed execution context;
+G5 recomputes CVSS 3.1. Independent review is authenticated judgement. The G4 corpus-generation
+audit is a separate mechanical heuristic over the committed review corpus and blocks when applicable;
+it never substitutes for independent review. Refuted and contaminated revisions remain fileable
+negative records with informational severity and do not claim that positive proof gates passed.
+
 ## 6. Cleanup gate
 Every artifact the harness created (test chat, shared object, uploaded fixture, planted canary) is
 recorded in `cleanup.md` with its revert action and status. Unresolved cleanup **blocks pattern

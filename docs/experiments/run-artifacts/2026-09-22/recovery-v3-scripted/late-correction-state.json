@@ -1,0 +1,212 @@
+{
+  "$schemaVersion": "1.17",
+  "auto_previous_response_id": false,
+  "context": {
+    "approvals": {},
+    "context": null,
+    "context_meta": {
+      "omitted": false,
+      "original_type": "none",
+      "requires_deserializer": false,
+      "serialized_via": "none"
+    },
+    "tool_invocations": {
+      "late-v1": {
+        "approval_scope": "22fc5f78e988fc2fb1e2023a68160b25a503bf687d824701d8259b9e6d6374f5",
+        "completed": true,
+        "executed": true,
+        "fingerprint": "44e6f15b54fe3ff1f9f96eb7883cf2900dcfa12b4e0beb19b7d99dfa5da49441",
+        "type": "function_call"
+      }
+    },
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "conversation_id": null,
+  "current_agent": {
+    "name": "late-correction"
+  },
+  "current_step": {
+    "type": "next_step_run_again"
+  },
+  "current_turn": 1,
+  "current_turn_persisted_item_count": 0,
+  "generated_items": [
+    {
+      "agent": {
+        "name": "late-correction"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"revision\": \"workshop-v1\"}",
+        "call_id": "late-v1",
+        "id": "function-late-v1",
+        "name": "record_revision",
+        "type": "function_call"
+      },
+      "tool_name": "record_revision",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "late-correction"
+      },
+      "output": "recorded:workshop-v1",
+      "raw_item": {
+        "call_id": "late-v1",
+        "output": "recorded:workshop-v1",
+        "type": "function_call_output"
+      },
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_output_item"
+    }
+  ],
+  "generated_prompt_cache_key": null,
+  "generated_session_item_indexes": [
+    0,
+    1
+  ],
+  "input_guardrail_results": [],
+  "last_model_response": {
+    "output": [
+      {
+        "arguments": "{\"revision\": \"workshop-v1\"}",
+        "call_id": "late-v1",
+        "id": "function-late-v1",
+        "name": "record_revision",
+        "type": "function_call"
+      }
+    ],
+    "request_id": null,
+    "response_id": "resp-789",
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "last_processed_response": null,
+  "max_turns": 10,
+  "model_responses": [
+    {
+      "output": [
+        {
+          "arguments": "{\"revision\": \"workshop-v1\"}",
+          "call_id": "late-v1",
+          "id": "function-late-v1",
+          "name": "record_revision",
+          "type": "function_call"
+        }
+      ],
+      "request_id": null,
+      "response_id": "resp-789",
+      "usage": {
+        "input_tokens": 0,
+        "input_tokens_details": [
+          {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          }
+        ],
+        "output_tokens": 0,
+        "output_tokens_details": [
+          {
+            "reasoning_tokens": 0
+          }
+        ],
+        "request_usage_entries": [],
+        "requests": 1,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "nested_history_owned_session_item_refs": [],
+  "no_active_agent_run": true,
+  "original_input": "Use workshop-v1; wait for later updates.",
+  "output_guardrail_results": [],
+  "pending_input": [
+    {
+      "content": "Correction c1: replace workshop-v1 with workshop-v2.",
+      "role": "user"
+    }
+  ],
+  "previous_response_id": null,
+  "reasoning_item_id_policy": null,
+  "session_items": [
+    {
+      "agent": {
+        "name": "late-correction"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"revision\": \"workshop-v1\"}",
+        "call_id": "late-v1",
+        "id": "function-late-v1",
+        "name": "record_revision",
+        "type": "function_call"
+      },
+      "tool_name": "record_revision",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "late-correction"
+      },
+      "output": "recorded:workshop-v1",
+      "raw_item": {
+        "call_id": "late-v1",
+        "output": "recorded:workshop-v1",
+        "type": "function_call_output"
+      },
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_output_item"
+    }
+  ],
+  "tool_input_guardrail_results": [],
+  "tool_output_guardrail_results": [],
+  "tool_use_tracker": {
+    "late-correction": [
+      "record_revision"
+    ]
+  },
+  "trace": null
+}

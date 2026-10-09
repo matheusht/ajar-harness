@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 11.754249000005075,
+  "id": "positive-neutral-final",
+  "output": "{\"classification\":\"confirmed_issue\",\"mechanism\":\"read_document ignores the actor and returns any existing document by document_id, allowing cross-owner reads (broken object-level authorization/IDOR).\",\"evidence\":[{\"source\":\"The function looks up DOCUMENTS[document_id] and returns its content without checking document[\\\"owner\\\"] against actor.\"},{\"probe\":{\"actor\":\"alice\",\"document_id\":\"doc-bob\",\"operation\":\"read_document\"},\"observed\":{\"status\":\"ok\",\"content\":\"bravo\"},\"meaning\":\"Alice successfully read Bob's document.\"},{\"probe\":{\"actor\":\"bob\",\"document_id\":\"doc-alice\",\"operation\":\"read_document\"},\"observed\":{\"status\":\"ok\",\"content\":\"alpha\"},\"meaning\":\"Bob successfully read Alice's document.\"},{\"integrity\":\"Both receipts match fixture sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff and the frozen probe plan.\"}],\"uncertainty\":\"None for the demonstrated cross-owner read behavior; the intended policy is strongly supported by document ownership data and list_documents filtering by actor.\"}",
+  "prompt_sha256": "sha256:113b3f8bd30202d3e62b2eccdd95d15d0c4a410ce640a8e3009b2a6fe82c77ad",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 14109,
+    "output_tokens": 243,
+    "reasoning_output_tokens": 0
+  }
+}

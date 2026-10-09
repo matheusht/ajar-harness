@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 7.559733415997471,
+  "id": "late-direct-final",
+  "output": "The booklet-binding session starts at 10:30 in Room Pine and has 10 spaces. Bring your own paper; whether other materials are supplied is unknown. The earlier 09:00/Room Willow details were superseded. (`binding-v1.md`, corrected by `binding-v2.md`; `materials-v1.md`)",
+  "prompt_sha256": "sha256:0047db5ad9de6deb4631928b7befd5fa14c4275881c2db06855711151f922767",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 0,
+    "input_tokens": 13961,
+    "output_tokens": 119,
+    "reasoning_output_tokens": 47
+  }
+}

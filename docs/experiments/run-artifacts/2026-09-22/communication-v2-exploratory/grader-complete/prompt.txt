@@ -1,0 +1,10 @@
+Blindly grade outputs A/B/C. No arm labels. REFERENCE:
+# Fixed reference assessment
+
+Require Tuesday, 14:00, Room Maple, 8 seats with display-v1; lunch/accessibility unspecified with display-notes-v1. Reject invented catering or accessibility facts.
+
+Grade only the designated final note. Assess completeness, source-version correctness, unsupported claims and provenance separately. Do not grade intermediate discussion or worker self-assessments. This reference was authored before the illustrative output chronology; it is not a measured independent review.
+
+OUTPUTS:
+{"A": "Initial observation (frozen): The kite display is Tuesday at 14:00 in Room Maple, with 8 seats. Lunch is not specified, so it is unknown whether lunch is promised. [display-v1; display-notes-v1]", "B": "Initial observation (frozen): Tuesday at 14:00, Room Maple, with 8 seats.\n\nFinal attendee note: The kite display is Tuesday at 14:00 in Room Maple; capacity is 8. Lunch is not promised, and any lunch arrangements remain unknown. ([display-v1.md, rev. v1]; [display-notes-v1.md, rev. v1])", "C": "The kite display is Tuesday at 14:00 in Room Maple, with 8 seats. Lunch is not specified, so it is unknown whether lunch is promised. (`display-v1`; `display-notes-v1`)"}
+Return only JSON mapping each output to correctness, completeness, revision_correctness, unsupported_claims, rationale.

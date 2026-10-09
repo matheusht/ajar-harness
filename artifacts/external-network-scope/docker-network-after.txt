@@ -1,0 +1,6 @@
+test_live_network_boundary_and_provider_streaming (__main__.DockerWorkQueueIntegrationTest.test_live_network_boundary_and_provider_streaming) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 6.854s
+
+OK

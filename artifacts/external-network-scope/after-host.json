@@ -1,0 +1,36 @@
+{
+  "checks": [
+    {
+      "detail": "",
+      "name": "provider-credentials-and-url-remain-parent-owned",
+      "passed": true
+    },
+    {
+      "detail": "",
+      "name": "single-copy-connect-emulation",
+      "passed": true
+    },
+    {
+      "detail": "",
+      "name": "dns-alias-redirect-budget-deadline-and-no-uncertain-replay",
+      "passed": true
+    },
+    {
+      "detail": "",
+      "name": "signed-scope-destination-path-method-and-tamper",
+      "passed": true
+    },
+    {
+      "detail": "",
+      "name": "socket-family-type-protocol-and-fastopen-matrix",
+      "passed": true
+    }
+  ],
+  "docker_requested": false,
+  "errors": 0,
+  "failures": 0,
+  "fixture_image": "golang@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80",
+  "real_provider_auth_qualified": false,
+  "schema_version": 1,
+  "successful": true
+}

@@ -1,10 +1,38 @@
 # Future evaluation applications and cases
 
-**Status:** research recommendations and a case backlog, 2026-09-11; no adoption decision or new experiment.
-Local contracts checked at `6fd04bfbc128b95d201b38f82dc467e7c05fdcfb`. The existing recovery and
-communication packets remain **UNEXECUTED**. This page records useful applications from the
+**Status:** research recommendations, a case backlog, and bounded pilots updated 2026-09-22; no
+runtime or default-board adoption. Local contracts were originally checked at
+`6fd04bfbc128b95d201b38f82dc467e7c05fdcfb`. The v1 preparation packets remain illustrative, while
+new versioned pilots have now executed under the limits below. This page records useful applications from the
 Andy Gill harness/MCP discussion, Madhu Guru's evaluation series and XBOW's guardrails; external descriptions are
 not evidence that a mechanism improves this repository.
+
+## September 22 bounded execution
+
+The [portable run artifacts](../experiments/run-artifacts/2026-09-22/README.md) preserve the complete
+prompt/output/usage record and the limitations of each run. Active framing v2 executed nine harmless
+toy assignments: all arms chose two probes, all three issue cases confirmed only after a successful
+cross-owner receipt, and all six patched/near-miss cases closed as supported negatives. There were no
+wrong-case confirmations, but every arm reached the same ceiling. This measures probe choice and typed
+classification in a fixed two-call batch, not adaptive persistence, stopping benefit, population behavior
+or real-world offensive effectiveness.
+
+Communication v3 executed three cases across serial, matched direct notices and the canonical board.
+The direct and board paths received the same two independent worker notes, the same release ordinals and
+the same late correction content; the board correction cites its predecessor. Explicit grader calibration
+passed before blind grading. Serial earned two correct and one wrong grade, direct three wrong grades, and
+board two wrong plus one ambiguous grade. Board delivery and useful late-correction use were observed, but
+the result does not meet the predeclared default-adoption criterion. Final assembler access differed by
+design: serial had primary sources, while direct and board had advisory packets only. Treat factual quality
+and primary-source verification as separate results.
+
+Recovery v3 exercised the pinned SDK without a provider or model: serialized soft cancellation preserved
+completed tool work, late pending input appeared exactly once on resume, and replay of a pre-effect snapshot
+duplicated a local effect whose first receipt was lost. The baseline files expose no equivalent serialized
+cognitive continuation interface, so those comparison rows are `unsupported_not_executed`. This does not
+mean the harness cannot recover work: its ledger-derived queue and committed-record reconciliation are a
+different, separately qualified recovery boundary. No exactly-once, provider-recovery or production-runtime
+claim follows.
 
 ## What is worth carrying forward
 
@@ -49,8 +77,8 @@ to improve the next study, not award the preferred architecture an assumed advan
 
 ## Concrete benign case backlog
 
-All rows below are **proposed and NOT RUN as agent evaluations**. “Existing hook” names reusable
-preparation or accounting, not an implemented new scenario or an executed mechanism. Patched and
+Rows not covered by the execution update above remain **proposed and NOT RUN as agent evaluations**.
+“Existing hook” names reusable preparation or accounting, not an implemented new scenario or an executed mechanism. Patched and
 deceptive controls below mean future hermetic toy fixtures only; no exploit, target or operational
 change is authorized here.
 
@@ -133,17 +161,16 @@ are not proof of off-host immutable full-request logs. XBOW's described egress/a
 than our documented containment. Our evidence machinery is more explicit in the inspected material;
 that is not proof of better detection or equivalent deployed protection.
 
-Our [persistence language](../../engine/persistence.md) also deserves scrutiny: an operator prior can
-activate persistence, while “the vuln is somewhere” and a held vector not lowering belief overstate what
-a fallible prior warrants. The same policy retains refutation, re-verification and unchanged scope, and
-[the reducer](../../tools/engagement_state.py) treats a prior as search/coverage authority rather than
-claim truth. Recommendation: retain bounded persistence while allowing negative evidence to update the
-broader hypothesis according to its diagnostic strength. This page does not change that doctrine.
+Our [persistence language](../../engine/persistence.md) now treats an operator prior as search signal rather
+than claim truth. A held vector is negative evidence for that route and may lower route, mechanism or broader
+hypothesis belief according to its diagnostic strength; it neither proves the remaining space clean nor
+guarantees a vulnerability elsewhere. The reducer still treats a prior as search/coverage authority rather
+than claim truth.
 
-A future hermetic comparison could pair neutral framing, evidence-grounded persistence and unsupported
-certainty across the positive, patched and near-miss cases above. Freeze model, tools, case families,
-budget and blinded grading; measure valid root-cause recall, invalid confirmations, correct closures,
-inconclusive outcomes, repeats, effort and scope violations separately. No such study has run.
+The framing v2 pilot paired neutral framing, evidence-grounded persistence and unsupported certainty across
+positive, patched and deceptive near-miss fixtures. It observed no difference at the fixed two-call ceiling.
+A future adaptive study would need multiple evidence-dependent probe rounds and a separately frozen stopping
+rule; this pilot does not justify one by itself.
 
 After a concrete runtime is selected, these small safety cases could test its promised boundaries:
 
@@ -178,6 +205,7 @@ replications. This documentation pass checked the local contracts and did not re
 | [9](https://x.com/realmadhuguru/status/2092426017118028266) | Usage-informed roadmap. |
 | [10](https://x.com/realmadhuguru/status/2098064969464217720) | Trajectories, typical and hard-case economics. |
 
-The next useful step is selecting one existing packet and its required contract for separately authorized
-execution, with actual configuration, grading isolation, measurements and budget supplied. This page
-approves no runtime replacement, MCP server, board service, paid run, live security work or gate change.
+The bounded runs resolve the immediate toy mechanisms but do not justify a runtime replacement or a
+default board. A larger study needs a new, representative case roster and practical threshold; an adaptive
+persistence study additionally needs evidence-dependent probe rounds and a stopping contract. This page
+approves no MCP server, paid run, live security work or gate change.

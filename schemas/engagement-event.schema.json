@@ -212,7 +212,7 @@
           "format": "date"
         },
         "record_kernel": {
-          "enum": ["decision-0005-v1", "decision-0006-v1"]
+          "enum": ["decision-0005-v1", "decision-0006-v1", "decision-0006-v2"]
         },
         "supersedes_scope_hash": {
           "oneOf": [
@@ -229,6 +229,30 @@
         },
         "entity_type": {
           "type": "string"
+        },
+        "task_id": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_notice": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["notice_version", "notice_id", "task_id", "principal_id", "source_event_ref", "source_revision", "observation", "applicability", "uncertainty", "predecessor_event_ref"],
+          "properties": {
+            "notice_version": {"const": 1},
+            "notice_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "task_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "principal_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "source_event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+            "source_revision": {"type": "string", "minLength": 1},
+            "observation": {"type": "string", "minLength": 1, "maxLength": 400},
+            "applicability": {"type": "string", "minLength": 1, "maxLength": 400},
+            "uncertainty": {"type": "string", "minLength": 1, "maxLength": 400},
+            "predecessor_event_ref": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}, {"type": "null"}]}
+          }
         },
         "status": {
           "type": "string"
@@ -733,6 +757,9 @@
         },
         "finding_digest": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "filing_contract_version": {
+          "const": 1
         },
         "adjudication_review_ref": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"

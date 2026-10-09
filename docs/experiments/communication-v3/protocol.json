@@ -1,0 +1,78 @@
+{
+  "aggregate_ceilings": {
+    "calls": 100,
+    "input_tokens": 2000000,
+    "output_tokens": 80000
+  },
+  "allocation": {
+    "calibration_calls": 1,
+    "candidate_calls": 20,
+    "grader_calls": 3,
+    "total_calls": 24,
+    "transfers": false
+  },
+  "arms": [
+    "serial",
+    "direct",
+    "board"
+  ],
+  "cases": [
+    {
+      "case_id": "complete",
+      "reference": "docs/experiments/communication-v1/grader/complete.md",
+      "sources": [
+        "docs/experiments/communication-v1/inputs/complete/display-v1.md",
+        "docs/experiments/communication-v1/inputs/complete/display-notes-v1.md"
+      ]
+    },
+    {
+      "case_id": "complementary",
+      "reference": "docs/experiments/communication-v1/grader/complementary.md",
+      "sources": [
+        "docs/experiments/communication-v1/inputs/complementary/attendance-v1.md",
+        "docs/experiments/communication-v1/inputs/complementary/stock-v1.md"
+      ]
+    },
+    {
+      "case_id": "late",
+      "reference": "docs/experiments/communication-v1/grader/late.md",
+      "sources": [
+        "docs/experiments/communication-v1/inputs/late/binding-v1.md",
+        "docs/experiments/communication-v1/inputs/late/materials-v1.md"
+      ],
+      "correction": "docs/experiments/communication-v1/releases/late/binding-v2.md"
+    }
+  ],
+  "ceilings": {
+    "calls": 24,
+    "elapsed_seconds": 5400,
+    "input_tokens": 480000,
+    "output_tokens": 24000,
+    "reserved_input_tokens_per_call": 20000,
+    "reserved_output_tokens_per_call": 1000
+  },
+  "frozen_at": "2026-09-22T15:02:28Z",
+  "logical_schedule": {
+    "clock": "synthetic event ordinals anchored at 2026-01-01T00:00:00Z; not observed wall time",
+    "steps": [
+      "independent worker notes",
+      "empty coordination read",
+      "initial notice forwarding",
+      "late pre-correction drafts",
+      "late correction release and predecessor-linked forwarding",
+      "final synthesis",
+      "grader calibration",
+      "blind grading"
+    ]
+  },
+  "model": "gpt-5.6-sol",
+  "prior_aggregate_usage": {
+    "calls": 59,
+    "input_tokens": 821071,
+    "output_tokens": 7404
+  },
+  "reasoning_effort": "medium",
+  "schema_version": 3,
+  "study_id": "communication-v3-correction-and-board-pilot",
+  "valid_claim": "Three synthetic cases compare serial source access with matched direct and canonical-board forwarding. They are mechanism observations, not a reliability estimate."
+}

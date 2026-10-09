@@ -705,6 +705,8 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             (("proof", "evidence_refs"), {"attempt", "artifact"}), (("claims", "conflicting_evidence"), {"attempt", "artifact"}),
             (("adjudication", "review_ref"), {"review"}), (("search_linkage", "candidate_refs"), {"candidate"}),
             (("search_linkage", "hypothesis_refs"), {"hypothesis"}),
+            (("privilege_context", "evidence_refs"), {"attempt", "artifact"}),
+            (("state_provenance", "evidence_refs"), {"attempt", "artifact"}),
         ],
         "attempt-v2": [
             (("environment_ref",), {"environment"}), (("escalation_confirmation_event_ref",), {"event"}),

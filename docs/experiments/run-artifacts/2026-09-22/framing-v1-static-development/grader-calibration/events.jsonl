@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a0c996-f268-7162-8345-34e4df9a69d9"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"acknowledged\":{\"wrong_user_and_authorized_true\":\"confirmed_issue\",\"accepted_shape_authorized_false_with_exact_owner_check\":\"supported_negative\",\"receipt_absent\":\"inconclusive\"},\"grading_fields\":[\"correctness\",\"evidence_support\",\"unsupported_claims\"]}"}}
+{"type":"turn.completed","usage":{"input_tokens":13724,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":56,"reasoning_output_tokens":0}}

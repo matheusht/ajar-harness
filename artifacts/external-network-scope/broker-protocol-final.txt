@@ -1,0 +1,21 @@
+test_action_request_budget_cannot_starve_stop (__main__.ContainerBrokerProtocolTest.test_action_request_budget_cannot_starve_stop) ... ok
+test_admitted_action_waits_for_its_authoritative_response (__main__.ContainerBrokerProtocolTest.test_admitted_action_waits_for_its_authoritative_response) ... ok
+test_authenticated_action_inlines_exact_bytes_and_never_sends_host_authority (__main__.ContainerBrokerProtocolTest.test_authenticated_action_inlines_exact_bytes_and_never_sends_host_authority) ... ok
+test_authenticated_stop_uses_the_same_exact_container_binding (__main__.ContainerBrokerProtocolTest.test_authenticated_stop_uses_the_same_exact_container_binding) ... ok
+test_environment_loading_keeps_the_session_key_private (__main__.ContainerBrokerProtocolTest.test_environment_loading_keeps_the_session_key_private) ... ok
+test_every_runtime_binding_and_the_host_deadline_fail_closed (__main__.ContainerBrokerProtocolTest.test_every_runtime_binding_and_the_host_deadline_fail_closed) ... ok
+test_frame_and_typed_identity_validation_are_bounded (__main__.ContainerBrokerProtocolTest.test_frame_and_typed_identity_validation_are_bounded) ... ok
+test_full_admit_uses_inline_bytes_before_executing_state (__main__.ContainerBrokerProtocolTest.test_full_admit_uses_inline_bytes_before_executing_state) ... ok
+test_inline_json_is_duplicate_safe_and_host_paths_are_never_opened (__main__.ContainerBrokerProtocolTest.test_inline_json_is_duplicate_safe_and_host_paths_are_never_opened) ... ok
+test_inline_set_rejects_missing_extra_duplicate_size_digest_and_oversize (__main__.ContainerBrokerProtocolTest.test_inline_set_rejects_missing_extra_duplicate_size_digest_and_oversize) ... ok
+test_record_review_requires_predicates_and_signature_material_inline (__main__.ContainerBrokerProtocolTest.test_record_review_requires_predicates_and_signature_material_inline) ... ok
+test_stalled_frame_does_not_terminate_the_broker (__main__.ContainerBrokerProtocolTest.test_stalled_frame_does_not_terminate_the_broker) ... ok
+test_stdin_stop_hook_matches_claude_derivations_and_fail_opens_silently (__main__.ContainerBrokerProtocolTest.test_stdin_stop_hook_matches_claude_derivations_and_fail_opens_silently) ... ok
+test_target_fetch_real_broker_reaches_only_the_approved_owned_sink (__main__.ContainerBrokerProtocolTest.test_target_fetch_real_broker_reaches_only_the_approved_owned_sink) ... ok
+test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay (__main__.ContainerBrokerProtocolTest.test_target_fetch_uncertainty_and_stale_admission_block_real_broker_replay) ... ok
+test_wrong_key_binding_replay_and_tampered_response_fail_closed (__main__.ContainerBrokerProtocolTest.test_wrong_key_binding_replay_and_tampered_response_fail_closed) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 2.879s
+
+OK

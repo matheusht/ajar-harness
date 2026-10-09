@@ -15,10 +15,16 @@ A maintained synthesis of engineering decisions, their evidence and the question
 | How do I prepare and inspect an offline study account? | [Study report contract](../study-report.md) |
 | What should the implementation task do? | [Implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) |
 | Which external evaluation ideas and benign cases are useful for future work? | [Future evaluation applications](future-evaluations.md) |
+| What is the current local candidate delivery and qualification status? | [September 22 delivery status](delivery-status-2026-09-22.md) |
 | What changed in this wiki? | [Chronological log](log.md) |
 | How should an agent maintain these pages? | [Maintenance instructions](AGENTS.md) |
 
 ## Current delivery state
+
+The current three local candidate heads and their qualification gaps are recorded in the
+[September 22 delivery status](delivery-status-2026-09-22.md). They remain separate local review
+inputs rather than a merged or fully qualified delivery. The paragraph below preserves the prior
+2026-09-08 state and its then-current experiment status.
 
 All six slices have local implementation and bounded acceptance evidence as of 2026-09-08 under [specification #106](https://github.com/matheusht/redteam-harness/issues/106). Slices #107–109 and #111–112 previously completed both independent review axes; their exact reviewed boundary remains in the [evidence page](engineering-evidence.md#final-handoff). The [read-only dossier inspector](../dossier-inspector.md) now implements #110 with 23 public-command checks and integration into the existing scoped CI step. Both independent review axes for the new #110/integration diff are complete. All six scoped local slices are accepted with integrated tests and reviews done; no issue closure or merge is part of this delivery. PR publication was separately requested on September 10. The September 5 automatic execution errors are preserved as observations, not a finding that this offline task was prohibited; the resumed September 8 scoped work succeeded through normal tools. Recovery and communication candidate experiments remain UNEXECUTED. The [handoff](../research/harness-engineering-2026-09-05/handoff.md) preserves the approved plan and prior main repair.
 

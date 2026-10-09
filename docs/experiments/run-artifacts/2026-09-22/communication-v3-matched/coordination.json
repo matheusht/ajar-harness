@@ -1,0 +1,389 @@
+{
+  "complementary": {
+    "board_actions": [
+      {
+        "action": "empty_read",
+        "arm": "board",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-complementary-notice-1",
+        "notice": {
+          "applicability": "Only task-complementary.",
+          "notice_id": "complementary-notice-1",
+          "notice_version": 1,
+          "observation": "attendance-v1.md: 36 attendees need one sheet each, so 36 sheets are required. Supplied stock quantity is not stated.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-complementary-1",
+          "source_revision": "attendance-v1.md",
+          "task_id": "task-complementary",
+          "uncertainty": "Stock sufficiency, spare count, and restocking status are unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-complementary-notice-2",
+        "notice": {
+          "applicability": "Only task-complementary.",
+          "notice_id": "complementary-notice-2",
+          "notice_version": 1,
+          "observation": "stock-v1.md: Supply box has 6 sealed packs with 6 sheets each (36 sheets total); no extra loose sheets are listed.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-complementary-2",
+          "source_revision": "stock-v1.md",
+          "task_id": "task-complementary",
+          "uncertainty": "Restocking arrangements are unknown."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "read_final",
+        "arm": "board",
+        "notice_count": 2,
+        "ordinal": 8
+      }
+    ],
+    "board_primary_sources": [],
+    "correction_source_released": null,
+    "direct_actions": [
+      {
+        "action": "empty_receive",
+        "arm": "direct",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-complementary.",
+          "notice_id": "complementary-notice-1",
+          "notice_version": 1,
+          "observation": "attendance-v1.md: 36 attendees need one sheet each, so 36 sheets are required. Supplied stock quantity is not stated.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-complementary-1",
+          "source_revision": "attendance-v1.md",
+          "task_id": "task-complementary",
+          "uncertainty": "Stock sufficiency, spare count, and restocking status are unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-complementary.",
+          "notice_id": "complementary-notice-2",
+          "notice_version": 1,
+          "observation": "stock-v1.md: Supply box has 6 sealed packs with 6 sheets each (36 sheets total); no extra loose sheets are listed.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-complementary-2",
+          "source_revision": "stock-v1.md",
+          "task_id": "task-complementary",
+          "uncertainty": "Restocking arrangements are unknown."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "receive_final",
+        "arm": "direct",
+        "notice_count": 2,
+        "ordinal": 8
+      }
+    ],
+    "direct_primary_sources": [],
+    "serial_source_paths": [
+      "docs/experiments/communication-v1/inputs/complementary/attendance-v1.md",
+      "docs/experiments/communication-v1/inputs/complementary/stock-v1.md"
+    ],
+    "shared_worker_notes": [
+      {
+        "observation": "attendance-v1.md: 36 attendees need one sheet each, so 36 sheets are required. Supplied stock quantity is not stated.",
+        "uncertainty": "Stock sufficiency, spare count, and restocking status are unknown."
+      },
+      {
+        "observation": "stock-v1.md: Supply box has 6 sealed packs with 6 sheets each (36 sheets total); no extra loose sheets are listed.",
+        "uncertainty": "Restocking arrangements are unknown."
+      }
+    ]
+  },
+  "complete": {
+    "board_actions": [
+      {
+        "action": "empty_read",
+        "arm": "board",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-complete-notice-1",
+        "notice": {
+          "applicability": "Only task-complete.",
+          "notice_id": "complete-notice-1",
+          "notice_version": 1,
+          "observation": "display-v1.md: Kite display is Tuesday at 14:00 in Room Maple; capacity is 8 seats. Lunch is not promised in this revision.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-complete-1",
+          "source_revision": "display-v1.md",
+          "task_id": "task-complete",
+          "uncertainty": "Whether lunch will be provided is unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-complete-notice-2",
+        "notice": {
+          "applicability": "Only task-complete.",
+          "notice_id": "complete-notice-2",
+          "notice_version": 1,
+          "observation": "display-notes-v1.md: The event is a display, not a class. Lunch and accessibility arrangements are unspecified.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-complete-2",
+          "source_revision": "display-notes-v1.md",
+          "task_id": "task-complete",
+          "uncertainty": "Lunch and accessibility details remain unknown."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "read_final",
+        "arm": "board",
+        "notice_count": 2,
+        "ordinal": 8
+      }
+    ],
+    "board_primary_sources": [],
+    "correction_source_released": null,
+    "direct_actions": [
+      {
+        "action": "empty_receive",
+        "arm": "direct",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-complete.",
+          "notice_id": "complete-notice-1",
+          "notice_version": 1,
+          "observation": "display-v1.md: Kite display is Tuesday at 14:00 in Room Maple; capacity is 8 seats. Lunch is not promised in this revision.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-complete-1",
+          "source_revision": "display-v1.md",
+          "task_id": "task-complete",
+          "uncertainty": "Whether lunch will be provided is unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-complete.",
+          "notice_id": "complete-notice-2",
+          "notice_version": 1,
+          "observation": "display-notes-v1.md: The event is a display, not a class. Lunch and accessibility arrangements are unspecified.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-complete-2",
+          "source_revision": "display-notes-v1.md",
+          "task_id": "task-complete",
+          "uncertainty": "Lunch and accessibility details remain unknown."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "receive_final",
+        "arm": "direct",
+        "notice_count": 2,
+        "ordinal": 8
+      }
+    ],
+    "direct_primary_sources": [],
+    "serial_source_paths": [
+      "docs/experiments/communication-v1/inputs/complete/display-v1.md",
+      "docs/experiments/communication-v1/inputs/complete/display-notes-v1.md"
+    ],
+    "shared_worker_notes": [
+      {
+        "observation": "display-v1.md: Kite display is Tuesday at 14:00 in Room Maple; capacity is 8 seats. Lunch is not promised in this revision.",
+        "uncertainty": "Whether lunch will be provided is unknown."
+      },
+      {
+        "observation": "display-notes-v1.md: The event is a display, not a class. Lunch and accessibility arrangements are unspecified.",
+        "uncertainty": "Lunch and accessibility details remain unknown."
+      }
+    ]
+  },
+  "late": {
+    "board_actions": [
+      {
+        "action": "empty_read",
+        "arm": "board",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-late-notice-1",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-1",
+          "notice_version": 1,
+          "observation": "binding-v1.md (rev binding-v1): booklet-binding starts at 09:00 in Room Willow; capacity is 10 spaces. Materials supply is not stated.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-late-1",
+          "source_revision": "binding-v1.md",
+          "task_id": "task-late",
+          "uncertainty": "Whether materials are supplied is unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "post",
+        "arm": "board",
+        "event_id": "event-task-notice-late-notice-2",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-2",
+          "notice_version": 1,
+          "observation": "materials-v1.md: Participants bring their own paper. Supplied sources do not specify other materials.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-late-2",
+          "source_revision": "materials-v1.md",
+          "task_id": "task-late",
+          "uncertainty": "Unknown whether any other materials are required or provided."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "post_correction",
+        "arm": "board",
+        "event_id": "event-task-notice-late-notice-correction",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-correction",
+          "notice_version": 1,
+          "observation": "binding-v2 corrects binding-v1: 10:30 in Room Pine; 10 spaces and materials-v1 guidance are unchanged.",
+          "predecessor_event_ref": "event-task-notice-late-notice-1",
+          "principal_id": "worker-1",
+          "source_event_ref": "event-correction-late-1",
+          "source_revision": "binding-v2.md",
+          "task_id": "task-late",
+          "uncertainty": "Primary correction source controls."
+        },
+        "ordinal": 7
+      },
+      {
+        "action": "read_final",
+        "arm": "board",
+        "notice_count": 3,
+        "ordinal": 8
+      }
+    ],
+    "board_primary_sources": [],
+    "correction_source_released": "# binding-v2\n\nCorrection of binding-v1: the booklet-binding session now starts at 10:30 in Room Pine. The 10 spaces are unchanged. Materials guidance in materials-v1 is unchanged.\n",
+    "direct_actions": [
+      {
+        "action": "empty_receive",
+        "arm": "direct",
+        "notice_count": 0,
+        "ordinal": 3
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-1",
+          "notice_version": 1,
+          "observation": "binding-v1.md (rev binding-v1): booklet-binding starts at 09:00 in Room Willow; capacity is 10 spaces. Materials supply is not stated.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-1",
+          "source_event_ref": "event-initial-late-1",
+          "source_revision": "binding-v1.md",
+          "task_id": "task-late",
+          "uncertainty": "Whether materials are supplied is unknown."
+        },
+        "ordinal": 4
+      },
+      {
+        "action": "send",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-2",
+          "notice_version": 1,
+          "observation": "materials-v1.md: Participants bring their own paper. Supplied sources do not specify other materials.",
+          "predecessor_event_ref": null,
+          "principal_id": "worker-2",
+          "source_event_ref": "event-initial-late-2",
+          "source_revision": "materials-v1.md",
+          "task_id": "task-late",
+          "uncertainty": "Unknown whether any other materials are required or provided."
+        },
+        "ordinal": 5
+      },
+      {
+        "action": "send_correction",
+        "arm": "direct",
+        "notice": {
+          "applicability": "Only task-late.",
+          "notice_id": "late-notice-correction",
+          "notice_version": 1,
+          "observation": "binding-v2 corrects binding-v1: 10:30 in Room Pine; 10 spaces and materials-v1 guidance are unchanged.",
+          "predecessor_event_ref": "event-task-notice-late-notice-1",
+          "principal_id": "worker-1",
+          "source_event_ref": "event-correction-late-1",
+          "source_revision": "binding-v2.md",
+          "task_id": "task-late",
+          "uncertainty": "Primary correction source controls."
+        },
+        "ordinal": 7
+      },
+      {
+        "action": "receive_final",
+        "arm": "direct",
+        "notice_count": 3,
+        "ordinal": 8
+      }
+    ],
+    "direct_primary_sources": [],
+    "serial_source_paths": [
+      "docs/experiments/communication-v1/inputs/late/binding-v1.md",
+      "docs/experiments/communication-v1/inputs/late/materials-v1.md",
+      "docs/experiments/communication-v1/releases/late/binding-v2.md"
+    ],
+    "shared_worker_notes": [
+      {
+        "observation": "binding-v1.md (rev binding-v1): booklet-binding starts at 09:00 in Room Willow; capacity is 10 spaces. Materials supply is not stated.",
+        "uncertainty": "Whether materials are supplied is unknown."
+      },
+      {
+        "observation": "materials-v1.md: Participants bring their own paper. Supplied sources do not specify other materials.",
+        "uncertainty": "Unknown whether any other materials are required or provided."
+      }
+    ]
+  }
+}

@@ -372,15 +372,15 @@ def _hypothesis_action(item_class: str, engagement: Path, entity_id: str, detail
     if item_class == "hypothesis_running_unattempted":
         if status != "running":
             raise RecordError("work_queue_hypothesis_status_invalid", f"{entity_id}:{status}")
-        return _event_action(
-            "requeue_unattempted_hypothesis",
+        return _attempt_action(
+            "record_hunter_primary",
             engagement,
-            "<hypothesis-requeued-event-json>",
+            "<hunter-primary-attempt-json>",
             [
-                "valid hypothesis.status_changed notebook event",
-                f"binds exact hypothesis {entity_id}",
-                "changes running to queued",
-                "preserves the bounded route, evidence refs, and unresolved questions",
+                "valid primary attempt",
+                f"hypothesis_ref is exact {entity_id}",
+                f"experiment_ref is exact running event {hypothesis.get('running_event_ref')}",
+                "records the bounded observation without adjudicating or promoting it",
             ],
             effect="advances_item",
         )

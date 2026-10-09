@@ -415,6 +415,18 @@ def build_action_admission(
                 _constraint("proposal", ["review_refs"], "set_equals", [review["review_ref"]]),
             ])
         return admission
+    if action_id == "record_hunter_primary":
+        hypothesis = state.get("hypotheses", {}).get(entity_id)
+        if not isinstance(hypothesis, dict) or hypothesis.get("status") != "running" or not isinstance(hypothesis.get("running_event_ref"), str):
+            raise RecordError("work_queue_admission_hypothesis_missing", entity_id)
+        return _attempt(
+            _constraint("proposal", ["kind"], "equals", "primary"),
+            _constraint("proposal", ["hypothesis_ref"], "equals", entity_id),
+            _constraint("proposal", ["experiment_ref"], "equals", hypothesis["running_event_ref"]),
+            _constraint("proposal", ["control_of"], "set_equals", []),
+            _constraint("proposal", ["observation", "source"], "one_of", ["broker", "runtime", "source_inspection", "model_report"]),
+            *_attempt_scope(state),
+        )
     if action_id == "route_review_obligation":
         return _created_hypothesis("reviewer_challenge", entity_id)
     if action_id in {"select_review_hypothesis", "run_review_hypothesis", "requeue_review_hypothesis"}:

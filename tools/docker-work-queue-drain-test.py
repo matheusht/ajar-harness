@@ -837,6 +837,57 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
         self.assertEqual(result["sessions_started"], 1)
         self.assertEqual(result["history"], [])
 
+    def test_hunter_run_retains_target_local_manifest_after_projection_cleanup(self) -> None:
+        # Failure modes: cleanup deletes the only manifest, run history loses its path,
+        # or the retained bytes do not match the admitted cognitive view digest.
+        if not SSH_KEYGEN.is_file():
+            self.skipTest("ssh-keygen unavailable for the signed queue fixture")
+        with tempfile.TemporaryDirectory(prefix="docker-hunter-manifest-") as temporary:
+            root = Path(temporary).resolve()
+            workspace = root / "target"
+            engagement = workspace / "engagements" / "docker-hunter"
+            engagement.mkdir(parents=True)
+            self._seed_current_signed_dry_review(root, workspace, engagement)
+            route = workspace / "src" / "route.txt"
+            route.parent.mkdir()
+            route.write_text("owned synthetic marker\n", encoding="utf-8")
+            collect_preflight(
+                engagement, preflight_id="preflight-docker-hunter", mode="package",
+                target=route, expected_identity=sha256_file(route),
+                runtime=Path(sys.executable).resolve(),
+                reproduction_argv=[str(Path(sys.executable).resolve()), "-c", "pass"],
+                operator_id="operator-docker-queue-test", recorded_at="2026-08-26T12:00:03.500000Z",
+                operator_redaction_attested=True, endpoint_identity="local", account_role="owner",
+            )
+            self._seed_running_hypothesis(engagement)
+            backend = DockerQueueBackend(
+                image="python@sha256:" + "a" * 64,
+                python_executable=LIVE_PYTHON,
+                docker_executable=Path("/usr/local/bin/docker"),
+                limits=DockerRuntimeLimits(),
+            )
+            execution = queue_driver._QueueSessionExecution(
+                session=queue_driver.SessionResult(
+                    "11111111-1111-4111-8111-111111111111", True, False, 0, True, False, None,
+                ),
+                interrupted=False,
+            )
+            with mock.patch("work_queue_driver._run_docker_queue_session", return_value=execution):
+                result = run_driver(
+                    workspace=workspace, engagement=engagement,
+                    executable=Path("/workspace/not-executed"), model=WORKER_MODEL,
+                    reviewer_model=REVIEWER_MODEL, budget=DriverBudget(1, 30.0, 10.0, None),
+                    docker_backend=backend, read_only_inputs=(route,),
+                )
+            entry = result["history"][0]
+            retained = entry["view_manifest"]
+            self.assertEqual(retained["relative_path"], f"driver-view-manifests/{result['run_ref']}-1.json")
+            manifest = json.loads((engagement / retained["relative_path"]).read_bytes())
+            self.assertEqual(sha256_bytes(canonical_json_bytes(manifest)), retained["digest"])
+            self.assertEqual(manifest["view_digest"], entry["cognitive_view"]["view_digest"])
+            self.assertIn("exclusion_policy", manifest)
+            self.assertEqual(validate_record(result, "work-queue-driver"), [])
+
     @unittest.skipUnless(
         LIVE_IMAGE,
         "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",

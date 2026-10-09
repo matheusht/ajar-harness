@@ -43,6 +43,7 @@ from engagement_state import (
     _append_kernel_event_idempotent,
     _open_absolute_directory,
     _reduce_engagement_unchecked,
+    atomic_write,
     base_event,
     blocking_work_identities,
     bound_engagement_lock,
@@ -1351,6 +1352,7 @@ def run_driver(
             os_session_id: int | None = None
             docker_interrupted = False
             hunter_view: HunterView | None = None
+            view_manifest: dict[str, str] | None = None
 
             try:
                 if action.get("principal") == "hunter":
@@ -1386,6 +1388,14 @@ def run_driver(
                     view_binding=view_binding,
                 )
                 try:
+                    if hunter_view is not None:
+                        relative = f"driver-view-manifests/{run_ref}-{sessions_started + 1}.json"
+                        manifest_bytes = canonical_json_bytes(hunter_view.manifest)
+                        try:
+                            atomic_write(Path(f"/dev/fd/{bound.engagement_fd}") / relative, manifest_bytes)
+                        except (OSError, RecordError) as exc:
+                            raise DriverError("driver_hunter_view_manifest_save_failed") from exc
+                        view_manifest = {"relative_path": relative, "digest": sha256_bytes(manifest_bytes)}
                     if docker_backend is not None:
                         execution = _run_docker_queue_session(
                             bound=bound,
@@ -1481,6 +1491,7 @@ def run_driver(
             }
             if view_binding is not None:
                 history_entry["cognitive_view"] = copy.deepcopy(view_binding)
+                history_entry["view_manifest"] = view_manifest
                 # The hunter never sees reducer commitments. The parent retains the full current
                 # ledger/source binding separately so unrelated hidden changes cannot perturb the
                 # cognitive digest while admission remains bound to all authoritative inputs.

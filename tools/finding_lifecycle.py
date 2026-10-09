@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
-"""Findings start unproven. Promotion is an act that must pass gates.
+"""Inspect legacy finding packages without granting production filing authority.
 
-Why this exists
----------------
-Until now a finding was created directly in `findings/` and carried its own status field. The run
-that produced the finding also set the field. On 2026-08-09 a script set `claim_state: supported` on
-seven findings in spotify-backstage-2026-07 and nothing objected, because nothing had to.
-
-That is a default-accept pipeline. Every check that does not run is a silent pass, so a broken
-unattended run produces confident garbage and looks productive.
-
-This inverts it. A finding is written to `unproven/`. It has no status. It has a LOCATION, and the
-location changes only by running `promote`, which runs gates that can each say no. A broken
-unattended run now produces nothing, which is visible and harmless.
-
-Ownership (CLAUDE.md section 2)
--------------------------------
-Hunters write into `unproven/` and may not move anything. Only the orchestrator runs `promote`.
-`demote` is open to any role and needs only a reason: a wrong demote costs a re-review, a wrong
-promote reaches a vendor, so the asymmetry matches the cost.
+Decision-0006-v2 activation lives in ``run-engagement.py revise-finding`` and the authenticated
+kernel reducer. ``promote`` remains as an inspection-only compatibility command: it evaluates the
+legacy package gates, always reports the activation blocker, and never moves or activates bytes.
 
 The gates
 ---------
@@ -36,18 +21,8 @@ The gates
                     through the real path, not written directly, and the
                     attempt cited as reaching it resolves                   computable + attestable
 
-G3 is the gate this harness did not have. It cannot decide whether a proof really ran as a low
-privilege user. It can decide that the package DECLARES both positions and that they agree. That
-catches the failure ZSec documented: a named pipe that looked exploitable from SYSTEM and was
-unreachable as a standard user.
-
-G6 is the gate the obyte run bought. G3 asks WHO the attacker was; G6 asks whether the situation
-they attacked can occur at all. obyte-2026-08-004 answered G3 honestly and still promoted a false
-impact, because its PoC wrote itself into a state the real network cannot reach. Added 2026-08-11.
-
-Package layout
---------------
-  unproven/<FINDING_ID>/
+These predicates are retained for inspection, while production activation resolves typed committed
+attempt and review records. Historical package layout begins at ``unproven/<FINDING_ID>/``.
     finding.json      the finding record (v1 flat or v3 nested; both are read)
     attest.json       the attestations the attestable gates require
     REPORT.md         the writeup
@@ -60,7 +35,7 @@ Usage
   finding_lifecycle.py demote  FINDING_ID  --engagement DIR --actor ID --reason TEXT
   finding_lifecycle.py status  --engagement DIR [--json]
 
-Exit 0 = clear or moved, 1 = blocked.
+Exit 0 = advisory gates clear or status read; retired promote/demote aliases return 1.
 """
 
 import argparse
@@ -1139,52 +1114,17 @@ def _cmd_promote_unlocked(args, engagement, package_relative):
         g.add("source", False, f"the package is promoted out of {UNPROVEN}/",
               f"package sits at {pkg}, expected a child of {want_parent} — a finding that was never "
               f"in {UNPROVEN}/ was never gated on its way in")
-    dest = os.path.join(args.engagement, PROVEN, fid)
-    moved = False
-    if not g.blocked:
-        if not _bound_move(engagement, UNPROVEN, PROVEN, fid):
-            g.add("move", False, "destination is free", f"{dest} already exists")
-        else:
-            moved = True
-    _append_log_bound(engagement, {
-        "recorded_at": now(), "action": "promote", "finding_id": fid, "actor": args.actor,
-        "result": "promoted" if moved else "blocked",
-        "gates": [{"gate": r["gate"], "ok": r["ok"]} for r in g.rows],
-        "blocked_by": [r["gate"] for r in g.blocked]})
-    report(args, g, pkg, moved=moved, dest=dest if moved else None)
-    return 0 if moved else 1
+    # Retained for package archaeology only. Active membership is created solely by the signed
+    # record-kernel finding.revised commit; an actor string cannot confer filing authority.
+    g.add("activation", False, "legacy promotion is inspection-only",
+          "use run-engagement.py request-authority and settle-approved-revision")
+    report(args, g, pkg, moved=False)
+    return 1
 
 
 def cmd_demote(args):
-    with engagement_lock(Path(args.engagement).absolute()) as engagement:
-        return _cmd_demote_unlocked(args, engagement)
-
-
-def _cmd_demote_unlocked(args, engagement):
-    src = os.path.join(args.engagement, PROVEN, args.finding_id)
-    dest = os.path.join(args.engagement, UNPROVEN, args.finding_id)
-    root_fd = _bound_root_fd(engagement)
-    try:
-        proven_fd = _open_state_directory(root_fd, PROVEN)
-        try:
-            source = os.stat(args.finding_id, dir_fd=proven_fd, follow_symlinks=False)
-            source_exists = stat.S_ISDIR(source.st_mode) and not stat.S_ISLNK(source.st_mode)
-        finally:
-            os.close(proven_fd)
-    except (FileNotFoundError, ValueError):
-        source_exists = False
-    if not source_exists:
-        print(f"not promoted: {src} does not exist")
-        return 1
-    if not _bound_move(engagement, PROVEN, UNPROVEN, args.finding_id):
-        print(f"cannot demote: {dest} already exists")
-        return 1
-    _append_log_bound(engagement, {
-        "recorded_at": now(), "action": "demote", "finding_id": args.finding_id,
-        "actor": args.actor, "result": "demoted", "reason": args.reason})
-    print(f"demoted {args.finding_id} -> {UNPROVEN}/")
-    print(f"reason: {args.reason}")
-    return 0
+    print("demote is inspection-only; canonical finding state changes require the authenticated record kernel")
+    return 1
 
 
 def cmd_status(args):
@@ -1192,18 +1132,18 @@ def cmd_status(args):
     try:
         with bound_engagement_source(original) as engagement:
             rows = _bound_finding_rows(engagement)
+            display_rows = [{**row, "location": "canonical storage" if row["state"] == PROVEN else "legacy unproven package"} for row in rows]
             _require_bound_package_current(original, engagement, portable=False)
             if args.json:
-                json.dump({"engagement": args.engagement, "findings": rows}, sys.stdout, indent=2)
+                json.dump({"engagement": args.engagement, "findings": display_rows, "authority": "record-kernel only"}, sys.stdout, indent=2)
                 sys.stdout.write("\n")
             else:
                 if not rows:
                     print("no findings")
-                for r in rows:
-                    mark = "PROVEN  " if r["state"] == PROVEN else "unproven"
-                    print(f"  {mark} {r['finding_id']}")
-                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} proven, "
-                      f"{sum(1 for r in rows if r['state']==UNPROVEN)} unproven")
+                for r in display_rows:
+                    print(f"  {r['location']} {r['finding_id']}")
+                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} canonical storage, "
+                      f"{sum(1 for r in rows if r['state']==UNPROVEN)} legacy unproven packages")
             return 0
     except (OSError, RecordError, ValueError):
         if args.json:
@@ -1257,14 +1197,16 @@ def main():
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_gates)
 
-    p = sub.add_parser("promote", help="orchestrator only — run gates and move to findings/")
+    p = sub.add_parser("promote", help="inspection-only legacy alias; run gates without activating or moving",
+                       description="Inspection-only legacy alias. Runs gates without activating or moving a finding.")
     p.add_argument("package")
     p.add_argument("--engagement", required=True)
-    p.add_argument("--actor", required=True)
+    p.add_argument("--actor", help="ignored historical argument; never grants filing authority")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_promote)
 
-    p = sub.add_parser("demote", help="any role — move back to unproven/")
+    p = sub.add_parser("demote", help="inspection-only retired alias; never moves canonical finding bytes",
+                       description="Inspection-only retired alias. Canonical state changes require the authenticated record kernel.")
     p.add_argument("finding_id")
     p.add_argument("--engagement", required=True)
     p.add_argument("--actor", required=True)

@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 10.635979792001308,
+  "id": "near-miss-evidence-grounded-final",
+  "output": "{\"classification\":\"supported_negative\",\"mechanism\":\"Owner-based authorization is enforced for both direct reads and document listing. Alice cannot read Bob's document, and her listing contains only her own document.\",\"evidence\":[{\"ordinal\":1,\"source_expectation\":\"read_document permits content only when document.owner == actor.\",\"request\":{\"actor\":\"alice\",\"document_id\":\"doc-bob\",\"operation\":\"read_document\"},\"observed\":{\"accepted\":true,\"authorized\":false,\"content\":null},\"effect\":\"Cross-owner content was not disclosed.\"},{\"ordinal\":2,\"source_expectation\":\"list_documents returns only documents whose owner equals actor.\",\"request\":{\"actor\":\"alice\",\"operation\":\"list_documents\"},\"observed\":[\"doc-alice\"],\"effect\":\"Bob's document was excluded from Alice's listing.\"}],\"uncertainty\":\"The evidence supports only the two probed operations for Alice against this fixture; it does not establish behavior for other inputs or implementations.\"}",
+  "prompt_sha256": "sha256:84f9d4f681a6810cb11d4bde958cacbb6b9a9010b3feab4c7712e542ebdec87c",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14113,
+    "output_tokens": 192,
+    "reasoning_output_tokens": 0
+  }
+}

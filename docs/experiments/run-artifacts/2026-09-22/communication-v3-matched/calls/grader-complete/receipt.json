@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 25.827081749986974,
+  "id": "grader-complete",
+  "output": "{\"A\":{\"decision\":\"wrong\",\"correct_facts\":[\"Event type is a display\",\"Tuesday\",\"14:00\",\"Room Maple\",\"Capacity of 8\",\"Lunch is unspecified\",\"Accessibility is unspecified\",\"Uses display-v1 and display-notes-v1\"],\"missing_facts\":[],\"stale_revision\":false,\"unsupported_claims\":[\"The event is not a class\"],\"used_released_information\":true,\"useful_correction\":null,\"rationale\":\"Complete and version-correct, but it adds the unsupported claim that the display is not a class. The reference establishes that it is a display but does not independently establish this contrast.\"},\"B\":{\"decision\":\"correct\",\"correct_facts\":[\"Event type is a display\",\"Tuesday\",\"14:00\",\"Room Maple\",\"Capacity of 8 seats\",\"Lunch is unspecified\",\"Accessibility is unspecified\",\"Uses display-v1 revision v1 and display-notes-v1 revision v1\"],\"missing_facts\":[],\"stale_revision\":false,\"unsupported_claims\":[],\"used_released_information\":true,\"useful_correction\":null,\"rationale\":\"It includes every required fact, preserves the unknown status of lunch and accessibility, cites the correct source revisions, and introduces no unsupported details.\"},\"C\":{\"decision\":\"wrong\",\"correct_facts\":[\"Identifies display-v1 and display-notes-v1 as the relevant sources\"],\"missing_facts\":[\"Event type is a display\",\"Tuesday\",\"14:00\",\"Room Maple\",\"Capacity of 8 seats\",\"Lunch is unspecified\",\"Accessibility is unspecified\"],\"stale_revision\":false,\"unsupported_claims\":[\"The event details cannot yet be confirmed\",\"The cited sources were not supplied\",\"The event type, schedule, room, capacity, lunch, and accessibility all remain unknown pending source review\"],\"used_released_information\":false,\"useful_correction\":null,\"rationale\":\"It does not report the required facts and incorrectly replaces the fixed assessment with an unsubstantiated source-availability objection.\"}}",
+  "prompt_sha256": "sha256:a07556ff90df096202dcd32e7a53f1c43a4656fdd301d5c5b7d5f224309471a1",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14018,
+    "output_tokens": 679,
+    "reasoning_output_tokens": 278
+  }
+}

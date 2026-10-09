@@ -16,7 +16,11 @@ from work_queue_driver import (
     NONCOMPLETION_STATUSES,
     SignalStop,
     run_driver,
+    bind_run,
+    _queue_payload,
+    _reduce,
 )
+from hunter_view import HunterViewError, compile_hunter_view, inspect_hunter_view
 
 
 def emit(value: object) -> None:
@@ -92,11 +96,28 @@ def build_parser() -> argparse.ArgumentParser:
             "desired deterministic /inputs/000, /inputs/001, ... mount order"
         ),
     )
+    inspect = subcommands.add_parser("inspect-hunter-view", help="compile and safely summarize the current hunter view without launching it")
+    inspect.add_argument("--workspace", type=Path, required=True)
+    inspect.add_argument("--engagement", type=Path, required=True)
+    inspect.add_argument("--read-only-input", type=Path, action="append", required=True)
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.command == "inspect-hunter-view":
+        try:
+            with bind_run(args.workspace, args.engagement) as bound:
+                state = _reduce(bound)
+                item = _queue_payload(state, bound.engagement).get("item")
+                if not isinstance(item, dict) or item.get("next_action", {}).get("principal") != "hunter":
+                    raise HunterViewError("hunter_view_action_not_current")
+                with compile_hunter_view(workspace=bound.workspace, engagement=bound.engagement, state=state, item=item, target_inputs=tuple(args.read_only_input), methodology_root=Path(__file__).resolve().parents[1] / "skills") as view:
+                    emit({"schema_version": 1, "ok": True, "inspection": inspect_hunter_view(view)})
+            return 0
+        except (DriverError, HunterViewError) as exc:
+            emit({"schema_version": 1, "ok": False, "error": {"code": exc.code}})
+            return 1
     docker_backend = DockerQueueBackend(
         image=args.docker_image,
         python_executable=args.docker_python_executable,

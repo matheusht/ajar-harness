@@ -1,0 +1,9 @@
+{
+  "calibration_calls": 1,
+  "candidate_assignments": 9,
+  "final_calls": 9,
+  "grading_calls": 3,
+  "initial_note_calls": 15,
+  "no_favorable_reruns": true,
+  "protocol_commit": "bc5c5bb3beb7979fb3c71b7f21ab9c1bec85947c"
+}

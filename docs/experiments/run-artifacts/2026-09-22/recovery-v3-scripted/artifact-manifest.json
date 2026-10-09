@@ -1,0 +1,36 @@
+{
+  "files": {
+    "cooperative-pause-state.json": {
+      "bytes": 4885,
+      "portable_sha256": "sha256:dfe0d7cec2a263828d5f543cd662bc8592e977e8435fc5c622cdfe0844b7cc60",
+      "raw_sha256": "sha256:dfe0d7cec2a263828d5f543cd662bc8592e977e8435fc5c622cdfe0844b7cc60",
+      "redactions": 0
+    },
+    "late-correction-state.json": {
+      "bytes": 4996,
+      "portable_sha256": "sha256:bbc911acb022ef95015f1f59a5813d0030986c575b27e62eb02d9948a8cc7e4f",
+      "raw_sha256": "sha256:bbc911acb022ef95015f1f59a5813d0030986c575b27e62eb02d9948a8cc7e4f",
+      "redactions": 0
+    },
+    "lost-receipt-effects.jsonl": {
+      "bytes": 92,
+      "portable_sha256": "sha256:e1ffcdd8a82d5d777ece38aff4547e94e9b9970f11c9a58eed6676b6bd865df2",
+      "raw_sha256": "sha256:e1ffcdd8a82d5d777ece38aff4547e94e9b9970f11c9a58eed6676b6bd865df2",
+      "redactions": 0
+    },
+    "lost-receipt-pre-effect-state.json": {
+      "bytes": 8186,
+      "portable_sha256": "sha256:2f72b342dfdc8a9a1d4f7a9b881e5903c6d9d75a212be263adb6f435eac9307f",
+      "raw_sha256": "sha256:2f72b342dfdc8a9a1d4f7a9b881e5903c6d9d75a212be263adb6f435eac9307f",
+      "redactions": 0
+    },
+    "results.json": {
+      "bytes": 7878,
+      "portable_sha256": "sha256:131b9c8f0a15fd4142ddfdaefab1fc1bd9c56882c1b4d36909dac7b69c3dbf28",
+      "raw_sha256": "sha256:131b9c8f0a15fd4142ddfdaefab1fc1bd9c56882c1b4d36909dac7b69c3dbf28",
+      "redactions": 0
+    }
+  },
+  "raw_root": "/tmp/redteam-pilots/recovery-v3",
+  "redaction": "All occurrences of the personal home prefix were replaced with <redacted-user-home>. Original target-local raw files remain under /tmp and are bound below by SHA-256."
+}

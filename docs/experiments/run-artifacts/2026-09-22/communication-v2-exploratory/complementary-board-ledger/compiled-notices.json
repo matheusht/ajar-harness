@@ -1,0 +1,36 @@
+{
+  "brief": [
+    {
+      "digest": "sha256:219a39f296d25f505e16df6092f1e22f4db14c2c775264ed66c7abed2e0586a3",
+      "event_id": "event-task-notice-complementary-notice-1",
+      "path": "notices/notice-000.json",
+      "principal": "worker-1",
+      "source_revision": "attendance-v1.md"
+    },
+    {
+      "digest": "sha256:0a09373f0b973a02fd3e7fdef6601305f977c969b51742fd50d2d4998a6436e7",
+      "event_id": "event-task-notice-complementary-notice-2",
+      "path": "notices/notice-001.json",
+      "principal": "worker-2",
+      "source_revision": "stock-v1.md"
+    }
+  ],
+  "commitment": [
+    {
+      "digest": "sha256:219a39f296d25f505e16df6092f1e22f4db14c2c775264ed66c7abed2e0586a3",
+      "event_id": "event-task-notice-complementary-notice-1",
+      "principal": "worker-1",
+      "source_event_ref": "event-initial-complementary-1",
+      "source_revision": "attendance-v1.md",
+      "task_id": "task-complementary"
+    },
+    {
+      "digest": "sha256:0a09373f0b973a02fd3e7fdef6601305f977c969b51742fd50d2d4998a6436e7",
+      "event_id": "event-task-notice-complementary-notice-2",
+      "principal": "worker-2",
+      "source_event_ref": "event-initial-complementary-2",
+      "source_revision": "stock-v1.md",
+      "task_id": "task-complementary"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "brief": [
+    {
+      "digest": "sha256:a7c0560a0322dd0c0244ab2020741557b85c57c1e4e8b2f960259f844048393d",
+      "event_id": "event-task-notice-late-notice-1",
+      "path": "notices/notice-000.json",
+      "principal": "worker-1",
+      "source_revision": "binding-v1.md"
+    },
+    {
+      "digest": "sha256:703b387b30025cbcc214231811100fc79a4c60aa3b6487a5048cb4f5237c966f",
+      "event_id": "event-task-notice-late-notice-2",
+      "path": "notices/notice-001.json",
+      "principal": "worker-2",
+      "source_revision": "materials-v1.md"
+    },
+    {
+      "digest": "sha256:699da0b965a87920e2b41b7710781303b7cb5aefcee99bba9593a35aa1831b7b",
+      "event_id": "event-task-notice-late-notice-correction",
+      "path": "notices/notice-002.json",
+      "principal": "worker-1",
+      "source_revision": "binding-v2.md"
+    }
+  ],
+  "commitment": [
+    {
+      "digest": "sha256:a7c0560a0322dd0c0244ab2020741557b85c57c1e4e8b2f960259f844048393d",
+      "event_id": "event-task-notice-late-notice-1",
+      "principal": "worker-1",
+      "source_event_ref": "event-initial-late-1",
+      "source_revision": "binding-v1.md",
+      "task_id": "task-late"
+    },
+    {
+      "digest": "sha256:703b387b30025cbcc214231811100fc79a4c60aa3b6487a5048cb4f5237c966f",
+      "event_id": "event-task-notice-late-notice-2",
+      "principal": "worker-2",
+      "source_event_ref": "event-initial-late-2",
+      "source_revision": "materials-v1.md",
+      "task_id": "task-late"
+    },
+    {
+      "digest": "sha256:699da0b965a87920e2b41b7710781303b7cb5aefcee99bba9593a35aa1831b7b",
+      "event_id": "event-task-notice-late-notice-correction",
+      "principal": "worker-1",
+      "source_event_ref": "event-correction-late-1",
+      "source_revision": "binding-v2.md",
+      "task_id": "task-late"
+    }
+  ]
+}

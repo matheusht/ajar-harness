@@ -1,9 +1,10 @@
 # Remaining filing contract and local WIP disposition
 
-Plan only, 2026-09-20; issue [#85](https://github.com/matheusht/redteam-harness/issues/85).
+Selected plan, 2026-09-20; implemented locally on 2026-09-22 for issue [#85](https://github.com/matheusht/redteam-harness/issues/85).
 Reviewed source: `5e366a32af299fead09180b5ef349310d674d7cd` (origin/main).
 Local WIP was inspected against `0d8fe0c4ffb57a3bf1cfd5d4db013113b51d8c8d`, not imported.
-This note neither closes #85 nor changes production filing authority.
+Implementation evidence is recorded in `filing-activation-failure-matrix.md`; this note alone does
+not close #85.
 
 ## WIP disposition
 

@@ -1,0 +1,11 @@
+Blindly grade the three final notes. You do not know their communication treatments. Use only this current-case reference and outputs.
+REFERENCE:
+# Fixed reference assessment
+
+Require Tuesday, 14:00, Room Maple, 8 seats with display-v1; lunch/accessibility unspecified with display-notes-v1. Reject invented catering or accessibility facts.
+
+Grade only the designated final note. Assess completeness, source-version correctness, unsupported claims and provenance separately. Do not grade intermediate discussion or worker self-assessments. This reference was authored before the illustrative output chronology; it is not a measured independent review.
+
+OUTPUTS:
+{"A": "The Kite display\u2014not a class\u2014is Tuesday at 14:00 in Room Maple, with capacity for 8 attendees. Lunch and accessibility arrangements are unknown. (`display-v1.md`; `display-notes-v1.md`)", "B": "The kite display is Tuesday at 14:00 in Room Maple. Capacity is 8 seats. Lunch is not specified, so whether it is promised remains unknown. Accessibility arrangements are also unknown. [display-v1.md, rev. v1; display-notes-v1.md, rev. v1]", "C": "Kite event details cannot yet be confirmed because `display-v1.md` and `display-notes-v1.md` were cited but not supplied. The event type, schedule, room, eight-seat capacity, lunch, and accessibility arrangements remain unknown pending source review."}
+Return only JSON mapping A/B/C to objects with: decision (correct|wrong|ambiguous), correct_facts (array), missing_facts (array), stale_revision (boolean), unsupported_claims (array), used_released_information (boolean), useful_correction (boolean or null), rationale.

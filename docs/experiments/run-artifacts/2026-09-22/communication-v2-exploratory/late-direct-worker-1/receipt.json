@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 6.91072683299717,
+  "id": "late-direct-worker-1",
+  "output": "binding-v1.md: Time 09:00; Room Willow; capacity 10. Whether materials are supplied is unknown.",
+  "prompt_sha256": "sha256:b82388bb0b5330b375eeb5cf63189b69faa28ec0188ff814d52a4c1b05728c26",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 13821,
+    "output_tokens": 100,
+    "reasoning_output_tokens": 69
+  }
+}

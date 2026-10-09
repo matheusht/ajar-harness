@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 7.602307416993426,
+  "id": "positive-evidence-grounded-plan",
+  "output": "{\"probes\":[{\"operation\":\"list_documents\",\"actor\":\"alice\"},{\"operation\":\"read_document\",\"actor\":\"alice\",\"document_id\":\"doc-bob\"}]}",
+  "prompt_sha256": "sha256:1c4bb37044b123bbb4eddc2d6e09823cde4a158bce362515ecb0374b260d8e9a",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 13883,
+    "output_tokens": 81,
+    "reasoning_output_tokens": 44
+  }
+}

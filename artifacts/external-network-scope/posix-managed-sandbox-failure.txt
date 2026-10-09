@@ -1,0 +1,17 @@
+2026-09-22 managed CLI sandbox evidence
+
+Command:
+/Users/matheusvsky/Documents/trab/llm-redteam-harness/.venv/bin/python tools/work-queue-driver-test.py
+
+Observed unrelated Darwin session-integration failures:
+- test_noop_subprocess_spends_outer_session_budget_against_frozen_corpus
+- test_real_subprocess_drains_known_queue_in_order_and_stops
+
+Both nested sandbox-exec launches closed the process-start gate, then cleanup failed at
+os.killpg(..., SIGTERM) with PermissionError: [Errno 1] Operation not permitted. A focused rerun of
+the no-op case reproduced the same managed-sandbox denial. The affected broker-close test initially
+found a compatibility issue in a manually constructed test broker; that issue was fixed and its
+focused rerun passed.
+
+Repeat outside the managed CLI sandbox with the command above. Docker Desktop qualification was
+not blocked and ran separately to completion.

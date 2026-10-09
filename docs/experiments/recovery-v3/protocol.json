@@ -1,0 +1,31 @@
+{
+  "baseline": {
+    "pin": "ea3e5c69222c9a1a471915af56bf9485429b53ea",
+    "source_files": {
+      "tools/claude_work_session.py": "sha256:3bfe7b4db842c09bc5b38753534280fd304e7ae94a74884a866c57333b32a5e4",
+      "tools/work_queue_driver.py": "sha256:801ce2ad3157b8f35b18bc2b3125591dbbe17e92a2074879a4ea82bfdc11fae9"
+    }
+  },
+  "cases": [
+    "late-correction",
+    "cooperative-pause",
+    "lost-receipt"
+  ],
+  "frozen_at": "2026-09-22T14:57:48Z",
+  "model_calls": 0,
+  "schema_version": 3,
+  "sdk": {
+    "checkout": "/tmp/redteam-recovery-sdk",
+    "commit": "f1f35031d364f9f0d8e94dda0853c92abefdccff",
+    "lock_sha256": "sha256:dc8e8af7cf4774cd33caa4aba30e4b324acfb68de1cc88628e69e5015b5c6229"
+  },
+  "study_id": "recovery-v3-scripted-sdk-mechanics",
+  "valid_claim": "The pinned SDK mechanics preserve late pending input and completed tool history across serialized soft-cancel resumes; replaying a pre-effect snapshot can duplicate an unreceipted local effect.",
+  "claims_not_established": [
+    "model reasoning",
+    "provider recovery",
+    "filesystem durability",
+    "exactly-once external effects",
+    "production runtime acceptance"
+  ]
+}

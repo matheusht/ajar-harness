@@ -1,0 +1,195 @@
+{
+  "complementary": {
+    "A": {
+      "correct_facts": [
+        "Attendance is 36.",
+        "Stock is 36 sheets.",
+        "Restocking is unknown.",
+        "Both source versions are cited."
+      ],
+      "decision": "wrong",
+      "missing_facts": [
+        "36 attendees require 36 sheets.",
+        "The available stock is sufficient.",
+        "There are zero spare sheets."
+      ],
+      "rationale": "The note cites the correct versions and reports both quantities, but rejects conclusions established by the reference. Joining the two sources shows exact sufficiency and zero spare.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "The underlying revisions were not provided for confirmation.",
+        "Stock sufficiency and spare-sheet count remain unknown."
+      ],
+      "used_released_information": true,
+      "useful_correction": null
+    },
+    "B": {
+      "correct_facts": [
+        "36 attendees require 36 sheets.",
+        "Stock contains 36 sheets.",
+        "There is one sheet per attendee.",
+        "There are zero listed spare sheets.",
+        "Restocking is unknown.",
+        "Both source versions are cited.",
+        "The required calculation is shown."
+      ],
+      "decision": "ambiguous",
+      "missing_facts": [],
+      "rationale": "The required conclusion, sources, and calculation are present, but the note adds pack details absent from the reference and unnecessarily makes the fixed sufficiency finding conditional.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "The 36 sheets consist of 6 sealed packs of 6.",
+        "Sufficiency must be qualified based on all listed sheets being usable."
+      ],
+      "used_released_information": true,
+      "useful_correction": null
+    },
+    "C": {
+      "correct_facts": [
+        "36 sheets exactly meet the need for 36 attendees.",
+        "There are zero spare sheets.",
+        "Restocking is unknown.",
+        "Both source versions are cited.",
+        "The equality of need and stock provides the calculation."
+      ],
+      "decision": "correct",
+      "missing_facts": [],
+      "rationale": "The note matches the fixed assessment, cites both v1 sources, states exact sufficiency and zero spare, and avoids unsupported additions.",
+      "stale_revision": false,
+      "unsupported_claims": [],
+      "used_released_information": true,
+      "useful_correction": null
+    }
+  },
+  "complete": {
+    "A": {
+      "correct_facts": [
+        "Event type is a display",
+        "Tuesday",
+        "14:00",
+        "Room Maple",
+        "Capacity of 8",
+        "Lunch is unspecified",
+        "Accessibility is unspecified",
+        "Uses display-v1 and display-notes-v1"
+      ],
+      "decision": "wrong",
+      "missing_facts": [],
+      "rationale": "Complete and version-correct, but it adds the unsupported claim that the display is not a class. The reference establishes that it is a display but does not independently establish this contrast.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "The event is not a class"
+      ],
+      "used_released_information": true,
+      "useful_correction": null
+    },
+    "B": {
+      "correct_facts": [
+        "Event type is a display",
+        "Tuesday",
+        "14:00",
+        "Room Maple",
+        "Capacity of 8 seats",
+        "Lunch is unspecified",
+        "Accessibility is unspecified",
+        "Uses display-v1 revision v1 and display-notes-v1 revision v1"
+      ],
+      "decision": "correct",
+      "missing_facts": [],
+      "rationale": "It includes every required fact, preserves the unknown status of lunch and accessibility, cites the correct source revisions, and introduces no unsupported details.",
+      "stale_revision": false,
+      "unsupported_claims": [],
+      "used_released_information": true,
+      "useful_correction": null
+    },
+    "C": {
+      "correct_facts": [
+        "Identifies display-v1 and display-notes-v1 as the relevant sources"
+      ],
+      "decision": "wrong",
+      "missing_facts": [
+        "Event type is a display",
+        "Tuesday",
+        "14:00",
+        "Room Maple",
+        "Capacity of 8 seats",
+        "Lunch is unspecified",
+        "Accessibility is unspecified"
+      ],
+      "rationale": "It does not report the required facts and incorrectly replaces the fixed assessment with an unsubstantiated source-availability objection.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "The event details cannot yet be confirmed",
+        "The cited sources were not supplied",
+        "The event type, schedule, room, capacity, lunch, and accessibility all remain unknown pending source review"
+      ],
+      "used_released_information": false,
+      "useful_correction": null
+    }
+  },
+  "late": {
+    "A": {
+      "correct_facts": [
+        "Session starts at 10:30",
+        "Session is in Room Pine",
+        "There are 10 spaces",
+        "Participants bring their own paper",
+        "Other materials remain unknown",
+        "Cites binding-v2",
+        "Cites materials-v1"
+      ],
+      "decision": "wrong",
+      "missing_facts": [
+        "binding-v2 corrects and supersedes binding-v1"
+      ],
+      "rationale": "The attendee details and materials status match the reference, but the note does not explicitly recognize that binding-v2 corrects binding-v1, which the reference requires.",
+      "stale_revision": false,
+      "unsupported_claims": [],
+      "used_released_information": true,
+      "useful_correction": false
+    },
+    "B": {
+      "correct_facts": [
+        "Materials other than paper remain unknown"
+      ],
+      "decision": "wrong",
+      "missing_facts": [
+        "Session starts at 10:30",
+        "Session is in Room Pine",
+        "There are 10 spaces",
+        "Participants bring their own paper",
+        "binding-v2 corrects and supersedes binding-v1"
+      ],
+      "rationale": "It withholds the required attendee-facing facts and incorrectly treats the released sources as unavailable or non-authoritative.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "The packet contains only advisory notices",
+        "binding-v2 and materials-v1 have not been released"
+      ],
+      "used_released_information": false,
+      "useful_correction": null
+    },
+    "C": {
+      "correct_facts": [
+        "Session starts at 10:30",
+        "Session is in Room Pine",
+        "There are 10 spaces",
+        "Participants bring their own paper",
+        "Other materials remain unknown",
+        "binding-v2 corrects binding-v1",
+        "Cites materials-v1"
+      ],
+      "decision": "wrong",
+      "missing_facts": [],
+      "rationale": "The designated attendee note contains all required substantive facts and the useful revision correction, but misrepresents released information as unverified advisory claims and refuses to issue a verified announcement.",
+      "stale_revision": false,
+      "unsupported_claims": [
+        "Only advisory notices were provided",
+        "The released documents were not provided",
+        "No verified workshop announcement can be issued",
+        "The binding-v2 and materials-v1 details require further confirmation"
+      ],
+      "used_released_information": false,
+      "useful_correction": true
+    }
+  }
+}

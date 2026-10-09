@@ -1,0 +1,19 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+Create a short initial draft from these sources. Preserve unknowns and cite filenames. No tools.
+FILE attendance-v1.md:
+# attendance-v1
+
+The paper-art demonstration has 36 attendees. Each attendee needs one sheet. Task: determine whether supplied stock suffices and state the spare count; retain any restocking uncertainty.
+
+
+FILE stock-v1.md:
+# stock-v1
+
+The supply box contains 6 sealed packs of 6 sheets each. No extra loose sheets are listed. Restocking arrangements are unknown.

@@ -1,6 +1,6 @@
 # Decision 0006 — the record kernel is the agent's notebook, not the operator's checkpoint
 
-**Status:** proposed; interim experiment exists, but the design below is not yet implemented
+**Status:** accepted; decision-0006-v2 finding activation implemented 2026-09-22
 
 **Relationship:** refines Decision 0005's authority boundary; does not weaken signed scope, independent adjudication, Zone-2, cleanup, reporting, submission, memory, or closure gates
 
@@ -25,6 +25,16 @@ The desired outcome is high operational autonomy inside the evidence shell, not 
 The same run also exposed a measurement gap. Decision 0005 can derive complete candidate-funnel history and conservative cost totals, but it does not yet make agent-runtime flow legible enough to answer: which stage consumed active effort, which lane waited on authority, how many agent turns/tool calls were spent, where backtracking occurred, and whether record completeness improved. Without that layer, Decision 0006 could pass contracts yet still overstate that flow improved. The measurement addition must remain lightweight, agent-runtime-neutral, and non-authoritative.
 
 ## 2. Decision
+
+### 2.0 Finding activation contract (decision-0006-v2)
+
+New engagements select `decision-0006-v2`. A finding becomes active only when a signed,
+digest/lane/session/scope/environment/current-ledger-bound action-version 3 request commits the exact
+revision and then appends `finding.revised`. Stored bytes and `record.committed` alone are inert.
+Action-version 2 remains readable historical evidence and cannot be newly submitted or appended
+through the production writer. Positive claims additionally bind typed attempt privilege and
+impact-state facts plus recomputed severity; refuted and contaminated revisions remain durable
+negative records. The independent review and the corpus-generation heuristic remain separate gates.
 
 ### 2.1 Core rule
 

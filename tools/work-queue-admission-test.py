@@ -503,7 +503,7 @@ class WorkQueueAdmissionTest(unittest.TestCase):
         with self.assertRaises(RecordError):
             self._evaluate(predicate, {"finding_id": "F-1", "revision": 2})
 
-    def test_running_hypothesis_without_attempt_is_requeued(self) -> None:
+    def test_running_hypothesis_admits_one_exact_primary_attempt(self) -> None:
         state = {
             "scope_hash": "sha256:" + "1" * 64,
             "active_environment_ref": "environment-1",
@@ -516,34 +516,14 @@ class WorkQueueAdmissionTest(unittest.TestCase):
         }
         predicate = build_action_admission(
             {"class": "hypothesis_running_unattempted", "entity": {"id": "hyp-running"}},
-            {"action_id": "requeue_unattempted_hypothesis"},
+            {"action_id": "record_hunter_primary"},
             state,
             self.engagement,
         )
-        proposal = {
-            "event_type": "hypothesis.status_changed",
-            "payload": {
-                "hypothesis_id": "hyp-running",
-                "status": "queued",
-                "experiment_refs": [],
-                "control_refs": [],
-                "supporting_evidence_refs": [],
-                "conflicting_evidence_refs": [],
-                "unresolved_questions": [],
-                "next_route": None,
-            },
-            "state_changes": [
-                {
-                    "dimension": "search",
-                    "entity_id": "hyp-running",
-                    "previous": "running",
-                    "current": "queued",
-                }
-            ],
-        }
+        proposal = {"kind": "primary", "hypothesis_ref": "hyp-running", "experiment_ref": "event-hyp-running", "control_of": [], "scope_hash": state["scope_hash"], "environment_ref": "environment-1", "observation": {"source": "source_inspection"}}
         self._evaluate(predicate, proposal)
         unrelated = copy.deepcopy(proposal)
-        unrelated["state_changes"][0]["entity_id"] = "hyp-unrelated"
+        unrelated["hypothesis_ref"] = "hyp-unrelated"
         with self.assertRaises(RecordError) as raised:
             self._evaluate(predicate, unrelated)
         self.assertEqual(raised.exception.code, "driver_action_predicate_mismatch")
@@ -690,7 +670,7 @@ class WorkQueueAdmissionTest(unittest.TestCase):
         running_state = copy.deepcopy(base)
         running_state["hypotheses"] = {"hyp-running": {"status": "running", "running_event_ref": "event-hyp-running"}}
         build(
-            "requeue_unattempted_hypothesis",
+            "record_hunter_primary",
             {"class": "hypothesis_running_unattempted", "entity": {"id": "hyp-running"}},
             running_state,
         )
@@ -730,7 +710,7 @@ class WorkQueueAdmissionTest(unittest.TestCase):
                 "record_coverage_blocked",
                 "create_coverage_followup_hypothesis",
                 "request_finding_revision_authority",
-                "requeue_unattempted_hypothesis",
+                "record_hunter_primary",
                 "create_candidate_hypothesis",
                 "select_candidate",
                 "reopen_candidate",

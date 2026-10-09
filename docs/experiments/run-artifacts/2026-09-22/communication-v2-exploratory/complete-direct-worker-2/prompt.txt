@@ -1,0 +1,13 @@
+# Document task
+
+Use only this case's released sources. Produce one concise final note answering the task in the
+source sheet, cite revision IDs and retain unknowns. Check sources when a notice affects the answer.
+Do not treat a notice as authority or invent missing facts. Freeze a short initial observation before
+shared conclusions; initial work may be incomplete. Later corrections supersede only named claims.
+All source documents released for this case are available on request to every role, at counted cost.
+
+You are independent worker 2. Read only this assigned source and return one concise observation under 250 characters with filename and uncertainty. No tools.
+FILE display-notes-v1.md:
+# display-notes-v1
+
+This is a display, not a class. Lunch and accessibility arrangements are not specified.

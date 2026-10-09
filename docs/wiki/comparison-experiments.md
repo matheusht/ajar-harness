@@ -1,6 +1,7 @@
 # Recovery and communication experiments
 
-**Status:** recovery and communication packets implemented and locally checked; candidate execution UNSTARTED; adoption undecided. **Updated:** 2026-09-08. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
+**Status:** v1 preparation packets retained; bounded v3 pilots executed; no runtime or default-board
+adoption. **Updated:** 2026-09-22. **Authority:** [specification #106](https://github.com/matheusht/redteam-harness/issues/106), [recovery ticket #111](https://github.com/matheusht/redteam-harness/issues/111) and [communication ticket #112](https://github.com/matheusht/redteam-harness/issues/112).
 
 Both packets depend on the implemented [offline study account](engineering-evidence.md). They prepare concrete benign documents, expected accounts and fixed protocols. They do not justify implementation of the design being compared.
 
@@ -30,7 +31,8 @@ preserved. These are packet/account checks, not executed isolation or candidate 
 
 Required contracts, whole-study ceilings including coordination/repair, separate development/maintenance
 allocation, optional rollover, fixed reference grading and run-readiness/stop criteria are recorded before
-outcomes. Effective configuration and run authorization remain absent; candidate execution is **UNSTARTED**.
+outcomes. For this v1 packet, effective configuration and run authorization remain absent; candidate
+execution is **UNSTARTED**.
 Source references and invented expectations earn zero candidate execution passes. #110 now has a separate [read-only inspector implementation](../dossier-inspector.md) and local checks; both independent review axes are complete.
 
 ## Communication: test discovery against capable handoffs
@@ -71,16 +73,63 @@ contaminated/missing/failed cases and distinguish technical eligibility from com
 unknown measurement from zero, and known budget overrun. Source/input inventories stay unchanged.
 This proves prepared-file/account checks, not physical runtime access control or cognitive isolation.
 
-Effective run configuration and authorization remain absent. No board/adapter/runtime was built and
-no agent experiment ran. The gate remains a validated notice explaining improvement over capable
+Within v1, effective run configuration and authorization remain absent. No board/adapter/runtime was built
+and no agent experiment ran under that frozen packet. The gate remains a validated notice explaining improvement over capable
 direct handoff at the same total budget without new correctness/provenance/isolation failure. Equal
 complete results with equal or lower effort favor the simpler baseline; adoption requires later
-predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice and new #110/integration independent reviews are complete; all six scoped local slices are accepted. No issue closure or merge is part of this delivery; PR publication was separately requested on September 10. Both candidate experiments are **UNEXECUTED**.
+predeclared repeated paired evidence. The latest bounded regression passed, including the new #110 inspector. The earlier five-slice and new #110/integration independent reviews are complete; all six scoped local slices are accepted. No issue closure or merge is part of that delivery; PR publication was separately requested on September 10. Both v1 candidate experiments remain **UNEXECUTED**.
+
+## Executed bounded versions
+
+The [September 22 artifact index](../experiments/run-artifacts/2026-09-22/README.md) preserves exact
+prompts, results, grades, scripted states, usage and redacted logs. It also retains earlier runs that do
+not qualify their intended contracts: framing v1 was static classification calibration, communication
+v2 used an unqualified grader and incomplete correction schedule, and recovery v2 was an approval/
+serialization smoke with invented baseline arguments.
+
+**Recovery v3.** The pinned SDK checkout exercised public soft cancellation, `RunState` serialization and
+pending input with `ScriptedModel`, trace export disabled and no provider calls. A late v2 input appeared
+exactly once in the next captured model arguments after a serialized pause. Cooperative `after_turn`
+cancellation preserved the completed phase-one effect and one unfinished model step. In the lost-receipt
+case, a disposable file append occurred before the tool returned; restoring the same pre-effect state
+caused a second append and exposed only the retry receipt. This directly rejects exactly-once claims.
+
+The pinned baseline driver/session files expose no equivalent native serialized cognitive-continuation
+interface; those rows are `unsupported_not_executed` with no invented received arguments. This is not a
+general recovery loss: the harness separately recomputes its work queue and reconciles committed ledger
+records after interruption. SDK conversation continuation and ledger-derived work recovery answer
+different contracts. The scripted result proves neither model reasoning, provider recovery, filesystem
+durability nor production runtime acceptance.
+
+**Communication v3.** Two independent worker notes were generated once per case and delivered unchanged
+to direct and board paths. Both recorded an empty read, matched sends and a final receive. The late case
+saved pre-correction drafts, then delivered the same binding-v2 content; the canonical board stored a
+correction citing the prior notice event. Serial final assemblers received all released primary sources.
+Direct and board final assemblers received advisory notices only, so primary-source access and factual
+output quality remain separate observations.
+
+The explicit correct/wrong/ambiguous calibration matched all hidden gold labels before blind grading.
+Serial received two `correct` and one `wrong`; direct received three `wrong`; board received two `wrong`
+and one `ambiguous`. All direct and board notice counts matched (2, 2 and 3). The grader marked released
+information used in three serial, one direct and two board finals, and marked the board's late correction
+useful once. This does not meet the default-board gate: board had no correct grade, did not beat serial,
+and adds projection/storage work.
+
+Actual communication v3 billing was 24 model calls, 363,404 input and 8,280 output tokens. The six shared
+note calls are billed once in that aggregate and charged in full to both direct and board standalone
+estimates. Dollars, human coordination and total labor remain unknown. The requested Codex model name and
+Medium effort were configured, but underlying weights/revision are unavailable; built-in CLI context
+overhead remains. Claude provider execution was blocked by organization authentication, and Docker runtime
+qualification stays separate.
 
 ## What earns the next step
 
 A deterministic packet check establishes accounting and isolation behavior only. A later mechanism pilot may justify a larger study when a validated notice explains an improvement over capable direct handoff at the same budget, without a new correctness, provenance or isolation failure. Equivalent complete output with equal or less effort favors the simpler baseline.
 
-Adoption needs repeated paired evidence and a practical benefit threshold declared before the adoption study. Neither three cases nor a busy feed establishes that threshold. Recovery selection likewise requires executed evidence for the chosen contract, not source inspection alone.
+Adoption still needs repeated paired evidence and a practical benefit threshold declared before an adoption
+study. These three cases do not establish that threshold. Recovery v3 selects no production runtime; it
+only resolves the tested scripted SDK mechanics and exposes duplicate-effect risk on snapshot replay.
 
-Before either actual comparison, establish effective model/runtime/configuration, resource ceilings, case/source roster, grading isolation and run scope/authorization. Ordinary-session conclusions also need the representative launch path, still unknown. The [implementation prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md) stops after validated preparation packets; provider calls, model experiments and infrastructure adoption remain separate work.
+Before any larger comparison, establish a representative model/runtime configuration, new resource ceilings,
+case/source roster, grading isolation and run scope. Ordinary-session conclusions still need the representative
+launch path. Provider execution and infrastructure adoption remain separate work.

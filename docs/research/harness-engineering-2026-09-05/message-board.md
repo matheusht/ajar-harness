@@ -4,11 +4,22 @@ Research note · 2026-09-05 · [issue #104](https://github.com/matheusht/redteam
 
 ## Recommendation
 
+**2026-09-22 implementation update:** the optional bounded projection described here now exists as
+[`tools/task_board.py`](../../../tools/task_board.py), with its failure contract and repeatable E2E
+in [`docs/engineering/task-board-v1.md`](../../engineering/task-board-v1.md). This implements
+retention and filtered delivery through the record kernel. It does not establish usefulness or
+change the no-go decision for a default board. The later bounded comparison retained that no-go:
+board delivery and one useful correction were observed, but the board earned zero correct blind grades
+and did not beat the complete-source serial baseline.
+
 A task-scoped observation board is worth a small comparison when useful information may have an unknown recipient or arrive after the original handoff. It is not yet a justified platform feature, replacement for direct handoffs, shared source of truth, or reason to own the model loop.
 
 For the current document-processing work, compare a board against a coordinator who already distributes concise, cited task packets. The board must earn its extra reading, curation and reconciliation cost. If the coordinator knows the recipient and dependency, a direct message can already do the job. If a single worker can inspect the complete source set cheaply, parallel collaboration may add no value.
 
-Scope: source research and a proposed experiment using synthetic documents. No agent experiment, provider call, board service, target operation, incident-data import or runtime change was performed. Repository references below describe inspected documented contracts, not freshly verified runtime enforcement.
+Original scope: source research and a proposed experiment using synthetic documents. A later local Codex
+CLI mechanism pilot executed those synthetic cases and the optional record-kernel projection. No live
+target, incident-data import, Claude provider run or production runtime change was performed. Repository
+references below distinguish original research from later bounded observations.
 
 ## What the external evidence establishes
 
@@ -66,7 +77,7 @@ Run each packet through three arrangements, with the same model/version, source 
 | Parallel, direct handoff | Workers inspect complementary sources, send observations to the coordinator, and receive a concise curated packet or directed update. |
 | Parallel, board added | The same assignments and direct handoffs, plus a bounded task-local feed workers can consult for observations whose recipients are not known in advance. |
 
-First commit short independent observations before either parallel arrangement shares conclusions. Keep the same final coordinator/grader boundary. Bound the feed in advance, for example to five short notices, rather than creating a searchable knowledge platform. A scripted document and message schedule makes provenance and isolation checks deterministic; actual agent usefulness requires later agent runs and cannot be inferred from that replay alone. None are launched by this note.
+First commit short independent observations before either parallel arrangement shares conclusions. Keep the same final coordinator/grader boundary. Bound the feed in advance, for example to five short notices, rather than creating a searchable knowledge platform. A scripted document and message schedule makes provenance and isolation checks deterministic; actual agent usefulness cannot be inferred from replay alone. The later v3 pilot used real model notes/finals and the canonical board under this schedule; its three cases remain too small for a reliability or adoption claim.
 
 Record evidence completeness, source-version correctness, unsupported claims, duplicate source acquisitions, unnecessary repeated analysis, correction adoption after delivery, source retrievals, total tokens, elapsed time and human repair. Board reads, posting and curation count as work. Necessary independent verification is not a duplicate to eliminate. A faster parallel run with more total work is a latency tradeoff, not a productivity win by default.
 

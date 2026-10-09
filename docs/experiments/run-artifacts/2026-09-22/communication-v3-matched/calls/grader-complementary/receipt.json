@@ -1,0 +1,26 @@
+{
+  "elapsed_seconds": 51.68369129099301,
+  "id": "grader-complementary",
+  "output": "{\n  \"A\": {\n    \"decision\": \"wrong\",\n    \"correct_facts\": [\n      \"Attendance is 36.\",\n      \"Stock is 36 sheets.\",\n      \"Restocking is unknown.\",\n      \"Both source versions are cited.\"\n    ],\n    \"missing_facts\": [\n      \"36 attendees require 36 sheets.\",\n      \"The available stock is sufficient.\",\n      \"There are zero spare sheets.\"\n    ],\n    \"stale_revision\": false,\n    \"unsupported_claims\": [\n      \"The underlying revisions were not provided for confirmation.\",\n      \"Stock sufficiency and spare-sheet count remain unknown.\"\n    ],\n    \"used_released_information\": true,\n    \"useful_correction\": null,\n    \"rationale\": \"The note cites the correct versions and reports both quantities, but rejects conclusions established by the reference. Joining the two sources shows exact sufficiency and zero spare.\"\n  },\n  \"B\": {\n    \"decision\": \"ambiguous\",\n    \"correct_facts\": [\n      \"36 attendees require 36 sheets.\",\n      \"Stock contains 36 sheets.\",\n      \"There is one sheet per attendee.\",\n      \"There are zero listed spare sheets.\",\n      \"Restocking is unknown.\",\n      \"Both source versions are cited.\",\n      \"The required calculation is shown.\"\n    ],\n    \"missing_facts\": [],\n    \"stale_revision\": false,\n    \"unsupported_claims\": [\n      \"The 36 sheets consist of 6 sealed packs of 6.\",\n      \"Sufficiency must be qualified based on all listed sheets being usable.\"\n    ],\n    \"used_released_information\": true,\n    \"useful_correction\": null,\n    \"rationale\": \"The required conclusion, sources, and calculation are present, but the note adds pack details absent from the reference and unnecessarily makes the fixed sufficiency finding conditional.\"\n  },\n  \"C\": {\n    \"decision\": \"correct\",\n    \"correct_facts\": [\n      \"36 sheets exactly meet the need for 36 attendees.\",\n      \"There are zero spare sheets.\",\n      \"Restocking is unknown.\",\n      \"Both source versions are cited.\",\n      \"The equality of need and stock provides the calculation.\"\n    ],\n    \"missing_facts\": [],\n    \"stale_revision\": false,\n    \"unsupported_claims\": [],\n    \"used_released_information\": true,\n    \"useful_correction\": null,\n    \"rationale\": \"The note matches the fixed assessment, cites both v1 sources, states exact sufficiency and zero spare, and avoids unsupported additions.\"\n  }\n}",
+  "prompt_sha256": "sha256:f53be9757d56e0f56b873fa81724e036f504ae7d00baa9f5927b1a1aa5246db1",
+  "returncode": 0,
+  "runtime_messages": [
+    {
+      "item": {
+        "id": "item_0",
+        "message": "Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in <redacted-user-home>/.codex/config.toml.",
+        "type": "error"
+      },
+      "type": "item.completed"
+    }
+  ],
+  "timeout": false,
+  "unexpected_items": [],
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 11776,
+    "input_tokens": 14019,
+    "output_tokens": 1484,
+    "reasoning_output_tokens": 958
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "calibration_passed": true,
+  "candidate_assignments": 9,
+  "finals": {
+    "complementary:board": "Initial observation: 36 attendees require 36 sheets (`attendance-v1.md`).\n\nThe supply box contains exactly 36 sheets\u20146 sealed packs of 6\u2014so there is one sheet per attendee and no listed spares (`stock-v1.md`). Stock sufficiency depends on all listed sheets being usable. Restocking arrangements are unknown.",
+    "complementary:direct": "Attendee handout availability is not yet verified. Notices claim 36 attendees and 36 stocked sheets, but the underlying revisions were not provided for confirmation (`attendance-v1.md`; `stock-v1.md`). Stock sufficiency, spare sheets, and restocking therefore remain unknown.",
+    "complementary:serial": "The 36-sheet supply exactly meets the need for 36 attendees, leaving 0 spare sheets. Restocking arrangements remain unknown. (`attendance-v1`; `stock-v1`)",
+    "complete:board": "The Kite display\u2014not a class\u2014is Tuesday at 14:00 in Room Maple, with capacity for 8 attendees. Lunch and accessibility arrangements are unknown. (`display-v1.md`; `display-notes-v1.md`)",
+    "complete:direct": "Kite event details cannot yet be confirmed because `display-v1.md` and `display-notes-v1.md` were cited but not supplied. The event type, schedule, room, eight-seat capacity, lunch, and accessibility arrangements remain unknown pending source review.",
+    "complete:serial": "The kite display is Tuesday at 14:00 in Room Maple. Capacity is 8 seats. Lunch is not specified, so whether it is promised remains unknown. Accessibility arrangements are also unknown. [display-v1.md, rev. v1; display-notes-v1.md, rev. v1]",
+    "late:board": "Initial observation (frozen): Only advisory notices were provided; the source sheet and released documents were not. Therefore, no substantive answer can yet be verified. The notices point to `binding-v1.md` (rev `binding-v1`) and `materials-v1.md`, but cannot establish their claims as authority. The task question and all workshop details remain unknown pending those sources.\n\nAttendee note: No verified workshop announcement can be issued yet. Advisory notices claim booklet-binding is at 10:30 in Room Pine with 10 spaces (`binding-v2.md`, correcting rev `binding-v1`) and that participants bring their own paper (`materials-v1.md`). These details require confirmation from the source sheet and released revisions. Whether other materials are required or provided remains unknown.",
+    "late:direct": "Please release `binding-v2.md` and `materials-v1.md`. The packet contains only advisory notices, which are not authority, so I cannot yet produce a verified attendee-facing note. The requirements for materials other than paper also remain unknown.",
+    "late:serial": "The booklet-binding session starts at 10:30 in Room Pine and has space for 10 participants. Bring your own paper; whether any other materials are supplied remains unknown. (Sources: `binding-v2.md` [binding-v2], `materials-v1.md` [materials-v1])"
+  },
+  "manifest_id": "communication-v3-freeze-2026-09-22T15:02:28Z",
+  "no_favorable_reruns": true,
+  "notice_receipt": {
+    "complementary": {
+      "board": 2,
+      "direct": 2
+    },
+    "complete": {
+      "board": 2,
+      "direct": 2
+    },
+    "late": {
+      "board": 3,
+      "direct": 3
+    }
+  },
+  "usage": {
+    "calls": 24,
+    "elapsed_seconds": 371.0217086249904,
+    "input_tokens": 363404,
+    "output_tokens": 8280
+  }
+}

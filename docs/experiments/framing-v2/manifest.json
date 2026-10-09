@@ -1,0 +1,14 @@
+{
+  "files": {
+    "docs/experiments/framing-v2/failure-matrix.md": "sha256:3609b9c212e43c2cd2a55b44d387f4701eddbb7f523e2fe97cde0f3af84e5b69",
+    "docs/experiments/framing-v2/fixtures/near-miss/authz.py": "sha256:2845c3e805841aab371cecbe6269f43fcf0f5ce9ca1b3fdc67dc23f35b3d5a66",
+    "docs/experiments/framing-v2/fixtures/patched/authz.py": "sha256:7d3dfa21fae7a600a42bbfdfa6aa9487c3e5e6f48cebe13604ccf3a3f3d78a12",
+    "docs/experiments/framing-v2/fixtures/positive/authz.py": "sha256:74bf1f1e9286c6b84644c99bb6cb7cfd3892e2f09bd0fdf42aa5031749daedff",
+    "docs/experiments/framing-v2/protocol.json": "sha256:850d3ede7b22452292657e51b6451ad50e32584950b3fcedf7a664f22261deef",
+    "docs/experiments/framing-v2/rubric.json": "sha256:306bcce21189c168a7d349673455354a8f3ba15636c4f1b0884c8f1c72c5506a",
+    "docs/experiments/framing-v2/runtime-config.json": "sha256:27cd33af7184b95d015bb1351ef0e9d8745351233486ec98aab65b32d2fa1f97",
+    "tools/run_framing_v2.py": "sha256:037c1289708b981d3f6c145493b030c1a38cfa8bbb07d546abee6aa50935a027"
+  },
+  "manifest_id": "framing-v2-freeze-2026-09-22T14:55:18Z",
+  "note": "Frozen before candidate inference. manifest.json is excluded from its own digest."
+}

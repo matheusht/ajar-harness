@@ -140,4 +140,4 @@ closed for this engagement.
 - Operator: [name]
 - Date: [date]
 - Signed: [ ]
-- Record kernel: `decision-0006-v1`
+- Record kernel: `decision-0006-v2`

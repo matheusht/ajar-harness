@@ -1,0 +1,340 @@
+{
+  "$schemaVersion": "1.17",
+  "auto_previous_response_id": false,
+  "context": {
+    "approvals": {},
+    "context": null,
+    "context_meta": {
+      "omitted": false,
+      "original_type": "none",
+      "requires_deserializer": false,
+      "serialized_via": "none"
+    },
+    "tool_invocations": {
+      "lost-write": {
+        "approval_scope": "11bbec2c792e786cd4b39af2615548ba2c40f5a49db658402fdff688bcf97264",
+        "completed": false,
+        "executed": false,
+        "fingerprint": "bf118eb908e1fa034800a1bbb0e9956f7f59091a71c9d330387015841a6a1efb",
+        "type": "function_call"
+      }
+    },
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "conversation_id": null,
+  "current_agent": {
+    "name": "lost-receipt"
+  },
+  "current_response_generated_item_ownership": {
+    "end": 2,
+    "interruptions": [
+      1
+    ],
+    "start": 0
+  },
+  "current_step": {
+    "data": {
+      "interruptions": [
+        {
+          "agent": {
+            "name": "lost-receipt"
+          },
+          "raw_item": {
+            "arguments": "{\"payload\": \"attendee-note-v2\"}",
+            "call_id": "lost-write",
+            "id": "function-lost-write",
+            "name": "write_note",
+            "type": "function_call"
+          },
+          "tool_lookup_key": {
+            "kind": "bare",
+            "name": "write_note"
+          },
+          "tool_name": "write_note",
+          "tool_origin": {
+            "type": "function"
+          },
+          "type": "tool_approval_item"
+        }
+      ],
+      "llm_end_hooks_started": true,
+      "response_accepted": false
+    },
+    "type": "next_step_interruption"
+  },
+  "current_turn": 1,
+  "current_turn_persisted_item_count": 0,
+  "generated_items": [
+    {
+      "agent": {
+        "name": "lost-receipt"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"payload\": \"attendee-note-v2\"}",
+        "call_id": "lost-write",
+        "id": "function-lost-write",
+        "name": "write_note",
+        "type": "function_call"
+      },
+      "tool_name": "write_note",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "lost-receipt"
+      },
+      "raw_item": {
+        "arguments": "{\"payload\": \"attendee-note-v2\"}",
+        "call_id": "lost-write",
+        "id": "function-lost-write",
+        "name": "write_note",
+        "type": "function_call"
+      },
+      "tool_lookup_key": {
+        "kind": "bare",
+        "name": "write_note"
+      },
+      "tool_name": "write_note",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_approval_item"
+    }
+  ],
+  "generated_prompt_cache_key": null,
+  "generated_session_item_indexes": [
+    0,
+    1
+  ],
+  "input_guardrail_results": [],
+  "last_model_response": {
+    "output": [
+      {
+        "arguments": "{\"payload\": \"attendee-note-v2\"}",
+        "call_id": "lost-write",
+        "id": "function-lost-write",
+        "name": "write_note",
+        "type": "function_call"
+      }
+    ],
+    "request_id": null,
+    "response_id": "resp-789",
+    "usage": {
+      "input_tokens": 0,
+      "input_tokens_details": [
+        {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      ],
+      "output_tokens": 0,
+      "output_tokens_details": [
+        {
+          "reasoning_tokens": 0
+        }
+      ],
+      "request_usage_entries": [],
+      "requests": 1,
+      "total_tokens": 0
+    }
+  },
+  "last_processed_response": {
+    "apply_patch_actions": [],
+    "computer_actions": [],
+    "custom_tool_actions": [],
+    "functions": [
+      {
+        "tool": {
+          "description": "",
+          "lookupKey": {
+            "kind": "bare",
+            "name": "write_note"
+          },
+          "name": "write_note",
+          "paramsJsonSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "payload": {
+                "title": "Payload",
+                "type": "string"
+              }
+            },
+            "required": [
+              "payload"
+            ],
+            "title": "write_note_args",
+            "type": "object"
+          }
+        },
+        "tool_call": {
+          "arguments": "{\"payload\": \"attendee-note-v2\"}",
+          "call_id": "lost-write",
+          "id": "function-lost-write",
+          "name": "write_note",
+          "type": "function_call"
+        }
+      }
+    ],
+    "handoffs": [],
+    "interruptions": [
+      {
+        "agent": {
+          "name": "lost-receipt"
+        },
+        "raw_item": {
+          "arguments": "{\"payload\": \"attendee-note-v2\"}",
+          "call_id": "lost-write",
+          "id": "function-lost-write",
+          "name": "write_note",
+          "type": "function_call"
+        },
+        "tool_lookup_key": {
+          "kind": "bare",
+          "name": "write_note"
+        },
+        "tool_name": "write_note",
+        "tool_origin": {
+          "type": "function"
+        },
+        "type": "tool_approval_item"
+      }
+    ],
+    "local_shell_actions": [],
+    "mcp_approval_requests": [],
+    "new_items": [
+      {
+        "agent": {
+          "name": "lost-receipt"
+        },
+        "description": "",
+        "raw_item": {
+          "arguments": "{\"payload\": \"attendee-note-v2\"}",
+          "call_id": "lost-write",
+          "id": "function-lost-write",
+          "name": "write_note",
+          "type": "function_call"
+        },
+        "tool_name": "write_note",
+        "tool_origin": {
+          "type": "function"
+        },
+        "type": "tool_call_item"
+      }
+    ],
+    "shell_actions": [],
+    "tools_used": [
+      "write_note"
+    ]
+  },
+  "max_turns": 10,
+  "model_responses": [
+    {
+      "output": [
+        {
+          "arguments": "{\"payload\": \"attendee-note-v2\"}",
+          "call_id": "lost-write",
+          "id": "function-lost-write",
+          "name": "write_note",
+          "type": "function_call"
+        }
+      ],
+      "request_id": null,
+      "response_id": "resp-789",
+      "usage": {
+        "input_tokens": 0,
+        "input_tokens_details": [
+          {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          }
+        ],
+        "output_tokens": 0,
+        "output_tokens_details": [
+          {
+            "reasoning_tokens": 0
+          }
+        ],
+        "request_usage_entries": [],
+        "requests": 1,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "nested_history_owned_session_item_refs": [],
+  "no_active_agent_run": true,
+  "original_input": "Write attendee-note-v2.",
+  "output_guardrail_results": [],
+  "pending_input": [],
+  "previous_response_id": null,
+  "reasoning_item_id_policy": null,
+  "session_items": [
+    {
+      "agent": {
+        "name": "lost-receipt"
+      },
+      "description": "",
+      "raw_item": {
+        "arguments": "{\"payload\": \"attendee-note-v2\"}",
+        "call_id": "lost-write",
+        "id": "function-lost-write",
+        "name": "write_note",
+        "type": "function_call"
+      },
+      "tool_name": "write_note",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_call_item"
+    },
+    {
+      "agent": {
+        "name": "lost-receipt"
+      },
+      "raw_item": {
+        "arguments": "{\"payload\": \"attendee-note-v2\"}",
+        "call_id": "lost-write",
+        "id": "function-lost-write",
+        "name": "write_note",
+        "type": "function_call"
+      },
+      "tool_lookup_key": {
+        "kind": "bare",
+        "name": "write_note"
+      },
+      "tool_name": "write_note",
+      "tool_origin": {
+        "type": "function"
+      },
+      "type": "tool_approval_item"
+    }
+  ],
+  "tool_input_guardrail_results": [],
+  "tool_output_guardrail_results": [],
+  "tool_use_tracker": {
+    "lost-receipt": [
+      "write_note"
+    ]
+  },
+  "trace": null
+}

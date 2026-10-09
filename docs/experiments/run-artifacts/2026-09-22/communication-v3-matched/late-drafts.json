@@ -1,0 +1,5 @@
+{
+  "board": "Initial observation (frozen): Only advisory notices were provided; the source sheet and released documents were not. Therefore, no substantive answer can yet be verified. The notices point to `binding-v1.md` (rev `binding-v1`) and `materials-v1.md`, but cannot establish their claims as authority. The task question and all workshop details remain unknown pending those sources.",
+  "direct": "Initial observation (frozen, pre-correction): The advisories report that booklet-binding starts at 09:00 in Room Willow, with 10 spaces, and participants bring their own paper (revisions `binding-v1` and `materials-v1`). Whether other materials are required or provided remains unknown. The source documents themselves were not released, so these claims are not yet independently verified.",
+  "serial": "Initial observation: The booklet-binding session is at 09:00 in Room Willow, with capacity for 10 participants. Participants must bring their own paper; whether any other materials are supplied is unknown. (Sources: `binding-v1.md` [binding-v1], `materials-v1.md` [materials-v1])"
+}

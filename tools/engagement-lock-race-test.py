@@ -284,11 +284,11 @@ def main() -> int:
             if path.is_file() and not path.is_symlink()
         }
         lifecycle_bound = (
-            lifecycle_result == 0
-            and lifecycle_swapped
+            lifecycle_result == 1
+            and not lifecycle_swapped
             and quarantined_tree_after == quarantined_tree_before
-            and lifecycle_live.joinpath("unproven", "F-BOUND", "finding.json").is_file()
-            and not lifecycle_live.joinpath("findings", "F-BOUND").exists()
+            and lifecycle_live.joinpath("findings", "F-BOUND", "finding.json").is_file()
+            and not lifecycle_live.joinpath("unproven", "F-BOUND").exists()
         )
 
         passed = aba_passed and nonmutating_refusal and marker_wins and lifecycle_bound
@@ -305,8 +305,8 @@ def main() -> int:
             "wins at the post-flock boundary"
         )
         print(
-            f"  {'ok  ' if lifecycle_bound else 'FAIL'} lifecycle mutation remains bound "
-            "across a quarantined pathname ABA"
+            f"  {'ok  ' if lifecycle_bound else 'FAIL'} retired lifecycle mutation cannot reach "
+            "the move seam across a quarantined pathname ABA"
         )
         if failure:
             print(f"       {failure}")

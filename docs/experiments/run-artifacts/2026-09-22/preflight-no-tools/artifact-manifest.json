@@ -1,0 +1,18 @@
+{
+  "files": {
+    "probe.jsonl": {
+      "bytes": 771,
+      "portable_sha256": "sha256:6de691d5baeb111f34ede21d0bf10ff0d01158dc9a7350e309696861befd68a5",
+      "raw_sha256": "sha256:d8d944e49f74748577708bbf9ad184ca26ecbcab32afdbd597e813b0ec115cfc",
+      "redactions": 1
+    },
+    "probe.stderr": {
+      "bytes": 4690,
+      "portable_sha256": "sha256:044210d544a0510baf7b0cddd86fcdf04f1b2069615134fa4cf47c21db3f22dc",
+      "raw_sha256": "sha256:044210d544a0510baf7b0cddd86fcdf04f1b2069615134fa4cf47c21db3f22dc",
+      "redactions": 0
+    }
+  },
+  "raw_root": "/tmp/redteam-pilots/raw",
+  "redaction": "All occurrences of the personal home prefix were replaced with <redacted-user-home>. Original target-local raw files remain under /tmp and are bound below by SHA-256."
+}

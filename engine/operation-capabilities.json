@@ -9,6 +9,7 @@
   "commands": {
     "accept-report": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "current_report_revision"], "tier": "authority"},
     "append-attempt": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "active_environment", "session_provenance"], "tier": "notebook"},
+    "record-hunter-pair": {"allowed_roles": ["broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "active_environment", "parent_observed_output", "matched_held_control"], "tier": "notebook"},
     "append-event": {"allowed_roles": [], "blocking_scope": "event_dispatch", "required_evidence": ["classified_event"], "tier": "event_dispatch"},
     "check-resume": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "check-completion-claims": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": ["healthy_current_coverage_or_exact_opaque_pin"], "tier": "notebook"},

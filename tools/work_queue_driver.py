@@ -877,6 +877,8 @@ def _run_docker_queue_session(
                 execution_deadline=execution_deadline,
                 docker_identity=docker_identity,
                 docker_session_key=session_key,
+                hunter_view=cognitive_view,
+                source_workspace=bound.workspace if cognitive_view is not None else None,
             ) as broker:
                 manifest_bytes = canonical_json_bytes(
                     broker.container_manifest(

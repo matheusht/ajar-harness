@@ -53,6 +53,7 @@ from engagement_state import (
     WORK_QUEUE_CLASS_ORDER,
     WORK_QUEUE_RULES,
     append_attempt,
+    append_attempt_pair,
     append_event,
     _append_kernel_event,
     _append_kernel_event_idempotent,
@@ -1842,6 +1843,29 @@ def command_append_attempt(args: argparse.Namespace) -> int:
     session_id = _require_session(proposal.get("provenance", {}), "append-attempt"); _require_local_provenance(str(actor.get("role", "")), str(actor.get("id", "")), session_id)
     record = append_attempt(args.engagement.absolute(), proposal)
     emit({"ok": True, "attempt_id": record["attempt_id"], "sequence": record["sequence"], "record_hash": record["record_hash"]})
+    return 0
+
+
+def command_record_hunter_pair(args: argparse.Namespace) -> int:
+    if getattr(args, "_driver_authenticated_runtime", None) is None:
+        raise RecordError("hunter_pair_requires_parent_broker", "record-hunter-pair")
+    proposal = _command_json(args, "file")
+    if set(proposal) != {"schema_version", "primary", "control", "primary_raw_sha256", "control_raw_sha256"} or proposal.get("schema_version") != 1:
+        raise RecordError("hunter_pair_invalid", "shape")
+    primary, control = proposal.get("primary"), proposal.get("control")
+    if not isinstance(primary, dict) or not isinstance(control, dict):
+        raise RecordError("hunter_pair_invalid", "attempts")
+    capability = classify_command("record-hunter-pair")
+    actor = primary.get("provenance", {}).get("actor", {})
+    _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"record-hunter-pair:{primary.get('attempt_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
+    for attempt in (primary, control):
+        provenance = attempt.get("provenance", {})
+        if attempt.get("operation_class") != "notebook" or attempt.get("actor") != actor or provenance.get("actor") != actor or attempt.get("observation", {}).get("source") != "broker":
+            raise RecordError("hunter_pair_provenance_invalid", str(attempt.get("attempt_id")))
+        session_id = _require_session(provenance, "record-hunter-pair")
+        _require_local_provenance(str(actor.get("role", "")), str(actor.get("id", "")), session_id)
+    records = append_attempt_pair(args.engagement.absolute(), primary, control)
+    emit({"ok": True, "attempt_ids": [record["attempt_id"] for record in records], "record_hashes": [record["record_hash"] for record in records]})
     return 0
 
 
@@ -5728,7 +5752,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--operator-id", required=True)
         command.add_argument("--reason", required=True, choices=sorted(QUARANTINE_REASONS))
         command.add_argument("--recorded-at", required=True)
-    for name in ("append-event", "append-attempt"):
+    for name in ("append-event", "append-attempt", "record-hunter-pair"):
         command = subcommands.add_parser(name, help=f"trusted {name} operation")
         command.add_argument("--engagement", type=Path, required=True)
         command.add_argument("--file", type=Path, required=True)
@@ -5863,6 +5887,7 @@ def _command_handlers() -> dict[str, object]:
             "clear-ledger-quarantine": command_clear_ledger_quarantine,
             "append-event": command_append_event,
             "append-attempt": command_append_attempt,
+            "record-hunter-pair": command_record_hunter_pair,
             "classify-artifact": command_classify_artifact,
             "create-artifact": command_create_artifact,
             "propose-scope": command_propose_scope,

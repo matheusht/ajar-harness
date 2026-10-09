@@ -534,6 +534,16 @@
           "type": "string",
           "minLength": 1
         },
+        "source_comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary_path", "control_path", "signal"],
+          "properties": {
+            "primary_path": {"type": "string", "minLength": 1},
+            "control_path": {"type": "string", "minLength": 1},
+            "signal": {"type": "string", "minLength": 1, "maxLength": 128}
+          }
+        },
         "experiment_refs": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
         },

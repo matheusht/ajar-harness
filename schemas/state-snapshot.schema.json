@@ -304,6 +304,16 @@
           "next_experiment": {
             "type": "string"
           },
+          "source_comparison": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["primary_path", "control_path", "signal"],
+            "properties": {
+              "primary_path": {"type": "string", "minLength": 1},
+              "control_path": {"type": "string", "minLength": 1},
+              "signal": {"type": "string", "minLength": 1, "maxLength": 128}
+            }
+          },
           "running_event_ref": {
             "type": ["string", "null"]
           },

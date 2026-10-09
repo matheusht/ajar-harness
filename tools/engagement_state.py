@@ -68,6 +68,7 @@ EVENT_STATE_RULES = {
     "operator_prior.recorded": ({"search", "coverage"}, set()),
     "hypothesis.created": ({"search"}, {"search"}),
     "hypothesis.status_changed": ({"search"}, {"search"}),
+    "partial_chain.recorded": ({"search"}, {"search"}),
     "claim.adjudicated": ({"claim"}, {"claim"}),
     "finding.revised": (set(), set()),
     "review.regrade_completed": (set(), set()),
@@ -219,6 +220,7 @@ WORK_QUEUE_RULES = {
 WORK_DISPOSITION_EVENT_TYPES = frozenset({
     "hypothesis.created",
     "hypothesis.status_changed",
+    "partial_chain.recorded",
     "claim.adjudicated",
     "finding.revised",
 })
@@ -230,6 +232,8 @@ def _is_work_disposition_event(event: dict[str, Any]) -> bool:
         return False
     if event_type == "hypothesis.status_changed":
         return event.get("payload", {}).get("status") not in {"queued", "selected", "running"}
+    if event_type == "partial_chain.recorded":
+        return event.get("payload", {}).get("status") == "closed"
     if event_type == "claim.adjudicated":
         return event.get("payload", {}).get("status") in {"confirmed", "contaminated", "refuted"}
     return True
@@ -256,6 +260,16 @@ def require_filing_corpus_quality(action_version: int, corpus: list[dict[str, An
     corpus_verdict, _, _ = audit(corpus)
     if not corpus or corpus_verdict == "synthetic":
         raise RecordError("filing_review_corpus_quality_invalid", context)
+
+
+def require_complete_chain(finding_id: str, state: dict[str, Any]) -> None:
+    chain = state.get("partial_chains", {}).get(finding_id)
+    if chain is not None and any(stage["state"] != "proven" for stage in chain["stages"]):
+        raise RecordError("finding_chain_incomplete", finding_id)
+    if chain is not None:
+        review = state.get("claim_adjudications", {}).get(finding_id)
+        if review is not None and (review["event_sequence"] <= chain["event_sequence"] or chain["event_ref"] not in review["input_refs"]):
+            raise RecordError("finding_chain_review_stale", finding_id)
 
 
 def validate_filing_evidence(
@@ -657,6 +671,8 @@ def _validate_revise_finding_v2_action(
     latest = state.get("claim_adjudications", {}).get(finding_id)
     if target.get("type") != "finding" or latest is None or latest.get("status") not in FILEABLE_CLAIM_STATES or target.get("expected_revision") != latest.get("expected_filing_revision") or target.get("claim_state") != latest.get("status") or target.get("adjudication_event_ref") != latest.get("event_ref") or target.get("adjudication_review_ref") != latest.get("review_ref"):
         raise RecordError("revise_finding_v2_target_stale", context)
+    if target["claim_state"] in {"supported", "confirmed"}:
+        require_complete_chain(finding_id, state)
     prior = state.get("findings", {}).get(finding_id)
     expected_revision = 1 if prior is None else prior["revision"] + 1
     expected_supersedes = None if prior is None else prior["revision"]
@@ -2377,6 +2393,23 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
         ) or not comparison["signal"].isascii() or not comparison["signal"].isprintable()
             or any(detect_secret_classes(value.encode("utf-8")) for value in [*paths, comparison["signal"]])):
             raise RecordError("source_comparison_invalid", "bounded source comparison is unsafe")
+    if event_type == "partial_chain.recorded":
+        stages = payload["stages"]
+        expected_status = "closed" if any(stage["state"] == "refuted" for stage in stages) or all(stage["state"] == "proven" for stage in stages) else "queued"
+        text_values = [event["rationale"], payload["finding_id"], payload["hypothesis_id"], payload["next_question"],
+                       *([payload["base_finding_ref"]] if payload["base_finding_ref"] else []),
+                       *(value for stage in stages for value in (stage["claim"], stage["blocked_by"], stage["what_would_close_it"], *stage["evidence_refs"]) if value is not None)]
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,159}", payload["finding_id"])
+                or payload["base_finding_ref"] == payload["finding_id"]
+                or event["entity_refs"] != [payload["hypothesis_id"]]
+                or payload["status"] != expected_status
+                or any(stage["n"] != index + 1 or (stage["state"] == "proven" and not stage["evidence_refs"])
+                       or (stage["state"] == "proven") != (stage["blocked_by"] is None and stage["what_would_close_it"] is None)
+                       or (stage["state"] != "proven" and (not stage["blocked_by"] or not stage["what_would_close_it"]))
+                       for index, stage in enumerate(stages))):
+            raise RecordError("partial_chain_invalid", event["event_id"])
+        if any(detect_secret_classes(value.encode("utf-8")) for value in text_values):
+            raise RecordError("partial_chain_secret_shaped", event["event_id"])
     if event_type == "engagement.blocked" and event.get("actor", {}).get("role") != "operator":
         raise RecordError("engagement_block_not_operator", event.get("event_id", "unknown"))
     capability = classify_event(event_type, payload)
@@ -2590,6 +2623,8 @@ def validate_event_semantics(event: dict[str, Any]) -> None:
     elif event_type == "hypothesis.created":
         binding = ("search", payload.get("hypothesis_id"), "queued")
     elif event_type == "hypothesis.status_changed":
+        binding = ("search", payload.get("hypothesis_id"), payload.get("status"))
+    elif event_type == "partial_chain.recorded":
         binding = ("search", payload.get("hypothesis_id"), payload.get("status"))
     elif event_type == "claim.adjudicated":
         binding = ("claim", payload.get("entity_id"), payload.get("status"))
@@ -3026,7 +3061,7 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
         "schema_version": 1, "engagement_id": engagement_id, "scope_hash": scope_hash,
         "active_environment_ref": None, "environment_preflights": {}, "last_event_id": None, "event_count": 0,
         "ledger_hash": "sha256:" + "0" * 64, "attempt_count": 0, "artifact_count": 0,
-        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "findings": {}, "claim_adjudications": {},
+        "active_blockers": [], "authority_requests": {}, "scope_drafts": [], "candidates": {}, "control_candidates": [], "operator_priors": [], "hypotheses": {}, "partial_chains": {}, "findings": {}, "claim_adjudications": {},
         "outstanding_reviews": [], "proof_reviews": {}, "regrade_reviews": {}, "higher_impact_route_reviews": {}, "reviewer_run_models": {}, "latest_coverage_review": None, "coverage_relevant_sequence": 0, "coverage_relevant_event_ref": None, "coverage": "active", "coverage_counts": None, "ending_overrides": [], "budget_redeclaration_cycles": [], "queue_control": {"status": "active", "last_stop": None, "last_resume": None}, "work_queue": [], "work_queue_context": {"pending_attempts": {}, "artifacts": {}}, "reports": {}, "report_refs": [], "submission_refs": [],
         "cleanup": {"open_count": 0, "obligations": [], "recorded": False}, "memory_disposition": None, "source_hashes": {}, "integrity_errors": [], "intake": None,
     }
@@ -3674,6 +3709,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             if commitment is None or finding_entry is None or commitment["record_revision"] != revision or commitment["record_digest"] != payload["finding_digest"]:
                 raise RecordError("finding_revision_not_committed", event["event_id"])
             finding = load_json(engagement / finding_entry["path"])
+            if payload["status"] in {"supported", "confirmed"}:
+                require_complete_chain(finding_id, state)
             if finding.get("revision") != revision or finding.get("supersedes_revision") != expected_supersedes or finding.get("claim_state") != payload["status"] or finding.get("change_reason") != payload["change_reason"] or finding.get("adjudication", {}).get("review_ref") != payload["adjudication_review_ref"] or finding.get("scope_provenance", {}).get("scope_hash") != state["scope_hash"] or finding.get("scope_provenance", {}).get("environment_ref") != state["active_environment_ref"] or _governed_sha256_file(engagement / finding_entry["path"]) != payload["finding_digest"]:
                 raise RecordError("finding_revision_record_mismatch", event["event_id"], [{"finding_revision": finding.get("revision"), "event_revision": revision, "finding_supersedes": finding.get("supersedes_revision"), "expected_supersedes": expected_supersedes, "finding_state": finding.get("claim_state"), "event_state": payload.get("status"), "finding_change_reason": finding.get("change_reason"), "event_change_reason": payload.get("change_reason"), "finding_review_ref": finding.get("adjudication", {}).get("review_ref"), "event_review_ref": payload.get("adjudication_review_ref"), "finding_scope_hash": finding.get("scope_provenance", {}).get("scope_hash"), "active_scope_hash": state.get("scope_hash"), "finding_environment_ref": finding.get("scope_provenance", {}).get("environment_ref"), "active_environment_ref": state.get("active_environment_ref"), "file_digest_matches": _governed_sha256_file(engagement / finding_entry["path"]) == payload.get("finding_digest")}])
             if action_version == 3:
@@ -4002,6 +4039,24 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                             item["resolution_input_refs"] = list(payload["supporting_evidence_refs"])
         elif event_type == "review.higher_impact_route_completed":
             state["higher_impact_route_reviews"][payload["hypothesis_id"]] = {"review_ref": payload["review_ref"], "event_ref": event["event_id"], "verdict": payload["verdict"], "route_digest": payload["route_digest"], "recorded_at": event["recorded_at"]}
+        elif event_type == "partial_chain.recorded":
+            hypothesis = state["hypotheses"].get(payload["hypothesis_id"])
+            prior = state["partial_chains"].get(payload["finding_id"])
+            if (hypothesis is None or hypothesis["status"] != "running"
+                    or payload["finding_id"] in state["findings"]
+                    or (prior is not None and (prior["hypothesis_id"] != payload["hypothesis_id"] or prior["base_finding_ref"] != payload["base_finding_ref"]))):
+                raise RecordError("partial_chain_binding_invalid", event["event_id"])
+            state["partial_chains"][payload["finding_id"]] = {"event_ref": event["event_id"], "event_sequence": event["sequence"], **copy.deepcopy(payload)}
+            hypothesis.update({"status": payload["status"], "rationale": event["rationale"],
+                               "next_route": payload["next_question"] if payload["status"] == "queued" else None,
+                               "unresolved_questions": [payload["next_question"]] if payload["status"] == "queued" else []})
+            attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+            for stage in payload["stages"]:
+                for reference in stage["evidence_refs"]:
+                    attempt = attempt_by_id.get(reference)
+                    if attempt is not None and attempt["hypothesis_ref"] == payload["hypothesis_id"]:
+                        field = "control_refs" if attempt["kind"] in {"negative_control", "positive_control"} else "experiment_refs"
+                        hypothesis[field] = sorted(set(hypothesis[field]) | {reference})
         elif event_type == "claim.adjudicated":
             review_entry = _index_entry(index, payload["review_ref"], "review", engagement_id)
             adjudication_review = load_json(engagement / review_entry["path"])

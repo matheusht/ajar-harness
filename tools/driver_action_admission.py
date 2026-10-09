@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from engagement_records import RecordError, _reject_duplicate_pairs, canonical_json_bytes, sha256_bytes
+from engagement_records import RecordError, _reject_duplicate_pairs, canonical_json_bytes, detect_secret_classes, sha256_bytes
 from engagement_state import (
     _reduce_engagement_unchecked,
     append_event,
@@ -1142,6 +1142,20 @@ def _stamp_parent_recorder_documents(
 
     actor_id, session_id = _parent_recorder_identity()
     stamped = copy.deepcopy(admitted)
+    def stamp_attempt(attempt: dict[str, Any]) -> None:
+        attempt["actor"] = {"role": "broker", "id": actor_id}
+        provenance = attempt.get("provenance")
+        if not isinstance(provenance, dict):
+            provenance = {}
+            attempt["provenance"] = provenance
+        provenance["actor"] = {"role": "broker", "id": actor_id}
+        provenance["session_id"] = session_id
+        provenance["runtime_session_ref"] = runtime_session_ref
+        provenance["model"] = runtime_model
+        provenance["provider"] = None
+        if view_binding is not None:
+            provenance.update(view_binding)
+
     for entry in stamped.values():
         value = entry.get("value")
         if not isinstance(value, dict):
@@ -1158,18 +1172,13 @@ def _stamp_parent_recorder_documents(
             provenance["model"] = runtime_model
             provenance["provider"] = None
         elif value.get("schema_version") == 2 and isinstance(value.get("attempt_id"), str):
-            value["actor"] = {"role": "broker", "id": actor_id}
-            provenance = value.get("provenance")
-            if not isinstance(provenance, dict):
-                provenance = {}
-                value["provenance"] = provenance
-            provenance["actor"] = {"role": "broker", "id": actor_id}
-            provenance["session_id"] = session_id
-            provenance["runtime_session_ref"] = runtime_session_ref
-            provenance["model"] = runtime_model
-            provenance["provider"] = None
-            if view_binding is not None:
-                provenance.update(view_binding)
+            stamp_attempt(value)
+        elif command == "record-hunter-pair" and value.get("schema_version") == 1:
+            for name in ("primary", "control"):
+                attempt = value.get(name)
+                if not isinstance(attempt, dict):
+                    raise RecordError("driver_hunter_pair_invalid", name)
+                stamp_attempt(attempt)
         elif command == "request-authority" and value.get("action_version") in {2, 3}:
             value["executor_id"] = actor_id
             value["session_id"] = session_id
@@ -1305,6 +1314,8 @@ class DriverActionBroker:
         docker_identity: dict[str, str] | None = None,
         docker_session_key: bytes | None = None,
         provider_fixture_origin: str | None = None,
+        hunter_view: Any | None = None,
+        source_workspace: Path | None = None,
     ) -> None:
         if execution_deadline is not None and (
             not isinstance(execution_deadline, (int, float))
@@ -1316,6 +1327,8 @@ class DriverActionBroker:
         self._engagement_fd = os.dup(engagement_fd)
         self._logical_engagement = Path(os.path.abspath(logical_engagement))
         self._admission = copy.deepcopy(admission)
+        self._hunter_view = hunter_view
+        self._source_workspace = source_workspace
         self._execution_deadline = (
             float(execution_deadline) if execution_deadline is not None else None
         )
@@ -1718,6 +1731,55 @@ class DriverActionBroker:
             raise RecordError("driver_action_broker_request_invalid", "shape")
         return request
 
+    def _admit_hunter_pair(
+        self, proposal: dict[str, Any], admitted: dict[str, dict[str, Any]],
+        state: dict[str, Any], engagement: Path,
+    ) -> None:
+        if self._hunter_view is None or self._source_workspace is None or self._admission.get("cognitive_principal") != "hunter":
+            raise RecordError("driver_hunter_source_view_missing", "record_hunter_pair")
+        if set(proposal) != {"schema_version", "primary", "control", "primary_raw_sha256", "control_raw_sha256"}:
+            raise RecordError("driver_hunter_pair_invalid", "shape")
+        primary, control = proposal.get("primary"), proposal.get("control")
+        if not isinstance(primary, dict) or not isinstance(control, dict) or control.get("control_of") != [primary.get("attempt_id")]:
+            raise RecordError("driver_hunter_pair_invalid", "control link")
+        if detect_secret_classes(admitted["file"]["bytes"]):
+            raise RecordError("driver_hunter_output_secret_shaped", "proposal")
+        item = queue_command_payload("next", state, engagement).get("item")
+        try:
+            from hunter_view import HunterViewError
+            self._hunter_view.assert_current(
+                workspace=self._source_workspace, engagement=engagement, state=state,
+                item=item, methodology_root=Path(__file__).resolve().parents[1] / "skills",
+            )
+        except (HunterViewError, TypeError) as exc:
+            raise RecordError("driver_hunter_source_changed", "current view") from exc
+        comparison = state["hypotheses"][primary["hypothesis_ref"]]["source_comparison"]
+        signal = comparison["signal"].encode("ascii")
+        observed: dict[str, bytes] = {}
+        for name, path in (("primary", comparison["primary_path"]), ("control", comparison["control_path"])):
+            rows = [row for row in self._hunter_view.manifest["target_inputs"] if row["target_relative_path"] == path]
+            if len(rows) != 1:
+                raise RecordError("driver_hunter_source_mismatch", name)
+            row = rows[0]
+            raw = _read_regular_bytes(
+                self._hunter_view.projection / "target-inputs" / row["slot"],
+                max_bytes=_MODEL_JSON_LIMIT, error_code="driver_hunter_source_unavailable",
+            )
+            digest = sha256_bytes(raw)
+            if digest != row["digest"] or digest != proposal[f"{name}_raw_sha256"]:
+                raise RecordError("driver_hunter_output_mismatch", name)
+            if detect_secret_classes(raw):
+                raise RecordError("driver_hunter_output_secret_shaped", name)
+            observed[name] = raw
+            attempt = proposal[name]
+            attempt["action_summary"] = f"Compared allowlisted source {path}."
+            attempt["observation"] = {"source": "broker", "statement": f"{path} raw={digest} bytes={len(raw)} signal={'present' if signal in raw else 'absent'}"}
+            attempt["recorded_at"] = utc_now()
+            attempt["redaction_attestation"] = True
+        if signal not in observed["primary"] or signal in observed["control"]:
+            raise RecordError("driver_hunter_signal_mismatch", "matched source pair")
+        admitted["file"]["value"] = proposal
+
     def _admit(
         self,
         request: dict[str, Any],
@@ -1758,6 +1820,8 @@ class DriverActionBroker:
             documents, admitted = _evaluate_predicate(
                 record.get("predicate", {}), arguments, inline_inputs
             )
+            if command == "record-hunter-pair":
+                self._admit_hunter_pair(documents["proposal"], admitted, state, bound)
         if command == "record-review":
             raw_values = _raw_argument_values(arguments)
             for option, attribute, limit in (

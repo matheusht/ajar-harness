@@ -146,6 +146,17 @@ def _attempt_action(action_id: str, engagement: Path, placeholder: str, requirem
     )
 
 
+def _hunter_pair_action(engagement: Path, hypothesis_id: str) -> dict[str, Any]:
+    return _action(
+        "record_hunter_pair", "record-hunter-pair", engagement,
+        ["--file", "<hunter-pair-json>"],
+        [_required_input("pair_file", "path", "<hunter-pair-json>",
+                         f"primary and linked held control for exact hypothesis {hypothesis_id}",
+                         "raw output hashes match the parent's two allowlisted source reads")],
+        session_kind="ordinary_bounded", principal="hunter", effect="advances_item",
+    )
+
+
 def _review_action(
     action_id: str,
     engagement: Path,
@@ -371,6 +382,8 @@ def _hypothesis_action(item_class: str, engagement: Path, entity_id: str, detail
     if item_class == "hypothesis_running_unattempted":
         if status != "running":
             raise RecordError("work_queue_hypothesis_status_invalid", f"{entity_id}:{status}")
+        if hypothesis.get("source_comparison") is not None:
+            return _hunter_pair_action(engagement, entity_id)
         return _attempt_action(
             "record_hunter_primary",
             engagement,

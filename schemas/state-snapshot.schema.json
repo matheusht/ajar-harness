@@ -197,6 +197,23 @@
         }
       }
     },
+    "partial_chains": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["event_ref", "event_sequence", "finding_id", "hypothesis_id", "base_finding_ref", "stages", "next_question", "status"],
+        "properties": {
+          "event_ref": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "event_sequence": {"type": "integer", "minimum": 1},
+          "finding_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "hypothesis_id": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"},
+          "base_finding_ref": {"oneOf": [{"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"}, {"type": "null"}]},
+          "stages": {"$ref": "https://llm-redteam-harness.local/schemas/engagement-event.schema.json#/properties/payload/properties/stages"},
+          "next_question": {"type": "string", "minLength": 1},
+          "status": {"enum": ["queued", "closed"]}
+        }
+      }
+    },
     "hypotheses": {
       "type": "object",
       "additionalProperties": {

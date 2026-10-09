@@ -171,6 +171,14 @@ A partial package declares, in `finding.json`:
 ]
 ```
 
+For decision-0006-v2, `partial_chain.recorded` is the authoritative, hash-chained record.
+The reducer projects its latest stages to `unproven/<finding-id>/partial-chain.json`.
+That file is rebuildable and never activates a finding. An argued stage queues its
+existing hypothesis with the exact next question; a refuted stage closes that route.
+Positive filing for the proposed full-chain ID is blocked until every recorded stage
+is proven and the ordinary filing gates pass. A separate proven base finding keeps
+its own ID and revision history.
+
 `state` is one of `proven` · `argued` · `refuted`. A partial is any package with at least one
 non-`proven` stage. It stays in `unproven/`, it never claims a severity above what its proven
 stages support, and it is **not** promoted — promotion still means every gate passed.

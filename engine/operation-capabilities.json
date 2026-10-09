@@ -119,6 +119,7 @@
     "finding.revised": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication"], "tier": "authority"},
     "hypothesis.created": {"allowed_roles": ["orchestrator", "hunter", "broker"], "blocking_scope": "none", "required_evidence": ["origin"], "tier": "notebook"},
     "hypothesis.status_changed": {"allowed_roles": ["orchestrator", "hunter", "broker"], "blocking_scope": "none", "required_evidence": ["hypothesis"], "tier": "notebook"},
+    "partial_chain.recorded": {"allowed_roles": ["orchestrator", "broker"], "blocking_scope": "none", "required_evidence": ["signed_scope", "hypothesis", "stage_evidence_or_blocker"], "tier": "notebook"},
     "legacy.record_imported": {"allowed_roles": ["migration", "broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "migration_review"], "tier": "authority"},
     "migration.apply_authorized": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "migration_review"], "tier": "authority"},
     "memory.disposition_recorded": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "memory_review"], "tier": "authority"},

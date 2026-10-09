@@ -768,6 +768,10 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             ])
     elif schema_name == "engagement-event":
         payload = record.get("payload", {})
+        if record.get("event_type") == "partial_chain.recorded":
+            for index_number, stage in enumerate(payload.get("stages", [])):
+                dynamic_specs.append((("payload", "stages", str(index_number), "evidence_refs"), stage.get("evidence_refs", []), {"attempt", "artifact"}))
+            dynamic_specs.append((("payload", "base_finding_ref"), payload.get("base_finding_ref"), {"finding"}))
         dynamic_specs.extend([
             (("payload", "environment_ref"), payload.get("environment_ref"), {"environment"}),
             (("payload", "source_observation_ref"), payload.get("source_observation_ref"), {"event", "attempt"}),

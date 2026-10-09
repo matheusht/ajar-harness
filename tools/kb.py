@@ -35,12 +35,14 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
 
 from engagement_quarantine import quarantined_ancestor, require_safe_offline_output
-from engagement_state import bound_engagement_lock
+from engagement_records import canonical_json_bytes, detect_secret_classes, sha256_bytes
+from engagement_state import bound_engagement_lock, read_ledger, reduce_engagement
 from ledger_health import probe_ledger_health
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -499,9 +501,10 @@ def cmd_add(args):
 
 
 def _cmd_add_authorized(
-    args, *, source_engagement=None, source_fd=None, source_guard=None
+    args, *, source_engagement=None, source_fd=None, source_guard=None,
+    entry_override=None, exact_retry=False
 ):
-    entry = _load_json_file(
+    entry = entry_override if entry_override is not None else _load_json_file(
         args.file, source_engagement=source_engagement, source_fd=source_fd
     )
     problems = validate(entry)
@@ -534,10 +537,6 @@ def _cmd_add_authorized(
     try:
         _require_kb_output_current(absolute, parent, parent_fd, parent_identity, lock_fd)
         kb = _read_kb_fd(lock_fd)
-        if any(e["id"] == entry["id"] for e in kb):
-            print(f"REJECTED: {entry['id']} already exists. The KB is append-only.")
-            return 1
-
         if fixture is not None:
             changed, detail = ablate(entry, fixture, kb)
             if not changed:
@@ -564,6 +563,14 @@ def _cmd_add_authorized(
         elif not args.no_fixture:
             print("REJECTED: pass --fixture (the B.3 gate) or --no-fixture with a reason recorded "
                   "in the entry's writer.note.")
+            return 1
+
+        prior = next((e for e in kb if e["id"] == entry["id"]), None)
+        if prior is not None:
+            if exact_retry and prior == entry:
+                print(f"already present {entry['id']} (exact retry)")
+                return 0
+            print(f"REJECTED: {entry['id']} already exists. The KB is append-only.")
             return 1
 
         original_size = os.lseek(lock_fd, 0, os.SEEK_END)
@@ -611,6 +618,94 @@ def _cmd_add_authorized(
         os.close(parent_fd)
     print(f"added {entry['id']} ({entry['kind']}, {entry['transfer_scope']}, {entry['boundedness']})")
     return 0
+
+
+def cmd_promote_confirmed(args):
+    """Promote only a checked, scrubbed lesson from a current confirmed finding."""
+    source_fd = -1
+    try:
+        source_fd, source, identity = _open_bound_source(args.source_engagement)
+        with bound_engagement_lock(source_fd, create=False):
+            if probe_ledger_health(Path(f"/dev/fd/{source_fd}")).get("status") != "healthy":
+                raise ValueError("source is unhealthy")
+            _require_bound_source_current(source, source_fd, identity)
+            state = reduce_engagement(Path(f"/dev/fd/{source_fd}"))
+            current = state["findings"].get(args.finding_id)
+            adjudication = state["claim_adjudications"].get(args.finding_id)
+            chain = state.get("partial_chains", {}).get(args.finding_id)
+            report = state["reports"].get(f"report-{args.finding_id}-r{args.revision}")
+            if (current is None or current["status"] != "confirmed" or current["revision"] != args.revision
+                    or adjudication is None or adjudication["status"] != "confirmed"
+                    or current["adjudication_event_ref"] != adjudication["event_ref"]
+                    or report is None or report["status"] != "draft" or report["finding_revision"] != args.revision
+                    or chain is not None and chain["status"] != "complete"):
+                raise ValueError("finding is not current confirmed complete")
+            finding_bytes = _read_bound_relative(source_fd, f"findings/{args.finding_id}/rev-{args.revision}.json")
+            finding = json.loads(finding_bytes)
+            if (sha256_bytes(canonical_json_bytes(finding)) != current["digest"]
+                    or finding["claim_state"] != "confirmed" or finding["revision"] != args.revision
+                    or finding["finding_id"] != args.finding_id):
+                raise ValueError("finding revision does not match current state")
+            proof = finding["proof"]
+            if (args.replay_id not in proof["replay_refs"]
+                    or any(args.replay_id not in row["replay_refs"] for row in proof["claim_proofs"])):
+                raise ValueError("replay is not claim-bound")
+            attempts = {row["attempt_id"]: row for row in read_ledger(source, "attempt")}
+            replay = attempts.get(args.replay_id)
+            primary = [attempts.get(ref) for ref in proof["primary_attempt_refs"]]
+            controls = [attempts.get(ref) for ref in proof["negative_control_refs"]]
+            if (replay is None or replay["kind"] != "replay" or replay["assessment"] != "suspected_signal"
+                    or replay["contamination"]["status"] != "none_observed" or not replay["evidence_refs"]
+                    or not primary or any(row is None or row["kind"] != "primary" for row in primary)
+                    or not controls or any(row is None or row["kind"] != "negative_control" or row["assessment"] != "no_signal" for row in controls)
+                    or replay["recorded_at"] < max(row["recorded_at"] for row in primary)):
+                raise ValueError("replay or matched control failed")
+            artifacts = {row["artifact_id"]: row for row in read_ledger(source, "artifact")}
+            for ref in replay["evidence_refs"]:
+                artifact = artifacts.get(ref)
+                if (artifact is None or artifact["redaction_status"] not in {"not_needed", "redacted"}
+                        or sha256_bytes(_read_bound_relative(source_fd, artifact["relative_path"])) != artifact["sha256"]):
+                    raise ValueError("replay raw output is missing or changed")
+            review_ref = current["adjudication_review_ref"]
+            review_bytes = _read_bound_relative(source_fd, f"reviews/{review_ref}.json")
+            review = json.loads(review_bytes)
+            if (review["verdict"] != "confirmed" or review["review_id"] != review_ref
+                    or not review["independence"]["reviewer_session_id"]):
+                raise ValueError("independent confirmation is missing")
+            proposal = _load_json_file(args.entry_file, source_engagement=source, source_fd=source_fd)
+            if (not isinstance(proposal, dict) or proposal.get("transfer_scope") != "this-mechanism-class"
+                    or proposal.get("applies_to") or "family" in proposal or "control_is_proven" in proposal):
+                raise ValueError("portable proposal scope is unsafe")
+            raw = canonical_json_bytes(proposal)
+            source_ids = {state["engagement_id"], args.finding_id, *attempts, *artifacts, review_ref,
+                          *finding["search_linkage"]["candidate_refs"], *finding["search_linkage"]["hypothesis_refs"]}
+            if (detect_secret_classes(raw) or any(name.encode() in raw for name in source_ids)
+                    or re.search(rb"https?://|/[Uu]sers/|/[Hh]ome/|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", raw)):
+                raise ValueError("proposal is not scrubbed")
+            card_ids = {card for ref in finding["search_linkage"]["candidate_refs"]
+                        for card in state["candidates"][ref]["card_ids"]}
+            if not proposal.get("cards") or not set(proposal["cards"]) <= card_ids:
+                raise ValueError("proposal has no source route")
+            if "engagement" in proposal or "evidence" in proposal or "ablation_fixture" in proposal:
+                raise ValueError("proposal supplies non-portable provenance")
+            entry = {**proposal, "evidence": [f"finding-r{args.revision}:{current['digest']}",
+                                              f"replay:{replay['record_hash']}",
+                                              f"review:{sha256_bytes(review_bytes)}"]}
+            if entry.get("kind") == "loser":
+                control = entry.get("control")
+                if not isinstance(control, dict) or set(control) != {"mechanism"}:
+                    raise ValueError("loser must name the held control")
+                entry["control"] = {**control, "evidence": [f"held-control:{controls[0]['record_hash']}"]}
+            add_args = argparse.Namespace(file=args.entry_file, fixture=args.fixture, kb=args.kb, no_fixture=False)
+            return _cmd_add_authorized(add_args, source_engagement=source, source_fd=source_fd,
+                                       source_guard=lambda: _require_bound_source_current(source, source_fd, identity),
+                                       entry_override=entry, exact_retry=True)
+    except Exception:
+        print("REJECTED: source, replay, relevance, or redaction check failed; shared memory unchanged.")
+        return 1
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
 
 
 def cmd_query(args):
@@ -776,6 +871,12 @@ def main():
     source.add_argument("--source-engagement", type=Path)
     source.add_argument("--source-kind", choices=["synthetic", "public"])
     a.add_argument("--no-fixture", action="store_true"); a.set_defaults(fn=cmd_add)
+
+    p = sub.add_parser("promote-confirmed"); common(p)
+    p.add_argument("--source-engagement", type=Path, required=True)
+    p.add_argument("--finding-id", required=True); p.add_argument("--revision", type=int, required=True)
+    p.add_argument("--replay-id", required=True); p.add_argument("--entry-file", type=Path, required=True)
+    p.add_argument("--fixture", required=True); p.set_defaults(fn=cmd_promote_confirmed)
 
     q = sub.add_parser("query"); common(q)
     for f in ("target", "framework", "language", "family", "kind"):

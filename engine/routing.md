@@ -84,6 +84,11 @@ trap `D-09` forbids.
 
 Entries are scrubbed to an abstract mechanism. Never write a target identifier into
 `mechanism_class`, and omit `engagement` entirely when the source is under a disclosure obligation.
+For a current confirmed internal finding, `tools/kb.py promote-confirmed` accepts a scrubbed
+entry proposal, exact finding revision and replay id, and an ablation fixture. It checks the
+signed source, independent review, replay output, source route, and redaction before appending.
+The portable entry cites content digests rather than engagement-local ids; a failed check leaves
+shared memory unchanged. `add` remains the explicit manual/public path.
 
 ## Hard gates still apply
 Routing changes *what you consider*, never the gates. The KB pass changes only the ORDER of what

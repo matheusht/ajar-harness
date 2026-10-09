@@ -956,6 +956,7 @@
         "resolved_at": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/timestamp"
         },
+        "scope_derived": {"const": true},
         "draft_digest": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
         },

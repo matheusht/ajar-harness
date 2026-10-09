@@ -3474,7 +3474,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         if event["event_type"] == "scope.amendment_proposed":
             expected_draft = f"scope-drafts/{payload['draft_digest'].removeprefix('sha256:')}.md"; draft_path = engagement / str(payload.get("draft_path", ""))
             if payload.get("draft_path") != expected_draft or payload.get("supersedes_scope_hash") != state["scope_hash"] or not _governed_file_exists(draft_path) or sha256_bytes(read_governed_file(draft_path)) != payload["draft_digest"]: raise RecordError("scope_draft_binding_invalid", event["event_id"])
-        if event["event_type"] == "authority.resolved" and event["actor"] != {"role": "operator", "id": active_scope_operator}:
+        if event["event_type"] == "authority.resolved" and event["actor"]["role"] not in {"operator", "broker"}:
             raise RecordError("authority_resolution_operator_invalid", event["event_id"])
         if event["event_type"] == "authority.requested":
             request_id = payload["request_id"]
@@ -3507,6 +3507,55 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             request = state["authority_requests"].get(payload["request_id"])
             if request is None or request["status"] != "pending_authority" or request["request_event_ref"] != payload.get("request_event_ref") or request["action_digest"] != payload.get("action_digest"):
                 raise RecordError("authority_resolution_binding_invalid", event["event_id"])
+            if event["actor"]["role"] == "broker":
+                action_path = f"authority/requests/{payload['request_id']}.action.json"
+                action_bytes = read_governed_file(engagement / action_path) if request.get("action_path") == action_path and _governed_file_exists(engagement / action_path) else b""
+                action = load_json(engagement / action_path) if action_bytes and sha256_bytes(action_bytes) == request["action_digest"] else {}
+                if (payload.get("scope_derived") is not True or payload["resolution"] != "approved"
+                        or payload["resolved_at"] != event["recorded_at"] or event["entity_refs"] != [request["request_event_ref"]]
+                        or active_record_kernel != "decision-0006-v2" or request["scope_hash"] != state["scope_hash"]
+                        or request["environment_ref"] is None or request["environment_ref"] != state["active_environment_ref"]
+                        or action_bytes != canonical_json_bytes(action) or action.get("action_kind") != request["action_kind"]
+                        or action.get("lane_id") != request["lane_id"] or action.get("executor_id") != event["actor"]["id"]
+                        or action.get("session_id") != event["provenance"]["session_id"] or action.get("operator_id") != active_scope_operator):
+                    raise RecordError("internal_authority_request_invalid", event["event_id"])
+                if request["action_kind"] == "revise-finding":
+                    target = request.get("target")
+                    if (not isinstance(target, dict) or target.get("claim_state") != "confirmed"
+                            or not revise_finding_target_is_current(state, request, action.get("proposal", {}))):
+                        raise RecordError("internal_finding_not_confirmed_current", event["event_id"])
+                    _validate_revise_finding_v2_action(action, state=state, engagement=engagement, index=index,
+                                                        committed_entity_ids=committed_entity_ids, seen_events=seen_events,
+                                                        attempts=attempts, artifacts=artifacts, requested_at=request["requested_at"], context=event["event_id"])
+                elif request["action_kind"] == "generate-report":
+                    finding_id, revision = action.get("finding_id"), action.get("revision")
+                    current = state["findings"].get(finding_id) if isinstance(finding_id, str) else None
+                    adjudication = state["claim_adjudications"].get(finding_id) if isinstance(finding_id, str) else None
+                    commitment = committed_records.get(finding_id) if isinstance(finding_id, str) else None
+                    try:
+                        report_at = datetime.fromisoformat(action["recorded_at"].replace("Z", "+00:00"))
+                    except (KeyError, AttributeError, ValueError):
+                        raise RecordError("internal_report_not_confirmed_current", event["event_id"]) from None
+                    if (set(action) != {"action_kind", "lane_id", "executor_id", "session_id", "finding_id", "revision", "included_claim_ids", "omitted_claims", "operator_id", "recorded_at"}
+                            or not isinstance(revision, int) or current is None or current["status"] != "confirmed" or current["revision"] != revision
+                            or adjudication is None or adjudication["status"] != "confirmed" or current["adjudication_event_ref"] != adjudication["event_ref"]
+                            or commitment is None or f"report-{finding_id}-r{revision}" in state["reports"]
+                            or report_at.tzinfo is None or report_at < event_time):
+                        raise RecordError("internal_report_not_confirmed_current", event["event_id"])
+                    finding = load_json(engagement / commitment["record_path"])
+                    claim_ids = {row["claim_id"] for row in claim_rows(finding)}
+                    included = action.get("included_claim_ids"); omitted = action.get("omitted_claims")
+                    if (not isinstance(included, list) or not isinstance(omitted, list)
+                            or any(not isinstance(item, str) for item in included)
+                            or any(not isinstance(item, dict) or set(item) != {"claim_id", "rationale"} or not isinstance(item["claim_id"], str) or not isinstance(item["rationale"], str) or not item["rationale"] for item in omitted)
+                            or not included or len(included) != len(set(included))
+                            or set(included) & {item["claim_id"] for item in omitted}
+                            or set(included) | {item["claim_id"] for item in omitted} != claim_ids):
+                        raise RecordError("internal_report_claim_partition_invalid", event["event_id"])
+                else:
+                    raise RecordError("internal_authority_action_forbidden", event["event_id"])
+            elif event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("scope_derived") is not None:
+                raise RecordError("authority_resolution_operator_invalid", event["event_id"])
             expired_at_resolution = request["expires_at"] is not None and datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")) > datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))
             if payload["resolution"] == "approved" and expired_at_resolution:
                 raise RecordError("authority_approval_expired", event["event_id"])

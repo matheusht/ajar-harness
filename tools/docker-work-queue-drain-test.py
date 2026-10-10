@@ -388,6 +388,43 @@ def _docker_owned_ids(docker: Path, kind: str) -> frozenset[str]:
     return frozenset(line for line in result.stdout.splitlines() if line)
 
 
+def _crash_after_hunter_pair(workspace: Path, engagement: Path) -> None:
+    docker = Path(shutil.which("docker") or "").resolve(strict=True)
+    original_compile = queue_driver.compile_hunter_view
+    original_session = queue_driver._run_docker_queue_session
+
+    def compile_with_provider(**arguments: object) -> object:
+        packet = original_compile(**arguments)  # type: ignore[arg-type]
+        os.chmod(packet.runtime, 0o700)
+        provider = packet.runtime / "fake-claude"
+        provider.write_text(FAKE_HUNTER_PAIR.replace("/usr/local/bin/python3", LIVE_PYTHON).replace("EXPECT_LOST_ACK", "False"), encoding="utf-8")
+        provider.chmod(0o555)
+        os.chmod(packet.runtime, 0o555)
+        return packet
+
+    def crash_after_session(**arguments: object) -> object:
+        outcome = original_session(**arguments)
+        if {row["attempt_id"] for row in read_ledger(engagement, "attempt")} == {"attempt-hunter-primary", "attempt-hunter-control"}:
+            os._exit(77)
+        return outcome
+
+    backend = DockerQueueBackend(
+        image=LIVE_IMAGE, python_executable=LIVE_PYTHON, docker_executable=docker,
+        limits=DockerRuntimeLimits(memory_bytes=256 * 1024 * 1024, cpu_count=1.0, pids=64, nofile=256, scratch_bytes=16 * 1024 * 1024, scratch_inodes=2048, shm_bytes=4 * 1024 * 1024, shm_inodes=256),
+    )
+    with (
+        mock.patch("work_queue_driver.compile_hunter_view", side_effect=compile_with_provider),
+        mock.patch("work_queue_driver._run_docker_queue_session", side_effect=crash_after_session),
+        mock.patch.dict(os.environ, {**{key: "" for key in MODEL_AUTH_ENV_KEYS}, "ANTHROPIC_API_KEY": "fixture-parent-api-key"}, clear=False),
+    ):
+        run_driver(
+            workspace=workspace, engagement=engagement, executable=Path("/harness/fake-claude"),
+            model=WORKER_MODEL, reviewer_model=REVIEWER_MODEL, budget=DriverBudget(1, 45.0, 30.0, None),
+            docker_backend=backend, read_only_inputs=(workspace / "src/a-primary.txt", workspace / "src/b-control.txt"),
+        )
+    raise AssertionError("the committed pair did not trigger the crash")
+
+
 class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
     def _run_cli(self, workspace: Path, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -1108,6 +1145,78 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
                     "queue_classes": [row["class"] for row in reduce_engagement(engagement)["work_queue"]],
                 }))
 
+    @unittest.skipUnless(LIVE_IMAGE, "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image")
+    def test_crash_after_pair_commit_restarts_without_duplicate(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("the strong Docker runtime currently supports local Docker Desktop on Darwin")
+        docker_text = shutil.which("docker")
+        if docker_text is None or not SSH_KEYGEN.is_file():
+            self.skipTest("Docker or ssh-keygen unavailable")
+        docker = Path(docker_text).resolve(strict=True)
+        before_containers = _docker_owned_ids(docker, "container")
+        before_networks = _docker_owned_ids(docker, "network")
+        with tempfile.TemporaryDirectory(prefix="docker-hunter-crash-") as temporary:
+            root = Path(temporary).resolve()
+            workspace = root / "target"
+            engagement = workspace / "engagements" / "docker-hunter-crash"
+            engagement.mkdir(parents=True)
+            self._seed_current_signed_dry_review(root, workspace, engagement)
+            primary = workspace / "src/a-primary.txt"
+            control = workspace / "src/b-control.txt"
+            primary.parent.mkdir()
+            primary.write_text("owned synthetic marker green\n", encoding="utf-8")
+            control.write_text("owned synthetic marker blue\n", encoding="utf-8")
+            collect_preflight(
+                engagement, preflight_id="preflight-docker-hunter-crash", mode="package",
+                target=primary, expected_identity=sha256_file(primary), runtime=Path(sys.executable).resolve(),
+                reproduction_argv=[str(Path(sys.executable).resolve()), "-c", "pass"],
+                operator_id="operator-docker-queue-test", recorded_at="2026-08-26T12:00:03.500000Z",
+                operator_redaction_attested=True, endpoint_identity="local", account_role="owner",
+            )
+            self._seed_running_hypothesis(engagement, {"primary_path": "src/a-primary.txt", "control_path": "src/b-control.txt", "signal": "green"})
+            crashed = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "--crash-after-pair", str(workspace), str(engagement)],
+                cwd=workspace, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, check=False, timeout=60,
+            )
+            self.assertEqual(crashed.returncode, 77, crashed.stdout + crashed.stderr)
+            self.assertEqual(_docker_owned_ids(docker, "container"), before_containers)
+            self.assertEqual(_docker_owned_ids(docker, "network"), before_networks)
+            before_restart = (engagement / "attempts.jsonl").read_bytes()
+            pair = read_ledger(engagement, "attempt")
+            self.assertEqual([row["attempt_id"] for row in pair], ["attempt-hunter-primary", "attempt-hunter-control"])
+            self.assertIn("hypothesis_ran_unadjudicated", {row["class"] for row in reduce_engagement(engagement)["work_queue"]})
+            restarted = run_driver(
+                workspace=workspace, engagement=engagement, executable=Path("/harness/fake-claude"),
+                model=WORKER_MODEL, reviewer_model=REVIEWER_MODEL, budget=DriverBudget(1, 45.0, 30.0, None),
+                stop_requested=lambda: True,
+            )
+            self.assertEqual(restarted["status"], "interrupted_unrecorded")
+            self.assertEqual((engagement / "attempts.jsonl").read_bytes(), before_restart)
+            self.assertIn("hypothesis_ran_unadjudicated", {row["class"] for row in reduce_engagement(engagement)["work_queue"]})
+            output_text = os.environ.get("HARNESS_HUNTER_CRASH_OUTPUT_DIR")
+            if output_text:
+                output = Path(output_text).resolve()
+                output.mkdir(parents=True, exist_ok=False)
+                shutil.copyfile(primary, output / "primary.txt")
+                shutil.copyfile(control, output / "control.txt")
+                (output / "attempts-before-restart.jsonl").write_bytes(before_restart)
+                shutil.copyfile(engagement / "attempts.jsonl", output / "attempts.jsonl")
+                shutil.copyfile(engagement / "scope.md", output / "scope.md")
+                shutil.copyfile(engagement / "events.jsonl", output / "events.jsonl")
+                shutil.copyfile(engagement / "state.snapshot.json", output / "state.snapshot.json")
+                manifest = next((engagement / "driver-view-manifests").glob("*.json"))
+                shutil.copyfile(manifest, output / "view-manifest.json")
+                (output / "restart-result.json").write_bytes(canonical_json_bytes(restarted))
+                source_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
+                (output / "result.json").write_bytes(canonical_json_bytes({
+                    "schema_version": 1, "source_head": source_head, "attempt_ids": [row["attempt_id"] for row in pair],
+                    "docker_image": LIVE_IMAGE, "docker_python": LIVE_PYTHON, "provider": "owned fake provider",
+                    "source_hashes": [sha256_file(primary), sha256_file(control)], "manifest_digest": sha256_file(manifest),
+                    "queue_classes": [row["class"] for row in reduce_engagement(engagement)["work_queue"]],
+                    "crash_exit": crashed.returncode, "restart_status": restarted["status"],
+                }))
+
     @unittest.skipUnless(
         LIVE_IMAGE,
         "set HARNESS_DOCKER_QUEUE_TEST_IMAGE to an already-cached immutable Python image",
@@ -1410,4 +1519,7 @@ class DockerWorkQueueDrainAcceptanceTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    if len(sys.argv) == 4 and sys.argv[1] == "--crash-after-pair":
+        _crash_after_hunter_pair(Path(sys.argv[2]), Path(sys.argv[3]))
+    else:
+        unittest.main(verbosity=2)

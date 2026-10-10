@@ -47,6 +47,17 @@ def main() -> int:
         "runtime_boundary": result["provider"] == "owned fake provider" and "@sha256:" in result["docker_image"] and bool(result["docker_python"]),
         "open_adjudication": "hypothesis_ran_unadjudicated" in result["queue_classes"],
     }
+    if "crash_exit" in result:
+        restart = json.loads((root / "restart-result.json").read_bytes())
+        state = json.loads((root / "state.snapshot.json").read_bytes())
+        events = [json.loads(line) for line in (root / "events.jsonl").read_bytes().splitlines() if line]
+        checks.update({
+            "real_parent_crash": result["crash_exit"] == 77,
+            "restart_observed_open_queue": restart["status"] == result["restart_status"] == "interrupted_unrecorded" and "hypothesis_ran_unadjudicated" in result["queue_classes"],
+            "restart_did_not_duplicate_attempts": (root / "attempts-before-restart.jsonl").read_bytes() == (root / "attempts.jsonl").read_bytes(),
+            "signed_scope_bound": bool(events) and events[0]["event_type"] == "scope.attested" and events[0]["payload"]["scope_hash"] == digest((root / "scope.md").read_bytes()),
+            "restart_state_bound": digest(canonical(state)) == restart["final_state_hash"] and "hypothesis_ran_unadjudicated" in {row["class"] for row in state["work_queue"]},
+        })
     print(json.dumps({"valid": all(checks.values()), "checks": checks, "source_head": result["source_head"]}, sort_keys=True))
     return 0 if all(checks.values()) else 1
 

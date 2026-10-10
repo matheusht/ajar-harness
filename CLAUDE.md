@@ -21,9 +21,11 @@ over "confirmed".
 1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
    objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
 2. **Safe-signal gate** — never run a vuln skill whose front-matter lacks a benign `safe_signal`.
-3. **Impact-escalation confirm** — before creating ANY Zone-2 PoC artifact (see README scope
-   fence), STOP and get an explicit human confirmation. Never autonomous, even if scope authorizes
-   the category. Contain it; log it in the engagement `cleanup.md`.
+3. **Impact-artifact gate** — before creating a Zone-2 PoC artifact (see README scope fence),
+   require either a fresh human confirmation or an explicit standing local-PoC grant in the current
+   signed scope that the record kernel enforces. Each contained local artifact binds its exact bytes,
+   path, active environment, and a prior open cleanup obligation. The grant covers artifact creation
+   only; target contact and effects beyond the signed containment still stop for human confirmation.
 4. **Review gate** — operator reviews assembled findings before any escalation up the severity
    ladder (self → stored/persistent → cross-user), each rung gated on the prior succeeding.
 

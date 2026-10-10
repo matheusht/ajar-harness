@@ -11,17 +11,21 @@ stages, each with its own level:
 | Information acquisition | recon, surface snapshots, routing signals | wasted compute | high autonomy |
 | Information analysis | narrowing, triples, reachability, chain construction | wasted effort, a wrong lead | high autonomy |
 | Decision selection | `confirmed`, severity, `covered-dry` | a false report or a missed bug | **operator** |
-| Action implementation | Zone-2 artifacts, filing, disclosure | not reversible | **operator** |
+| Action implementation | Zone-2 artifacts, filing, disclosure | not reversible | **operator**, except signed local-only artifact creation |
 
 Running acquisition and analysis near-autonomous while decision and action stay human is not a
 compromise. It is the correct shape. Read the level per stage, never as one number.
 
 ## 2. Which gates are irreducible
 
-Two gates stay human. No framework surveyed supports removing either.
+Two authority boundaries stay human: the operator signs the exact engagement scope, and the
+operator reviews assembled findings before severity escalation. Filing and disclosure also stay
+operator actions.
 
-**Zone-2 confirmation before an impact artifact.** The action is not reversible. Every production
-system that handles this class narrows the *capability* rather than trusting supervision more.
+**Zone-2 artifact creation.** A fresh operator confirmation is the default. A signed scope may
+instead grant contained local PoC artifact creation under `local_only_v1`; the kernel still binds
+bytes, path, environment, and open cleanup before creation. External effects remain outside that
+standing grant.
 
 **Adjudicating `confirmed`.** This is decision selection, the exact stage where automation bias
 produces silent misses. Skitka et al. measured the reason: training reduces commission errors and

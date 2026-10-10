@@ -134,6 +134,9 @@ def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_a
         state = reduce_engagement(engagement); scope = _scope_metadata(engagement / "scope.md")
         if _operator(scope["operator"]) != operator_id: raise RecordError("engagement_closure_authority_invalid", operator_id)
         if scoped:
+            latest_scope = next(event for event in reversed(read_ledger(engagement, "event")) if event["event_type"] == "scope.attested")
+            if latest_scope["payload"]["record_kernel"] != "decision-0006-v1":
+                raise RecordError("scoped_closure_kernel_required", latest_scope["event_id"])
             scoped_cleanup_root(engagement, state["scope_hash"])
             if authority_request_ref or not executor_id or not session_id:
                 raise RecordError("scoped_closure_provenance_invalid", state["engagement_id"])

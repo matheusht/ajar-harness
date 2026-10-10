@@ -4,6 +4,15 @@
 
 **Relationship:** refines Decision 0005's authority boundary; does not weaken signed scope, independent adjudication, Zone-2, cleanup, reporting, submission, memory, or closure gates
 
+**Local artifact amendment (2026-10-10):** A signed scope may grant contained local Zone-2 artifact
+creation through `local_only_v1`. The kernel checks the current scope, exact planned bytes and path,
+active environment, and an open cleanup obligation before each creation. This replaces the fresh
+per-artifact confirmation only for that local file operation. Target contact, external effects,
+finding filing, reporting, and terminal authority retain their separate gates.
+With a second signed scoped-cleanup grant, the broker may open and settle the shared obligation
+for the kernel's fixed inert local effect after exact root and absence checks. Registered evidence
+remains immutable; arbitrary transient effects and terminal closure remain operator-owned.
+
 **Origin:** operational friction observed during a source engagement; refined by two independent pre-implementation reviews of the autonomy and measurement design
 
 ## 1. Problem
@@ -18,7 +27,8 @@ The correction must not replace one false authority signal with another. In part
 - a hash chain demonstrates append integrity relative to the observed filesystem, not truth, authorship, authorization, or semantic correctness;
 - a clean automated secret scan is useful evidence, not proof that no secret exists;
 - asynchronous human review may keep unrelated safe work moving, but the transition that depends on that review must remain blocked;
-- a signed category authorization never replaces the fresh confirmation required before each Zone-2 artifact is created.
+- a signed category authorization alone never replaces the fresh confirmation required before a
+  Zone-2 artifact; the versioned `local_only_v1` grant is the bounded local exception.
 
 The desired outcome is high operational autonomy inside the evidence shell, not weaker authority boundaries.
 
@@ -50,7 +60,7 @@ The public record command must classify an operation by capability, validate the
 | --- | --- | --- |
 | **Notebook — agent-autonomous** | collect preflight facts; register Zone-0/Zone-1 artifacts; append attempts, observations, controls, replay results, candidates, hypotheses, and non-authority transitions; record immutable review proposals | Execute without TTY after schema, scope, capability, secret-shape, reference, environment, and hash-chain checks. Record the real actor and session/model/tool provenance. |
 | **Authority — human, asynchronous** | initial scope signature; scope amendment; operator filing/acceptance of a finding revision; severity-rung review; report acceptance; submission authorization/recording; memory disposition; closure; ledger repair | Initial scope remains a global prerequisite. Later requests enter `pending_authority`; only the dependent transition waits. The orchestrator continues every unrelated, authorized, safe lane. Human approval is bound to the exact proposed action and immutable digest. |
-| **Real-world — fresh live human confirmation** | creation of each Zone-2 PoC artifact; production/live-network contact; cross-user/account effects; destructive or persistent writes; use of real credentials/funds/sensitive data; publication, deployment, disclosure, or filing | Pause the exact lane before the action. Require action-specific scope, environment, containment, expiry, and cleanup references. If no other safe lane remains, the engagement pauses. Never approve retrospectively. |
+| **Real-world — fresh confirmation or signed local artifact grant** | Zone-2 PoC artifact files; production/live-network contact; cross-user/account effects; destructive or persistent writes; use of real credentials/funds/sensitive data; publication, deployment, disclosure, or filing | A signed `local_only_v1` scope permits exact contained local artifact files after byte, path, environment, and cleanup checks. Other real-world effects pause the exact lane for fresh authority. Never approve retrospectively. |
 
 “Async — never blocks the agent” therefore means **never blocks unrelated safe research**. It does not mean that the harness may execute an unapproved dependent action.
 
@@ -185,7 +195,7 @@ The gates document will distinguish global, lane-local, and asynchronous blockin
 | Scope amendment | Async authority | Existing-scope lanes continue; expanded lane waits |
 | File finding revision | Async authority | Candidate waits; other research continues |
 | Accept report / record submission | Async authority | External path waits; research continues |
-| Create one Zone-2 artifact | Fresh live confirmation | Exact lane pauses before creation |
+| Create one Zone-2 artifact | Fresh confirmation or signed `local_only_v1` grant | Exact local file may proceed after kernel checks; other lanes pause |
 | Production/cross-user/destructive action | Fresh live confirmation or refusal | Exact lane pauses; scope ceilings still apply |
 | Terminal coverage | Computed queue; async authority only for override | Leaving `active` fails while blocking work remains; an override records its reason and exact blockers |
 | Memory disposition / close | Computed queue + async authority | Normal closure also requires no blocking work; completed evidence is preserved and any override remains countable |
@@ -246,7 +256,8 @@ At minimum, prove:
 - changing an actor label or environment variable cannot upgrade capability;
 - a researcher cannot self-adjudicate through a fabricated reviewer identity;
 - pending authority blocks only the dependent transition while an unrelated safe candidate continues;
-- Zone-2 is stopped before bytes are created and remains bound to one artifact, environment, scope, expiry, and cleanup obligation;
+- Zone-2 is stopped before bytes are created unless the current signed scope carries `local_only_v1`;
+  either route binds each artifact's bytes, environment, scope, and cleanup obligation;
 - scope drift is preserved and cannot be silently restored into authority;
 - a complete subprocess-only engagement path works through preflight, artifacts, attempts, independent reviews, finding proposal, operator filing, report, and closure;
 - hash-chain, crash recovery, deterministic reduction, secret scanning, contamination, and stale-environment tests remain green.

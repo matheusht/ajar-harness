@@ -10,6 +10,11 @@ Zone-2 gate
 **Purpose:** define the smallest end-to-end architecture that makes Decision 0005 executable, then
 specify retrospective and prospective evaluation without claiming efficacy from conformance alone
 
+**Current Zone-2 rule:** This document describes the original fresh-confirmation contract. The
+2026-10-10 Decision 0006 amendment permits only signed `local_only_v1` contained local artifact
+creation without a fresh confirmation per file; `engine/gates.md` and the current kernel define its
+additional byte, path, environment, and cleanup checks. Other real-world effects remain gated.
+
 ## 1. Outcome and success definition
 
 The target product is a domain-neutral research kernel in which models retain control of semantic

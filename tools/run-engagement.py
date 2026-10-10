@@ -849,13 +849,27 @@ def command_classify_artifact(args: argparse.Namespace) -> int:
         if metadata.get("advisory_zone") != "review_required": raise RecordError("zone2_advisory_zone_invalid", metadata.get("artifact_id", "unknown"))
         plan = _zone2_plan(metadata, planned_sha256=source_digest, planned_size=source_size, relative_path=relative, scope_hash=state["scope_hash"], environment_ref=state["active_environment_ref"], cleanup_obligation_ref=metadata.get("cleanup_obligation_ref") or "")
         action_digest = sha256_bytes(canonical_json_bytes(plan))
-        confirmation = next((event for event in read_ledger(args.engagement.absolute(), "event") if event["event_id"] == metadata.get("escalation_confirmation_event_ref")), None)
-        if confirmation is None or confirmation["event_type"] != "escalation.confirmed" or confirmation["payload"].get("entity_id") != metadata.get("artifact_id") or confirmation["payload"].get("environment_ref") != state["active_environment_ref"] or confirmation["payload"].get("action_digest") != action_digest:
-            raise RecordError("artifact_creation_requires_fresh_confirmation", metadata.get("artifact_id", "unknown"))
-        expiry = datetime.fromisoformat(confirmation["payload"]["expires_at"].replace("Z", "+00:00"))
-        if datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")) > expiry:
-            raise RecordError("artifact_confirmation_expired", metadata.get("artifact_id", "unknown"))
-        decision = "allow_confirmed_creation"; expires_at = confirmation["payload"]["expires_at"]
+        events = read_ledger(args.engagement.absolute(), "event")
+        if require_scope_zone2_authorized(engagement, state["scope_hash"]) == "standing":
+            scope_event = next((event for event in reversed(events) if event["event_type"] == "scope.attested"), None)
+            cleanup_event = next((event for event in events if event["event_id"] == metadata.get("cleanup_obligation_ref")), None)
+            cleanup_id = metadata.get("cleanup_obligation_id")
+            cleanup_open = any(item.get("obligation_id") == cleanup_id and item.get("status") == "open" for item in state["cleanup"]["obligations"])
+            if (scope_event is None or scope_event["payload"]["scope_hash"] != state["scope_hash"]
+                or metadata.get("escalation_confirmation_event_ref") != scope_event["event_id"]
+                or cleanup_event is None or cleanup_event["event_type"] != "cleanup.updated"
+                or not any(item.get("obligation_id") == cleanup_id and item.get("status") == "open" for item in cleanup_event["payload"]["cleanup_obligations"])
+                or not cleanup_open):
+                raise RecordError("zone2_standing_grant_binding_invalid", metadata.get("artifact_id", "unknown"))
+            decision = "allow_scope_grant_creation"; expires_at = None
+        else:
+            confirmation = next((event for event in events if event["event_id"] == metadata.get("escalation_confirmation_event_ref")), None)
+            if confirmation is None or confirmation["event_type"] != "escalation.confirmed" or confirmation["payload"].get("entity_id") != metadata.get("artifact_id") or confirmation["payload"].get("environment_ref") != state["active_environment_ref"] or confirmation["payload"].get("action_digest") != action_digest:
+                raise RecordError("artifact_creation_requires_fresh_confirmation", metadata.get("artifact_id", "unknown"))
+            expiry = datetime.fromisoformat(confirmation["payload"]["expires_at"].replace("Z", "+00:00"))
+            if datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")) > expiry:
+                raise RecordError("artifact_confirmation_expired", metadata.get("artifact_id", "unknown"))
+            decision = "allow_confirmed_creation"; expires_at = confirmation["payload"]["expires_at"]
     else:
         decision = "allow_local_creation"; expires_at = None
     permit_body = {"schema_version": 1, "classification_id": f"classification-{metadata['artifact_id']}", "artifact_id": metadata["artifact_id"], "engagement_id": state["engagement_id"], "relative_path": relative, "advisory_zone": metadata["advisory_zone"], "operation_class": capability["tier"], "metadata_digest": sha256_bytes(canonical_json_bytes(metadata)), "scope_hash": state["scope_hash"], "environment_ref": state["active_environment_ref"], "classified_at": args.recorded_at, "expires_at": expires_at, "source_digest": source_digest, "source_size": source_size, "action_digest": action_digest, "file_absent_at_classification": True, "decision": decision}
@@ -892,6 +906,24 @@ def command_propose_scope(args: argparse.Namespace) -> int:
     emit({"valid": True, "draft_path": relative, "draft_digest": digest, "event_id": record["event_id"], "authority_changed": False}); return 0
 
 
+def _zone2_pending_journal_exists(engagement: Path, *, unreadable_code: str) -> bool:
+    pending_dir = engagement / "legacy" / "zone2-pending"
+    try:
+        pending_fd = _open_absolute_directory(pending_dir)
+    except FileNotFoundError:
+        return False
+    except (OSError, RecordError) as exc:
+        raise RecordError(unreadable_code, str(pending_dir)) from exc
+    try:
+        try:
+            with os.scandir(pending_fd) as entries:
+                return next(entries, None) is not None
+        except OSError as exc:
+            raise RecordError(unreadable_code, str(pending_dir)) from exc
+    finally:
+        os.close(pending_fd)
+
+
 def command_reattest_scope(args: argparse.Namespace) -> int:
     _require_decision6_kernel(args.engagement)
     _require_local_provenance("broker", args.executor_id, args.session_id); engagement = args.engagement.absolute(); draft = args.draft.resolve(strict=True); draft_bytes = draft.read_bytes(); draft_digest = sha256_bytes(draft_bytes); action = _authority_action("reattest-scope", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, draft_digest=draft_digest, operator_id=args.operator_id, recorded_at=args.recorded_at); action_digest = sha256_bytes(canonical_json_bytes(action)); require_repair_authority_from_intact_prefix(engagement, args.authority_request_id, "reattest-scope", action_digest, args.lane_id, args.recorded_at)
@@ -899,6 +931,9 @@ def command_reattest_scope(args: argparse.Namespace) -> int:
     if normalized_operator != args.operator_id or args.operator_id != active_operator or draft_metadata["scope_hash"] != draft_digest: raise RecordError("scope_reattestation_invalid", "scope amendment cannot silently replace the active operator identity")
     if not any(event["event_type"] == "scope.amendment_proposed" and event["payload"].get("draft_digest") == draft_digest for event in read_ledger(engagement, "event")): raise RecordError("scope_draft_not_proposed", draft_digest)
     with engagement_lock(engagement) as bound_engagement:
+        if _zone2_pending_journal_exists(bound_engagement,
+                                         unreadable_code="scope_reattestation_zone2_pending_unreadable"):
+            raise RecordError("scope_reattestation_zone2_pending", "finish or recover the pending Zone-2 artifact before changing scope")
         prior_events = read_ledger(bound_engagement, "event"); prior_scope = next(event["payload"]["scope_hash"] for event in reversed(prior_events) if event["event_type"] == "scope.attested"); atomic_write(bound_engagement / "scope.md", draft_bytes); snapshot_path = persist_scope_snapshot(bound_engagement, draft_digest)
         event = base_event(event_id=f"event-scope-{draft_digest[-12:]}", engagement_id=prior_events[0]["engagement_id"], recorded_at=args.recorded_at, actor_role="operator", actor_id=args.operator_id, event_type="scope.attested", rationale=args.reason, payload={"scope_hash": draft_digest, "scope_snapshot_path": snapshot_path, "operator_id": args.operator_id, "signed_date": draft_metadata["date"], "record_kernel": draft_metadata["record_kernel"], "supersedes_scope_hash": prior_scope, "authority_request_ref": args.authority_request_id, "executor_id": args.executor_id}, entity_refs=[prior_events[0]["engagement_id"]], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(bound_engagement, event, lock_held=True)
     emit({"valid": True, "scope_hash": draft_digest, "event_id": applied["event_id"], "prior_scope_preserved": True}); return 0
@@ -1212,8 +1247,11 @@ def command_create_scoped_effect(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute()
     with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement)
-        root = scoped_cleanup_root(engagement, state["scope_hash"])
         events = read_ledger(engagement, "event")
+        active_scope = next(event for event in reversed(events) if event["event_type"] == "scope.attested")
+        if active_scope["payload"]["record_kernel"] == "decision-0006-v2" and require_scope_zone2_authorized(engagement, state["scope_hash"]) != "standing":
+            raise RecordError("scoped_cleanup_standing_grant_required", state["scope_hash"])
+        root = scoped_cleanup_root(engagement, state["scope_hash"])
         if _scoped_engagement_closed(events, state["engagement_id"]):
             raise RecordError("scoped_effect_after_closure", state["engagement_id"])
         opening, creation = _scoped_cleanup_events(events, args.obligation_id)
@@ -1313,9 +1351,12 @@ def command_record_scoped_cleanup(args: argparse.Namespace) -> int:
         raise RecordError("scoped_cleanup_proposal_invalid", proposal["entity_id"])
     with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement)
+        events = read_ledger(engagement, "event")
+        active_scope = next(event for event in reversed(events) if event["event_type"] == "scope.attested")
+        if active_scope["payload"]["record_kernel"] == "decision-0006-v2" and require_scope_zone2_authorized(engagement, state["scope_hash"]) != "standing":
+            raise RecordError("scoped_cleanup_standing_grant_required", state["scope_hash"])
         root = scoped_cleanup_root(engagement, state["scope_hash"])
         operator = _scope_metadata(engagement / "scope.md")["operator"]
-        events = read_ledger(engagement, "event")
         committed_id = f"event-scoped-cleanup-{proposal['status']}-{proposal['entity_id']}"
         prior = next((event for event in events if event["event_id"] == committed_id), None)
         if prior is not None:
@@ -1341,6 +1382,12 @@ def command_record_scoped_cleanup(args: argparse.Namespace) -> int:
             return 0
         if _scoped_engagement_closed(events, state["engagement_id"]):
             raise RecordError("scoped_cleanup_after_closure", state["engagement_id"])
+        if (active_scope["payload"]["record_kernel"] == "decision-0006-v2"
+            and proposal["status"] != "open"
+            and _zone2_pending_journal_exists(engagement,
+                                             unreadable_code="scoped_cleanup_zone2_pending_unreadable")):
+            raise RecordError("scoped_cleanup_zone2_pending",
+                              "retry the exact create-artifact to clear its pending journal before settling cleanup")
         opening, creation = _scoped_cleanup_events(events, proposal["entity_id"])
         if opening is not None and scoped_cleanup_root(engagement, opening["payload"]["scope_hash"]) != root:
             raise RecordError("scoped_cleanup_root_changed", proposal["entity_id"])
@@ -2032,23 +2079,39 @@ def command_create_artifact(args: argparse.Namespace) -> int:
     def exact_existing_record(root: Path = engagement) -> dict[str, object] | None:
         candidate=next((item for item in read_ledger(root,"artifact") if item["artifact_id"]==metadata.get("artifact_id")),None)
         return candidate if candidate is not None and candidate.get("relative_path")==relative.as_posix() and candidate.get("sha256")==permit.get("source_digest") and candidate.get("size")==permit.get("source_size") and candidate.get("precreation_classification_digest")==classification_digest and candidate.get("escalation_confirmation_event_ref")==metadata.get("escalation_confirmation_event_ref") else None
+    if existing_journal is not None and destination.exists():
+        with engagement_lock(engagement) as bound_engagement:
+            completed = exact_existing_record(bound_engagement)
+            if completed is not None:
+                reduce_engagement(bound_engagement)
+                if read_governed_file(bound_engagement / relative) != data or read_governed_file(bound_engagement / "legacy" / "zone2-pending" / f"{metadata.get('artifact_id','unknown')}.json") != journal_bytes:
+                    raise RecordError("zone2_resume_record_mismatch", metadata.get("artifact_id", "unknown"))
+                _unlink_governed_file(bound_engagement / "legacy" / "zone2-pending" / f"{metadata.get('artifact_id','unknown')}.json")
+                emit({"ok": True, "artifact_id": completed["artifact_id"], "record_hash": completed["record_hash"], "created_after_confirmation": permit.get("decision") == "allow_confirmed_creation", "resumed": True})
+                return 0
     resuming = destination.exists() and existing_journal is not None
     if destination.exists() and existing_journal is None:
         with engagement_lock(engagement) as bound_engagement:
             completed=exact_existing_record(bound_engagement)
-            if completed is not None and read_governed_file(bound_engagement / relative)==data: emit({"ok":True,"artifact_id":completed["artifact_id"],"record_hash":completed["record_hash"],"created_after_confirmation":True,"resumed":True}); return 0
+            if completed is not None and read_governed_file(bound_engagement / relative)==data: emit({"ok":True,"artifact_id":completed["artifact_id"],"record_hash":completed["record_hash"],"created_after_confirmation":permit.get("decision")=="allow_confirmed_creation","resumed":True}); return 0
         raise RecordError("artifact_bytes_precede_creation_command", relative.as_posix())
     if destination.exists() and read_governed_file(destination) != data: raise RecordError("artifact_bytes_precede_creation_command", relative.as_posix())
     state = reduce_engagement(engagement, allowed_artifact_orphans={relative.as_posix()} if resuming else None); events = read_ledger(engagement, "event")
     event = next((item for item in events if item["event_id"] == permit.get("classification_event_ref")), None); confirmation = next((item for item in events if item["event_id"] == metadata.get("escalation_confirmation_event_ref")), None)
+    standing = permit.get("decision") == "allow_scope_grant_creation"
     expiry = datetime.fromisoformat((permit.get("expires_at") or "").replace("Z", "+00:00")) if permit.get("expires_at") else None
     try: artifact_time=datetime.fromisoformat(str(metadata.get("created_at","")).replace("Z","+00:00")); classification_time=datetime.fromisoformat(str(permit.get("classified_at","")).replace("Z","+00:00")); confirmation_time=datetime.fromisoformat(str(confirmation.get("recorded_at","") if confirmation else "").replace("Z","+00:00"))
     except ValueError: artifact_time=classification_time=confirmation_time=None
-    chronology_valid=artifact_time is not None and classification_time is not None and confirmation_time is not None and confirmation_time<=artifact_time<=expiry and classification_time<=artifact_time if expiry is not None else False
-    contract_valid = set(permit) == ARTIFACT_PERMIT_FIELDS and metadata.get("operation_class") == "real_world" and metadata.get("advisory_zone") == "review_required" and permit.get("advisory_zone") == "review_required" and permit.get("operation_class") == "real_world" and permit.get("decision") == "allow_confirmed_creation" and permit.get("artifact_id") == metadata.get("artifact_id") and permit.get("metadata_digest") == sha256_bytes(canonical_json_bytes(metadata)) and permit.get("scope_hash") == state["scope_hash"] and permit.get("environment_ref") == state["active_environment_ref"] and permit.get("action_digest") == action_digest
+    chronology_valid = bool(artifact_time and classification_time and confirmation_time and confirmation_time <= artifact_time and classification_time <= artifact_time and (expiry is None or artifact_time <= expiry))
+    contract_valid = set(permit) == ARTIFACT_PERMIT_FIELDS and metadata.get("operation_class") == "real_world" and metadata.get("advisory_zone") == "review_required" and permit.get("advisory_zone") == "review_required" and permit.get("operation_class") == "real_world" and permit.get("decision") in {"allow_confirmed_creation", "allow_scope_grant_creation"} and permit.get("artifact_id") == metadata.get("artifact_id") and permit.get("metadata_digest") == sha256_bytes(canonical_json_bytes(metadata)) and permit.get("scope_hash") == state["scope_hash"] and permit.get("environment_ref") == state["active_environment_ref"] and permit.get("action_digest") == action_digest
     event_valid = event is not None and event["event_type"] == "artifact.classified" and event["payload"].get("classification_digest") == classification_digest and event["payload"].get("action_digest") == action_digest and event["payload"].get("source_digest") == permit.get("source_digest") and event["payload"].get("source_size") == permit.get("source_size")
-    confirmation_valid = confirmation is not None and confirmation["event_type"] == "escalation.confirmed" and confirmation["payload"].get("action_digest") == action_digest and confirmation["payload"].get("cleanup_obligation_ref") == metadata.get("cleanup_obligation_ref") and confirmation["payload"].get("cleanup_obligation_id") == metadata.get("cleanup_obligation_id")
-    if not contract_valid or not event_valid or not confirmation_valid or expiry is None or not chronology_valid: raise RecordError("zone2_creation_authority_invalid", metadata.get("artifact_id", "unknown"))
+    if standing:
+        active_scope_event = next((item for item in reversed(events) if item["event_type"] == "scope.attested"), None)
+        cleanup_event = next((item for item in events if item["event_id"] == metadata.get("cleanup_obligation_ref")), None)
+        confirmation_valid = bool(confirmation and active_scope_event and confirmation["event_id"] == active_scope_event["event_id"] and confirmation["event_type"] == "scope.attested" and confirmation["payload"].get("scope_hash") == state["scope_hash"] and require_scope_zone2_authorized(engagement, state["scope_hash"]) == "standing" and cleanup_event and cleanup_event["event_type"] == "cleanup.updated" and any(item.get("obligation_id") == metadata.get("cleanup_obligation_id") and item.get("status") == "open" for item in cleanup_event["payload"]["cleanup_obligations"]))
+    else:
+        confirmation_valid = confirmation is not None and confirmation["event_type"] == "escalation.confirmed" and confirmation["payload"].get("action_digest") == action_digest and confirmation["payload"].get("cleanup_obligation_ref") == metadata.get("cleanup_obligation_ref") and confirmation["payload"].get("cleanup_obligation_id") == metadata.get("cleanup_obligation_id")
+    if not contract_valid or not event_valid or not confirmation_valid or not chronology_valid or (standing and expiry is not None) or (not standing and expiry is None): raise RecordError("zone2_creation_authority_invalid", metadata.get("artifact_id", "unknown"))
     metadata["precreation_classification_digest"] = classification_digest; metadata["precreation_classification_event_ref"] = event["event_id"]; metadata["classified_source_digest"] = permit["source_digest"]; metadata["classified_source_size"] = permit["source_size"]; metadata["classified_at"] = permit["classified_at"]
     preview = {**metadata, "relative_path": relative.as_posix(), "sha256": permit["source_digest"], "size": permit["source_size"], "immutable": True}
     preview = materialize_ledger_record("artifact", {key: value for key, value in preview.items() if key not in {"sequence", "previous_hash", "record_hash"}}, read_ledger(engagement, "artifact"))
@@ -2059,8 +2122,15 @@ def command_create_artifact(args: argparse.Namespace) -> int:
         bound_destination = bound_engagement / relative
         bound_journal_path = bound_engagement / "legacy" / "zone2-pending" / f"{metadata.get('artifact_id','unknown')}.json"
         final_state = reduce_engagement(bound_engagement, allowed_artifact_orphans={relative.as_posix()} if resuming else None)
-        cleanup_id = confirmation["payload"].get("cleanup_obligation_id"); cleanup_open = any(item.get("obligation_id") == cleanup_id and item.get("status") == "open" for item in final_state["cleanup"]["obligations"])
-        if (not resuming and (final_state["scope_hash"] != permit["scope_hash"] or final_state["active_environment_ref"] != permit["environment_ref"] or datetime.now(timezone.utc) > expiry)) or not cleanup_open:
+        if standing and require_scope_zone2_authorized(bound_engagement, final_state["scope_hash"]) != "standing":
+            raise RecordError("zone2_standing_grant_binding_invalid", metadata.get("artifact_id", "unknown"))
+        if standing:
+            latest_scope_event = next((item for item in reversed(read_ledger(bound_engagement, "event")) if item["event_type"] == "scope.attested"), None)
+            if latest_scope_event is None or metadata.get("escalation_confirmation_event_ref") != latest_scope_event["event_id"]:
+                raise RecordError("zone2_standing_grant_binding_invalid", metadata.get("artifact_id", "unknown"))
+        cleanup_id = metadata.get("cleanup_obligation_id") if standing else confirmation["payload"].get("cleanup_obligation_id")
+        cleanup_open = any(item.get("obligation_id") == cleanup_id and item.get("status") == "open" for item in final_state["cleanup"]["obligations"])
+        if (not resuming and (final_state["scope_hash"] != permit["scope_hash"] or final_state["active_environment_ref"] != permit["environment_ref"] or (expiry is not None and datetime.now(timezone.utc) > expiry))) or not cleanup_open:
             raise RecordError("zone2_creation_authority_expired", metadata.get("artifact_id", "unknown"))
         current_journal = _governed_regular_bytes_or_none(bound_journal_path)
         if current_journal is not None and current_journal != journal_bytes:
@@ -2072,7 +2142,7 @@ def command_create_artifact(args: argparse.Namespace) -> int:
             if governed_root != bound_engagement or tuple(governed_parts) != tuple(relative.parts): raise RecordError("artifact_path_not_contained", relative.as_posix())
             parent_fd, destination_name = _open_parent_fd(governed_root, governed_parts, create=False)
             try:
-                if datetime.now(timezone.utc) > expiry: raise RecordError("zone2_creation_authority_expired", metadata.get("artifact_id", "unknown"))
+                if expiry is not None and datetime.now(timezone.utc) > expiry: raise RecordError("zone2_creation_authority_expired", metadata.get("artifact_id", "unknown"))
                 fd = os.open(destination_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=parent_fd)
                 try:
                     view = memoryview(data); written = 0
@@ -2084,25 +2154,24 @@ def command_create_artifact(args: argparse.Namespace) -> int:
                 finally: os.close(fd)
             finally: os.close(parent_fd)
         elif current_destination != data: raise RecordError("zone2_resume_bytes_mismatch", metadata["artifact_id"])
-    existing_record = next((item for item in read_ledger(engagement,"artifact") if item["artifact_id"] == metadata["artifact_id"]),None)
-    if existing_record is not None:
-        exact_record=exact_existing_record()
-        if exact_record is None or read_governed_file(destination)!=data: raise RecordError("zone2_resume_record_mismatch", metadata["artifact_id"])
-        with engagement_lock(engagement) as bound_engagement:
-            bound_journal_path = bound_engagement/"legacy"/"zone2-pending"/f"{metadata.get('artifact_id','unknown')}.json"
-            if read_governed_file(bound_journal_path) != journal_bytes: raise RecordError("zone2_resume_journal_mismatch", metadata.get("artifact_id", "unknown"))
-            _unlink_governed_file(bound_journal_path)
-        emit({"ok":True,"artifact_id":exact_record["artifact_id"],"record_hash":exact_record["record_hash"],"created_after_confirmation":True,"resumed":True}); return 0
-    try: record = register_artifact(engagement, destination, metadata, classification=permit)
-    except RecordError:
-        completed=exact_existing_record()
-        if completed is None or read_governed_file(destination)!=data: raise
-        record=completed
-    with engagement_lock(engagement) as bound_engagement:
-        bound_journal_path = bound_engagement/"legacy"/"zone2-pending"/f"{metadata.get('artifact_id','unknown')}.json"
+        existing_record = next((item for item in read_ledger(bound_engagement, "artifact") if item["artifact_id"] == metadata["artifact_id"]), None)
+        if existing_record is not None:
+            record = exact_existing_record(bound_engagement)
+            if record is None or read_governed_file(bound_destination) != data:
+                raise RecordError("zone2_resume_record_mismatch", metadata["artifact_id"])
+            resumed = True
+        else:
+            try:
+                record = register_artifact(bound_engagement, bound_destination, metadata, classification=permit, lock_held=True)
+                resumed = False
+            except RecordError:
+                record = exact_existing_record(bound_engagement)
+                if record is None or read_governed_file(bound_destination) != data:
+                    raise
+                resumed = True
         if read_governed_file(bound_journal_path) != journal_bytes: raise RecordError("zone2_resume_journal_mismatch", metadata.get("artifact_id", "unknown"))
         _unlink_governed_file(bound_journal_path)
-    emit({"ok": True, "artifact_id": record["artifact_id"], "record_hash": record["record_hash"], "created_after_confirmation": True})
+    emit({"ok": True, "artifact_id": record["artifact_id"], "record_hash": record["record_hash"], "created_after_confirmation": not standing, "resumed": resumed})
     return 0
 
 
@@ -2418,6 +2487,9 @@ def command_close(args: argparse.Namespace) -> int:
     if getattr(args, "scoped", False):
         _require_local_provenance("broker", args.executor_id, args.session_id)
         _require_decision6_kernel(args.engagement)
+        latest_scope = next(event for event in reversed(read_ledger(args.engagement.absolute(), "event")) if event["event_type"] == "scope.attested")
+        if latest_scope["payload"]["record_kernel"] != "decision-0006-v1":
+            raise RecordError("scoped_closure_kernel_required", latest_scope["event_id"])
         if args.authority_request_id or args.lane_id or args.operator_id:
             raise RecordError("scoped_closure_authority_conflict", "scoped closure uses only the signed local grant")
         operator = _scope_metadata(args.engagement / "scope.md")["operator"]
@@ -6342,7 +6414,7 @@ def parser() -> argparse.ArgumentParser:
     classify_artifact.add_argument("--provider")
     classify_artifact.add_argument("--tool-version", action="append", default=[])
     classify_artifact.add_argument("--output", type=Path)
-    create_artifact = subcommands.add_parser("create-artifact", help="create exact digest-bound Zone-2 bytes only after fresh confirmation")
+    create_artifact = subcommands.add_parser("create-artifact", help="create exact digest-bound Zone-2 bytes under fresh confirmation or a signed local standing grant")
     create_artifact.add_argument("--engagement", type=Path, required=True)
     create_artifact.add_argument("--metadata", type=Path, required=True)
     create_artifact.add_argument("--classification", type=Path, required=True)

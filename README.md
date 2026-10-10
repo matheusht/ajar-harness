@@ -49,7 +49,8 @@ docs/           architecture + decisions + field-notes (cross-engagement methodo
 
 Decision 0006 keeps Decision 0005's evidence and authority boundaries while allowing the local
 broker to maintain truthful Notebook records non-interactively. Consequential transitions use
-lane-local digest-bound authority requests; Zone-2 remains freshly confirmed before creation.
+lane-local digest-bound authority requests; Zone-2 creation requires either fresh confirmation or
+a versioned local-only standing grant in the current signed scope, plus an open cleanup obligation.
 
 New version-3 engagements use `python3 tools/run-engagement.py <subcommand> ...` as the sole public
 Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown are derived. See

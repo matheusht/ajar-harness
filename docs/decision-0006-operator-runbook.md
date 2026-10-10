@@ -89,10 +89,19 @@ closure gates.
 
 ## 6. Zone-2
 
-Do not create or pipe capability-bearing bytes before `confirm-zone2`. Confirmation binds one planned
-artifact digest, size, path, scope, environment, cleanup obligation, operator, and short expiry.
-`create-artifact` revalidates under lock immediately before exclusive creation. Scope authorization
-alone is never sufficient.
+Do not create or pipe capability-bearing bytes before either `confirm-zone2` or a current signed
+scope with the versioned `local_only_v1` standing grant and an open cleanup obligation. Fresh
+confirmation binds one planned artifact digest, size, path, scope, environment, cleanup, operator,
+and short expiry. The standing path binds planned bytes/path, scope, environment, and cleanup
+without per-artifact confirmation. `create-artifact` revalidates under lock before exclusive
+creation. A scope with only `impact_demo_authorized: yes` is insufficient.
+
+For a v2 scope that also signs `scoped_cleanup_closure: yes` and an exact safe
+`scoped_cleanup_root`, the broker may use `record-cleanup --scoped` to open one local obligation,
+reference its opening event from repeated evidence artifacts, and complete it after the fixed inert
+scoped effect is removed and absence is checked. If no effect was created, use verified
+`not_applicable`. Evidence files remain immutable. This grant covers no arbitrary transient effect;
+report acceptance and terminal close still require their own operator authority.
 
 ## 7. Flow telemetry
 

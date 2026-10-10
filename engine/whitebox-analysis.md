@@ -219,8 +219,8 @@ it for source-available work and adds what black-box mode doesn't need:
 - The "keep-biased grading panel" (§3) is the adversarial-verify pattern with the bias flipped —
   same mechanism (N independent graders, require agreement to act), opposite default.
 - `engine/gates.md`/`AGENTS.md §1` still govern: no PoC construction against a program's production
-  systems (doubly true here — this program forbids it outright), Zone-2 confirmation still needed
-  before any artifact with real capability is built, even in a local repro environment.
+  systems (doubly true here — this program forbids it outright), Zone-2 requires fresh confirmation
+  or a signed, kernel-enforced local-only standing grant before a capability-bearing artifact is built.
 
 ## 8. EVM smart-contract domain funnel (Decision 0008)
 
@@ -248,4 +248,5 @@ proposes, the oracle confirms).
 - **Stage 5 severity.** B1 impact×likelihood over funds (NOT CVSS) + the B2 realized-loss floor
   (`skills/oracles/severity-precedent-oracle.md` DeFi cross-check).
 - **Gates unchanged.** No mainnet/live target; a value-moving fork PoC is Zone-2 (§7's rule, ADR 0008
-  §5.2) → human confirm; the tool never emits `confirmed` — the oracle does.
+  §5.2) → fresh human confirmation unless a signed local-only standing grant covers exact local
+  artifact creation. Execution retains its own scope boundary; the oracle still owns `confirmed`.

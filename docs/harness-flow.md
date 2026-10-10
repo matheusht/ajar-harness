@@ -46,7 +46,7 @@ oracle. Hunters may propose `suspected_success`; **only the orchestrator/oracle 
 | --- | --- | --- |
 | **scope** | Stage 1 | `scope.md` filled + signed — no scope, no run |
 | **safe-signal** | every card load | a vuln card with no benign `safe_signal` **will not load** |
-| **impact-escalation confirm** | before any Zone-2 PoC artifact | scope authorizes **+** live human confirm **+** contained + logged |
+| **impact-artifact gate** | before any Zone-2 PoC artifact | signed scope authorizes **+** fresh confirmation or its versioned `local_only_v1` grant for contained local files **+** prior open cleanup obligation |
 | **review** | /goal | operator reviews findings before escalating the severity ladder, each rung gated on the prior |
 | **cleanup** | Post | every created artifact reverted + logged; unresolved cleanup blocks pattern promotion |
 

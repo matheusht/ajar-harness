@@ -92,6 +92,6 @@ shared memory unchanged. `add` remains the explicit manual/public path.
 
 ## Hard gates still apply
 Routing changes *what you consider*, never the gates. The KB pass changes only the ORDER of what
-routing already chose. Scope, `safe_signal`, Zone-2 human-confirm,
-redaction, and oracle-before-`confirmed` are unchanged (`AGENTS.md §1`). A strong activation never
+routing already chose. Scope, `safe_signal`, the Zone-2 confirmation or signed local standing-grant gate,
+redaction, and oracle-before-`confirmed` still apply (`AGENTS.md §1`). A strong activation never
 authorizes an impact artifact on its own.

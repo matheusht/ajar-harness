@@ -2136,7 +2136,14 @@ def _scope_metadata(scope_path: Path) -> dict[str, Any]:
     return {"operator": operator.group(1).strip(), "date": signed.group(1), "scope_hash": sha256_bytes(scope_bytes), "record_kernel": kernels[0], "intake": _scope_intake(text)}
 
 
-def require_scope_zone2_authorized(engagement: Path, scope_hash: str, category: str = "zone2_artifact_creation") -> None:
+def require_scope_zone2_authorized(engagement: Path, scope_hash: str, category: str = "zone2_artifact_creation", *, historical: bool = False) -> str:
+    if not historical:
+        try:
+            source_hash = sha256_bytes(read_governed_file(engagement / "scope.md"))
+        except (OSError, RecordError) as exc:
+            raise RecordError("zone2_scope_source_drift", scope_hash) from exc
+        if source_hash != scope_hash:
+            raise RecordError("zone2_scope_source_drift", scope_hash)
     snapshot = engagement / "scope-attestations" / f"{scope_hash.removeprefix('sha256:')}.md"
     try: snapshot_bytes = read_governed_file(snapshot)
     except (OSError, RecordError): raise RecordError("zone2_scope_snapshot_invalid", scope_hash)
@@ -2144,9 +2151,30 @@ def require_scope_zone2_authorized(engagement: Path, scope_hash: str, category: 
     try: text = snapshot_bytes.decode("utf-8")
     except UnicodeDecodeError: raise RecordError("zone2_scope_snapshot_invalid", scope_hash)
     def value(name: str) -> str | None:
-        occurrence = [name] * text.lower().count(name.lower()); pattern = rf"^\s*-\s*(?:\*\*{re.escape(name)}:\*\*|{re.escape(name)}:)\s*`([^`]*)`\s*(?:←[^\n]*)?$"; matches = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE); return matches[0].strip().lower() if len(occurrence) == len(matches) == 1 else None
+        fields = re.findall(rf"^\s*-\s*(?:\*\*)?{re.escape(name)}:", text, re.MULTILINE | re.IGNORECASE)
+        pattern = rf"^\s*-\s*(?:\*\*{re.escape(name)}:\*\*|{re.escape(name)}:)\s*`([^`]*)`\s*(?:←[^\n]*)?$"
+        matches = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE)
+        return matches[0].strip().lower() if len(fields) == len(matches) == 1 else None
     authorized = value("impact_demo_authorized") == "yes"; categories = {item.strip() for item in (value("zone2_authorized_categories") or "").split(",") if item.strip()}; ceiling = value("zone2_escalation_ceiling"); containment = value("zone2_containment"); placeholders = {"none", "n/a", "no", "tbd", "unknown", "to be determined", "todo", "placeholder"}
     if not authorized or category.lower() not in categories or ceiling != "artifact_creation" or not containment or containment in placeholders or len(containment) < 8 or any(token in containment for token in ("<", ">", "[", "]", "{", "}", "___", "*")) or any(marker in containment for marker in ("tbd", "unknown", "placeholder", "todo", "none", "n/a", "to be determined")): raise RecordError("zone2_not_authorized_by_scope", category)
+    standing_fields = ("zone2_confirmation_mode", "zone2_standing_grant", "zone2_standing_grant_contract", "zone2_per_act_confirmation_required")
+    present = {name: bool(re.search(rf"^\s*-\s*(?:\*\*)?{name}:", text, re.MULTILINE | re.IGNORECASE)) for name in standing_fields}
+    if not any(present.values()):
+        return "fresh"
+    parsed = {name: value(name) for name in standing_fields}
+    if any(present[name] and parsed[name] is None for name in standing_fields):
+        raise RecordError("zone2_standing_grant_invalid", category)
+    fresh = {"zone2_confirmation_mode": "fresh", "zone2_standing_grant": "no", "zone2_standing_grant_contract": "none", "zone2_per_act_confirmation_required": "yes"}
+    if all(parsed[name] in {None, expected} for name, expected in fresh.items()):
+        return "fresh"
+    if (parsed["zone2_standing_grant_contract"] != "local_only_v1"
+        or parsed["zone2_confirmation_mode"] != "standing"
+        or parsed["zone2_standing_grant"] != "yes"
+        or parsed["zone2_per_act_confirmation_required"] != "no"
+        or not containment.startswith("local engagement/evidence/")
+        or re.search(r"\bcleanup\b", containment) is None):
+        raise RecordError("zone2_standing_grant_invalid", category)
+    return "standing"
 
 
 def scoped_cleanup_root(engagement: Path, scope_hash: str) -> Path:
@@ -2163,7 +2191,11 @@ def scoped_cleanup_root(engagement: Path, scope_hash: str) -> Path:
     roots = re.findall(r"^- scoped_cleanup_root: `([^`]*)`\s*$", text, re.MULTILINE)
     if len(grant) != 1 or grant[0] != "yes" or len(roots) != 1:
         raise RecordError("scoped_cleanup_not_authorized", scope_hash)
-    if _scope_metadata(snapshot)["record_kernel"] != "decision-0006-v1":
+    kernel = _scope_metadata(snapshot)["record_kernel"]
+    if kernel == "decision-0006-v2":
+        if require_scope_zone2_authorized(engagement, scope_hash, historical=True) != "standing":
+            raise RecordError("scoped_cleanup_standing_grant_required", scope_hash)
+    elif kernel != "decision-0006-v1":
         raise RecordError("scoped_cleanup_kernel_required", scope_hash)
     root = Path(roots[0])
     if not root.is_absolute() or roots[0] == "/" or any(part in {".", ".."} for part in roots[0].split("/")):
@@ -2742,7 +2774,7 @@ def validate_reference_precedence(event: dict[str, Any], index: dict[str, list[d
             raise RecordError("record_reference_from_future", f"{event['event_id']}:{reference}")
 
 
-def validate_cross_ledger_causality(events: list[dict[str, Any]], attempts: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> None:
+def validate_cross_ledger_causality(engagement: Path, events: list[dict[str, Any]], attempts: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> None:
     event_times = {event["event_id"]: datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")) for event in events}
     hypothesis_times = {event["payload"]["hypothesis_id"]: event_times[event["event_id"]] for event in events if event["event_type"] == "hypothesis.created"}
     artifact_times = {artifact["artifact_id"]: datetime.fromisoformat(artifact["created_at"].replace("Z", "+00:00")) for artifact in artifacts}
@@ -2757,30 +2789,58 @@ def validate_cross_ledger_causality(events: list[dict[str, Any]], attempts: list
     event_by_id = {event["event_id"]: event for event in events}
     for artifact in artifacts:
         artifact_time = datetime.fromisoformat(artifact["created_at"].replace("Z", "+00:00"))
-        active_environment = next((environment_ref for timestamp, environment_ref in reversed(environment_timeline) if timestamp <= artifact_time), None)
-        if artifact["environment_ref"] != active_environment:
-            raise RecordError("artifact_environment_not_active", artifact["artifact_id"])
         classification_ref = artifact.get("precreation_classification_event_ref")
+        classified = event_by_id.get(classification_ref) if classification_ref is not None else None
         if classification_ref is not None:
-            classified = event_by_id.get(classification_ref)
             if classified is None or classified["event_type"] != "artifact.classified" or classified["payload"].get("artifact_id") != artifact["artifact_id"] or classified["payload"].get("classification_digest") != artifact.get("precreation_classification_digest") or classified["payload"].get("source_digest") != artifact.get("classified_source_digest") or classified["payload"].get("source_size") != artifact.get("classified_source_size") or classified["payload"].get("advisory_zone") != artifact["advisory_zone"] or event_times[classification_ref] > artifact_time:
                 raise RecordError("artifact_classification_event_invalid", artifact["artifact_id"])
+        if classified is not None:
+            active_environment_event = next((candidate for candidate in reversed(events) if candidate["sequence"] <= classified["sequence"] and candidate["event_type"] in {"scope.attested", "environment.preflight_recorded", "environment.review_recorded"}), None)
+            active_environment = (active_environment_event["payload"].get("environment_ref") if active_environment_event["payload"].get("status") == "ready" else None) if active_environment_event is not None else None
+        else:
+            active_environment = next((environment_ref for timestamp, environment_ref in reversed(environment_timeline) if timestamp <= artifact_time), None)
+        if artifact["environment_ref"] != active_environment:
+            raise RecordError("artifact_environment_not_active", artifact["artifact_id"])
         if artifact["advisory_zone"] == "unknown":
             raise RecordError("artifact_zone_unknown", artifact["artifact_id"])
         if artifact["advisory_zone"] == "review_required":
             confirmation = event_by_id.get(artifact.get("escalation_confirmation_event_ref")); cleanup_event = event_by_id.get(artifact.get("cleanup_obligation_ref"))
-            if confirmation is None or confirmation["event_type"] != "escalation.confirmed" or cleanup_event is None or cleanup_event["event_type"] != "cleanup.updated":
+            if (confirmation is None or cleanup_event is None or cleanup_event["event_type"] != "cleanup.updated"
+                or (classified is not None and cleanup_event["sequence"] > classified["sequence"])):
                 raise RecordError("zone2_confirmation_invalid", artifact["artifact_id"])
-            expires_at = datetime.fromisoformat(confirmation["payload"]["expires_at"].replace("Z", "+00:00")); confirmation_time = event_times[confirmation["event_id"]]
+            confirmation_time = event_times[confirmation["event_id"]]
             confirmation_payload = confirmation["payload"]; obligation_id = confirmation_payload.get("cleanup_obligation_id")
+            if confirmation["event_type"] == "scope.attested":
+                active_scope_event = next((candidate for candidate in reversed(events) if classified is not None and candidate["event_type"] == "scope.attested" and candidate["sequence"] <= classified["sequence"]), None)
+                obligation_id = artifact.get("cleanup_obligation_id")
+                if (active_scope_event is None or active_scope_event["event_id"] != confirmation["event_id"]
+                    or require_scope_zone2_authorized(engagement, confirmation_payload["scope_hash"], historical=True) != "standing"):
+                    raise RecordError("zone2_standing_grant_binding_invalid", artifact["artifact_id"])
+            elif confirmation["event_type"] != "escalation.confirmed":
+                raise RecordError("zone2_confirmation_invalid", artifact["artifact_id"])
             cleanup_status = None
             for candidate in events:
-                if event_times[candidate["event_id"]] > artifact_time or candidate["event_type"] != "cleanup.updated": continue
+                if candidate["event_type"] != "cleanup.updated":
+                    continue
+                candidate_time = event_times[candidate["event_id"]]
+                # A later cleanup can share the artifact's declared time. The creation
+                # command separately rechecks open status under its write/register lock.
+                if (candidate_time > artifact_time
+                    or (classified is not None and candidate_time == artifact_time
+                        and candidate["sequence"] > classified["sequence"])):
+                    continue
                 for item in candidate["payload"]["cleanup_obligations"]:
                     if item["obligation_id"] == obligation_id: cleanup_status = item["status"]
-            bounded = confirmation_payload.get("confirmation", {})
-            if confirmation_payload.get("confirmation_scope") != "zone2_artifact_creation" or confirmation_payload.get("entity_id") != artifact["artifact_id"] or bounded.get("bounded_action") != artifact["artifact_id"] or confirmation_payload.get("environment_ref") != artifact["environment_ref"] or confirmation_payload.get("cleanup_obligation_ref") != cleanup_event["event_id"] or obligation_id != artifact.get("cleanup_obligation_id") or cleanup_status != "open" or not (confirmation_time <= artifact_time <= expires_at):
+            cleanup_time = event_times[cleanup_event["event_id"]]
+            if (cleanup_status != "open" or cleanup_time > artifact_time
+                or not any(item["obligation_id"] == obligation_id and item["status"] == "open" for item in cleanup_event["payload"]["cleanup_obligations"])):
                 raise RecordError("zone2_confirmation_invalid", artifact["artifact_id"])
+            if confirmation["event_type"] == "escalation.confirmed":
+                expires_at = datetime.fromisoformat(confirmation_payload["expires_at"].replace("Z", "+00:00")); bounded = confirmation_payload.get("confirmation", {})
+                if confirmation_payload.get("confirmation_scope") != "zone2_artifact_creation" or confirmation_payload.get("entity_id") != artifact["artifact_id"] or bounded.get("bounded_action") != artifact["artifact_id"] or confirmation_payload.get("environment_ref") != artifact["environment_ref"] or confirmation_payload.get("cleanup_obligation_ref") != cleanup_event["event_id"] or obligation_id != artifact.get("cleanup_obligation_id") or not (cleanup_time <= confirmation_time <= artifact_time <= expires_at):
+                    raise RecordError("zone2_confirmation_invalid", artifact["artifact_id"])
+            elif confirmation_time > cleanup_time:
+                raise RecordError("zone2_standing_grant_binding_invalid", artifact["artifact_id"])
     seen_attempts: set[str] = set()
     for attempt in attempts:
         attempt_time = datetime.fromisoformat(attempt["recorded_at"].replace("Z", "+00:00"))
@@ -3112,7 +3172,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             reference_errors = validate_record_references(record, schema, index)
             if reference_errors:
                 raise RecordError("record_reference_invalid", f"stored {kind} references do not resolve", reference_errors)
-    validate_cross_ledger_causality(events, attempts, artifacts)
+    validate_cross_ledger_causality(engagement, events, attempts, artifacts)
     verify_file_authority(engagement, events, artifacts, allowed_record_orphans=allowed_record_orphans, allowed_artifact_orphans=allowed_artifact_orphans)
     state = _initial_snapshot(engagement_id, scope_hash)
     states: dict[str, dict[str, str]] = {dimension: {} for dimension in STATE_VALUES}
@@ -3339,6 +3399,8 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             memory_bound = memory is not None and payload.get("disposition_ref") == memory["disposition_ref"] and payload.get("disposition_digest") == memory["disposition_digest"]
             close_action = {"action_kind": "close", "lane_id": request.get("lane_id") if request else None, "executor_id": event["actor"]["id"], "session_id": event.get("provenance", {}).get("session_id"), "operator_id": payload.get("operator_id"), "reason": event["rationale"], "recorded_at": event["recorded_at"]}
             if scoped_close:
+                if active_record_kernel != "decision-0006-v1":
+                    raise RecordError("scoped_closure_kernel_required", event["event_id"])
                 scoped_cleanup_root(engagement, state["scope_hash"])
             close_authority_exact = (_scoped_broker_event(event, "authority") and request is None) if scoped_close else (event["actor"]["role"] == "operator" or consume_exact_authority(event, request, close_action))
             terminal_coverage = states["coverage"].get(engagement_id, "active")
@@ -3456,7 +3518,7 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
                 ):
                     raise RecordError("ending_override_nonqueue_gate_failed", event["event_id"])
         if event["event_type"] == "escalation.confirmed":
-            require_scope_zone2_authorized(engagement, state["scope_hash"]); confirmation_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")); expires_at = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")); cleanup_event = seen_events.get(payload["cleanup_obligation_ref"]); bounded = payload.get("confirmation", {})
+            require_scope_zone2_authorized(engagement, state["scope_hash"], historical=True); confirmation_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")); expires_at = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")); cleanup_event = seen_events.get(payload["cleanup_obligation_ref"]); bounded = payload.get("confirmation", {})
             cleanup_open = cleanup_event is not None and cleanup_event["event_type"] == "cleanup.updated" and any(item["obligation_id"] == payload.get("cleanup_obligation_id") and item["status"] == "open" for item in cleanup_event["payload"]["cleanup_obligations"]) and any(item["obligation_id"] == payload.get("cleanup_obligation_id") and item["status"] == "open" for item in state["cleanup"]["obligations"])
             bounded_valid = bounded.get("category") == "zone2_artifact_creation" and bounded.get("bounded_action") == payload.get("entity_id") and bounded.get("scope_hash") == state["scope_hash"] and bounded.get("operator_id") == active_scope_operator and bounded.get("confirmed_at") == event["recorded_at"] and bounded.get("expires_at") == payload.get("expires_at")
             if event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("status") != "confirmed" or payload.get("confirmation_scope") != "zone2_artifact_creation" or payload.get("environment_ref") != state["active_environment_ref"] or not cleanup_open or not bounded_valid or expires_at <= confirmation_time or (expires_at - confirmation_time).total_seconds() > 1800:
@@ -4544,7 +4606,7 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         return record
 
 
-def register_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any], *, classification: dict[str, Any]) -> dict[str, Any]:
+def register_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any], *, classification: dict[str, Any], lock_held: bool = False) -> dict[str, Any]:
     variant = artifact_variant(metadata)
     expected_class = "notebook" if variant == "clear_local" else "real_world"
     if metadata.get("operation_class") != expected_class or not metadata.get("producer_session_id"):
@@ -4558,15 +4620,26 @@ def register_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any
         unhashed_metadata.pop(field, None)
     classification_body = {key: value for key, value in classification.items() if key != "classification_event_ref"}
     classification_digest = sha256_bytes(canonical_json_bytes(classification_body))
-    expected_decision = "allow_local_creation" if expected_class == "notebook" else "allow_confirmed_creation"
+    expected_decision = "allow_local_creation" if expected_class == "notebook" else classification.get("decision")
+    if expected_class == "real_world" and expected_decision not in {"allow_confirmed_creation", "allow_scope_grant_creation"}:
+        raise RecordError("artifact_classification_mismatch", metadata.get("artifact_id", "unknown"))
     if classification.get("decision") != expected_decision or classification.get("file_absent_at_classification") is not True or classification.get("artifact_id") != metadata.get("artifact_id") or classification.get("metadata_digest") != sha256_bytes(canonical_json_bytes(unhashed_metadata)) or metadata.get("precreation_classification_digest") != classification_digest or metadata.get("precreation_classification_event_ref") != classification.get("classification_event_ref") or metadata.get("classified_source_digest") != classification.get("source_digest") or metadata.get("classified_source_size") != classification.get("source_size") or metadata.get("classified_at") != classification.get("classified_at"):
         raise RecordError("artifact_classification_mismatch", metadata.get("artifact_id", "unknown"))
     state = reduce_engagement(engagement, allowed_artifact_orphans={classification.get("relative_path", "")})
+    if expected_decision == "allow_scope_grant_creation":
+        events = read_ledger(engagement, "event")
+        scope_event = next((item for item in reversed(events) if item["event_type"] == "scope.attested"), None)
+        cleanup_event = next((item for item in events if item["event_id"] == metadata.get("cleanup_obligation_ref")), None)
+        if (require_scope_zone2_authorized(engagement, state["scope_hash"]) != "standing"
+            or scope_event is None or metadata.get("escalation_confirmation_event_ref") != scope_event["event_id"]
+            or cleanup_event is None or cleanup_event["event_type"] != "cleanup.updated"
+            or not any(item.get("obligation_id") == metadata.get("cleanup_obligation_id") and item.get("status") == "open" for item in state["cleanup"]["obligations"])):
+            raise RecordError("zone2_standing_grant_binding_invalid", metadata.get("artifact_id", "unknown"))
     event = next((item for item in read_ledger(engagement, "event") if item["event_id"] == classification.get("classification_event_ref")), None)
     expired = classification.get("expires_at") is not None and datetime.now(timezone.utc) > datetime.fromisoformat(classification["expires_at"].replace("Z", "+00:00"))
     if event is None or event["event_type"] != "artifact.classified" or event["payload"].get("classification_digest") != classification_digest or classification.get("scope_hash") != state["scope_hash"] or classification.get("environment_ref") != state["active_environment_ref"] or expired:
         raise RecordError("artifact_classification_event_invalid", metadata.get("artifact_id", "unknown"))
-    return _register_artifact_core(engagement, file_path, metadata)
+    return _register_artifact_core(engagement, file_path, metadata, lock_held=lock_held)
 
 
 def _register_legacy_artifact(engagement: Path, file_path: Path, metadata: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:

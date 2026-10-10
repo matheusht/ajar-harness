@@ -38,8 +38,9 @@ target's own project repo (Plane 3) per engagement.
   capabilities (`capabilities/classes.yaml`) to *propose* candidate artifacts for an approved benign
   objective — **proposal only**: they never execute on a live target, never judge success, never emit a
   verdict; the broker/oracle stay authoritative. Each proposal must carry a declared payload class,
-  containment plan, cleanup plan, and a non-authority attestation. Any Zone-2 artifact or live execution
-  still requires the impact-demo authorization above + a runtime human-confirm.
+  containment plan, cleanup plan, and a non-authority attestation. Zone-2 artifact creation requires
+  the impact-demo authorization below and either a runtime human-confirm or the versioned local-only
+  standing grant. Execution and target contact have separate authorization boundaries.
 
 ## Escalation ceiling
 - self → stored/persistent → cross-user: ceiling = `<rung>`
@@ -52,8 +53,16 @@ target's own project repo (Plane 3) per engagement.
 
 Categories are comma-separated exact identifiers (currently `zone2_artifact_creation`); the ceiling
 must be exactly `artifact_creation`; containment must be specific and non-placeholder. Duplicate or
-unbackticked authorization fields fail closed. Even when all fields authorize the exact category, a live human-confirm displays the digest-bound
-action, scope, environment, expiry, and cleanup binding before any artifact is created.
+unbackticked authorization fields fail closed. The default still needs `confirm-zone2` for each exact
+artifact. For contained local artifacts only, the operator may add four scope fields with values
+`zone2_confirmation_mode: standing`, `zone2_standing_grant: yes`,
+`zone2_standing_grant_contract: local_only_v1`, and
+`zone2_per_act_confirmation_required: no`, then sign those exact scope bytes. The kernel binds each
+planned digest, size, path under `evidence/`, active environment, and prior open cleanup obligation.
+For this grant, `zone2_containment` must start with `local engagement/evidence/` and name cleanup.
+This standing grant does not authorize target contact or external effects.
+Omitting the four standing fields, or setting them to `fresh` / `no` / `none` / `yes`, keeps the
+per-artifact `confirm-zone2` path. A partial standing tuple is invalid.
 
 ## Impact-maximization mandate (standard — the operator's standing answer is `yes`)
 - **standing_impact_maximization_mandate:** `yes`  ← this operator's standing answer, recorded
@@ -131,16 +140,20 @@ closed for this engagement.
 ## Authority lanes
 - Notebook work may continue inside the signed scope while an exact dependent action is `pending_authority`.
 - Approval is digest-, lane-, environment-, executor/session-, and expiry-bound; it is never retrospective.
-- Real-world / Zone-2 creation still requires a fresh live confirmation immediately before bytes/effects.
+- Zone-2 artifact creation requires fresh confirmation or the signed `local_only_v1` grant for
+  contained local files. Other real-world effects still require fresh authority.
 
-## Scoped cleanup and closure
+## Scoped cleanup
 - scoped_cleanup_closure: `no`
 - scoped_cleanup_root: `none`
 
-Set these only for a target-local containment directory whose inert files the broker may create and
-remove. The broker checks the cleanup obligation before creation and verifies file absence after
-revert. This grant does not authorize live target effects, other file kinds, external filing, or
-operator-owned memory and report decisions.
+For `decision-0006-v2`, set these to `yes` and an absolute, operator-owned, non-writable-by-others
+local directory only alongside the signed `local_only_v1` Zone-2 grant. The broker may open a
+cleanup obligation there, create the kernel's exact inert scoped effect, then complete cleanup only
+after checking the root identity and removing that effect. Without an effect, it may record
+`not_applicable` after verifying absence. Immutable `evidence/` artifacts stay in place. The v2
+grant does not authorize arbitrary transient effects, live target effects, external filing, report
+acceptance, or terminal close. The prior v1 scoped-closure path retains its own contract.
 
 ## Authorization
 - Operator allowed signers file: `<operator-controlled path; private key stays outside agent access>`

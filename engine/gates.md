@@ -23,9 +23,15 @@ identity-bound across scanning. Only secret classes and hashes are retained, nev
 A clean shape scan is not proof that no secret exists.
 
 The advisory Zone is only `clear_local`, `review_required`, or `unknown`; it is never authorization.
-A Zone-2 artifact requires a fresh signed-operator confirmation bound to one future artifact id,
-planned byte digest/size/path, active environment and scope, an open cleanup obligation, and at most a
-30-minute expiry. The kernel rechecks all bindings under lock immediately before exclusive creation.
+A Zone-2 artifact requires either fresh signed-operator confirmation (one future artifact id,
+planned byte digest/size/path, active environment and scope, open cleanup, at most 30 minutes) or
+a versioned `local_only_v1` standing grant in the current signed scope. The standing path still
+binds planned bytes/path, current scope/environment, and an open cleanup obligation. The kernel
+rechecks bindings under lock immediately before exclusive creation.
+For a v2 signed standing grant with an explicit scoped-cleanup root, the broker may open and settle
+the local obligation through `record-cleanup --scoped` only with exact root identity and effect
+postcondition checks. Registered evidence remains immutable; arbitrary effects and terminal close
+remain outside this grant.
 
 ## 3. Operation tiers and asynchronous authority
 Every public command and event is fail-closed through `engine/operation-capabilities.json`:
@@ -34,7 +40,8 @@ Every public command and event is fail-closed through `engine/operation-capabili
 - **Authority:** the broker first records `pending_authority`; an operator may approve/reject/expire/
   supersede only the exact action digest. Approval is current, lane-bound, executor/session-bound,
   one-use, and never retrospective. Unrelated Notebook lanes continue.
-- **Real-world:** fresh live confirmation is still required before capability-bearing bytes or effects.
+- **Real-world:** capability-bearing bytes require fresh live confirmation or the signed local-only
+  standing grant enforced by the kernel. Effects outside that grant require human confirmation.
 
 Use `runtime-identity --role broker` for the OS-principal/POSIX-session provenance values. This is a
 truthful local trust boundary, not authentication against another process with total access to the
@@ -43,12 +50,12 @@ same user account or filesystem. Agents never become the signed operator.
 Required gates are correct behavior, not stalls. Only a Notebook operation blocked contrary to the
 frozen capability matrix is an improper stall.
 
-## 4. Impact-escalation confirm (blocking, Zone-2 only)
-Before creating **any** real PoC artifact (worm/exfil chain/etc.):
-1. `scope.md#impact_demo_authorized` must be true (category authorized), AND
-2. a **live human confirmation** is obtained at the moment — the loop **pauses and asks**; it never
-   creates a harmful artifact autonomously, even when the category is authorized, AND
-3. the artifact is contained (inert where possible) and logged in `cleanup.md`.
+## 4. Impact-artifact gate (blocking, Zone-2 only)
+Before creating a PoC artifact, `scope.md#impact_demo_authorized` must authorize its category.
+The broker then needs fresh human confirmation for that exact artifact or a signed
+`local_only_v1` standing grant for contained local PoCs. An open cleanup obligation must precede
+the artifact, and the artifact record must reference that obligation. No standing grant extends to
+external effects, other assets, or an unsigned scope.
 
 ## 5. Review and filing gates
 `record-review` commits an external independent review and its typed event through one canonical

@@ -20,13 +20,13 @@
       "tier": "variant_dispatch",
       "variants": {
         "clear_local": {"blocking_scope": "none", "required_evidence": ["signed_scope", "active_environment", "session_provenance"], "tier": "notebook"},
-        "review_required": {"blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation_event", "escalation_confirmation", "cleanup_obligation"], "tier": "real_world"}
+        "review_required": {"blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation_or_signed_local_standing_grant", "active_environment", "cleanup_obligation"], "tier": "real_world"}
       }
     },
     "clear-ledger-quarantine": {"allowed_roles": ["operator"], "blocking_scope": "global", "required_evidence": ["fresh_operator_console", "healthy_underlying_ledger", "exact_quarantine_marker"], "tier": "authority"},
     "close": {"allowed_roles": ["operator", "broker"], "blocking_scope": "global", "required_evidence": ["approved_authority_request_or_scoped_grant", "closure_gates"], "tier": "authority"},
     "create-scoped-effect": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["signed_scoped_cleanup_grant", "prior_open_cleanup_obligation"], "tier": "notebook"},
-    "create-artifact": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation", "bound_classification", "planned_digest", "cleanup"], "tier": "real_world"},
+    "create-artifact": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["fresh_confirmation_or_signed_local_standing_grant", "bound_classification", "planned_digest", "cleanup"], "tier": "real_world"},
     "confirm-zone2": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["fresh_operator_console", "signed_scope", "active_environment", "cleanup_obligation"], "tier": "real_world"},
     "export-flow": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
     "export-telemetry": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},

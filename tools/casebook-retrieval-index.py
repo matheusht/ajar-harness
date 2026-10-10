@@ -87,40 +87,6 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_regular_once(path: Path, *, limit: int = _MAX_JSON_BYTES) -> bytes:
-    try:
-        before_path = path.lstat()
-        if stat.S_ISLNK(before_path.st_mode) or not stat.S_ISREG(before_path.st_mode):
-            raise ProvenanceError()
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except (OSError, ValueError) as exc:
-        raise ProvenanceError() from exc
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-            raise ProvenanceError()
-        chunks: list[bytes] = []
-        remaining = limit + 1
-        while remaining:
-            chunk = os.read(fd, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        data = b"".join(chunks)
-        after = os.fstat(fd)
-        if len(data) > limit or (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-            raise ProvenanceError()
-        return data
-    finally:
-        os.close(fd)
-
-
 def _decode_closed_json(data: bytes) -> dict[str, Any]:
     try:
         value = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicates)
@@ -129,10 +95,6 @@ def _decode_closed_json(data: bytes) -> dict[str, Any]:
     if not isinstance(value, dict) or canonical_json_bytes(value) != data:
         raise ProvenanceError()
     return value
-
-
-def _load_closed_json(path: Path, *, limit: int = _MAX_JSON_BYTES) -> dict[str, Any]:
-    return _decode_closed_json(_read_regular_once(path, limit=limit))
 
 
 def _tokens(text: str) -> set[str]:
@@ -181,7 +143,11 @@ def _casebook_snapshot(casebook: Path) -> tuple[str, dict[str, str]]:
 def _valid_provenance(value: Any, *, expected_casebook: str) -> bool:
     if not isinstance(value, dict) or set(value) != _PROVENANCE_KEYS:
         return False
-    if value.get("schema_version") != 1 or value.get("casebook_id") != expected_casebook:
+    if (
+        type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+        or value.get("casebook_id") != expected_casebook
+    ):
         return False
     source_kind = value.get("source_kind")
     if source_kind not in SOURCE_KINDS:
@@ -230,7 +196,7 @@ def _identity_token(identity: os.stat_result, *, directory: bool) -> dict[str, i
         "device": identity.st_dev,
         "inode": identity.st_ino,
         "birthtime_ns": int(float(birthtime) * 1_000_000_000) if birthtime is not None else None,
-        "generation": int(generation) if isinstance(generation, int) and generation > 0 else None,
+        "generation": int(generation) if type(generation) is int and generation > 0 else None,
     }
 
 
@@ -250,7 +216,7 @@ def _open_relative_regular(root_fd: int, relative: str) -> int:
             directory_fd = child_fd
         fd = os.open(
             path.parts[-1],
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=directory_fd,
         )
     except OSError as exc:
@@ -292,16 +258,16 @@ def _valid_instance(value: Any) -> bool:
     for token in value.values():
         if not isinstance(token, dict) or set(token) != {"device", "inode", "birthtime_ns", "generation"}:
             return False
-        if not isinstance(token.get("device"), int) or token["device"] < 0:
+        if type(token.get("device")) is not int or token["device"] < 0:
             return False
-        if not isinstance(token.get("inode"), int) or token["inode"] <= 0:
+        if type(token.get("inode")) is not int or token["inode"] <= 0:
             return False
         if token.get("birthtime_ns") is not None and (
-            not isinstance(token["birthtime_ns"], int) or token["birthtime_ns"] <= 0
+            type(token["birthtime_ns"]) is not int or token["birthtime_ns"] <= 0
         ):
             return False
         if token.get("generation") is not None and (
-            not isinstance(token["generation"], int) or token["generation"] <= 0
+            type(token["generation"]) is not int or token["generation"] <= 0
         ):
             return False
     return True
@@ -363,7 +329,11 @@ def _require_bound_source_current(source: Path, fd: int, identity: os.stat_resul
 
 def _parse_resolver(data: bytes) -> dict[str, dict[str, Any]]:
     value = _decode_closed_json(data)
-    if set(value) != {"schema_version", "origins"} or value.get("schema_version") != 1:
+    if (
+        set(value) != {"schema_version", "origins"}
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+    ):
         raise ProvenanceError()
     origins = value.get("origins")
     if not isinstance(origins, dict) or len(origins) > 10000:
@@ -457,7 +427,11 @@ def _read_regular_at(
     limit: int = _MAX_JSON_BYTES,
 ) -> bytes:
     try:
-        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        fd = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
+        )
     except FileNotFoundError:
         raise
     except OSError as exc:
@@ -626,11 +600,6 @@ def _atomic_write_bound(bound: _BoundOutputParent, data: bytes) -> None:
                 )
             except OSError:
                 pass
-
-
-def _atomic_write(path: Path, data: bytes) -> None:
-    with _bound_output_parent(path) as bound:
-        _atomic_write_bound(bound, data)
 
 
 def _write_exclusive(path: Path, data: bytes) -> bool:

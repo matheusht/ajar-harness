@@ -45,6 +45,8 @@ import subprocess
 import sys
 import tempfile
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
@@ -67,8 +69,7 @@ SC = _mod("score_candidate", "score-candidate.py")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def write_json(path, obj):
@@ -272,7 +273,7 @@ def materialize_candidate(campaign, candidate, root=ROOT):
     mt = candidate.get("mutation_target", "") or ""
     target_rel = (mt + "SKILL.md") if mt.endswith("/") else mt
     allowlist = list(campaign.get("mutable_allowlist", [])) or ([mt] if mt else [])
-    immutable = list(CC.DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    immutable = CC.immutable_paths(campaign)
     res = _blank_materialization(declared, is_baseline, target_rel)
 
     pf_verdict, pf_reasons = CC.gate(campaign, candidate, root)     # PREFLIGHT — cannot authorize
@@ -281,7 +282,13 @@ def materialize_candidate(campaign, candidate, root=ROOT):
 
     measured = []
     diff = candidate.get("diff")
-    diff_abs = (diff if os.path.isabs(diff) else os.path.join(root, diff)) if diff else None
+    diff_abs = CC.repo_file_path(root, diff) if diff else None
+    if diff and diff_abs is None:
+        reason = "candidate diff path must be repository-relative and remain inside the repository"
+        res["apply"] = "block"
+        res["measured_reasons"] = [reason]
+        res["reasons"] = sorted(set(pf_reasons + [reason]))
+        return res
     live_target = os.path.join(root, target_rel) if target_rel else None
     before = sha256_file(live_target) if live_target else None
 
@@ -423,7 +430,7 @@ def run_cli(campaign_path, only_candidate=None, backend="deterministic"):
     results = []
     for cand in candidates:
         entry = evaluate_candidate(campaign, cand, scoreboard, backend)
-        cdir = os.path.join(os.path.dirname(campaign_path), "candidates", cand["candidate_id"])
+        cdir = CC.candidate_dir(campaign_path, cand.get("candidate_id"))
         write_json(os.path.join(cdir, "applied-eval.json"), entry)
         results.append(entry)
 
@@ -488,6 +495,21 @@ def _fake_scoreboard(coverage_cases, fdr_rate=0.0, protected_extra=None):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="candidate-eval-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     incumbent_sb = _fake_scoreboard(["case-a", "case-b"])
     inc = RG.incumbent_eval(incumbent_sb)
     cand = {"candidate_id": "c", "campaign_id": "x"}
@@ -536,6 +558,34 @@ def self_test():
         else:
             print("[self-test] isolated apply: clean diff applies, live tree byte-identical: ok")
 
+        with tempfile.TemporaryDirectory(prefix="candidate-diff-outside-") as outside:
+            outside_diff = os.path.join(outside, "candidate.diff")
+            with open(outside_diff, "w") as fh:
+                fh.write(diff)
+            evidence = os.path.join(repo, "evidence.md")
+            with open(evidence, "w") as fh:
+                fh.write("# Evidence bundle\n\n- campaign: c\n- mutation target: demo\n- eligibility: candidate\n")
+            mutation_target = "skills/techniques/demo/"
+            campaign = {"campaign_id": "c", "tracks": [{"name": "demo", "mutation_target": mutation_target}],
+                        "mutable_allowlist": [mutation_target], "immutable": [], "frozen_inputs": {}, "budgets": {}}
+            candidate = {"candidate_id": "cand-outside", "campaign_id": "c",
+                         "mutation_target": mutation_target, "touched_files": [tgt],
+                         "diff": os.path.relpath(outside_diff, repo),
+                         "candidate_hash": hashlib.sha256(diff.encode()).hexdigest(),
+                         "evidence_bundle": "evidence.md"}
+            original_measure_conformance = globals()["measure_conformance"]
+            globals()["measure_conformance"] = lambda _: True
+            try:
+                measured_outside = materialize_candidate(campaign, candidate, repo)
+            finally:
+                globals()["measure_conformance"] = original_measure_conformance
+            outside_blocked = (measured_outside["verdict"] == "block"
+                               and measured_outside["apply"] != "pass")
+            if not outside_blocked:
+                ok = False; print(f"[self-test] out-of-repository diff reached measured apply: {materialization_summary(measured_outside)}")
+            else:
+                print("[self-test] out-of-repository diff is blocked before measured apply: ok")
+
         # a non-applying diff is reported as such, and the live tree still does not change
         bad = os.path.join(repo, "bad.diff")
         with open(bad, "w") as fh:
@@ -557,6 +607,18 @@ def self_test():
              "target_regular": True}
     if measured_policy(clean)[0]:
         ok = False; print(f"[self-test] clean card variant must pass measured policy; got {measured_policy(clean)[0]}")
+
+    frozen_rel = "docs/frozen-input.txt"
+    frozen_campaign = {"immutable": [], "frozen_inputs": {
+        "pinned-doc": {"path": frozen_rel, "sha256": "0" * 64},
+    }}
+    frozen_facts = dict(
+        clean, declared=[frozen_rel], actual=[frozen_rel], mt="docs/",
+        allowlist=["docs/"], immutable=CC.immutable_paths(frozen_campaign),
+        modes={frozen_rel: "100644"}, target_rel=frozen_rel,
+    )
+    if not measured_policy(frozen_facts)[0]:
+        ok = False; print("[self-test] measured policy must block a changed frozen input")
 
     adversarial = {
         "exec-bit mode change": dict(clean, modes={card: "100755"}),
@@ -647,7 +709,11 @@ def main(argv):
     if not args.campaign:
         ap.print_help()
         return 2
-    return run_cli(args.campaign, only_candidate=args.candidate, backend=args.backend)
+    try:
+        return run_cli(args.campaign, only_candidate=args.candidate, backend=args.backend)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid campaign input: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

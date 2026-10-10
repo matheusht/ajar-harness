@@ -26,6 +26,8 @@ import re
 import subprocess
 import sys
 
+from regular_file_io import load_json, read_regular_text
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -71,6 +73,12 @@ def check_not_quoted(rel, withheld_set):
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames
                        if d not in {".git", "node_modules", ".venv", "out", "cache", "__pycache__"}]
+        for name in dirnames[:]:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path):
+                relative = os.path.relpath(path, ROOT)
+                hits.append((relative, "unsafe: symlinked directory"))
+                dirnames.remove(name)
         for fn in filenames:
             if os.path.splitext(fn)[1].lower() not in {".md", ".txt", ".json", ".jsonl"}:
                 continue
@@ -82,8 +90,9 @@ def check_not_quoted(rel, withheld_set):
             if r in withheld_set or any(r.startswith(w.rstrip("/") + "/") for w in withheld_set):
                 continue
             try:
-                text = open(p, errors="replace").read().lower()
-            except OSError:
+                text = read_regular_text(p, errors="replace", no_follow=True).lower()
+            except OSError as exc:
+                hits.append((r, f"unsafe: {exc.strerror or 'cannot read regular file'}"))
                 continue
             for t in terms:
                 if t in text:
@@ -98,7 +107,11 @@ def main():
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    prereg = json.load(open(args.prereg))
+    try:
+        prereg = load_json(args.prereg)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     withheld = prereg.get("holdout", {}).get("paths", [])
     if not withheld:
         print("preregistration declares no holdout paths; nothing to enforce")
@@ -137,8 +150,11 @@ def main():
             if not r["absent_from_history"]:
                 print("         recoverable from git history on this branch")
             for f, t in r["quoted_elsewhere"][:4]:
-                print(f"         quoted in {f} (term {t!r})")
-        print(f"\n{len(withheld)} paths, {len(failures)} leaking")
+                if t.startswith("unsafe:"):
+                    print(f"         unsafe scan entry {f} ({t[7:]})")
+                else:
+                    print(f"         quoted in {f} (term {t!r})")
+        print(f"\n{len(withheld)} paths, {len(failures)} blocked")
         if failures:
             print("VERDICT: BLOCKED — do not start the run.")
             print("A leaking holdout yields a clean-looking result that means nothing.")

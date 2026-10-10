@@ -88,7 +88,9 @@ def _read_bound_relative(root_fd, relative):
             os.close(parent_fd)
             parent_fd = child
         fd = os.open(
-            parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd
+            parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_fd,
         )
         try:
             before = os.fstat(fd)
@@ -152,7 +154,7 @@ def _read_stable_bytes(
     try:
         fd = os.open(
             absolute.name,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=parent_fd,
         )
         try:

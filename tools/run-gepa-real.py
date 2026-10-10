@@ -35,7 +35,6 @@ Usage:
 """
 
 import argparse
-import difflib
 import hashlib
 import importlib.util
 import json
@@ -44,6 +43,8 @@ import re
 import subprocess
 import sys
 import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -64,8 +65,7 @@ BE = _mod("run_behavioral_eval", "run-behavioral-eval.py")   # Phase 13 behavior
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def write_json(path, obj):
@@ -394,7 +394,7 @@ def choose_backend(name):
 
 
 def candidate_dir(campaign_path, candidate_id):
-    return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
+    return CC.candidate_dir(campaign_path, candidate_id)
 
 
 def write_candidate(campaign_path, campaign, track, backend_result, repo_rel, old_text, include_budget=True):
@@ -552,7 +552,7 @@ def write_candidate_scores(campaign_path):
     for row in report["candidates"]:
         cid = row["candidate_id"]
         shadow_verdict = (row.get("keep_discard") or {}).get("verdict")
-        bundle_path = os.path.join(camp_dir, "candidates", cid, "promotion", "promotion-bundle.json")
+        bundle_path = os.path.join(candidate_dir(campaign_path, cid), "promotion", "promotion-bundle.json")
         bundle = load(bundle_path) if os.path.isfile(bundle_path) else {}
         materialization_verdict = (bundle.get("materialization") or {}).get("verdict")
         authoritative_verdict = bundle.get("authoritative_verdict", shadow_verdict)
@@ -574,7 +574,7 @@ def write_candidate_scores(campaign_path):
                     "measured materialization boundary when it blocks, else the replay-adjusted shadow "
                     "verdict; shadow_verdict is the unapplied scoreboard view and is not authoritative alone.",
         }
-        write_json(os.path.join(camp_dir, "candidates", cid, "scores.json"), score)
+        write_json(os.path.join(candidate_dir(campaign_path, cid), "scores.json"), score)
 
 
 def discover_campaign_candidates(campaign_path):
@@ -615,9 +615,12 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
     shadow = load(shadow_path) if os.path.isfile(shadow_path) else {"candidates": []}
     shadow_by_id = {c["candidate_id"]: c for c in shadow.get("candidates", [])}
 
-    static, eligible = {}, []
+    static, eligible, candidate_manifests = {}, [], {}
     for cid in discover_campaign_candidates(campaign_path):
-        cand = load(os.path.join(camp_dir, "candidates", cid, "candidate-manifest.json"))
+        source_manifest = os.path.join(candidate_dir(campaign_path, cid), "candidate-manifest.json")
+        cand = CC.load_candidate_manifest(ROOT, campaign_path,
+                                         {"candidate_id": cid, "manifest": rel(source_manifest)})
+        candidate_manifests[cid] = cand
         measured = BE.measure_candidate(campaign, cand)
         mat = measured["materialization"]
         in_scope, violations = scope_check(mat.get("patched_card_text") or "")
@@ -631,7 +634,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             "coverage_delta": None, "fdr_invalids": None, "cost": None, "replay": None,
             "promotable": False,
             "links": {"materialization": _mat_links(mat),
-                      "diff": rel(os.path.join(camp_dir, "candidates", cid, "candidate.diff")),
+                      "diff": rel(os.path.join(candidate_dir(campaign_path, cid), "candidate.diff")),
                       "broker_events": None, "behavioral_run": None},
         }
         if mat["verdict"] != "allow":
@@ -655,8 +658,21 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             rec["behavioral_status"] = "not_run"
     elif eligible:
         sub_dir = os.path.join(camp_dir, "behavioral")
-        os.makedirs(sub_dir, exist_ok=True)
         sub_path = os.path.join(sub_dir, "campaign-manifest.json")
+        if (CC.repo_file_path(ROOT, rel(sub_path)) is None
+                or os.path.realpath(sub_path) != os.path.abspath(sub_path)):
+            raise ValueError("behavioral subcampaign path must be a regular in-repository path")
+        candidates = []
+        for cid in eligible:
+            manifest_path = os.path.join(candidate_dir(sub_path, cid), "candidate-manifest.json")
+            manifest_rel = rel(manifest_path)
+            if (CC.repo_file_path(ROOT, manifest_rel) is None
+                    or os.path.realpath(manifest_path) != os.path.abspath(manifest_path)):
+                raise ValueError("behavioral candidate manifest path must be a regular in-repository path")
+            if os.path.exists(manifest_path) and os.stat(manifest_path, follow_symlinks=False).st_nlink != 1:
+                raise ValueError("behavioral candidate manifest must not be hard-linked")
+            write_json(manifest_path, candidate_manifests[cid])
+            candidates.append({"candidate_id": cid, "eligibility": "candidate", "manifest": manifest_rel})
         write_json(sub_path, {
             # MUST match the candidates' campaign_id or the contract gate rejects them at preflight.
             "campaign_id": campaign["campaign_id"],
@@ -665,9 +681,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
             "budgets": campaign["budgets"], "tracks": campaign["tracks"],
             "mutable_allowlist": campaign["mutable_allowlist"], "immutable": campaign["immutable"],
             "frozen_inputs": {},
-            "candidates": [{"candidate_id": cid, "eligibility": "candidate",
-                            "manifest": rel(os.path.join(camp_dir, "candidates", cid, "candidate-manifest.json"))}
-                           for cid in eligible],
+            "candidates": candidates,
         })
         rc = BE.run_cli(sub_path, backend=backend, model_cmd=model_cmd)
         behavioral_status = {0: "completed", 2: "skipped", 3: "failed"}.get(rc, "unknown")
@@ -695,7 +709,7 @@ def behavioral_bridge(campaign_path, backend="fake", model_cmd=None):
 
     for cid, rec in static.items():
         rec["behavioral_backend"] = backend   # so promotion can refuse to promote a fake/simulator allow
-        write_json(os.path.join(camp_dir, "candidates", cid, "bridge-result.json"), rec)
+        write_json(os.path.join(candidate_dir(campaign_path, cid), "bridge-result.json"), rec)
     summary = {
         "campaign_id": campaign["campaign_id"], "behavioral_backend": backend,
         "behavioral_status": behavioral_status, "eligible_for_behavioral": eligible,
@@ -792,6 +806,21 @@ def generate(campaign_path, backend_name="auto", max_metric_calls=8, run_chain=T
 def self_test():
     ok = True
 
+    with tempfile.TemporaryDirectory(prefix="gepa-real-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
     # scope guard (Phase 12): the actual Phase-11 drift card must be flagged off-scope; a real in-scope
     # technique card must pass clean.
     offscope = ('name: "Memory Corruption via Double-Free"\n'
@@ -805,7 +834,7 @@ def self_test():
     else:
         print(f"[self-test] scope guard flags off-scope (double-free/gadget/CVE) and passes in-scope: ok")
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
         camp_path = os.path.join(tmp, "campaign-manifest.json")
         campaign = {
             "campaign_id": "phase8-self-test",
@@ -875,6 +904,9 @@ def main(argv):
             behavioral_backend=args.behavioral_backend,
             behavioral_model_cmd=args.behavioral_model_cmd,
         )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
+        print(f"invalid campaign input: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"GEPA adapter run failed: {type(e).__name__}: {e}")
         return 1

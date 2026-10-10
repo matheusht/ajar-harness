@@ -12,6 +12,7 @@ A candidate is BLOCKED if any of these hold:
     hermetic targets, schemas, budgets) — the 'what winning means' set;
   - its declared budget differs from the campaign budget (no buying extra budget);
   - a frozen campaign input's sha256 has drifted (benchmark/evaluator tamper);
+  - a diff, evidence bundle, or frozen input path escapes the repository root;
   - its diff hash does not match the diff file (candidate tamper);
   - its evidence bundle is missing;
   - it is a baseline but is not a no-op (a control must touch nothing).
@@ -31,6 +32,8 @@ import subprocess
 import sys
 import tempfile
 
+from regular_file_io import load_json, read_regular_text
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Built-in immutable set: enforced regardless of what a campaign manifest declares. These are the
@@ -42,6 +45,7 @@ DEFAULT_IMMUTABLE = [
     "tools/run-hermetic-bola.py",
     "tools/check-conformance.py",
     "tools/check-campaign.py",
+    "tools/regular_file_io.py",
     "evals/routing/gold/",
     "evals/qualification/crosswalk.json",
     "evals/hermetic/targets/",
@@ -50,11 +54,11 @@ DEFAULT_IMMUTABLE = [
     "casebooks/",
     "schemas/",
 ]
+CANDIDATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z", re.ASCII)
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def sha256_file(path):
@@ -72,25 +76,62 @@ def _under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 
-def _rename_paths(p):
-    """A numstat path may encode a rename as 'old => new' or 'pre/{old => new}/post'."""
-    if "=>" not in p:
-        return {p}
-    p = p.replace("{", "").replace("}", "")
-    if "{" not in p and " => " in p and "/" not in p.split(" => ")[0].split("/")[-1]:
-        pass
-    out = set()
-    # generic: split on ' => ', recombine brace context if present
-    if "{" in p or "/" in p:
-        # best-effort: take both sides verbatim
-        left, right = p.split(" => ", 1)
-        out.add(left.strip())
-        out.add(right.strip())
-    else:
-        left, right = p.split(" => ", 1)
-        out.add(left.strip())
-        out.add(right.strip())
-    return {x for x in out if x}
+def immutable_paths(campaign):
+    paths = list(DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    paths.extend(spec["path"] for spec in campaign.get("frozen_inputs", {}).values()
+                 if isinstance(spec, dict) and isinstance(spec.get("path"), str) and spec["path"])
+    return paths
+
+
+def valid_candidate_id(candidate_id):
+    return isinstance(candidate_id, str) and CANDIDATE_ID_RE.fullmatch(candidate_id) is not None
+
+
+def candidate_dir(campaign_path, candidate_id):
+    if not valid_candidate_id(candidate_id):
+        raise ValueError("candidate_id must be a safe path component")
+    return os.path.join(os.path.dirname(campaign_path), "candidates", candidate_id)
+
+
+def candidate_manifest_path(root, campaign_path, entry):
+    if not isinstance(entry, dict) or not valid_candidate_id(entry.get("candidate_id")):
+        raise ValueError("candidate entry must have a safe candidate_id")
+    manifest = entry.get("manifest")
+    if not isinstance(manifest, str) or not manifest or os.path.isabs(manifest):
+        raise ValueError("candidate manifest path must be repository-relative")
+    root = os.path.realpath(root)
+    campaign_path = os.path.realpath(os.path.abspath(campaign_path))
+    expected = os.path.abspath(os.path.join(candidate_dir(campaign_path, entry["candidate_id"]), "candidate-manifest.json"))
+    expected_rel = os.path.relpath(expected, root).replace(os.sep, "/")
+    resolved = repo_file_path(root, manifest)
+    try:
+        expected_inside = os.path.commonpath((root, os.path.realpath(expected))) == root
+    except ValueError:
+        expected_inside = False
+    if (manifest != expected_rel or resolved is None or not expected_inside or os.path.abspath(resolved) != expected
+            or os.path.realpath(expected) != expected or not os.path.isfile(expected)):
+        raise ValueError("candidate manifest must be a regular file at this campaign's candidates/<id>/candidate-manifest.json")
+    return expected
+
+
+def load_candidate_manifest(root, campaign_path, entry):
+    candidate = load_json(candidate_manifest_path(root, campaign_path, entry))
+    if not isinstance(candidate, dict) or candidate.get("candidate_id") != entry["candidate_id"]:
+        raise ValueError("candidate manifest candidate_id must match its campaign directory")
+    return candidate
+
+
+def repo_file_path(root, relative_path):
+    """Resolve a repository-relative artifact path, rejecting absolute and symlink escapes."""
+    if not isinstance(relative_path, str) or not relative_path or os.path.isabs(relative_path):
+        return None
+    root = os.path.realpath(root)
+    path = os.path.join(root, relative_path)
+    resolved = os.path.realpath(path)
+    try:
+        return path if os.path.commonpath((root, resolved)) == root else None
+    except ValueError:
+        return None
 
 
 def git_patch_analysis(diff_path, root):
@@ -100,15 +141,17 @@ def git_patch_analysis(diff_path, root):
     and so derived no paths. Returns (paths, unsupported_reasons). Fail closed: callers must block on
     any unsupported reason and on a non-empty patch that yields no paths."""
     paths, unsupported = set(), []
-    num = subprocess.run(["git", "-C", root, "apply", "--numstat", diff_path], capture_output=True, text=True)
+    num = subprocess.run(["git", "-C", root, "apply", "--numstat", "-z", diff_path],
+                         capture_output=True, text=True)
     if num.returncode == 0:
-        for ln in num.stdout.splitlines():
-            parts = ln.split("\t")
+        for record in num.stdout.split("\0"):
+            parts = record.split("\t", 2)
             if len(parts) == 3:
                 added, removed, p = parts
                 if added == "-" and removed == "-":
                     unsupported.append(f"binary patch: {p}")
-                paths |= _rename_paths(p)
+                if p:
+                    paths.add(p)
     else:
         unsupported.append(f"git could not parse the patch: {num.stderr.strip()[:120]}")
     summ = subprocess.run(["git", "-C", root, "apply", "--summary", diff_path], capture_output=True, text=True)
@@ -118,7 +161,11 @@ def git_patch_analysis(diff_path, root):
             unsupported.append(t)
         if "120000" in t:
             unsupported.append(f"symlink: {t}")
-    text = open(diff_path).read()
+    try:
+        text = read_regular_text(diff_path, encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        unsupported.append(f"diff cannot be read as UTF-8: {exc}")
+        text = ""
     for ln in text.splitlines():
         m = re.match(r"diff --git a/(.+?) b/(.+)$", ln)
         if m:
@@ -144,6 +191,9 @@ def gate(campaign, candidate, root):
     """Return (verdict, reasons). verdict is 'allow' or 'block'."""
     reasons = []
 
+    if not valid_candidate_id(candidate.get("candidate_id")):
+        reasons.append("candidate_id must be a safe path component (1-128 ASCII letters, digits, '.', '_', or '-')")
+
     if candidate.get("campaign_id") != campaign.get("campaign_id"):
         reasons.append(f"campaign_id mismatch: candidate {candidate.get('campaign_id')} != {campaign.get('campaign_id')}")
 
@@ -162,9 +212,11 @@ def gate(campaign, candidate, root):
     # mutation-target / immutable checks against the UNION, so a file hidden from touched_files but
     # present in the diff still blocks.
     diff = candidate.get("diff")
-    diff_path = os.path.join(root, diff) if diff else None
+    diff_path = repo_file_path(root, diff) if diff else None
     derived = set()
-    if not diff or not os.path.isfile(diff_path):
+    if diff and diff_path is None:
+        reasons.append("diff path must be repository-relative and remain inside the repository")
+    elif not diff or not os.path.isfile(diff_path):
         if not is_baseline:
             reasons.append(f"diff missing: {diff}")
     else:
@@ -192,7 +244,7 @@ def gate(campaign, candidate, root):
         if stray:
             reasons.append(f"touches files outside mutation_target '{mt}': {stray}")
 
-    immutable = list(DEFAULT_IMMUTABLE) + list(campaign.get("immutable", []))
+    immutable = immutable_paths(campaign)
     leaked = sorted(f for f in effective if any(_under(f, p) for p in immutable))
     if leaked:
         reasons.append(f"touches immutable (evaluator/gold/casebook/budget/schema) files: {leaked}")
@@ -202,11 +254,18 @@ def gate(campaign, candidate, root):
         reasons.append("candidate budget differs from campaign budget")
 
     eb = candidate.get("evidence_bundle")
-    if not eb or not os.path.isfile(os.path.join(root, eb)):
+    evidence_path = repo_file_path(root, eb) if eb else None
+    if eb and evidence_path is None:
+        reasons.append("evidence_bundle path must be repository-relative and remain inside the repository")
+    elif not eb or not os.path.isfile(evidence_path):
         reasons.append(f"evidence bundle missing: {eb}")
 
     for name, spec in campaign.get("frozen_inputs", {}).items():
-        p = os.path.join(root, spec.get("path", ""))
+        frozen_path = spec.get("path", "")
+        p = repo_file_path(root, frozen_path)
+        if p is None:
+            reasons.append(f"frozen input '{name}' path must be repository-relative and remain inside the repository: {frozen_path}")
+            continue
         if not os.path.isfile(p):
             reasons.append(f"frozen input '{name}' missing: {spec.get('path')}")
         elif sha256_file(p) != spec.get("sha256"):
@@ -276,6 +335,40 @@ def self_test():
             "touched_files": [CARD], "diff": card_diff, "candidate_hash": card_h, "evidence_bundle": bundle,
         }
 
+        campaign_file = _write(root, "evals/c/campaign.json", json.dumps(campaign))
+        if hasattr(os, "mkfifo"):
+            candidate_file = _write(root, "evals/c/candidate.json", json.dumps(base))
+            for label, campaign_arg, candidate_arg in (
+                ("FIFO campaign input", os.path.join(root, "evals/c/campaign.fifo"), candidate_file),
+                ("FIFO candidate input", campaign_file, os.path.join(root, "evals/c/candidate.fifo")),
+            ):
+                fifo = campaign_arg if label == "FIFO campaign input" else candidate_arg
+                os.mkfifo(fifo)
+                try:
+                    result = subprocess.run(
+                        [sys.executable, os.path.abspath(__file__), "--campaign", campaign_arg,
+                         "--candidate", candidate_arg],
+                        capture_output=True, text=True, timeout=2,
+                    )
+                    rejected = result.returncode == 2 and "input error:" in result.stderr
+                except subprocess.TimeoutExpired:
+                    rejected = False
+                if not rejected:
+                    ok = False
+                    print(f"[self-test] {label} was not rejected promptly")
+
+        invalid_candidate = os.path.join(root, "evals/c/invalid-candidate.json")
+        with open(invalid_candidate, "wb") as handle:
+            handle.write(b"\xff")
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--campaign", campaign_file,
+             "--candidate", invalid_candidate],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode != 2 or "input error:" not in result.stderr or "Traceback" in result.stderr:
+            ok = False
+            print("[self-test] invalid UTF-8 candidate returned an unhandled error")
+
         def expect(label, cand, want, camp=campaign):
             nonlocal ok
             verdict, reasons = gate(camp, cand, root)
@@ -285,6 +378,54 @@ def self_test():
                 ok = False
 
         expect("clean candidate allows", base, "allow")
+        expect("candidate ID cannot escape the candidate directory",
+               dict(base, candidate_id="../../outside"), "block")
+
+        with tempfile.TemporaryDirectory(prefix="campaign-artifacts-outside-") as outside:
+            outside_diff = os.path.join(outside, "candidate.diff")
+            with open(outside_diff, "w") as handle:
+                handle.write(_diff_for([CARD]))
+            outside_hash = sha256_file(outside_diff)
+            outside_rel = os.path.relpath(outside_diff, root)
+            expect("candidate diff outside repository blocks",
+                   dict(base, diff=outside_rel, candidate_hash=outside_hash), "block")
+            expect("absolute candidate diff blocks",
+                   dict(base, diff=outside_diff, candidate_hash=outside_hash), "block")
+
+            symlink_diff = os.path.join(root, "evals/c/outside.diff")
+            os.symlink(outside_diff, symlink_diff)
+            expect("candidate diff symlink outside repository blocks",
+                   dict(base, diff=os.path.relpath(symlink_diff, root), candidate_hash=outside_hash), "block")
+
+            outside_evidence = os.path.join(outside, "evidence.md")
+            with open(outside_evidence, "w") as handle:
+                handle.write("# Evidence bundle\n\n- campaign: c\n- mutation target: x\n- eligibility: candidate\n")
+            expect("evidence bundle outside repository blocks",
+                   dict(base, evidence_bundle=os.path.relpath(outside_evidence, root)), "block")
+
+            frozen_campaign = dict(campaign, frozen_inputs={"outside": {
+                "path": outside_rel, "sha256": outside_hash,
+            }})
+            expect("frozen input outside repository blocks", base, "block", camp=frozen_campaign)
+
+        arrow_campaign = dict(
+            campaign,
+            tracks=[{"name": "docs", "mutation_target": "docs/"}],
+            mutable_allowlist=["docs/"], frozen_inputs={},
+        )
+        for name, arrow_path in (("plain-arrow", "docs/frozen=>input.txt"),
+                                 ("spaced-arrow", "docs/frozen => input.txt")):
+            arrow_diff, arrow_hash = mkdiff(name, [arrow_path])
+            arrow_candidate = dict(
+                base, candidate_id=f"cand-{name}", track="docs", mutation_target="docs/",
+                touched_files=[arrow_path], diff=arrow_diff, candidate_hash=arrow_hash,
+            )
+            try:
+                expect(f"literal arrow in '{arrow_path}' is preserved", arrow_candidate, "allow",
+                       camp=arrow_campaign)
+            except Exception as exc:
+                ok = False
+                print(f"[self-test] filename containing => crashed the gate: {type(exc).__name__}: {exc}")
 
         stray_diff, stray_h = mkdiff("stray", [CARD, "engine/routing.md"])
         expect("undeclared (out-of-target) file blocks",
@@ -301,6 +442,36 @@ def self_test():
         expect("P0: diff edits an immutable checker but declares only the card -> block",
                dict(base, candidate_id="cand-p0-hidden", touched_files=[CARD],
                     diff=p0_diff, candidate_hash=p0_h), "block")
+
+        reader_diff, reader_h = mkdiff("reader", ["tools/regular_file_io.py"])
+        reader_campaign = dict(
+            campaign,
+            tracks=[{"name": "reader", "mutation_target": "tools/"}],
+            mutable_allowlist=["tools/"],
+        )
+        reader_candidate = dict(
+            base, candidate_id="cand-reader", mutation_target="tools/",
+            touched_files=["tools/regular_file_io.py"], diff=reader_diff,
+            candidate_hash=reader_h,
+        )
+        expect("P0: candidate cannot change the gate's file reader -> block",
+               reader_candidate, "block", camp=reader_campaign)
+
+        pinned_rel = "docs/frozen-input.txt"
+        pinned_hash = sha256_file(_write(root, pinned_rel, "frozen\n"))
+        pinned_campaign = dict(
+            campaign,
+            tracks=[{"name": "docs", "mutation_target": "docs/"}],
+            mutable_allowlist=["docs/"],
+            frozen_inputs={"frozen-doc": {"path": pinned_rel, "sha256": pinned_hash}},
+        )
+        pinned_diff, pinned_diff_hash = mkdiff("pinned", [pinned_rel])
+        pinned_candidate = dict(
+            base, candidate_id="cand-pinned-input", mutation_target="docs/",
+            touched_files=[pinned_rel], diff=pinned_diff, candidate_hash=pinned_diff_hash,
+        )
+        expect("P0: candidate cannot change a frozen input -> block",
+               pinned_candidate, "block", camp=pinned_campaign)
 
         # touched_files claims a file the diff does not actually touch.
         expect("declared != diff-derived paths blocks",
@@ -350,6 +521,19 @@ def self_test():
         expect("P0: rename patch -> block",
                dict(base, candidate_id="cand-ren", touched_files=[CARD], diff=ren_rel, candidate_hash=ren_h), "block")
 
+        invalid_rel = "evals/c/invalid-utf8.diff"
+        invalid_path = os.path.join(root, invalid_rel)
+        with open(invalid_path, "wb") as handle:
+            handle.write(f"--- a/{CARD}\n+++ b/{CARD}\n@@ -1 +1,2 @@\n base\n+".encode() + b"\xff\n")
+        invalid_hash = sha256_file(invalid_path)
+        invalid_patch = dict(base, candidate_id="cand-invalid-utf8", touched_files=[CARD],
+                             diff=invalid_rel, candidate_hash=invalid_hash)
+        try:
+            expect("non-UTF-8 patch blocks", invalid_patch, "block")
+        except Exception as exc:
+            ok = False
+            print(f"[self-test] non-UTF-8 patch crashed the gate: {type(exc).__name__}: {exc}")
+
         expect("non-empty baseline diff blocks",
                dict(baseline, candidate_id="cand-baseline-nonempty", touched_files=[],
                     diff=card_diff, candidate_hash=card_h), "block")
@@ -363,13 +547,17 @@ def main(argv):
         return self_test()
     camp = cand = None
     i = 1
-    while i < len(argv):
-        if argv[i] == "--campaign":
-            camp = load(argv[i + 1]); i += 2
-        elif argv[i] == "--candidate":
-            cand = load(argv[i + 1]); i += 2
-        else:
-            i += 1
+    try:
+        while i < len(argv):
+            if argv[i] == "--campaign":
+                camp = load(argv[i + 1]); i += 2
+            elif argv[i] == "--candidate":
+                cand = load(argv[i + 1]); i += 2
+            else:
+                i += 1
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"input error: {exc}", file=sys.stderr)
+        return 2
     if camp is None or cand is None:
         print(__doc__)
         return 2

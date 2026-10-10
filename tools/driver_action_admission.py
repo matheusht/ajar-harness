@@ -41,13 +41,12 @@ from engagement_state import (
     atomic_write,
     base_event,
     bound_engagement_lock,
-    engagement_lock,
     read_governed_file,
     read_ledger,
     unlink_governed_file,
     utc_now,
 )
-from work_queue_actions import queue_command_payload
+from work_queue_actions import queue_command_payload, queue_item_identity, queue_item_ref
 
 
 ADMISSION_FILE = ".work-queue-action-admission.json"
@@ -378,23 +377,10 @@ def _identity(path: Path) -> dict[str, int]:
 
 
 def _item_identity(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "class": item.get("class"),
-        "entity": copy.deepcopy(item.get("entity")),
-        "predicate": item.get("predicate"),
-        "closes_when": item.get("closes_when"),
-        "blocking": item.get("blocking"),
-    }
-
-
-def _computed_item_ref(item: dict[str, Any]) -> str:
-    stable = {
-        "class": item.get("class"),
-        "entity": item.get("entity"),
-        "predicate": item.get("predicate"),
-        "closes_when": item.get("closes_when"),
-    }
-    return sha256_bytes(canonical_json_bytes(stable))
+    identity = queue_item_identity(item)
+    identity["entity"] = copy.deepcopy(identity["entity"])
+    identity["blocking"] = item.get("blocking")
+    return identity
 
 
 def _normalized_action(action: dict[str, Any]) -> dict[str, Any]:
@@ -780,9 +766,12 @@ def _validate_provider_inference_body(
         if isinstance(item, list):
             pending.extend(item)
         elif isinstance(item, dict):
+            item_type = item.get("type")
+            if "type" in item and not isinstance(item_type, str):
+                raise RecordError("driver_provider_request_invalid", "content type")
             source = item.get("source")
             if (
-                item.get("type") in {"document", "image"}
+                item_type in {"document", "image"}
                 and isinstance(source, dict)
                 and (source.get("type") == "url" or "url" in source)
             ):
@@ -875,7 +864,11 @@ def _evaluate_predicate(
     arguments: list[str],
     inline_inputs: dict[str, bytes] | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    if predicate.get("schema_version") != 1 or set(predicate) != {"schema_version", "documents", "constraints"}:
+    if (
+        type(predicate.get("schema_version")) is not int
+        or predicate["schema_version"] != 1
+        or set(predicate) != {"schema_version", "documents", "constraints"}
+    ):
         raise RecordError("driver_action_predicate_invalid", "shape")
     documents, admitted = _load_predicate_documents(
         predicate, arguments, inline_inputs
@@ -1066,10 +1059,6 @@ def _stop_output(
 
 
 def _verify_current_selected_action(record: dict[str, Any], state: dict[str, Any], engagement: Path) -> None:
-    try:
-        from work_queue_actions import queue_command_payload
-    except ImportError as exc:
-        raise RecordError("driver_queue_contract_unavailable", "admission") from exc
     payload = queue_command_payload("next", state, engagement)
     item = payload.get("item")
     action = item.get("next_action") if isinstance(item, dict) else None
@@ -1077,7 +1066,7 @@ def _verify_current_selected_action(record: dict[str, Any], state: dict[str, Any
         not isinstance(item, dict)
         or not isinstance(action, dict)
         or _item_identity(item) != record.get("item_identity")
-        or _computed_item_ref(item) != record.get("item_ref")
+        or queue_item_ref(item) != record.get("item_ref")
         or action.get("action_id") != record.get("action_id")
         or action.get("command") != record.get("command")
         or _normalized_action({"arguments": action.get("arguments")}).get("arguments")
@@ -1157,7 +1146,11 @@ def _stamp_parent_recorder_documents(
             provenance["runtime_session_ref"] = runtime_session_ref
             provenance["model"] = runtime_model
             provenance["provider"] = None
-        elif value.get("schema_version") == 2 and isinstance(value.get("attempt_id"), str):
+        elif (
+            type(value.get("schema_version")) is int
+            and value["schema_version"] == 2
+            and isinstance(value.get("attempt_id"), str)
+        ):
             value["actor"] = {"role": "broker", "id": actor_id}
             provenance = value.get("provenance")
             if not isinstance(provenance, dict):
@@ -1170,7 +1163,11 @@ def _stamp_parent_recorder_documents(
             provenance["provider"] = None
             if view_binding is not None:
                 provenance.update(view_binding)
-        elif command == "request-authority" and value.get("action_version") in {2, 3}:
+        elif (
+            command == "request-authority"
+            and type(value.get("action_version")) is int
+            and value["action_version"] in {2, 3}
+        ):
             value["executor_id"] = actor_id
             value["session_id"] = session_id
         entry["bytes"] = canonical_json_bytes(value)
@@ -1227,34 +1224,61 @@ def _decode_container_inline_inputs(
     return decoded
 
 
-def _recv_exact(connection: socket.socket, size: int) -> bytes:
+def _recv_exact(
+    connection: socket.socket, size: int, *, cancel_event: threading.Event | None = None
+) -> bytes:
     result = bytearray()
     while len(result) < size:
-        chunk = connection.recv(size - len(result))
+        if cancel_event is None:
+            chunk = connection.recv(size - len(result))
+        else:
+            read_deadline = time.monotonic() + _BROKER_IO_TIMEOUT_SECONDS
+            while True:
+                if cancel_event.is_set():
+                    raise socket.timeout()
+                try:
+                    chunk = connection.recv(size - len(result))
+                    break
+                except BlockingIOError:
+                    remaining = read_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise socket.timeout()
+                    if cancel_event.wait(min(remaining, 0.05)):
+                        raise socket.timeout()
         if not chunk:
             raise RecordError("driver_action_broker_request_invalid", "short frame")
         result.extend(chunk)
     return bytes(result)
 
 
-def _recv_container_frame(connection: socket.socket) -> dict[str, Any]:
+def _recv_container_frame(
+    connection: socket.socket, *, cancel_event: threading.Event | None = None
+) -> dict[str, Any]:
+    previous_timeout = connection.gettimeout() if cancel_event is not None else None
+    if cancel_event is not None:
+        connection.setblocking(False)
     try:
-        length = struct.unpack("!I", _recv_exact(connection, 4))[0]
-    except struct.error as exc:
-        raise RecordError("driver_action_broker_request_invalid", "frame") from exc
-    if length <= 0 or length > _CONTAINER_FRAME_LIMIT:
-        raise RecordError("driver_action_broker_request_invalid", "oversize frame")
-    try:
-        value = json.loads(
-            _recv_exact(connection, length), object_pairs_hook=_reject_duplicate_pairs
-        )
-    except RecordError:
-        raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
-        raise RecordError("driver_action_broker_request_invalid", "json") from exc
-    if not isinstance(value, dict):
-        raise RecordError("driver_action_broker_request_invalid", "shape")
-    return value
+        try:
+            length = struct.unpack("!I", _recv_exact(connection, 4, cancel_event=cancel_event))[0]
+        except struct.error as exc:
+            raise RecordError("driver_action_broker_request_invalid", "frame") from exc
+        if length <= 0 or length > _CONTAINER_FRAME_LIMIT:
+            raise RecordError("driver_action_broker_request_invalid", "oversize frame")
+        try:
+            value = json.loads(
+                _recv_exact(connection, length, cancel_event=cancel_event),
+                object_pairs_hook=_reject_duplicate_pairs,
+            )
+        except RecordError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
+            raise RecordError("driver_action_broker_request_invalid", "json") from exc
+        if not isinstance(value, dict):
+            raise RecordError("driver_action_broker_request_invalid", "shape")
+        return value
+    finally:
+        if cancel_event is not None:
+            connection.settimeout(previous_timeout)
 
 
 def _send_container_frame(connection: socket.socket, value: dict[str, Any]) -> None:
@@ -1507,14 +1531,17 @@ class DriverActionBroker:
                 row = json.loads(line, object_pairs_hook=_reject_duplicate_pairs)
             except (UnicodeDecodeError, json.JSONDecodeError, RecordError) as exc:
                 raise RecordError("driver_network_receipt_invalid", "JSON") from exc
-            operation = row.get("operation") if isinstance(row, dict) else None
-            allowed = common | operation_fields.get(operation, set())
+            if not isinstance(row, dict):
+                raise RecordError("driver_network_receipt_invalid", "shape")
+            operation = row.get("operation")
+            if not isinstance(operation, str) or operation not in operation_fields:
+                raise RecordError("driver_network_receipt_invalid", "shape")
+            allowed = common | operation_fields[operation]
             if (
-                not isinstance(row, dict)
-                or operation not in operation_fields
-                or not common.issubset(row)
+                not common.issubset(row)
                 or not set(row).issubset(allowed)
-                or row.get("schema_version") != 1
+                or type(row.get("schema_version")) is not int
+                or row["schema_version"] != 1
                 or not isinstance(row.get("runtime_session_ref"), str)
                 or not isinstance(row.get("action_id"), str)
                 or not isinstance(row.get("method"), str)
@@ -1667,16 +1694,30 @@ class DriverActionBroker:
 
     @staticmethod
     def _read_request(connection: socket.socket) -> dict[str, Any]:
+        previous_timeout = connection.gettimeout()
+        deadline = time.monotonic() + _BROKER_IO_TIMEOUT_SECONDS
         chunks: list[bytes] = []
         size = 0
-        while True:
-            chunk = connection.recv(min(65536, _RPC_LIMIT + 1 - size))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            size += len(chunk)
-            if size > _RPC_LIMIT:
-                raise RecordError("driver_action_broker_request_invalid", "oversize")
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout("broker request deadline")
+                timeout = (
+                    remaining
+                    if previous_timeout is None
+                    else min(previous_timeout, remaining)
+                )
+                connection.settimeout(timeout)
+                chunk = connection.recv(min(65536, _RPC_LIMIT + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+                if size > _RPC_LIMIT:
+                    raise RecordError("driver_action_broker_request_invalid", "oversize")
+        finally:
+            connection.settimeout(previous_timeout)
         try:
             request = json.loads(b"".join(chunks), object_pairs_hook=_reject_duplicate_pairs)
         except RecordError:
@@ -1687,7 +1728,8 @@ class DriverActionBroker:
             isinstance(request, dict)
             and set(request)
             == {"schema_version", "command", "arguments", "runtime_session_ref"}
-            and request.get("schema_version") == 1
+            and type(request.get("schema_version")) is int
+            and request["schema_version"] == 1
             and isinstance(request.get("command"), str)
             and isinstance(request.get("arguments"), list)
             and all(isinstance(value, str) for value in request["arguments"])
@@ -1704,7 +1746,8 @@ class DriverActionBroker:
                 "stop_hook_active",
                 "request_ref",
             }
-            and request.get("schema_version") == 1
+            and type(request.get("schema_version")) is int
+            and request["schema_version"] == 1
             and request.get("request_kind") == "session_end_check"
             and isinstance(request.get("runtime_session_ref"), str)
             and isinstance(request.get("hook_session_ref"), str)
@@ -2126,7 +2169,8 @@ class DriverActionBroker:
                 "driver_action_broker_request_invalid", "canonical payload"
             ) from exc
         if (
-            envelope.get("schema_version") != 1
+            type(envelope.get("schema_version")) is not int
+            or envelope["schema_version"] != 1
             or envelope.get("message_kind") != "request"
             or envelope.get("runtime_identity") != self._docker_identity
             or envelope.get("runtime_session_ref")
@@ -2207,7 +2251,8 @@ class DriverActionBroker:
                     "request_kind", "method", "path", "headers", "body_base64", "runtime_session_ref"
                 }
                 or payload.get("method") != "POST"
-                or payload.get("path") not in {"/v1/messages", "/v1/messages?beta=true"}
+                or not isinstance(payload.get("path"), str)
+                or payload["path"] not in {"/v1/messages", "/v1/messages?beta=true"}
                 or payload.get("runtime_session_ref") != self._admission.get("runtime_session_ref")
                 or not isinstance(payload.get("headers"), dict)
                 or any(
@@ -2259,7 +2304,8 @@ class DriverActionBroker:
                 or payload["request_id"] != expected_request_id
                 or not isinstance(payload.get("url"), str)
                 or not 1 <= len(payload["url"]) <= 8192
-                or payload.get("method") not in {"GET", "HEAD"}
+                or not isinstance(payload.get("method"), str)
+                or payload["method"] not in {"GET", "HEAD"}
             ):
                 raise RecordError("driver_target_fetch_invalid", "shape")
             self._remember_container_nonce(nonce, "target_fetch")
@@ -2555,7 +2601,7 @@ class DriverActionBroker:
     def _serve_container_connection(self, connection: socket.socket) -> None:
         envelope: dict[str, Any] | None = None
         try:
-            envelope = _recv_container_frame(connection)
+            envelope = _recv_container_frame(connection, cancel_event=self._stop)
             request, inline_inputs, nonce = self._authenticate_container_request(
                 envelope
             )
@@ -2638,33 +2684,19 @@ class DriverActionBroker:
                         returncode, output = self._execute_stop(request)
                     else:
                         returncode, output = self._execute(request)
-                    response = canonical_json_bytes(
-                        {
-                            "schema_version": 1,
-                            "returncode": returncode,
-                            "stdout_base64": base64.b64encode(output).decode("ascii"),
-                        }
-                    )
                 except socket.timeout:
                     returncode, output = _broker_error(
                         RecordError("driver_action_broker_request_invalid", "timeout")
                     )
-                    response = canonical_json_bytes(
-                        {
-                            "schema_version": 1,
-                            "returncode": returncode,
-                            "stdout_base64": base64.b64encode(output).decode("ascii"),
-                        }
-                    )
                 except RecordError as exc:
                     returncode, output = _broker_error(exc)
-                    response = canonical_json_bytes(
-                        {
-                            "schema_version": 1,
-                            "returncode": returncode,
-                            "stdout_base64": base64.b64encode(output).decode("ascii"),
-                        }
-                    )
+                response = canonical_json_bytes(
+                    {
+                        "schema_version": 1,
+                        "returncode": returncode,
+                        "stdout_base64": base64.b64encode(output).decode("ascii"),
+                    }
+                )
                 try:
                     connection.sendall(response)
                 except OSError:
@@ -2811,7 +2843,8 @@ def forward_action_to_broker(
         if (
             not isinstance(response, dict)
             or set(response) != {"schema_version", "returncode", "stdout_base64"}
-            or response.get("schema_version") != 1
+            or type(response.get("schema_version")) is not int
+            or response["schema_version"] != 1
             or type(response.get("returncode")) is not int
             or not 0 <= response["returncode"] <= 255
             or not isinstance(response.get("stdout_base64"), str)
@@ -2870,7 +2903,8 @@ def forward_stop_check_to_broker(
         if (
             not isinstance(response, dict)
             or set(response) != {"schema_version", "returncode", "stdout_base64"}
-            or response.get("schema_version") != 1
+            or type(response.get("schema_version")) is not int
+            or response["schema_version"] != 1
             or type(response.get("returncode")) is not int
             or not isinstance(response.get("stdout_base64"), str)
         ):

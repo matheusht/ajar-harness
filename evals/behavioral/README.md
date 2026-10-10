@@ -77,17 +77,203 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v34-2026-10-02/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v4-2026-09-13`
+## Canonical campaign: `behavioral-canonical-v34-2026-10-02`
 
-Revision 4 retains the existing candidate definitions and patch bytes and freezes the current
-conformance checker after queue/guidance changes. Revision 3 was already drifted on main before
-#113, and #113 changes the checker further. Its manifest and prior results are preserved rather
-than retroactively re-pinned. Revision 4 has no executed candidate run or new efficacy claim.
+Revision 34 preserves earlier evidence while pinning the guarded Decision 0005 and corpus-enumeration fixture reads, no-follow package tarball reads, lifecycle-control finding and attestation, constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine mirrors, intervention ledgers, framing-probe packets, false-discovery and
+adversarial evaluator corpora, tool-family manifests and fixtures, finding fixtures, capability sources, cards,
+oracles, and casebooks.
+It keeps candidate definitions and technique patches
+unchanged. Earlier revisions remain immutable history rather than being re-pinned. Revision 34 has no executed
+candidate run or efficacy claim.
 Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+
+### Historical revision 33
+
+Revision 33 pinned Decision 0005 and corpus-enumeration fixture reads and preceding filesystem checks. Revision 34
+supersedes it after the remaining single-use conformance JSON wrapper was removed. Its manifest and candidate
+artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 32
+
+Revision 32 pinned lifecycle-control fixture reads and earlier filesystem-input checks. Revision 33 superseded
+it after Decision 0005 and corpus-enumeration JSON and package tarball reads gained guarded, no-follow input handling.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 31
+
+Revision 31 pinned constrained KB ablation-fixture reads and preceding filesystem-input checks. Revision 32
+superseded it after lifecycle-control finding and attestation reads began rejecting symlinked and special-file
+inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 24
+
+Revision 24 pinned no-follow intervention, framing-probe, and evaluator corpus reads alongside tool-family, finding,
+capability, card, oracle, and casebook scans. Revision 25 supersedes it after the doctrine mirror check also began
+rejecting symlinked guidance files. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 25
+
+Revision 25 added the doctrine-mirror no-follow check. Revision 26 supersedes it after the finding-trap attestation
+scan began rejecting symlinked and special-file attestations. Its manifest and candidate artifacts remain unchanged,
+with no executed candidate run or efficacy claim.
+
+### Historical revision 26
+
+Revision 26 added no-follow finding-trap attestation reads. Revision 27 supersedes it after cited-fixture checks
+began rejecting symlinked and special-file cards. Its manifest and candidate artifacts remain unchanged, with no
+executed candidate run or efficacy claim.
+
+### Historical revision 27
+
+Revision 27 added no-follow reads for cited-fixture cards. Revision 28 supersedes it after active-guidance navigation
+checks began rejecting symlinked and special-file Markdown inputs. Its manifest and candidate artifacts remain
+unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 28
+
+Revision 28 added no-follow active-guidance reads. Revision 29 supersedes it after queue-stop doctrine checks began
+rejecting symlinked and special-file documentation and runtime inputs. Its manifest and candidate artifacts remain
+unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 29
+
+Revision 29 added no-follow reads for queue-stop doctrine. Revision 30 supersedes it after capability scope-template
+checks began rejecting symlinked and special-file inputs. Its manifest and candidate artifacts remain unchanged,
+with no executed candidate run or efficacy claim.
+
+### Historical revision 30
+
+Revision 30 added no-follow capability scope-template reads. Revision 31 supersedes it after KB ablation-fixture
+checks began enforcing repository-local, no-follow JSON reads. Its manifest and candidate artifacts remain unchanged,
+with no executed candidate run or efficacy claim.
+
+### Historical revision 23
+
+Revision 23 pinned no-follow framing-probe and evaluator corpus reads alongside tool-family, finding, capability,
+card, oracle, and casebook scans. Revision 24 supersedes it after intervention ledger reads also began rejecting
+symlink and special-file inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 22
+
+Revision 22 pinned no-follow evaluator, tool-family, finding, capability, card, oracle, and casebook reads.
+Revision 23 supersedes it after framing-probe packet reads also began rejecting symlink and special-file inputs.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 21
+
+Revision 21 pinned no-follow tool-family manifest and fixture reads alongside finding, capability, card, oracle, and
+casebook scans. Revision 22 supersedes it after false-discovery and adversarial evaluator corpora also began rejecting
+symlink and special-file inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 20
+
+Revision 20 pinned no-follow finding-fixture and capability sources alongside card, oracle, and casebook scans.
+Revision 21 supersedes it after tool-family authority manifests and negative fixtures also began rejecting symlink
+and special-file inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 19
+
+Revision 19 pinned no-follow capability registry, class, and negative-fixture reads alongside card, oracle, and
+casebook scans. Revision 20 supersedes it after the finding-fixture corpus also began rejecting unsafe symlink and
+special-file inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 18
+
+Revision 18 pinned no-follow capability registry and class reads alongside card, oracle, and casebook scans.
+Revision 19 supersedes it after the capability negative-fixture corpus also began rejecting symlink and special-file
+inputs. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 17
+
+Revision 17 pinned no-follow card, oracle, and casebook reads. Revision 18 supersedes it after capability registry
+and class scans also began rejecting symlink and special-file inputs. Its manifest and candidate artifacts remain
+unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 16
+
+Revision 16 pinned fail-closed oracle-card reads in the conformance checker. Revision 17 supersedes it after card
+and casebook scans also began rejecting symlink and special-file inputs. Its manifest and candidate artifacts
+remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 15
+
+Revision 15 pinned shared regular-file reads and the holdout/conformance scanners' safe handling of symlinks and
+non-regular files. Revision 16 supersedes it after oracle-card reads began rejecting symlinks and special files.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 14
+
+Revision 14 pinned the conformance secret scanner's non-regular-file and symlink handling. Revision 15
+supersedes it after the scanner reused the shared regular-file reader with no-follow support. Its manifest and
+candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 13
+
+Revision 13 pinned candidate-manifest identity checks in the shared loader and behavioral runner. Revision 14
+supersedes it after the conformance scanner began refusing symlinks and non-regular inputs. Its manifest and
+candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 12
+
+Revision 12 froze canonical campaign-path resolution for candidate manifest paths. Revision 13 supersedes
+it after the shared loader began requiring the JSON candidate_id to match the directory/entry ID. Its
+manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 11
+
+Revision 11 froze campaign-confined candidate manifest paths in the behavioral evaluator. Revision 12
+supersedes it after the shared path guard began canonicalizing the campaign path before resolving the
+candidate directory. Its manifest and candidate artifacts remain unchanged, with no executed candidate run
+or efficacy claim.
+
+### Historical revision 10
+
+Revision 10 froze repository-confined candidate artifact paths in preflight, materialization, and behavioral
+evaluation. Revision 11 supersedes it after candidate manifest paths were confined to their campaign and
+candidate ID. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or
+efficacy claim.
+
+### Historical revision 9
+
+Revision 9 froze candidate-ID path validation in the campaign gate. Revision 10 supersedes it after diff,
+evidence, and frozen-input paths were constrained to repository-local files at both preflight and measured
+materialization. Its manifest and candidate artifacts remain unchanged, with no executed candidate run or
+efficacy claim.
+
+### Historical revision 8
+
+Revision 8 froze the campaign gate and regular-file reader after invalid UTF-8 patches were made to fail
+closed. Revision 9 supersedes it after candidate IDs were constrained to safe path components for
+candidate artifact paths. Its manifest and candidate artifacts remain unchanged, with no executed candidate
+run or efficacy claim.
+
+### Historical revision 7
+
+Revision 7 froze the gate after patch-path parsing switched to Git's NUL-delimited numstat output.
+Revision 8 supersedes it after the gate began rejecting invalid UTF-8 patches without a traceback.
+Its manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 6
+
+Revision 6 froze the gate after it began treating frozen input paths as immutable. Revision 7
+supersedes it after the gate learned to preserve legal filenames containing arrow delimiters. Its
+manifest and candidate artifacts remain unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 5
+
+Revision 5 froze the campaign gate and its regular-file reader. Revision 6 supersedes it after the
+gate began treating frozen input paths as immutable. Its manifest and candidate artifacts remain
+unchanged, with no executed candidate run or efficacy claim.
+
+### Historical revision 4
+
+Revision 4 preserved revision 3 and froze the conformance checker after queue and engineering-guidance
+changes. It has no executed candidate run or efficacy claim. Its manifest and candidate artifacts are
+preserved; the current gate is revision 10.
 
 ### Historical revision 3
 

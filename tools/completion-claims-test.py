@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import runpy
 import shutil
@@ -371,6 +370,11 @@ class CompletionClaimsTest(unittest.TestCase):
         path = Path(self.temporary.name) / "pins.json"
         pin = {"path_sha256": "sha256:" + "A" * 64, "content_sha256": "sha256:" + "b" * 64, "claim_count": True}
         path.write_bytes(canonical_json_bytes({"schema_version": 1, "pins": [pin]}))
+        self.assertEqual(self._error(lambda: self._load_manifest(path)), "completion_claims_manifest_invalid")
+
+    def test_10b_manifest_rejects_boolean_schema_version(self) -> None:
+        path = Path(self.temporary.name) / "pins.json"
+        path.write_bytes(canonical_json_bytes({"schema_version": True, "pins": []}))
         self.assertEqual(self._error(lambda: self._load_manifest(path)), "completion_claims_manifest_invalid")
 
     def test_11_current_dry_route_passes(self) -> None:
@@ -1103,6 +1107,58 @@ class CompletionClaimsTest(unittest.TestCase):
                     note.write_text("x" * (128 - split - 1) + "\n" + wording, encoding="utf-8")
                     with mock.patch.object(claims, "SCAN_CHUNK_BYTES", 128):
                         self.assertEqual(sum(row[2] for row in self._claim_rows()), expected)
+
+    def test_63_claim_scanners_reject_fifo_inputs_without_blocking(self) -> None:
+        source = self.root / "fifo-source"
+        source.mkdir()
+        os.mkfifo(source / "input.fifo")
+        probe = (
+            "import os, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import completion_claims as claims\n"
+            "root = os.open(sys.argv[2], os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))\n"
+            "if sys.argv[3] == 'read': claims._read_regular(root, 'input.fifo')\n"
+            "else:\n"
+            "    path = os.path.join(sys.argv[2], 'input.fifo')\n"
+            "    claims._scan_regular(root, 'input.fifo', 'input.fifo', claims._identity(os.stat(path, follow_symlinks=False)))\n"
+        )
+        for mode in ("read", "scan"):
+            with self.subTest(mode=mode):
+                try:
+                    result = subprocess.run(
+                        [sys.executable, "-c", probe, str(ROOT / "tools"), str(source), mode],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=1,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    self.fail(f"{mode} blocked while opening a FIFO")
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_64_manifest_loader_rejects_fifo_without_blocking(self) -> None:
+        manifest = self.root / "manifest.fifo"
+        os.mkfifo(manifest)
+        probe = (
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import completion_claims as claims\n"
+            "claims.MANIFEST_PATH = sys.argv[2]\n"
+            "claims._manifest_bytes()\n"
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", probe, str(ROOT / "tools"), str(manifest)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("manifest loader blocked while opening a FIFO")
+        self.assertNotEqual(result.returncode, 0)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

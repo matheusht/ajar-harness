@@ -33,12 +33,17 @@ def _validate_entry(name: str, entry: Any) -> list[str]:
     if not isinstance(entry, dict) or not set(entry).issubset(ENTRY_KEYS):
         return [f"{name}: invalid/unknown entry fields"]
     tier = entry.get("tier")
-    if tier not in TIERS | {"variant_dispatch", "event_dispatch"}:
+    if not isinstance(tier, str) or tier not in TIERS | {"variant_dispatch", "event_dispatch"}:
         problems.append(f"{name}: unknown tier {tier}")
     roles = entry.get("allowed_roles")
-    if not isinstance(roles, list) or len(roles) != len(set(roles)) or not set(roles).issubset(ROLES):
+    if (
+        not isinstance(roles, list)
+        or any(not isinstance(role, str) or role not in ROLES for role in roles)
+        or len(roles) != len(set(roles))
+    ):
         problems.append(f"{name}: invalid allowed roles")
-    if entry.get("blocking_scope") not in {"none", "lane_local", "global", "variant_dispatch", "event_dispatch"}:
+    blocking_scope = entry.get("blocking_scope")
+    if not isinstance(blocking_scope, str) or blocking_scope not in {"none", "lane_local", "global", "variant_dispatch", "event_dispatch"}:
         problems.append(f"{name}: invalid blocking scope")
     evidence = entry.get("required_evidence")
     if not isinstance(evidence, list) or any(not isinstance(item, str) or not item for item in evidence):
@@ -49,6 +54,9 @@ def _validate_entry(name: str, entry: Any) -> list[str]:
             problems.append(f"{name}: missing variants")
         else:
             for variant, spec in variants.items():
+                if not isinstance(spec, dict):
+                    problems.append(f"{name}:{variant}: invalid variant entry")
+                    continue
                 problems.extend(_validate_entry(f"{name}:{variant}", {"allowed_roles": roles, **spec}))
     elif variants is not None:
         problems.append(f"{name}: variants on fixed tier")
@@ -61,7 +69,15 @@ def validate_capability_matrix(value: Any, *, public_commands: Iterable[str] | N
     problems: list[str] = []
     if set(value) != {"schema_version", "matrix_id", "tiers", "authority_states", "commands", "events"}:
         problems.append("matrix top-level fields are not closed")
-    if value.get("schema_version") != 1 or value.get("matrix_id") != "decision6-operation-capabilities-v1" or set(value.get("tiers", [])) != TIERS:
+    tiers = value.get("tiers")
+    if (
+        type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+        or value.get("matrix_id") != "decision6-operation-capabilities-v1"
+        or not isinstance(tiers, list)
+        or any(not isinstance(tier, str) for tier in tiers)
+        or set(tiers) != TIERS
+    ):
         problems.append("matrix identity/tiers invalid")
     if value.get("authority_states") != ["pending_authority", "approved", "rejected", "expired", "superseded"]:
         problems.append("authority states invalid")
@@ -104,7 +120,7 @@ def _resolved(entry: dict[str, Any], variant: str | None, operation: str) -> dic
 
 
 def classify_command(name: str, *, variant: str | None = None, matrix: dict[str, Any] | None = None) -> dict[str, Any]:
-    matrix = matrix or load_capability_matrix()
+    matrix = load_capability_matrix() if matrix is None else matrix
     entry = matrix["commands"].get(name)
     if entry is None:
         raise RecordError("operation_unclassified", f"command:{name}")
@@ -112,7 +128,7 @@ def classify_command(name: str, *, variant: str | None = None, matrix: dict[str,
 
 
 def classify_event(event_type: str, payload: dict[str, Any] | None = None, *, matrix: dict[str, Any] | None = None) -> dict[str, Any]:
-    matrix = matrix or load_capability_matrix()
+    matrix = load_capability_matrix() if matrix is None else matrix
     entry = matrix["events"].get(event_type)
     if entry is None:
         raise RecordError("operation_unclassified", f"event:{event_type}")
@@ -159,6 +175,30 @@ def self_test() -> list[tuple[str, bool, str]]:
         except RecordError as exc:
             ok = exc.code in {"operation_unclassified", "operation_variant_unclassified"}; detail = exc.code
         checks.append((label, ok, detail))
+    for label, function in (
+        ("empty command matrix is not replaced with the default", lambda: classify_command("preflight", matrix={})),
+        ("empty event matrix is not replaced with the default", lambda: classify_event("engagement.blocked", {}, matrix={})),
+    ):
+        try:
+            function(); ok = False; detail = "default matrix was substituted"
+        except (KeyError, RecordError) as exc:
+            ok = True; detail = type(exc).__name__
+        checks.append((label, ok, detail))
+    malformed_matrices = (
+        ("malformed tier values", lambda candidate: candidate.update({"tiers": [[]]})),
+        ("unhashable operation tier", lambda candidate: candidate["commands"].update({"bad": {"tier": []}})),
+        ("unhashable allowed role", lambda candidate: candidate["commands"].update({"bad": {"tier": "notebook", "allowed_roles": [[]]}})),
+        ("non-object variant", lambda candidate: candidate["commands"].update({"bad": {"tier": "variant_dispatch", "allowed_roles": ["operator"], "variants": {"x": []}}})),
+    )
+    for label, corrupt in malformed_matrices:
+        candidate = copy.deepcopy(matrix)
+        corrupt(candidate)
+        try:
+            problems = validate_capability_matrix(candidate)
+            rejected = bool(problems)
+        except (TypeError, ValueError):
+            rejected = False
+        checks.append((f"matrix validator reports {label}", rejected, str(candidate.get("commands", {}).get("bad", candidate.get("tiers")))))
     forged = classify_event("claim.adjudicated", {}, matrix=matrix)
     try:
         require_actor(forged, "operator"); forged_ok = False

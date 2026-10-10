@@ -40,14 +40,15 @@ import json
 import os
 import sys
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 MIN_REPLAYS = 2
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _mod(name, filename):
@@ -145,6 +146,7 @@ def generate_for_campaign(campaign_path):
     camp_dir = os.path.dirname(campaign_path)
     report = load(os.path.join(camp_dir, "report.json"))
     RG = _mod("run_gepa_shadow", "run-gepa-shadow.py")
+    CC = _mod("check_campaign", "check-campaign.py")
 
     sb = report["baseline_scoreboard"]
     version = _benchmark_version(campaign)
@@ -158,11 +160,12 @@ def generate_for_campaign(campaign_path):
                                  "note": "blocked at contract gate; no replay"})
             continue
 
+        rdir = os.path.join(CC.candidate_dir(campaign_path, cid), "replays")
+
         runs = [_run_record(sb, RG, cid, i, version, budget) for i in range(1 + MIN_REPLAYS)]
         claimed_new = cand["scored"] and []  # shadow: candidate reproduces incumbent, no claimed new coverage
         result = assess(runs, cand["keep_discard"]["verdict"], [], budget, version)
 
-        rdir = os.path.join(camp_dir, "candidates", cid, "replays")
         os.makedirs(rdir, exist_ok=True)
         for r in runs:
             with open(os.path.join(rdir, r["run_id"] + ".json"), "w") as fh:
@@ -238,7 +241,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--campaign":
-        return generate_for_campaign(argv[2])
+        try:
+            return generate_for_campaign(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"invalid campaign input: {exc}", file=sys.stderr)
+            return 2
     print(__doc__)
     return 2
 

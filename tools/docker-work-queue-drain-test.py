@@ -38,7 +38,6 @@ from docker_session_runtime import (
 from engagement_records import (
     build_reference_index,
     canonical_json_bytes,
-    sha256_bytes,
     sha256_file,
     validate_record,
 )
@@ -54,7 +53,7 @@ from engagement_state import (
 from hunter_view import HunterViewError, compile_hunter_view
 from operator_signature import operator_challenge_bytes
 from task_board import post_notice
-from environment_preflight import _collect_legacy_preflight as collect_preflight
+from environment_preflight import _collect_preflight_core as collect_preflight
 from work_queue_actions import queue_command_payload
 from work_queue_driver import DockerQueueBackend, DriverBudget, run_driver
 

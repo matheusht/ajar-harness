@@ -246,7 +246,11 @@ def _snapshot_bound_tree(root_fd):
                 continue
             if not stat.S_ISREG(entry.st_mode):
                 raise RecordError("q02_source_unsafe", "ablation source contains a non-regular entry")
-            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+            fd = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=directory_fd,
+            )
             try:
                 before = os.fstat(fd)
                 chunks = []

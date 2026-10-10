@@ -7,6 +7,8 @@ import fcntl
 import io
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 from contextlib import redirect_stdout
@@ -16,7 +18,6 @@ from types import SimpleNamespace
 import engagement_state
 import finding_lifecycle
 from engagement_quarantine import MARKER_RELATIVE, canonical_marker
-from engagement_records import canonical_json_bytes
 from engagement_state import append_ledger_record, base_event, initialize_engagement
 
 
@@ -70,6 +71,71 @@ def _install_marker(engagement: Path) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="engagement-lock-race-") as temporary:
         root = Path(temporary).resolve()
+        reader_root = root / "governed-reader-race"
+        reader_root.mkdir()
+        reader_path = reader_root / "scope.md"
+        reader_path.write_text("regular before open\n", encoding="utf-8")
+        reader_hook = root / "reader-hook-fired"
+        reader_probe = (
+            "import os, sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import engagement_state\n"
+            "original_open = os.open\n"
+            "def race_open(path, flags, mode=0o777, *, dir_fd=None):\n"
+            "    if path == 'scope.md' and sys._getframe(1).f_code.co_name == 'read_governed_file':\n"
+            "        with open(sys.argv[3], 'w', encoding='utf-8') as handle: handle.write('reached')\n"
+            "        os.unlink(path, dir_fd=dir_fd)\n"
+            "        os.mkfifo(path, dir_fd=dir_fd)\n"
+            "    return original_open(path, flags, mode, dir_fd=dir_fd)\n"
+            "os.open = race_open\n"
+            "engagement_state.read_governed_file(Path(sys.argv[2]))\n"
+        )
+        try:
+            reader_race = subprocess.run(
+                [sys.executable, "-c", reader_probe, str(Path(__file__).resolve().parent), str(reader_path), str(reader_hook)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            reader_race = None
+        governed_reader_safe = (
+            reader_race is not None and reader_race.returncode != 0 and reader_hook.is_file()
+        )
+        open_root = root / "open-governed-race"
+        open_root.mkdir()
+        (open_root / "scope.md").write_text(_scope(), encoding="utf-8")
+        open_path = open_root / "payload.json"
+        open_path.write_text("{}\n", encoding="utf-8")
+        open_hook = root / "open-governed-hook-fired"
+        open_probe = (
+            "import os, runpy, sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0, str(Path(sys.argv[1]).parent))\n"
+            "namespace = runpy.run_path(sys.argv[1])\n"
+            "original_open = os.open\n"
+            "def race_open(path, flags, mode=0o777, *, dir_fd=None):\n"
+            "    if path == 'payload.json' and sys._getframe(1).f_code.co_name == '_open_governed_regular':\n"
+            "        with open(sys.argv[3], 'w', encoding='utf-8') as handle: handle.write('reached')\n"
+            "        os.unlink(path, dir_fd=dir_fd)\n"
+            "        os.mkfifo(path, dir_fd=dir_fd)\n"
+            "    return original_open(path, flags, mode, dir_fd=dir_fd)\n"
+            "os.open = race_open\n"
+            "namespace['_open_governed_regular'](Path(sys.argv[2]))\n"
+        )
+        try:
+            open_race = subprocess.run(
+                [sys.executable, "-c", open_probe, str(Path(__file__).resolve().with_name("run-engagement.py")), str(open_path), str(open_hook)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            open_race = None
+        governed_open_safe = open_race is not None and open_race.returncode != 0 and open_hook.is_file()
         live = _engagement(root / "synthetic-live")
         quarantined = root / "synthetic-quarantined-copy"
         shutil.copytree(live, quarantined)
@@ -245,39 +311,30 @@ def main() -> int:
         lifecycle_quarantined = root / "synthetic-lifecycle-quarantined"
         shutil.copytree(lifecycle_live, lifecycle_quarantined)
         _install_marker(lifecycle_quarantined)
-        lifecycle_moved = root / "synthetic-lifecycle-original-moved"
+        lifecycle_live_before = {
+            path.relative_to(lifecycle_live).as_posix(): path.read_bytes()
+            for path in lifecycle_live.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        }
         quarantined_tree_before = {
             path.relative_to(lifecycle_quarantined).as_posix(): path.read_bytes()
             for path in lifecycle_quarantined.rglob("*")
             if path.is_file() and not path.is_symlink()
         }
-        original_move = finding_lifecycle._bound_move
-        lifecycle_swapped = False
-
-        def swap_before_lifecycle_move(*args, **kwargs):
-            nonlocal lifecycle_swapped
-            lifecycle_live.rename(lifecycle_moved)
-            lifecycle_quarantined.rename(lifecycle_live)
-            lifecycle_swapped = True
-            try:
-                return original_move(*args, **kwargs)
-            finally:
-                lifecycle_live.rename(lifecycle_quarantined)
-                lifecycle_moved.rename(lifecycle_live)
-
-        finding_lifecycle._bound_move = swap_before_lifecycle_move
-        try:
-            with redirect_stdout(io.StringIO()):
-                lifecycle_result = finding_lifecycle.cmd_demote(
-                    SimpleNamespace(
-                        engagement=str(lifecycle_live),
-                        finding_id="F-BOUND",
-                        actor="fixture-orchestrator",
-                        reason="Exercise the bound lifecycle mutation seam.",
-                    )
+        with redirect_stdout(io.StringIO()):
+            lifecycle_result = finding_lifecycle.cmd_demote(
+                SimpleNamespace(
+                    engagement=str(lifecycle_live),
+                    finding_id="F-BOUND",
+                    actor="fixture-orchestrator",
+                    reason="Exercise the retired lifecycle command.",
                 )
-        finally:
-            finding_lifecycle._bound_move = original_move
+            )
+        lifecycle_live_after = {
+            path.relative_to(lifecycle_live).as_posix(): path.read_bytes()
+            for path in lifecycle_live.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        }
         quarantined_tree_after = {
             path.relative_to(lifecycle_quarantined).as_posix(): path.read_bytes()
             for path in lifecycle_quarantined.rglob("*")
@@ -285,13 +342,17 @@ def main() -> int:
         }
         lifecycle_bound = (
             lifecycle_result == 1
-            and not lifecycle_swapped
+            and lifecycle_live_after == lifecycle_live_before
             and quarantined_tree_after == quarantined_tree_before
-            and lifecycle_live.joinpath("findings", "F-BOUND", "finding.json").is_file()
-            and not lifecycle_live.joinpath("unproven", "F-BOUND").exists()
         )
 
-        passed = aba_passed and nonmutating_refusal and marker_wins and lifecycle_bound
+        passed = aba_passed and nonmutating_refusal and marker_wins and lifecycle_bound and governed_reader_safe and governed_open_safe
+        print(
+            f"  {'ok  ' if governed_reader_safe else 'FAIL'} governed file reader rejects a FIFO replacement without blocking"
+        )
+        print(
+            f"  {'ok  ' if governed_open_safe else 'FAIL'} governed regular opener rejects a FIFO replacement without blocking"
+        )
         print(
             f"  {'ok  ' if aba_passed else 'FAIL'} locked append stays on one directory inode "
             "across a pathname ABA"
@@ -305,8 +366,8 @@ def main() -> int:
             "wins at the post-flock boundary"
         )
         print(
-            f"  {'ok  ' if lifecycle_bound else 'FAIL'} retired lifecycle mutation cannot reach "
-            "the move seam across a quarantined pathname ABA"
+            f"  {'ok  ' if lifecycle_bound else 'FAIL'} retired lifecycle command leaves "
+            "live and quarantined trees unchanged"
         )
         if failure:
             print(f"       {failure}")

@@ -45,6 +45,8 @@ import os
 import re
 import sys
 
+from regular_file_io import load_json
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BANDS = ["critical", "high", "medium", "low", "informational", "informative"]
@@ -168,7 +170,7 @@ def cmd_pack(args):
 
 
 def cmd_verify(args):
-    p = json.load(open(args.packet))
+    p = load_json(args.packet)
     residual = leaks(p["body"])
     recomputed = hashlib.sha256(p["body"].encode()).hexdigest()
     ok_hash = recomputed == p["body_sha256"]
@@ -213,7 +215,7 @@ specific evidence you relied on."""
 
 
 def cmd_brief(args):
-    p = json.load(open(args.packet))
+    p = load_json(args.packet)
     print(f"{FRAMINGS[args.framing]}\n\n{TASK}\n\n"
           f"--- EVIDENCE PACKET: {p['finding_id']} (sha256:{p['body_sha256'][:16]}) ---\n{p['body']}")
     return 0
@@ -224,7 +226,7 @@ def cmd_score(args):
 
     results file: [{"finding_id":..., "framing":"rigor|escalation|neutral", "band":...}, ...]
     """
-    rows = json.load(open(args.results))
+    rows = load_json(args.results)
     rank = {b: i for i, b in enumerate(["informational", "low", "medium", "high", "critical"])}
     by = {}
     for r in rows:
@@ -319,7 +321,11 @@ def main():
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_score)
 
     args = ap.parse_args()
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

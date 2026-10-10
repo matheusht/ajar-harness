@@ -147,7 +147,11 @@ def _read_registered_bytes(engagement: Path, record: dict[str, Any]) -> bytes:
             child = os.open(component, directory_flags, dir_fd=parent)
             os.close(parent)
             parent = child
-        fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+        fd = os.open(
+            parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent,
+        )
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode) or before.st_size != record.get("size"):

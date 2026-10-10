@@ -9,12 +9,8 @@ Two sides, both content-neutral (no payload catalog; the tool only hides/recover
   - **embed/extract** — the offensive transform (test the target's robustness to hidden input).
   - **detect** — the defensive analyzer (flag hidden data; feeds evidence). Tools are sensors, not judges.
 
-Two backends:
-  - **stdlib (default, authoritative for CI):** zero-width-Unicode text stego — encodes secret bytes as
-    invisible ZWSP/ZWNJ characters appended to a carrier. Deterministic, lossless, visible text unchanged.
-  - **external (optional, ARMS-LENGTH):** ST3GG image/audio/document LSB stego + its richer detectors,
-    reached by subprocess to an externally-installed CLI. AGPL-3.0, NEVER vendored/imported
-    (see docs/etrack-third-party-license-notes.md). **Not wired in E2.**
+This stdlib implementation encodes secret bytes as invisible ZWSP/ZWNJ characters appended to a carrier.
+It is deterministic and lossless, and leaves the visible text unchanged.
 
 Usage:
   python3 tools/stego-converter.py --embed   --carrier "hello there" --secret "canary"
@@ -24,19 +20,11 @@ Usage:
 """
 
 import argparse
-import shutil
 import sys
 
 ZERO = "​"   # ZERO WIDTH SPACE      -> bit 0
 ONE = "‌"    # ZERO WIDTH NON-JOINER -> bit 1
 ZW_ALPHABET = (ZERO, ONE)
-
-EXTERNAL_CLI = "st3gg"  # AGPL-3.0, arms-length subprocess only; NOT vendored/imported
-
-
-def external_available():
-    """True iff the optional ST3GG CLI is installed on PATH (never bundled)."""
-    return shutil.which(EXTERNAL_CLI) is not None
 
 
 def embed(carrier, secret):
@@ -87,7 +75,6 @@ def self_test():
         ("detector clean on plain carrier", not detect(carrier)["has_stego"]),
     ]:
         print(f"  {'ok  ' if ok else 'FAIL'} {label}")
-    print(f"  ok   external backend optional (present={external_available()})")
     if fails:
         for f in fails:
             print(f"  FAIL {f}")

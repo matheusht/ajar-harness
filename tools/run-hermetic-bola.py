@@ -13,7 +13,11 @@ Usage:
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGET = os.path.join(ROOT, "evals", "hermetic", "targets", "bola-legacy-route", "target.json")
@@ -22,8 +26,7 @@ DENY = (401, 403)
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def respond(target, req):
@@ -84,8 +87,23 @@ def report(target, res):
 
 
 def self_test():
-    target = load(TARGET)
     ok = True
+    with tempfile.TemporaryDirectory(prefix="hermetic-bola-input-") as tmp:
+        fifo = os.path.join(tmp, "target.json")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO target input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
+    target = load(TARGET)
 
     print("[self-test] 1. normal run -> confirmed with controls, within budget")
     res = run(target)
@@ -114,7 +132,11 @@ def self_test():
 def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
-    target = load(argv[1] if len(argv) == 2 else TARGET)
+    try:
+        target = load(argv[1] if len(argv) == 2 else TARGET)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"invalid target input: {exc}", file=sys.stderr)
+        return 2
     return 0 if report(target, run(target)) else 1
 
 

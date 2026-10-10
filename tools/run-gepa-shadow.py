@@ -37,8 +37,11 @@ Usage:
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -46,8 +49,7 @@ EXAMPLES = os.path.join(ROOT, "evals", "qualification", "examples")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _mod(name, filename):
@@ -203,15 +205,16 @@ def evaluate_campaign(campaign, candidates, root, scoreboard):
     }
 
 
-def discover_candidates(campaign_manifest_path):
+def discover_candidates(campaign_manifest_path, root=ROOT):
     cdir = os.path.join(os.path.dirname(campaign_manifest_path), "candidates")
     out = []
     if not os.path.isdir(cdir):
         return out
     for name in sorted(os.listdir(cdir)):
         mf = os.path.join(cdir, name, "candidate-manifest.json")
-        if os.path.isfile(mf):
-            out.append(load(mf))
+        if os.path.lexists(mf):
+            entry = {"candidate_id": name, "manifest": os.path.relpath(mf, root).replace(os.sep, "/")}
+            out.append(CC.load_candidate_manifest(root, campaign_manifest_path, entry))
     return out
 
 
@@ -297,6 +300,57 @@ def _write(root, rel, text):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-input-") as tmp:
+        fifo = os.path.join(tmp, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        fifo_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-candidate-") as tmp:
+        campaign_path = os.path.join(tmp, "campaign-manifest.json")
+        with open(campaign_path, "w") as fh:
+            json.dump({}, fh)
+        outside = os.path.join(tmp, "outside.json")
+        with open(outside, "w") as fh:
+            json.dump({"candidate_id": "cand-escape", "marker": "must not be read"}, fh)
+        manifest = os.path.join(tmp, "candidates", "cand-escape", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(manifest))
+        os.symlink(outside, manifest)
+        try:
+            discover_candidates(campaign_path, tmp)
+            rejected = False
+        except ValueError:
+            rejected = True
+        print("[self-test] symlinked candidate manifest is rejected before read:", "ok" if rejected else "FAIL")
+        if not rejected:
+            ok = False
+
+    with tempfile.TemporaryDirectory(prefix="gepa-shadow-identity-") as tmp:
+        campaign_path = os.path.join(tmp, "campaign-manifest.json")
+        with open(campaign_path, "w") as fh:
+            json.dump({}, fh)
+        manifest = os.path.join(tmp, "candidates", "cand-folder", "candidate-manifest.json")
+        os.makedirs(os.path.dirname(manifest))
+        with open(manifest, "w") as fh:
+            json.dump({"candidate_id": "cand-other"}, fh)
+        try:
+            discover_candidates(campaign_path, tmp)
+            rejected = False
+        except ValueError:
+            rejected = True
+        print("[self-test] manifest candidate_id must match its directory:", "ok" if rejected else "FAIL")
+        if not rejected:
+            ok = False
+
     with tempfile.TemporaryDirectory() as root:
         _write(root, "c/baseline/candidate.diff", "")
         bh = CC.sha256_file(os.path.join(root, "c/baseline/candidate.diff"))
@@ -346,7 +400,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--campaign":
-        return run_cli(argv[2])
+        try:
+            return run_cli(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"invalid campaign input: {exc}", file=sys.stderr)
+            return 2
     print(__doc__)
     return 2
 

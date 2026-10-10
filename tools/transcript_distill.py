@@ -46,6 +46,8 @@ import glob
 import json
 import os
 import re
+import stat
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,6 +109,17 @@ def redact_reason(text, engagements):
     return None
 
 
+def _open_regular_text(path):
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("transcript input is not a regular file")
+        return os.fdopen(fd, "r", errors="ignore")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def user_turns(path):
     """Yield (index, text) for HUMAN-TYPED operator turns only.
 
@@ -127,7 +140,7 @@ def user_turns(path):
     imagined layout can be 100% wrong on real data and still look like it ran.
     """
     try:
-        fh = open(path, errors="ignore")
+        fh = _open_regular_text(path)
     except OSError:
         return
     for i, line in enumerate(fh):
@@ -165,7 +178,7 @@ def verify_quote(path, quote):
     """Re-read the source and confirm the span is really there. backpass documents this; it does
     not do it. A candidate whose quote cannot be found is dropped, not downgraded."""
     try:
-        with open(path, errors="ignore") as fh:
+        with _open_regular_text(path) as fh:
             return quote[:120] in fh.read()
     except OSError:
         return False
@@ -325,6 +338,19 @@ def self_test():
         check("a signal in 2 sessions becomes a candidate", len(c2) == 1, str(c2))
         c3, _ = scan(tmp, min_sessions=3)
         check("the same signal in 2 sessions is dropped at N=3", len(c3) == 0, str(c3))
+
+    print("[self-test] non-regular session inputs do not block the scan")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.mkfifo(os.path.join(tmp, "fifo-session.jsonl"))
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "scan", "--sessions", tmp, "--json"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        check("FIFO session path returns promptly",
+              result is not None and result.returncode == 0 and json.loads(result.stdout).get("stats", {}).get("turns") == 0)
 
     print("[self-test] no REMOVE proposal, and no budget, is reachable")
     with tempfile.TemporaryDirectory() as tmp:

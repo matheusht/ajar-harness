@@ -28,14 +28,14 @@ Usage:
 """
 
 import argparse
-import glob
 import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREREG_GLOB = os.path.join(ROOT, "evals", "**", "preregistration.json")
+EVALS_DIR = os.path.join(ROOT, "evals")
 
 
 def sha256_file(path):
@@ -44,7 +44,37 @@ def sha256_file(path):
 
 
 def find_preregs():
-    return sorted(glob.glob(PREREG_GLOB, recursive=True))
+    paths, unsafe = [], []
+    for parent, directories, files in os.walk(EVALS_DIR):
+        for name in directories[:]:
+            path = os.path.join(parent, name)
+            if os.path.islink(path):
+                unsafe.append(os.path.relpath(path, ROOT))
+                directories.remove(name)
+        if "preregistration.json" in files:
+            candidate = os.path.join(parent, "preregistration.json")
+            if pinned_path(os.path.relpath(candidate, ROOT)) is None:
+                unsafe.append(os.path.relpath(candidate, ROOT))
+            else:
+                paths.append(candidate)
+    if unsafe:
+        raise ValueError(f"unsafe preregistration discovery path(s): {', '.join(sorted(unsafe))}")
+    return sorted(paths)
+
+
+def pinned_path(relative):
+    if not isinstance(relative, str) or os.path.isabs(relative):
+        return None
+    root = Path(ROOT).resolve()
+    try:
+        path = (root / relative).resolve()
+        path.relative_to(root)
+        # A repository-local hard link can still alias a path outside ROOT.
+        if not path.is_file() or path.stat().st_nlink != 1:
+            return None
+        return path
+    except (OSError, ValueError):
+        return None
 
 
 def inspect(path):
@@ -55,8 +85,8 @@ def inspect(path):
     rows = []
     for entry in overlay.get("files", []):
         rel = entry["path"]
-        full = os.path.join(ROOT, rel)
-        if not os.path.isfile(full):
+        full = pinned_path(rel)
+        if full is None:
             rows.append({"path": rel, "pinned": entry.get("sha256"), "actual": None,
                          "state": "missing"})
             continue
@@ -157,7 +187,15 @@ def main():
     r = sub.add_parser("repin"); r.add_argument("--apply", action="store_true")
     r.set_defaults(fn=cmd_repin)
     args = ap.parse_args()
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except ValueError as exc:
+        if args.cmd == "check" and args.json:
+            print(json.dumps({"error": str(exc), "failures": 1, "results": [], "stale": 0},
+                             indent=2, sort_keys=True))
+        else:
+            print(f"REFUSING {exc}")
+        return 1
 
 
 if __name__ == "__main__":

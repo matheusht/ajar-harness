@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import io
 import json
 import os
@@ -1277,6 +1276,74 @@ def main() -> int:
             == "input-parent-aba-sentinel\n"
             and tree_moved_child.joinpath("fixture.tgz").read_bytes()
             == b"tree-parent-aba-sentinel",
+        )
+
+        input_fifo = root / "portable-input.fifo"
+        os.mkfifo(input_fifo)
+        fifo_reader = (
+            "import sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[2])\n"
+            "from engagement_quarantine import read_safe_offline_file\n"
+            "try:\n read_safe_offline_file(Path(sys.argv[1]))\n"
+            "except ValueError as exc:\n print(str(exc))\n"
+        )
+        try:
+            fifo_result = subprocess.run(
+                [sys.executable, "-c", fifo_reader, str(input_fifo), str(TOOLS)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fifo_result = None
+        check(
+            "portable file input rejects a FIFO without blocking",
+            fifo_result is not None
+            and fifo_result.returncode == 0
+            and fifo_result.stdout.strip() == "offline input source is not a regular file",
+            "timed out" if fifo_result is None else fifo_result.stdout + fifo_result.stderr,
+        )
+
+        marker_race_root = root / "marker-open-race"
+        marker_race_path = marker_race_root / MARKER_RELATIVE
+        marker_race_path.parent.mkdir(parents=True)
+        marker_race_path.write_text("{}\n", encoding="utf-8")
+        marker_race_probe = (
+            "import json, os, sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import engagement_quarantine as quarantine\n"
+            "original_open = os.open\n"
+            "marker = quarantine.MARKER_PARTS[-1]\n"
+            "def race_open(path, flags, mode=0o777, *, dir_fd=None):\n"
+            "    if path == marker and sys._getframe(1).f_code.co_name == '_read_marker':\n"
+            "        os.unlink(path, dir_fd=dir_fd)\n"
+            "        os.mkfifo(path, dir_fd=dir_fd)\n"
+            "    return original_open(path, flags, mode, dir_fd=dir_fd)\n"
+            "os.open = race_open\n"
+            "print(json.dumps(quarantine.inspect_quarantine(Path(sys.argv[2]))))\n"
+        )
+        try:
+            marker_race = subprocess.run(
+                [sys.executable, "-c", marker_race_probe, str(TOOLS), str(marker_race_root)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            marker_race_state = json.loads(marker_race.stdout)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError):
+            marker_race = None
+            marker_race_state = {}
+        check(
+            "quarantine marker replacement with FIFO fails closed without blocking",
+            marker_race is not None
+            and marker_race.returncode == 0
+            and marker_race_state.get("quarantined") is True
+            and marker_race_state.get("marker_status") == "malformed",
+            "timed out" if marker_race is None else marker_race.stdout + marker_race.stderr,
         )
 
         casebook = _run(TOOLS / "casebook-provenance-test.py")

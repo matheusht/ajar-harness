@@ -33,14 +33,36 @@ import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
+
+
+def _under_skills(path):
+    try:
+        parts = Path(os.path.abspath(path)).relative_to(ROOT).parts
+        if parts and parts[0].casefold() == "skills":
+            return True
+    except ValueError:
+        pass
+    skills_root = Path(ROOT, "skills").resolve()
+    current = Path(path).resolve()
+    while True:
+        try:
+            if os.path.samefile(current, skills_root):
+                return True
+        except OSError:
+            pass
+        if current.parent == current:
+            return False
+        current = current.parent
 
 
 def read(path):
@@ -325,10 +347,14 @@ def render_pr_body(bundle, promotable):
 
 
 def render_cli(campaign_path, candidate_id):
-    campaign = load(campaign_path)
     camp_dir = os.path.dirname(campaign_path)
+    cand_dir = APE.CC.candidate_dir(campaign_path, candidate_id)
+    out_dir = os.path.join(cand_dir, "promotion")
+    if _under_skills(out_dir):
+        raise ValueError("renderer must not write under skills/")
+
+    campaign = load(campaign_path)
     report = load(os.path.join(camp_dir, "report.json"))
-    cand_dir = os.path.join(camp_dir, "candidates", candidate_id)
     candidate_manifest = load(os.path.join(cand_dir, "candidate-manifest.json"))
 
     rc = next((c for c in report["candidates"] if c["candidate_id"] == candidate_id), None)
@@ -371,8 +397,6 @@ def render_cli(campaign_path, candidate_id):
         print(f"bundle invalid, missing: {missing}")
         return 1
 
-    out_dir = os.path.join(cand_dir, "promotion")
-    assert "skills/" not in out_dir
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "promotion-bundle.json"), "w") as fh:
         json.dump(bundle, fh, indent=2); fh.write("\n")
@@ -387,6 +411,25 @@ def render_cli(campaign_path, candidate_id):
 
 def self_test():
     ok = True
+    with tempfile.TemporaryDirectory(prefix="promotion-renderer-input-") as tmp:
+        for label, args in (
+            ("campaign", ["--campaign", "{path}", "--candidate", "candidate"]),
+            ("bundle", ["--verify", "{path}"]),
+        ):
+            fifo = os.path.join(tmp, f"{label}.fifo")
+            os.mkfifo(fifo)
+            try:
+                result = subprocess.run(
+                    [sys.executable, os.path.abspath(__file__), *[arg.format(path=fifo) for arg in args]],
+                    capture_output=True, text=True, timeout=2, check=False,
+                )
+            except subprocess.TimeoutExpired:
+                result = None
+            input_ok = result is not None and result.returncode == 2 and "regular file" in result.stderr
+            print(f"[self-test] FIFO {label} input is rejected promptly:", "ok" if input_ok else "FAIL")
+            if not input_ok:
+                ok = False
+
     campaign = {"campaign_id": "camp"}
     scoreboard = {"false_discovery": {"invalid_accept_rate": 0.0, "passed": True},
                   "hermetic_bola": {"target_calls": 5}}
@@ -535,7 +578,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
         return self_test()
     if len(argv) == 3 and argv[1] == "--verify":
-        return verify_cli(argv[2])
+        try:
+            return verify_cli(argv[2])
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            print(f"invalid renderer input: {exc}", file=sys.stderr)
+            return 2
     camp = cand = None
     i = 1
     while i < len(argv):
@@ -548,7 +595,11 @@ def main(argv):
     if not camp or not cand:
         print(__doc__)
         return 2
-    return render_cli(camp, cand)
+    try:
+        return render_cli(camp, cand)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"invalid renderer input: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -5,15 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Mapping
 from pathlib import Path
+
+from regular_file_io import open_regular_file, read_regular_text
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
 def sha256_file(path: os.PathLike[str] | str) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
+    with open_regular_file(path, binary=True) as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -39,10 +40,6 @@ def emit(paths, base: os.PathLike[str] | str = REPOSITORY_ROOT) -> dict[str, dic
     return block
 
 
-def emit_named(paths: Mapping[str, os.PathLike[str] | str], base: os.PathLike[str] | str) -> dict[str, dict[str, str]]:
-    return {name: spec_for(path, base) for name, path in paths.items()}
-
-
 def _manifest_base(manifest_path: Path, document: dict) -> Path:
     base_kind = document.get("frozen_inputs_base", "repository")
     if base_kind == "repository":
@@ -56,7 +53,7 @@ def check_manifest(manifest_path: os.PathLike[str] | str) -> list[str]:
     """Return deterministic drift descriptions; malformed manifests fail closed as drift."""
     path = Path(manifest_path)
     try:
-        document = json.loads(path.read_text())
+        document = json.loads(read_regular_text(path))
         if not isinstance(document, dict):
             raise TypeError("manifest root must be an object")
         base = _manifest_base(path, document)

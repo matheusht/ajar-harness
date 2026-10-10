@@ -48,6 +48,7 @@ from engagement_records import (
     validate_reference_fixture_suite,
     validate_schema_documents,
 )
+from regular_file_io import open_regular_file, read_regular_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -65,6 +66,31 @@ def record(ok, label, detail=""):
         FAILS.append(f"{label}  {detail}")
 
 
+def read_conformance_text(path, label, guarded_dirs=(), *, encoding=None, errors="strict"):
+    if any(os.path.islink(directory) for directory in guarded_dirs):
+        record(False, f"{label}: regular input is safe to read", "unsafe symlinked source directory")
+        return None
+    if not os.path.lexists(path):
+        return None
+    try:
+        return read_regular_text(path, encoding=encoding, errors=errors, no_follow=True)
+    except OSError as exc:
+        record(False, f"{label}: regular input is safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+        return None
+
+
+def read_conformance_json(path, label, guarded_dirs=()):
+    text = read_conformance_text(path, label, guarded_dirs)
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        record(False, f"{label}: fixture JSON is valid", "invalid JSON fixture")
+        return None
+
+
 def front_matter(text):
     if not text.startswith("---"):
         return None
@@ -80,13 +106,21 @@ def get_key(fm, key):
 
 
 def list_cards(subdir):
+    skills_root = os.path.join(ROOT, "skills")
     base = os.path.join(ROOT, "skills", subdir)
+    if os.path.islink(skills_root) or os.path.islink(base):
+        record(False, f"{subdir}: card directory is not a symlink",
+               "unsafe symlinked skill directory")
+        return []
     if not os.path.isdir(base):
         return []
     out = []
     for name in sorted(os.listdir(base)):
-        path = os.path.join(base, name, "SKILL.md")
-        if os.path.isfile(path):
+        card_dir = os.path.join(base, name)
+        path = os.path.join(card_dir, "SKILL.md")
+        if os.path.islink(card_dir):
+            out.append((name, card_dir))
+        elif os.path.lexists(path):
             out.append((name, path))
     return out
 
@@ -94,7 +128,13 @@ def list_cards(subdir):
 def collect_pattern_ids():
     ids = {}
     for name, path in list_cards("patterns"):
-        fm = front_matter(open(path).read()) or ""
+        try:
+            text = read_regular_text(path, no_follow=True)
+        except OSError as exc:
+            record(False, f"patterns/{name}: regular card input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
+        fm = front_matter(text) or ""
         cid = get_key(fm, "id")
         if cid:
             ids[cid] = name
@@ -104,7 +144,12 @@ def collect_pattern_ids():
 def check_cards(subdir, pattern_ids, cap_ids):
     print(f"\n[cards] skills/{subdir}/")
     for name, path in list_cards(subdir):
-        text = open(path).read()
+        try:
+            text = read_regular_text(path, no_follow=True)
+        except OSError as exc:
+            record(False, f"{subdir}/{name}: regular card input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
         fm = front_matter(text)
         record(fm is not None, f"{subdir}/{name}: front-matter present")
         if fm is None:
@@ -231,10 +276,15 @@ def check_routes_to(name, subdir, fm, pattern_ids):
 def collect_capability_ids():
     ids = set()
     path = os.path.join(ROOT, "capabilities", "registry.yaml")
-    if os.path.isfile(path):
-        for m in re.finditer(r"^\s*-\s*id:\s*([A-Za-z0-9._-]+)", open(path).read(), re.MULTILINE):
+    text = _read_capability_input(path, "capabilities/registry.yaml")
+    if text is not None:
+        for m in re.finditer(r"^\s*-\s*id:\s*([A-Za-z0-9._-]+)", text, re.MULTILINE):
             ids.add(m.group(1))
     return ids
+
+
+def _read_capability_input(path, label):
+    return read_conformance_text(path, label, (os.path.join(ROOT, "capabilities"),))
 
 
 def _capability_blocks(text):
@@ -315,9 +365,10 @@ def check_capability_classes():
     default-disabled, gated, and forbidden from oracle/judge/verdict authority; only `oracle` may judge."""
     print("\n[capabilities] capability classes (authority model)")
     path = os.path.join(ROOT, "capabilities", "classes.yaml")
-    if not os.path.isfile(path):
+    text = _read_capability_input(path, "capabilities/classes.yaml")
+    if text is None:
         return
-    blocks = _capability_blocks(open(path).read())
+    blocks = _capability_blocks(text)
     record(len(blocks) > 0, "classes: non-empty")
     by_id = {cid: body for cid, body in blocks}
     for cid, body in blocks:
@@ -342,9 +393,9 @@ def check_capabilities():
     """The narrow keyhole: every external capability must be sensor_only and declare its fences."""
     print("\n[capabilities] external capability registry")
     path = os.path.join(ROOT, "capabilities", "registry.yaml")
-    if not os.path.isfile(path):
+    text = _read_capability_input(path, "capabilities/registry.yaml")
+    if text is None:
         return
-    text = open(path).read()
     blocks = _capability_blocks(text)
     record(len(blocks) > 0, "capabilities: registry non-empty")
     for cid, body in blocks:
@@ -363,14 +414,18 @@ def scope_flag_problems(registry_text, template_text):
 
 def check_capability_scope_flags():
     tmpl = os.path.join(ROOT, "engagements", "_TEMPLATE", "scope.md")
-    if not os.path.isfile(tmpl):
+    template_text = read_conformance_text(
+        tmpl, "capability scope template", (os.path.dirname(tmpl),), encoding="utf-8"
+    )
+    if template_text is None:
         return
     src = ""
     for fn in ("registry.yaml", "classes.yaml"):
         fp = os.path.join(ROOT, "capabilities", fn)
-        if os.path.isfile(fp):
-            src += open(fp).read() + "\n"
-    problems = scope_flag_problems(src, open(tmpl).read())
+        text = _read_capability_input(fp, f"capabilities/{fn}")
+        if text is not None:
+            src += text + "\n"
+    problems = scope_flag_problems(src, template_text)
     record(not problems, "capabilities: every required scope flag is declared in _TEMPLATE/scope.md",
            "; ".join(problems) if problems else "")
 
@@ -397,17 +452,29 @@ def check_capability_must_reject():
     """Permanent negative tests: every fixture MUST be rejected by the SAME validation predicates.
     Converts the manual gate-bites into CI-enforced regressions (mirrors fixtures/findings/_must_reject)."""
     base = os.path.join(ROOT, "fixtures", "capabilities", "_must_reject")
+    for path in (os.path.join(ROOT, "fixtures"), os.path.dirname(base), base):
+        if os.path.islink(path):
+            record(False, "capabilities _must_reject: fixture directories are safe",
+                   "unsafe symlinked fixture directory")
+            return
     if not os.path.isdir(base):
         return
     print("\n[capabilities] _must_reject corpus (the keyhole must fail closed)")
     cap_ids = collect_capability_ids()
     tmpl = os.path.join(ROOT, "engagements", "_TEMPLATE", "scope.md")
-    tmpl_text = open(tmpl).read() if os.path.isfile(tmpl) else ""
+    tmpl_text = read_conformance_text(
+        tmpl, "capability scope template", (os.path.dirname(tmpl),), encoding="utf-8"
+    ) or ""
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not os.path.isfile(fp):
+        if not os.path.lexists(fp):
             continue
-        content = open(fp).read()
+        try:
+            content = read_regular_text(fp, no_follow=True)
+        except OSError as exc:
+            record(False, f"_must_reject/{fn}: regular fixture is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
         if fn.endswith(".md"):
             problems = card_capability_problems(front_matter(content) or "", cap_ids)
         elif "scope-flag" in fn:
@@ -500,20 +567,29 @@ TOOL_FAMILY_CONTRACT_OWNED = {"st3gg", "p4rs3lt0ngv3", "foundry-slither"}
 def check_tool_family_manifests():
     """Family manifests: detection-first, machine-checkable, staged authority. Fail closed."""
     base = os.path.join(ROOT, "tool-families")
+    if os.path.islink(base):
+        record(False, "tool-families: source directory is safe", "unsafe symlinked directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[tool-families] family manifests (manifest holds authority; advanced surfaces gated)")
     for fam in sorted(os.listdir(base)):
         if fam not in TOOL_FAMILY_CONTRACT_OWNED:
             continue
-        mpath = os.path.join(base, fam, "manifest.yaml")
-        if os.path.isfile(mpath):
-            problems = tool_family_manifest_problems(open(mpath).read())
+        family_dir = os.path.join(base, fam)
+        if os.path.islink(family_dir):
+            record(False, f"tool-families/{fam}: source directory is safe", "unsafe symlinked directory")
+            continue
+        mpath = os.path.join(family_dir, "manifest.yaml")
+        text = read_conformance_text(mpath, f"tool-families/{fam}/manifest.yaml", (base, family_dir))
+        if text is not None:
+            problems = tool_family_manifest_problems(text)
             record(not problems, f"tool-families/{fam}/manifest.yaml: detection-first + staged authority",
                    "; ".join(problems) if problems else "")
-        apath = os.path.join(base, fam, "AGENT.md")
-        if os.path.isfile(apath):
-            atext = open(apath).read().lower()
+        apath = os.path.join(family_dir, "AGENT.md")
+        atext = read_conformance_text(apath, f"tool-families/{fam}/AGENT.md", (base, family_dir))
+        if atext is not None:
+            atext = atext.lower()
             record("plane 1/2" in atext and "raw" in atext,
                    f"tool-families/{fam}/AGENT.md: states raw payloads not stored in Plane 1/2")
 
@@ -521,14 +597,20 @@ def check_tool_family_manifests():
 def check_tool_family_must_reject():
     """Permanent negatives: a malformed family manifest MUST be rejected by the same predicate."""
     base = os.path.join(ROOT, "fixtures", "tool-families", "_must_reject")
+    guarded_dirs = (os.path.join(ROOT, "fixtures"), os.path.dirname(base), base)
+    if any(os.path.islink(directory) for directory in guarded_dirs):
+        record(False, "tool-families _must_reject: fixture directories are safe",
+               "unsafe symlinked fixture directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[tool-families] _must_reject corpus (the manifest must fail closed)")
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not os.path.isfile(fp):
+        text = read_conformance_text(fp, f"_must_reject/{fn}", guarded_dirs)
+        if text is None:
             continue
-        problems = tool_family_manifest_problems(open(fp).read())
+        problems = tool_family_manifest_problems(text)
         record(bool(problems), f"_must_reject/{fn}: rejected [{'; '.join(problems) or 'NONE'}]",
                "fixture should be rejected but passed all checks" if not problems else "")
 
@@ -577,35 +659,64 @@ def payload_proposal_problems(obj):
 def check_payload_proposals():
     """PG-2: the inert payload-proposal schema gate. Valid example passes; malformed ones must reject."""
     base = os.path.join(ROOT, "fixtures", "payload-proposals")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "payload-proposals: fixture directories are safe",
+               "unsafe symlinked proposal fixture directory")
+        return
     if not os.path.isdir(base):
         return
     print("\n[payload-proposals] inert proposal schema gate (PG-2)")
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not (fn.endswith(".json") and os.path.isfile(fp)):
+        if not fn.endswith(".json") or not os.path.lexists(fp):
             continue
-        problems = payload_proposal_problems(load_json(fp))
+        obj = read_conformance_json(fp, f"payload-proposals/{fn}", (fixture_root, base))
+        if obj is None:
+            continue
+        problems = payload_proposal_problems(obj)
         record(not problems, f"payload-proposals/{fn}: valid proposal",
                "; ".join(problems) if problems else "")
     mr = os.path.join(base, "_must_reject")
+    if os.path.islink(mr):
+        record(False, "payload-proposals/_must_reject: fixture directory is safe",
+               "unsafe symlinked must-reject directory")
+        return
     if os.path.isdir(mr):
         for fn in sorted(os.listdir(mr)):
             if not fn.endswith(".json"):
                 continue
-            problems = payload_proposal_problems(load_json(os.path.join(mr, fn)))
+            fp = os.path.join(mr, fn)
+            if not os.path.lexists(fp):
+                continue
+            obj = read_conformance_json(fp, f"payload-proposals/_must_reject/{fn}",
+                                        (fixture_root, base, mr))
+            if obj is None:
+                continue
+            problems = payload_proposal_problems(obj)
             record(bool(problems), f"payload-proposals/_must_reject/{fn}: rejected [{'; '.join(problems) or 'NONE'}]",
                    "malformed proposal should be rejected but passed" if not problems else "")
 
 
 def check_oracles():
     print("\n[oracles] skills/oracles/")
+    skills_root = os.path.join(ROOT, "skills")
     base = os.path.join(ROOT, "skills", "oracles")
+    if os.path.islink(skills_root) or os.path.islink(base):
+        record(False, "oracles: source directory is safe", "unsafe symlinked directory")
+        return
     if not os.path.isdir(base):
         return
     for fn in sorted(os.listdir(base)):
         if not fn.endswith(".md"):
             continue
-        fm = front_matter(open(os.path.join(base, fn)).read())
+        try:
+            text = read_regular_text(os.path.join(base, fn), no_follow=True)
+        except OSError as exc:
+            record(False, f"oracles/{fn}: regular input is safe to read",
+                   f"unsafe input: {exc.strerror or 'not a regular file'}")
+            continue
+        fm = front_matter(text)
         record(fm is not None, f"oracles/{fn}: front-matter present")
         if fm is not None:
             record(get_key(fm, "id") is not None, f"oracles/{fn}: has id")
@@ -617,15 +728,31 @@ def check_casebooks(pattern_ids):
     base = os.path.join(ROOT, "casebooks")
     if not os.path.isdir(base):
         return
+    if os.path.islink(base):
+        record(False, "casebooks: source directory is safe", "unsafe symlinked directory")
+        return
     for name in sorted(os.listdir(base)):
         cdir = os.path.join(base, name)
-        if name.startswith("_") or not os.path.isdir(cdir):
+        if name.startswith("_"):
+            continue
+        if os.path.islink(cdir):
+            record(False, f"casebooks/{name}: source directory is safe",
+                   "unsafe symlinked directory")
+            continue
+        if not os.path.isdir(cdir):
             continue
         refs = set()
         for fn in os.listdir(cdir):
             fp = os.path.join(cdir, fn)
-            if os.path.isfile(fp):
-                refs |= set(re.findall(r"pattern\.[a-z0-9-]+", open(fp).read()))
+            if not os.path.lexists(fp) or (os.path.isdir(fp) and not os.path.islink(fp)):
+                continue
+            try:
+                text = read_regular_text(fp, no_follow=True)
+            except OSError as exc:
+                record(False, f"casebooks/{name}/{fn}: regular input is safe to read",
+                       f"unsafe input: {exc.strerror or 'not a regular file'}")
+                continue
+            refs |= set(re.findall(r"pattern\.[a-z0-9-]+", text))
         unknown = sorted(r for r in refs if r not in pattern_ids)
         record(not unknown, f"casebooks/{name}: pattern refs resolve",
                f"unknown: {unknown}" if unknown else "")
@@ -659,10 +786,24 @@ def check_secrets():
         base = os.path.join(ROOT, sub)
         if not os.path.isdir(base):
             continue
-        for dirpath, _, files in os.walk(base):
+        if os.path.islink(base):
+            hits.append(f"{sub}: scan root is a symlink")
+            continue
+        for dirpath, dirnames, files in os.walk(base):
+            for name in dirnames[:]:
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path):
+                    hits.append(f"{os.path.relpath(path, ROOT)}: symlinked directory")
+                    dirnames.remove(name)
             for fn in files:
                 fp = os.path.join(dirpath, fn)
-                text = open(fp, errors="ignore").read()
+                try:
+                    text = read_regular_text(fp, errors="ignore", no_follow=True)
+                except OSError as exc:
+                    hits.append(
+                        f"{os.path.relpath(fp, ROOT)}: cannot safely scan ({exc.strerror})"
+                    )
+                    continue
                 for pat, desc in SECRET_PATTERNS:
                     for m in re.finditer(pat, text):
                         hits.append(f"{os.path.relpath(fp, ROOT)}: {desc} :: {m.group(0)[:24]}")
@@ -679,9 +820,8 @@ FINDING_BASE_REQUIRED = [
 ]
 
 
-def load_json(path):
-    with open(path) as fh:
-        return json.load(fh)
+def _load_finding_fixture(path, label):
+    return read_conformance_json(path, label)
 
 
 def finding_is_new(f):
@@ -692,13 +832,19 @@ def finding_is_new(f):
 def check_finding_fixtures():
     print("\n[findings] evidence-contract gate (necessary, not sufficient)")
     base = os.path.join(ROOT, "fixtures", "findings")
+    if os.path.islink(os.path.join(ROOT, "fixtures")) or os.path.islink(base):
+        record(False, "findings: fixture directories are safe",
+               "unsafe symlinked finding fixture directory")
+        return
     if not os.path.isdir(base):
         return
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
-        if not fn.endswith(".json") or not os.path.isfile(fp):
+        if not fn.endswith(".json") or not os.path.lexists(fp):
             continue
-        f = load_json(fp)
+        f = _load_finding_fixture(fp, f"findings/{fn}")
+        if f is None:
+            continue
         missing = [k for k in FINDING_BASE_REQUIRED if k not in f]
         record(not missing, f"findings/{fn}: base required fields", f"missing {missing}" if missing else "")
         record("recorded_date" in f, f"findings/{fn}: recorded_date present (drives the migration gate)",
@@ -714,12 +860,20 @@ def check_finding_fixtures():
             record(True, f"findings/{fn}: legacy finding advisory-only")
 
     mr = os.path.join(base, "_must_reject")
+    if os.path.islink(mr):
+        record(False, "findings/_must_reject: fixture directory is safe",
+               "unsafe symlinked must-reject directory")
+        return
     if os.path.isdir(mr):
         for fn in sorted(os.listdir(mr)):
             fp = os.path.join(mr, fn)
             if not fn.endswith(".json"):
                 continue
-            f = load_json(fp)
+            if not os.path.lexists(fp):
+                continue
+            f = _load_finding_fixture(fp, f"findings/_must_reject/{fn}")
+            if f is None:
+                continue
             schema_errors = validate_record(f, "finding-v2-legacy")
             caught = finding_is_new(f) and ("evidence_contract" not in f or bool(schema_errors))
             record(caught, f"findings/_must_reject/{fn}: caught by full schema + policy gate (invalid-accept guard)",
@@ -737,12 +891,27 @@ def check_decision5_record_schemas():
     ref_suite = validate_reference_fixture_suite()
     record(not ref_suite["failures"], f"record-reference fixtures: {ref_suite['case_count']} expected outcomes",
            str(ref_suite["failures"]) if ref_suite["failures"] else "")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    record_dir = os.path.join(fixture_root, "engagement-records")
     corpus_root = os.path.join(ROOT, "fixtures", "engagement-records", "legacy-corpus")
+    if any(os.path.islink(path) for path in (fixture_root, record_dir, corpus_root)):
+        record(False, "engagement-records: fixture directories are safe", "unsafe symlinked fixture directory")
+        return
     produced = legacy_finding_inventory(corpus_root)
-    corpus_expected = load_json(os.path.join(ROOT, "fixtures", "engagement-records", "legacy-corpus-expected.json"))
+    corpus_expected = read_conformance_json(
+        os.path.join(record_dir, "legacy-corpus-expected.json"),
+        "engagement-records/legacy-corpus-expected.json", (fixture_root, record_dir),
+    )
+    if corpus_expected is None:
+        return
     record(produced == corpus_expected, "synthetic legacy corpus inventory matches exact counts, hashes, and root digest",
            "regenerate only after intentional fixture review" if produced != corpus_expected else "")
-    expected = load_json(os.path.join(ROOT, "fixtures", "engagement-records", "legacy-drift-expected.json"))
+    expected = read_conformance_json(
+        os.path.join(record_dir, "legacy-drift-expected.json"),
+        "engagement-records/legacy-drift-expected.json", (fixture_root, record_dir),
+    )
+    if expected is None:
+        return
     counts = expected.get("expected_counts", {})
     record(counts.get("total") == 124 and counts.get("schema_version_2") == 124,
            "legacy inventory baseline exposes 124 version-2 findings")
@@ -755,9 +924,15 @@ def check_decision5_record_schemas():
 def check_false_discovery_corpus():
     print("\n[false-discovery] invalid-accept guard")
     fp = os.path.join(ROOT, "fixtures", "false-discovery", "corpus.json")
-    if not os.path.isfile(fp):
+    fixture_root = os.path.join(ROOT, "fixtures")
+    base = os.path.dirname(fp)
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "false-discovery: corpus directories are safe", "unsafe symlinked corpus directory")
         return
-    entries = load_json(fp).get("entries", [])
+    corpus = read_conformance_json(fp, "false-discovery/corpus.json", (fixture_root, base))
+    if corpus is None:
+        return
+    entries = corpus.get("entries", [])
     record(len(entries) > 0, "false-discovery: corpus non-empty")
     confirmable = [e.get("id", "?") for e in entries if e.get("correct_verdict") == "confirmed"]
     record(not confirmable, "false-discovery: invalid_accept_rate == 0 (no trap's correct verdict is 'confirmed')",
@@ -771,9 +946,15 @@ def check_false_discovery_corpus():
 def check_adversarial_candidates():
     print("\n[adversarial-candidates] Phase-3 gate fixture (staged, not launched)")
     fp = os.path.join(ROOT, "fixtures", "adversarial-candidates", "corpus.json")
-    if not os.path.isfile(fp):
+    fixture_root = os.path.join(ROOT, "fixtures")
+    base = os.path.dirname(fp)
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "adversarial: corpus directories are safe", "unsafe symlinked corpus directory")
         return
-    entries = load_json(fp).get("entries", [])
+    corpus = read_conformance_json(fp, "adversarial/corpus.json", (fixture_root, base))
+    if corpus is None:
+        return
+    entries = corpus.get("entries", [])
     retain = [e.get("id", "?") for e in entries if e.get("expected_disposition") == "retain"]
     block = [e.get("id", "?") for e in entries if e.get("expected_disposition") == "block"]
     record(len(retain) >= 1, "adversarial: at least one valid additive candidate to retain",
@@ -914,12 +1095,30 @@ def check_kb_entries():
             record(False, f"kb/{eid}: carries an ablation fixture",
                    "B.3: a promoted entry must prove it changes a routing decision")
             continue
-        fx_path = os.path.join(ROOT, fx_rel)
-        if not os.path.isfile(fx_path):
+        if not isinstance(fx_rel, str):
+            parts = []
+        else:
+            parts = fx_rel.split("/")
+        if (
+            not isinstance(fx_rel, str)
+            or "\\" in fx_rel
+            or os.path.isabs(fx_rel)
+            or len(parts) < 2
+            or parts[0] != "fixtures"
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            record(False, f"kb/{eid}: ablation fixture path stays within repository fixtures",
+                   str(fx_rel))
+            continue
+        fx_path = os.path.join(ROOT, *parts)
+        if not os.path.lexists(fx_path):
             record(False, f"kb/{eid}: ablation fixture exists", fx_rel)
             continue
-        with open(fx_path) as fh:
-            fx = json.load(fh)
+        guarded_dirs = tuple(os.path.join(ROOT, *parts[:index])
+                             for index in range(1, len(parts)))
+        fx = read_conformance_json(fx_path, f"kb/{eid} ablation fixture", guarded_dirs)
+        if fx is None:
+            continue
         changed, detail = kbmod.ablate(e, fx, entries)
         record(changed, f"kb/{eid}: still changes a routing decision",
                f"{detail['without']} == {detail['with']}")
@@ -985,7 +1184,13 @@ def check_finding_traps():
         if not os.path.isdir(pkg):
             continue
         attest_path = os.path.join(pkg, "attest.json")
-        attest = load_json(attest_path) if os.path.isfile(attest_path) else None
+        attest = None
+        if os.path.lexists(attest_path):
+            attest = read_conformance_json(
+                attest_path, f"finding-traps/{name}/attest.json", (base, pkg)
+            )
+            if attest is None:
+                continue
         res, _ = score(pkg, attest)
         blocked = bool(res.failures)
         want_block = not name.startswith("control-")
@@ -1117,17 +1322,29 @@ def check_finding_lifecycle():
     control_fixture = os.path.join(ROOT, "fixtures", "lifecycle-control-kind")
     if os.path.isdir(control_fixture):
         from finding_lifecycle import Gates, g2_control
+        fixture_root = os.path.join(ROOT, "fixtures")
+        cases_dir = os.path.join(control_fixture, "cases")
 
         def control_case(name):
-            case = os.path.join(control_fixture, "cases", name)
-            finding = load_json(os.path.join(case, "finding.json"))
-            attest = load_json(os.path.join(case, "attest.json"))
+            case = os.path.join(cases_dir, name)
+            finding = read_conformance_json(
+                os.path.join(case, "finding.json"), f"lifecycle-control-kind/{name}/finding.json",
+                (fixture_root, control_fixture, cases_dir, case),
+            )
+            attest = read_conformance_json(
+                os.path.join(case, "attest.json"), f"lifecycle-control-kind/{name}/attest.json",
+                (fixture_root, control_fixture, cases_dir, case),
+            )
+            if finding is None or attest is None:
+                return None
             gate = Gates()
             g2_control(finding, attest, gate, control_fixture)
             return gate.rows[0]
 
         replay = control_case("replay-as-control")
         matched = control_case("matched-control")
+        if replay is None or matched is None:
+            return
         record(not replay["ok"], "lifecycle-control-kind: replay-as-control blocks G2",
                replay["detail"])
         record(matched["ok"], "lifecycle-control-kind: matched control clears G2",
@@ -1402,6 +1619,10 @@ def check_framing_probe():
     none of the three vector patterns matched."""
     print("\n[framing-probe] evidence packets carry no severity signal")
     pk = os.path.join(ROOT, "fixtures", "framing-probe", "packets-v2")
+    guarded_dirs = (os.path.join(ROOT, "fixtures"), os.path.dirname(pk), pk)
+    if any(os.path.islink(path) for path in guarded_dirs):
+        record(False, "framing-probe: packet directories are safe", "unsafe symlinked packet directory")
+        return
     if not os.path.isdir(pk):
         return
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -1411,10 +1632,15 @@ def check_framing_probe():
         record(False, "framing-probe: module is importable", str(exc))
         return
 
-    packets = sorted(f for f in os.listdir(pk) if f.endswith(".packet.json"))
+    packets = []
+    for fn in sorted(os.listdir(pk)):
+        if not fn.endswith(".packet.json"):
+            continue
+        packet = read_conformance_json(os.path.join(pk, fn), f"framing-probe/{fn}", guarded_dirs)
+        if packet is not None:
+            packets.append(packet)
     record(len(packets) >= 3, "framing-probe: packets exist", f"{len(packets)} packet(s)")
-    for name in packets:
-        p = json.load(open(os.path.join(pk, name)))
+    for p in packets:
         leaked = FP.leaks(p["body"])
         record(not leaked, f"framing-probe/{p['finding_id']}: zero severity signals survive",
                f"{len(leaked)} leak(s): {[t for _, t in leaked[:3]]}")
@@ -1432,7 +1658,7 @@ def check_framing_probe():
 
     # Three framings, one packet: the evidence must be byte-identical across them.
     if packets:
-        p = json.load(open(os.path.join(pk, packets[0])))
+        p = packets[0]
         record(len(set(FP.FRAMINGS.values())) == 3,
                "framing-probe: the three framings are distinct texts")
         record(all(p["body"] not in v for v in FP.FRAMINGS.values()),
@@ -1490,6 +1716,10 @@ def check_intervention_corpus():
     Absent corpus is not a failure; the check returns early."""
     print("\n[interventions] operator-intervention ledger")
     base = os.path.join(ROOT, "fixtures", "interventions")
+    fixture_root = os.path.join(ROOT, "fixtures")
+    if any(os.path.islink(path) for path in (fixture_root, base)):
+        record(False, "interventions: corpus directories are safe", "unsafe symlinked corpus directory")
+        return
     if not os.path.isdir(base):
         return
     files = sorted(f for f in os.listdir(base) if f.endswith(".json"))
@@ -1497,7 +1727,9 @@ def check_intervention_corpus():
         return
     seen = {}
     for fn in files:
-        doc = load_json(os.path.join(base, fn))
+        doc = read_conformance_json(os.path.join(base, fn), f"interventions/{fn}", (fixture_root, base))
+        if doc is None:
+            continue
         entries = doc.get("entries", [])
         record(len(entries) > 0, f"interventions/{fn}: corpus non-empty")
         record(bool(doc.get("method")), f"interventions/{fn}: declares its method",
@@ -1530,11 +1762,18 @@ def check_doctrine_mirror():
     print("\n[doctrine] CLAUDE.md / AGENTS.md mirror")
     a = os.path.join(ROOT, "CLAUDE.md")
     b = os.path.join(ROOT, "AGENTS.md")
-    if not (os.path.isfile(a) and os.path.isfile(b)):
+    if not (os.path.lexists(a) and os.path.lexists(b)):
         record(False, "doctrine mirror: both CLAUDE.md and AGENTS.md are present")
         return
-    da = hashlib.sha256(open(a, "rb").read()).hexdigest()
-    db = hashlib.sha256(open(b, "rb").read()).hexdigest()
+    try:
+        with open_regular_file(a, binary=True, no_follow=True) as handle:
+            da = hashlib.sha256(handle.read()).hexdigest()
+        with open_regular_file(b, binary=True, no_follow=True) as handle:
+            db = hashlib.sha256(handle.read()).hexdigest()
+    except OSError as exc:
+        record(False, "doctrine mirror: guidance files are safe to read",
+               f"unsafe input: {exc.strerror or 'not a regular file'}")
+        return
     record(da == db, "AGENTS.md is byte-identical to CLAUDE.md",
            f"CLAUDE.md {da[:12]} != AGENTS.md {db[:12]} — edit both together")
 
@@ -1548,14 +1787,18 @@ def check_active_guidance():
         ("AGENTS.md", ("docs/decisions/README.md",)),
     ):
         path = os.path.join(ROOT, source)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"guidance/{source}", (os.path.dirname(path),), encoding="utf-8"
+        ) or ""
         for destination in destinations:
             record((f"]({destination})" in text or f"`{destination}`" in text)
                    and os.path.isfile(os.path.join(os.path.dirname(path), destination)),
                    f"guidance/{source}: {destination} is linked and exists")
     for source in ("AGENTS.md", "CLAUDE.md"):
         path = os.path.join(ROOT, source)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"guidance/{source}", (os.path.dirname(path),), encoding="utf-8"
+        ) or ""
         for missing in ("docs/agents/issue-tracker.md", "docs/agents/domain.md"):
             record(missing not in text, f"guidance/{source}: absent setup reference {missing} stays removed")
 
@@ -1577,9 +1820,14 @@ def check_queue_stop_doctrine():
         (re.compile(r"\b(?:round|dry[-_\s]+round)\s+(?:bound|floor)\b", re.IGNORECASE), "round bound or floor"),
         (re.compile(r"\bfloor\s+applies\b", re.IGNORECASE), "implicit round floor"),
     )
+    core_texts = {}
     for relative in core_doctrine_paths:
         path = os.path.join(ROOT, relative)
-        text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        text = read_conformance_text(
+            path, f"queue stop doctrine {relative}", (os.path.dirname(path),), encoding="utf-8"
+        )
+        core_texts[relative] = text
+        text = text or ""
         record(bool(text), f"queue stop doctrine: {relative} exists")
         record("computed work queue" in text.lower(),
                f"queue stop doctrine: {relative} names the computed work queue")
@@ -1606,10 +1854,16 @@ def check_queue_stop_doctrine():
                     operational_paths.add(os.path.relpath(os.path.join(directory, name), ROOT))
     doctrine_offenders = []
     for relative in sorted(operational_paths):
-        path = os.path.join(ROOT, relative)
-        if not os.path.isfile(path):
+        if relative in core_texts:
+            text = core_texts[relative]
+        else:
+            path = os.path.join(ROOT, relative)
+            text = read_conformance_text(
+                path, f"queue stop doctrine {relative}", (os.path.dirname(path),),
+                encoding="utf-8", errors="replace",
+            )
+        if text is None:
             continue
-        text = open(path, encoding="utf-8", errors="replace").read()
         for pattern, description in forbidden_stops:
             match = pattern.search(text)
             if match:
@@ -1630,7 +1884,7 @@ def check_queue_stop_doctrine():
            "queue stop doctrine: guard recognizes numeric and semantic consecutive-pass stops",
            ", ".join(missed_doctrine_spellings))
 
-    loop_text = open(os.path.join(ROOT, "engine/loop.md"), encoding="utf-8").read()
+    loop_text = core_texts.get("engine/loop.md") or ""
     record("A dry round is a round that enqueued no new work." in loop_text,
            "queue stop doctrine: a dry round is defined only as an observation")
     record("single loop condition" in loop_text.lower(),
@@ -1693,7 +1947,12 @@ def check_queue_stop_doctrine():
                     continue
                 relative = os.path.relpath(path, ROOT)
                 scanned_runtime_paths.add(relative)
-                text = open(path, encoding="utf-8", errors="replace").read()
+                text = read_conformance_text(
+                    path, f"queue runtime source {relative}", (directory,),
+                    encoding="utf-8", errors="replace",
+                )
+                if text is None:
+                    continue
                 for pattern in runtime_counter_patterns:
                     match = pattern.search(text)
                     if match:
@@ -1724,7 +1983,12 @@ def check_cited_fixtures():
     pat = re.compile(r"evals/[A-Za-z0-9_./-]*?fixtures/([A-Za-z0-9._-]+)/")
     for subdir in ("vulns", "patterns", "techniques"):
         for name, path in list_cards(subdir):
-            text = open(path).read()
+            try:
+                text = read_regular_text(path, no_follow=True)
+            except OSError as exc:
+                record(False, f"{subdir}/{name}: regular card input is safe to read",
+                       f"unsafe input: {exc.strerror or 'not a regular file'}")
+                continue
             fm = front_matter(text) or ""
             planned = re.search(r"^fixture_status:\s*planned\s*$", fm, re.MULTILINE) is not None
             cited = sorted({m.group(0) for m in pat.finditer(text)})
@@ -1741,12 +2005,16 @@ def check_cited_fixtures():
 
 def _build_fixture_npm_tarball(source_dir, destination):
     """Build a byte-stable npm-style tarball from a checked-in source fixture."""
+    if os.path.islink(source_dir):
+        raise OSError(f"fixture source directory is a symlink: {source_dir}")
     with (
         open(destination, "wb") as raw,
         gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
     ):
         for root, dirs, files in os.walk(source_dir):
+            if any(os.path.islink(os.path.join(root, name)) for name in dirs):
+                raise OSError(f"fixture contains a symlinked directory: {root}")
             dirs.sort()
             for name in sorted(files):
                 path = os.path.join(root, name)
@@ -1755,7 +2023,7 @@ def _build_fixture_npm_tarball(source_dir, destination):
                 info.uid = info.gid = 0
                 info.uname = info.gname = ""
                 info.mtime = 0
-                with open(path, "rb") as handle:
+                with open_regular_file(path, binary=True, no_follow=True) as handle:
                     archive.addfile(info, handle)
 
 
@@ -1773,15 +2041,37 @@ def check_corpus_enumeration():
     if not all(os.path.isfile(path) for path in required):
         return
 
-    expected = load_json(expected_path)
+    expected = read_conformance_json(
+        expected_path, "corpus-enumeration/expected.json",
+        (os.path.join(ROOT, "fixtures"), fixture),
+    )
+    if expected is None:
+        return
     with tempfile.TemporaryDirectory() as temp:
         tarballs = os.path.join(temp, "tarballs")
         os.mkdir(tarballs)
         pin_rows = []
+        packages_root = os.path.join(fixture, "packages")
         for package in expected["packages"]:
-            source = os.path.join(fixture, "packages", package["fixture"])
-            tarball = os.path.join(tarballs, f"{package['fixture']}.tgz")
-            _build_fixture_npm_tarball(source, tarball)
+            fixture_name = package.get("fixture")
+            if (not isinstance(fixture_name, str) or not fixture_name or fixture_name in (".", "..")
+                    or os.path.isabs(fixture_name) or os.path.basename(fixture_name) != fixture_name
+                    or "\\" in fixture_name):
+                record(False, "corpus enumeration: package fixture path stays within packages",
+                       f"unsafe fixture path: {fixture_name!r}")
+                return
+            source = os.path.join(packages_root, fixture_name)
+            if any(os.path.islink(path) for path in (os.path.join(ROOT, "fixtures"), fixture, packages_root, source)):
+                record(False, f"corpus enumeration/{fixture_name}: package fixture directories are safe",
+                       "symlinked fixture directory")
+                return
+            tarball = os.path.join(tarballs, f"{fixture_name}.tgz")
+            try:
+                _build_fixture_npm_tarball(source, tarball)
+            except OSError as exc:
+                record(False, f"corpus enumeration/{fixture_name}: package fixture files are regular",
+                       str(exc))
+                return
             with open(tarball, "rb") as handle:
                 digest = hashlib.sha1(handle.read(), usedforsecurity=False).hexdigest()
             pin_rows.append((package["status"], package["name"], package["version"], digest))
@@ -1851,7 +2141,8 @@ def check_corpus_enumeration():
                "hostile control characters cannot enter a frozen entrypoint path",
                (hostile.stdout + hostile.stderr).strip())
 
-        manifest = load_json(freeze)
+        with open(freeze, encoding="utf-8") as handle:
+            manifest = json.load(handle)
         record(manifest.get("generated_by", {}).get("mode") == "syntactic" and
                manifest.get("generated_by", {}).get("model_involvement") is False,
                "freeze records syntactic generation with no model involvement")

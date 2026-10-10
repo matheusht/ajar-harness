@@ -50,14 +50,17 @@ import json
 import os
 import stat
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from engagement_records import RecordError
 from engagement_state import (
+    _governed_root,
+    _open_parent_fd,
     _relative_regular_files,
     bound_engagement_source,
+    engagement_lock,
     read_governed_file,
+    utc_now,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -73,10 +76,6 @@ RANK = {b: i for i, b in enumerate(BANDS)}
 # for reporting acceptance rate — never for the delta, which needs both sides to have graded.
 ACCEPTING = {"accepted", "accepted_lower_severity", "accepted_higher_severity",
              "credited_via_vendor_advisory"}
-
-
-def now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def load_all(root):
@@ -138,7 +137,7 @@ def cmd_record(args):
         "engagement": os.path.basename(eng.rstrip("/")),
         "finding_ref": args.finding,
         "program": args.program,
-        "recorded_at": now(),
+        "recorded_at": utc_now(),
         "our_severity": args.our,
         "outcome": args.outcome,
         "source": {"kind": args.source_kind, "ref": args.source_ref or ""},
@@ -153,7 +152,6 @@ def cmd_record(args):
     if args.bounty is not None:
         rec["bounty_usd"] = args.bounty
 
-    from engagement_state import _governed_root, _open_parent_fd, engagement_lock
     path = os.path.join(eng, LEDGER)
     try:
         with engagement_lock(Path(eng)) as bound_engagement:

@@ -9,6 +9,7 @@ import json
 import os
 import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -184,6 +185,38 @@ def _telemetry_publication_swap(root: Path) -> bool:
         and not output.exists()
         and not replacement.joinpath(".record-kernel.lock").exists()
     )
+
+
+def _telemetry_rollback_fifo_swap(root: Path) -> bool:
+    output = root / "rollback-output.json"
+    marker = root / "rollback-fifo-hook-fired"
+    output.write_bytes(b"published bytes\n")
+    probe = (
+        "import os, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import research_telemetry as telemetry\n"
+        "original_open = os.open\n"
+        "def race_open(path, flags, mode=0o777, *, dir_fd=None):\n"
+        "    if path == os.path.basename(sys.argv[2]) and sys._getframe(1).f_code.co_name == '_remove_published_output':\n"
+        "        with open(sys.argv[3], 'w', encoding='utf-8') as handle: handle.write('reached')\n"
+        "        os.unlink(path, dir_fd=dir_fd)\n"
+        "        os.mkfifo(path, dir_fd=dir_fd)\n"
+        "    return original_open(path, flags, mode, dir_fd=dir_fd)\n"
+        "os.open = race_open\n"
+        "telemetry._remove_published_output(__import__('pathlib').Path(sys.argv[2]), b'published bytes\\n')\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(ROOT / "tools"), str(output), str(marker)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0 and marker.is_file() and output.is_fifo()
 
 
 def _score_pre_emit_swap(root: Path) -> bool:
@@ -681,6 +714,7 @@ def main() -> int:
                 ("central reducer and health retain one bound source across transient marked replacement", _central_and_health_transient_swap(root)),
                 ("legacy inventory discards buffered rows after a persistent source replacement", _legacy_inventory_persistent_swap(root)),
                 ("telemetry export rolls back publication when source admission fails", _telemetry_publication_swap(root)),
+                ("telemetry rollback rejects a FIFO replacement without blocking", _telemetry_rollback_fifo_swap(root)),
                 ("telemetry scoring emits nothing after a governed source replacement", _score_pre_emit_swap(root)),
                 ("direct standalone gates with or without explicit engagement disclose no finding detail after source quarantine", _standalone_gate_source_swap(root)),
                 ("explicit-engagement gate CLI emits only sanitized GQ after public source replacement", _explicit_cli_gate_source_swap(root)),

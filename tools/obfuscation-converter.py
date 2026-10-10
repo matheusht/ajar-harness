@@ -6,12 +6,7 @@ target's safety/monitoring pipeline still classifies an **encoded benign canary*
 the plaintext. It is the "how" used by the `obfuscation-encoding` technique card; it carries NO payloads
 and makes NO judgement (the oracle adjudicates). A transform is just a codec: base64/hex/rot13/etc.
 
-Two backends:
-  - **stdlib (default, authoritative for CI):** base64, base32, hex, rot13 — deterministic, lossless,
-    no dependency. The `--self-test` exercises only these so CI is hermetic.
-  - **external (optional, ARMS-LENGTH):** the richer P4RS3LT0NGV3 transform set, reached by *subprocess*
-    to an externally-installed CLI. It is AGPL-3.0 and is NEVER vendored or imported into this repo
-    (see docs/etrack-third-party-license-notes.md). Absent → the converter still works on the stdlib set.
+The stdlib transforms are base64, base32, hex, and rot13: deterministic, lossless, and dependency-free.
 
 Scope fence: transforms are codecs, not a harmful-content catalog. This tool only encodes/decodes text it
 is given; it neither stores nor ships any payload corpus.
@@ -26,7 +21,6 @@ Usage:
 import argparse
 import base64
 import codecs
-import shutil
 import sys
 
 # ---- stdlib transforms: (encode, decode), all lossless round-trips on UTF-8 text ----
@@ -47,21 +41,11 @@ STDLIB_TRANSFORMS = {
     "rot13":  (_rot13_e, _rot13_d),
 }
 
-EXTERNAL_CLI = "p4rs3lt0ngv3"  # AGPL-3.0, arms-length subprocess only; NOT vendored/imported
-
-
-def external_available():
-    """True iff the optional external transform CLI is installed on PATH (never bundled)."""
-    return shutil.which(EXTERNAL_CLI) is not None
-
 
 def encode(name, text):
     if name in STDLIB_TRANSFORMS:
         return STDLIB_TRANSFORMS[name][0](text)
-    raise ValueError(
-        f"unknown stdlib transform {name!r}; external transforms require the arms-length "
-        f"{EXTERNAL_CLI} CLI and are not wired in E1 (see license notes)"
-    )
+    raise ValueError(f"unknown stdlib transform {name!r}")
 
 
 def decode(name, text):
@@ -82,8 +66,6 @@ def self_test():
         if dec != canary:
             fails.append(f"{name}: not lossless (decode != plaintext)")
         print(f"  ok   {name}: encode!=plain and decode==plain")
-    # the external backend must be OPTIONAL: its absence is not a failure
-    print(f"  ok   external backend optional (present={external_available()})")
     if fails:
         for f in fails:
             print(f"  FAIL {f}")
@@ -106,8 +88,6 @@ def main():
         return self_test()
     if a.list:
         print("stdlib transforms:", ", ".join(sorted(STDLIB_TRANSFORMS)))
-        print(f"external backend ({EXTERNAL_CLI}, AGPL, arms-length): "
-              f"{'available' if external_available() else 'not installed'}")
         return 0
     if a.encode:
         print(encode(a.encode, a.text or sys.stdin.read().rstrip("\n")))

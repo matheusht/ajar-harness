@@ -35,7 +35,7 @@ import importlib.util
 import json
 import os
 import sys
-import tempfile
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -67,13 +67,33 @@ def _rel(path):
     return os.path.relpath(path, ROOT) if path else None
 
 
+def _under_skills(path):
+    try:
+        parts = Path(os.path.abspath(path)).relative_to(ROOT).parts
+        if parts and parts[0].casefold() == "skills":
+            return True
+    except ValueError:
+        pass
+    skills_root = Path(ROOT, "skills").resolve()
+    current = Path(path).resolve()
+    while True:
+        try:
+            if os.path.samefile(current, skills_root):
+                return True
+        except OSError:
+            pass
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
 def assemble_lifecycle_result(campaign_path, candidate_id):
     """Pure: read the per-candidate artifacts the chain already wrote and map them into the one
     lifecycle-result contract. Invents no verdicts — the authoritative answer comes straight from the
     bridge-result (materialization > scope > behavioral) and promotability from the promotion bundle."""
     camp_dir = os.path.dirname(campaign_path)
     campaign_id = load(campaign_path).get("campaign_id")
-    cdir = os.path.join(camp_dir, "candidates", candidate_id)
+    cdir = GR.CC.candidate_dir(campaign_path, candidate_id)
     br = load(os.path.join(cdir, "bridge-result.json"))
     links = br.get("links", {}) or {}
     mat = links.get("materialization", {}) or {}
@@ -131,8 +151,10 @@ def assemble_lifecycle_result(campaign_path, candidate_id):
 
 def run_lifecycle(campaign_path, backend="deterministic", behavioral_backend="none",
                   behavioral_model_cmd=None, only_candidate=None):
+    campaign_path = os.path.abspath(campaign_path)
     camp_dir = os.path.dirname(campaign_path)
-    assert "skills/" not in os.path.abspath(camp_dir) + os.sep, "lifecycle must not run under skills/"
+    if _under_skills(camp_dir):
+        raise ValueError("lifecycle must not run under skills/")
 
     # 1. generate candidates + shadow score + replay + promotion (no behavioral yet)
     GR.generate(campaign_path, backend_name=backend, run_chain=True, behavioral_backend="none")
@@ -149,7 +171,7 @@ def run_lifecycle(campaign_path, backend="deterministic", behavioral_backend="no
     rows = []
     for cid in cids:
         result = assemble_lifecycle_result(campaign_path, cid)
-        write_json(os.path.join(camp_dir, "candidates", cid, "lifecycle-result.json"), result)
+        write_json(os.path.join(GR.CC.candidate_dir(campaign_path, cid), "lifecycle-result.json"), result)
         rows.append({k: result[k] for k in ("candidate_id", "status", "authoritative_stage",
                                             "authoritative_verdict", "promotable")})
     report = {
@@ -184,11 +206,31 @@ def _tmp_campaign():
 
 def self_test():
     import shutil
+    import subprocess
     ok = True
     camp_path, d = _tmp_campaign()
     try:
-        # deterministic generation + fake behavioral: CI-safe, exercises the whole canonical flow.
-        run_lifecycle(camp_path, backend="deterministic", behavioral_backend="fake")
+        fifo = os.path.join(d, "campaign.fifo")
+        os.mkfifo(fifo)
+        try:
+            fifo_result = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--campaign", fifo],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fifo_result = None
+        fifo_ok = fifo_result is not None and fifo_result.returncode == 2 and "regular file" in fifo_result.stderr
+        print("[self-test] FIFO campaign input is rejected promptly:", "ok" if fifo_ok else "FAIL")
+        if not fifo_ok:
+            ok = False
+
+        # A bare campaign filename exercises the canonical entrypoint's current-directory path handling.
+        previous_cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            run_lifecycle(os.path.basename(camp_path), backend="deterministic", behavioral_backend="fake")
+        finally:
+            os.chdir(previous_cwd)
         results = {cid: load(os.path.join(d, "candidates", cid, "lifecycle-result.json"))
                    for cid in GR.discover_campaign_candidates(camp_path)}
         verdicts = {cid: (r["authoritative_verdict"], r["authoritative_stage"], r["status"]) for cid, r in results.items()}
@@ -269,8 +311,15 @@ def main(argv):
     if not args.campaign:
         ap.print_help()
         return 2
-    report = run_lifecycle(args.campaign, backend=args.backend, behavioral_backend=args.behavioral_backend,
-                           behavioral_model_cmd=args.behavioral_model_cmd, only_candidate=args.candidate)
+    if not os.path.isfile(args.campaign):
+        print("invalid campaign input: expected a regular file", file=sys.stderr)
+        return 2
+    try:
+        report = run_lifecycle(args.campaign, backend=args.backend, behavioral_backend=args.behavioral_backend,
+                               behavioral_model_cmd=args.behavioral_model_cmd, only_candidate=args.candidate)
+    except ValueError as exc:
+        print(f"invalid campaign input: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(report, indent=2))
     return 0
 

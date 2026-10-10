@@ -8,11 +8,8 @@ surface form) and `steganography` (which hides data inside a carrier): here the 
 the ask but route around keyword/normalization-based defenses. Inspired by GLOSSOPETRAE `/redteam`
 channels (homoglyph, token-break, conlang/glyph); content-neutral codecs, no payload catalog.
 
-Backends:
-  - **stdlib (default, authoritative for CI):** homoglyph (confusable substitution), constructed-script
-    (1:1 glyph substitution), token-break (zero-width interleave). All reversible round-trips.
-  - **external (optional, ARMS-LENGTH):** richer GLOSSOPETRAE channels (procedural conlang, glyph
-    rendering) via subprocess to an externally-installed CLI. AGPL-3.0, NEVER vendored. **Not wired in E3.**
+The stdlib transforms are homoglyph (confusable substitution), constructed-script (1:1 glyph
+substitution), and token-break (zero-width interleave). All support reversible round-trips.
 
 Defensive side (Tollbooth decode evidence) is DEFERRED — it needs the operator-gated Tollbooth live
 container; see docs/etrack-third-party-license-notes.md.
@@ -24,7 +21,6 @@ Usage:
 """
 
 import argparse
-import shutil
 import sys
 
 # homoglyph: ascii -> Unicode confusable (reversible via inverse map; unmapped chars pass through)
@@ -39,12 +35,6 @@ _SCRIPT_FWD = {a: s for a, s in zip(_LATIN, _SCRIPT)}
 _SCRIPT_INV = {s: a for a, s in zip(_LATIN, _SCRIPT)}
 
 ZW = "​"  # ZERO WIDTH SPACE — token-break separator
-
-EXTERNAL_CLI = "glossopetrae"  # AGPL-3.0, arms-length subprocess only; NOT vendored/imported
-
-
-def external_available():
-    return shutil.which(EXTERNAL_CLI) is not None
 
 
 def _homoglyph_e(s): return "".join(_HOMO.get(ch, ch) for ch in s)
@@ -64,8 +54,7 @@ TRANSFORMS = {
 def encode(name, text):
     if name in TRANSFORMS:
         return TRANSFORMS[name][0](text)
-    raise ValueError(f"unknown stdlib channel {name!r}; richer channels need the arms-length "
-                     f"{EXTERNAL_CLI} CLI (not wired in E3)")
+    raise ValueError(f"unknown stdlib channel {name!r}")
 
 
 def decode(name, text):
@@ -86,7 +75,6 @@ def self_test():
             fails.append(f"{name}: not lossless (decode != plaintext)")
         print(f"  {'ok  ' if (enc != canary and dec == canary) else 'FAIL'} "
               f"{name}: encode!=plain and decode==plain")
-    print(f"  ok   external backend optional (present={external_available()})")
     if fails:
         for f in fails:
             print(f"  FAIL {f}")
@@ -109,8 +97,6 @@ def main():
         return self_test()
     if a.list:
         print("stdlib channels:", ", ".join(sorted(TRANSFORMS)))
-        print(f"external backend ({EXTERNAL_CLI}, AGPL, arms-length): "
-              f"{'available' if external_available() else 'not installed'}")
         return 0
     if a.encode:
         print(encode(a.encode, a.text or sys.stdin.read().rstrip("\n")))

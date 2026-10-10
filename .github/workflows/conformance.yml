@@ -63,6 +63,20 @@ jobs:
         run: python3 tools/researcher_adapter.py --self-test
       - name: Keep/discard candidate policy (self-test)
         run: python3 tools/score-candidate.py --self-test
+      - name: Versioned scorer input contract (CLI E2E)
+        run: python3 tools/score-candidate-v2-test.py
+      - name: Skills output guards under optimized Python
+        run: python3 -O tools/skills-path-guard-test.py
+      - name: Framing probe JSON input CLI (FIFO rejection)
+        run: python3 tools/framing-probe-input-test.py
+      - name: Holdout preflight JSON input CLI (FIFO rejection)
+        run: python3 tools/preflight-holdout-input-test.py
+      - name: Ideation mapper JSON input CLI (FIFO rejection)
+        run: python3 tools/ideation-input-test.py
+      - name: Conformance filesystem-input E2E
+        run: python3 tools/check-conformance-secret-scan-test.py
+      - name: Replay campaign input CLI (FIFO rejection)
+        run: python3 tools/replay-candidate-input-test.py
       - name: Replay & variance gate (self-test)
         run: python3 tools/replay-candidate.py --self-test
       - name: Promotion bundle renderer (self-test)
@@ -72,14 +86,14 @@ jobs:
       - name: DSPy spike — routing normalizer baseline (deterministic, self-test)
         run: python3 experiments/dspy-routing-normalizer/normalize.py --self-test
       # Frozen-input integrity is gated against the CURRENT canonical campaign, not historical
-      # revisions. Revision 4 freezes the current checker after queue/guidance changes; revisions
-      # 2 and 3 remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
+      # revisions. Revision 34 freezes guarded Decision 0005/corpus-enumeration reads, package tarball input handling, lifecycle-control finding/attestation, constrained KB ablation-fixture, scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine-mirror, intervention, framing-probe, static evaluator, tool-family, finding-fixture, capability, card, oracle, and casebook reads; prior
+      # revisions remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
       # their frozen_inputs pin
       # Phase-8-era tool and gold hashes that later evaluator hardening (10F/10G/10H0) and gold rotation
       # legitimately drifted — the drift detector working as designed. See each campaign's SUPERSEDED.md.
       # Re-pinning historical revisions to silence CI is forbidden (it would rewrite superseded history).
       - name: Canonical behavioral campaign frozen-input integrity
-        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
+        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v34-2026-10-02/campaign-manifest.json
       # The promotion bundle hash-pin / drift machinery is exercised by render-promotion-bundle --self-test
       # (verify_drift: intact -> clean, tampered gold -> drift). There is no live promotion bundle to pin
       # against until a real-model qualification produces one.

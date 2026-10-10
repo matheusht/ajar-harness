@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Evaluator changes get a NEW campaign revision; prior revisions are preserved append-only, never
 # mutated/replaced in place (see the superseding SUPERSEDED.md note).
-CAMP_ID = "behavioral-canonical-v4-2026-09-13"
+CAMP_ID = "behavioral-canonical-v34-2026-10-02"
 CAMP_DIR = os.path.join(ROOT, "evals", "behavioral", "campaigns", CAMP_ID)
 
 
@@ -85,6 +85,9 @@ def build():
                       ("episodes:decomposition", "evals/behavioral/episodes/decomposition.json"),
                       ("scorer:score-candidate", "tools/score-candidate.py"),
                       ("gate:check-campaign", "tools/check-campaign.py"),
+                      ("gate:regular-file-io", "tools/regular_file_io.py"),
+                      ("materializer:apply-candidate-eval", "tools/apply-candidate-eval.py"),
+                      ("runner:run-behavioral-eval", "tools/run-behavioral-eval.py"),
                       ("checker:check-conformance", "tools/check-conformance.py"),
                       ("adapter:researcher_adapter", "tools/researcher_adapter.py")]:
         frozen_inputs[name] = {"path": rel, "sha256": sha256_head(rel)}
@@ -138,9 +141,9 @@ def build():
         campaign_candidates.append({"candidate_id": cid, "manifest": manifest_rel, "eligibility": c["eligibility"]})
 
     campaign = {
-        "campaign_id": CAMP_ID, "created": "2026-09-13",
-        "note": "Canonical behavioral campaign revision 4. Preserves revision 3 and its historical evidence "
-                "while freezing the current conformance checker after queue and engineering-guidance changes. "
+        "campaign_id": CAMP_ID, "created": "2026-10-02",
+        "note": "Canonical behavioral campaign revision 31. Preserves prior revisions and historical evidence "
+                "while pinning constrained KB ablation-fixture reads, no-follow scope-template, queue-stop doctrine, active-guidance, cited-fixture card, finding-trap attestation, doctrine-mirror, intervention, framing-probe and evaluator corpus, tool-family, finding-fixture, capability, card, oracle, and casebook reads in conformance checks. "
                 "Built deterministically by tools/build-behavioral-campaign.py and consumed with the "
                 "canonical contract gate plus measured patched-workspace conformance.",
         "tracks": [{"name": "task-reframing", "mutation_target": "skills/techniques/task-reframing/", "kind": "existing-card-variant"},

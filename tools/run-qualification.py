@@ -24,7 +24,11 @@ Usage:
 import importlib.util
 import json
 import os
+import subprocess
 import sys
+import tempfile
+
+from regular_file_io import load_json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
@@ -34,8 +38,7 @@ CORPUS = os.path.join(ROOT, "fixtures", "false-discovery", "corpus.json")
 
 
 def load(path):
-    with open(path) as fh:
-        return json.load(fh)
+    return load_json(path)
 
 
 def _mod(name, filename):
@@ -169,6 +172,38 @@ def self_test():
         ok = False
         print("  !! corrupted orchestrator was not blocked")
 
+    if hasattr(os, "mkfifo"):
+        with tempfile.TemporaryDirectory(prefix="qualification-input-") as temp_dir:
+            fifo = os.path.join(temp_dir, "evaluator.json")
+            os.mkfifo(fifo)
+            try:
+                result = subprocess.run(
+                    [sys.executable, os.path.abspath(__file__), "--evaluator", fifo,
+                     "--orchestrator", os.path.join(ex, "orchestrator-case-a.json")],
+                    capture_output=True, text=True, timeout=2,
+                )
+                rejected = result.returncode == 2 and "regular file" in result.stderr
+            except subprocess.TimeoutExpired:
+                rejected = False
+            if not rejected:
+                ok = False
+                print("  !! FIFO evaluator input was not rejected promptly")
+
+    with tempfile.TemporaryDirectory(prefix="qualification-input-") as temp_dir:
+        invalid_utf8 = os.path.join(temp_dir, "evaluator.json")
+        with open(invalid_utf8, "wb") as handle:
+            handle.write(b"\xff")
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--evaluator", invalid_utf8,
+             "--orchestrator", os.path.join(ex, "orchestrator-case-a.json")],
+            capture_output=True, text=True, timeout=2,
+        )
+        rejected = (result.returncode == 2 and "input error:" in result.stderr
+                    and "Traceback" not in result.stderr)
+        if not rejected:
+            ok = False
+            print("  !! invalid UTF-8 evaluator input returned an unhandled error")
+
     print("\nSELF-TEST:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -178,13 +213,17 @@ def main(argv):
         return self_test()
     ev, orchs = None, []
     i = 1
-    while i < len(argv):
-        if argv[i] == "--evaluator":
-            ev = load(argv[i + 1]); i += 2
-        elif argv[i] == "--orchestrator":
-            orchs.append(load(argv[i + 1])); i += 2
-        else:
-            i += 1
+    try:
+        while i < len(argv):
+            if argv[i] == "--evaluator":
+                ev = load(argv[i + 1]); i += 2
+            elif argv[i] == "--orchestrator":
+                orchs.append(load(argv[i + 1])); i += 2
+            else:
+                i += 1
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"input error: {exc}", file=sys.stderr)
+        return 2
     if ev is None or not orchs:
         print(__doc__)
         return 2

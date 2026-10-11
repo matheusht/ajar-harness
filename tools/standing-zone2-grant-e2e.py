@@ -24,6 +24,7 @@ from engagement_state import SCOPED_EFFECT_BYTES, _append_kernel_event, base_eve
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "tools/run-engagement.py"
+SHELL = str(Path("/bin/sh").resolve(strict=True))
 BROKER = f"local-uid-{os.getuid()}:broker"
 SESSION = f"session-posix-{os.getuid()}-{os.getsid(0)}"
 GOOD_ONE = b"synthetic local artifact one\n"
@@ -158,8 +159,8 @@ def main() -> None:
                 (engagement / "evidence").mkdir(exist_ok=True)
                 success(command(f"{name}-preflight", "preflight", "--engagement", str(engagement),
                                 "--preflight-id", "env-local", "--mode", "local_runtime", "--target", str(source),
-                                "--expected-identity", sha256_file(source), "--runtime", "/bin/sh",
-                                "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]),
+                                "--expected-identity", sha256_file(source), "--runtime", SHELL,
+                                "--reproduction-argv", json.dumps([SHELL, "-c", "true"]),
                                 "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION,
                                 "--recorded-at", at(1)), f"{name}-preflight")
                 state = reduce_engagement(engagement)
@@ -830,8 +831,8 @@ def main() -> None:
             ready_preflight = success(command("repeat-preflight", "preflight", "--engagement", str(repeated_scope),
                                               "--preflight-id", "env-after-repeat", "--mode", "local_runtime",
                                               "--target", str(source), "--expected-identity", sha256_file(source),
-                                              "--runtime", "/bin/sh",
-                                              "--reproduction-argv", json.dumps(["/bin/sh", "-c", "true"]),
+                                              "--runtime", SHELL,
+                                              "--reproduction-argv", json.dumps([SHELL, "-c", "true"]),
                                               "--actor-role", "broker", "--actor-id", BROKER, "--session-id", SESSION,
                                               "--recorded-at", at(3.5)), "repeat-preflight")
             assert ready_preflight["status"] == "ready", ready_preflight

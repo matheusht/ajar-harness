@@ -86,6 +86,7 @@
     "resolve-internal-authority": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["signed_scope", "confirmed_current_claim", "exact_request_digest"], "tier": "authority"},
     "revise-finding": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication"], "tier": "authority"},
     "score-telemetry": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"},
+    "stage-go-dependencies": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["signed_scope", "ready_environment", "approved_exact_one_use_action", "source_identity", "metered_official_https"], "tier": "authority"},
     "settle-approved-revision": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication", "recorded_expiry", "fresh_current_time", "session_provenance"], "tier": "authority"},
     "validate": {"allowed_roles": [], "blocking_scope": "none", "required_evidence": [], "tier": "notebook"}
   },
@@ -118,6 +119,8 @@
     "engagement.reopened": {"allowed_roles": ["operator", "broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request"], "tier": "authority"},
     "environment.review_recorded": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "operator_review", "immutable_preflight"], "tier": "authority"},
     "environment.preflight_recorded": {"allowed_roles": ["orchestrator", "hunter", "broker"], "blocking_scope": "none", "required_evidence": ["collector_record"], "tier": "notebook"},
+    "dependency.stage_spent": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_exact_one_use_action", "spend_before_contact"], "tier": "authority"},
+    "dependency.stage_completed": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["prior_spend_event", "redacted_private_receipt"], "tier": "authority"},
     "escalation.confirmed": {"allowed_roles": ["operator"], "blocking_scope": "lane_local", "required_evidence": ["fresh_operator_console", "scope", "environment", "expiry", "cleanup"], "tier": "real_world"},
     "finding.revised": {"allowed_roles": ["broker"], "blocking_scope": "lane_local", "required_evidence": ["approved_authority_request", "independent_adjudication"], "tier": "authority"},
     "hypothesis.created": {"allowed_roles": ["orchestrator", "hunter", "broker"], "blocking_scope": "none", "required_evidence": ["origin"], "tier": "notebook"},

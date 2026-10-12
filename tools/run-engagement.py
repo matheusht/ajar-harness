@@ -1885,6 +1885,23 @@ def command_request_authority(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_stage_go_dependencies(args: argparse.Namespace) -> int:
+    """Apply one exact approved action; the typed spend precedes HTTPS contact."""
+    from dependency_stage import StageError, run_stage
+
+    require_actor(classify_command("stage-go-dependencies"), "broker")
+    _require_decision6_kernel(args.engagement)
+    _require_local_provenance("broker", args.actor_id, args.session_id)
+    try:
+        recorded = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00"))
+        result = run_stage(args.engagement, args.authority_request_id, args.actor_id,
+                           args.session_id, now=recorded)
+    except StageError as exc:
+        raise RecordError(exc.code, str(exc)) from exc
+    emit(result)
+    return 0
+
+
 def command_resolve_authority(args: argparse.Namespace) -> int:
     capability = classify_command("resolve-authority"); _require_local_session(args.session_id)
     pending_state = reduce_engagement(args.engagement.absolute()); pending_request = pending_state["authority_requests"].get(args.request_id); action_path = args.engagement.absolute() / str((pending_request or {}).get("action_path", ""))
@@ -6441,6 +6458,8 @@ def parser() -> argparse.ArgumentParser:
     reopen.add_argument("--engagement", type=Path, required=True); reopen.add_argument("--operator-id", required=True); reopen.add_argument("--recorded-at", required=True); reopen.add_argument("--reason", required=True); reopen.add_argument("--authority-request-id", required=True); reopen.add_argument("--lane-id", required=True); reopen.add_argument("--executor-id", required=True); reopen.add_argument("--session-id", required=True)
     request_authority = subcommands.add_parser("request-authority", help="append one digest-bound lane-local authority request")
     request_authority.add_argument("--engagement", type=Path, required=True); request_authority.add_argument("--request-id", required=True); request_authority.add_argument("--action-kind", required=True); request_authority.add_argument("--action-file", type=Path, required=True); request_authority.add_argument("--lane-id", required=True); request_authority.add_argument("--actor-role", choices=["broker"], required=True); request_authority.add_argument("--actor-id", required=True); request_authority.add_argument("--session-id", required=True); request_authority.add_argument("--recorded-at", required=True); request_authority.add_argument("--expires-at", required=True); request_authority.add_argument("--reason", required=True)
+    stage_go = subcommands.add_parser("stage-go-dependencies", help="spend exact authority and stage Go 1.23.0 dependencies through metered official HTTPS")
+    stage_go.add_argument("--engagement", type=Path, required=True); stage_go.add_argument("--authority-request-id", required=True); stage_go.add_argument("--actor-id", required=True); stage_go.add_argument("--session-id", required=True); stage_go.add_argument("--recorded-at", required=True)
     resolve_authority = subcommands.add_parser("resolve-authority", help="operator-resolve one exact pending authority request")
     resolve_authority.add_argument("--engagement", type=Path, required=True); resolve_authority.add_argument("--request-id", required=True); resolve_authority.add_argument("--resolution", choices=["approved", "rejected", "expired", "superseded"], required=True); resolve_authority.add_argument("--operator-id", required=True); resolve_authority.add_argument("--session-id", required=True); resolve_authority.add_argument("--recorded-at", required=True); resolve_authority.add_argument("--reason", required=True)
     internal_authority = subcommands.add_parser("resolve-internal-authority", help="broker-resolve only a confirmed internal revision or draft from signed scope")
@@ -6528,6 +6547,7 @@ def _command_handlers() -> dict[str, object]:
             "operator-resume": command_operator_resume,
             "override-ending": command_override_ending,
             "request-authority": command_request_authority,
+            "stage-go-dependencies": command_stage_go_dependencies,
             "resolve-authority": command_resolve_authority,
             "resolve-internal-authority": command_resolve_internal_authority,
             "settle-approved-revision": command_settle_approved_revision,

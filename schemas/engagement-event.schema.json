@@ -104,7 +104,9 @@
         "authority.expired",
         "authority.resolved",
         "scope.amendment_proposed",
-        "artifact.classified"
+        "artifact.classified",
+        "dependency.stage_spent",
+        "dependency.stage_completed"
       ]
     },
     "entity_refs": {
@@ -2138,6 +2140,32 @@
         "properties": {
           "payload": {
             "required": ["request_id", "request_event_ref", "action_digest", "resolution", "resolved_at"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "dependency.stage_spent"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "authority_request_ref", "action_digest", "scope_hash", "environment_ref", "source_revision", "executor_id", "operator_id"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "dependency.stage_completed"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "record_path", "record_digest", "source_revision"]
           }
         }
       }

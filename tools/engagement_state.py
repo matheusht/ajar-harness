@@ -40,6 +40,8 @@ from operator_signature import (
     verify_embedded_operator_signature,
 )
 from reasoned_escalation import current_card_matches, route_digest, route_holds
+from dependency_stage import (StageError, _scope_harness_revision,
+                              _scope_requires_fresh_third_party_confirmation, validate_stage_action)
 
 LEDGERS = {
     "event": ("events.jsonl", "engagement-event", "event_id"),
@@ -95,6 +97,8 @@ EVENT_STATE_RULES = {
     "artifact.classified": (set(), set()),
     "environment.review_recorded": ({"environment"}, {"environment"}),
     "environment.preflight_recorded": ({"environment"}, set()),
+    "dependency.stage_spent": (set(), set()),
+    "dependency.stage_completed": (set(), set()),
 }
 
 COMMITTED_RECORD_LAYOUT = {
@@ -3248,13 +3252,97 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
         authority_request_target: dict[str, Any] | None = None
         authority_request_application: dict[str, Any] | None = None
         request = state["authority_requests"].get(payload.get("authority_request_ref")) if payload.get("authority_request_ref") else None
-        expected_authority_action = {"environment.review_recorded": "review-preflight", "report.generated": "generate-report", "operator.review_recorded": "accept-report", "submission.recorded": "record-submission", "memory.disposition_recorded": "record-memory", "engagement.closed": "close", "finding.revised": "revise-finding", "scope.attested": "reattest-scope", "cleanup.updated": "record-cleanup", "operator_prior.recorded": "record-operator-prior", "engagement.reopened": "reopen", "migration.apply_authorized": "apply-migration"}.get(event["event_type"])
+        expected_authority_action = {"environment.review_recorded": "review-preflight", "report.generated": "generate-report", "operator.review_recorded": "accept-report", "submission.recorded": "record-submission", "memory.disposition_recorded": "record-memory", "engagement.closed": "close", "finding.revised": "revise-finding", "scope.attested": "reattest-scope", "cleanup.updated": "record-cleanup", "operator_prior.recorded": "record-operator-prior", "engagement.reopened": "reopen", "migration.apply_authorized": "apply-migration", "dependency.stage_spent": "stage-go-dependencies"}.get(event["event_type"])
         if event["event_type"] == "observation.recorded" and payload.get("entity_type") == "ledger_tail_repair" and payload.get("authority_request_ref"): expected_authority_action = "repair-ledger-tail"
         event_time = datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
         resolved_budget_denominator: dict[str, Any] | None = None
         override_signer_fingerprint: str | None = None
         request_environment_matches = bool(request and (request["environment_ref"] == state["active_environment_ref"] or (event["event_type"] == "finding.revised" and request.get("target") is None and request["environment_ref"] is None)))
         broker_authorized = bool(expected_authority_action and request and request["action_kind"] == expected_authority_action and request["status"] == "approved" and request["scope_hash"] == state["scope_hash"] and request_environment_matches and request["resolved_at"] is not None and event_time >= datetime.fromisoformat(request["resolved_at"].replace("Z", "+00:00")) and (request["expires_at"] is None or event_time <= datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))) and event["actor"]["role"] == "broker" and event.get("provenance", {}).get("session_id") and payload.get("operator_id") == active_scope_operator)
+        if event["event_type"] == "dependency.stage_spent":
+            action_path = engagement / f"authority/requests/{payload['authority_request_ref']}.action.json"
+            try:
+                action_bytes = read_governed_file(action_path)
+                action = json.loads(action_bytes)
+                signed_scope_bytes = read_governed_file(
+                    engagement / next(item["payload"]["scope_snapshot_path"] for item in reversed(events[:event["sequence"]]) if item["event_type"] == "scope.attested")
+                )
+                fixture_scope = b"Synthetic dependency-stage fixture: `yes`" in signed_scope_bytes
+                if not fixture_scope and not _scope_requires_fresh_third_party_confirmation(signed_scope_bytes):
+                    raise StageError("scope_grant_missing")
+                validate_stage_action(action, allow_fixture=fixture_scope)
+                if _scope_harness_revision(signed_scope_bytes) != action["harness_commit"]:
+                    raise StageError("scope_harness_mismatch")
+            except (OSError, ValueError, RecordError, StageError, StopIteration) as exc:
+                raise RecordError("dependency_stage_action_invalid", event["event_id"]) from exc
+            if (not broker_authorized or request is None or action_bytes != canonical_json_bytes(action)
+                    or request["action_digest"] != sha256_bytes(action_bytes)
+                    or payload.get("entity_id") != payload.get("authority_request_ref")
+                    or payload.get("status") != "spent" or payload.get("action_digest") != request["action_digest"]
+                    or payload.get("scope_hash") != state["scope_hash"]
+                    or payload.get("environment_ref") != state["active_environment_ref"]
+                    or payload.get("source_revision") != action["source_commit"]
+                    or payload.get("executor_id") != event["actor"]["id"]
+                    or action["executor_id"] != event["actor"]["id"]
+                    or action["session_id"] != event["provenance"]["session_id"]
+                    or action["operator_id"] != active_scope_operator
+                    or action["scope_hash"] != state["scope_hash"]
+                    or action["environment_ref"] != state["active_environment_ref"]
+                    or action["lane_id"] != request["lane_id"]
+                    or event["entity_refs"] != [request["request_event_ref"]]
+                    or not consume_exact_authority(event, request, action)):
+                raise RecordError("dependency_stage_spend_invalid", event["event_id"])
+        if event["event_type"] == "dependency.stage_completed":
+            request_id = payload["entity_id"]
+            prior = seen_events.get(f"event-stage-spent-{request_id}")
+            expected_path = f"sandbox/dependency-retrieval/{request_id}/manifest.json"
+            receipt_path = engagement / expected_path
+            try:
+                receipt_bytes = read_governed_file(receipt_path)
+                receipt = json.loads(receipt_bytes)
+                receipt_mode = stat.S_IMODE(receipt_path.stat().st_mode)
+            except (OSError, ValueError, RecordError) as exc:
+                raise RecordError("dependency_stage_receipt_invalid", event["event_id"]) from exc
+            receipt_valid = (
+                isinstance(receipt, dict)
+                and set(receipt) == {"schema_version", "request_id", "action_digest", "scope_hash",
+                                     "source_commit", "request_count", "response_bytes", "responses",
+                                     "result", "stop_reason", "offline_resolver"}
+                and receipt_bytes == canonical_json_bytes(receipt)
+                and receipt_mode == 0o600
+                and receipt.get("schema_version") == 1
+                and receipt.get("request_id") == request_id
+                and receipt.get("action_digest") == prior["payload"]["action_digest"] if prior else False
+            )
+            receipt_valid = bool(receipt_valid and receipt.get("scope_hash") == prior["payload"]["scope_hash"]
+                                 and receipt.get("source_commit") == prior["payload"]["source_revision"]
+                                 and receipt.get("result") == payload.get("status")
+                                 and (receipt.get("stop_reason") is None if payload.get("status") == "completed"
+                                      else isinstance(receipt.get("stop_reason"), str))
+                                 and type(receipt.get("request_count")) is int
+                                 and type(receipt.get("response_bytes")) is int
+                                 and receipt["request_count"] >= 0 and receipt["response_bytes"] >= 0
+                                 and isinstance(receipt.get("responses"), list)
+                                 and len(receipt["responses"]) <= receipt["request_count"]
+                                 and receipt.get("offline_resolver") == {
+                                     "GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off",
+                                     "socket_syscalls": "seccomp_eperm"}
+                                 and all(isinstance(row, dict) and set(row).issubset({
+                                     "host", "path_sha256", "status", "redirect_host", "bytes",
+                                     "kind", "sha256", "go_h1", "relative_file"}) for row in receipt["responses"])
+                                 and "https://" not in receipt_bytes.decode("utf-8"))
+            if (prior is None or prior["event_type"] != "dependency.stage_spent"
+                    or event["actor"] != prior["actor"]
+                    or event["provenance"]["session_id"] != prior["provenance"]["session_id"]
+                    or event["entity_refs"] != [prior["event_id"]]
+                    or payload.get("status") not in {"completed", "stopped"} or payload.get("record_path") != expected_path
+                    or payload.get("source_revision") != prior["payload"]["source_revision"]
+                    or not _governed_file_exists(receipt_path)
+                    or sha256_bytes(read_governed_file(receipt_path)) != payload.get("record_digest")
+                    or not receipt_valid
+                    or any(item["event_type"] == "dependency.stage_completed"
+                           and item["payload"].get("entity_id") == request_id for item in seen_events.values())):
+                raise RecordError("dependency_stage_receipt_invalid", event["event_id"])
         if event["event_type"] in {"operator_stop.recorded", "operator_resume.recorded"} and (event["actor"] != {"role": "operator", "id": active_scope_operator} or payload.get("operator_id") != active_scope_operator):
             raise RecordError("operator_queue_control_not_scope_authorized", event["event_id"])
         validate_reference_precedence(event, index, committed_entity_ids)

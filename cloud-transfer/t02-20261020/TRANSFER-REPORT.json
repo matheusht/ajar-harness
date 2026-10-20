@@ -1,13 +1,20 @@
 {
   "archive": "source.zip",
-  "archive_bytes": 4800193,
-  "archive_sha256": "17e7a7713025f9bb352d104ead4ffbff37511ed7ecfe8e4d449a804c61979df2",
+  "archive_bytes": 4815329,
+  "archive_sha256": "d87e78c88454a44406b55fa0d031090313b0969d29ccbabc71b61a8310fea8f2",
   "cloud_execution": false,
   "files": 36,
   "historical_image_id": "sha256:31b7fa2b80f17bbddfeffd0577634257df40490f1b8d4c57f8507b40956cdf15",
-  "manifest_sha256": "d3f579cc2befb9608a934566849907c5f60de2fb1f8d943faf9e3da3b344fc73",
+  "manifest_sha256": "490e6be3a28504c4b01c25569df295a598139c9f577eaabe7f2e623b467380be",
   "provider_execution": false,
   "relay_cross_build_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
-  "source_bytes": 8835795,
-  "status": "source_bundle_built_not_cloud_qualified"
+  "source_bytes": 8838615,
+  "status": "source_bundle_built_not_cloud_qualified",
+  "amd64_base_child_digest": "sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319",
+  "opencode_2_0_32_index_digest": "sha256:02998f912cc8bf84ce20ff9d9faa33225406c52f9d13f8f86b376490f1e28813",
+  "source_verification": {
+    "fresh_unzip_paths_modes_sizes_sha256": "pass: 36/36 source files and root manifest",
+    "cloud_manifest_layout": "pass: source-only",
+    "cloud_owned_source": "pass: fake Docker only"
+  }
 }

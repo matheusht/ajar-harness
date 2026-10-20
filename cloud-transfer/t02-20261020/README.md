@@ -12,14 +12,29 @@ ZIP and manifest hashes. Verify both before extracting into a private checkout.
 The shared local worktree is mostly untracked; cloning its Git HEAD alone will
 not reproduce this candidate.
 
-**Status:** transfer ready; cloud and live provider execution unqualified. The
-relay binary was built twice with identical bytes from pinned Go source, but
-has not run on the cloud executor. The runner accepts an explicit cloud
-platform, immutable image ID, relay SHA, RFC1918 subnet/listener/peer, and
-selected HTTP proxy variable. Cloud `direct` is rejected. `--live-free` is
-hard-blocked before output creation until a later reviewed change has evidence
-for the actual owned cloud sidecar route and native TLS trust. The offline
-owned-response run uses `--dummy-port`, so it cannot prove that upstream hop.
+The bundled Dockerfile defaults to the reviewed OpenCode 2.0.32 Linux/arm64
+child `sha256:2fc782d346b0670c43378557cf8a2a9926a1f3d28e596180e7b21a0736d8cb7d`.
+For an explicit Linux/amd64 build, set `OPENCODE_BASE` to
+`ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319`,
+the separately verified amd64 child of the official 2.0.32 OCI index
+`sha256:02998f912cc8bf84ce20ff9d9faa33225406c52f9d13f8f86b376490f1e28813`.
+This is a source/build candidate only: the amd64 base and derived image have
+not been built or run on the cloud executor. Record the exact build argument,
+derived image ID, architecture, OpenCode version, PHP version and modules before
+using it with the owned-response runner. Keep the historical arm64 receipts.
+
+**Status of this refreshed bundle:** transfer ready; its updated Dockerfile and
+source ZIP have passed local source checks, but have not been built or run on
+the cloud executor. The exact cross-built amd64 relay binary ran twice there
+against an owned receiver in earlier OSLit work, and separate Linux
+source/transport suites passed in the cloud chat. Those receipts do not
+qualify this bundle's derived Docker image, native run, provider route, or
+cleanup. The runner accepts an explicit cloud platform, immutable image ID,
+relay SHA, RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
+Cloud `direct` is rejected. `--live-free` is hard-blocked before output
+creation until a later reviewed change has evidence for the actual owned
+cloud sidecar route and native TLS trust. The offline owned-response run uses
+`--dummy-port`, so it cannot prove that upstream hop.
 
 The next cloud operator should:
 
@@ -29,7 +44,9 @@ The next cloud operator should:
 2. Read the executor's current environment status and enforced network policy.
    Confirm the local Docker socket and bind-source visibility without changing
    its configuration or existing services. Observe image OS/architecture and
-   build the pinned Dockerfile there; record its immutable image ID.
+   build the Dockerfile with the explicit amd64 child digest above; record the
+   build command and immutable derived image ID. Stop if PHP 8.4.26, SQLite or
+   GD cannot be verified in that image.
 3. Read back the private Docker bridge subnet, intended gateway and relay peer.
    Run the cross-built relay there against an owned receiver. Require the exact
    kernel-observed peer and reject researcher/unrelated-container bypass. If
@@ -43,6 +60,7 @@ The next cloud operator should:
    is an unavailable result, not a reason to relax isolation or retry blindly.
 
 The bundle contains no raw prior run outputs, native stores, Docker volumes,
-capabilities, keys, or provider credentials. It supplies source and a
-cross-built binary, not evidence that cloud policy, route, image, trust, or
-provider behavior is qualified.
+capabilities, keys, or provider credentials. It supplies source and the
+previously cloud-exercised relay binary. The separate cloud checks apply to
+their recorded inputs; this refreshed bundle still needs its own Docker,
+native, sidecar, and provider qualification.

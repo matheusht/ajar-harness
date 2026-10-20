@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 488,
+      "bytes": 523,
       "path": "evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
-      "sha256": "f93e4ea1f38b4837af3b763c6e1c1cc3ec80b012c858ba26a568dc792fba3dea"
+      "sha256": "00846b1d99467a4f00c2e62524d6925659a2bbd9e21c095a93a5db8d3f7e5cca"
     },
     {
       "bytes": 1362,
@@ -16,9 +16,9 @@
       "sha256": "b94917ad3021ed6366f8bfe0ed0134dcaa4a42613373b834a08d8fb06ab9012b"
     },
     {
-      "bytes": 5488,
+      "bytes": 7013,
       "path": "evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md",
-      "sha256": "fc6f24d051c4a6774bc91ce6493b968ffaa3031a1b822335639beac0a69b087c"
+      "sha256": "a5a99f990986b72e68dc1161f71f40e1bc2abb51f0225b941c6374a55b4748b3"
     },
     {
       "bytes": 361,
@@ -76,9 +76,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 3006,
+      "bytes": 4266,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "014bfeb2e73ede9bae2373123934e86495bb6e5d9a8adbde057b7dfa0cef8475"
+      "sha256": "49a118338f9506d87b8cb911bc90207949441fc273e3a23a4d67e47ebbc5c168"
     },
     {
       "bytes": 11748,

@@ -61,9 +61,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 2769,
+      "bytes": 2871,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "f17f20ab90e9879a0dbc6c5aa25cad0016eb75ae0bb94e61f9bca54f7250ca9f"
+      "sha256": "c90543efba1fe11ffe8af4b0d024f2114f03803e0ccf6216d9f3821cc380a74d"
     },
     {
       "bytes": 11748,
@@ -79,6 +79,11 @@
       "bytes": 5184,
       "path": "experiments/native-network-preflight/PRIVATE-LISTENER-CHECKS.md",
       "sha256": "157f268dfcf0b93909154dd155bd9564f6e9e7ed75175ede66d7b062fc7ae890"
+    },
+    {
+      "bytes": 2591,
+      "path": "experiments/native-network-preflight/READINESS-STOP-CHECKS.md",
+      "sha256": "67aa0b83c94d013a39d8982cb2b0915b10d5d11bc8e9469fbdbd542b63bd84cf"
     },
     {
       "bytes": 5641,

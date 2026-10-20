@@ -1,0 +1,161 @@
+{
+  "files": [
+    {
+      "bytes": 488,
+      "path": "evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "sha256": "f93e4ea1f38b4837af3b763c6e1c1cc3ec80b012c858ba26a568dc792fba3dea"
+    },
+    {
+      "bytes": 14326,
+      "path": "evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md",
+      "sha256": "a727e9417fda44b5d9cfb4754933c94506dbcb8926bfa80e6b2aaa1fe5a66624"
+    },
+    {
+      "bytes": 5488,
+      "path": "evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md",
+      "sha256": "fc6f24d051c4a6774bc91ce6493b968ffaa3031a1b822335639beac0a69b087c"
+    },
+    {
+      "bytes": 361,
+      "path": "evals/native-qualification/smoke/check.php",
+      "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
+    },
+    {
+      "bytes": 98,
+      "path": "evals/native-qualification/smoke/index.php",
+      "sha256": "f070f8308bda12bb56df51717675d86558a53891666d419052013e811ce3b7b7"
+    },
+    {
+      "bytes": 58,
+      "path": "evals/native-qualification/smoke/message.php",
+      "sha256": "ac12d930241f36a93d5e83b7b37737219a8d04fe0d3d5a417a8c3b7edbf8c9d9"
+    },
+    {
+      "bytes": 853,
+      "path": "evals/native-qualification/smoke/opencode_v2_live_config.json",
+      "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
+    },
+    {
+      "bytes": 80571,
+      "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
+      "sha256": "f0ddb089b9752bab6fe125bc7ecd062219a0f6b9e84b0d1d9555b2ba3b771b3c"
+    },
+    {
+      "bytes": 1222,
+      "path": "evals/native-qualification/smoke/opencode_v2_mock_provider.php",
+      "sha256": "3eccc5c7bd8a9e60c743b6199f60ae669ed9f2d9df4f3e11d69b2038f1215880"
+    },
+    {
+      "bytes": 792,
+      "path": "evals/native-qualification/smoke/opencode_v2_observed_config.json",
+      "sha256": "8c63991951ecf580549be2e5cb08ad6746e10adae91f404e11c3a5138bc4215b"
+    },
+    {
+      "bytes": 18,
+      "path": "evals/native-qualification/smoke/opencode_v2_request_observer/package.json",
+      "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae"
+    },
+    {
+      "bytes": 1634,
+      "path": "evals/native-qualification/smoke/opencode_v2_request_observer/server.js",
+      "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
+    },
+    {
+      "bytes": 2769,
+      "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
+      "sha256": "f17f20ab90e9879a0dbc6c5aa25cad0016eb75ae0bb94e61f9bca54f7250ca9f"
+    },
+    {
+      "bytes": 11748,
+      "path": "experiments/native-network-preflight/CLOUD-DIND-PORTABILITY-PRECHECK-2026-10-20.md",
+      "sha256": "d50a0364a2c984baa7a8d41ac74e709718bf03487935af296421cf265ddd6e32"
+    },
+    {
+      "bytes": 5282,
+      "path": "experiments/native-network-preflight/LOCAL-200-RESULTS-2026-10-20.md",
+      "sha256": "56fb08ead9d49039593e1fbe2a6c0b825aef21bf773042c9ce9cf73e44626048"
+    },
+    {
+      "bytes": 5184,
+      "path": "experiments/native-network-preflight/PRIVATE-LISTENER-CHECKS.md",
+      "sha256": "157f268dfcf0b93909154dd155bd9564f6e9e7ed75175ede66d7b062fc7ae890"
+    },
+    {
+      "bytes": 5641,
+      "path": "experiments/native-network-preflight/UPSTREAM-PROXY-CHECKS.md",
+      "sha256": "859e3a2028c3cfb591cb70c15dafd348ebfc7938442e1ce71c4bd84e55818bc7"
+    },
+    {
+      "bytes": 5410,
+      "path": "experiments/native-network-preflight/V2-TUNNEL-CHECKS.md",
+      "sha256": "d6ffa2493948d45916283e72e045bee57896a780aaae4c556995ec2676dda69f"
+    },
+    {
+      "bytes": 16237,
+      "path": "experiments/native-network-preflight/check_v2_connect.py",
+      "sha256": "2067a8917c0fe09c5458bac564742354dca4ae06e70b76e4211d085719a3d3fd"
+    },
+    {
+      "bytes": 17543,
+      "path": "experiments/native-network-preflight/check_v2_private_listener.py",
+      "sha256": "2872a00f23f6a650bc804080cdbc20d145b15b3bf7eaf107a3bf7c3f99c6862c"
+    },
+    {
+      "bytes": 27302,
+      "path": "experiments/native-network-preflight/check_v2_upstream_proxy.py",
+      "sha256": "28ed0cd8d4fc8920e89ff8ba0723a15a4efda78aac57339c4361146fe0a8651b"
+    },
+    {
+      "bytes": 2702,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/CHECKS.md",
+      "sha256": "811148fa5fd8c36c2a167b310de3bb31dbe0521fdc2f9722dc44a4c81146dadb"
+    },
+    {
+      "bytes": 9024,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/check.py",
+      "sha256": "61cfd4599fe00dbe3893d339116ec95e0a1c708439012b66ca898adbdada0b18"
+    },
+    {
+      "bytes": 399,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/README.md",
+      "sha256": "517c97a83e4e6123fd8b1cf551858b887d034958a5ed88699984d3729ae6343d"
+    },
+    {
+      "bytes": 876,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/result.json",
+      "sha256": "c0886a251ca3c69061c604276248626a574ae3e207bad39d35e44ad907da26b8"
+    },
+    {
+      "bytes": 8490157,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/tcp-relay-linux-amd64",
+      "sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895"
+    },
+    {
+      "bytes": 1762,
+      "path": "experiments/native-network-preflight/tcp_relay.go",
+      "sha256": "ebacc88d41e64b4f088f675be039f2318e3ad67549259274cdd37a9b41089fca"
+    },
+    {
+      "bytes": 11087,
+      "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
+      "sha256": "c567147c9006766bd6aa5445fcda94093a0812ef1cd0f4c3d41be42d56974c4d"
+    },
+    {
+      "bytes": 4913,
+      "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
+      "sha256": "7e939e8d245996b12f3f509e272acd3a538f222b4c537a8dee6fa0b55dac1db2"
+    },
+    {
+      "bytes": 26811,
+      "path": "experiments/native-network-preflight/v2_connect.py",
+      "sha256": "f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea"
+    },
+    {
+      "bytes": 59243,
+      "path": "tools/docker_session_runtime.py",
+      "sha256": "9beff3af097a711010a5234f2ab72f549f617fdcf8c3833b6d5a29c7fa582b28"
+    }
+  ],
+  "kind": "t02-cloud-source",
+  "schema_version": 1
+}

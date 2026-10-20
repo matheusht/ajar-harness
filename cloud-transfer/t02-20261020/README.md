@@ -18,19 +18,39 @@ For an explicit Linux/amd64 build, set `OPENCODE_BASE` to
 `ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319`,
 the separately verified amd64 child of the official 2.0.32 OCI index
 `sha256:02998f912cc8bf84ce20ff9d9faa33225406c52f9d13f8f86b376490f1e28813`.
-This is a source/build candidate only: the amd64 base and derived image have
-not been built or run on the cloud executor. Record the exact build argument,
-derived image ID, architecture, OpenCode version, PHP version and modules before
-using it with the owned-response runner. Keep the historical arm64 receipts.
+This is a source/build candidate only. On the cloud executor with its managed
+proxy and an existing combined CA bundle, the exact amd64 build command is:
 
-**Status of this refreshed bundle:** transfer ready; its updated Dockerfile and
-source ZIP have passed local source checks, but have not been built or run on
-the cloud executor. The exact cross-built amd64 relay binary ran twice there
-against an owned receiver in earlier OSLit work, and separate Linux
-source/transport suites passed in the cloud chat. Those receipts do not
-qualify this bundle's derived Docker image, native run, provider route, or
-cleanup. The runner accepts an explicit cloud platform, immutable image ID,
-relay SHA, RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
+```sh
+docker buildx build --platform linux/amd64 --load \
+  --build-arg OPENCODE_BASE=ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319 \
+  --secret id=proxy_ca,type=file,src=/etc/ssl/certs/ca-certificates.crt \
+  -f evals/native-qualification/Dockerfile.opencode-kanboard-runtime \
+  -t t02-kanboard-runtime:amd64-candidate evals/native-qualification
+```
+
+Keep HTTPS certificate and hostname checks on. The secret is mounted only at
+`/etc/apk/ca.pem` during `apk add`; do not copy it into the image or receipt.
+The mount is optional for the local arm64 default, which retains its existing
+base digest and system trust when the build argument and secret are omitted.
+Record the exact build command, derived image ID, architecture, OpenCode
+version, PHP version and modules before using the image. Keep the historical
+arm64 receipts.
+
+**Status of this refreshed bundle:** transfer ready; its new secret-bearing
+Dockerfile and source ZIP have passed local source checks, but have not been
+cloud-built. The embedded relay cross-build receipt
+`experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/result.json`
+has `cloud_execution: false`: it records the earlier local cross-build only.
+Cloud task `01a15aae-2ba3-7160-96ba-2fdf5e20700b` (20 October 2026)
+later ran that exact binary twice against an owned receiver. Cloud task
+`01a15b0a-9bba-7282-8f57-2f37f42a0012` (20 October 2026) passed both
+source checks and Linux direct 29/29, upstream proxy 95/95, and private
+listener 106/106 on the preceding bundle; its amd64 base downloaded, but
+`apk add` failed TLS trust, so no derived image was produced. Those receipts
+do not qualify this refreshed bundle's Docker image, native run, provider
+route, or cleanup. The runner accepts an explicit cloud platform, immutable
+image ID, relay SHA, RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
 Cloud `direct` is rejected. `--live-free` is hard-blocked before output
 creation until a later reviewed change has evidence for the actual owned
 cloud sidecar route and native TLS trust. The offline owned-response run uses
@@ -44,17 +64,22 @@ The next cloud operator should:
 2. Read the executor's current environment status and enforced network policy.
    Confirm the local Docker socket and bind-source visibility without changing
    its configuration or existing services. Observe image OS/architecture and
-   build the Dockerfile with the explicit amd64 child digest above; record the
-   build command and immutable derived image ID. Stop if PHP 8.4.26, SQLite or
-   GD cannot be verified in that image.
+   use the exact amd64 build command above; record the build command and
+   immutable derived image ID. Stop if PHP 8.4.26, SQLite or GD cannot be
+   verified in that image. Keep the CA secret out of the image and logs.
 3. Read back the private Docker bridge subnet, intended gateway and relay peer.
-   Run the cross-built relay there against an owned receiver. Require the exact
-   kernel-observed peer and reject researcher/unrelated-container bypass. If
-   Docker NAT makes peers indistinguishable, stop.
+   The earlier standalone relay run does not prove the researcher's Docker
+   peer. Require an independent exact kernel-observed peer check for this
+   topology and reject researcher/unrelated-container bypass. If Docker NAT
+   makes peers indistinguishable, stop.
 4. Prove the selected executor HTTP CONNECT sidecar with an owned receiver,
    then prove native TLS trust through the relay without disabling certificate
-   checks. Repeat the full owned-response managed native E2E on that cloud host
-   with source/image/relay pins, producer stop, and exact cleanup.
+   checks. The bundled runner deliberately raises
+   `cloud_kernel_peer_challenge_required` before `session.create`; it cannot
+   perform the cloud native E2E as bundled. Require the independent exact-peer
+   result and a reviewed new runner bundle before repeating the full
+   owned-response native E2E with source/image/relay pins, producer stop, and
+   exact cleanup.
 5. Review that receipt before considering the one bounded harmless free-model
    diagnostic in `T02-V2-MANAGED-LIVE-CHECKS-20261020.md`. A failed preflight
    is an unavailable result, not a reason to relax isolation or retry blindly.
@@ -63,4 +88,4 @@ The bundle contains no raw prior run outputs, native stores, Docker volumes,
 capabilities, keys, or provider credentials. It supplies source and the
 previously cloud-exercised relay binary. The separate cloud checks apply to
 their recorded inputs; this refreshed bundle still needs its own Docker,
-native, sidecar, and provider qualification.
+exact-peer, native, sidecar, and provider qualification.

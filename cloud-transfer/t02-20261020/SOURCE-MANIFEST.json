@@ -6,9 +6,9 @@
       "sha256": "f93e4ea1f38b4837af3b763c6e1c1cc3ec80b012c858ba26a568dc792fba3dea"
     },
     {
-      "bytes": 14326,
+      "bytes": 16228,
       "path": "evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md",
-      "sha256": "a727e9417fda44b5d9cfb4754933c94506dbcb8926bfa80e6b2aaa1fe5a66624"
+      "sha256": "b94917ad3021ed6366f8bfe0ed0134dcaa4a42613373b834a08d8fb06ab9012b"
     },
     {
       "bytes": 5488,
@@ -19,6 +19,11 @@
       "bytes": 361,
       "path": "evals/native-qualification/smoke/check.php",
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
+    },
+    {
+      "bytes": 6493,
+      "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
+      "sha256": "c69c6734fd12fcbb57cac13d1dd6112ecdae60822cd29d72b3a6d0421fcfabfd"
     },
     {
       "bytes": 98,
@@ -36,9 +41,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 80571,
+      "bytes": 82706,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "f0ddb089b9752bab6fe125bc7ecd062219a0f6b9e84b0d1d9555b2ba3b771b3c"
+      "sha256": "3e017c959729ef1a66ce9f432c0a8414332728d6753c38f5e34f1c20b57762cf"
     },
     {
       "bytes": 1222,
@@ -61,9 +66,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 2871,
+      "bytes": 2920,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "c90543efba1fe11ffe8af4b0d024f2114f03803e0ccf6216d9f3821cc380a74d"
+      "sha256": "19a62713a36fff5b13e037c39c8d8702300488abc973c59edb0b7a1a24fa5b49"
     },
     {
       "bytes": 11748,
@@ -86,9 +91,9 @@
       "sha256": "67aa0b83c94d013a39d8982cb2b0915b10d5d11bc8e9469fbdbd542b63bd84cf"
     },
     {
-      "bytes": 5641,
+      "bytes": 6621,
       "path": "experiments/native-network-preflight/UPSTREAM-PROXY-CHECKS.md",
-      "sha256": "859e3a2028c3cfb591cb70c15dafd348ebfc7938442e1ce71c4bd84e55818bc7"
+      "sha256": "9f99a823fc9af3ad0a22e475bb000787ea4fb144f9f8d7a54148468f7fc41c9e"
     },
     {
       "bytes": 5410,
@@ -96,9 +101,9 @@
       "sha256": "d6ffa2493948d45916283e72e045bee57896a780aaae4c556995ec2676dda69f"
     },
     {
-      "bytes": 16237,
+      "bytes": 17908,
       "path": "experiments/native-network-preflight/check_v2_connect.py",
-      "sha256": "2067a8917c0fe09c5458bac564742354dca4ae06e70b76e4211d085719a3d3fd"
+      "sha256": "5db8b212376ade3b8b2f08817a063d684ca0942c56ef4e2cb8d42f7e14744979"
     },
     {
       "bytes": 17543,
@@ -106,9 +111,9 @@
       "sha256": "2872a00f23f6a650bc804080cdbc20d145b15b3bf7eaf107a3bf7c3f99c6862c"
     },
     {
-      "bytes": 27302,
+      "bytes": 28208,
       "path": "experiments/native-network-preflight/check_v2_upstream_proxy.py",
-      "sha256": "28ed0cd8d4fc8920e89ff8ba0723a15a4efda78aac57339c4361146fe0a8651b"
+      "sha256": "d403fc604e293d15cbddf6ae6479b895bdadc43abcef998740f1b5f3e9b353e7"
     },
     {
       "bytes": 2702,

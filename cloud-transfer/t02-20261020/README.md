@@ -52,18 +52,20 @@ that same cloud task used the CA-backed bundle and verified Linux/amd64 image
 first managed runner attempt stopped at host-check check 8, before container
 start: Docker had injected upper- and lowercase `HTTP_PROXY`, `HTTPS_PROXY`,
 and `NO_PROXY` despite no request for those six variables. Exact image/cache
-cleanup passed. This bundle contains the later runner revision, which
-explicitly requests empty values for those six names plus upper- and
-lowercase `ALL_PROXY` and `FTP_PROXY` unless a role supplies its exact value.
-The stopped-container readback requires each requested value to match and
-rejects unfamiliar proxy or credential variables. The researcher retains its
-exact owned relay proxy and loopback exclusions; the host checker, relay,
-and external receiver must have no inherited managed proxy. This revision
-has passed source-only checks but has not been cloud-run, so Docker's actual
-empty-override behavior and the native path remain unverified.
+cleanup passed. The next cloud run at source commit `998d10f` proved the
+explicit empty proxy overrides: its stopped network-none host checker had
+all ten proxy variables empty. It built and inspected immutable amd64 image
+`sha256:93a34186b699a11925b9b965e5e9a7c60e33ec0d5ee08db4949c3796b12ca423`.
+The runner then failed check 17 before `NativeRun`, because this daemon
+rejects a static relay IP on an internal bridge whose subnet Docker assigned
+automatically. It removed its exact containers, networks, image and cache;
+no native session started. This bundle adds an explicit cloud internal
+subnet and keeps the relay's reserved address while stopped. This revision
+needs a new cloud run; the prior check 17 failure does not establish success.
 
 The runner accepts an explicit cloud platform, immutable image ID, relay SHA,
-RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
+nonoverlapping private internal and external subnets, external listener/peer,
+and selected HTTP proxy variable.
 Cloud `direct` is rejected. `--live-free` is hard-blocked before output
 creation until a later reviewed change has evidence for the actual owned
 cloud sidecar route and native TLS trust. The offline owned-response run uses
@@ -80,7 +82,12 @@ The next cloud operator should:
    use the exact amd64 build command above; record the build command and
    immutable derived image ID. Stop if PHP 8.4.26, SQLite or GD cannot be
    verified in that image. Keep the CA secret out of the image and logs.
-3. Read back the private Docker bridge subnet, intended gateway and relay peer.
+3. Read back the private internal and external Docker bridge subnets, intended
+   gateway and relay peer. On the currently observed clean cloud daemon,
+   `172.18.0.0/16` was Docker's prior internal allocation. A separate
+   disposable network-only preflight accepted it with `Internal=true` and an
+   empty gateway, then restored the daemon baseline; static attachment remains
+   untested. Require a fresh no-conflict observation before supplying it.
    The earlier standalone relay run does not prove the researcher's Docker
    peer. Require an independent exact kernel-observed peer check for this
    topology and reject researcher/unrelated-container bypass. If Docker NAT

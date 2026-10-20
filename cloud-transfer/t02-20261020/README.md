@@ -37,9 +37,8 @@ Record the exact build command, derived image ID, architecture, OpenCode
 version, PHP version and modules before using the image. Keep the historical
 arm64 receipts.
 
-**Status of this refreshed bundle:** transfer ready; its new secret-bearing
-Dockerfile and source ZIP have passed local source checks, but have not been
-cloud-built. The embedded relay cross-build receipt
+**Status of this refreshed bundle:** source transfer ready after the local
+36-file and source-only checks. The embedded relay cross-build receipt
 `experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/result.json`
 has `cloud_execution: false`: it records the earlier local cross-build only.
 Cloud task `01a15aae-2ba3-7160-96ba-2fdf5e20700b` (20 October 2026)
@@ -47,10 +46,24 @@ later ran that exact binary twice against an owned receiver. Cloud task
 `01a15b0a-9bba-7282-8f57-2f37f42a0012` (20 October 2026) passed both
 source checks and Linux direct 29/29, upstream proxy 95/95, and private
 listener 106/106 on the preceding bundle; its amd64 base downloaded, but
-`apk add` failed TLS trust, so no derived image was produced. Those receipts
-do not qualify this refreshed bundle's Docker image, native run, provider
-route, or cleanup. The runner accepts an explicit cloud platform, immutable
-image ID, relay SHA, RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
+`apk add` failed TLS trust, so no derived image was produced. A later run in
+that same cloud task used the CA-backed bundle and verified Linux/amd64 image
+`sha256:a50c602b437f30d2d1d27ba73d08df47db7461915a0d563282d07e862f2ad29b`. Its
+first managed runner attempt stopped at host-check check 8, before container
+start: Docker had injected upper- and lowercase `HTTP_PROXY`, `HTTPS_PROXY`,
+and `NO_PROXY` despite no request for those six variables. Exact image/cache
+cleanup passed. This bundle contains the later runner revision, which
+explicitly requests empty values for those six names plus upper- and
+lowercase `ALL_PROXY` and `FTP_PROXY` unless a role supplies its exact value.
+The stopped-container readback requires each requested value to match and
+rejects unfamiliar proxy or credential variables. The researcher retains its
+exact owned relay proxy and loopback exclusions; the host checker, relay,
+and external receiver must have no inherited managed proxy. This revision
+has passed source-only checks but has not been cloud-run, so Docker's actual
+empty-override behavior and the native path remain unverified.
+
+The runner accepts an explicit cloud platform, immutable image ID, relay SHA,
+RFC1918 subnet/listener/peer, and selected HTTP proxy variable.
 Cloud `direct` is rejected. `--live-free` is hard-blocked before output
 creation until a later reviewed change has evidence for the actual owned
 cloud sidecar route and native TLS trust. The offline owned-response run uses
@@ -87,5 +100,5 @@ The next cloud operator should:
 The bundle contains no raw prior run outputs, native stores, Docker volumes,
 capabilities, keys, or provider credentials. It supplies source and the
 previously cloud-exercised relay binary. The separate cloud checks apply to
-their recorded inputs; this refreshed bundle still needs its own Docker,
-exact-peer, native, sidecar, and provider qualification.
+their recorded inputs; this revised runner still needs managed Docker
+environment readback, exact-peer, native, sidecar, and provider qualification.

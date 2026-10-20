@@ -16,9 +16,9 @@
       "sha256": "b94917ad3021ed6366f8bfe0ed0134dcaa4a42613373b834a08d8fb06ab9012b"
     },
     {
-      "bytes": 7741,
+      "bytes": 9013,
       "path": "evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md",
-      "sha256": "a6e604f37136325da156c2b1a21bc45f347696a9122f0a0da117f3c312e60fd7"
+      "sha256": "18ec25947be95c2555621a29ab96e37b6a76973c399a6e86c917d184c0d68e15"
     },
     {
       "bytes": 361,
@@ -51,9 +51,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 82706,
+      "bytes": 83295,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "3e017c959729ef1a66ce9f432c0a8414332728d6753c38f5e34f1c20b57762cf"
+      "sha256": "7a3a46cd752ccc7b64344e851a77e46baf84694c92a07d01b3061d450bc5af70"
     },
     {
       "bytes": 1222,
@@ -76,9 +76,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 5755,
+      "bytes": 6667,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "1a7e469a76faa0f36227da7f10e846bf9abbe105dc00b9b67d708d566f8f686d"
+      "sha256": "8adb3cff883aef02cce64333cc98f6a6a5d959b6946016dcb99671867b671ae6"
     },
     {
       "bytes": 11748,

@@ -6,6 +6,11 @@
       "sha256": "f93e4ea1f38b4837af3b763c6e1c1cc3ec80b012c858ba26a568dc792fba3dea"
     },
     {
+      "bytes": 1362,
+      "path": "evals/native-qualification/T02-CLOUD-SOURCE-CHECKER-FAILURES-20261020.md",
+      "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
+    },
+    {
       "bytes": 16228,
       "path": "evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md",
       "sha256": "b94917ad3021ed6366f8bfe0ed0134dcaa4a42613373b834a08d8fb06ab9012b"
@@ -21,9 +26,14 @@
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
     },
     {
-      "bytes": 6493,
+      "bytes": 2920,
+      "path": "evals/native-qualification/smoke/check_v2_cloud_manifest_layout.py",
+      "sha256": "cdb1cb0c5f445b99b1bde19eda6aad32ca00c648595cde102ec8b57a4e403750"
+    },
+    {
+      "bytes": 8304,
       "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
-      "sha256": "c69c6734fd12fcbb57cac13d1dd6112ecdae60822cd29d72b3a6d0421fcfabfd"
+      "sha256": "b05266d75e42abdf653e649309c7589a64bd41fcb34f02199a76b37aa7d0ba46"
     },
     {
       "bytes": 98,
@@ -66,9 +76,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 2920,
+      "bytes": 3006,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "19a62713a36fff5b13e037c39c8d8702300488abc973c59edb0b7a1a24fa5b49"
+      "sha256": "014bfeb2e73ede9bae2373123934e86495bb6e5d9a8adbde057b7dfa0cef8475"
     },
     {
       "bytes": 11748,
@@ -79,6 +89,11 @@
       "bytes": 5282,
       "path": "experiments/native-network-preflight/LOCAL-200-RESULTS-2026-10-20.md",
       "sha256": "56fb08ead9d49039593e1fbe2a6c0b825aef21bf773042c9ce9cf73e44626048"
+    },
+    {
+      "bytes": 2788,
+      "path": "experiments/native-network-preflight/ORPHAN-REAP-CHECKS.md",
+      "sha256": "a5d2bbfe70c6666fb9aea61db795bb6a48475d365d9b3e3b2fc1697b6548d04e"
     },
     {
       "bytes": 5184,

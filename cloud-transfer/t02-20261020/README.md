@@ -4,8 +4,9 @@ This is a credential-free snapshot of the current managed V2 CONNECT candidate,
 its prewritten checks, the pinned T05 controls, and a Linux/amd64 relay
 cross-build. `source.zip` contains exactly the repository paths listed in
 `SOURCE-MANIFEST.json`, plus that manifest. The allowlist includes
-`READINESS-STOP-CHECKS.md`, which the upstream proxy checker reads at startup,
-and the no-Docker cloud source/teardown checker.
+`READINESS-STOP-CHECKS.md` and `ORPHAN-REAP-CHECKS.md`, which document the
+transport checker failures, and the no-Docker cloud source/teardown and
+manifest-layout checkers with their prewritten failure conditions.
 `TRANSFER-REPORT.json` records the
 ZIP and manifest hashes. Verify both before extracting into a private checkout.
 The shared local worktree is mostly untracked; cloning its Git HEAD alone will

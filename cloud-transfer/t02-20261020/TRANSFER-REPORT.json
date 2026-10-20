@@ -1,13 +1,13 @@
 {
   "archive": "source.zip",
-  "archive_bytes": 4809476,
-  "archive_sha256": "0cea1bc69dc4134f135934d170d918f7069cc15f25e55e5222675f59f0eedd19",
+  "archive_bytes": 4800193,
+  "archive_sha256": "17e7a7713025f9bb352d104ead4ffbff37511ed7ecfe8e4d449a804c61979df2",
   "cloud_execution": false,
-  "files": 33,
+  "files": 36,
   "historical_image_id": "sha256:31b7fa2b80f17bbddfeffd0577634257df40490f1b8d4c57f8507b40956cdf15",
-  "manifest_sha256": "6ddc045818336062fa2d6e5909d5ed47c853de94085655259838b4d74e70cb41",
+  "manifest_sha256": "d3f579cc2befb9608a934566849907c5f60de2fb1f8d943faf9e3da3b344fc73",
   "provider_execution": false,
   "relay_cross_build_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
-  "source_bytes": 8826828,
+  "source_bytes": 8835795,
   "status": "source_bundle_built_not_cloud_qualified"
 }

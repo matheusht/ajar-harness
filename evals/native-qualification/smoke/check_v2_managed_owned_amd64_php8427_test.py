@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -222,7 +223,7 @@ class FakeCommands:
             if entry == 'sh':
                 return completed(argv, stdout='sh\nphp\nwget\nopencode\n')
             return completed(argv, returncode=98, stderr='unexpected probe')
-        if (argv and argv[0].endswith('python3') and len(argv) > 1
+        if (argv and argv[0] == sys.executable and len(argv) > 1
                 and Path(argv[1]).name == controller.PARITY_WRAPPER.name):
             candidate_path = self.output_root / 'candidate.json'
             runtime_path = self.output_root / 'runtime-admission.json'
@@ -290,7 +291,7 @@ class FakeCommands:
                 self.cache_rows['cache-unregistered'] = {
                     'ID': 'cache-unregistered', 'Size': '1kB', 'Parents': None}
             return completed(argv, stdout=json.dumps({'status': 'pass'}))
-        if argv and argv[0].endswith('python3') and str(controller.MANAGED_RUNNER) in argv:
+        if argv and argv[0] == sys.executable and str(controller.MANAGED_RUNNER) in argv:
             if '--live-free' in argv or '--live-runtime-ca' in argv:
                 return completed(argv, returncode=96, stderr='live flag forbidden')
             managed = Path(argv[argv.index('--output') + 1])
@@ -481,10 +482,10 @@ class ControllerTests(unittest.TestCase):
                              ['docker', 'buildx', 'inspect', 'default']
                              for call in commands.calls))
         parity = next(call for call in commands.calls
-                      if call and call[0].endswith('python3')
+                      if call and call[0] == sys.executable
                       and Path(call[1]).name == controller.PARITY_WRAPPER.name)
         managed = next(call for call in commands.calls
-                       if call and call[0].endswith('python3')
+                       if call and call[0] == sys.executable
                        and '--cloud-image-id' in call)
         self.assertLess(commands.calls.index(parity), commands.calls.index(managed))
         self.assertNotIn('--live-free', managed)
@@ -515,7 +516,7 @@ class ControllerTests(unittest.TestCase):
         commands = FakeCommands(bad_php=True)
         _output, result = self.attempt(commands)
         self.assertEqual(1, result)
-        self.assertFalse(any(call and call[0].endswith('python3') for call in commands.calls))
+        self.assertFalse(any(call and call[0] == sys.executable for call in commands.calls))
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
 
@@ -524,7 +525,7 @@ class ControllerTests(unittest.TestCase):
         _output, result = self.attempt(commands)
         self.assertEqual(1, result)
         self.assertFalse(any(call[:2] == ['docker', 'run'] for call in commands.calls))
-        self.assertFalse(any(call and call[0].endswith('python3') for call in commands.calls))
+        self.assertFalse(any(call and call[0] == sys.executable for call in commands.calls))
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
 
@@ -533,7 +534,7 @@ class ControllerTests(unittest.TestCase):
         _output, result = self.attempt(commands)
         self.assertEqual(1, result)
         self.assertFalse(any(call[:2] == ['docker', 'run'] for call in commands.calls))
-        self.assertFalse(any(call and call[0].endswith('python3') for call in commands.calls))
+        self.assertFalse(any(call and call[0] == sys.executable for call in commands.calls))
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
 
@@ -542,7 +543,7 @@ class ControllerTests(unittest.TestCase):
         _output, result = self.attempt(commands)
         self.assertEqual(1, result)
         self.assertFalse(any(call[:2] == ['docker', 'run'] for call in commands.calls))
-        self.assertFalse(any(call and call[0].endswith('python3')
+        self.assertFalse(any(call and call[0] == sys.executable
                              for call in commands.calls))
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)

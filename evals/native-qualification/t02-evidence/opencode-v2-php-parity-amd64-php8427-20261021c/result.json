@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "kind": "kanboard-current-runtime-qualification-result",
+  "qualification_id": "t01-kanboard-php8427-amd64-20261021c",
+  "evidence_stage": "pre-oracle-result",
+  "recorded_at": "2026-10-21T20:35:00Z",
+  "review_status": "needs_review",
+  "observed_outcome": "pass_current_runtime_application_semantics",
+  "classification": "owned offline two-arm observer; zero provider/model/target calls",
+  "image": {
+    "tag": "t02-kanboard-runtime:amd64-php8427-20261021c",
+    "id": "sha256:241dd8f788c62d5c9ef87bdab07ce1f05aca7db0199d532a68b5910c7397f7de",
+    "platform": "linux/amd64",
+    "new_relative_to_baseline": true,
+    "registered_before_first_execution": true,
+    "candidate_receipt_sha256": "b988d104545f4ace568a268f79cdf1d2bfb2f686d948ce34f144a01db394df73"
+  },
+  "runtime_admission": {
+    "receipt_sha256": "0481663a5d4e62b8ec84054288af98523300128fda04512b02c4e89a77ed1e4c",
+    "php_version": "PHP 8.4.27 (cli) (built: Oct 21 2026 16:38:20) (NTS)",
+    "required_packages_present": true,
+    "all_installed_php84_packages_match_8_4_27_r0": true,
+    "required_modules_present": true,
+    "every_probe_used_exact_id_pull_never_network_none": true
+  },
+  "archive_admission": {
+    "vulnerable_sha256": "3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf",
+    "fixed_sha256": "44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56",
+    "archives_verified": 2,
+    "both_verified_before_runner_invocation": true,
+    "arms_started_before_both_verified": 0
+  },
+  "observer": {
+    "private_runner_result_sha256": "6a984b53bf9b3f2608af43461f7a62696b837845c3b6d1b6b12b2f2de08fcf78",
+    "runner_status": "pass",
+    "runner_checks_passed": 32,
+    "runner_checks_total": 32,
+    "failed_checks": [],
+    "two_unique_arms": true,
+    "ordinary_controls_both_arms": true,
+    "vulnerable_exact_metadata": true,
+    "fixed_cross_role_denial": true,
+    "semantic_match_historical_t01": true,
+    "current_runtime_both_arms": true,
+    "source_pins_both_arms": true,
+    "arm_cleanup_complete": true,
+    "public_result_sha256": "cf7b83e7c79dcb2ade0f833e158ed3535e94350d7effcbc9e34075aca7f92b9d",
+    "vulnerable_trace_sha256": "088257b93fffbe83284c25ffec0b2a938cbffcc41c31ddf86b5623c1c64aad00",
+    "fixed_trace_sha256": "037fef5ac1842e4413c281f3868a474d0ef1bdf7e049de3220cd55b6f4c9ad4b"
+  },
+  "execution": {
+    "application_arms_started": 2,
+    "application_containers_started": 2,
+    "provider_calls": 0,
+    "model_calls": 0,
+    "live_targets_contacted": 0,
+    "external_credentials_used": 0,
+    "researcher_bundle_created": false
+  },
+  "outer_cleanup": {
+    "task_image_removed": "sha256:241dd8f788c62d5c9ef87bdab07ce1f05aca7db0199d532a68b5910c7397f7de",
+    "task_cache_record_ids_created": [
+      "kihzfbgjzuzb8z8c7bks0nd9o",
+      "llghvf4decuvuo09l50r7thy8",
+      "p4z6l2l0cokwl26ffbbueegll",
+      "q95p7txgmon8hz04xnyg7u623",
+      "sccib46cldao8b3cq9sz4ymnk",
+      "1vnhgkxgfxhj38ofd0ltl7htv",
+      "75ti2wpmyib4oeqrzm1bns0hk"
+    ],
+    "task_cache_record_ids_removed": [
+      "75ti2wpmyib4oeqrzm1bns0hk",
+      "sccib46cldao8b3cq9sz4ymnk",
+      "kihzfbgjzuzb8z8c7bks0nd9o",
+      "p4z6l2l0cokwl26ffbbueegll",
+      "llghvf4decuvuo09l50r7thy8",
+      "q95p7txgmon8hz04xnyg7u623",
+      "1vnhgkxgfxhj38ofd0ltl7htv"
+    ],
+    "global_prune_used": false,
+    "final_containers": [],
+    "final_images": [],
+    "final_image_tag_mappings": [],
+    "final_volumes": [],
+    "final_networks": [
+      {"name": "bridge", "id": "1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba", "driver": "bridge"},
+      {"name": "host", "id": "dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb", "driver": "host"},
+      {"name": "none", "id": "8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216", "driver": "null"}
+    ],
+    "final_builder_identity": {
+      "name": "default",
+      "driver": "docker",
+      "node": "default",
+      "node_id": "3d9ccea9-b6e8-44d3-bacb-cc5a846b48ca",
+      "buildkit_version": "v0.24.0"
+    },
+    "final_build_cache_record_ids": [],
+    "final_build_cache_bytes": 0,
+    "candidate_tag_absent": true,
+    "candidate_image_absent": true,
+    "final_readback_private_sha256": "68b705d23b677242e0a8a229ccfac73e02c7a8aaca34683bb1e89feea5f4fc41",
+    "baseline_restored": true
+  },
+  "claims": {
+    "current_php8427_application_semantics_qualified": true,
+    "historical_application_semantics_matched": true,
+    "byte_identical_php8426_parity": false,
+    "sealed_php8426_build_remains_blocked": true,
+    "provider_or_model_route_qualified": false
+  },
+  "limits": [
+    "This qualifies only the immutable image ID recorded above against the owned ordinary observer.",
+    "The live Alpine repository is not a durable package snapshot and may stop serving 8.4.27-r0.",
+    "The result is semantic application comparison, not byte-identical PHP 8.4.26 parity.",
+    "No provider, model, hosted CI, live target, engagement, or researcher workflow was exercised."
+  ]
+}

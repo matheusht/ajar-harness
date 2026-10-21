@@ -1,0 +1,13 @@
+{
+  "status": "handoff_checks_passed",
+  "checks": [
+    "source/claim/raw binding; changed condition requires actual review",
+    "prior preparation cannot author a reviewer outcome or stale input ID",
+    "exact allowlist, raw material and no invented allowance",
+    "edited manifest and injected answer rejected before staging",
+    "tampered, missing, extra and symlink staged files rejected",
+    "stop preserves complete strong-lead basis, condition and next check"
+  ],
+  "provider_calls": 0,
+  "native_review": "not_run"
+}

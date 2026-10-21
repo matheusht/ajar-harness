@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "t02-cloud-amd64-kanboard-fresh-candidate-attempt",
+  "recorded_at": "2026-10-21T20:02:20Z",
+  "status": "blocked_build_dependency_unavailable",
+  "classification": "owned offline candidate build; zero image execution and zero provider/model calls",
+  "qualification_base": "9c0c0e3f0f7d25fece945a564c8c991a5368d8b9",
+  "failure": {
+    "phase": "candidate_image_build",
+    "build_started_at": "2026-10-21T20:00:58Z",
+    "build_failed_at": "2026-10-21T20:01:04Z",
+    "build_exit_code": 1,
+    "failed_process": "apk add exact PHP packages",
+    "apk_exit_code": 11,
+    "required_php_package_version": "8.4.26-r0",
+    "available_php_package_version": "8.4.27-r0",
+    "diagnostic": "Alpine package selection rejected each exact 8.4.26-r0 constraint because the repository resolved 8.4.27-r0.",
+    "private_build_log_sha256": "92aa9ae5d7a2a67af50877f76ecc1476efcf39f72d29fa7a007d8ec53d801bd9",
+    "private_build_log_size_bytes": 7131,
+    "raw_build_log_published": false,
+    "build_metadata_file_created": false
+  },
+  "candidate": {
+    "tag": "t02-kanboard-runtime:amd64-parity-20261021b",
+    "tag_present_after_failure": false,
+    "image_loaded": false,
+    "image_id": null,
+    "registered": false,
+    "registration_receipt_created": false,
+    "decision": "stop_before_candidate_registration_archive_retrieval_or_image_execution"
+  },
+  "execution": {
+    "build_attempted": true,
+    "metadata_only_candidate_inspection_attempted": false,
+    "docker_run_calls": 0,
+    "archive_retrieval_attempted": false,
+    "archives_verified": 0,
+    "archives_extracted": 0,
+    "application_containers_started": 0,
+    "ordinary_behavior_run": false,
+    "vulnerable_arm_run": false,
+    "fixed_arm_run": false,
+    "parity_runner_executed": false,
+    "parity_established": false,
+    "researcher_bundle_created": false,
+    "provider_calls": 0,
+    "model_calls": 0,
+    "live_targets_contacted": 0,
+    "external_credentials_used": 0
+  },
+  "cleanup": {
+    "task_images_removed": [],
+    "task_cache_record_ids_created": [
+      "47ehtoqw71c1f0ovp2sfysmh9",
+      "uae38gxj80a02n8gzi2f73pdz",
+      "urofb9wv6yehq8rk8l81or3vz",
+      "x92kc87fqeg51fzy5c41la612",
+      "ydik7lbwq2hcxwqyttv2gls84",
+      "9u2iccw8sozn5ehtlzjldleql"
+    ],
+    "task_cache_record_ids_removed": [
+      "47ehtoqw71c1f0ovp2sfysmh9",
+      "uae38gxj80a02n8gzi2f73pdz",
+      "urofb9wv6yehq8rk8l81or3vz",
+      "x92kc87fqeg51fzy5c41la612",
+      "ydik7lbwq2hcxwqyttv2gls84",
+      "9u2iccw8sozn5ehtlzjldleql"
+    ],
+    "parent_cache_retries": [
+      "47ehtoqw71c1f0ovp2sfysmh9",
+      "urofb9wv6yehq8rk8l81or3vz"
+    ],
+    "global_prune_used": false,
+    "final_candidate_tag_absent": true,
+    "final_containers": [],
+    "final_images": [],
+    "final_volumes": [],
+    "final_networks": [
+      {"name": "bridge", "id": "1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba"},
+      {"name": "host", "id": "dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb"},
+      {"name": "none", "id": "8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216"}
+    ],
+    "final_build_cache_record_ids": [],
+    "final_build_cache_bytes": 0,
+    "dockerfile_sha256_after": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b",
+    "managed_ca_sha256_after": "43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73",
+    "baseline_restored": true
+  },
+  "follow_up_defects": [
+    "The immutable PR #175 verifier's command substring/order check accepts a mismatch gate hidden in a false shell branch.",
+    "The immutable PR #175 secret scan misses quoted JSON Authorization and api_key values.",
+    "The immutable PR #175 historical command can build or retag before exact-image admission.",
+    "The immutable PR #175 runner freezes its Docker baseline after the historical build rather than before the whole attempt."
+  ],
+  "limits": [
+    "No fresh candidate image exists or was executed.",
+    "No public archive or application behavior was observed.",
+    "The live Alpine repository state is not a reproducible source for the Dockerfile's exact 8.4.26-r0 constraints.",
+    "Historical arm64 results and the unavailable prior amd64 image do not qualify this attempt."
+  ],
+  "remaining_input": "Provide a reproducible supported source for the pinned 8.4.26-r0 packages, or make an explicit separate operator decision to qualify a newly pinned runtime version."
+}

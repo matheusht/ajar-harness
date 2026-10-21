@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -eu
+
+# Redacted historical shape of the failed one-time candidate build. This is
+# separate from any future candidate replay and contains no parity runner.
+: "${PARITY_PRIVATE_ROOT:?set PARITY_PRIVATE_ROOT to a new private directory}"
+CANDIDATE_TAG='t02-kanboard-runtime:amd64-parity-20261021b'
+EFFECTIVE_BASE='ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319'
+MANAGED_CA='/etc/ssl/certs/ca-certificates.crt'
+
+if docker image inspect "${CANDIDATE_TAG}" >/dev/null 2>&1; then
+  printf 'refusing to overwrite existing candidate tag: %s\n' \
+    "${CANDIDATE_TAG}" >&2
+  exit 41
+fi
+
+docker buildx build --platform linux/amd64 --load \
+  --build-arg "OPENCODE_BASE=${EFFECTIVE_BASE}" \
+  --secret "id=proxy_ca,type=file,src=${MANAGED_CA}" \
+  --metadata-file "${PARITY_PRIVATE_ROOT}/build-metadata.json" \
+  -f evals/native-qualification/Dockerfile.opencode-kanboard-runtime \
+  -t "${CANDIDATE_TAG}" \
+  evals/native-qualification \
+  >"${PARITY_PRIVATE_ROOT}/build.log" 2>&1
+
+# Recorded 2026-10-21 outcome: buildx returned 1 because apk returned 11;
+# no image was loaded, registered, inspected as a candidate, or executed.

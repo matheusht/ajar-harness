@@ -42,6 +42,7 @@ OBSERVER = HERE / 'opencode_v2_request_observer'
 RELAY = CONTROLS / 'evidence/v2-connect-official-20261019b/tcp-relay-linux-arm64'
 CONNECT = CONTROLS / 'v2_connect.py'
 NATIVE = CONTROLS / 'v2-effect-windows/native_run.py'
+STOP_OWNER = CONTROLS / 'v2-effect-windows/_native_stop_owner.py'
 PRODUCER = CONTROLS / 'v2-effect-windows/producer_stop.py'
 DOCKER_RUNTIME = ROOT / 'tools/docker_session_runtime.py'
 CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md'
@@ -59,12 +60,13 @@ ABSENT_TRUST_ENV = ('NODE_TLS_REJECT_UNAUTHORIZED', 'GIT_SSL_NO_VERIFY', 'SSLKEY
 CLEARABLE_TRUST_ENV = tuple(name for name in TRUST_ENV if name not in ABSENT_TRUST_ENV)
 RUNTIME_CA_DEST = '/fixture/runtime-ca.pem'
 MAX_RUNTIME_CA_BYTES = 4 * 1024 * 1024
-CONNECT_SHA = 'f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea'
-NATIVE_SHA = 'c567147c9006766bd6aa5445fcda94093a0812ef1cd0f4c3d41be42d56974c4d'
-PRODUCER_SHA = '7e939e8d245996b12f3f509e272acd3a538f222b4c537a8dee6fa0b55dac1db2'
+CONNECT_SHA = '7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3'
+NATIVE_SHA = '917830aaed9ff05bda562fc26db5106efce9851eb0e75879e7c5c03e7a131e20'
+STOP_OWNER_SHA = 'dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175'
+PRODUCER_SHA = '004117f3b49c1b9ecc302e45b9b564b2489f655779653be61a0abadda52d0fc0'
 RELAY_SHA = 'f2b4a65487fecbace54ea4954d26f80566b9ccd8a7c476d826b40fe5bf65bbb8'
-DOCKER_RUNTIME_SHA = '9beff3af097a711010a5234f2ab72f549f617fdcf8c3833b6d5a29c7fa582b28'
-CONTROL_SHA = {CONNECT: CONNECT_SHA, NATIVE: NATIVE_SHA, PRODUCER: PRODUCER_SHA,
+DOCKER_RUNTIME_SHA = '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651'
+CONTROL_SHA = {CONNECT: CONNECT_SHA, NATIVE: NATIVE_SHA, STOP_OWNER: STOP_OWNER_SHA, PRODUCER: PRODUCER_SHA,
                DOCKER_RUNTIME: DOCKER_RUNTIME_SHA}
 COMMON_INPUT_SHA = {
     HERE / 'index.php': 'f070f8308bda12bb56df51717675d86558a53891666d419052013e811ce3b7b7',
@@ -349,12 +351,16 @@ def activate_controls(source_root, relay=RELAY, relay_sha=RELAY_SHA):
     connect_path = source_root / CONNECT.relative_to(ROOT)
     if Path(native.NativeRun('unused', 'unused', 1, []).argv[1]).resolve() != connect_path.resolve():
         raise RuntimeError('archived_connect_origin_mismatch')
+    stop_owner_path = source_root / STOP_OWNER.relative_to(ROOT)
+    if Path(native.__file__).with_name('_native_stop_owner.py').resolve() != stop_owner_path.resolve():
+        raise RuntimeError('archived_stop_owner_origin_mismatch')
     globals().update(DockerRuntimeError=runtime.DockerRuntimeError,
                      _inspect_one=runtime._inspect_one, _is_absent=runtime._is_absent,
                      NativeRun=native.NativeRun, RunStopped=native.RunStopped,
                      dispatch_guard=native.dispatch_guard, request_stop=native.request_stop,
                      binding=producer.binding)
-    return {name: str(path.resolve()) for name, path in paths.items()} | {'v2_connect': str(connect_path.resolve())}
+    return {name: str(path.resolve()) for name, path in paths.items()} | {
+        'v2_connect': str(connect_path.resolve()), 'stop_owner': str(stop_owner_path.resolve())}
 
 
 def command(*argv, timeout=30):
@@ -667,7 +673,7 @@ def main():
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
     nonce = uuid.uuid4().hex
     qualification_docs = (LIVE_CHECKS, LIVE_PREPARATION_CHECKS) if live else (CHECKS,)
-    pin_files = (Path(__file__), CONNECT, NATIVE, PRODUCER, DOCKER_RUNTIME, selected['relay'], config,
+    pin_files = (Path(__file__), CONNECT, NATIVE, STOP_OWNER, PRODUCER, DOCKER_RUNTIME, selected['relay'], config,
                  *qualification_docs,
                  MOCK_PHP, OBSERVER / 'server.js', OBSERVER / 'package.json', *FIXTURE)
     source_root = output / 'source'

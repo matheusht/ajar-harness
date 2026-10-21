@@ -19,6 +19,9 @@ class RunStopped(RuntimeError):
     pass
 
 
+STOP_LOCK_WAIT_SECONDS = 35
+
+
 def _directory(path):
     path = Path(path).absolute()
     if path.is_symlink(): raise ValueError('native_run_directory_symlink')
@@ -40,7 +43,8 @@ def _lock(path, name='dispatch.lock', timeout=20, with_fd=False):
         while True:
             try:fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB);break
             except BlockingIOError:
-                if time.monotonic()>=deadline:raise RunStopped('native_run_dispatch_lock_unavailable')
+                if time.monotonic()>=deadline:
+                    raise RunStopped('native_run_stop_lock_unavailable' if name=='stop.lock' else 'native_run_dispatch_lock_unavailable')
                 time.sleep(.01)
         yield (path,fd) if with_fd else path
     finally: os.close(fd)
@@ -183,28 +187,43 @@ def start_producers(state_dir, producers, fail_after=None, hold_dir=None):
 
 def stop_producers(state_dir, producers, event, reason, evidence_ok=lambda: True):
     # The process that wins this lock owns the entire stop and terminal marker.
-    with _lock(state_dir, 'stop.lock', 600):
-        path = _directory(state_dir)
-        if (path/'UNSAFE').exists(): return False
-        if (path/'REVOKED').exists():
-            try: return json.loads((path/'REVOKED').read_text())['producers_verified_stopped'] is True
-            except (OSError,ValueError,KeyError,TypeError): return False
-        uncertain_start=(path/'START_IN_FLIGHT').exists()
-        begin_stop(path, reason)
-        event_failed=False
-        def record(kind,data):
-            nonlocal event_failed
-            try:event(kind,data)
-            except Exception:event_failed=True
-        try: producers.freeze(record)
-        except Exception:
-            finish_stop(path, False)
+    request_stop(state_dir,reason)  # Close final dispatch before waiting for a start CLI that may outlive Python.
+    try:
+        with _lock(state_dir, 'stop.lock', STOP_LOCK_WAIT_SECONDS):
+            path = _directory(state_dir)
+            if (path/'UNSAFE').exists(): return False
+            if (path/'REVOKED').exists():
+                try: return json.loads((path/'REVOKED').read_text())['producers_verified_stopped'] is True
+                except (OSError,ValueError,KeyError,TypeError): return False
+            uncertain_start=(path/'START_IN_FLIGHT').exists()
+            begin_stop(path, reason)
+            event_failed=False
+            def record(kind,data):
+                nonlocal event_failed
+                try:event(kind,data)
+                except Exception:event_failed=True
+            try: producers.freeze(record)
+            except Exception:
+                finish_stop(path, False)
+                return False
+            if uncertain_start or event_failed or not evidence_ok():
+                finish_stop(path, False)
+                return False
+            finish_stop(path, True)
+            return True
+    except RunStopped as error:
+        if str(error)!='native_run_stop_lock_unavailable':raise
+        # An inherited CLI may hold stop.lock indefinitely. Preserve the closed
+        # dispatch gate and report uncertainty without claiming a producer freeze.
+        with _lock(state_dir) as path:
+            if (path/'REVOKED').exists():
+                try:return json.loads((path/'REVOKED').read_text())['producers_verified_stopped'] is True
+                except (OSError,ValueError,KeyError,TypeError):return False
+            if (path/'UNSAFE').exists():return False
+            if not (path/'STOPPING').exists():
+                _write_atomic_once(path,'STOPPING',{'reason':reason,'monotonic':time.monotonic()})
+            _write_atomic_once(path,'UNSAFE',{'producers_verified_stopped':False,'stop_lock_timeout':True,'monotonic':time.monotonic()})
             return False
-        if uncertain_start or event_failed or not evidence_ok():
-            finish_stop(path, False)
-            return False
-        finish_stop(path, True)
-        return True
 
 
 def arm_stop_owner(state_dir, manifest, fault_id=None, kill_fault_id=None):

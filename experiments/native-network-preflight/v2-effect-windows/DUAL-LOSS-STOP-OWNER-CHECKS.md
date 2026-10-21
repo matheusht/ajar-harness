@@ -25,6 +25,12 @@ run-scoped host process is justified only if the checks below close that gap.
   the exact Docker start CLI so takeover waits for an in-flight CLI. A durable
   START_IN_FLIGHT marker remains if CLI completion is uncertain; takeover freezes
   the exact set but publishes UNSAFE, never REVOKED, in that case.
+- If the inherited Docker CLI hangs after both Python processes die, its Python
+  subprocess timeout dies too. Publish STOP_REQUEST before waiting for `stop.lock`.
+  Bound that wait; on timeout, publish STOPPING and UNSAFE under `dispatch.lock`
+  without claiming a freeze. Never leave a false REVOKED or an open dispatch gate.
+  An unreleased CLI can still start a producer later, so cleanup must release it
+  and remove only the nonce-owned exact resource.
 - The stop winner writes STOPPING, freezes/rechecks the whole exact set, then writes
   REVOKED. Any Docker/identity/logging failure writes UNSAFE, never REVOKED. A
   second writer must preserve the first terminal outcome. Provider REVOKED is only
@@ -50,7 +56,10 @@ run-scoped host process is justified only if the checks below close that gap.
    no producer may run. If a completed first start is held before READY, takeover
    freezes the exact set. If the Docker start CLI is still in flight across both
    host kills, owner waits for it, freezes, and retains UNSAFE for uncertain daemon
-   completion. A false REVOKED or runnable producer after a verified marker fails.
+   completion. Repeat without releasing the CLI until a bounded UNSAFE terminal
+   appears: STOP_REQUEST must close dispatch, no REVOKED or READY may appear, and
+   the owner must exit. A false REVOKED or runnable producer after a verified
+   marker fails.
 5. Inject pause and kill failure on an exact producer. Preserve provider closure,
    STOPPING and UNSAFE; require no run REVOKED and record actual runnable state.
 6. Hold a CONNECT upload after charge/before send, stop, then release: upstream

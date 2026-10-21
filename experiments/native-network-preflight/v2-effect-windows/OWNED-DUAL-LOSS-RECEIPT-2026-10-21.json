@@ -5,7 +5,7 @@
       "checks_passed": 13,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/double_loss_e2e.py --output /tmp/issue161-dual-owner-<new-run>",
-      "local_result": "/tmp/issue161-dual-owner-20261021d/result.json",
+      "local_result": "/tmp/issue161-dual-owner-20261021e/result.json",
       "markers": {
         "REVOKED": true,
         "STOPPING": true,
@@ -15,7 +15,7 @@
       "receiver_cases": [
         "positive"
       ],
-      "result_sha256": "6e50063acf5ba866290a517c498ac490ca7763f059df6f2a95264ede45dcbc24",
+      "result_sha256": "69d7a84d0f934cfdccfaad19fc02427204e475671d25d10a22c4a72422f9f63b",
       "source_pins_stable": true,
       "status": "both_loss_boundary_pass_partial_T05",
       "target_boundary_acceptance": true
@@ -25,7 +25,7 @@
       "checks_passed": 13,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/double_loss_e2e.py --output /tmp/issue161-parent-owner-<new-run> --fault parent",
-      "local_result": "/tmp/issue161-parent-owner-20261021c/result.json",
+      "local_result": "/tmp/issue161-parent-owner-20261021e/result.json",
       "markers": {
         "REVOKED": true,
         "STOPPING": true,
@@ -35,7 +35,7 @@
       "receiver_cases": [
         "positive"
       ],
-      "result_sha256": "c3cad80abdd0fd9e0dcb9c56a3481950be66b7f3fbf4a98a74a58a28d3be3473",
+      "result_sha256": "9e25b30c9d4d588586faa6badaf91e0459de18bcf7af381bbfa3987d591916d3",
       "source_pins_stable": true,
       "status": "parent_loss_boundary_pass_partial_T05",
       "target_boundary_acceptance": true
@@ -45,7 +45,7 @@
       "checks_passed": 13,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/double_loss_e2e.py --output /tmp/issue161-child-owner-<new-run> --fault child",
-      "local_result": "/tmp/issue161-child-owner-20261021c/result.json",
+      "local_result": "/tmp/issue161-child-owner-20261021e/result.json",
       "markers": {
         "REVOKED": true,
         "STOPPING": true,
@@ -55,7 +55,7 @@
       "receiver_cases": [
         "positive"
       ],
-      "result_sha256": "eb20a04045e620a6318ec4da14db91b808a02b2b0e1ba9b7dee5e445c2fabb02",
+      "result_sha256": "39ccbb90bd4c44dfc6bb79fc21ce88f07ed4d98562552971f5cf3544d9dbfc92",
       "source_pins_stable": true,
       "status": "child_loss_boundary_pass_partial_T05",
       "target_boundary_acceptance": true
@@ -65,7 +65,7 @@
       "checks_passed": 7,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/startup_dual_loss_e2e.py --output /tmp/issue161-start-partial-<new-run>",
-      "local_result": "/tmp/issue161-start-partial-20261021c/result.json",
+      "local_result": "/tmp/issue161-start-partial-20261021e/result.json",
       "markers": {
         "READY": false,
         "REVOKED": true,
@@ -74,7 +74,7 @@
         "STOP_REQUEST": true,
         "UNSAFE": false
       },
-      "result_sha256": "a882ab09317194aa483377f412027bc25631f9da647cf0848d6f751eff08507a",
+      "result_sha256": "484f6d716160c2c49daff916751feb0adebc9a10a1064e3ea603e5394098d48b",
       "source_pins_stable": true,
       "status": "partial_start_dual_loss_pass_partial_T05"
     },
@@ -83,7 +83,7 @@
       "checks_passed": 8,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/startup_dual_loss_e2e.py --output /tmp/issue161-start-inflight-<new-run> --inflight-start",
-      "local_result": "/tmp/issue161-start-inflight-20261021c/result.json",
+      "local_result": "/tmp/issue161-start-inflight-20261021e/result.json",
       "markers": {
         "READY": false,
         "REVOKED": false,
@@ -92,16 +92,48 @@
         "STOP_REQUEST": true,
         "UNSAFE": true
       },
-      "result_sha256": "dd1abcb53e88b443d24aede240d33ded5eebaf8c7238a04e3ba3f43cc5c8ae5d",
+      "result_sha256": "90b6748d5d0f5dca53c639cdd1d37f51c20e07ea767e180508f75b5ae00767b6",
       "source_pins_stable": true,
       "status": "inflight_start_dual_loss_unsafe_partial_T05"
+    },
+    {
+      "before_cli_release_markers": {
+        "READY": false,
+        "REVOKED": false,
+        "START_IN_FLIGHT": true,
+        "STOPPING": true,
+        "STOP_REQUEST": true,
+        "UNSAFE": true
+      },
+      "case": "start-stuck",
+      "checks_passed": 11,
+      "cleanup_complete": true,
+      "command": "python3 experiments/native-network-preflight/v2-effect-windows/startup_dual_loss_e2e.py --output /tmp/issue161-start-stuck-<new-run> --inflight-start --stuck-cli",
+      "local_result": "/tmp/issue161-start-stuck-20261021a/result.json",
+      "markers": {
+        "READY": false,
+        "REVOKED": false,
+        "START_IN_FLIGHT": true,
+        "STOPPING": true,
+        "STOP_REQUEST": true,
+        "UNSAFE": true
+      },
+      "producer_running_after_cli_release": true,
+      "result_sha256": "c07dea1b4f2bac9d7ebc85abeb714c7b84f8dd5fde49cee1f6ce130158d9b675",
+      "source_pins_stable": true,
+      "status": "inflight_start_lock_timeout_unsafe_partial_T05",
+      "unsafe_marker": {
+        "monotonic": 488788.277022375,
+        "producers_verified_stopped": false,
+        "stop_lock_timeout": true
+      }
     },
     {
       "case": "stop-failure",
       "checks_passed": 13,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/double_loss_e2e.py --output /tmp/issue161-stop-failure-<new-run> --stop-failure",
-      "local_result": "/tmp/issue161-stop-failure-20261021c/result.json",
+      "local_result": "/tmp/issue161-stop-failure-20261021e/result.json",
       "markers": {
         "REVOKED": false,
         "STOPPING": true,
@@ -112,7 +144,7 @@
         "positive",
         "pre-ack"
       ],
-      "result_sha256": "deba10e9b8d5f8debaf878852b6cdb91978414ff8515185720ac157388f114c8",
+      "result_sha256": "d677d76a127b8949780d286f27767f7c8d4bb0c26daa4e72283b2e5c47245429",
       "source_pins_stable": true,
       "status": "dual_loss_stop_failure_unsafe_partial_T05",
       "target_boundary_acceptance": false
@@ -122,7 +154,7 @@
       "checks_passed": 13,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/double_loss_e2e.py --output /tmp/issue161-log-failure-<new-run> --log-failure",
-      "local_result": "/tmp/issue161-log-failure-20261021c/result.json",
+      "local_result": "/tmp/issue161-log-failure-20261021e/result.json",
       "markers": {
         "REVOKED": false,
         "STOPPING": true,
@@ -132,7 +164,7 @@
       "receiver_cases": [
         "positive"
       ],
-      "result_sha256": "8c900b77b4bf78744ce18b68b5dbfb394e83c9b2473c355e31a6ea25006d2a25",
+      "result_sha256": "0b4aee8a68e1349b1739a0097b1c45e02a696d72da39f0b9f3036dbed6ae202a",
       "source_pins_stable": true,
       "status": "dual_loss_log_failure_unsafe_partial_T05",
       "target_boundary_acceptance": false
@@ -142,8 +174,8 @@
       "checks_passed": 9,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/connect_send_race.py --output /tmp/issue161-late-send-<new-run>",
-      "local_result": "/tmp/issue161-late-send-20261021c/result.json",
-      "result_sha256": "35d2b17ce81515a5155b5203a1e904ebc1e5005e273b6af4016b46f22c4bad10",
+      "local_result": "/tmp/issue161-late-send-20261021e/result.json",
+      "result_sha256": "c5a38e13fafc85224c28024493e01dfff515f85a59ac86b2997d299b15d50ce5",
       "source_pins_stable": true,
       "status": "pre_send_stop_pass_partial_T05"
     },
@@ -152,8 +184,8 @@
       "checks_passed": 11,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/connect_send_race.py --output /tmp/issue161-unsafe-reopen-<new-run> --unsafe-reopen",
-      "local_result": "/tmp/issue161-unsafe-reopen-20261021c/result.json",
-      "result_sha256": "90c48d27e7ee939508d04b36fd93e0137b7413d72b5521ca3d76d17461b42afa",
+      "local_result": "/tmp/issue161-unsafe-reopen-20261021e/result.json",
+      "result_sha256": "14c2e27b2750ea6faac3b5b935280cd70f00eb14a13cc1336b8f3d20c171657c",
       "source_pins_stable": true,
       "status": "unsafe_reopen_denied_partial_T05"
     },
@@ -162,8 +194,8 @@
       "checks_passed": 4,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/native_startup_e2e.py --output /tmp/issue161-start-timeout-<new-run>",
-      "local_result": "/tmp/issue161-start-timeout-20261021c/result.json",
-      "result_sha256": "88879fe778bf92bce992087f9b40c6dc12421480aa4cbad6cbefd8e1187127d0",
+      "local_result": "/tmp/issue161-start-timeout-20261021e/result.json",
+      "result_sha256": "d8ae9e7e8e3bde40ad0e5535731cd2e9a376d1ccf12404b75ef8ec13377ded9b",
       "source_pins_stable": true,
       "status": "startup_failure_closed_partial_T05"
     },
@@ -172,8 +204,8 @@
       "checks_passed": 5,
       "cleanup_complete": true,
       "command": "python3 experiments/native-network-preflight/v2-effect-windows/native_startup_e2e.py --output /tmp/issue161-start-failure-<new-run> --partial-failure",
-      "local_result": "/tmp/issue161-start-failure-20261021c/result.json",
-      "result_sha256": "125b0ff4717724b83b5577e49899075c9593bd566fb27aa17b8a5d0a4eab3f39",
+      "local_result": "/tmp/issue161-start-failure-20261021e/result.json",
+      "result_sha256": "a99d6052a873f7e8afaf8e644d72f323c198051f40bdc534e9496cda7813d863",
       "source_pins_stable": true,
       "status": "startup_failure_closed_partial_T05"
     }
@@ -188,10 +220,10 @@
   "native_calls": 0,
   "provider_calls": 0,
   "source_sha256": {
-    "DUAL-LOSS-STOP-OWNER-CHECKS.md": "6d575049564cda78f109bf953cb0bfddc35e88eaff0ee27d33b6941624ae501f",
+    "DUAL-LOSS-STOP-OWNER-CHECKS.md": "2c565abf6aba3f4ae83b6d12e8c4e01b0d683c04708de3e2d2279fa41d32bfc6",
     "_native_stop_owner.py": "dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175",
     "double_loss_e2e.py": "7398f9cdd39d48f33a38375b8b808de8bfffaac4184ca909c9ae3c44740687f4",
-    "native_run.py": "a07fd9bb18e0c7b0df9f82df6491e32ff3d628007394f76e904633ebb852c280",
+    "native_run.py": "917830aaed9ff05bda562fc26db5106efce9851eb0e75879e7c5c03e7a131e20",
     "producer_stop.py": "004117f3b49c1b9ecc302e45b9b564b2489f655779653be61a0abadda52d0fc0",
     "receiver.php": "7f4b0c010e6efb5db2aaedc0d9262bf4ea324e8d571e4ad19238336b9800f27e",
     "v2_connect.py": "7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3"

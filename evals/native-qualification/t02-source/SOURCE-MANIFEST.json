@@ -36,9 +36,9 @@
       "sha256": "d3e26736f2f31e30aae70dbac5ab2b0111af35ea84018d90de9b3634ae47400e"
     },
     {
-      "bytes": 10622,
       "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
-      "sha256": "e06453668bdd7f26f9f80847d15c087370e270ae92789570e65b42c8f166adbf"
+      "bytes": 12165,
+      "sha256": "548100fa9f77e62a191c5ebd716eedc88e92a9ea7ccf9637346ef2cf062b8af8"
     },
     {
       "bytes": 15028,
@@ -61,9 +61,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 96569,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "659920699cd3c0a70807ef2d0ade83e14c7123feafd2e31ec4b5031734dd24b9"
+      "bytes": 97049,
+      "sha256": "24f13cc96b825ae20c7868bcc10017bc5d782bd0b33e0fde4534be02959a6482"
     },
     {
       "bytes": 1222,
@@ -91,9 +91,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1416,
+      "bytes": 1574,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "e7dd227bdcc6aba7f59d35a0e99fd0b37c62cbafdfeae09e685f9bbe883748f8"
+      "sha256": "7995196f86a458978875472b8d14ad718c56fa4d40ab1050ddace36aeec967d8"
     },
     {
       "bytes": 11748,
@@ -176,24 +176,29 @@
       "sha256": "ebacc88d41e64b4f088f675be039f2318e3ad67549259274cdd37a9b41089fca"
     },
     {
-      "bytes": 11087,
+      "path": "experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py",
+      "bytes": 2184,
+      "sha256": "dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175"
+    },
+    {
       "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
-      "sha256": "c567147c9006766bd6aa5445fcda94093a0812ef1cd0f4c3d41be42d56974c4d"
+      "bytes": 18409,
+      "sha256": "917830aaed9ff05bda562fc26db5106efce9851eb0e75879e7c5c03e7a131e20"
     },
     {
-      "bytes": 4913,
       "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
-      "sha256": "7e939e8d245996b12f3f509e272acd3a538f222b4c537a8dee6fa0b55dac1db2"
+      "bytes": 5738,
+      "sha256": "004117f3b49c1b9ecc302e45b9b564b2489f655779653be61a0abadda52d0fc0"
     },
     {
-      "bytes": 26811,
       "path": "experiments/native-network-preflight/v2_connect.py",
-      "sha256": "f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea"
+      "bytes": 28157,
+      "sha256": "7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3"
     },
     {
-      "bytes": 59243,
       "path": "tools/docker_session_runtime.py",
-      "sha256": "9beff3af097a711010a5234f2ab72f549f617fdcf8c3833b6d5a29c7fa582b28"
+      "bytes": 59310,
+      "sha256": "9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651"
     }
   ],
   "kind": "t02-cloud-source",

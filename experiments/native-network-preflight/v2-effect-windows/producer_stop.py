@@ -51,11 +51,22 @@ class Producers:
             raise ValueError('producer_identity_mismatch')
         return info
 
-    def start(self, fail_after=None):
+    def start(self, fail_after=None, stop_check=None, hold_dir=None, lock_fd=None, start_record=None):
         for number,item in enumerate(self.items,1):
+            if stop_check and stop_check():raise RuntimeError('native_stop_during_start')
             self.inspect(item)
-            _run_docker(self.docker, ['container', 'start', item['id']])
+            if start_record:start_record(item,'begin')
+            _run_docker(self.docker, ['container', 'start', item['id']],pass_fds=(lock_fd,) if lock_fd is not None else ())
+            if start_record:start_record(item,'done')
             if fail_after==number:raise RuntimeError('injected_partial_start_failure')
+            if number==1 and hold_dir:
+                (hold_dir/'STARTED').touch()
+                deadline=time.monotonic()+30
+                while not (hold_dir/'RELEASE').exists():
+                    if stop_check and stop_check():raise RuntimeError('native_stop_during_start')
+                    if time.monotonic()>=deadline:raise RuntimeError('injected_start_hold_timeout')
+                    time.sleep(.01)
+            if stop_check and stop_check():raise RuntimeError('native_stop_during_start')
 
     def freeze(self, event):
         errors = []

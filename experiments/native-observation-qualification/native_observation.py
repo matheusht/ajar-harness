@@ -30,6 +30,7 @@ ROOT_KEYS = {
     "schema_version",
     "source_pins",
 }
+CAPTURE_ROOT_KEYS = ROOT_KEYS - {"cleanup"}
 HYPOTHESIS_KEYS = {
     "agent_discovery_credited",
     "allowed_effects",
@@ -104,6 +105,44 @@ CLEANUP_CHECK_KEYS = {
     "private_scratch_removed",
     "producer_processes_stopped",
     "raw_capture_removed",
+}
+LIFECYCLE_CHECK_KEYS = {"cleanup_complete", "stop_verified"}
+OBSERVATION_CHECK_KEYS = {
+    "capture_limitations_preserved",
+    "causal_order_valid",
+    "chain_state_consistent",
+    "cleanup_complete",
+    "dispatch_binding_complete",
+    "effects_within_declared_authority",
+    "host_activity_absent_during_dispatch",
+    "observer_available",
+    "observer_channel_protected",
+    "producer_cannot_write_observer",
+    "provided_host_replays_valid",
+    "provided_route_evidence_classified",
+    "repeatability_record_consistent",
+    "request_binding_unambiguous",
+    "sensitive_patterns_not_detected",
+    "source_manifest_self_integrity",
+    "stop_verified",
+    "trace_complete",
+}
+CAPTURE_CHECK_KEYS = OBSERVATION_CHECK_KEYS - LIFECYCLE_CHECK_KEYS
+CAPTURE_EVIDENCE_KEYS = {
+    "application_observer",
+    "attribution_scope",
+    "case_bindings",
+    "collection",
+    "coverage",
+    "lifecycle",
+    "repeatability",
+    "schema_version",
+}
+BUNDLE_FILE_KEYS = {
+    "evidence.json": "evidence",
+    "hypothesis.json": "hypothesis",
+    "observation.json": "observation",
+    "result.json": "result",
 }
 CHAIN_KEYS = {
     "consumed",
@@ -442,6 +481,24 @@ def validate_chain_schema(chain_state: Any, case_ids: set[str]) -> None:
         require_string(item["status"], "unfinished_status")
 
 
+def validate_cleanup_projection(value: Any) -> dict[str, Any]:
+    cleanup = require_keys(value, CLEANUP_KEYS, "cleanup")
+    if (
+        not isinstance(cleanup["checks"], dict)
+        or set(cleanup["checks"]) != CLEANUP_CHECK_KEYS
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(check, bool)
+            for name, check in cleanup["checks"].items()
+        )
+        or not isinstance(cleanup["stop_verified"], bool)
+    ):
+        raise EvidenceError("cleanup_schema_mismatch")
+    require_string(cleanup["status"], "cleanup_status")
+    return cleanup
+
+
 def validate_run_schema(run: Any) -> None:
     run = require_keys(run, ROOT_KEYS, "input")
     if type(run["schema_version"]) is not int or run["schema_version"] != SCHEMA_VERSION:
@@ -493,20 +550,7 @@ def validate_run_schema(run: Any) -> None:
     ):
         raise EvidenceError("observer_boolean_mismatch")
 
-    cleanup = require_keys(run["cleanup"], CLEANUP_KEYS, "cleanup")
-    if (
-        not isinstance(cleanup["checks"], dict)
-        or set(cleanup["checks"]) != CLEANUP_CHECK_KEYS
-        or any(
-            not isinstance(name, str)
-            or not name
-            or not isinstance(value, bool)
-            for name, value in cleanup["checks"].items()
-        )
-        or not isinstance(cleanup["stop_verified"], bool)
-    ):
-        raise EvidenceError("cleanup_schema_mismatch")
-    require_string(cleanup["status"], "cleanup_status")
+    validate_cleanup_projection(run["cleanup"])
     repeatability = require_keys(
         run["repeatability"], {"normalized_match", "runs"}, "repeatability"
     )
@@ -948,6 +992,238 @@ def evaluate_observation_run(run: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return bundle
 
 
+def evaluate_capture_run(
+    capture_projection: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Evaluate a capture before final stop and cleanup have run.
+
+    The input deliberately omits cleanup. The returned bundle can be shown to a
+    reviewer, but its status and lifecycle fields make no finalization claim.
+    """
+
+    validate_portable_json_shape(capture_projection)
+    try:
+        canonical_bytes(capture_projection)
+    except (TypeError, ValueError) as error:
+        raise EvidenceError("nonportable_json_value") from error
+    if not isinstance(capture_projection, dict) or set(capture_projection) != (
+        CAPTURE_ROOT_KEYS
+    ):
+        raise EvidenceError("capture_input_schema_mismatch")
+    run = copy_json(capture_projection)
+    run["cleanup"] = {
+        "checks": {name: False for name in sorted(CLEANUP_CHECK_KEYS)},
+        "status": "not_run",
+        "stop_verified": False,
+    }
+    bundle = evaluate_observation_run(run)
+    capture_checks = {
+        name: passed
+        for name, passed in bundle["result"]["checks"].items()
+        if name not in LIFECYCLE_CHECK_KEYS
+    }
+    if set(capture_checks) != CAPTURE_CHECK_KEYS:
+        raise EvidenceError("capture_check_inventory_mismatch")
+    bundle["evidence"].pop("cleanup")
+    bundle["evidence"]["lifecycle"] = {
+        "cleanup_status": "not_run",
+        "finalized": False,
+        "stop_status": "not_run",
+    }
+    bundle["result"]["checks"] = capture_checks
+    bundle["result"]["finalization"] = {
+        "cleanup_status": "not_run",
+        "finalized": False,
+        "stop_status": "not_run",
+    }
+    bundle["result"]["status"] = (
+        "observation_capture_ready_not_finalized"
+        if all(capture_checks.values())
+        else "observation_capture_invalid"
+    )
+    bundle["result"]["artifacts"] = {
+        "evidence.json": digest(bundle["evidence"]),
+        "hypothesis.json": digest(bundle["hypothesis"]),
+        "observation.json": digest(bundle["observation"]),
+    }
+    if contains_sensitive(bundle):
+        raise EvidenceError("sensitive_evidence_detected")
+    return bundle
+
+
+def bundle_file_bytes(bundle: dict[str, dict[str, Any]]) -> dict[str, bytes]:
+    if set(bundle) != set(BUNDLE_FILE_KEYS.values()):
+        raise EvidenceError("bundle_inventory_mismatch")
+    validate_portable_json_shape(bundle)
+    if contains_sensitive(bundle):
+        raise EvidenceError("sensitive_evidence_detected")
+    files = {
+        name: canonical_bytes(bundle[key])
+        for name, key in BUNDLE_FILE_KEYS.items()
+        if name != "result.json"
+    }
+    artifacts = {
+        name: hashlib.sha256(data).hexdigest() for name, data in files.items()
+    }
+    result = copy_json(bundle["result"])
+    result["artifacts"] = artifacts
+    files["result.json"] = canonical_bytes(result)
+    return files
+
+
+def _strict_json_bytes(data: bytes, failure_code: str) -> Any:
+    try:
+        value = json.loads(
+            data.decode(),
+            object_pairs_hook=reject_duplicate_json_keys,
+            parse_constant=reject_nonfinite_json,
+        )
+    except (EvidenceError, json.JSONDecodeError, UnicodeError) as error:
+        raise EvidenceError(failure_code) from error
+    validate_portable_json_shape(value)
+    if canonical_bytes(value) != data:
+        raise EvidenceError("capture_bundle_not_canonical")
+    return value
+
+
+def _read_sealed_capture(
+    capture_path: Path,
+) -> tuple[dict[str, Any], dict[str, str], str]:
+    lexical_path = Path(capture_path)
+    if (
+        not lexical_path.is_absolute()
+        or lexical_path.is_symlink()
+        or not lexical_path.is_dir()
+    ):
+        raise EvidenceError("capture_bundle_directory_invalid")
+    try:
+        entries = list(lexical_path.iterdir())
+    except OSError as error:
+        raise EvidenceError("capture_bundle_unreadable") from error
+    if {entry.name for entry in entries} != set(BUNDLE_FILE_KEYS):
+        raise EvidenceError("capture_bundle_inventory_mismatch")
+    raw_files: dict[str, bytes] = {}
+    bundle: dict[str, Any] = {}
+    try:
+        for entry in entries:
+            if entry.is_symlink() or not entry.is_file():
+                raise EvidenceError("capture_bundle_file_invalid")
+            raw_files[entry.name] = entry.read_bytes()
+            bundle[BUNDLE_FILE_KEYS[entry.name]] = _strict_json_bytes(
+                raw_files[entry.name], "capture_bundle_json_invalid"
+            )
+    except OSError as error:
+        raise EvidenceError("capture_bundle_unreadable") from error
+    if contains_sensitive(bundle):
+        raise EvidenceError("sensitive_evidence_detected")
+    if any(not isinstance(value, dict) for value in bundle.values()):
+        raise EvidenceError("capture_component_schema_mismatch")
+    result = bundle["result"]
+    expected_result_keys = {
+        "artifacts",
+        "case_outcomes",
+        "checks",
+        "finalization",
+        "nonclaims",
+        "provider_calls",
+        "scenario_id",
+        "schema_version",
+        "status",
+        "target_calls",
+    }
+    if not isinstance(result, dict) or set(result) != expected_result_keys:
+        raise EvidenceError("capture_result_schema_mismatch")
+    if (
+        result["status"] != "observation_capture_ready_not_finalized"
+        or result["schema_version"] != SCHEMA_VERSION
+        or result["finalization"]
+        != {
+            "cleanup_status": "not_run",
+            "finalized": False,
+            "stop_status": "not_run",
+        }
+        or not isinstance(result["checks"], dict)
+        or set(result["checks"]) != CAPTURE_CHECK_KEYS
+        or any(value is not True for value in result["checks"].values())
+    ):
+        raise EvidenceError("capture_not_ready_for_finalization")
+    if (
+        not isinstance(bundle["evidence"], dict)
+        or set(bundle["evidence"]) != CAPTURE_EVIDENCE_KEYS
+        or "cleanup" in bundle["evidence"]
+        or bundle["evidence"].get("lifecycle") != result["finalization"]
+    ):
+        raise EvidenceError("capture_lifecycle_mismatch")
+    if result["scenario_id"] != bundle["observation"].get("scenario_id"):
+        raise EvidenceError("capture_scenario_mismatch")
+    expected_artifacts = {
+        name: hashlib.sha256(raw_files[name]).hexdigest()
+        for name in BUNDLE_FILE_KEYS
+        if name != "result.json"
+    }
+    if result["artifacts"] != expected_artifacts:
+        raise EvidenceError("capture_artifact_digest_mismatch")
+    manifest = {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in sorted(raw_files.items())
+    }
+    return bundle, manifest, digest(manifest)
+
+
+def capture_manifest_sha256(capture_path: Path) -> str:
+    """Return the digest that binds the exact four sealed capture files."""
+
+    _, _, manifest_sha256 = _read_sealed_capture(capture_path)
+    return manifest_sha256
+
+
+def finalize_observation_capture(
+    capture_path: Path,
+    expected_capture_manifest_sha256: str,
+    final_cleanup: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind final stop and cleanup to an unchanged pre-review capture."""
+
+    if not is_sha256(expected_capture_manifest_sha256):
+        raise EvidenceError("capture_manifest_digest_invalid")
+    capture, manifest, actual_manifest_sha256 = _read_sealed_capture(capture_path)
+    if actual_manifest_sha256 != expected_capture_manifest_sha256:
+        raise EvidenceError("capture_manifest_digest_mismatch")
+    validate_portable_json_shape(final_cleanup)
+    if contains_sensitive(final_cleanup):
+        raise EvidenceError("sensitive_evidence_detected")
+    cleanup = validate_cleanup_projection(final_cleanup)
+    checks = {
+        "capture_manifest_matches": True,
+        "cleanup_complete": cleanup["status"] == "complete"
+        and all(cleanup["checks"].values()),
+        "stop_verified": cleanup["stop_verified"] is True,
+    }
+    receipt = {
+        "capture_file_sha256": manifest,
+        "capture_manifest_sha256": actual_manifest_sha256,
+        "checks": checks,
+        "cleanup": copy_json(cleanup),
+        "provider_calls": capture["result"]["provider_calls"],
+        "qualification_scope": "capture_lifecycle_only",
+        "review_status": "not_observed",
+        "scenario_id": capture["result"]["scenario_id"],
+        "schema_version": SCHEMA_VERSION,
+        "source_manifest_sha256": capture["observation"]["source_pins"][
+            "manifest_sha256"
+        ],
+        "status": (
+            "observation_capture_finalized"
+            if all(checks.values())
+            else "observation_capture_finalization_failed"
+        ),
+        "target_calls": capture["result"]["target_calls"],
+    }
+    if contains_sensitive(receipt):
+        raise EvidenceError("sensitive_evidence_detected")
+    return receipt
+
+
 def publish_atomic(output: Path, files: dict[str, bytes]) -> None:
     lexical_output = Path(output)
     if (
@@ -974,20 +1250,63 @@ def publish_atomic(output: Path, files: dict[str, bytes]) -> None:
 
 
 def write_bundle(bundle: dict[str, dict[str, Any]], output: Path) -> None:
-    if set(bundle) != {"evidence", "hypothesis", "observation", "result"}:
-        raise EvidenceError("bundle_inventory_mismatch")
-    if contains_sensitive(bundle):
+    publish_atomic(output, bundle_file_bytes(bundle))
+
+
+def write_finalization_receipt(receipt: dict[str, Any], output: Path) -> None:
+    expected_keys = {
+        "capture_file_sha256",
+        "capture_manifest_sha256",
+        "checks",
+        "cleanup",
+        "provider_calls",
+        "qualification_scope",
+        "review_status",
+        "scenario_id",
+        "schema_version",
+        "source_manifest_sha256",
+        "status",
+        "target_calls",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != expected_keys:
+        raise EvidenceError("finalization_receipt_invalid")
+    validate_portable_json_shape(receipt)
+    if contains_sensitive(receipt):
         raise EvidenceError("sensitive_evidence_detected")
-    files = {}
-    artifacts = {}
-    for name in ("hypothesis.json", "observation.json", "evidence.json"):
-        key = name.removesuffix(".json")
-        files[name] = canonical_bytes(bundle[key])
-        artifacts[name] = hashlib.sha256(files[name]).hexdigest()
-    result = copy_json(bundle["result"])
-    result["artifacts"] = artifacts
-    files["result.json"] = canonical_bytes(result)
-    publish_atomic(output, files)
+    cleanup = validate_cleanup_projection(receipt["cleanup"])
+    checks = receipt["checks"]
+    expected_checks = {
+        "capture_manifest_matches": True,
+        "cleanup_complete": cleanup["status"] == "complete"
+        and all(cleanup["checks"].values()),
+        "stop_verified": cleanup["stop_verified"] is True,
+    }
+    expected_status = (
+        "observation_capture_finalized"
+        if all(expected_checks.values())
+        else "observation_capture_finalization_failed"
+    )
+    if (
+        receipt["schema_version"] != SCHEMA_VERSION
+        or receipt["qualification_scope"] != "capture_lifecycle_only"
+        or receipt["review_status"] != "not_observed"
+        or not isinstance(receipt["scenario_id"], str)
+        or not receipt["scenario_id"]
+        or not is_sha256(receipt["capture_manifest_sha256"])
+        or not is_sha256(receipt["source_manifest_sha256"])
+        or not isinstance(receipt["capture_file_sha256"], dict)
+        or set(receipt["capture_file_sha256"]) != set(BUNDLE_FILE_KEYS)
+        or not all(
+            is_sha256(value)
+            for value in receipt["capture_file_sha256"].values()
+        )
+        or digest(receipt["capture_file_sha256"])
+        != receipt["capture_manifest_sha256"]
+        or checks != expected_checks
+        or receipt["status"] != expected_status
+    ):
+        raise EvidenceError("finalization_receipt_invalid")
+    publish_atomic(output, {"finalization.json": canonical_bytes(receipt)})
 
 
 def publish_rejection(output: Path, code: str) -> None:
@@ -1010,6 +1329,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--pre-review",
+        action="store_true",
+        help="seal capture evidence without claiming final stop or cleanup",
+    )
     args = parser.parse_args()
     if args.input.is_symlink():
         raise SystemExit("--input must not be a symlink")
@@ -1027,6 +1351,7 @@ def main() -> int:
     ):
         raise SystemExit("--output must be absent under an existing directory")
     output = args.output.resolve()
+    sealed_capture_digest: str | None = None
     try:
         try:
             run = json.loads(
@@ -1036,8 +1361,18 @@ def main() -> int:
             )
         except (json.JSONDecodeError, OSError, UnicodeError) as error:
             raise EvidenceError("input_json_invalid") from error
-        bundle = evaluate_observation_run(run)
+        bundle = (
+            evaluate_capture_run(run)
+            if args.pre_review
+            else evaluate_observation_run(run)
+        )
         write_bundle(bundle, output)
+        if (
+            args.pre_review
+            and bundle["result"]["status"]
+            == "observation_capture_ready_not_finalized"
+        ):
+            sealed_capture_digest = capture_manifest_sha256(output)
     except EvidenceError as error:
         publish_rejection(output, error.code)
         print(
@@ -1057,17 +1392,18 @@ def main() -> int:
             )
         )
         return 1
-    print(
-        json.dumps(
-            {
-                "provider_calls": bundle["result"]["provider_calls"],
-                "status": bundle["result"]["status"],
-                "target_calls": bundle["result"]["target_calls"],
-            },
-            sort_keys=True,
-        )
-    )
-    return 0 if bundle["result"]["status"] == "observation_packet_valid" else 1
+    summary = {
+        "provider_calls": bundle["result"]["provider_calls"],
+        "status": bundle["result"]["status"],
+        "target_calls": bundle["result"]["target_calls"],
+    }
+    success_status = "observation_packet_valid"
+    if args.pre_review:
+        success_status = "observation_capture_ready_not_finalized"
+        if sealed_capture_digest is not None:
+            summary["capture_manifest_sha256"] = sealed_capture_digest
+    print(json.dumps(summary, sort_keys=True))
+    return 0 if bundle["result"]["status"] == success_status else 1
 
 
 if __name__ == "__main__":

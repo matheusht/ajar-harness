@@ -26,9 +26,13 @@ from native_observation import (
     CLEANUP_CHECK_KEYS,
     EvidenceError,
     canonical_bytes,
+    capture_manifest_sha256,
+    evaluate_capture_run,
     evaluate_observation_run,
+    finalize_observation_capture,
     publish_atomic,
     write_bundle,
+    write_finalization_receipt,
 )
 
 
@@ -1627,6 +1631,7 @@ def offline_fixture_checks(
 
     cli_scratch: Path | None = None
     cli_success = False
+    cli_pre_review_success = False
     cli_failure_preserved = False
     cli_duplicate_key_rejected = False
     cli_dangling_output_rejected = False
@@ -1692,6 +1697,48 @@ def offline_fixture_checks(
                 (path.stat().st_mode & 0o777) == 0o600
                 for path in good_output.iterdir()
             )
+        )
+
+        capture_packet = copy.deepcopy(generic)
+        capture_packet.pop("cleanup")
+        capture_packet_path = cli_scratch / "capture-packet.json"
+        capture_packet_path.write_bytes(canonical_bytes(capture_packet))
+        os.chmod(capture_packet_path, 0o600)
+        capture_output = cli_scratch / "capture"
+        capture_completed = subprocess.run(
+            [
+                python,
+                str(evaluator_path),
+                "--pre-review",
+                "--input",
+                str(capture_packet_path),
+                "--output",
+                str(capture_output),
+            ],
+            check=False,
+            env=cli_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+        )
+        capture_projection = json.loads(capture_completed.stdout)
+        capture_result = json.loads((capture_output / "result.json").read_text())
+        cli_pre_review_success = (
+            capture_completed.returncode == 0
+            and capture_completed.stderr == ""
+            and capture_projection["status"]
+            == "observation_capture_ready_not_finalized"
+            and capture_projection["capture_manifest_sha256"]
+            == capture_manifest_sha256(capture_output)
+            and capture_result["status"]
+            == "observation_capture_ready_not_finalized"
+            and capture_result["finalization"]
+            == {
+                "cleanup_status": "not_run",
+                "finalized": False,
+                "stop_status": "not_run",
+            }
         )
 
         dangling_target = cli_scratch / "absent-cli-target"
@@ -1877,6 +1924,7 @@ def offline_fixture_checks(
         "public_cli_duplicate_key_rejected": cli_duplicate_key_rejected,
         "public_cli_dangling_output_rejected": cli_dangling_output_rejected,
         "public_cli_nonfinite_rejected": cli_nonfinite_rejected,
+        "public_cli_pre_review_succeeded": cli_pre_review_success,
         "public_cli_relative_output_rejected": cli_relative_output_rejected,
         "public_cli_scratch_removed": cli_scratch_removed,
         "public_cli_succeeded": cli_success,
@@ -1896,6 +1944,342 @@ def offline_fixture_checks(
             unsupported_discovery_credit_rejected
         ),
         "unknown_critical_field_rejected": unknown_schema_rejected,
+    }
+
+
+def lifecycle_fixture_checks(
+    run: dict[str, Any], cleanup_projection: dict[str, Any]
+) -> dict[str, bool]:
+    capture_projection = copy.deepcopy(run)
+    capture_projection.pop("cleanup")
+    capture_bundle = evaluate_capture_run(capture_projection)
+    capture_ready_not_finalized = (
+        capture_bundle["result"]["status"]
+        == "observation_capture_ready_not_finalized"
+        and capture_bundle["result"]["status"] != "observation_packet_valid"
+        and capture_bundle["result"]["finalization"]
+        == {
+            "cleanup_status": "not_run",
+            "finalized": False,
+            "stop_status": "not_run",
+        }
+        and set(capture_bundle["result"]["checks"]).isdisjoint(
+            {"cleanup_complete", "stop_verified"}
+        )
+        and all(capture_bundle["result"]["checks"].values())
+    )
+    legacy_final_still_valid = (
+        evaluate_observation_run(run)["result"]["status"]
+        == "observation_packet_valid"
+    )
+
+    legacy_pending = copy.deepcopy(run)
+    legacy_pending["cleanup"] = {
+        "checks": {name: False for name in sorted(CLEANUP_CHECK_KEYS)},
+        "status": "not_run",
+        "stop_verified": False,
+    }
+    legacy_pending_result = evaluate_observation_run(legacy_pending)["result"]
+    legacy_final_rejects_pending = (
+        legacy_pending_result["status"] == "observation_packet_invalid"
+        and legacy_pending_result["checks"]["cleanup_complete"] is False
+        and legacy_pending_result["checks"]["stop_verified"] is False
+    )
+
+    incomplete_cleanup = copy.deepcopy(legacy_pending)
+    incomplete_cleanup["cleanup"]["status"] = "incomplete"
+    ordinary_incomplete_remains_invalid = (
+        evaluate_observation_run(incomplete_cleanup)["result"]["status"]
+        == "observation_packet_invalid"
+    )
+
+    invalid_capture_projection = copy.deepcopy(capture_projection)
+    invalid_capture_projection["observer_boundary"]["available"] = False
+    invalid_capture = evaluate_capture_run(invalid_capture_projection)["result"]
+    invalid_capture_not_ready = (
+        invalid_capture["status"] == "observation_capture_invalid"
+        and invalid_capture["checks"]["observer_available"] is False
+    )
+
+    capture_with_cleanup = copy.deepcopy(capture_projection)
+    capture_with_cleanup["cleanup"] = copy.deepcopy(run["cleanup"])
+    try:
+        evaluate_capture_run(capture_with_cleanup)
+        capture_cleanup_claim_rejected = False
+    except EvidenceError as error:
+        capture_cleanup_claim_rejected = (
+            error.code == "capture_input_schema_mismatch"
+        )
+
+    scratch: Path | None = None
+    capture_manifest_repeatable = False
+    final_receipt_linked = False
+    finalization_does_not_mutate_capture = False
+    finalization_does_not_claim_review = False
+    final_receipt_atomic = False
+    forged_final_receipt_rejected = False
+    forged_manifest_receipt_rejected = False
+    existing_final_receipt_rejected = False
+    wrong_manifest_rejected = False
+    changed_capture_byte_rejected = False
+    missing_capture_file_rejected = False
+    extra_capture_file_rejected = False
+    symlinked_capture_file_rejected = False
+    incomplete_capture_check_inventory_rejected = False
+    malformed_capture_component_rejected = False
+    sealed_capture_cleanup_claim_rejected = False
+    cleanup_schema_rejected = False
+    incomplete_finalizations_fail = False
+    try:
+        scratch = Path(tempfile.mkdtemp(prefix="native-observation-lifecycle-"))
+        os.chmod(scratch, 0o700)
+        capture_path = scratch / "capture"
+        repeat_path = scratch / "capture-repeat"
+        write_bundle(capture_bundle, capture_path)
+        before = {
+            path.name: sha256(path.read_bytes()) for path in capture_path.iterdir()
+        }
+        sealed_digest = capture_manifest_sha256(capture_path)
+        write_bundle(capture_bundle, repeat_path)
+        capture_manifest_repeatable = (
+            sealed_digest == capture_manifest_sha256(repeat_path)
+        )
+
+        final_cleanup = copy.deepcopy(run["cleanup"])
+        final_receipt = finalize_observation_capture(
+            capture_path, sealed_digest, final_cleanup
+        )
+        final_receipt_linked = (
+            final_receipt["status"] == "observation_capture_finalized"
+            and final_receipt["capture_manifest_sha256"] == sealed_digest
+            and all(final_receipt["checks"].values())
+            and final_receipt["cleanup"] == final_cleanup
+        )
+        finalization_does_not_claim_review = (
+            final_receipt["qualification_scope"] == "capture_lifecycle_only"
+            and final_receipt["review_status"] == "not_observed"
+        )
+        receipt_path = scratch / "final-receipt"
+        write_finalization_receipt(final_receipt, receipt_path)
+        stored_receipt = json.loads(
+            (receipt_path / "finalization.json").read_text()
+        )
+        final_receipt_atomic = (
+            stored_receipt == final_receipt
+            and (receipt_path.stat().st_mode & 0o777) == 0o700
+            and (receipt_path / "finalization.json").stat().st_mode & 0o777
+            == 0o600
+        )
+        try:
+            write_finalization_receipt(final_receipt, receipt_path)
+        except EvidenceError as error:
+            existing_final_receipt_rejected = (
+                error.code == "output_must_be_absent_with_existing_parent"
+            )
+        forged_receipt = copy.deepcopy(final_receipt)
+        forged_receipt["cleanup"]["stop_verified"] = False
+        try:
+            write_finalization_receipt(
+                forged_receipt, scratch / "forged-final-receipt"
+            )
+        except EvidenceError as error:
+            forged_final_receipt_rejected = (
+                error.code == "finalization_receipt_invalid"
+                and not os.path.lexists(scratch / "forged-final-receipt")
+            )
+        forged_manifest_receipt = copy.deepcopy(final_receipt)
+        forged_manifest_receipt["capture_manifest_sha256"] = "0" * 64
+        try:
+            write_finalization_receipt(
+                forged_manifest_receipt,
+                scratch / "forged-manifest-final-receipt",
+            )
+        except EvidenceError as error:
+            forged_manifest_receipt_rejected = (
+                error.code == "finalization_receipt_invalid"
+                and not os.path.lexists(
+                    scratch / "forged-manifest-final-receipt"
+                )
+            )
+        after = {
+            path.name: sha256(path.read_bytes()) for path in capture_path.iterdir()
+        }
+        finalization_does_not_mutate_capture = before == after
+
+        try:
+            finalize_observation_capture(capture_path, "0" * 64, final_cleanup)
+        except EvidenceError as error:
+            wrong_manifest_rejected = (
+                error.code == "capture_manifest_digest_mismatch"
+            )
+
+        changed_path = scratch / "capture-changed"
+        shutil.copytree(capture_path, changed_path)
+        with (changed_path / "observation.json").open("ab") as stream:
+            stream.write(b" ")
+        try:
+            capture_manifest_sha256(changed_path)
+        except EvidenceError as error:
+            changed_capture_byte_rejected = (
+                error.code == "capture_bundle_not_canonical"
+            )
+
+        missing_path = scratch / "capture-missing"
+        shutil.copytree(capture_path, missing_path)
+        (missing_path / "hypothesis.json").unlink()
+        try:
+            capture_manifest_sha256(missing_path)
+        except EvidenceError as error:
+            missing_capture_file_rejected = (
+                error.code == "capture_bundle_inventory_mismatch"
+            )
+
+        extra_path = scratch / "capture-extra"
+        shutil.copytree(capture_path, extra_path)
+        (extra_path / "extra.json").write_bytes(b"{}\n")
+        try:
+            capture_manifest_sha256(extra_path)
+        except EvidenceError as error:
+            extra_capture_file_rejected = (
+                error.code == "capture_bundle_inventory_mismatch"
+            )
+
+        symlink_path = scratch / "capture-symlink"
+        shutil.copytree(capture_path, symlink_path)
+        (symlink_path / "evidence.json").unlink()
+        (symlink_path / "evidence.json").symlink_to(
+            capture_path / "evidence.json"
+        )
+        try:
+            capture_manifest_sha256(symlink_path)
+        except EvidenceError as error:
+            symlinked_capture_file_rejected = (
+                error.code == "capture_bundle_file_invalid"
+            )
+
+        incomplete_checks_path = scratch / "capture-incomplete-checks"
+        shutil.copytree(capture_path, incomplete_checks_path)
+        incomplete_result_path = incomplete_checks_path / "result.json"
+        incomplete_result = json.loads(incomplete_result_path.read_text())
+        incomplete_result["checks"] = {"only_one_fake_check": True}
+        incomplete_result_path.write_bytes(canonical_bytes(incomplete_result))
+        try:
+            capture_manifest_sha256(incomplete_checks_path)
+        except EvidenceError as error:
+            incomplete_capture_check_inventory_rejected = (
+                error.code == "capture_not_ready_for_finalization"
+            )
+
+        cleanup_claim_path = scratch / "capture-cleanup-claim"
+        shutil.copytree(capture_path, cleanup_claim_path)
+        cleanup_evidence_path = cleanup_claim_path / "evidence.json"
+        cleanup_evidence = json.loads(cleanup_evidence_path.read_text())
+        cleanup_evidence["cleanup"] = copy.deepcopy(final_cleanup)
+        cleanup_evidence_path.write_bytes(canonical_bytes(cleanup_evidence))
+        cleanup_result_path = cleanup_claim_path / "result.json"
+        cleanup_result = json.loads(cleanup_result_path.read_text())
+        cleanup_result["artifacts"]["evidence.json"] = sha256(
+            cleanup_evidence_path.read_bytes()
+        )
+        cleanup_result_path.write_bytes(canonical_bytes(cleanup_result))
+        try:
+            capture_manifest_sha256(cleanup_claim_path)
+        except EvidenceError as error:
+            sealed_capture_cleanup_claim_rejected = (
+                error.code == "capture_lifecycle_mismatch"
+            )
+
+        malformed_component_path = scratch / "capture-malformed-component"
+        shutil.copytree(capture_path, malformed_component_path)
+        malformed_observation_path = malformed_component_path / "observation.json"
+        malformed_observation_path.write_bytes(canonical_bytes([]))
+        malformed_result_path = malformed_component_path / "result.json"
+        malformed_result = json.loads(malformed_result_path.read_text())
+        malformed_result["artifacts"]["observation.json"] = sha256(
+            malformed_observation_path.read_bytes()
+        )
+        malformed_result_path.write_bytes(canonical_bytes(malformed_result))
+        try:
+            capture_manifest_sha256(malformed_component_path)
+        except EvidenceError as error:
+            malformed_capture_component_rejected = (
+                error.code == "capture_component_schema_mismatch"
+            )
+
+        missing_cleanup_key = copy.deepcopy(final_cleanup)
+        missing_cleanup_key["checks"].pop("raw_capture_removed")
+        try:
+            finalize_observation_capture(
+                capture_path, sealed_digest, missing_cleanup_key
+            )
+        except EvidenceError as error:
+            cleanup_schema_rejected = error.code == "cleanup_schema_mismatch"
+
+        failed_receipts = []
+        wrong_status = copy.deepcopy(final_cleanup)
+        wrong_status["status"] = "incomplete"
+        failed_receipts.append(
+            finalize_observation_capture(capture_path, sealed_digest, wrong_status)
+        )
+        false_check = copy.deepcopy(final_cleanup)
+        false_check["checks"]["private_scratch_removed"] = False
+        failed_receipts.append(
+            finalize_observation_capture(capture_path, sealed_digest, false_check)
+        )
+        false_stop = copy.deepcopy(final_cleanup)
+        false_stop["stop_verified"] = False
+        failed_receipts.append(
+            finalize_observation_capture(capture_path, sealed_digest, false_stop)
+        )
+        incomplete_finalizations_fail = all(
+            receipt["status"] == "observation_capture_finalization_failed"
+            and not all(receipt["checks"].values())
+            for receipt in failed_receipts
+        )
+    finally:
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+        lifecycle_scratch_removed = scratch is not None and not scratch.exists()
+        cleanup_projection["lifecycle_fixture_scratch_removed"] = (
+            lifecycle_scratch_removed
+        )
+
+    return {
+        "capture_cleanup_claim_rejected": capture_cleanup_claim_rejected,
+        "capture_manifest_repeatable": capture_manifest_repeatable,
+        "capture_ready_not_finalized": capture_ready_not_finalized,
+        "changed_capture_byte_rejected": changed_capture_byte_rejected,
+        "cleanup_schema_rejected": cleanup_schema_rejected,
+        "existing_final_receipt_rejected": existing_final_receipt_rejected,
+        "extra_capture_file_rejected": extra_capture_file_rejected,
+        "final_receipt_atomic": final_receipt_atomic,
+        "final_receipt_linked": final_receipt_linked,
+        "forged_final_receipt_rejected": forged_final_receipt_rejected,
+        "forged_manifest_receipt_rejected": forged_manifest_receipt_rejected,
+        "finalization_does_not_claim_review": (
+            finalization_does_not_claim_review
+        ),
+        "finalization_does_not_mutate_capture": (
+            finalization_does_not_mutate_capture
+        ),
+        "incomplete_finalizations_fail": incomplete_finalizations_fail,
+        "incomplete_capture_check_inventory_rejected": (
+            incomplete_capture_check_inventory_rejected
+        ),
+        "invalid_capture_not_ready": invalid_capture_not_ready,
+        "legacy_final_still_valid": legacy_final_still_valid,
+        "legacy_final_rejects_pending": legacy_final_rejects_pending,
+        "lifecycle_scratch_removed": lifecycle_scratch_removed,
+        "malformed_capture_component_rejected": (
+            malformed_capture_component_rejected
+        ),
+        "missing_capture_file_rejected": missing_capture_file_rejected,
+        "ordinary_incomplete_remains_invalid": ordinary_incomplete_remains_invalid,
+        "sealed_capture_cleanup_claim_rejected": (
+            sealed_capture_cleanup_claim_rejected
+        ),
+        "symlinked_capture_file_rejected": symlinked_capture_file_rejected,
+        "wrong_manifest_rejected": wrong_manifest_rejected,
     }
 
 
@@ -2003,6 +2387,7 @@ def main() -> int:
         if not all(mutations.values()):
             raise RuntimeError("negative fixture failure")
         offline = offline_fixture_checks(first, offline_cleanup)
+        lifecycle = lifecycle_fixture_checks(first, offline_cleanup)
         expected_counts = {
             "sensitive_key_alias_count": len(SENSITIVE_ALIAS_FIXTURES),
             "sensitive_value_pattern_count": len(SENSITIVE_VALUE_FIXTURES),
@@ -2012,8 +2397,11 @@ def main() -> int:
             for key, value in offline.items()
         ):
             raise RuntimeError("offline fixture failure")
+        if not all(lifecycle.values()):
+            raise RuntimeError("lifecycle fixture failure")
         first_bundle["evidence"]["offline_failure_fixtures"] = mutations
         first_bundle["evidence"]["offline_boundary_fixtures"] = offline
+        first_bundle["evidence"]["lifecycle_fixtures"] = lifecycle
         if source_pins(expected) != pins:
             raise RuntimeError("source_pin_mismatch: source changed during run")
         write_bundle(first_bundle, output)

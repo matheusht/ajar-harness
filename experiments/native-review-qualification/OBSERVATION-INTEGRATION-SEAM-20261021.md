@@ -42,21 +42,28 @@ CA/proxy configuration, allowance, final-send authority, stop, and cleanup. This
 module returns evidence and required mount/process projections only; it does not
 create a second pool, allowance, producer, or generic telemetry service.
 
-The narrow interface is:
+The review-facing command is:
 
 ```sh
 python3 experiments/native-observation-qualification/native_observation.py \
-  --input /private/sanitized-app-capture-packet.json \
-  --output /private/absent-observation-bundle
+  --pre-review \
+  --input /private/sanitized-capture-projection-without-cleanup.json \
+  --output /private/absent-capture-bundle
 ```
+
+The same command without `--pre-review` is terminal-only. Its input must include
+the completed cleanup projection, and it cannot run while the shared pool is
+active.
 
 The caller, not this evaluator, verifies actual source bytes and protected
 capture inputs before freezing the packet's self-digested manifest. The core
 does not know or require the owned E2E's fixture IDs. Every chain-state case
 reference must be accompanied by its sealed case evidence in the same packet.
-It also requires the six portable cleanup categories, refuses route completeness,
-and rejects discovery credit because this schema has no independently protected
-discovery-origin event.
+It refuses route completeness and rejects discovery credit because this schema
+has no independently protected discovery-origin event. The terminal evaluator
+still requires the six portable cleanup categories. The pre-review capture API
+omits cleanup, records stop and cleanup as `not_run`, and cannot emit
+`observation_packet_valid`.
 
 ## Portable files and review selection
 
@@ -66,15 +73,17 @@ A passing native caller publishes the exact four-file observation bundle:
 | --- | --- |
 | `hypothesis.json` | Portable statement, source conditions, origin/help, status, and explicit discovery credit. Runtime IDs are excluded from core hypothesis state. |
 | `observation.json` | Actual request/result/effect, host-replay distinction, session/tool/process evidence bindings, produced and consumed state, contrary results, missing transitions, and unfinished conditions. |
-| `evidence.json` | Attribution method and coverage, observer protection, route limitations, redaction, stop, repeatability, and cleanup. |
+| `evidence.json` | Attribution method and coverage, observer protection, route limitations, redaction, repeatability, and either a non-final lifecycle marker or terminal cleanup. |
 | `result.json` | Exact hashes, case statuses, failure predicates, and nonclaims. |
 
 These bytes are candidate inputs for a future independently frozen manifest. Do
 not pass them through the historical T03 manifest, whose digest remains
 `26056e8abd33e6b55cfac99929e611b7f8bc8b9193bf914c589c4592c15f7f74`
 and whose accepted actual-predecessor set is empty. The coordinator must select a
-new exact manifest/digest and keep the packet observer-owned and reviewer read-only
-before a fresh reviewer can run. Prepared inputs remain `review_status: not_run`.
+new exact manifest/digest and keep the packet observer-owned and reviewer
+read-only before a fresh reviewer can run. A pre-review capture must have status
+`observation_capture_ready_not_finalized`; it is not a valid terminal packet.
+No review has run merely because the capture was prepared.
 
 ## Future caller order for fresh review
 
@@ -93,9 +102,12 @@ A later launcher integration must enforce this order:
    edit or conclusion.
 2. Observe the arbitrary producer dispatch through the protected seam and keep
    host-authored replay explicitly separate.
-3. Atomically seal the exact observation bundle, current source manifest, and a
-   newly selected review-input manifest. Record their hashes; do not reuse the
-   historical T03 manifest.
+3. Call `evaluate_capture_run` with a projection that has no cleanup field.
+   Atomically write the exact four-file capture, then record the manifest digest
+   over all four file hashes. Seal that digest with the current source manifest
+   and a newly selected review-input manifest. Do not reuse the historical T03
+   manifest. Keep the shared NativeRun pool active; stop and cleanup remain
+   `not_run` at this stage.
 4. Give the presealed reviewer read-only access to exactly that packet and
    current source. Capture the reviewer-selected inspection/tool evidence and
    actual result without allowing the producer to write either store.
@@ -107,6 +119,12 @@ A later launcher integration must enforce this order:
    state to a separate unhinted adaptive run. That run must demonstrate the
    evidence changing its actual next investigation action and must preserve
    missing/unfinished transitions; a reconstructed success story does not pass.
+7. After the last authorized use of the shared pool, stop it and complete the
+   exact six cleanup checks. Call `finalize_observation_capture` with the sealed
+   capture path, the digest recorded in step 3, and the final cleanup projection.
+   Preserve the separate final receipt. A changed capture, incomplete cleanup,
+   or unverified stop cannot produce `observation_capture_finalized`. Finalization
+   does not rewrite the packet reviewed in step 4 and does not qualify the review.
 
 This lane implements only the packet evaluator and this caller seam. Reviewer
 presealing, native review execution, conclusion binding, and the later unhinted

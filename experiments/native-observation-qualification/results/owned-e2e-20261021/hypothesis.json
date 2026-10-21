@@ -1,0 +1,28 @@
+{
+  "agent_discovery_credited": false,
+  "allowed_effects": [
+    "effect_applied"
+  ],
+  "authority": "owned_synthetic_local_only",
+  "conditions": {
+    "application": "harmless_owned_synthetic",
+    "observer": "host_owned_independent_receiver",
+    "process_attribution": "exact_owned_spawned_subtree",
+    "route_enforcement": "not_established"
+  },
+  "hypothesis_id": "owned-original-application-observation-v1",
+  "next_test": "qualify the exact managed-native process boundary",
+  "nonclaims": [
+    "agent_discovery",
+    "managed_native_process_attribution",
+    "model_or_provider_qualification",
+    "route_enforcement",
+    "live_target_observation",
+    "fresh_independent_review",
+    "adaptive_investigation"
+  ],
+  "objective": "qualify protected original application observation",
+  "origin": "operator_authored_fixture",
+  "statement": "A protected receipt can bind one exact owned dispatch while host replay and an unobserved route remain distinct.",
+  "status": "supported_for_owned_fixture_with_bypass_limitation"
+}

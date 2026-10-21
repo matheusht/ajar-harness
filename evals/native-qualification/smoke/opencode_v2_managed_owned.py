@@ -61,9 +61,9 @@ CLEARABLE_TRUST_ENV = tuple(name for name in TRUST_ENV if name not in ABSENT_TRU
 RUNTIME_CA_DEST = '/fixture/runtime-ca.pem'
 MAX_RUNTIME_CA_BYTES = 4 * 1024 * 1024
 CONNECT_SHA = '7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3'
-NATIVE_SHA = '917830aaed9ff05bda562fc26db5106efce9851eb0e75879e7c5c03e7a131e20'
+NATIVE_SHA = '759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f'
 STOP_OWNER_SHA = 'dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175'
-PRODUCER_SHA = '004117f3b49c1b9ecc302e45b9b564b2489f655779653be61a0abadda52d0fc0'
+PRODUCER_SHA = '94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd'
 RELAY_SHA = 'f2b4a65487fecbace54ea4954d26f80566b9ccd8a7c476d826b40fe5bf65bbb8'
 DOCKER_RUNTIME_SHA = '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651'
 CONTROL_SHA = {CONNECT: CONNECT_SHA, NATIVE: NATIVE_SHA, STOP_OWNER: STOP_OWNER_SHA, PRODUCER: PRODUCER_SHA,
@@ -426,6 +426,41 @@ def provider_state(database, responder):
             'downloaded_bytes': sum(row[3] for row in tunnels),
             'owned_responses': len(responder.rows) if responder is not None else None,
             'owned_health': owned_health_count(responder)}
+
+
+def managed_stop_readback(run_dir, provider_dir, manifest_path, expected_sha256,
+                          expected_ids, inspect_container):
+    """Read the stop winner's run proof; provider admission is a separate result."""
+    run_dir,provider_dir,manifest_path=map(Path,(run_dir,provider_dir,manifest_path))
+    result={'run_verified':False,'provider_admission_closed':(provider_dir/'REVOKED').exists(),
+            'ordered_monotonic':False,'exact_producers_stopped':False}
+    try:
+        raw=manifest_path.read_bytes()
+        manifest=json.loads(raw)
+        run=json.loads((run_dir/'RUN.json').read_text())
+        request=json.loads((run_dir/'STOP_REQUEST').read_text())
+        stopping=json.loads((run_dir/'STOPPING').read_text())
+        revoked=json.loads((run_dir/'REVOKED').read_text())
+        ids=list(expected_ids)
+        if ((run_dir/'UNSAFE').exists() or revoked.get('producers_verified_stopped') is not True
+                or hashlib.sha256(raw).hexdigest()!=expected_sha256
+                or [item['id'] for item in manifest['producers']]!=ids
+                or run.get('manifest_sha256')!=expected_sha256 or run.get('ids')!=ids
+                or revoked.get('manifest_sha256')!=expected_sha256 or revoked.get('ids')!=ids):
+            return result
+        times=(request['monotonic'],stopping['monotonic'],
+               revoked['frozen_monotonic'],revoked['monotonic'])
+        if not all(type(value) in (int,float) and math.isfinite(value) for value in times):
+            return result
+        result['ordered_monotonic']=all(left<=right for left,right in zip(times,times[1:]))
+        if not result['ordered_monotonic']:return result
+        result['exact_producers_stopped']=all(
+            (info:=inspect_container(identifier)) is not None and info['Id']==identifier
+            and (not info['State']['Running'] or info['State']['Paused']) for identifier in ids)
+        result['run_verified']=result['exact_producers_stopped']
+    except (OSError,ValueError,KeyError,TypeError,IndexError):
+        pass
+    return result
 
 
 def inspect(kind, identifier):
@@ -1574,26 +1609,12 @@ def main():
             worker.start()
             request_stop(output / 'run', 'harmless_live_complete' if live else 'owned_offline_complete')
             report['native_stop'] = native.close()
-            try:
-                stop_request = json.loads((output / 'run/STOP_REQUEST').read_text())['monotonic']
-                stopping = json.loads((output / 'run/STOPPING').read_text())['monotonic']
-                revoked = json.loads((output / 'run/REVOKED').read_text())
-                with sqlite3.connect(output / 'provider/tunnel.sqlite3') as db:
-                    detected = json.loads(db.execute("SELECT data FROM events WHERE kind='stop_detected' ORDER BY id DESC LIMIT 1").fetchone()[0])['monotonic']
-                    frozen = json.loads(db.execute("SELECT data FROM events WHERE kind='producer_set_frozen' ORDER BY id DESC LIMIT 1").fetchone()[0])['monotonic']
-                ordered = (output / 'provider/REVOKED').exists() and revoked['producers_verified_stopped'] is True \
-                    and stop_request <= stopping <= detected <= frozen <= revoked['monotonic']
-                report['stop_order'] = {'provider_only_marker_present': (output / 'provider/REVOKED').exists(),
-                                        'run_revoked_verified': revoked['producers_verified_stopped'],
-                                        'ordered_monotonic': ordered}
-            except (OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error):
-                ordered = False
-                report['stop_order'] = {'error': 'marker_readback_unavailable'}
-            check('provider closure and verified run stop markers ordered', ordered)
+            report['stop_order'] = managed_stop_readback(
+                output/'run',output/'provider',manifest,ready['manifest_sha256'],ids,
+                lambda identifier:inspect('container',identifier))
+            check('provider admission closed',report['stop_order']['provider_admission_closed'])
             check('verified run stop and exact producers frozen',
-                  report['native_stop']['status'] == 'stopped' and
-                  all(not (state := inspect('container', identifier)['State'])['Running'] or state['Paused']
-                      for identifier in ids))
+                  report['native_stop']['status']=='stopped' and report['stop_order']['run_verified'])
             send_release.set()
             worker.join(timeout=5)
             fresh = {}

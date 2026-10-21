@@ -62,8 +62,8 @@
     },
     {
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "bytes": 97049,
-      "sha256": "24f13cc96b825ae20c7868bcc10017bc5d782bd0b33e0fde4534be02959a6482"
+      "bytes": 97834,
+      "sha256": "c828054ed71610dcc13a238298acb0ef21570b6a2147c818444ce4063c23e1a2"
     },
     {
       "bytes": 1222,
@@ -182,13 +182,13 @@
     },
     {
       "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
-      "bytes": 18409,
-      "sha256": "917830aaed9ff05bda562fc26db5106efce9851eb0e75879e7c5c03e7a131e20"
+      "bytes": 19437,
+      "sha256": "759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f"
     },
     {
       "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
-      "bytes": 5738,
-      "sha256": "004117f3b49c1b9ecc302e45b9b564b2489f655779653be61a0abadda52d0fc0"
+      "bytes": 5791,
+      "sha256": "94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd"
     },
     {
       "path": "experiments/native-network-preflight/v2_connect.py",

@@ -159,12 +159,21 @@ def begin_stop(state_dir, reason):
             _write_atomic_once(path,'STOPPING',{'reason':reason,'monotonic':time.monotonic()})
 
 
-def finish_stop(state_dir, stopped):
+def finish_stop(state_dir, stopped, proof=None):
     with _lock(state_dir) as path:
         if not (path/'STOPPING').exists(): raise ValueError('native_run_stop_not_started')
         if (path/'REVOKED').exists() or (path/'UNSAFE').exists():
             raise ValueError('native_run_stop_already_terminal')
-        _write_atomic_once(path,'REVOKED' if stopped else 'UNSAFE',{'producers_verified_stopped':bool(stopped),'monotonic':time.monotonic()})
+        value={'producers_verified_stopped':bool(stopped),'monotonic':time.monotonic()}
+        if stopped:
+            state=snapshot(path)
+            if (not isinstance(proof,dict) or proof.get('manifest_sha256')!=state['manifest_sha256']
+                    or proof.get('ids')!=state['ids'] or not isinstance(proof.get('frozen_monotonic'),(int,float))
+                    or not math.isfinite(proof['frozen_monotonic'])
+                    or proof['frozen_monotonic']>value['monotonic']):
+                raise ValueError('native_run_stop_proof_invalid')
+            value.update(proof)
+        _write_atomic_once(path,'REVOKED' if stopped else 'UNSAFE',value)
 
 
 def start_producers(state_dir, producers, fail_after=None, hold_dir=None):
@@ -202,14 +211,20 @@ def stop_producers(state_dir, producers, event, reason, evidence_ok=lambda: True
                 nonlocal event_failed
                 try:event(kind,data)
                 except Exception:event_failed=True
-            try: producers.freeze(record)
+            try: frozen=producers.freeze(record)
             except Exception:
                 finish_stop(path, False)
                 return False
-            if uncertain_start or event_failed or not evidence_ok():
+            try: state=snapshot(path)
+            except (OSError,ValueError,KeyError,TypeError):state={}
+            sealed=(state.get('manifest_sha256')==producers.digest and
+                    state.get('ids')==[item['id'] for item in producers.items])
+            if uncertain_start or event_failed or not evidence_ok() or not sealed or not isinstance(frozen,dict):
                 finish_stop(path, False)
                 return False
-            finish_stop(path, True)
+            finish_stop(path, True, {'manifest_sha256':frozen['manifest_sha256'],
+                                     'ids':frozen['ids'],
+                                     'frozen_monotonic':frozen['monotonic']})
             return True
     except RunStopped as error:
         if str(error)!='native_run_stop_lock_unavailable':raise

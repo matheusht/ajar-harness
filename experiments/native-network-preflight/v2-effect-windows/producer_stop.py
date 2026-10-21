@@ -101,4 +101,7 @@ class Producers:
         if errors:
             event('producer_stop_failed', {'errors': errors})
             raise RuntimeError('producer_stop_failed')
-        event('producer_set_frozen', {'ids': [p['id'] for p in self.items], 'manifest_sha256': self.digest, 'monotonic': time.monotonic()})
+        proof={'ids':[p['id'] for p in self.items], 'manifest_sha256':self.digest,
+               'monotonic':time.monotonic()}
+        event('producer_set_frozen', proof)
+        return proof

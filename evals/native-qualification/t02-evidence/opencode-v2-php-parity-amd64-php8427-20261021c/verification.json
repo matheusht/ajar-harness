@@ -2,9 +2,23 @@
   "schema_version": 1,
   "kind": "kanboard-current-runtime-public-verification",
   "qualification_id": "t01-kanboard-php8427-amd64-20261021c",
+  "verifier_sha256": "25e13f0b8f4f85b4d9cdb8b227e692f0fb3e0f504a23358e94fe0eb3250e5452",
+  "artifact_sha256": {
+    "README.md": "65b77519db23ff9a6f352603a16c24da324634ae27a333c9fea91fbf47dba600",
+    "build-command.txt": "26c36644ee686c7538b6da2f266fbc445f37ff5710ecd8081017381e151ee2be",
+    "candidate.json": "b988d104545f4ace568a268f79cdf1d2bfb2f686d948ce34f144a01db394df73",
+    "docker-observations.txt": "aa4b36938b3117f0b794200a78bff7f062a5a8e7522d6f661932dc19449d0344",
+    "evidence/fixed-requests.json": "037fef5ac1842e4413c281f3868a474d0ef1bdf7e049de3220cd55b6f4c9ad4b",
+    "evidence/observer-results.public.json": "cf7b83e7c79dcb2ade0f833e158ed3535e94350d7effcbc9e34075aca7f92b9d",
+    "evidence/vulnerable-requests.json": "088257b93fffbe83284c25ffec0b2a938cbffcc41c31ddf86b5623c1c64aad00",
+    "inputs.json": "915656a1ef7798d5b1bcec0bc33a06f689a5274d8bd11ef7280310b0b1ff6c33",
+    "result.json": "eaef887fe2aa1c527b1db4d260001e2ecf0475b4dcfae85a43de2d40ff58aef7",
+    "run-command.txt": "32d88a17c9aca8728b9722e86cc22cf50ae7734d5967dc834f6b7c82e81a85e2",
+    "runtime-admission.json": "0481663a5d4e62b8ec84054288af98523300128fda04512b02c4e89a77ed1e4c"
+  },
   "status": "pass",
-  "checks_passed": 191,
-  "checks_total": 191,
+  "checks_passed": 209,
+  "checks_total": 209,
   "network_required": false,
   "docker_required": false,
   "checks": [
@@ -461,6 +475,38 @@
       "pass": true
     },
     {
+      "name": "source file pinned: evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/README.md",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/result.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verification.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verify.py",
+      "pass": true
+    },
+    {
       "name": "image source paths and hashes exact",
       "pass": true
     },
@@ -530,6 +576,46 @@
     },
     {
       "name": "docker observations state exact restored lifecycle",
+      "pass": true
+    },
+    {
+      "name": "self-test verification receipt binds exact verifier bytes",
+      "pass": true
+    },
+    {
+      "name": "self-test verification receipt binds exact public artifact map",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/README.md",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/result.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verification.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verify.py",
       "pass": true
     },
     {

@@ -126,7 +126,7 @@ INSTALLED_PACKAGES = [
     'php84-xml-8.4.27-r0',
 ]
 
-SOURCE_PINS = {
+DECLARED_REPOSITORY_INPUT_PINS = {
     'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py':
         '100cebaaf715e42fa9c10e4c396a5075c931f6f780baac64f590844308d0973d',
     'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427_test.py':
@@ -141,6 +141,35 @@ SOURCE_PINS = {
         '9db3bc220484a7a786729847f3c8fa8cc1d364a74b1e4a81d2bb78f80dc924fa',
     'evals/native-qualification/RESEARCHER-BRIEF.md':
         '8f2b5604870cf86719ae94ac180cb6cbe0c5c12cdd2356bc90f4104bb7179a5a',
+}
+HISTORICAL_PHP8426_PINS = {
+    'evals/native-qualification/Dockerfile.opencode-kanboard-runtime':
+        '7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/README.md'):
+        '32bf91b3f7c4d17a11b52987c99d6c0ed1f43c43a182f9b4596ee0dd9e501f45',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt'):
+        'd8720995a146140339a2eab86d2967d1d32a74ed86ead96f7795bbe326cd91da',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt'):
+        '2414b40a2b7674a0553e215eeea5a5c06e0c48433c600bc0ca7e0b27ba459997',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json'):
+        '8306c081fcf7d11d137d6c3a773b8d225b4ca0027ddc9a70b1a686d20fcb18a3',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/result.json'):
+        'b7f0875cdb80f2dd567a5be22ce4624858df664b7c96add28a19b3a508b32046',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/verification.json'):
+        'd9a6d0c8c064192a6a6e0bf93c29c0588565a0b14a3b4f5ed3903b5133737fa3',
+    ('evals/native-qualification/t02-evidence/'
+     'opencode-v2-php-parity-amd64-fresh-20261021b/verify.py'):
+        'acaa5c1859c1c029880a4e921c44bcbda2b19bed76f6f5a30a6d85e7bbd6899b',
+}
+SOURCE_PINS = {
+    **DECLARED_REPOSITORY_INPUT_PINS,
+    **HISTORICAL_PHP8426_PINS,
 }
 IMAGE_SOURCE_PINS = {
     'evals/native-qualification/Dockerfile.opencode-kanboard-runtime-php8427':
@@ -467,7 +496,7 @@ def input_checks(inputs: dict) -> dict[str, bool]:
             and inputs.get('archives', {}).get(
                 'both_verified_before_runner_invocation') is True),
         'source pin manifest exact': strict_equal(
-            inputs.get('repository_inputs'), SOURCE_PINS),
+            inputs.get('repository_inputs'), DECLARED_REPOSITORY_INPUT_PINS),
         'public arm artifact hashes exact': strict_equal(
             inputs.get('public_arm_artifacts'), {
             'evidence/observer-results.public.json':
@@ -959,14 +988,19 @@ def result_checks(inputs: dict, result: dict,
     }
 
 
-def source_checks(inputs: dict) -> dict[str, bool]:
+def source_checks(inputs: dict,
+                  source_overrides: dict[str, bytes] | None = None) -> dict[str, bool]:
+    source_overrides = source_overrides or {}
     checks = {
         'source manifest in inputs exact': strict_equal(
-            inputs.get('repository_inputs'), SOURCE_PINS)}
+            inputs.get('repository_inputs'), DECLARED_REPOSITORY_INPUT_PINS)}
     for relative, digest in SOURCE_PINS.items():
         path = ROOT / relative
+        value = source_overrides.get(relative)
+        if value is None and path.is_file():
+            value = path.read_bytes()
         checks[f'source file pinned: {relative}'] = (
-            path.is_file() and sha256_bytes(path.read_bytes()) == digest)
+            path.is_file() and value is not None and sha256_bytes(value) == digest)
     image = inputs.get('image_source', {})
     path_bindings = {
         image.get('dockerfile'): image.get('dockerfile_sha256'),
@@ -977,8 +1011,11 @@ def source_checks(inputs: dict) -> dict[str, bool]:
         path_bindings, IMAGE_SOURCE_PINS)
     for relative, digest in IMAGE_SOURCE_PINS.items():
         path = ROOT / relative
+        value = source_overrides.get(relative)
+        if value is None and path.is_file():
+            value = path.read_bytes()
         checks[f'image source pinned: {relative}'] = (
-            path.is_file() and sha256_bytes(path.read_bytes()) == digest)
+            path.is_file() and value is not None and sha256_bytes(value) == digest)
     return checks
 
 
@@ -1155,6 +1192,49 @@ def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
                runtime: dict, result: dict, observer: dict, historical: dict,
                traces: dict[str, list], parsed: dict[str, object]) -> dict[str, bool]:
     tests = {}
+    binding_probe = json.loads(render_receipt({'binding probe': True}))
+    tests['verification receipt binds exact verifier bytes'] = (
+        binding_probe.get('verifier_sha256')
+        == sha256_bytes((HERE / 'verify.py').read_bytes()))
+    tests['verification receipt binds exact public artifact map'] = strict_equal(
+        binding_probe.get('artifact_sha256'), {
+            name: sha256_bytes(raw[name]) for name in sorted(raw)})
+
+    historical_php8426 = {
+        'evals/native-qualification/Dockerfile.opencode-kanboard-runtime':
+            '7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/README.md'):
+            '32bf91b3f7c4d17a11b52987c99d6c0ed1f43c43a182f9b4596ee0dd9e501f45',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt'):
+            'd8720995a146140339a2eab86d2967d1d32a74ed86ead96f7795bbe326cd91da',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt'):
+            '2414b40a2b7674a0553e215eeea5a5c06e0c48433c600bc0ca7e0b27ba459997',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json'):
+            '8306c081fcf7d11d137d6c3a773b8d225b4ca0027ddc9a70b1a686d20fcb18a3',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/result.json'):
+            'b7f0875cdb80f2dd567a5be22ce4624858df664b7c96add28a19b3a508b32046',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/verification.json'):
+            'd9a6d0c8c064192a6a6e0bf93c29c0588565a0b14a3b4f5ed3903b5133737fa3',
+        ('evals/native-qualification/t02-evidence/'
+         'opencode-v2-php-parity-amd64-fresh-20261021b/verify.py'):
+            'acaa5c1859c1c029880a4e921c44bcbda2b19bed76f6f5a30a6d85e7bbd6899b',
+    }
+    for relative, digest in historical_php8426.items():
+        try:
+            mutated_checks = source_checks(
+                inputs, {relative: (ROOT / relative).read_bytes() + b'\nmutation'})
+        except TypeError:
+            mutated_checks = {}
+        tests[f'reject immutable historical mutation: {relative}'] = (
+            SOURCE_PINS.get(relative) == digest
+            and mutated_checks.get(f'source file pinned: {relative}') is False)
+
     for name in ARTIFACT_SHA256:
         mutated = raw[name].replace(b'\n', b'\r\n')
         mutated_raw = dict(raw)
@@ -1419,18 +1499,32 @@ def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
     tests['wrong-id replay executes no python'] = executable_wrong_id_negative()
 
     wrong_source = copy.deepcopy(inputs)
-    key = next(iter(SOURCE_PINS))
+    key = next(iter(DECLARED_REPOSITORY_INPUT_PINS))
     wrong_source['repository_inputs'][key] = '0' * 64
     tests['reject source pin substitution'] = not source_checks(wrong_source)[
         'source manifest in inputs exact']
     return tests
 
 
-def render_receipt(checks: dict[str, bool], error: str | None = None) -> str:
+def public_artifact_sha256(raw: dict[str, bytes] | None = None) -> dict[str, str]:
+    if raw is None:
+        raw = {name: (HERE / name).read_bytes() for name in ARTIFACT_SHA256}
+    return {name: sha256_bytes(raw[name]) for name in sorted(raw)}
+
+
+def render_receipt(checks: dict[str, bool], error: str | None = None,
+                   verifier_sha256: str | None = None,
+                   artifact_sha256: dict[str, str] | None = None) -> str:
+    if verifier_sha256 is None:
+        verifier_sha256 = sha256_bytes((HERE / 'verify.py').read_bytes())
+    if artifact_sha256 is None:
+        artifact_sha256 = public_artifact_sha256()
     receipt = {
         'schema_version': 1,
         'kind': 'kanboard-current-runtime-public-verification',
         'qualification_id': QUALIFICATION_ID,
+        'verifier_sha256': verifier_sha256,
+        'artifact_sha256': artifact_sha256,
         'status': 'pass' if checks and all(checks.values()) and error is None else 'fail',
         'checks_passed': sum(bool(value) for value in checks.values()),
         'checks_total': len(checks),
@@ -1452,8 +1546,12 @@ def main() -> int:
 
     checks: dict[str, bool] = {}
     error = None
+    raw: dict[str, bytes] = {}
+    verifier_digest = sha256_bytes((HERE / 'verify.py').read_bytes())
+    artifact_digests: dict[str, str] = {}
     try:
         raw = {name: (HERE / name).read_bytes() for name in ARTIFACT_SHA256}
+        artifact_digests = public_artifact_sha256(raw)
         checks |= artifact_byte_checks(raw)
         if not all(checks.values()):
             raise ValueError('public artifact byte hash mismatch')
@@ -1506,7 +1604,8 @@ def main() -> int:
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as failure:
         error = f'{type(failure).__name__}: {failure}'
 
-    rendered = render_receipt(checks, error)
+    rendered = render_receipt(
+        checks, error, verifier_digest, artifact_digests)
     if args.json_output:
         args.json_output.write_text(rendered)
     print(rendered, end='')

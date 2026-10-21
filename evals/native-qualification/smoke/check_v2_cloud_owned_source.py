@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """No-Docker cloud owned pin/origin and failure-teardown checks."""
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -15,12 +16,16 @@ ROOT = Path(__file__).resolve().parents[3]
 RUNNER = ROOT / 'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
 RELAY = 'experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/tcp-relay-linux-amd64'
 RELAY_SHA = '33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895'
+CURRENT_MANIFEST = Path('evals/native-qualification/t02-source/SOURCE-MANIFEST.json')
 
 
-def select_manifest(root):
+def select_manifest(root, current=False):
     extracted = root / 'SOURCE-MANIFEST.json'
-    return extracted if extracted.exists() or extracted.is_symlink() else (
-        root / 'evals/native-qualification/t02-cloud-transfer-20261020/SOURCE-MANIFEST.json')
+    if extracted.exists() or extracted.is_symlink():
+        historical = extracted
+    else:
+        historical = root / 'evals/native-qualification/t02-cloud-transfer-20261020/SOURCE-MANIFEST.json'
+    return root / CURRENT_MANIFEST if current else historical
 
 
 def stage_sources(root, staged, manifest):
@@ -71,7 +76,7 @@ def load(path):
     return module
 
 
-def run(staged, output, marker, corrupt_copy=False, live_free=False):
+def run(staged, output, marker, corrupt_copy=False, live_free=False, runtime_ca=None):
     runner = staged / RUNNER.relative_to(ROOT)
     args = ['--output', str(output), '--cloud-platform', 'linux/amd64',
             '--cloud-image-id', 'sha256:' + 'a' * 64,
@@ -83,6 +88,9 @@ def run(staged, output, marker, corrupt_copy=False, live_free=False):
             '--cloud-upstream-route', 'HTTPS_PROXY']
     if live_free:
         args.append('--live-free')
+    if runtime_ca is not None:
+        args += ['--live-runtime-ca', str(runtime_ca),
+                 '--live-runtime-ca-sha256', hashlib.sha256(runtime_ca.read_bytes()).hexdigest()]
     env = os.environ.copy()
     env['HTTPS_PROXY'] = 'http://127.0.0.1:3128'
     env['T02_DOCKER_MARKER'] = str(marker)
@@ -153,20 +161,36 @@ def check_teardown(module, root):
 
 
 def main():
-    module = load(RUNNER)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--current-manifest', action='store_true',
+                        help='explicitly check the post-transfer source manifest')
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='t02-cloud-owned-source-') as directory:
         temp = Path(directory)
         staged = (temp / 'repo').resolve()
-        stage_sources(ROOT, staged, select_manifest(ROOT))
+        stage_sources(ROOT, staged, select_manifest(ROOT, current=args.current_manifest))
         fake = staged / 'fake-bin/docker'
         fake.parent.mkdir()
         fake.write_text('#!/bin/sh\nprintf called >> "$T02_DOCKER_MARKER"\nexit 99\n')
         fake.chmod(0o700)
         staged_module = load(staged / RUNNER.relative_to(ROOT))
+        module = staged_module
         assert len(staged_module.CLOUD_OWNED_INPUT_SHA) == 7
+        ca_pem = None
+        if args.current_manifest:
+            ca_key, ca_pem = temp / 'ca.key', temp / 'ca.pem'
+            generated = subprocess.run([
+                'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-noenc', '-days', '1',
+                '-sha256', '-subj', '/CN=T02 benign source-check CA',
+                '-addext', 'basicConstraints=critical,CA:TRUE',
+                '-keyout', str(ca_key), '-out', str(ca_pem)],
+                capture_output=True, text=True, timeout=15)
+            assert generated.returncode == 0
+            ca_key.chmod(0o600)
+            ca_pem.chmod(0o600)
         marker = temp / 'docker-called'
         output = temp / 'live-denied'
-        result = run(staged, output, marker, live_free=True)
+        result = run(staged, output, marker, live_free=True, runtime_ca=ca_pem)
         assert result.returncode != 0 and 'cloud_live_route_not_qualified' in result.stderr
         assert not output.exists() and not marker.exists()
         for index, path in enumerate(staged_module.CLOUD_OWNED_INPUT_SHA):

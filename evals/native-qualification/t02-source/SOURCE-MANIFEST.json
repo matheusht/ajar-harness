@@ -1,0 +1,201 @@
+{
+  "files": [
+    {
+      "bytes": 584,
+      "path": "evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "sha256": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b"
+    },
+    {
+      "bytes": 1362,
+      "path": "evals/native-qualification/T02-CLOUD-SOURCE-CHECKER-FAILURES-20261020.md",
+      "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
+    },
+    {
+      "bytes": 7441,
+      "path": "evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md",
+      "sha256": "10723d186db792cf1eb7db36e67df074ebf9fee53931a9ad92e796861ac0d9a4"
+    },
+    {
+      "bytes": 16473,
+      "path": "evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md",
+      "sha256": "04f76bc7365afe7a2d4f796bad9af20ebef5633d54b3f383c585f6919bfc79b3"
+    },
+    {
+      "bytes": 12706,
+      "path": "evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md",
+      "sha256": "5c51199eca9e671ffb34093884780eff3842fdff6d4c61f2f3e40b6dd5af99d8"
+    },
+    {
+      "bytes": 361,
+      "path": "evals/native-qualification/smoke/check.php",
+      "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
+    },
+    {
+      "bytes": 3898,
+      "path": "evals/native-qualification/smoke/check_v2_cloud_manifest_layout.py",
+      "sha256": "d3e26736f2f31e30aae70dbac5ab2b0111af35ea84018d90de9b3634ae47400e"
+    },
+    {
+      "bytes": 10622,
+      "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
+      "sha256": "e06453668bdd7f26f9f80847d15c087370e270ae92789570e65b42c8f166adbf"
+    },
+    {
+      "bytes": 15028,
+      "path": "evals/native-qualification/smoke/check_v2_live_preparation.py",
+      "sha256": "e873349893d808b664f7b887bf1cf0a1155a16a8a560a6dfb56f957bf881491b"
+    },
+    {
+      "bytes": 98,
+      "path": "evals/native-qualification/smoke/index.php",
+      "sha256": "f070f8308bda12bb56df51717675d86558a53891666d419052013e811ce3b7b7"
+    },
+    {
+      "bytes": 58,
+      "path": "evals/native-qualification/smoke/message.php",
+      "sha256": "ac12d930241f36a93d5e83b7b37737219a8d04fe0d3d5a417a8c3b7edbf8c9d9"
+    },
+    {
+      "bytes": 853,
+      "path": "evals/native-qualification/smoke/opencode_v2_live_config.json",
+      "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
+    },
+    {
+      "bytes": 96569,
+      "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
+      "sha256": "659920699cd3c0a70807ef2d0ade83e14c7123feafd2e31ec4b5031734dd24b9"
+    },
+    {
+      "bytes": 1222,
+      "path": "evals/native-qualification/smoke/opencode_v2_mock_provider.php",
+      "sha256": "3eccc5c7bd8a9e60c743b6199f60ae669ed9f2d9df4f3e11d69b2038f1215880"
+    },
+    {
+      "bytes": 792,
+      "path": "evals/native-qualification/smoke/opencode_v2_observed_config.json",
+      "sha256": "8c63991951ecf580549be2e5cb08ad6746e10adae91f404e11c3a5138bc4215b"
+    },
+    {
+      "bytes": 18,
+      "path": "evals/native-qualification/smoke/opencode_v2_request_observer/package.json",
+      "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae"
+    },
+    {
+      "bytes": 1634,
+      "path": "evals/native-qualification/smoke/opencode_v2_request_observer/server.js",
+      "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
+    },
+    {
+      "bytes": 7324,
+      "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
+      "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
+    },
+    {
+      "bytes": 1416,
+      "path": "evals/native-qualification/t02-source/README.md",
+      "sha256": "e7dd227bdcc6aba7f59d35a0e99fd0b37c62cbafdfeae09e685f9bbe883748f8"
+    },
+    {
+      "bytes": 11748,
+      "path": "experiments/native-network-preflight/CLOUD-DIND-PORTABILITY-PRECHECK-2026-10-20.md",
+      "sha256": "d50a0364a2c984baa7a8d41ac74e709718bf03487935af296421cf265ddd6e32"
+    },
+    {
+      "bytes": 5282,
+      "path": "experiments/native-network-preflight/LOCAL-200-RESULTS-2026-10-20.md",
+      "sha256": "56fb08ead9d49039593e1fbe2a6c0b825aef21bf773042c9ce9cf73e44626048"
+    },
+    {
+      "bytes": 2788,
+      "path": "experiments/native-network-preflight/ORPHAN-REAP-CHECKS.md",
+      "sha256": "a5d2bbfe70c6666fb9aea61db795bb6a48475d365d9b3e3b2fc1697b6548d04e"
+    },
+    {
+      "bytes": 5184,
+      "path": "experiments/native-network-preflight/PRIVATE-LISTENER-CHECKS.md",
+      "sha256": "157f268dfcf0b93909154dd155bd9564f6e9e7ed75175ede66d7b062fc7ae890"
+    },
+    {
+      "bytes": 2591,
+      "path": "experiments/native-network-preflight/READINESS-STOP-CHECKS.md",
+      "sha256": "67aa0b83c94d013a39d8982cb2b0915b10d5d11bc8e9469fbdbd542b63bd84cf"
+    },
+    {
+      "bytes": 6621,
+      "path": "experiments/native-network-preflight/UPSTREAM-PROXY-CHECKS.md",
+      "sha256": "9f99a823fc9af3ad0a22e475bb000787ea4fb144f9f8d7a54148468f7fc41c9e"
+    },
+    {
+      "bytes": 5410,
+      "path": "experiments/native-network-preflight/V2-TUNNEL-CHECKS.md",
+      "sha256": "d6ffa2493948d45916283e72e045bee57896a780aaae4c556995ec2676dda69f"
+    },
+    {
+      "bytes": 17908,
+      "path": "experiments/native-network-preflight/check_v2_connect.py",
+      "sha256": "5db8b212376ade3b8b2f08817a063d684ca0942c56ef4e2cb8d42f7e14744979"
+    },
+    {
+      "bytes": 17543,
+      "path": "experiments/native-network-preflight/check_v2_private_listener.py",
+      "sha256": "2872a00f23f6a650bc804080cdbc20d145b15b3bf7eaf107a3bf7c3f99c6862c"
+    },
+    {
+      "bytes": 28208,
+      "path": "experiments/native-network-preflight/check_v2_upstream_proxy.py",
+      "sha256": "d403fc604e293d15cbddf6ae6479b895bdadc43abcef998740f1b5f3e9b353e7"
+    },
+    {
+      "bytes": 2702,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/CHECKS.md",
+      "sha256": "811148fa5fd8c36c2a167b310de3bb31dbe0521fdc2f9722dc44a4c81146dadb"
+    },
+    {
+      "bytes": 9024,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/check.py",
+      "sha256": "61cfd4599fe00dbe3893d339116ec95e0a1c708439012b66ca898adbdada0b18"
+    },
+    {
+      "bytes": 399,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/README.md",
+      "sha256": "517c97a83e4e6123fd8b1cf551858b887d034958a5ed88699984d3729ae6343d"
+    },
+    {
+      "bytes": 876,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/result.json",
+      "sha256": "c0886a251ca3c69061c604276248626a574ae3e207bad39d35e44ad907da26b8"
+    },
+    {
+      "bytes": 8490157,
+      "path": "experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/tcp-relay-linux-amd64",
+      "sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895"
+    },
+    {
+      "bytes": 1762,
+      "path": "experiments/native-network-preflight/tcp_relay.go",
+      "sha256": "ebacc88d41e64b4f088f675be039f2318e3ad67549259274cdd37a9b41089fca"
+    },
+    {
+      "bytes": 11087,
+      "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
+      "sha256": "c567147c9006766bd6aa5445fcda94093a0812ef1cd0f4c3d41be42d56974c4d"
+    },
+    {
+      "bytes": 4913,
+      "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
+      "sha256": "7e939e8d245996b12f3f509e272acd3a538f222b4c537a8dee6fa0b55dac1db2"
+    },
+    {
+      "bytes": 26811,
+      "path": "experiments/native-network-preflight/v2_connect.py",
+      "sha256": "f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea"
+    },
+    {
+      "bytes": 59243,
+      "path": "tools/docker_session_runtime.py",
+      "sha256": "9beff3af097a711010a5234f2ab72f549f617fdcf8c3833b6d5a29c7fa582b28"
+    }
+  ],
+  "kind": "t02-cloud-source",
+  "schema_version": 1
+}

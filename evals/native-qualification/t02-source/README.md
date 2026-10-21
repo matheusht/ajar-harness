@@ -1,0 +1,9 @@
+# T02 live-path preparation source
+
+This stable directory identifies the post-transfer source state for the fail-closed OSLIT preparation change. `SOURCE-MANIFEST.json` pins the materialized candidate bytes used by the no-Docker source checks. It is separate from the immutable 20 October transfer ZIP and manifest at `cloud-transfer/t02-20261020/`.
+
+The historical ZIP-root or sidecar manifest remains the default source-check authority. It therefore rejects these post-transfer bytes as drift. Reviewers select this manifest explicitly with `check_v2_cloud_owned_source.py --current-manifest`; its presence never overrides the historical root implicitly. If this source is adopted into a canonical repository manifest, this explicit option and directory can be removed together.
+
+The change adds explicit, hash-pinned runtime CA validation and dormant private-snapshot plumbing, rejects unexpected trust overrides, and makes provider ledger reads safe when no owned offline responder exists. The unconditional `cloud_live_route_not_qualified` denial remains before output creation and Docker.
+
+The source manifest and offline receipts are preparation evidence only. They do not prove the managed sidecar reaches an owned receiver, prove that OpenCode excludes built-in trust roots, qualify live TLS or a provider, complete issues #158 or #161, unblock issues #159, #160 or #162, or change the #165 no-go decision.

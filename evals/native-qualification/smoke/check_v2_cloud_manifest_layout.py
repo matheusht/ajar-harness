@@ -13,6 +13,7 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 RELATIVE = 'evals/native-qualification/smoke/fixture.bin'
 SIDECAR = 'evals/native-qualification/t02-cloud-transfer-20261020/SOURCE-MANIFEST.json'
+CURRENT = 'evals/native-qualification/t02-source/SOURCE-MANIFEST.json'
 
 
 def manifest(data):
@@ -40,6 +41,22 @@ with tempfile.TemporaryDirectory(prefix='t02-manifest-layout-') as directory:
     assert checker.stage_sources(local, staged, sidecar) == 1
     assert (staged / RELATIVE).read_bytes() == source.read_bytes()
     assert (staged / RELATIVE).stat().st_mode & 0o111
+
+    candidate = temp / 'candidate'
+    source, current_manifest = write(candidate, b'candidate fixture', CURRENT)
+    _, root_manifest = write(candidate, b'candidate fixture', 'SOURCE-MANIFEST.json')
+    root_manifest.write_text(json.dumps(manifest(b'wrong historical root')) + '\n')
+    assert checker.select_manifest(candidate) == root_manifest
+    assert checker.select_manifest(candidate, current=True) == current_manifest
+    try:
+        checker.stage_sources(candidate, temp / 'staged-historical-current', root_manifest)
+    except ValueError as error:
+        assert str(error) == 'manifest_source_mismatch'
+    else:
+        raise AssertionError('historical root silently yielded to current source')
+    staged = temp / 'staged-candidate'
+    assert checker.stage_sources(candidate, staged, current_manifest) == 1
+    assert (staged / RELATIVE).read_bytes() == source.read_bytes()
 
     extracted = temp / 'extracted'
     source, root_manifest = write(extracted, b'extracted fixture', 'SOURCE-MANIFEST.json')
@@ -69,4 +86,4 @@ with tempfile.TemporaryDirectory(prefix='t02-manifest-layout-') as directory:
         raise AssertionError('invalid root manifest fell back to sidecar')
     assert not (temp / 'staged-bad-root').exists()
 
-print('PASS: local sidecar, ZIP-root precedence, executable staged bytes, mutated/invalid source rejection; no Docker/provider/CI')
+print('PASS: root/sidecar precedence, explicit current manifest, executable staged bytes, mutated/invalid source rejection; no Docker/provider/CI')

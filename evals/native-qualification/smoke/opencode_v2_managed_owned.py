@@ -46,11 +46,19 @@ PRODUCER = CONTROLS / 'v2-effect-windows/producer_stop.py'
 DOCKER_RUNTIME = ROOT / 'tools/docker_session_runtime.py'
 CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md'
 LIVE_CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md'
+LIVE_PREPARATION_CHECKS = ROOT / 'evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md'
 MOCK_PHP = HERE / 'opencode_v2_mock_provider.php'
 FIXTURE = (HERE / 'index.php', HERE / 'message.php', HERE / 'check.php')
 LABEL = 'io.lrh.t02-managed-owned'
 DOCKER_PROXY_ENV = ('HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY',
                     'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy', 'ftp_proxy')
+TRUST_ENV = ('SSL_CERT_FILE', 'SSL_CERT_DIR', 'CURL_CA_BUNDLE', 'REQUESTS_CA_BUNDLE',
+             'NODE_EXTRA_CA_CERTS', 'NODE_TLS_REJECT_UNAUTHORIZED', 'GIT_SSL_CAINFO',
+             'GIT_SSL_NO_VERIFY', 'SSLKEYLOGFILE')
+ABSENT_TRUST_ENV = ('NODE_TLS_REJECT_UNAUTHORIZED', 'GIT_SSL_NO_VERIFY', 'SSLKEYLOGFILE')
+CLEARABLE_TRUST_ENV = tuple(name for name in TRUST_ENV if name not in ABSENT_TRUST_ENV)
+RUNTIME_CA_DEST = '/fixture/runtime-ca.pem'
+MAX_RUNTIME_CA_BYTES = 4 * 1024 * 1024
 CONNECT_SHA = 'f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea'
 NATIVE_SHA = 'c567147c9006766bd6aa5445fcda94093a0812ef1cd0f4c3d41be42d56974c4d'
 PRODUCER_SHA = '7e939e8d245996b12f3f509e272acd3a538f222b4c537a8dee6fa0b55dac1db2'
@@ -80,6 +88,107 @@ PHP_CHECKS = ('php -l index.php', 'php -l message.php', 'php -l check.php',
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validated_runtime_ca(args, parser):
+    name = args.live_runtime_ca
+    expected = args.live_runtime_ca_sha256
+    if not args.live_free:
+        if name is not None or expected is not None:
+            parser.error('runtime_ca_live_only')
+        return None
+    if name is None or expected is None:
+        parser.error('live_runtime_ca_required')
+    if not re.fullmatch(r'[0-9a-f]{64}', expected):
+        parser.error('live_runtime_ca_sha256_invalid')
+    path = Path(name)
+    text = str(path)
+    if (not path.is_absolute() or ',' in text
+            or any(ord(character) < 32 or ord(character) == 127 for character in text)):
+        parser.error('live_runtime_ca_invalid')
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0) \
+        | getattr(os, 'O_NONBLOCK', 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        parser.error('live_runtime_ca_invalid')
+    try:
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_mode & 0o022
+                or not 0 < before.st_size <= MAX_RUNTIME_CA_BYTES):
+            parser.error('live_runtime_ca_invalid')
+        chunks = []
+        remaining = MAX_RUNTIME_CA_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b''.join(chunks)
+        after = os.fstat(descriptor)
+        if (len(data) != before.st_size or before.st_dev != after.st_dev
+                or before.st_ino != after.st_ino or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns):
+            parser.error('live_runtime_ca_invalid')
+    except OSError:
+        parser.error('live_runtime_ca_invalid')
+    finally:
+        os.close(descriptor)
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        parser.error('live_runtime_ca_hash_mismatch')
+    try:
+        pem = data.decode('ascii')
+        private_markers = ('-----BEGIN PRIVATE KEY-----', '-----BEGIN RSA PRIVATE KEY-----',
+                           '-----BEGIN EC PRIVATE KEY-----', '-----BEGIN OPENSSH PRIVATE KEY-----',
+                           '-----BEGIN ENCRYPTED PRIVATE KEY-----')
+        certificate_pattern = re.compile(
+            r'-----BEGIN CERTIFICATE-----\r?\n'
+            r'(?P<body>(?:[A-Za-z0-9+/=]{1,64}\r?\n)+)'
+            r'-----END CERTIFICATE-----')
+        certificate_matches = list(certificate_pattern.finditer(pem))
+        cursor = 0
+        for match in certificate_matches:
+            if pem[cursor:match.start()].strip():
+                raise ValueError
+            base64.b64decode(''.join(match.group('body').splitlines()), validate=True)
+            cursor = match.end()
+        if (any(marker in pem for marker in private_markers) or not certificate_matches
+                or pem[cursor:].strip()):
+            raise ValueError
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(cadata=pem)
+    except (UnicodeDecodeError, ValueError, ssl.SSLError):
+        parser.error('live_runtime_ca_invalid')
+    return {'bytes': data, 'sha256': actual, 'size': len(data),
+            'certificate_count': len(certificate_matches)}
+
+
+def private_snapshot(path, data):
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, 'O_CLOEXEC', 0), 0o600)
+    try:
+        view = memoryview(data)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError('runtime_ca_snapshot_write_failed')
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return path
+
+
+def researcher_trust(live, runtime_ca, offline_ca):
+    source = runtime_ca if live else offline_ca
+    if source is None:
+        raise RuntimeError('live_runtime_ca_unavailable' if live else 'offline_runtime_ca_unavailable')
+    destination = RUNTIME_CA_DEST if live else '/fixture/test-ca.pem'
+    return {'mounts': ['type=bind,src=' + str(source) + ',dst=' + destination + ',readonly'],
+            'env': ['SSL_CERT_FILE=' + destination],
+            'container_path': destination}
 
 
 def reviewed_inputs_match(expected):
@@ -205,7 +314,7 @@ def created_matches(info, identifier, mounts, env, image_id=IMAGE_ID):
     effective = dict(actual_pairs)
     if any(effective.get(name) != value for name, value in requested.items()):
         return False
-    critical = lambda name: ('PROXY' in name.upper() or any(word in name.upper() for word in
+    critical = lambda name: (name in TRUST_ENV or 'PROXY' in name.upper() or any(word in name.upper() for word in
         ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY',
          'AUTHORIZATION', 'CREDENTIAL')))
     return all(name in requested for name in effective if critical(name))
@@ -293,6 +402,24 @@ def token_field_sums_or_unknown(rows):
                 values.append(tokens.get(key))
         totals[key] = sum(values) if values and all(safe_number(v) is not None for v in values) else None
     return totals
+
+
+def owned_health_count(responder):
+    return responder.health_rows if responder is not None else None
+
+
+def provider_state(database, responder):
+    with sqlite3.connect(database) as db:
+        charged = db.execute('SELECT bytes FROM pool').fetchone()[0]
+        tunnels = db.execute('SELECT id,phase,uploaded,downloaded FROM tunnels ORDER BY id').fetchall()
+        events = db.execute('SELECT count(*) FROM events').fetchone()[0]
+        closed_events = db.execute("SELECT count(*) FROM events WHERE kind='closed'").fetchone()[0]
+    return {'events': events, 'closed_events': closed_events,
+            'tunnels': tunnels, 'charged_bytes': charged,
+            'uploaded_bytes': sum(row[2] for row in tunnels),
+            'downloaded_bytes': sum(row[3] for row in tunnels),
+            'owned_responses': len(responder.rows) if responder is not None else None,
+            'owned_health': owned_health_count(responder)}
 
 
 def inspect(kind, identifier):
@@ -521,10 +648,13 @@ def main():
     parser.add_argument('--cloud-listen-address')
     parser.add_argument('--cloud-relay-peer')
     parser.add_argument('--cloud-upstream-route')
+    parser.add_argument('--live-runtime-ca')
+    parser.add_argument('--live-runtime-ca-sha256')
     args = parser.parse_args()
     live = args.live_free
     config = LIVE_CONFIG if live else CONFIG
     selected = cloud_inputs(args, parser)
+    runtime_ca = validated_runtime_ca(args, parser)
     if live:
         parser.error('cloud_live_route_not_qualified')
     if live and not reviewed_inputs_match(LIVE_INPUT_SHA):
@@ -536,8 +666,9 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
     nonce = uuid.uuid4().hex
+    qualification_docs = (LIVE_CHECKS, LIVE_PREPARATION_CHECKS) if live else (CHECKS,)
     pin_files = (Path(__file__), CONNECT, NATIVE, PRODUCER, DOCKER_RUNTIME, selected['relay'], config,
-                 LIVE_CHECKS if live else CHECKS,
+                 *qualification_docs,
                  MOCK_PHP, OBSERVER / 'server.js', OBSERVER / 'package.json', *FIXTURE)
     source_root = output / 'source'
     for path in pin_files:
@@ -562,6 +693,10 @@ def main():
                                     ('cloud', 'platform', 'image_id', 'relay_sha', 'internal_subnet', 'external_subnet',
                                      'listen', 'peer', 'upstream_route')},
               'source_sha256': {str(p.relative_to(ROOT)): sha(p) for p in pin_files}}
+    if runtime_ca is not None:
+        report['runtime_trust'] = {'sha256': runtime_ca['sha256'], 'bytes': runtime_ca['size'],
+                                   'certificate_count': runtime_ca['certificate_count'],
+                                   'container_path': RUNTIME_CA_DEST, 'mount_read_only': True}
     resources = []
     native = None
     responder = None
@@ -613,7 +748,8 @@ def main():
                 or len({pair[0] for pair in pairs}) != len(pairs)):
             raise RuntimeError('invalid_requested_container_env')
         names = {pair[0] for pair in pairs}
-        requested_env = [name + '=' for name in DOCKER_PROXY_ENV if name not in names] + list(env)
+        requested_env = [name + '=' for name in DOCKER_PROXY_ENV + CLEARABLE_TRUST_ENV
+                         if name not in names] + list(env)
         for item in requested_env:
             argv += ['--env', item]
         if ip is not None:
@@ -845,9 +981,16 @@ def main():
         # Keep mounts and stop controls until NativeRun closes and owned IDs are absent.
         with contextlib.nullcontext(tempfile.mkdtemp(prefix='nq-v2-managed-owned-')) as temporary:
             work = Path(temporary).resolve()
-            if not live:
-                certs = work / 'certs'
-                certs.mkdir(mode=0o700)
+            certs = work / 'certs'
+            certs.mkdir(mode=0o700)
+            ca_pem = None
+            runtime_ca_snapshot = None
+            if live:
+                runtime_ca_snapshot = private_snapshot(certs / 'runtime-ca.pem', runtime_ca['bytes'])
+                check('runtime CA private snapshot matches validated bytes',
+                      sha(runtime_ca_snapshot) == runtime_ca['sha256']
+                      and runtime_ca_snapshot.stat().st_mode & 0o077 == 0)
+            else:
                 ca_key, ca_pem = certs / 'ca.key', certs / 'ca.pem'
                 server_key, server_csr, server_pem = certs / 'server.key', certs / 'server.csr', certs / 'server.pem'
                 extension = certs / 'server.ext'
@@ -954,8 +1097,8 @@ def main():
                 mounts = ['type=bind,src=' + str(base) + ',dst=/workspace',
                           'type=bind,src=' + str(config_mount) + ',dst=/workspace/config/opencode/opencode.json,readonly',
                           'type=bind,src=' + str(observer_mount) + ',dst=/observer/opencode_v2_request_observer,readonly']
-                if not live:
-                    mounts.append('type=bind,src=' + str(ca_pem) + ',dst=/fixture/test-ca.pem,readonly')
+                trust = researcher_trust(live, runtime_ca_snapshot, ca_pem)
+                mounts += trust['mounts']
                 env = [name + '=' + proxy for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')]
                 env += ['HOME=/workspace/home', 'XDG_CONFIG_HOME=/workspace/config',
                         'XDG_DATA_HOME=/workspace/data', 'XDG_CACHE_HOME=/workspace/cache',
@@ -963,8 +1106,7 @@ def main():
                         'T02_OBSERVER_PATH=/workspace/telemetry/request-names.jsonl',
                         'NO_COLOR=1',
                         'NO_PROXY=127.0.0.1,localhost,::1', 'no_proxy=127.0.0.1,localhost,::1']
-                if not live:
-                    env.append('SSL_CERT_FILE=/fixture/test-ca.pem')
+                env += trust['env']
                 return created(role, internal, mounts, env)
 
             first = research('first', workspace)
@@ -1018,10 +1160,14 @@ def main():
             first_state = inspect('container', first)
             effective_env = dict(item.split('=', 1) for item in first_state['Config']['Env'] if '=' in item)
             expected_proxy = urlsplit(effective_env.get('HTTPS_PROXY', ''))
+            expected_trust = researcher_trust(live, runtime_ca_snapshot, ca_pem)
             check('researcher effective proxy, trust and isolated DNS readback',
                   expected_proxy.hostname == relay_ip and expected_proxy.port == 8080
                   and effective_env.get('https_proxy') == effective_env.get('HTTPS_PROXY')
-                  and effective_env.get('SSL_CERT_FILE') == (None if live else '/fixture/test-ca.pem')
+                  and effective_env.get('SSL_CERT_FILE') == expected_trust['container_path']
+                  and all(effective_env.get(name) == '' for name in CLEARABLE_TRUST_ENV
+                          if name != 'SSL_CERT_FILE')
+                  and all(name not in effective_env for name in ABSENT_TRUST_ENV)
                   and first_state['HostConfig']['Dns'] == ['127.0.0.1']
                   and set(first_state['NetworkSettings']['Networks']) ==
                       {'nq-v2-managed-' + nonce[:12] + '-internal'})
@@ -1108,16 +1254,7 @@ def main():
                       for identifier in (reviewer, resume)))
             if selected['cloud']:
                 def peer_state():
-                    with sqlite3.connect(output / 'provider/tunnel.sqlite3') as db:
-                        charged = db.execute('SELECT bytes FROM pool').fetchone()[0]
-                        tunnels = db.execute('SELECT id,phase,uploaded,downloaded FROM tunnels ORDER BY id').fetchall()
-                        events = db.execute('SELECT count(*) FROM events').fetchone()[0]
-                        closed_events = db.execute("SELECT count(*) FROM events WHERE kind='closed'").fetchone()[0]
-                    return {'events': events, 'closed_events': closed_events,
-                            'tunnels': tunnels, 'charged_bytes': charged,
-                            'uploaded_bytes': sum(row[2] for row in tunnels),
-                            'downloaded_bytes': sum(row[3] for row in tunnels),
-                            'owned_responses': len(responder.rows), 'owned_health': responder.health_rows}
+                    return provider_state(output / 'provider/tunnel.sqlite3', responder)
 
                 def settled_relay():
                     before = peer_state()
@@ -1407,7 +1544,7 @@ def main():
             send_release = threading.Event()
             queued = {}
             sent = []
-            health_before = 0 if live else responder.health_rows
+            health_before = owned_health_count(responder)
 
             def owned_health_send():
                 if live:
@@ -1461,11 +1598,12 @@ def main():
                 fresh['denied'] = True
             report['post_stop_dispatch'] = {'queued': queued, 'fresh': fresh,
                                             'owned_health_before': health_before,
-                                            'owned_health_after': len(sent) if live else responder.health_rows}
+                                            'owned_health_after': owned_health_count(responder)}
             check('queued and fresh host sends denied after verified stop',
                   not worker.is_alive() and queued == {'denied': True}
                   and fresh == {'denied': True}
-                  and (len(sent) if live else responder.health_rows) == health_before)
+                  and not sent
+                  and owned_health_count(responder) == health_before)
             if not live:
                 report['responder_rows'] = responder.rows
                 report['responder_required_shell_fields'] = responder.required

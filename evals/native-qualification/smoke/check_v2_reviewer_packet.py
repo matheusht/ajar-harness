@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -92,6 +93,21 @@ def main():
                 'test -r /handoff/message.php && ! touch /handoff/denied'],
                 capture_output=True, text=True, timeout=30)
             check('reviewer sees packet but cannot write mount', mounted.returncode == 0)
+            owned_cleanup = work / 'owned-cleanup'
+            owned_cleanup.mkdir(mode=0o700)
+            shutil.copytree(packet, owned_cleanup / 'handoff')
+            check('cleanup fixture preserves frozen read-only packet',
+                  (owned_cleanup / 'handoff').stat().st_mode & 0o222 == 0
+                  and all(sha(owned_cleanup / 'handoff' / name) == digest
+                          for name, digest in pin['files'].items()))
+            cleanup = runner.finish_owned(None, [], 'owned-cleanup-check',
+                                          lambda *argv: None, owned_cleanup)
+            check('post-review cleanup removes only owned work and retains archive',
+                  cleanup['cleanup_complete'] and cleanup['temporary_secret_files_removed']
+                  and not owned_cleanup.exists()
+                  and set(p.name for p in archive.iterdir()) == set(pin['files'])
+                  and all(sha(archive / name) == digest
+                          for name, digest in pin['files'].items()))
             changed = packet / 'message.php'
             original_packet_bytes = changed.read_bytes()
             changed.chmod(0o600)
@@ -115,6 +131,33 @@ def main():
             else:
                 rejected = False
             check('capability in raw tool evidence refused before publication', rejected)
+            delayed_candidate = work / 'delayed-candidate'
+            delayed_candidate.mkdir()
+            for source_file in candidate.iterdir():
+                shutil.copy2(source_file, delayed_candidate / source_file.name)
+            delayed_packet = work / 'delayed-packet'
+            delayed_packet.mkdir(mode=0o700)
+            delayed_write = subprocess.run(['docker', 'run', '--rm', '--network', 'none',
+                '--user', f'{os.getuid()}:{os.getgid()}',
+                '--mount', f'type=bind,src={delayed_candidate},dst=/candidate',
+                '--entrypoint', 'sh', args.image, '-c',
+                "printf '\\n// delayed background write\\n' >> /candidate/message.php"],
+                capture_output=True, text=True, timeout=30)
+            check('owned Docker delayed writer changed checked candidate',
+                  delayed_write.returncode == 0
+                  and sha(delayed_candidate / 'message.php') !=
+                      app_checks['candidate']['source_sha256']['message.php'])
+            try:
+                runner.publish_review_packet(delayed_packet, originals, delayed_candidate,
+                                             delayed_candidate / 'research-note.md', stream,
+                                             app_checks, 'local_' + 'a' * 32,
+                                             forbidden_paths=(str(work),))
+            except RuntimeError as error:
+                rejected = str(error) == 'review_packet_app_source_mismatch'
+            else:
+                rejected = False
+            check('changed replay input refuses empty packet before reviewer start',
+                  rejected and not list(delayed_packet.iterdir()))
             receipt['packet_files'] = sorted(request['files'])
             receipt['packet_request_sha256'] = pin['files']['REQUEST.json']
             receipt['status'] = 'pass'

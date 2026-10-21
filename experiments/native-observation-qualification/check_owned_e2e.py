@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -381,9 +382,35 @@ def process_group_gone(process_group: int) -> bool:
     return False
 
 
+def enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(36, 1, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise RuntimeError(
+            f"observer_unavailable: child subreaper errno {error_number}"
+        )
+
+
+def reap_process_group(process_group: int, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        while True:
+            try:
+                child, _ = os.waitpid(-process_group, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if child == 0:
+                break
+        if process_group_gone(process_group):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
 def stop_process_group(process: subprocess.Popen[str]) -> bool:
     for stop_signal in (signal.SIGTERM, signal.SIGKILL):
-        if process.poll() is not None and process_group_gone(process.pid):
+        if process.poll() is not None and reap_process_group(process.pid):
             return True
         try:
             os.killpg(process.pid, stop_signal)
@@ -393,10 +420,9 @@ def stop_process_group(process: subprocess.Popen[str]) -> bool:
             process.communicate(timeout=2)
         except subprocess.TimeoutExpired:
             continue
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and not process_group_gone(process.pid):
-            time.sleep(0.05)
-    return process.poll() is not None and process_group_gone(process.pid)
+        if reap_process_group(process.pid):
+            return True
+    return process.poll() is not None and reap_process_group(process.pid)
 
 
 def port_can_rebind(port: int) -> bool:
@@ -546,7 +572,7 @@ def run_sandboxed_client(
         if not producer_status["stopped"]:
             raise RuntimeError("stop_unverified: client process group") from error
         raise
-    producer_status["stopped"] = process_group_gone(process.pid)
+    producer_status["stopped"] = reap_process_group(process.pid)
     if not producer_status["stopped"]:
         producer_status["stopped"] = stop_process_group(process)
         raise RuntimeError("stop_unverified: client process group")
@@ -1956,6 +1982,7 @@ def main() -> int:
     try:
         expected = json.loads(EXPECTED_PATH.read_text())
         pins = source_pins(expected)
+        enable_child_subreaper()
         first = execute_once(expected, pins)
         cleanup_receipt["owned_runs"].append(first["cleanup"])
         second = execute_once(expected, pins)

@@ -40,7 +40,8 @@ owned_e2e_pass_not_managed_native_qualified
 
 The command runs the scenario twice, compares normalized bundles, exercises all
 frozen failure predicates with offline mutations, stops both exact listeners,
-rebinds their ports, removes raw traces/private scratch, and retains only:
+rebinds their ports, reaps owned bubblewrap descendants through a Linux child
+subreaper, removes raw traces/private scratch, and retains only:
 
 - `hypothesis.json`: portable statement, origin, conditions, and non-credit for
   agent discovery;

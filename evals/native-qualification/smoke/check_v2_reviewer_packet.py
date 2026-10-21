@@ -68,6 +68,11 @@ def main():
                                                app_checks,
                                                'local_' + 'a' * 32, forbidden_paths=(str(work),))
             check('packet fixed inventory and hashes', runner.verify_review_packet(packet, pin))
+            archive = work / 'receipt-packet'
+            runner.archive_review_packet(packet, archive, pin)
+            check('receipt retains exact packet bytes outside mount',
+                  set(p.name for p in archive.iterdir()) == set(pin['files'])
+                  and all(sha(archive / name) == digest for name, digest in pin['files'].items()))
             request = json.loads((packet / 'REQUEST.json').read_text())
             check('original and candidate mapped separately',
                   request['files']['ORIGINAL-message.php'] == sha(originals / 'message.php')

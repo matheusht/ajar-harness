@@ -212,6 +212,16 @@ def verify_review_packet(directory, pin):
         return False
 
 
+def archive_review_packet(directory, archive, pin):
+    if not verify_review_packet(directory, pin):
+        raise RuntimeError('review_packet_changed_before_archive')
+    archive.mkdir(mode=0o700, exist_ok=False)
+    for name, digest in pin['files'].items():
+        private_snapshot(archive / name, (directory / name).read_bytes())
+        if sha(archive / name) != digest:
+            raise RuntimeError('review_packet_archive_mismatch')
+
+
 def validated_runtime_ca(args, parser):
     name = args.live_runtime_ca
     expected = args.live_runtime_ca_sha256
@@ -1565,10 +1575,12 @@ def main():
                                'image_id': selected['image_id'], 'results': report['host_after_first']}},
                 capability, forbidden_paths=(str(ROOT), str(output), str(work)))
             report['review_packet'] = {'files': packet_pin['files'],
+                'archive': 'review-packet/',
                 'classification': 'fixed observer-selected harmless packet; original protected capture unavailable'}
             check('fixed packet root and exact bytes frozen before reviewer session',
                   (packet_pin['dev'], packet_pin['ino']) == handoff_identity
                   and verify_review_packet(handoff, packet_pin))
+            archive_review_packet(handoff, output / 'review-packet', packet_pin)
             reviewer_state = inspect('container', reviewer)
             check('fresh reviewer has only read-only packet and separate empty project',
                   any(item.get('Source') == str(handoff) and item.get('Destination') == '/handoff'
@@ -1621,7 +1633,10 @@ def main():
                   all(after_review_authority[k] == first_authority[k] for k in authority_keys)
                   and after_review_authority['tunnels'] >= review_authority['tunnels']
                   and after_review_authority['charged_bytes'] >= review_authority['charged_bytes']
-                  and verify_review_packet(handoff, packet_pin))
+                  and verify_review_packet(handoff, packet_pin)
+                  and set(p.name for p in (output / 'review-packet').iterdir()) == set(packet_pin['files'])
+                  and all(sha(output / 'review-packet' / name) == digest
+                          for name, digest in packet_pin['files'].items()))
             try:
                 review_tools = native_tool_material(reviewer_native_stdout)
             except RuntimeError as error:

@@ -118,24 +118,21 @@ class FakeCommands:
         if argv[:3] == ['docker', 'network', 'inspect']:
             return completed(argv, stdout=json.dumps([NETWORK]))
         if argv[:5] == ['docker', 'buildx', 'ls', '--format', 'json']:
-            row = {'Name': 'default', 'Driver': 'docker', 'Status': 'running',
-                   'Buildkit': 'v0.24.0', 'Platforms': 'linux/amd64',
+            row = {'Name': 'default',
+                   'Driver': 'docker-container' if self.remote_builder else 'docker',
+                   'Current': True,
+                   'Nodes': [{
+                       'Name': 'default',
+                       'Endpoint': ('tcp://remote.invalid:1234'
+                                    if self.remote_builder else 'default'),
+                       'Status': 'running', 'Buildkit': 'v0.24.0',
+                       'Platforms': 'linux/amd64',
+                   }],
                    'LastActivity': 'ignored'}
             return completed(argv, stdout=json.dumps(row) + '\n')
         if argv[:4] == ['docker', 'buildx', 'inspect', 'default']:
-            value = {
-                'Name': 'default',
-                'Driver': 'docker-container' if self.remote_builder else 'docker',
-                'Nodes': [{
-                    'Name': 'default',
-                    'Endpoint': ('tcp://remote.invalid:1234'
-                                 if self.remote_builder else 'default'),
-                    'Status': 'running',
-                    'Buildkit': 'v0.24.0',
-                    'Platforms': 'linux/amd64,linux/amd64/v2',
-                }],
-            }
-            return completed(argv, stdout=json.dumps(value))
+            return completed(argv, returncode=1,
+                             stderr='unknown flag: --format')
         if argv[:5] == ['docker', 'buildx', 'du', '--format', 'json']:
             return completed(argv, stdout=''.join(
                 json.dumps(self.cache_rows[key]) + '\n'
@@ -345,6 +342,9 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(IMAGE_ID, candidate['image_id'])
         self.assertEqual('sha256:' + '3' * 64,
                          candidate['build_provenance']['image_manifest_digest'])
+        self.assertFalse(any(call[:4] ==
+                             ['docker', 'buildx', 'inspect', 'default']
+                             for call in commands.calls))
         managed = next(call for call in commands.calls
                        if call and call[0].endswith('python3'))
         self.assertNotIn('--live-free', managed)

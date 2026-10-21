@@ -504,12 +504,11 @@ def docker_snapshot(commands) -> dict[str, object]:
         (_stable_builder(row) for row in _json_lines(
             builders.stdout, 'docker_builder_json_invalid')),
         key=lambda item: json.dumps(item, sort_keys=True))
-    selected_builder = strict_json(_required(
-        commands,
-        ['docker', 'buildx', 'inspect', 'default', '--format', '{{json .}}'],
-        'docker_selected_builder_read_failed').stdout.encode())
-    if not isinstance(selected_builder, dict):
+    current_builders = [row for row in builder_rows
+                        if row.get('Current') is True]
+    if len(current_builders) != 1:
         raise GateError('docker_selected_builder_invalid')
+    selected_builder = current_builders[0]
     cache = _cache_rows(commands)
     return {
         'context': {
@@ -544,7 +543,9 @@ def _assert_fresh_topology(baseline: dict[str, object], commands,
     selected_builder = baseline.get('selected_builder')
     builder_nodes = (selected_builder.get('Nodes')
                      if isinstance(selected_builder, dict) else None)
-    node = builder_nodes[0] if isinstance(builder_nodes, list) and len(builder_nodes) == 1 else None
+    node = (builder_nodes[0]
+            if isinstance(builder_nodes, list) and len(builder_nodes) == 1
+            else None)
     endpoint = node.get('Endpoint') if isinstance(node, dict) else None
     platforms = node.get('Platforms') if isinstance(node, dict) else None
     has_amd64 = ('linux/amd64' in platforms if isinstance(platforms, str)
@@ -564,6 +565,7 @@ def _assert_fresh_topology(baseline: dict[str, object], commands,
             or engine.get('os_type') != 'linux'
             or engine.get('architecture') not in {'x86_64', 'amd64'}
             or not isinstance(selected_builder, dict)
+            or selected_builder.get('Current') is not True
             or selected_builder.get('Name') != 'default'
             or selected_builder.get('Driver') != 'docker'
             or not isinstance(node, dict)

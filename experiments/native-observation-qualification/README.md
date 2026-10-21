@@ -59,7 +59,32 @@ bundle = evaluate_observation_run(sanitized_run_projection)
 write_bundle(bundle, fresh_private_output)
 ```
 
-and the equivalent public command:
+That API remains the terminal path. It returns `observation_packet_valid` only
+after all six cleanup checks pass and stop is verified. A caller that must keep
+one shared runtime active for review uses the separate capture path:
+
+```python
+capture = evaluate_capture_run(sanitized_capture_projection_without_cleanup)
+write_bundle(capture, fresh_capture_output)
+sealed_digest = capture_manifest_sha256(fresh_capture_output)
+
+final_receipt = finalize_observation_capture(
+    fresh_capture_output,
+    sealed_digest,
+    final_cleanup_projection,
+)
+write_finalization_receipt(final_receipt, fresh_receipt_output)
+```
+
+The capture status is `observation_capture_ready_not_finalized`. Its evidence
+records stop and cleanup as `not_run`, and its result contains only capture
+checks. It is not an `observation_packet_valid` result. The digest covers a
+manifest of the exact bytes of all four capture files, including `result.json`.
+The finalizer rereads those files after stop, rejects changed or noncanonical
+bytes, symlinks, or a changed inventory, and emits a separate receipt linked to
+that digest. It never rewrites the reviewed capture.
+
+The terminal path also has an equivalent public command:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 \
@@ -67,6 +92,21 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
   --input /private/sanitized-app-capture-packet.json \
   --output /private/absent-bundle
 ```
+
+The corresponding pre-review command takes the same projection without the
+top-level `cleanup` field:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  experiments/native-observation-qualification/native_observation.py \
+  --pre-review \
+  --input /private/sanitized-capture-projection.json \
+  --output /private/absent-capture-bundle
+```
+
+On success, the command prints the capture-manifest digest that the caller must
+seal before reviewer access. Finalization is a Python caller operation because
+the launcher already owns the final cleanup projection and lifecycle order.
 
 Output must be an absolute, lexically absent, non-symlink path beneath an
 existing directory. Relative paths and dangling symlinks fail before any bundle
@@ -105,10 +145,14 @@ two exact normalized runs. Every traced `connect` syscall is represented. The
 fixture classifies known failed local name-service probes separately and rejects
 every unsupported or unexplained family.
 
-Cleanup is a closed portable projection with exactly six required categories:
-producer and observer processes stopped, observer endpoints released, private
-scratch and raw capture removed, and owned resources only. Runtime adapters may
-retain more detailed receipts outside this seam, but cannot omit these categories.
+Final cleanup is a closed portable projection with exactly six required
+categories: producer and observer processes stopped, observer endpoints
+released, private scratch and raw capture removed, and owned resources only.
+Runtime adapters may retain more detailed receipts outside this seam, but cannot
+omit these categories. A pre-review capture makes no cleanup claim. The separate
+final receipt succeeds only when the same six fields are true, cleanup status is
+`complete`, and `stop_verified` is true. An ordinary `incomplete` projection
+remains invalid.
 
 Any receipt classified as a changed effect must name an outcome expressly
 allowed by that packet's hypothesis. The generic evaluator records provider and

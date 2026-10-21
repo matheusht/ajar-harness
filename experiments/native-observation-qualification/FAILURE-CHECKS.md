@@ -19,8 +19,9 @@ defense in depth: the caller remains responsible for supplying sanitized input.
 The frozen case inventory and outcome expectations below belong only to the
 owned checker. The core evaluator accepts arbitrary sanitized application cases
 and portable chain state; it validates attribution, ordering, state references,
-observer protection, source-manifest integrity, stop, and cleanup invariants
-without requiring these fixture IDs.
+observer protection, and source-manifest integrity without requiring these
+fixture IDs. The terminal path also validates stop and cleanup. The pre-review
+path makes no stop or cleanup claim and cannot produce the terminal status.
 
 A same-container proxy, access log, source IP, host replay, or final effect alone
 does not prove original researcher activity. The candidate qualifies only the
@@ -90,6 +91,36 @@ The durable bundle contains portable `hypothesis.json`, `observation.json`, and
 consumed state, contrary results, the bypass's missing transition, unfinished
 conditions, source pins, and cleanup status. Runtime/session/tool IDs are
 evidence bindings, not hypothesis state.
+
+## Pre-review lifecycle regression checks
+
+Added after the independent PR review found that a reviewer must run before the
+shared NativeRun pool stops. These checks do not alter the frozen terminal stop
+or cleanup predicates above.
+
+1. `evaluate_capture_run` accepts the same sanitized capture projection only
+   when the caller omits the top-level cleanup claim. Every non-lifecycle
+   observation check must pass.
+2. A ready capture has status
+   `observation_capture_ready_not_finalized`. Both stop and cleanup are recorded
+   as `not_run`. It is never `observation_packet_valid`.
+3. Passing a pending or incomplete cleanup projection through the terminal
+   `evaluate_observation_run` path remains invalid. Its existing complete,
+   stopped path still returns `observation_packet_valid`.
+4. The caller seals a manifest of the exact bytes of all four capture files.
+   The manifest includes `result.json`; two canonical writes must produce the
+   same digest.
+5. Finalization rereads the sealed directory. A wrong digest, changed byte,
+   missing or extra file, symlinked file, noncanonical JSON, or existing receipt
+   output blocks final receipt publication. The sealed result must contain the
+   exact capture-check inventory, and its evidence cannot add a cleanup claim.
+6. The final receipt requires the exact six cleanup fields, all true, cleanup
+   status `complete`, and `stop_verified: true`. A missing key, false check,
+   false stop result, another status, or a receipt that mislabels those values
+   produces no successful finalization.
+7. Finalization does not modify the capture. Its receipt binds the sealed digest
+   and states `review_status: not_observed`; capture cleanup does not qualify a
+   reviewer or an adaptive run.
 
 ## Managed integration stop
 

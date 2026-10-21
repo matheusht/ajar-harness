@@ -60,8 +60,19 @@ RUNTIME_CA_PATH = '/fixture/runtime-ca.pem'
 AMBIENT_CA_PATH = '/fixture/ambient-ca.pem'
 EXCLUSIVE_CA_ENV = 'OPENCODE_EXCLUSIVE_CA_FILE'
 EXCLUSIVE_CA_HASH_ENV = 'OPENCODE_EXCLUSIVE_CA_SHA256'
+SHELL_BINARY = '/bin/sh'
+OPENCODE_BINARY = '/usr/local/bin/opencode'
+CONTAINER_RUNTIME = 'runc'
+PINNED_RUNTIME_ENV = {
+    'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    'BUN_RUNTIME_TRANSPILER_CACHE_PATH': '0',
+}
+RFC1918_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+    '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
+))
 OPENCODE_SERVER_PORT = 4096
 OPENCODE_SERVER_URL = 'http://127.0.0.1:' + str(OPENCODE_SERVER_PORT)
+RUN_SESSION_TITLE = 'LRH owned exclusive trust fixture'
 CONTROL_PASSWORD_HEX_LENGTH = 128
 TMPFS_OPTIONS = 'rw,nosuid,nodev,size=64m'
 VERSION_RECORD = 'opencode-version.txt'
@@ -95,6 +106,8 @@ MUST_BE_ABSENT_ENV = (
     'OPENCODE_CONFIG_DIR', 'OPENCODE_CLI_CONFIG_CONTENT', 'OPENCODE_DB',
     'OPENCODE_MODELS_PATH', 'OPENCODE_MODELS_URL', 'OPENCODE_SIMULATE',
     'OPENCODE_TEST_HOME', 'OPENCODE_DISABLE_PROJECT_CONFIG',
+    'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_HEADERS',
+    'OTEL_RESOURCE_ATTRIBUTES',
 )
 SENSITIVE_ENV_PARTS = (
     'TOKEN', 'SECRET', 'PASSWORD', 'API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY',
@@ -493,8 +506,7 @@ def self_test():
     """Exercise the pure evaluator without Docker, sockets, or subprocesses."""
     if (not all(_critical_name(name) for name in MUST_BE_ABSENT_ENV)
             or not all(_critical_name(name) for name in FIXED_RUNTIME_ENV)
-            or any(_image_forbidden_name(name) for name in FIXED_RUNTIME_ENV)
-            or not all(_image_forbidden_name(name) for name in MUST_BE_ABSENT_ENV)
+            or not all(_critical_name(name) for name in PINNED_RUNTIME_ENV)
             or _critical_name('LRH_BENIGN_PUBLIC_VALUE')):
         raise RuntimeError('critical_environment_fixture_failed')
     raw_config = _config_document(
@@ -509,6 +521,130 @@ def self_test():
                 'providerID': 'opencode', 'model': MODEL_ID}
             or 'mcp' in raw_config or 'mcp' in normalized_config):
         raise RuntimeError('normalized_config_fixture_failed')
+
+    default_image_environment = object()
+
+    class ImageInspectFixture:
+        def __init__(self, volumes, healthcheck=None,
+                     environment=default_image_environment):
+            self.volumes = volumes
+            self.healthcheck = healthcheck
+            self.environment = (
+                [name + '=' + value for name, value in PINNED_RUNTIME_ENV.items()]
+                if environment is default_image_environment else environment)
+
+        def json(self, *_args):
+            return [{
+                'Id': 'sha256:' + '1' * 64,
+                'Os': 'linux',
+                'Architecture': 'amd64',
+                'Config': {
+                    'Env': self.environment, 'Volumes': self.volumes,
+                    'Healthcheck': self.healthcheck,
+                },
+            }]
+
+    image_id = 'sha256:' + '1' * 64
+    for volumes in (None, {}):
+        if _inspect_image(ImageInspectFixture(volumes), image_id) != {
+                'id': image_id, 'os': 'linux', 'architecture': 'amd64',
+                'declared_environment_exact': True,
+                'declared_volumes_absent': True,
+                'declared_healthcheck_absent': True}:
+            raise RuntimeError('image_volume_absence_fixture_failed')
+        if _inspect_image(ImageInspectFixture(volumes, {}), image_id) != {
+                'id': image_id, 'os': 'linux', 'architecture': 'amd64',
+                'declared_environment_exact': True,
+                'declared_volumes_absent': True,
+                'declared_healthcheck_absent': True}:
+            raise RuntimeError('image_healthcheck_absence_fixture_failed')
+    valid_image_environment = [
+        name + '=' + value for name, value in PINNED_RUNTIME_ENV.items()]
+    invalid_image_environments = (
+        [],
+        valid_image_environment[:-1],
+        [*valid_image_environment, 'LD_PRELOAD=/tmp/injected.so'],
+        [*valid_image_environment, 'PATH=/tmp/bin'],
+        ['PATH=/tmp/bin', valid_image_environment[1]],
+        [*valid_image_environment, 'MALFORMED'],
+        None,
+    )
+    for environment in invalid_image_environments:
+        try:
+            _inspect_image(ImageInspectFixture(None, environment=environment), image_id)
+        except CheckError as error:
+            if str(error) != 'image_environment_invalid':
+                raise
+        else:
+            raise RuntimeError('image_environment_boundary_fixture_failed')
+    for volumes in (
+            {'/workspace/home': {}},
+            {'/workspace/config/opencode/plugin': {}},
+            [],
+            '/workspace/project'):
+        try:
+            _inspect_image(ImageInspectFixture(volumes), image_id)
+        except CheckError as error:
+            if str(error) != 'image_declares_volume':
+                raise
+        else:
+            raise RuntimeError('image_declared_volume_fixture_failed')
+    for healthcheck in (
+            {'Test': ['CMD-SHELL', 'curl https://example.invalid']},
+            {'Test': ['NONE']},
+            [],
+            'CMD true'):
+        try:
+            _inspect_image(ImageInspectFixture(None, healthcheck), image_id)
+        except CheckError as error:
+            if str(error) != 'image_declares_healthcheck':
+                raise
+        else:
+            raise RuntimeError('image_declared_healthcheck_fixture_failed')
+    if (not _healthcheck_disabled({'Test': ['NONE']})
+            or _healthcheck_disabled(None)
+            or _healthcheck_disabled({})
+            or _healthcheck_disabled({'Test': ['NONE'], 'Interval': 0})
+            or _healthcheck_disabled({'Test': ['CMD', 'true']})):
+        raise RuntimeError('disabled_healthcheck_fixture_failed')
+    expected_mounts = {
+        '/workspace': ('/owned/workspace', True),
+        AMBIENT_CA_PATH: ('/owned/ambient.pem', False),
+    }
+    mount_rows = [
+        {'Type': 'bind', 'Destination': '/workspace',
+         'Source': '/owned/workspace', 'RW': True},
+        {'Type': 'bind', 'Destination': AMBIENT_CA_PATH,
+         'Source': '/owned/ambient.pem', 'RW': False},
+    ]
+    if _exact_bind_mounts(mount_rows, expected_mounts) != expected_mounts:
+        raise RuntimeError('exact_bind_mount_fixture_failed')
+    invalid_mount_sets = (
+        mount_rows + [{'Type': 'volume', 'Destination': '/workspace/home',
+                       'Source': '/var/lib/docker/volumes/hidden', 'RW': True}],
+        mount_rows + [{'Type': 'bind', 'Destination': '/workspace/extra',
+                       'Source': '/owned/extra', 'RW': True}],
+        mount_rows[:-1],
+        [*mount_rows, dict(mount_rows[0])],
+        [dict(mount_rows[0], RW=1), mount_rows[1]],
+        None,
+    )
+    for invalid_mounts in invalid_mount_sets:
+        try:
+            _exact_bind_mounts(invalid_mounts, expected_mounts)
+        except CheckError as error:
+            if str(error) != 'container_mount_readback_failed':
+                raise
+        else:
+            raise RuntimeError('container_mount_boundary_fixture_failed')
+    if (not all(_is_rfc1918_subnet(ipaddress.ip_network(value)) for value in (
+                '10.0.0.0/8', '10.23.45.0/24', '172.16.0.0/12',
+                '172.31.255.0/24', '192.168.0.0/16', '192.168.4.0/24'))
+            or any(_is_rfc1918_subnet(ipaddress.ip_network(value)) for value in (
+                '0.0.0.0/0', '100.64.0.0/10', '127.0.0.0/8',
+                '172.0.0.0/8', '192.0.0.0/8', '203.0.113.0/24',
+                'fc00::/7'))):
+        raise RuntimeError('rfc1918_subnet_fixture_failed')
     if len({AMBIENT_ROOT_SERIAL, REPLACEMENT_ROOT_SERIAL,
             AMBIENT_LEAF_SERIAL, REPLACEMENT_LEAF_SERIAL}) != 4:
         raise RuntimeError('certificate_serial_fixture_failed')
@@ -527,6 +663,13 @@ def self_test():
             or any(re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-fixture', marker) is None
                    for marker in dispatch_markers)):
         raise RuntimeError('dispatch_marker_uniqueness_fixture_failed')
+    command_marker = 'lrh-dispatch-' + 'e' * 32 + '-fixture'
+    if _run_command(command_marker) != (
+            OPENCODE_BINARY, 'run', '--server', OPENCODE_SERVER_URL,
+            '--agent', 'build', '--model', MODEL,
+            '--title', RUN_SESSION_TITLE,
+            '--format', 'json', command_marker):
+        raise RuntimeError('run_command_title_fixture_failed')
     for system_exit in (SystemExit(), SystemExit(0), SystemExit(None),
                         SystemExit('unpublished-payload')):
         try:
@@ -1698,12 +1841,9 @@ def _critical_name(name):
     upper = name.upper()
     return (name in PROXY_ENV or name in TRUST_ENV or name in MUST_BE_ABSENT_ENV
             or name in BOUNDARY_ENV or name in FIXED_RUNTIME_ENV
+            or name in PINNED_RUNTIME_ENV
             or name in SERVER_CONTROL_ENV
             or any(part in upper for part in SENSITIVE_ENV_PARTS))
-
-
-def _image_forbidden_name(name):
-    return _critical_name(name) and name not in FIXED_RUNTIME_ENV
 
 
 def _env_map(items):
@@ -1715,19 +1855,70 @@ def _env_map(items):
     return dict(pairs)
 
 
+def _exact_bind_mounts(items, expected):
+    if not isinstance(items, list) or not isinstance(expected, dict):
+        raise CheckError('container_mount_readback_failed')
+    mounts = {}
+    for item in items:
+        if (not isinstance(item, dict) or item.get('Type') != 'bind'
+                or not isinstance(item.get('Destination'), str)
+                or not item['Destination']
+                or not isinstance(item.get('Source'), str)
+                or not item['Source']
+                or type(item.get('RW')) is not bool
+                or item['Destination'] in mounts):
+            raise CheckError('container_mount_readback_failed')
+        mounts[item['Destination']] = (item['Source'], item['RW'])
+    if mounts != expected:
+        raise CheckError('container_mount_readback_failed')
+    return mounts
+
+
+def _healthcheck_disabled(value):
+    return (isinstance(value, dict) and set(value) == {'Test'}
+            and value['Test'] == ['NONE'])
+
+
 def _inspect_image(docker, image_id):
     data = docker.json('image', 'inspect', image_id)
-    if (not isinstance(data, list) or len(data) != 1 or data[0].get('Id') != image_id
-            or data[0].get('Os') != 'linux' or data[0].get('Architecture') != 'amd64'):
+    if (not isinstance(data, list) or len(data) != 1
+            or not isinstance(data[0], dict) or data[0].get('Id') != image_id
+            or data[0].get('Os') != 'linux'
+            or data[0].get('Architecture') != 'amd64'):
         raise CheckError('exact_linux_amd64_image_required')
-    image_env = _env_map(data[0].get('Config', {}).get('Env') or [])
-    if any(_image_forbidden_name(name) for name in image_env):
-        raise CheckError('image_contains_critical_environment')
-    return {'id': image_id, 'os': 'linux', 'architecture': 'amd64'}
+    config = data[0].get('Config')
+    if not isinstance(config, dict):
+        raise CheckError('image_config_invalid')
+    declared_volumes = config.get('Volumes')
+    if (declared_volumes is not None
+            and (not isinstance(declared_volumes, dict) or declared_volumes)):
+        raise CheckError('image_declares_volume')
+    declared_healthcheck = config.get('Healthcheck')
+    if (declared_healthcheck is not None
+            and (not isinstance(declared_healthcheck, dict)
+                 or declared_healthcheck)):
+        raise CheckError('image_declares_healthcheck')
+    try:
+        image_env = _env_map(config.get('Env'))
+    except CheckError:
+        raise CheckError('image_environment_invalid') from None
+    if image_env != PINNED_RUNTIME_ENV:
+        raise CheckError('image_environment_invalid')
+    return {
+        'id': image_id, 'os': 'linux', 'architecture': 'amd64',
+        'declared_environment_exact': True,
+        'declared_volumes_absent': True,
+        'declared_healthcheck_absent': True,
+    }
 
 
 def _network_name(nonce):
     return 'nq-exclusive-' + nonce[:12]
+
+
+def _is_rfc1918_subnet(network):
+    return (isinstance(network, ipaddress.IPv4Network)
+            and any(network.subnet_of(parent) for parent in RFC1918_NETWORKS))
 
 
 def _container_name(nonce, arm):
@@ -1778,7 +1969,8 @@ def _network(docker, nonce, resources, create_journal, persist):
         gateway = ipaddress.ip_address(configs[0]['Gateway'])
     except (KeyError, ValueError):
         raise CheckError('internal_network_ipam_invalid') from None
-    if gateway not in subnet or gateway.version != 4:
+    if (gateway not in subnet or gateway.version != 4
+            or not _is_rfc1918_subnet(subnet)):
         raise CheckError('internal_network_gateway_invalid')
     return {'id': identifier, 'name': name, 'gateway': str(gateway),
             'subnet': str(subnet)}
@@ -1796,6 +1988,19 @@ def _new_dispatch_prompt(arm):
     if re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-[a-z0-9-]+', marker) is None:
         raise CheckError('dispatch_marker_invalid')
     return marker
+
+
+def _run_command(dispatch_prompt):
+    if (not isinstance(dispatch_prompt, str)
+            or re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-[a-z0-9-]+',
+                            dispatch_prompt) is None):
+        raise CheckError('dispatch_marker_invalid')
+    return (
+        OPENCODE_BINARY, 'run', '--server', OPENCODE_SERVER_URL,
+        '--agent', 'build', '--model', MODEL,
+        '--title', RUN_SESSION_TITLE,
+        '--format', 'json', dispatch_prompt,
+    )
 
 
 def _config_document(base_url, arm_marker, *, normalized):
@@ -1861,7 +2066,8 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
     if input_mode in mounted_modes:
         mounts.append('type=bind,src=' + str(exclusive_input)
                       + ',dst=' + RUNTIME_CA_PATH + ',readonly')
-    env = [name + '=' for name in PROXY_ENV]
+    env = [name + '=' + value for name, value in PINNED_RUNTIME_ENV.items()]
+    env += [name + '=' for name in PROXY_ENV]
     env += [
         *(name + '=' + value for name, value in FIXED_RUNTIME_ENV.items()),
         'SSL_CERT_FILE=' + AMBIENT_CA_PATH,
@@ -1881,6 +2087,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         '--name', name,
         '--network', 'none', '--add-host', 'opencode.ai:' + gateway,
         '--read-only', '--restart', 'no', '--log-driver', 'none',
+        '--no-healthcheck', '--init=false', '--runtime', CONTAINER_RUNTIME,
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges=true',
         '--user', str(os.getuid()) + ':' + str(os.getgid()),
         '--memory', '1g', '--memory-swap', '1g', '--cpus', '1',
@@ -1902,13 +2109,14 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         'unset control_word control_words; '
         '[ "${#OPENCODE_SERVER_PASSWORD}" -eq '
         + str(CONTROL_PASSWORD_HEX_LENGTH) + ' ]; '
-        'opencode --version > /workspace/' + VERSION_RECORD + '; '
-        'OPENCODE_SERVER_USERNAME=opencode; '
+        + OPENCODE_BINARY + ' --version > /workspace/' + VERSION_RECORD + '; '
+        + 'OPENCODE_SERVER_USERNAME=opencode; '
         'export OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; '
-        'exec opencode serve --hostname 127.0.0.1 --port '
+        'exec ' + OPENCODE_BINARY + ' serve --hostname 127.0.0.1 --port '
         + str(OPENCODE_SERVER_PORT))
     record = _begin_create(create_journal, 'container', name, persist)
-    result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
+    result = docker.run(
+        *argv, '--entrypoint', SHELL_BINARY, image_id, '-c', server_command)
     identifier = result.stdout.strip()
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', identifier):
         raise CheckError('container_create_failed')
@@ -1920,8 +2128,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         raise CheckError('container_inspect_failed')
     item = data[0]
     effective = _env_map(item.get('Config', {}).get('Env') or [])
-    requested = dict(value.split('=', 1) for value in env)
-    critical = {name: value for name, value in effective.items() if _critical_name(name)}
+    requested = _env_map(env)
     expected_bind_mounts = {
         '/workspace': (str(workspace), True),
         '/workspace/config/opencode/opencode.json': (str(config), False),
@@ -1929,24 +2136,24 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
     }
     if input_mode in mounted_modes:
         expected_bind_mounts[RUNTIME_CA_PATH] = (str(exclusive_input), False)
-    bind_mounts = {}
-    for mount in item.get('Mounts', []):
-        if isinstance(mount, dict) and mount.get('Type') == 'bind':
-            destination = mount.get('Destination')
-            if destination in bind_mounts:
-                raise CheckError('container_mount_readback_failed')
-            bind_mounts[destination] = (mount.get('Source'), mount.get('RW'))
+    _exact_bind_mounts(item.get('Mounts'), expected_bind_mounts)
     if (item.get('Id') != identifier or item.get('Image') != image_id
             or item.get('Name') != '/' + name
             or item.get('State', {}).get('Status') != 'created'
+            or item.get('Path') != SHELL_BINARY
+            or item.get('Args') != ['-c', server_command]
             or item.get('Config', {}).get('User') != str(os.getuid()) + ':' + str(os.getgid())
             or item.get('Config', {}).get('WorkingDir') != '/workspace/project'
-            or item.get('Config', {}).get('Entrypoint') != ['sh']
+            or item.get('Config', {}).get('Entrypoint') != [SHELL_BINARY]
             or item.get('Config', {}).get('Cmd') != ['-c', server_command]
             or item.get('Config', {}).get('Labels', {}).get(LABEL) != nonce
             or item.get('Config', {}).get('Labels', {}).get(LABEL + '.arm') != arm
+            or not _healthcheck_disabled(
+                item.get('Config', {}).get('Healthcheck'))
             or item.get('HostConfig', {}).get('ReadonlyRootfs') is not True
             or item.get('HostConfig', {}).get('NetworkMode') != 'none'
+            or item.get('HostConfig', {}).get('Init') is not False
+            or item.get('HostConfig', {}).get('Runtime') != CONTAINER_RUNTIME
             or item.get('HostConfig', {}).get('CapDrop') != ['ALL']
             or item.get('HostConfig', {}).get('Memory') != 1024 * 1024 * 1024
             or item.get('HostConfig', {}).get('MemorySwap') != 1024 * 1024 * 1024
@@ -1966,8 +2173,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
             or item.get('HostConfig', {}).get('ExtraHosts') != ['opencode.ai:' + gateway]
             or not set(item.get('NetworkSettings', {}).get('Networks', {})).issubset(
                 {'none'})
-            or bind_mounts != expected_bind_mounts
-            or critical != {name: value for name, value in requested.items() if _critical_name(name)}
+            or effective != requested
             or any(name in effective for name in MUST_BE_ABSENT_ENV)
             or any(effective.get(name) != '' for name in PROXY_ENV)):
         raise CheckError('container_boundary_readback_failed')
@@ -2022,7 +2228,7 @@ def _authenticated_exec(docker, identifier, *command, timeout=45):
         'export OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; exec "$@"')
     return docker.run(
         'container', 'exec', '-w', '/workspace/project', identifier,
-        'sh', '-c', client_command, 'opencode-control-client', *command,
+        SHELL_BINARY, '-c', client_command, 'opencode-control-client', *command,
         timeout=timeout,
     )
 
@@ -2078,7 +2284,7 @@ def _activate_dispatch_network(docker, identifier, network):
 def _api_json(docker, identifier, method):
     result = _authenticated_exec(
         docker, identifier,
-        'opencode', 'api', '--server', OPENCODE_SERVER_URL, method,
+        OPENCODE_BINARY, 'api', '--server', OPENCODE_SERVER_URL, method,
     )
     if result.returncode:
         raise CheckError('native_http_readback_unavailable')
@@ -2104,7 +2310,8 @@ def _wait_server(docker, identifier):
     while time.monotonic() < deadline:
         result = _authenticated_exec(
             docker, identifier,
-            'opencode', 'api', '--server', OPENCODE_SERVER_URL, 'server.info', timeout=5,
+            OPENCODE_BINARY, 'api', '--server', OPENCODE_SERVER_URL,
+            'server.info', timeout=5,
         )
         if result.returncode == 0:
             try:
@@ -2734,9 +2941,7 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                            else DEFAULT_COMMAND_TIMEOUT_SECONDS)
         run = _authenticated_exec(
             docker, identifier,
-            'opencode', 'run', '--server', OPENCODE_SERVER_URL,
-            '--agent', 'build', '--model', MODEL,
-            '--format', 'json', dispatch_prompt, timeout=command_timeout,
+            *_run_command(dispatch_prompt), timeout=command_timeout,
         )
         if not _source_roots_pristine(workspace):
             raise CheckError('native_http_readback_unavailable')
@@ -2868,9 +3073,7 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             raise CheckError('dispatch_marker_activation_observed_traffic')
         run = _authenticated_exec(
             docker, identifier,
-            'opencode', 'run', '--server', OPENCODE_SERVER_URL,
-            '--agent', 'build', '--model', MODEL,
-            '--format', 'json', dispatch_prompt,
+            *_run_command(dispatch_prompt),
             timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS,
         )
         rejection = _structured_rejection(run, input_mode)

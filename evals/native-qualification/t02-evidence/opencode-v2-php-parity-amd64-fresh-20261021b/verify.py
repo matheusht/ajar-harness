@@ -213,7 +213,8 @@ def schema_checks(inputs: dict, result: dict) -> dict[str, bool]:
 
 
 def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
-                   observations: str) -> dict[str, bool]:
+                   observations: str, command_bytes: bytes,
+                   observations_bytes: bytes) -> dict[str, bool]:
     dockerfile = inputs.get('dockerfile', {})
     bases = inputs.get('base_images', {})
     ca = inputs.get('managed_ca', {})
@@ -366,7 +367,7 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
             len(result.get('follow_up_defects', [])) == 4
             and all(isinstance(item, str) and item for item in result['follow_up_defects'])),
         'full failed command bytes pinned': (
-            hashlib.sha256(command.encode()).hexdigest() == COMMAND_SHA256
+            hashlib.sha256(command_bytes).hexdigest() == COMMAND_SHA256
             and 'refusing to overwrite existing candidate tag' in command
             and 'set -euC' in command and 'umask 077' in command
             and 'Dockerfile or managed CA SHA-256 mismatch' in command
@@ -378,7 +379,7 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
             and 'does not establish fresh cloud amd64 application parity' in readme
             and 'No global prune was used' in readme),
         'cleanup observations pinned': (
-            hashlib.sha256(observations.encode()).hexdigest() == OBSERVATIONS_SHA256
+            hashlib.sha256(observations_bytes).hexdigest() == OBSERVATIONS_SHA256
             and 'After failed build' in observations
             and 'First exact-ID removal pass' in observations
             and 'Independent retained final readback' in observations),
@@ -391,19 +392,20 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
     }
 
 
-def artifact_byte_checks(inputs_text: str, result_text: str, command: str,
-                         readme: str, observations: str) -> dict[str, bool]:
+def artifact_byte_checks(inputs_bytes: bytes, result_bytes: bytes,
+                         command_bytes: bytes, readme_bytes: bytes,
+                         observations_bytes: bytes) -> dict[str, bool]:
     return {
         'complete inputs bytes pinned':
-            hashlib.sha256(inputs_text.encode()).hexdigest() == INPUTS_SHA256,
+            hashlib.sha256(inputs_bytes).hexdigest() == INPUTS_SHA256,
         'complete result bytes pinned':
-            hashlib.sha256(result_text.encode()).hexdigest() == RESULT_SHA256,
+            hashlib.sha256(result_bytes).hexdigest() == RESULT_SHA256,
         'complete readme bytes pinned':
-            hashlib.sha256(readme.encode()).hexdigest() == README_SHA256,
+            hashlib.sha256(readme_bytes).hexdigest() == README_SHA256,
         'complete command bytes pinned':
-            hashlib.sha256(command.encode()).hexdigest() == COMMAND_SHA256,
+            hashlib.sha256(command_bytes).hexdigest() == COMMAND_SHA256,
         'complete cleanup observations bytes pinned':
-            hashlib.sha256(observations.encode()).hexdigest() == OBSERVATIONS_SHA256,
+            hashlib.sha256(observations_bytes).hexdigest() == OBSERVATIONS_SHA256,
     }
 
 
@@ -419,36 +421,46 @@ def source_checks(inputs: dict) -> dict[str, bool]:
 
 
 def verify(inputs: dict, result: dict, command: str, readme: str,
-           observations: str, inputs_text: str, result_text: str) -> dict[str, bool]:
+           observations: str, inputs_bytes: bytes, result_bytes: bytes,
+           command_bytes: bytes, readme_bytes: bytes,
+           observations_bytes: bytes) -> dict[str, bool]:
     return (schema_checks(inputs, result)
-            | receipt_checks(inputs, result, command, readme, observations)
-            | artifact_byte_checks(inputs_text, result_text, command, readme, observations)
+            | receipt_checks(inputs, result, command, readme, observations,
+                             command_bytes, observations_bytes)
+            | artifact_byte_checks(inputs_bytes, result_bytes, command_bytes,
+                                   readme_bytes, observations_bytes)
             | source_checks(inputs))
 
 
 def self_test(inputs: dict, result: dict, command: str, readme: str,
-              observations: str, inputs_text: str, result_text: str) -> dict[str, bool]:
+              observations: str, inputs_bytes: bytes, result_bytes: bytes,
+              command_bytes: bytes, readme_bytes: bytes,
+              observations_bytes: bytes) -> dict[str, bool]:
     tests = {}
 
     forged = copy.deepcopy(result)
     forged['status'] = 'pass'
     tests['reject false pass status'] = not receipt_checks(
-        inputs, forged, command, readme, observations)['build blocker exact']
+        inputs, forged, command, readme, observations,
+        command_bytes, observations_bytes)['build blocker exact']
 
     executed = copy.deepcopy(result)
     executed['execution']['vulnerable_arm_run'] = True
     tests['reject hidden arm execution'] = not receipt_checks(
-        inputs, executed, command, readme, observations)['zero dependent execution']
+        inputs, executed, command, readme, observations,
+        command_bytes, observations_bytes)['zero dependent execution']
 
     dirty = copy.deepcopy(result)
     dirty['cleanup']['task_cache_record_ids_removed'].pop()
     tests['reject incomplete cache cleanup'] = not receipt_checks(
-        inputs, dirty, command, readme, observations)['cleanup exact']
+        inputs, dirty, command, readme, observations,
+        command_bytes, observations_bytes)['cleanup exact']
 
     retrieved = copy.deepcopy(inputs)
     retrieved['archives']['fixed']['retrieved'] = True
     tests['reject false archive state'] = not receipt_checks(
-        retrieved, result, command, readme, observations)['archives remained unretrieved']
+        retrieved, result, command, readme, observations,
+        command_bytes, observations_bytes)['archives remained unretrieved']
 
     extra = copy.deepcopy(result)
     extra['unreviewed'] = True
@@ -458,20 +470,28 @@ def self_test(inputs: dict, result: dict, command: str, readme: str,
     hidden_gate = command.replace(
         'if docker image inspect', 'if false; then :; fi\nif docker image inspect', 1)
     tests['reject false-branch command mutation'] = not receipt_checks(
-        inputs, result, hidden_gate, readme, observations)['full failed command bytes pinned']
+        inputs, result, hidden_gate, readme, observations,
+        hidden_gate.encode(), observations_bytes)['full failed command bytes pinned']
 
     tests['reject quoted Authorization value'] = not receipt_checks(
-        inputs, result, command, readme + '\n{"Authorization":"Bearer secret"}', observations)[
+        inputs, result, command, readme + '\n{"Authorization":"Bearer secret"}',
+        observations, command_bytes, observations_bytes)[
             'no raw secret or private task material']
     tests['reject quoted api_key value'] = not receipt_checks(
-        inputs, result, command, readme + '\n{"api_key":"secret"}', observations)[
+        inputs, result, command, readme + '\n{"api_key":"secret"}',
+        observations, command_bytes, observations_bytes)[
             'no raw secret or private task material']
     tests['reject any complete inputs mutation'] = not artifact_byte_checks(
-        inputs_text + ' ', result_text, command, readme, observations)[
+        inputs_bytes + b' ', result_bytes, command_bytes, readme_bytes,
+        observations_bytes)[
             'complete inputs bytes pinned']
     tests['reject any complete result mutation'] = not artifact_byte_checks(
-        inputs_text, result_text + ' ', command, readme, observations)[
+        inputs_bytes, result_bytes + b' ', command_bytes, readme_bytes,
+        observations_bytes)[
             'complete result bytes pinned']
+    tests['reject newline-normalized inputs bytes'] = not artifact_byte_checks(
+        inputs_bytes.replace(b'\n', b'\r\n'), result_bytes, command_bytes,
+        readme_bytes, observations_bytes)['complete inputs bytes pinned']
     return tests
 
 
@@ -482,8 +502,10 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        inputs_text = (HERE / 'inputs.json').read_text()
-        result_text = (HERE / 'result.json').read_text()
+        inputs_bytes = (HERE / 'inputs.json').read_bytes()
+        result_bytes = (HERE / 'result.json').read_bytes()
+        inputs_text = inputs_bytes.decode('utf-8')
+        result_text = result_bytes.decode('utf-8')
         inputs = json.loads(inputs_text, object_pairs_hook=reject_duplicates)
         result = json.loads(result_text, object_pairs_hook=reject_duplicates)
         if not isinstance(inputs, dict) or not inputs:
@@ -493,15 +515,20 @@ def main() -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(json.dumps({'status': 'fail', 'error': str(error)}, indent=2))
         return 1
-    command = (HERE / 'failed-build-command.txt').read_text()
-    readme = (HERE / 'README.md').read_text()
-    observations = (HERE / 'docker-observations.txt').read_text()
+    command_bytes = (HERE / 'failed-build-command.txt').read_bytes()
+    readme_bytes = (HERE / 'README.md').read_bytes()
+    observations_bytes = (HERE / 'docker-observations.txt').read_bytes()
+    command = command_bytes.decode('utf-8')
+    readme = readme_bytes.decode('utf-8')
+    observations = observations_bytes.decode('utf-8')
     checks = verify(
-        inputs, result, command, readme, observations, inputs_text, result_text)
+        inputs, result, command, readme, observations, inputs_bytes, result_bytes,
+        command_bytes, readme_bytes, observations_bytes)
     if args.self_test:
         checks |= {f'self-test {name}': passed for name, passed in self_test(
             inputs, result, command, readme, observations,
-            inputs_text, result_text).items()}
+            inputs_bytes, result_bytes, command_bytes, readme_bytes,
+            observations_bytes).items()}
 
     receipt = {
         'schema_version': 1,

@@ -37,6 +37,21 @@ were absent at cleanup; the dual-loss and partial-start checks also verified
 the stop-owner and CONNECT host processes exited. The retained research hash
 was unchanged.
 
+The managed stop readback now uses a proof written by whichever stop path won.
+The freeze timestamp comes from `producer_stop.py` immediately after its final
+exact-set Docker reinspection, and run `REVOKED` carries that timestamp, the
+manifest digest, and ordered IDs. The managed check compares those bytes with
+`RUN.json`, the sealed manifest, and fresh Docker state. The owned dual-loss
+run had no provider `producer_set_frozen` event but passed the run proof; the
+single-parent-loss run had that event and passed too. False revocation, wrong
+digest or IDs, bad marker order, an UNSAFE marker, missing run REVOKED, and a
+runnable exact producer were rejected. Removing the owner event log did not
+change a valid run proof. Provider admission closure remains a separate check:
+the marker was absent in the killed-CONNECT controls and present in the
+surviving-CONNECT parent-loss control. The no-Docker cloud source/pin checker
+passed against the current manifest. The complete managed OpenCode rehearsal
+was not run here because its pinned derived image is unavailable locally.
+
 The dual-loss scenario stages the pending effect behind a private gate before
 killing both host processes. There is still a real interval between SIGKILL
 and the owner's durable stop request and freeze; already-dispatched effects

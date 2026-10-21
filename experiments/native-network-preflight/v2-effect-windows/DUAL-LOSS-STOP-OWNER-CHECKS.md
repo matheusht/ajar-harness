@@ -68,6 +68,15 @@ run-scoped host process is justified only if the checks below close that gap.
 7. Verify prior run markers/history remain, retained research hash is unchanged,
    and cleanup removes only nonce-owned exact resources and host processes. Save
    redacted command, source hashes, expected/actual results, and cleanup proof.
+8. Managed stop proof must work whether the CONNECT watcher or independent owner
+   wins the shared stop lock, including when watcher detection arrives after the
+   freeze. Do not require provider `stop_detected` before producer freeze, and do
+   not treat provider REVOKED as run proof. Accept only a valid run REVOKED proof
+   tied to RUN.json's exact manifest digest and ordered producer IDs, with
+   STOP_REQUEST <= STOPPING <= freeze <= REVOKED and exact Docker reinspection.
+   A missing or tampered owner event cannot substitute for that proof. Missing
+   or false run REVOKED, UNSAFE, wrong producer set/digest, or a runnable exact
+   producer must fail. Provider admission closure remains a separate check.
 
 The topology cannot promise zero effect from the instant of SIGKILL to the first
 durable STOP_REQUEST or freeze: a runnable producer may act in that interval. The

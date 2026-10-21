@@ -2,6 +2,7 @@
 """Owned exact-producer dual/single SIGKILL stop E2E; no provider/native inference."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import select
 import shutil
 import signal
 import socketserver
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -29,7 +31,8 @@ def main():
     if (args.stop_failure or args.log_failure) and args.fault!='both':ap.error('failure arms require dual loss')
     if args.stop_failure and args.log_failure:ap.error('one failure arm at a time')
     out=args.output.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
-    files=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE/'receiver.php',HERE.parent/'v2_connect.py']
+    managed=HERE.parents[2]/'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
+    files=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE/'receiver.php',HERE.parent/'v2_connect.py',managed]
     sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
     d={'classification':'owned launcher/CONNECT loss E2E; partial T05',
        'fault':args.fault,'stop_failure':args.stop_failure,'log_failure':args.log_failure,'provider_calls':0,'native_calls':0,'model_inference_requested':False,'checks':[],'resources':[],'cleanup':[],
@@ -123,6 +126,52 @@ def main():
             check('terminal stop result bounded',wait(lambda:any((state/n).exists() for n in ('REVOKED','UNSAFE')),seconds=10))
             d['before_gate_release']={'monotonic':time.monotonic(),'producer_states':{identifier:inspect('container',identifier)['State'] for identifier in (producer,second)},
                 'markers':{n:(state/n).exists() for n in ('STOP_REQUEST','STOPPING','REVOKED','UNSAFE')},'receiver_rows':rows()}
+            spec=importlib.util.spec_from_file_location('managed_stop_proof_e2e',managed)
+            managed_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(managed_module)
+            def stop_proof(run_path=state,provider_path=out/'provider',inspect_item=None):
+                return managed_module.managed_stop_readback(
+                    run_path,provider_path,manifest,ready['manifest_sha256'],ready['ids'],
+                    inspect_item or (lambda identifier:inspect('container',identifier)))
+            proof=stop_proof();d['managed_stop_proof']=proof
+            if args.stop_failure or args.log_failure:
+                check('managed readback rejects unsafe owner outcome',not proof['run_verified'])
+            else:
+                check('managed readback accepts exact run freeze without provider event ordering',
+                      proof['run_verified'] and proof['exact_producers_stopped'])
+                with sqlite3.connect(out/'provider/tunnel.sqlite3') as db:
+                    provider_frozen=db.execute("SELECT count(*) FROM events WHERE kind='producer_set_frozen'").fetchone()[0]
+                d['provider_frozen_event_count']=provider_frozen
+                if args.fault=='both':
+                    check('dual-loss owner proof survives missing provider freeze event',provider_frozen==0)
+                copied=root/'proof-tampered';shutil.copytree(state,copied)
+                revoked_path=copied/'REVOKED';original=json.loads(revoked_path.read_text())
+                (copied/'stop-owner.jsonl').unlink(missing_ok=True)
+                check('run proof does not require owner event log',stop_proof(run_path=copied)['run_verified'])
+                for name,mutation in (
+                    ('false_verified',lambda record:record.update(producers_verified_stopped=False)),
+                    ('wrong_digest',lambda record:record.update(manifest_sha256='0'*64)),
+                    ('wrong_ids',lambda record:record.update(ids=list(reversed(ready['ids'])))),
+                    ('wrong_order',lambda record:record.update(frozen_monotonic=record['monotonic']+1)),
+                ):
+                    altered=original.copy();mutation(altered)
+                    revoked_path.write_text(json.dumps(altered)+'\n')
+                    check('managed readback rejects '+name,not stop_proof(run_path=copied)['run_verified'])
+                revoked_path.write_text(json.dumps(original)+'\n')
+                (copied/'UNSAFE').write_text('{}\n')
+                check('managed readback rejects conflicting unsafe marker',not stop_proof(run_path=copied)['run_verified'])
+                (copied/'UNSAFE').unlink();revoked_path.unlink()
+                check('managed readback rejects missing run revocation',not stop_proof(run_path=copied)['run_verified'])
+                def runnable(identifier):
+                    info=inspect('container',identifier)
+                    if identifier==producer:info['State']={**info['State'],'Running':True,'Paused':False}
+                    return info
+                check('managed readback rejects runnable exact producer',
+                      not stop_proof(inspect_item=runnable)['run_verified'])
+                # The provider marker closes admission but is never the run freeze proof.
+                provider_copy=root/'provider-proof';provider_copy.mkdir()
+                check('managed readback keeps provider closure separate',
+                      stop_proof(provider_path=provider_copy)['run_verified'] and
+                      not stop_proof(provider_path=provider_copy)['provider_admission_closed'])
             (workspace/'RELEASE').touch();d['gate_release_monotonic']=time.monotonic()
             wait(lambda:any(r['case']=='pre-dispatch' for r in rows()),seconds=2)
             fresh=subprocess.run(['docker','exec',second if args.stop_failure else producer,'/bin/busybox','wget','-Y','off','-qO-','--post-data=',effect+'pre-ack'],capture_output=True,text=True,timeout=5)

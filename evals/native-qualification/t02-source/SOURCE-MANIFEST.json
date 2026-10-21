@@ -16,14 +16,14 @@
       "sha256": "1e4392da0750956218b64d985dd8fad9d062b6568e7f2973a16e087e83aa74cf"
     },
     {
-      "bytes": 11142,
+      "bytes": 11505,
       "path": "evals/native-qualification/T02-OPENCODE-EXCLUSIVE-TRUST-CHECKS-20261021.md",
-      "sha256": "d67e42937a0b033afae009b708539fa39ef4e73d6c0e6b6f3b35a85764dcf306"
+      "sha256": "1ceda660c48636c0191ea8b72f64c8703d7f918a5385528b526affd4132f25af"
     },
     {
-      "bytes": 18593,
+      "bytes": 18759,
       "path": "evals/native-qualification/T02-OPENCODE-EXCLUSIVE-TRUST-RESEARCH-20261021.md",
-      "sha256": "3c76fa2aeb194e5865bb0a3a0e33b877ae1de781bdf994fa207c11a38b5d9508"
+      "sha256": "3f13f52869602b66896bd030b1769acc1d94d830e1126f79587b8b612eea55fb"
     },
     {
       "bytes": 16473,
@@ -46,9 +46,9 @@
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
     },
     {
-      "bytes": 86352,
+      "bytes": 90957,
       "path": "evals/native-qualification/smoke/check_opencode_exclusive_trust.py",
-      "sha256": "ee989fc88dd50eda07974a547644c189c3977bb3fa9e7bbb27c43ebf8395e31a"
+      "sha256": "0031aa9f9dffe8c1aa9c2e822d40803e918c2bbad802e9edc79ab1ba8edb00bb"
     },
     {
       "bytes": 3898,
@@ -61,9 +61,9 @@
       "sha256": "e06453668bdd7f26f9f80847d15c087370e270ae92789570e65b42c8f166adbf"
     },
     {
-      "bytes": 19427,
+      "bytes": 19648,
       "path": "evals/native-qualification/smoke/check_v2_live_preparation.py",
-      "sha256": "d1317b465895cbc0ba8f45059c20b2a3ad6975f97e00121115eb772a811fe47c"
+      "sha256": "ea7f2cd511f13210f41759cff4071ee1cc82421f37cbe813e0bce710ce89835e"
     },
     {
       "bytes": 98,

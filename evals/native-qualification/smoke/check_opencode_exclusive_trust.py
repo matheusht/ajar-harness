@@ -464,33 +464,54 @@ def self_test():
         raise RuntimeError('cleanup_uncertain_create_fixture_failed')
 
     class FailingDocker:
-        def __init__(self, error):
+        def __init__(self, error, journal, snapshots, expected):
             self.error = error
+            self.journal = journal
+            self.snapshots = snapshots
+            self.expected = expected
 
         def run(self, *_args):
+            if self.journal != self.expected or self.snapshots != [self.expected]:
+                raise RuntimeError('create_not_persisted_before_docker')
             raise self.error
 
     pending_network = []
+    network_snapshots = []
+    expected_network = [{
+        'kind': 'network', 'name': _network_name(identifier),
+        'outcome': 'create_result_unconfirmed'}]
     try:
-        _network(FailingDocker(KeyboardInterrupt()), identifier, [], pending_network)
+        _network(
+            FailingDocker(
+                KeyboardInterrupt(), pending_network, network_snapshots,
+                expected_network),
+            identifier, [], pending_network,
+            lambda: network_snapshots.append(copy.deepcopy(pending_network)),
+        )
     except KeyboardInterrupt:
         pass
     else:
         raise RuntimeError('network_create_interrupt_fixture_failed')
-    if pending_network != [{
-            'kind': 'network', 'name': _network_name(identifier),
-            'outcome': 'create_result_unconfirmed'}]:
+    if pending_network != expected_network:
         raise RuntimeError('network_create_journal_fixture_failed')
     pending_container = []
+    container_snapshots = []
+    expected_container = [{
+        'kind': 'container',
+        'name': _container_name(identifier, 'replacement-positive'),
+        'outcome': 'create_result_unconfirmed'}]
     try:
         _container(
-            FailingDocker(RuntimeError('ordinary_non_check_error')),
+            FailingDocker(
+                RuntimeError('ordinary_non_check_error'), pending_container,
+                container_snapshots, expected_container),
             'sha256:' + 'd' * 64,
             {'name': _network_name(identifier)}, '172.18.0.1', identifier,
             'replacement-positive', 'candidate', 'valid',
             Path('/fixture/workspace'), Path('/fixture/opencode.json'),
             Path('/fixture/ambient.pem'), Path('/fixture/replacement.pem'),
             'b' * 64, [], pending_container,
+            lambda: container_snapshots.append(copy.deepcopy(pending_container)),
         )
     except RuntimeError as error:
         if str(error) != 'ordinary_non_check_error':
@@ -498,11 +519,53 @@ def self_test():
         pass
     else:
         raise RuntimeError('container_create_interrupt_fixture_failed')
-    if pending_container != [{
-            'kind': 'container',
-            'name': _container_name(identifier, 'replacement-positive'),
-            'outcome': 'create_result_unconfirmed'}]:
+    if pending_container != expected_container:
         raise RuntimeError('container_create_journal_fixture_failed')
+    confirmed = []
+    confirmation_snapshots = []
+    confirmed_name = _container_name(identifier, 'confirmed')
+    record = _begin_create(
+        confirmed, 'container', confirmed_name,
+        lambda: confirmation_snapshots.append(copy.deepcopy(confirmed)),
+    )
+    confirmed_id = 'e' * 64
+    confirmed_resource = {
+        'kind': 'container', 'name': confirmed_name, 'id': confirmed_id,
+        'active': False, 'nonce': identifier,
+    }
+    _confirm_create(
+        record, confirmed_id,
+        lambda: confirmation_snapshots.append(copy.deepcopy(confirmed)),
+    )
+    if (confirmation_snapshots != [
+            [{'kind': 'container', 'name': confirmed_name,
+              'outcome': 'create_result_unconfirmed'}],
+            [{'kind': 'container', 'name': confirmed_name,
+              'outcome': 'exact_id_recorded', 'id': confirmed_id}],
+            ]
+            or not _create_journal_confirmed(confirmed, [confirmed_resource])):
+        raise RuntimeError('create_confirmation_journal_fixture_failed')
+    interrupted_confirmation = []
+    interrupted_record = _begin_create(
+        interrupted_confirmation, 'container', confirmed_name, lambda: None)
+
+    def interrupt_confirmation():
+        raise KeyboardInterrupt
+
+    try:
+        _confirm_create(
+            interrupted_record, confirmed_id, interrupt_confirmation,
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise RuntimeError('create_confirmation_interrupt_fixture_failed')
+    if (interrupted_confirmation != [{
+            'kind': 'container', 'name': confirmed_name,
+            'outcome': 'create_result_unconfirmed'}]
+            or _create_journal_confirmed(
+                interrupted_confirmation, [confirmed_resource])):
+        raise RuntimeError('create_confirmation_rollback_fixture_failed')
     return True
 
 
@@ -603,6 +666,13 @@ def _write_json(output, receipt):
     finally:
         os.close(descriptor)
     os.replace(temporary, target)
+    directory = os.open(
+        output, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0)
+        | getattr(os, 'O_CLOEXEC', 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _run(argv, timeout=30, input_text=None, environment=None):
@@ -812,16 +882,29 @@ def _container_name(nonce, arm):
     return _network_name(nonce) + '-' + arm
 
 
-def _uncertain_create(uncertain_creates, kind, name):
+def _begin_create(create_journal, kind, name, persist):
     record = {'kind': kind, 'name': name,
               'outcome': 'create_result_unconfirmed'}
-    uncertain_creates.append(record)
+    create_journal.append(record)
+    persist()
     return record
 
 
-def _network(docker, nonce, resources, uncertain_creates):
+def _confirm_create(record, identifier, persist):
+    pending = dict(record)
+    record['id'] = identifier
+    record['outcome'] = 'exact_id_recorded'
+    try:
+        persist()
+    except BaseException:
+        record.clear()
+        record.update(pending)
+        raise
+
+
+def _network(docker, nonce, resources, create_journal, persist):
     name = _network_name(nonce)
-    pending = _uncertain_create(uncertain_creates, 'network', name)
+    record = _begin_create(create_journal, 'network', name, persist)
     result = docker.run('network', 'create', '--internal', '--driver', 'bridge',
                         '--label', LABEL + '=' + nonce, name)
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', result.stdout.strip()):
@@ -829,7 +912,7 @@ def _network(docker, nonce, resources, uncertain_creates):
     identifier = result.stdout.strip()
     resources.append({'kind': 'network', 'id': identifier, 'name': name,
                       'active': True, 'nonce': nonce})
-    uncertain_creates.remove(pending)
+    _confirm_create(record, identifier, persist)
     data = docker.json('network', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('internal_network_inspect_failed')
@@ -876,7 +959,7 @@ def _config(path, base_url):
 
 def _container(docker, image_id, network, gateway, nonce, arm, image_role, input_mode,
                workspace, config, ambient_ca, exclusive_input, exclusive_sha256,
-               resources, uncertain_creates):
+               resources, create_journal, persist):
     allowed = {
         'control': {'absent'},
         'candidate': {'valid', 'missing-both', 'missing-path-env',
@@ -954,14 +1037,14 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         'export OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; '
         'exec opencode serve --hostname 127.0.0.1 --port '
         + str(OPENCODE_SERVER_PORT))
-    pending = _uncertain_create(uncertain_creates, 'container', name)
+    record = _begin_create(create_journal, 'container', name, persist)
     result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
     identifier = result.stdout.strip()
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', identifier):
         raise CheckError('container_create_failed')
     resources.append({'kind': 'container', 'id': identifier, 'name': name,
                       'active': True, 'nonce': nonce})
-    uncertain_creates.remove(pending)
+    _confirm_create(record, identifier, persist)
     data = docker.json('container', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('container_inspect_failed')
@@ -1424,9 +1507,34 @@ def _latest_cleanup_pass(resources, cleanup):
                for resource in resources)
 
 
+def _create_journal_confirmed(create_journal, resources):
+    if not isinstance(create_journal, list) or not isinstance(resources, list):
+        return False
+    journal_keys = []
+    for row in create_journal:
+        if (not isinstance(row, dict)
+                or row.get('kind') not in {'container', 'network'}
+                or not isinstance(row.get('name'), str) or not row.get('name')
+                or row.get('outcome') != 'exact_id_recorded'
+                or re.fullmatch(r'[0-9a-f]{64}', row.get('id', '')) is None):
+            return False
+        journal_keys.append((row['kind'], row['id'], row['name']))
+    resource_keys = []
+    for resource in resources:
+        if (not isinstance(resource, dict)
+                or resource.get('kind') not in {'container', 'network'}
+                or not isinstance(resource.get('name'), str) or not resource.get('name')
+                or re.fullmatch(r'[0-9a-f]{64}', resource.get('id', '')) is None):
+            return False
+        resource_keys.append((resource['kind'], resource['id'], resource['name']))
+    return (len(journal_keys) == len(set(journal_keys))
+            and len(resource_keys) == len(set(resource_keys))
+            and set(journal_keys) == set(resource_keys))
+
+
 def _cleanup_complete(nonce, reconciliations, resources, cleanup, absence,
-                      uncertain_creates):
-    return (not uncertain_creates
+                      create_journal):
+    return (_create_journal_confirmed(create_journal, resources)
             and (not nonce or (reconciliations
                                and reconciliations[-1].get('pass') is True))
             and _latest_cleanup_pass(resources, cleanup)
@@ -1437,7 +1545,7 @@ def _cleanup_complete(nonce, reconciliations, resources, cleanup, absence,
 
 def _arm(docker, image_id, image_role, network, nonce, work, certificates,
          fixture_identities,
-         resources, cleanup, uncertain_creates, name, trust_mode, served_chain):
+         resources, cleanup, create_journal, persist, name, trust_mode, served_chain):
     _require_fixture_identities(certificates, fixture_identities)
     chain = certificates[served_chain]
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1464,7 +1572,7 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
             input_mode,
             workspace, config, certificates['ambient']['ca'], certificates['replacement']['ca'],
             fixture_identities['replacement.ca']['sha256'],
-            resources, uncertain_creates,
+            resources, create_journal, persist,
         )
         _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
@@ -1536,7 +1644,7 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
 
 def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certificates,
                      fixture_identities, exclusive_inputs, resources, cleanup,
-                     uncertain_creates,
+                     create_journal, persist,
                      name, input_mode):
     _require_fixture_identities(certificates, fixture_identities)
     chain = certificates['replacement']
@@ -1564,7 +1672,7 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             docker, candidate_image_id, network, network['gateway'], nonce, name,
             'candidate', input_mode, workspace, config, certificates['ambient']['ca'],
             exclusive_input['path'], exclusive_input['sha256'], resources,
-            uncertain_creates,
+            create_journal, persist,
         )
         _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
@@ -1669,9 +1777,10 @@ def execute(args):
     self_test()
     output = _safe_output(args.output)
     nonce = uuid.uuid4().hex
+    work = Path(tempfile.mkdtemp(prefix='t02-exclusive-trust-')).resolve()
     resource_arms = ([name for name, _, _, _ in CORE_ARMS]
                      + [name for name, _ in PRESOCKET_CASES])
-    uncertain_creates = []
+    create_journal = []
     receipt = {
         'schema_version': 1,
         'kind': 't02-opencode-exclusive-trust-owned-check',
@@ -1680,17 +1789,21 @@ def execute(args):
                            'and candidate images; zero external or live provider/model '
                            'service calls'),
         'checks': [], 'arms': [], 'resources': [], 'cleanup': [],
-        'uncertain_creates': uncertain_creates,
+        'create_journal': create_journal,
         'cleanup_recovery': {
             'label': LABEL, 'nonce': nonce,
             'network_name': _network_name(nonce),
             'container_names': [_container_name(nonce, arm) for arm in resource_arms],
         },
+        'retained_temporary_workspace': str(work),
         'external_provider_service_calls': 0, 'external_model_service_calls': 0,
     }
-    _write_json(output, receipt)
+
+    def persist():
+        _write_json(output, receipt)
+
+    persist()
     docker = Docker()
-    work = Path(tempfile.mkdtemp(prefix='t02-exclusive-trust-')).resolve()
     resources = []
     cleanup = receipt['cleanup']
     failure = None
@@ -1724,7 +1837,7 @@ def execute(args):
             'cross_chains_rejected': True,
             'private_material_recorded': False,
         }
-        network = _network(docker, nonce, resources, uncertain_creates)
+        network = _network(docker, nonce, resources, create_journal, persist)
         receipt['resources'].append({
             'kind': 'network', 'id': network['id'], 'name': network['name'],
             'internal': True, 'driver': 'bridge'})
@@ -1773,7 +1886,7 @@ def execute(args):
         for name, image_role, trust_mode, served_chain in CORE_ARMS:
             row = _arm(docker, image_ids[image_role], image_role, network, nonce,
                        work, certificates, fixture_identities, resources, cleanup,
-                       uncertain_creates, name, trust_mode, served_chain)
+                       create_journal, persist, name, trust_mode, served_chain)
             receipt['arms'].append(row)
             receipt['resources'].extend(
                 {'kind': item['kind'], 'id': item['id'], 'name': item['name']}
@@ -1786,7 +1899,7 @@ def execute(args):
             row = _pre_socket_case(
                 docker, args.candidate_image_id, network, nonce, work, certificates,
                 fixture_identities, exclusive_inputs, resources, cleanup,
-                uncertain_creates, name, input_mode,
+                create_journal, persist, name, input_mode,
             )
             receipt['arms'].append(row)
             receipt['resources'].extend(
@@ -1830,7 +1943,7 @@ def execute(args):
         receipt['label_cleanup'] = absence
         cleanup_ok = _cleanup_complete(
             nonce_value, reconciliations, resources, cleanup, absence,
-            uncertain_creates)
+            create_journal)
         receipt['temporary_removed'] = False
         if cleanup_ok:
             try:
@@ -1838,7 +1951,9 @@ def execute(args):
             except OSError:
                 pass
             receipt['temporary_removed'] = not work.exists()
-        if not receipt['temporary_removed']:
+        if receipt['temporary_removed']:
+            receipt.pop('retained_temporary_workspace', None)
+        else:
             receipt['retained_temporary_workspace'] = str(work)
         if failure is None and (not cleanup_ok or not receipt['temporary_removed']):
             failure = 'cleanup_failed'

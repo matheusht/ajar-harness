@@ -7,8 +7,8 @@
     },
     {
       "path": "evals/native-qualification/T02-CAPTURE-REVIEW-BRIDGE-CHECKS-20261021.md",
-      "bytes": 3102,
-      "sha256": "d54318f01f182ecabf34041b907c7ea3a605ab23b630506dcf1b26483182899e"
+      "bytes": 4246,
+      "sha256": "e2c21c3c65eefff981d93fceefced95940c9b804d1ed56a3859b4f3bbd248bbc"
     },
     {
       "bytes": 1362,
@@ -42,8 +42,8 @@
     },
     {
       "path": "evals/native-qualification/smoke/check_v2_capture_review_bridge.py",
-      "bytes": 16317,
-      "sha256": "e197d9ded4713efa25d7f6ed63bc872bcbe75fc420bba3899687165e1f71a37c"
+      "bytes": 19980,
+      "sha256": "04118a0d07917fe2f53bbe35107f1826f978007c9445fd67271e38c8eb30d6b2"
     },
     {
       "bytes": 3898,
@@ -82,8 +82,8 @@
     },
     {
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "bytes": 122855,
-      "sha256": "d0d1c15672c1b9b405926739e6c5d4494e95608cfe60b2b2afc89f42d16ce251"
+      "bytes": 123479,
+      "sha256": "524abbd26c2bede524b463d0e902fe4f8dd986f8f678f2732ccbc9b842d0ae24"
     },
     {
       "bytes": 1222,

@@ -9,3 +9,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_v2_capt
 ```
 
 Expect `PASS` and `result.json` in the new directory. The saved result names its source hashes and reports zero provider and target calls. Stop and cleanup projections in this check are synthetic. Its final receipt is limited to `capture_lifecycle_only` with review `not_observed`. This check proves only the local file-to-packet-to-receipt contract; it does not establish protected producer origin, a managed native capture or stop, a completed independent review, or live provider qualification. The packet keeps `original_observation.status` as `unavailable` even when an unqualified capture candidate is supplied.
+
+The opt-in call requires a separately supplied current run ID. This fixture uses
+a synthetic ID; no current managed caller wires an authoritative NativeRun ID
+and sealed capture into the bridge.
+
+The existing `check_v2_reviewer_packet.py` mount check requires Docker and was
+not run for this no-Docker bridge change. The checker above does exercise the
+ordinary packet publication path without a capture.

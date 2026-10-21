@@ -158,7 +158,8 @@ def observation_evaluator():
 
 
 def publish_review_packet(directory, originals, candidate, note, native_stdout, app_checks,
-                          capability, forbidden_paths=(), protected_observation=None):
+                          capability, forbidden_paths=(), protected_observation=None,
+                          current_run_id=None):
     if (directory.is_symlink() or not directory.is_dir() or list(directory.iterdir())
             or any(not (base / name).is_file() or (base / name).is_symlink()
                    for base in (originals, candidate) for name in PACKET_SOURCE_NAMES)
@@ -219,6 +220,14 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
                 or any(item['runtime_binding']['session'] != protected_observation['session_id']
                        for item in dispatched)):
             raise RuntimeError('protected_observation_binding_mismatch')
+        if (not isinstance(current_run_id, str)
+                or current_run_id != capture['result']['scenario_id']):
+            raise RuntimeError('protected_observation_current_run_mismatch')
+        if capture['observation']['source_pins']['manifest']['files'] != source_hashes['candidate']:
+            raise RuntimeError('protected_observation_source_mismatch')
+        if any(item['session_id'] != protected_observation['session_id']
+               for item in tool_material['records']):
+            raise RuntimeError('protected_observation_native_session_mismatch')
         for name, digest in capture_files.items():
             data = (path / name).read_bytes()
             if hashlib.sha256(data).hexdigest() != digest:

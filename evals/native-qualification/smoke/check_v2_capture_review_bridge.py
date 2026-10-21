@@ -15,7 +15,7 @@ RUNNER = ROOT / 'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
 OBSERVATION = ROOT / 'experiments/native-observation-qualification/native_observation.py'
 FIXTURE = ROOT / 'evals/native-qualification/smoke'
 SCENARIO = 'owned-t02-bridge-run'
-SESSION = 'owned-research-session'
+SESSION = 'ses_ownedresearch'
 
 
 def sha(data):
@@ -31,9 +31,9 @@ def receipt(case_id, request, response, sequence):
             'route_class': 'observer', 'sequence': sequence, 'status_code': 200}
 
 
-def synthetic_capture(observation, note, source):
+def synthetic_capture(observation, note, source_hashes):
     claim_sha = sha(note.read_bytes())
-    manifest = {'dependencies': {}, 'files': {'message.php': sha(source.read_bytes())},
+    manifest = {'dependencies': {}, 'files': dict(source_hashes),
                 'parent_version_ids': [], 'source_id': 'owned-synthetic-php',
                 'version_id': 'owned-bridge-fixture-v1'}
     source_pins = {'manifest': manifest, 'manifest_sha256': observation['digest'](manifest)}
@@ -107,26 +107,27 @@ def main():
         message.write_text(message.read_text().replace("return 'before';", "return 'after';"))
         note = candidate / 'research-note.md'
         note.write_text('Harmless local change: message() returns after; php check.php passed.\n')
-        capture_bundle, source_sha = synthetic_capture(observation, note, message)
+        before = {name: sha((originals / name).read_bytes()) for name in runner.PACKET_SOURCE_NAMES}
+        after = {name: sha((candidate / name).read_bytes()) for name in runner.PACKET_SOURCE_NAMES}
+        capture_bundle, source_sha = synthetic_capture(observation, note, after)
         capture = root / 'capture'
         observation['write_bundle'](capture_bundle, capture)
         capture_sha = observation['capture_manifest_sha256'](capture)
         expected = {'path': capture, 'manifest_sha256': capture_sha,
                     'source_manifest_sha256': source_sha,
                     'scenario_id': SCENARIO, 'session_id': SESSION}
-        stream = json.dumps({'type': 'tool_use', 'part': {'type': 'tool', 'tool': 'shell',
+        stream = json.dumps({'type': 'tool_use', 'sessionID': SESSION,
+            'part': {'type': 'tool', 'tool': 'shell',
             'state': {'status': 'completed', 'input': {'command': 'php check.php'},
                       'output': 'check passed\n'}}}) + '\n'
-        before = {name: sha((originals / name).read_bytes()) for name in runner.PACKET_SOURCE_NAMES}
-        after = {name: sha((candidate / name).read_bytes()) for name in runner.PACKET_SOURCE_NAMES}
         checks = {'baseline': {'source_sha256': before, 'results': []},
                   'candidate': {'source_sha256': after, 'results': []}}
 
-        def publish(folder, supplied=expected):
+        def publish(folder, supplied=expected, native_stream=stream, current_run_id=SCENARIO):
             folder.mkdir()
-            return runner.publish_review_packet(folder, originals, candidate, note, stream,
+            return runner.publish_review_packet(folder, originals, candidate, note, native_stream,
                 checks, 'local_' + 'a' * 32, forbidden_paths=(str(root),),
-                protected_observation=supplied)
+                protected_observation=supplied, current_run_id=current_run_id)
 
         packet = root / 'packet'
         pin = publish(packet)
@@ -148,6 +149,70 @@ def main():
         assert 'CAPTURE-observation.json' in (packet / 'PROMPT.txt').read_text()
         archive = root / 'archive'
         runner.archive_review_packet(packet, archive, pin)
+
+        original_candidate = message.read_bytes()
+        message.write_bytes(original_candidate + b'\n// changed after capture\n')
+        checks['candidate']['source_sha256'] = {
+            name: sha((candidate / name).read_bytes()) for name in runner.PACKET_SOURCE_NAMES}
+        rejected = root / 'reject-candidate-source'
+        try:
+            publish(rejected)
+        except RuntimeError as error:
+            assert str(error) == 'protected_observation_source_mismatch'
+            assert not list(rejected.iterdir())
+        else:
+            rejected.chmod(0o700)
+            raise AssertionError('candidate source drift accepted')
+        finally:
+            message.write_bytes(original_candidate)
+            checks['candidate']['source_sha256'] = after
+
+        for label, source_files in (
+            ('missing', {name: digest for name, digest in after.items() if name != 'check.php'}),
+            ('extra', {**after, 'extra.php': '0' * 64}),
+            ('stale', {**after, 'message.php': before['message.php']}),
+        ):
+            wrong_bundle, wrong_source_sha = synthetic_capture(observation, note, source_files)
+            wrong_capture = root / ('wrong-source-' + label)
+            observation['write_bundle'](wrong_bundle, wrong_capture)
+            rejected = root / ('reject-source-' + label)
+            try:
+                publish(rejected, {**expected, 'path': wrong_capture,
+                                   'manifest_sha256': observation['capture_manifest_sha256'](wrong_capture),
+                                   'source_manifest_sha256': wrong_source_sha})
+            except RuntimeError as error:
+                assert str(error) == 'protected_observation_source_mismatch', label
+                assert not list(rejected.iterdir()), label
+            else:
+                rejected.chmod(0o700)
+                raise AssertionError('capture source ' + label + ' accepted')
+
+        for label, session in (('missing', None), ('mismatched', 'ses_otherresearch')):
+            event = json.loads(stream)
+            if session is None:
+                del event['sessionID']
+            else:
+                event['sessionID'] = session
+            rejected = root / ('reject-native-session-' + label)
+            try:
+                publish(rejected, expected, json.dumps(event) + '\n')
+            except RuntimeError as error:
+                assert str(error) == 'protected_observation_native_session_mismatch', label
+                assert not list(rejected.iterdir()), label
+            else:
+                rejected.chmod(0o700)
+                raise AssertionError('native session ' + label + ' accepted')
+
+        for label, current_run_id in (('missing', None), ('stale', 'different-current-run')):
+            rejected = root / ('reject-current-run-' + label)
+            try:
+                publish(rejected, expected, stream, current_run_id)
+            except RuntimeError as error:
+                assert str(error) == 'protected_observation_current_run_mismatch', label
+                assert not list(rejected.iterdir()), label
+            else:
+                rejected.chmod(0o700)
+                raise AssertionError('current run ' + label + ' accepted')
 
         for label, altered in (
             ('capture', {'manifest_sha256': '0' * 64}),
@@ -256,7 +321,9 @@ def main():
         assert observation['capture_manifest_sha256'](capture) == capture_sha
 
         ordinary = root / 'ordinary-packet'
-        publish(ordinary, None)
+        ordinary.mkdir()
+        runner.publish_review_packet(ordinary, originals, candidate, note, stream, checks,
+            'local_' + 'a' * 32, forbidden_paths=(str(root),))
         ordinary_request = json.loads((ordinary / 'REQUEST.json').read_text())
         assert ordinary_request['original_observation']['status'] == 'unavailable'
         assert 'capture_candidate' not in ordinary_request
@@ -273,6 +340,9 @@ def main():
             'original_observation_status': request['original_observation']['status'],
             'checks': {'sealed_capture_and_exact_copy': True,
                        'source_run_session_claim_binding': True,
+                       'exact_candidate_source_binding': True,
+                       'native_tool_session_binding': True,
+                       'separate_current_run_id_required': True,
                        'malformed_secret_and_drift_rejected': True,
                        'host_replay_distinct': True,
                        'global_stop_and_cleanup_required': True,

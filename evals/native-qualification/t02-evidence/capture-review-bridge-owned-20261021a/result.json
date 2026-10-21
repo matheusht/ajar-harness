@@ -1,0 +1,26 @@
+{
+  "capture_manifest_sha256": "8158a290627891c79ee659360e8c58dd72e43affd6bdb5fab36c388a7d7cf2ae",
+  "capture_status": "observation_capture_ready_not_finalized",
+  "checks": {
+    "global_stop_and_cleanup_required": true,
+    "host_replay_distinct": true,
+    "malformed_secret_and_drift_rejected": true,
+    "ordinary_packet_unchanged": true,
+    "sealed_capture_and_exact_copy": true,
+    "source_run_session_claim_binding": true
+  },
+  "classification": "owned synthetic source bridge; no managed native capture or review",
+  "finalization_status": "observation_capture_finalized",
+  "original_observation_status": "unavailable",
+  "packet_request_sha256": "4f8f7cab0e62cfe0f180855af312626ca58c43caa48806fe12c51009d5356a0c",
+  "provider_calls": 0,
+  "qualification_scope": "capture_lifecycle_only",
+  "review_status": "not_observed",
+  "scenario_id": "owned-t02-bridge-run",
+  "source_sha256": {
+    "observation_evaluator": "b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c",
+    "runner": "d0d1c15672c1b9b405926739e6c5d4494e95608cfe60b2b2afc89f42d16ce251"
+  },
+  "status": "pass",
+  "target_calls": 0
+}

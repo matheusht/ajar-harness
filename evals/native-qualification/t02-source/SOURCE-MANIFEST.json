@@ -6,6 +6,11 @@
       "sha256": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b"
     },
     {
+      "path": "evals/native-qualification/T02-CAPTURE-REVIEW-BRIDGE-CHECKS-20261021.md",
+      "bytes": 3102,
+      "sha256": "d54318f01f182ecabf34041b907c7ea3a605ab23b630506dcf1b26483182899e"
+    },
+    {
       "bytes": 1362,
       "path": "evals/native-qualification/T02-CLOUD-SOURCE-CHECKER-FAILURES-20261020.md",
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
@@ -34,6 +39,11 @@
       "bytes": 361,
       "path": "evals/native-qualification/smoke/check.php",
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
+    },
+    {
+      "path": "evals/native-qualification/smoke/check_v2_capture_review_bridge.py",
+      "bytes": 16317,
+      "sha256": "e197d9ded4713efa25d7f6ed63bc872bcbe75fc420bba3899687165e1f71a37c"
     },
     {
       "bytes": 3898,
@@ -71,9 +81,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 117329,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "e5f442ddcda8515cb0fb29b9a601cdea068e6c66da795c4b8c8da0e351569475"
+      "bytes": 122855,
+      "sha256": "d0d1c15672c1b9b405926739e6c5d4494e95608cfe60b2b2afc89f42d16ce251"
     },
     {
       "bytes": 1222,
@@ -101,9 +111,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1574,
+      "bytes": 1746,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "7995196f86a458978875472b8d14ad718c56fa4d40ab1050ddace36aeec967d8"
+      "sha256": "be8a41dad9a2b97bbbd5a71e6521351714a456a9a26c3e7245876764fa6c79b1"
     },
     {
       "bytes": 11748,
@@ -204,6 +214,11 @@
       "path": "experiments/native-network-preflight/v2_connect.py",
       "bytes": 28157,
       "sha256": "7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3"
+    },
+    {
+      "path": "experiments/native-observation-qualification/native_observation.py",
+      "bytes": 50361,
+      "sha256": "b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c"
     },
     {
       "path": "tools/docker_session_runtime.py",

@@ -4,7 +4,7 @@ Recorded: 2026-10-21 UTC
 
 ## Result
 
-The remaining owned-receiver proof cannot use a receiver inside this OSLIT client. The selected policy declares managed outbound proxies and no receiver, callback, or authority-remap field. The prior managed-proxy attempt to reach two client-owned addresses returned `503`, and the receiver recorded zero connections. This assessment did not repeat that known failed probe.
+The retained evidence does not demonstrate a supported local ingress route for the remaining owned-receiver proof, so live admission stays closed pending owned-receiver and native TLS proof. The selected policy declares managed outbound proxies and no receiver, callback, or authority-remap field. The prior managed-proxy attempt to reach two client-owned addresses returned `503`, and the receiver recorded zero connections. This assessment did not repeat that known failed probe.
 
 `--live-free` remains unconditionally denied with `cloud_live_route_not_qualified` before output creation or Docker. No source gate, transport authority, network policy, system trust, or persistent setting changed. No network probe, provider request, model call, or Docker mutation occurred.
 
@@ -28,7 +28,7 @@ The three owned offline receipt hashes point to local prior-run artifacts that a
 
 ## Smallest supported alternative
 
-An operator must supply one task-owned TLS receiver outside this OSLIT client on a fixed FQDN and port that the managed proxy can reach. Before any provider request, a separately reviewed preflight must correlate one per-run nonce hash with a sanitized receiver-side connection record. The input must include:
+An operator must supply one task-owned TLS receiver on a supported route at a fixed FQDN and port that the managed proxy can reach. Before any provider request, a separately reviewed preflight must correlate one per-run nonce hash with a sanitized receiver-side connection record. The input must include:
 
 - receiver ownership and authorization;
 - the approved FQDN and port;

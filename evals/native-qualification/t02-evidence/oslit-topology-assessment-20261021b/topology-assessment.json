@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "t02-oslit-topology-assessment",
   "recorded_at": "2026-10-21T18:36:32Z",
-  "status": "blocked_external_owned_receiver",
+  "status": "blocked_owned_receiver_and_native_tls_proof",
   "source": {
     "repository": "matheusht/redteam-harness",
     "branch": "codex/t02-live-prep-fail-closed-20261021",
@@ -85,11 +85,11 @@
     "observation_method": "read-only docker version, info, ps, image ls, volume ls, and network ls"
   },
   "decision": {
-    "supported_local_substitute": false,
-    "source_route_change_warranted_before_external_input": false,
+    "supported_local_ingress_demonstrated_in_retained_evidence": false,
+    "source_route_change_warranted_by_retained_evidence": false,
     "live_admission": "closed",
-    "required_external_input": [
-      "operator-approved task-owned TLS receiver outside this OSLIT client",
+    "required_proof_inputs": [
+      "operator-approved task-owned TLS receiver on a supported managed-proxy-reachable route",
       "fixed managed-proxy-reachable FQDN and port",
       "receiver ownership and route authorization",
       "hostname-matching certificate chain and CA hashes",
@@ -107,7 +107,7 @@
     ]
   },
   "issue_state": {
-    "158": "incomplete_blocked_external_owned_receiver_and_native_tls_proof",
+    "158": "incomplete_blocked_owned_receiver_and_native_tls_proof",
     "161": "incomplete_blocked_live_interruption_and_recovery",
     "165": "no_go_unchanged"
   },

@@ -40,7 +40,10 @@ IMAGE = {
     'RepoDigests': [],
     'Os': 'linux',
     'Architecture': 'amd64',
-    'Config': {'Env': ['PATH=/usr/local/bin:/usr/bin:/bin']},
+    'Config': {'Env': [
+        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
+    ]},
     'RootFS': {'Layers': ['sha256:' + '2' * 64]},
 }
 
@@ -54,19 +57,29 @@ class FakeCommands:
 
     def __init__(self, *, preexisting_tag=False, bad_php=False,
                  bad_provenance=False, bad_env=False, truncated_managed=False,
-                 leave_cache=False, remote_builder=False):
+                 bad_env_value=False, bad_cache_size=False,
+                 missing_cache_parents=False, leave_cache=False,
+                 remote_builder=False):
         self.preexisting_tag = preexisting_tag
         self.bad_php = bad_php
         self.bad_provenance = bad_provenance
         self.bad_env = bad_env
+        self.bad_env_value = bad_env_value
+        self.bad_cache_size = bad_cache_size
+        self.missing_cache_parents = missing_cache_parents
         self.truncated_managed = truncated_managed
         self.leave_cache = leave_cache
         self.remote_builder = remote_builder
         self.built = False
         self.image_present = preexisting_tag
         self.cache_rows = {
-            BASE_CACHE_ID: {'ID': BASE_CACHE_ID, 'Size': 1024, 'Parents': []},
+            BASE_CACHE_ID: {
+                'ID': BASE_CACHE_ID,
+                'Size': '36.8MiB' if bad_cache_size else '549B',
+            },
         }
+        if not missing_cache_parents:
+            self.cache_rows[BASE_CACHE_ID]['Parents'] = None
         self.pruned_cache_ids = []
         self.calls = []
         self.output_root = None
@@ -79,6 +92,8 @@ class FakeCommands:
         value = json.loads(json.dumps(IMAGE))
         if self.bad_env:
             value['Config']['Env'].append('OPENAI_APIKEY=owned-test-sentinel')
+        if self.bad_env_value:
+            value['Config']['Env'][1] = 'BUN_RUNTIME_TRANSPILER_CACHE_PATH=1'
         return value
 
     def run(self, argv, **_kwargs):
@@ -141,15 +156,15 @@ class FakeCommands:
             self.built = self.image_present = True
             self.cache_rows.update({
                 CACHE_ROOT_ID: {
-                    'ID': CACHE_ROOT_ID, 'Size': 2048,
-                    'Parents': [BASE_CACHE_ID],
+                    'ID': CACHE_ROOT_ID, 'Size': '36.8MB',
+                    'Parents': None,
                 },
                 CACHE_MIDDLE_ID: {
-                    'ID': CACHE_MIDDLE_ID, 'Size': 3072,
+                    'ID': CACHE_MIDDLE_ID, 'Size': '0B',
                     'Parents': [CACHE_ROOT_ID],
                 },
                 CACHE_CHILD_ID: {
-                    'ID': CACHE_CHILD_ID, 'Size': 4096,
+                    'ID': CACHE_CHILD_ID, 'Size': '1.5kB',
                     'Parents': [CACHE_MIDDLE_ID],
                 },
             })
@@ -353,8 +368,13 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(all('--pull=never' in call for call in commands.calls
                             if call[:2] == ['docker', 'run']))
         receipt = json.loads((output / 'result.json').read_text())
+        baseline = json.loads((output / 'baseline.private.json').read_text())
         self.assertEqual('pass', receipt['status'])
         self.assertTrue(receipt['baseline_restored'])
+        self.assertEqual(
+            [{'id': BASE_CACHE_ID, 'parents': [], 'size_bytes': 549}],
+            baseline['cache'])
+        self.assertEqual(549, baseline['cache_bytes'])
         self.assertEqual(0, receipt['external_activity']['provider_calls'])
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
@@ -388,6 +408,36 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(any(call and call[0].endswith('python3') for call in commands.calls))
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
+
+    def test_changed_safe_image_environment_value_skips_runtime_execution(self):
+        commands = FakeCommands(bad_env_value=True)
+        _output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        self.assertFalse(any(call[:2] == ['docker', 'run'] for call in commands.calls))
+        self.assertFalse(any(call and call[0].endswith('python3')
+                             for call in commands.calls))
+        self.assertFalse(commands.image_present)
+        self.assertFalse(commands.cache_present)
+
+    def test_unsupported_cache_size_unit_blocks_before_build(self):
+        commands = FakeCommands(bad_cache_size=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual('docker_cache_row_invalid', receipt['failure'])
+        self.assertFalse(any(call[:3] == ['docker', 'buildx', 'build']
+                             for call in commands.calls))
+        self.assertFalse(any(call[:2] == ['docker', 'run']
+                             for call in commands.calls))
+
+    def test_missing_cache_parents_blocks_before_build(self):
+        commands = FakeCommands(missing_cache_parents=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual('docker_cache_row_invalid', receipt['failure'])
+        self.assertFalse(any(call[:3] == ['docker', 'buildx', 'build']
+                             for call in commands.calls))
 
     def test_truncated_managed_result_fails_and_still_cleans(self):
         commands = FakeCommands(truncated_managed=True)

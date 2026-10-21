@@ -49,7 +49,10 @@ REQUIRED_PHP_PACKAGES = frozenset({
     'php84-mbstring', 'php84-openssl', 'php84-pdo_sqlite', 'php84-session',
     'php84-simplexml', 'php84-xml',
 })
-SAFE_IMAGE_ENV_NAMES = frozenset({'PATH'})
+EXPECTED_IMAGE_ENV = {
+    'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    'BUN_RUNTIME_TRANSPILER_CACHE_PATH': '0',
+}
 REQUIRED_MANAGED_CHECKS = frozenset({
     'host-check created immutable image and exact mounts/env',
     'relay created immutable image and exact mounts/env',
@@ -427,6 +430,31 @@ def _inspect_each(commands, kind: str, identifiers: list[str], code: str) -> lis
     return rows
 
 
+def _cache_size_bytes(value: object) -> int:
+    if type(value) is int and value >= 0:
+        return value
+    if not isinstance(value, str):
+        raise GateError('docker_cache_row_invalid')
+    match = re.fullmatch(r'(0|[1-9][0-9]*)(?:\.([0-9]+))?(B|kB|MB|GB|TB)', value)
+    if not match:
+        raise GateError('docker_cache_row_invalid')
+    whole, fraction, unit = match.groups()
+    fraction = fraction or ''
+    numerator = int(whole + fraction)
+    denominator = 10 ** len(fraction)
+    multiplier = {
+        'B': 1,
+        'kB': 1000,
+        'MB': 1000 ** 2,
+        'GB': 1000 ** 3,
+        'TB': 1000 ** 4,
+    }[unit]
+    scaled = numerator * multiplier
+    if scaled % denominator:
+        raise GateError('docker_cache_row_invalid')
+    return scaled // denominator
+
+
 def _cache_rows(commands) -> list[dict]:
     result = _required(commands, ['docker', 'buildx', 'du', '--format', 'json'],
                        'docker_cache_read_failed')
@@ -434,10 +462,14 @@ def _cache_rows(commands) -> list[dict]:
     normalized = []
     for row in rows:
         identifier = row.get('ID', row.get('Id', row.get('id')))
-        size = row.get('Size', row.get('size', 0))
-        parents = row.get('Parents', row.get('parents', []))
+        size = _cache_size_bytes(row.get('Size', row.get('size')))
+        parent_keys = [key for key in ('Parents', 'parents') if key in row]
+        if len(parent_keys) != 1:
+            raise GateError('docker_cache_row_invalid')
+        parents = row[parent_keys[0]]
+        if parents is None:
+            parents = []
         if (not isinstance(identifier, str) or not identifier
-                or type(size) is not int or size < 0
                 or not isinstance(parents, list)
                 or not all(isinstance(item, str) for item in parents)):
             raise GateError('docker_cache_row_invalid')
@@ -669,8 +701,7 @@ def _image_env_is_allowlisted(info: dict) -> bool:
         return False
     pairs = [item.split('=', 1) for item in env]
     names = [name for name, _value in pairs]
-    return (len(names) == len(set(names)) and set(names) == SAFE_IMAGE_ENV_NAMES
-            and all(name and value for name, value in pairs))
+    return len(names) == len(set(names)) and dict(pairs) == EXPECTED_IMAGE_ENV
 
 
 def _probe(commands, image_id: str, entrypoint: str, *args: str):
@@ -720,7 +751,7 @@ def admit_runtime(commands, image_info: dict, image_id: str,
         'installed_php84_packages': packages,
         'required_modules': ['gd', 'pdo_sqlite'],
         'required_tools': ['sh', 'php', 'wget', 'opencode'],
-        'image_environment_names': sorted(SAFE_IMAGE_ENV_NAMES),
+        'image_environment_names': sorted(EXPECTED_IMAGE_ENV),
         'external_activity': {'provider_calls': 0, 'model_calls': 0,
                               'live_targets_contacted': 0},
     }

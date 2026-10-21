@@ -6,7 +6,7 @@ It never builds or pulls an image. The control is an exact unpatched OpenCode
 v2.0.32 image. The candidate is a separate reviewed build whose native HTTP
 request executor requires a fixed ``OPENCODE_EXCLUSIVE_CA_FILE`` plus its exact
 ``OPENCODE_EXCLUSIVE_CA_SHA256``. It passes the bounded, verified bytes as Bun
-``fetch(..., {tls: {ca}})`` input. The three core arms prove the result.
+``fetch(..., {tls: {ca}})`` input. The three core arms define the future proof.
 Environment variable names alone do not.
 
 The stable ``provider.list`` and ``model.list`` CLI/API reads must expose the
@@ -35,6 +35,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import ssl
 import stat
 import subprocess
@@ -72,7 +73,12 @@ AMBIENT_LEAF_SERIAL = 41001
 REPLACEMENT_LEAF_SERIAL = 42001
 MALFORMED_EXCLUSIVE_CA_HASH = 'NOT-A-SHA256'
 REJECTION_PREFIX = 'OPENCODE_EXCLUSIVE_CA_REJECT:'
-MAX_REJECTION_OUTPUT_BYTES = 64 * 1024
+MAX_STRUCTURED_OUTPUT_BYTES = 64 * 1024
+DISPATCH_QUIET_SECONDS = 2.0
+DISPATCH_QUIET_TIMEOUT_SECONDS = 8.0
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 60
+NEGATIVE_COMMAND_TIMEOUT_SECONDS = 240
+NEGATIVE_TRANSPORT_ATTEMPTS = 11
 
 PROXY_ENV = (
     'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY',
@@ -85,7 +91,10 @@ TRUST_ENV = (
 )
 MUST_BE_ABSENT_ENV = (
     'SSLKEYLOGFILE', 'NODE_TLS_REJECT_UNAUTHORIZED', 'GIT_SSL_NO_VERIFY',
-    'OPENCODE_API_KEY',
+    'OPENCODE_API_KEY', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT',
+    'OPENCODE_CONFIG_DIR', 'OPENCODE_CLI_CONFIG_CONTENT', 'OPENCODE_DB',
+    'OPENCODE_MODELS_PATH', 'OPENCODE_MODELS_URL', 'OPENCODE_SIMULATE',
+    'OPENCODE_TEST_HOME', 'OPENCODE_DISABLE_PROJECT_CONFIG',
 )
 SENSITIVE_ENV_PARTS = (
     'TOKEN', 'SECRET', 'PASSWORD', 'API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY',
@@ -97,6 +106,15 @@ BOUNDARY_ENV = {
     'OPENCODE_DISABLE_CLAUDE_CODE': '1',
     'OPENCODE_FILEWATCHER_DISABLE': '1',
     'OPENCODE_DISABLE_FFF': '1',
+}
+FIXED_RUNTIME_ENV = {
+    'HOME': '/workspace/home',
+    'XDG_CONFIG_HOME': '/workspace/config',
+    'XDG_DATA_HOME': '/workspace/data',
+    'XDG_CACHE_HOME': '/workspace/cache',
+    'XDG_STATE_HOME': '/workspace/state',
+    'TMPDIR': '/workspace/tmp',
+    'NO_COLOR': '1',
 }
 SERVER_CONTROL_ENV = ('OPENCODE_SERVER_USERNAME', 'OPENCODE_SERVER_PASSWORD')
 CORE_ARMS = (
@@ -144,9 +162,53 @@ REJECTION_CODE = {
 }
 OBSERVATION_KEYS = (
     'tcp_connections', 'tls_handshakes', 'tls_failures', 'http_requests',
-    'expected_path_requests', 'dispatch_marker_requests',
+    'expected_path_requests', 'arm_header_requests', 'dispatch_marker_requests',
     'unexpected_http_requests',
 )
+NATIVE_FACT_KEYS = frozenset({
+    'native_http_verified', 'provider_package', 'effective_model_package',
+    'provider_transport', 'model_transport_override_absent',
+    'transport_authority', 'provider_base_url_verified',
+    'model_base_url_verified', 'base_url_verified',
+    'provider_request_headers_verified', 'model_request_headers_verified',
+    'request_marker_verified', 'request_header_authority',
+    'source_boundary_verified', 'preflight_method_scope',
+    'source_document_verified', 'readback_scope',
+})
+OBSERVATION_ROW_KEYS = frozenset(OBSERVATION_KEYS) | frozenset(
+    prefix + key
+    for prefix in ('preflight_', 'dispatch_baseline_')
+    for key in OBSERVATION_KEYS
+)
+CORE_ROW_KEYS = frozenset({
+    'arm', 'case_kind', 'image_role', 'trust_mode', 'served_chain',
+    'replacement_pair_state', 'ambient_ca_sha256', 'replacement_ca_sha256',
+    'mounted_ca_hashes_stable', 'baseline_zero_verified',
+    'dispatch_network_activated', 'preflight_network_mode',
+    'responder_quiescence_verified', 'responder_sealed',
+    'container_removed_before_responder_seal', 'quiescence_window_ms',
+    'command_timeout_seconds', 'expected_transport_attempts',
+    'version_verified', 'server_started', 'dispatched', 'exit_code',
+    'exit_kind',
+}) | NATIVE_FACT_KEYS | OBSERVATION_ROW_KEYS
+TRANSPORT_PROOF_KEYS = frozenset({
+    'structured_transport_verified', 'transport_error_type',
+    'transport_session_id_present', 'transport_step_start_count',
+    'transport_terminal_error_count', 'transport_trace_event_count',
+})
+PRESOCKET_ROW_KEYS = frozenset({
+    'arm', 'case_kind', 'image_role', 'input_mode', 'replacement_pair_state',
+    'version_verified', 'server_started', 'baseline_zero_verified',
+    'dispatch_network_activated', 'preflight_network_mode',
+    'responder_quiescence_verified', 'responder_sealed',
+    'container_removed_before_responder_seal', 'quiescence_window_ms',
+    'command_timeout_seconds', 'expected_transport_attempts', 'dispatched',
+    'failure_stage', 'termination_verified', 'server_alive_after_rejection',
+    'native_readback_stable', 'structured_rejection_verified',
+    'rejection_code', 'session_id_present', 'structured_step_start_count',
+    'structured_terminal_error_count', 'structured_event_count', 'exit_code',
+    'exit_kind',
+}) | NATIVE_FACT_KEYS | OBSERVATION_ROW_KEYS
 
 
 class CheckError(RuntimeError):
@@ -155,6 +217,11 @@ class CheckError(RuntimeError):
 
 def _count(value):
     return type(value) is int and value >= 0
+
+
+def _exact_count(row, key, expected):
+    value = row.get(key)
+    return _count(value) and value == expected
 
 
 def _observation_delta(after, before):
@@ -173,6 +240,20 @@ def _observation_is_zero(snapshot):
             and all(snapshot[key] == 0 for key in OBSERVATION_KEYS))
 
 
+def _prefixed_observation(prefix, snapshot):
+    if (not isinstance(prefix, str) or not prefix
+            or not isinstance(snapshot, dict)
+            or set(snapshot) != set(OBSERVATION_KEYS)
+            or not all(_count(snapshot[key]) for key in OBSERVATION_KEYS)):
+        raise CheckError('owned_responder_observation_invalid')
+    return {prefix + key: snapshot[key] for key in OBSERVATION_KEYS}
+
+
+def _prefixed_observation_is_zero(row, prefix):
+    return all(_count(row.get(prefix + key)) and row[prefix + key] == 0
+               for key in OBSERVATION_KEYS)
+
+
 def _native_facts_verified(row):
     return (row.get('native_http_verified') is True
             and row.get('provider_package') == NATIVE_PACKAGE
@@ -183,7 +264,13 @@ def _native_facts_verified(row):
             and row.get('provider_base_url_verified') is True
             and row.get('model_base_url_verified') is True
             and row.get('base_url_verified') is True
+            and row.get('provider_request_headers_verified') is True
+            and row.get('model_request_headers_verified') is True
             and row.get('request_marker_verified') is True
+            and row.get('request_header_authority') == 'provider.headers+model.headers'
+            and row.get('source_boundary_verified') is True
+            and row.get('preflight_method_scope') == (
+                'openapi.get+server.info+model.list+provider.list+config.get')
             and row.get('source_document_verified') is True
             and row.get('readback_scope') == 'persistent-server-authority')
 
@@ -202,36 +289,62 @@ def evaluate_arms(rows, fixture):
         checks.append({'name': name, 'pass': bool(passed)})
 
     valid_rows = isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
-    fixture_valid = (isinstance(fixture, dict)
-                     and re.fullmatch(r'[0-9a-f]{64}',
-                                      fixture.get('ambient_ca_sha256', '')) is not None
-                     and re.fullmatch(r'[0-9a-f]{64}',
-                                      fixture.get('replacement_ca_sha256', '')) is not None
-                     and fixture.get('ambient_ca_sha256')
-                     != fixture.get('replacement_ca_sha256'))
+    ambient_hash = (fixture.get('ambient_ca_sha256')
+                    if isinstance(fixture, dict) else None)
+    replacement_hash = (fixture.get('replacement_ca_sha256')
+                        if isinstance(fixture, dict) else None)
+    fixture_valid = (
+        isinstance(ambient_hash, str)
+        and isinstance(replacement_hash, str)
+        and re.fullmatch(r'[0-9a-f]{64}', ambient_hash) is not None
+        and re.fullmatch(r'[0-9a-f]{64}', replacement_hash) is not None
+        and ambient_hash != replacement_hash
+    )
     add('initial CA fixture hashes are distinct and valid', fixture_valid)
     names = [row.get('arm') for row in rows] if valid_rows else []
+    names_valid = valid_rows and all(isinstance(name, str) for name in names)
     expected_names = ([name for name, _, _, _ in CORE_ARMS]
                       + [name for name, _ in PRESOCKET_CASES])
-    add('exact arm identities', valid_rows and sorted(names) == sorted(expected_names)
+    add('exact arm identities', names_valid and sorted(names) == sorted(expected_names)
         and len(set(names)) == len(expected_names))
-    by_name = {row.get('arm'): row for row in rows} if valid_rows else {}
+    by_name = {row['arm']: row for row in rows} if names_valid else {}
 
     for name, image_role, trust_mode, served_chain in CORE_ARMS:
         row = by_name.get(name, {})
-        counts_valid = all(_count(row.get(key)) for key in (
-            'preflight_tcp_connections', 'preflight_http_requests', 'tcp_connections',
-            'tls_handshakes', 'tls_failures', 'http_requests', 'expected_path_requests',
-            'dispatch_marker_requests', 'unexpected_http_requests',
-        ))
+        counts_valid = (all(_count(row.get(key)) for key in OBSERVATION_KEYS)
+                        and all(_count(row.get('preflight_' + key))
+                                for key in OBSERVATION_KEYS)
+                        and all(_count(row.get('dispatch_baseline_' + key))
+                                for key in OBSERVATION_KEYS))
+        expected_row_keys = (CORE_ROW_KEYS | TRANSPORT_PROOF_KEYS
+                             if name == 'ambient-rejected' else CORE_ROW_KEYS)
+        baseline_zero = (_prefixed_observation_is_zero(row, 'preflight_')
+                         and _prefixed_observation_is_zero(
+                             row, 'dispatch_baseline_'))
         add(name + ' observation schema', counts_valid
+            and set(row) == expected_row_keys
             and row.get('case_kind') == 'core'
             and row.get('image_role') == image_role
             and row.get('trust_mode') == trust_mode
             and row.get('served_chain') == served_chain
             and row.get('version_verified') is True
             and row.get('server_started') is True
-            and row.get('baseline_zero_verified') is True
+            and row.get('preflight_network_mode') == 'none'
+            and row.get('dispatch_network_activated') is True
+            and type(row.get('exit_code')) is int
+            and baseline_zero
+            and row.get('baseline_zero_verified') is baseline_zero
+            and row.get('responder_quiescence_verified') is True
+            and row.get('responder_sealed') is True
+            and row.get('container_removed_before_responder_seal') is True
+            and _exact_count(row, 'quiescence_window_ms', int(
+                DISPATCH_QUIET_SECONDS * 1000))
+            and _exact_count(row, 'command_timeout_seconds', (
+                NEGATIVE_COMMAND_TIMEOUT_SECONDS
+                if name == 'ambient-rejected' else DEFAULT_COMMAND_TIMEOUT_SECONDS))
+            and _exact_count(row, 'expected_transport_attempts', (
+                NEGATIVE_TRANSPORT_ATTEMPTS
+                if name == 'ambient-rejected' else 1))
             and row.get('mounted_ca_hashes_stable') is True
             and fixture_valid
             and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
@@ -242,28 +355,40 @@ def evaluate_arms(rows, fixture):
                 'complete' if image_role == 'candidate' else 'absent'))
         add(name + ' native HTTP package preflight', _native_facts_verified(row))
         add(name + ' readback made no selected-endpoint request', counts_valid
-            and row.get('preflight_tcp_connections') == 0
-            and row.get('preflight_http_requests') == 0)
+            and _prefixed_observation_is_zero(row, 'preflight_'))
         add(name + ' dispatched only after preflight', row.get('dispatched') is True)
 
     for name in ('ambient-control', 'replacement-positive'):
         row = by_name.get(name, {})
-        add(name + ' owned TLS and HTTP succeeded', row.get('exit_kind') == 'zero'
-            and _count(row.get('tcp_connections')) and row.get('tcp_connections') >= 1
-            and _count(row.get('tls_handshakes')) and row.get('tls_handshakes') >= 1
+        add(name + ' owned TLS and HTTP succeeded', row.get('exit_code') == 0
+            and row.get('exit_kind') == 'zero'
+            and row.get('tcp_connections') == 1
+            and row.get('tls_handshakes') == 1
             and row.get('tls_failures') == 0
-            and _count(row.get('http_requests')) and row.get('http_requests') >= 1
+            and row.get('http_requests') == 1
             and row.get('expected_path_requests') == row.get('http_requests')
+            and row.get('arm_header_requests') == row.get('http_requests')
             and row.get('dispatch_marker_requests') == row.get('http_requests')
             and row.get('unexpected_http_requests') == 0)
 
     denied = by_name.get('ambient-rejected', {})
-    add('ambient-only chain rejected by replacement store', denied.get('exit_kind') == 'nonzero'
-        and _count(denied.get('tcp_connections')) and denied.get('tcp_connections') >= 1
+    add('ambient-only chain rejected by replacement store', denied.get('exit_code') == 1
+        and denied.get('exit_kind') == 'nonzero'
+        and denied.get('structured_transport_verified') is True
+        and denied.get('transport_error_type') == 'provider.transport'
+        and denied.get('transport_session_id_present') is True
+        and _count(denied.get('transport_step_start_count'))
+        and denied.get('transport_step_start_count') <= NEGATIVE_TRANSPORT_ATTEMPTS
+        and _exact_count(denied, 'transport_terminal_error_count', 1)
+        and _count(denied.get('transport_trace_event_count'))
+        and denied['transport_trace_event_count'] == (
+            denied['transport_step_start_count'] + 1)
+        and denied.get('tcp_connections') == NEGATIVE_TRANSPORT_ATTEMPTS
         and denied.get('tls_handshakes') == 0
-        and _count(denied.get('tls_failures')) and denied.get('tls_failures') >= 1
+        and denied.get('tls_failures') == NEGATIVE_TRANSPORT_ATTEMPTS
         and denied.get('http_requests') == 0
         and denied.get('expected_path_requests') == 0
+        and denied.get('arm_header_requests') == 0
         and denied.get('dispatch_marker_requests') == 0
         and denied.get('unexpected_http_requests') == 0)
 
@@ -278,24 +403,44 @@ def evaluate_arms(rows, fixture):
 
     for name, input_mode in PRESOCKET_CASES:
         row = by_name.get(name, {})
-        counts_valid = all(_count(row.get(key)) for key in (
-            'preflight_tcp_connections', 'preflight_http_requests', 'tcp_connections',
-            'tls_handshakes', 'tls_failures', 'http_requests',
-            'expected_path_requests', 'dispatch_marker_requests',
-            'unexpected_http_requests',
-        ))
+        counts_valid = (all(_count(row.get(key)) for key in OBSERVATION_KEYS)
+                        and all(_count(row.get('preflight_' + key))
+                                for key in OBSERVATION_KEYS)
+                        and all(_count(row.get('dispatch_baseline_' + key))
+                                for key in OBSERVATION_KEYS))
+        baseline_zero = (_prefixed_observation_is_zero(row, 'preflight_')
+                         and _prefixed_observation_is_zero(
+                             row, 'dispatch_baseline_'))
         authority_valid = (
-            row.get('server_started') is True
-            and row.get('baseline_zero_verified') is True
+            set(row) == PRESOCKET_ROW_KEYS
+            and counts_valid
+            and row.get('server_started') is True
+            and row.get('preflight_network_mode') == 'none'
+            and row.get('dispatch_network_activated') is True
+            and type(row.get('exit_code')) is int
+            and baseline_zero
+            and row.get('baseline_zero_verified') is baseline_zero
+            and row.get('responder_quiescence_verified') is True
+            and row.get('responder_sealed') is True
+            and row.get('container_removed_before_responder_seal') is True
+            and _exact_count(row, 'quiescence_window_ms', int(
+                DISPATCH_QUIET_SECONDS * 1000))
+            and _exact_count(row, 'command_timeout_seconds',
+                             DEFAULT_COMMAND_TIMEOUT_SECONDS)
+            and _exact_count(row, 'expected_transport_attempts', 0)
             and _native_facts_verified(row)
-            and row.get('preflight_tcp_connections') == 0
-            and row.get('preflight_http_requests') == 0
+            and _prefixed_observation_is_zero(row, 'preflight_')
             and row.get('dispatched') is True
             and row.get('failure_stage') == 'same-server-dispatch'
             and row.get('structured_rejection_verified') is True
             and row.get('rejection_code') == REJECTION_CODE[input_mode]
             and row.get('session_id_present') is True
-            and row.get('structured_event_count') == 1
+            and _count(row.get('structured_step_start_count'))
+            and row.get('structured_step_start_count') <= 1
+            and _exact_count(row, 'structured_terminal_error_count', 1)
+            and _count(row.get('structured_event_count'))
+            and row['structured_event_count'] == (
+                row['structured_step_start_count'] + 1)
             and row.get('server_alive_after_rejection') is True
             and row.get('native_readback_stable') is True
         )
@@ -307,11 +452,13 @@ def evaluate_arms(rows, fixture):
             and row.get('replacement_pair_state') == PAIR_STATE[input_mode]
             and authority_valid
             and row.get('termination_verified') is True
+            and row.get('exit_code') == 1
             and row.get('exit_kind') == 'nonzero'
             and counts_valid
             and all(row.get(key) == 0 for key in (
                 'tcp_connections', 'tls_handshakes', 'tls_failures', 'http_requests',
-                'expected_path_requests', 'dispatch_marker_requests',
+                'expected_path_requests', 'arm_header_requests',
+                'dispatch_marker_requests',
                 'unexpected_http_requests',
             )))
     return {'pass': bool(checks) and all(check['pass'] for check in checks), 'checks': checks}
@@ -319,6 +466,24 @@ def evaluate_arms(rows, fixture):
 
 def self_test():
     """Exercise the pure evaluator without Docker, sockets, or subprocesses."""
+    if (not all(_critical_name(name) for name in MUST_BE_ABSENT_ENV)
+            or not all(_critical_name(name) for name in FIXED_RUNTIME_ENV)
+            or any(_image_forbidden_name(name) for name in FIXED_RUNTIME_ENV)
+            or not all(_image_forbidden_name(name) for name in MUST_BE_ABSENT_ENV)
+            or _critical_name('LRH_BENIGN_PUBLIC_VALUE')):
+        raise RuntimeError('critical_environment_fixture_failed')
+    raw_config = _config_document(
+        'https://opencode.ai:4443/inference/openai/v1', 'lrh-' + 'a' * 32 + '-fixture',
+        normalized=False)
+    normalized_config = _config_document(
+        'https://opencode.ai:4443/inference/openai/v1', 'lrh-' + 'a' * 32 + '-fixture',
+        normalized=True)
+    if (set(raw_config) != set(normalized_config)
+            or raw_config.get('model') != MODEL
+            or normalized_config.get('model') != {
+                'providerID': 'opencode', 'model': MODEL_ID}
+            or 'mcp' in raw_config or 'mcp' in normalized_config):
+        raise RuntimeError('normalized_config_fixture_failed')
     if len({AMBIENT_ROOT_SERIAL, REPLACEMENT_ROOT_SERIAL,
             AMBIENT_LEAF_SERIAL, REPLACEMENT_LEAF_SERIAL}) != 4:
         raise RuntimeError('certificate_serial_fixture_failed')
@@ -328,10 +493,29 @@ def self_test():
                   (None, 'unknown'), (True, 'unknown'))
     if any(_exit_kind(code) != expected for code, expected in exit_cases):
         raise RuntimeError('exit_classification_fixture_failed')
+    if (_json_scalar_count({'messages': [{'content': 'dispatch'}]}, 'dispatch') != 1
+            or _json_scalar_count(['dispatch', 'dispatch'], 'dispatch') != 2
+            or _json_scalar_count({'dispatch': 'other'}, 'dispatch') != 0):
+        raise RuntimeError('dispatch_marker_fixture_failed')
+    dispatch_markers = {_new_dispatch_prompt('fixture') for _item in range(2)}
+    if (len(dispatch_markers) != 2
+            or any(re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-fixture', marker) is None
+                   for marker in dispatch_markers)):
+        raise RuntimeError('dispatch_marker_uniqueness_fixture_failed')
+    for system_exit in (SystemExit(), SystemExit(0), SystemExit(None),
+                        SystemExit('unpublished-payload')):
+        try:
+            _raise_unhandled(system_exit)
+        except CheckError as error:
+            if str(error) != 'execution_aborted':
+                raise
+        else:
+            raise RuntimeError('system_exit_zero_fixture_failed')
     zero_observation = {key: 0 for key in OBSERVATION_KEYS}
     final_observation = dict(zero_observation, tcp_connections=1,
                              tls_handshakes=1, http_requests=1,
                              expected_path_requests=1,
+                             arm_header_requests=1,
                              dispatch_marker_requests=1)
     if (not _observation_is_zero(zero_observation)
             or _observation_is_zero(final_observation)
@@ -345,6 +529,8 @@ def self_test():
     base = {
         'version_verified': True,
         'server_started': True,
+        'preflight_network_mode': 'none',
+        'dispatch_network_activated': True,
         'native_http_verified': True,
         'provider_package': NATIVE_PACKAGE,
         'effective_model_package': NATIVE_PACKAGE,
@@ -354,21 +540,35 @@ def self_test():
         'provider_base_url_verified': True,
         'model_base_url_verified': True,
         'base_url_verified': True,
+        'provider_request_headers_verified': True,
+        'model_request_headers_verified': True,
         'request_marker_verified': True,
+        'request_header_authority': 'provider.headers+model.headers',
+        'source_boundary_verified': True,
+        'preflight_method_scope': (
+            'openapi.get+server.info+model.list+provider.list+config.get'),
         'source_document_verified': True,
         'readback_scope': 'persistent-server-authority',
         'mounted_ca_hashes_stable': True,
         'baseline_zero_verified': True,
-        'preflight_tcp_connections': 0,
-        'preflight_http_requests': 0,
+        'responder_quiescence_verified': True,
+        'responder_sealed': True,
+        'container_removed_before_responder_seal': True,
+        'quiescence_window_ms': int(DISPATCH_QUIET_SECONDS * 1000),
+        'command_timeout_seconds': DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        'expected_transport_attempts': 1,
+        **_prefixed_observation('preflight_', zero_observation),
+        **_prefixed_observation('dispatch_baseline_', zero_observation),
         'dispatched': True,
         'tcp_connections': 1,
         'tls_handshakes': 1,
         'tls_failures': 0,
         'http_requests': 1,
         'expected_path_requests': 1,
+        'arm_header_requests': 1,
         'dispatch_marker_requests': 1,
         'unexpected_http_requests': 0,
+        'exit_code': 0,
         'exit_kind': 'zero',
     }
     rows = []
@@ -382,12 +582,24 @@ def self_test():
                    replacement_pair_state=(
                        'complete' if image_role == 'candidate' else 'absent'))
         if name == 'ambient-rejected':
-            row.update(exit_kind='nonzero', tls_handshakes=0, tls_failures=1,
+            row.update(exit_kind='nonzero',
+                       exit_code=1,
+                       structured_transport_verified=True,
+                       transport_error_type='provider.transport',
+                       transport_session_id_present=True,
+                       transport_step_start_count=NEGATIVE_TRANSPORT_ATTEMPTS,
+                       transport_terminal_error_count=1,
+                       transport_trace_event_count=NEGATIVE_TRANSPORT_ATTEMPTS + 1,
+                       command_timeout_seconds=NEGATIVE_COMMAND_TIMEOUT_SECONDS,
+                       expected_transport_attempts=NEGATIVE_TRANSPORT_ATTEMPTS,
+                       tcp_connections=NEGATIVE_TRANSPORT_ATTEMPTS,
+                       tls_handshakes=0,
+                       tls_failures=NEGATIVE_TRANSPORT_ATTEMPTS,
                        http_requests=0, expected_path_requests=0,
-                       dispatch_marker_requests=0)
+                       arm_header_requests=0, dispatch_marker_requests=0)
         rows.append(row)
     for name, input_mode in PRESOCKET_CASES:
-        rows.append({
+        row = {
             'arm': name,
             'case_kind': 'pre-socket',
             'image_role': 'candidate',
@@ -395,25 +607,30 @@ def self_test():
             'version_verified': True,
             'replacement_pair_state': PAIR_STATE[input_mode],
             **base,
+            'exit_code': 1,
             'exit_kind': 'nonzero',
             'termination_verified': True,
             'failure_stage': 'same-server-dispatch',
             'structured_rejection_verified': True,
             'rejection_code': REJECTION_CODE[input_mode],
             'session_id_present': True,
-            'structured_event_count': 1,
+            'structured_step_start_count': 1,
+            'structured_terminal_error_count': 1,
+            'structured_event_count': 2,
             'server_alive_after_rejection': True,
             'native_readback_stable': True,
-            'preflight_tcp_connections': 0,
-            'preflight_http_requests': 0,
+            'expected_transport_attempts': 0,
             'tcp_connections': 0,
             'tls_handshakes': 0,
             'tls_failures': 0,
             'http_requests': 0,
             'expected_path_requests': 0,
+            'arm_header_requests': 0,
             'dispatch_marker_requests': 0,
             'unexpected_http_requests': 0,
-        })
+        }
+        row.pop('mounted_ca_hashes_stable')
+        rows.append(row)
     if not evaluate_arms(rows, fixture)['pass']:
         raise RuntimeError('evaluator_positive_fixture_failed')
     mutations = (
@@ -425,16 +642,41 @@ def self_test():
         (1, 'transport_authority', 'model.settings'),
         (1, 'model_base_url_verified', False),
         (1, 'base_url_verified', False),
+        (1, 'provider_request_headers_verified', False),
+        (1, 'model_request_headers_verified', False),
         (1, 'request_marker_verified', False),
+        (1, 'request_header_authority', 'provider.settings.headers'),
+        (1, 'source_boundary_verified', False),
+        (1, 'preflight_method_scope', 'provider.list+model.list'),
         (2, 'preflight_http_requests', 1),
+        (2, 'preflight_tls_failures', 1),
+        (2, 'dispatch_baseline_tcp_connections', 1),
+        (2, 'dispatch_network_activated', False),
+        (2, 'preflight_network_mode', 'owned-bridge'),
+        (2, 'responder_quiescence_verified', False),
+        (2, 'responder_sealed', False),
+        (2, 'container_removed_before_responder_seal', False),
+        (2, 'quiescence_window_ms', 0),
+        (2, 'command_timeout_seconds', DEFAULT_COMMAND_TIMEOUT_SECONDS),
+        (2, 'expected_transport_attempts', 1),
         (2, 'dispatched', False),
         (2, 'tcp_connections', 0),
         (2, 'tls_failures', 0),
         (2, 'http_requests', 1),
         (1, 'dispatch_marker_requests', 0),
+        (1, 'arm_header_requests', 0),
         (2, 'dispatch_marker_requests', 1),
         (2, 'exit_kind', 'zero'),
+        (2, 'exit_code', 0),
         (2, 'exit_kind', 'unknown'),
+        (2, 'structured_transport_verified', False),
+        (2, 'transport_error_type', 'unknown'),
+        (2, 'transport_session_id_present', False),
+        (2, 'transport_step_start_count', NEGATIVE_TRANSPORT_ATTEMPTS + 1),
+        (2, 'transport_terminal_error_count', 0),
+        (2, 'transport_terminal_error_count', True),
+        (2, 'transport_trace_event_count', NEGATIVE_TRANSPORT_ATTEMPTS),
+        (2, 'transport_trace_event_count', True),
         (1, 'ambient_ca_sha256', 'c' * 64),
         (2, 'replacement_ca_sha256', 'c' * 64),
         (1, 'mounted_ca_hashes_stable', False),
@@ -449,9 +691,15 @@ def self_test():
         (3, 'structured_rejection_verified', False),
         (3, 'rejection_code', 'digest_required'),
         (3, 'session_id_present', False),
-        (3, 'structured_event_count', 0),
+        (3, 'structured_step_start_count', 2),
+        (3, 'structured_terminal_error_count', 0),
+        (3, 'structured_terminal_error_count', True),
+        (3, 'structured_event_count', 1),
+        (3, 'structured_event_count', True),
         (3, 'server_alive_after_rejection', False),
         (3, 'native_readback_stable', False),
+        (3, 'expected_transport_attempts', 1),
+        (3, 'expected_transport_attempts', True),
         (3, 'failure_stage', 'server-startup'),
         (4, 'replacement_pair_state', 'absent'),
         (5, 'replacement_pair_state', 'complete'),
@@ -459,6 +707,7 @@ def self_test():
         (7, 'input_mode', 'missing-both'),
         (5, 'tcp_connections', 1),
         (8, 'exit_kind', 'zero'),
+        (8, 'exit_code', 0),
         (9, 'native_http_verified', False),
         (10, 'preflight_http_requests', 1),
         (11, 'tcp_connections', 1),
@@ -470,6 +719,30 @@ def self_test():
         changed[index][key] = value
         if evaluate_arms(changed, fixture)['pass']:
             raise RuntimeError('evaluator_negative_fixture_failed')
+    for index, key in ((0, 'expected_transport_attempts'),
+                       (0, 'command_timeout_seconds')):
+        changed = copy.deepcopy(rows)
+        changed[index][key] = True
+        if evaluate_arms(changed, fixture)['pass']:
+            raise RuntimeError('evaluator_boolean_count_fixture_failed')
+    changed = copy.deepcopy(rows)
+    changed[0]['raw_provider_log'] = 'must-not-be-retained'
+    if evaluate_arms(changed, fixture)['pass']:
+        raise RuntimeError('evaluator_unknown_field_fixture_failed')
+    for malformed_name in (None, 7, []):
+        changed = copy.deepcopy(rows)
+        changed[0]['arm'] = malformed_name
+        if evaluate_arms(changed, fixture)['pass']:
+            raise RuntimeError('evaluator_malformed_arm_fixture_failed')
+    for malformed_fixture in (
+            None,
+            {'ambient_ca_sha256': None,
+             'replacement_ca_sha256': fixture['replacement_ca_sha256']},
+            {'ambient_ca_sha256': fixture['ambient_ca_sha256'],
+             'replacement_ca_sha256': []},
+    ):
+        if evaluate_arms(rows, malformed_fixture)['pass']:
+            raise RuntimeError('evaluator_malformed_hash_fixture_failed')
     if evaluate_arms(rows[:-1], fixture)['pass']:
         raise RuntimeError('evaluator_missing_arm_failed')
     changed_fixture = dict(fixture, replacement_ca_sha256=fixture['ambient_ca_sha256'])
@@ -477,13 +750,33 @@ def self_test():
         raise RuntimeError('evaluator_fixture_identity_failed')
     session_id = 'ses_01TESTFIXTURE'
 
+    def step_start(session=session_id, *, part_session=None, message='msg_01TEST',
+                   part_id='prt_01TEST'):
+        return {
+            'type': 'step_start', 'timestamp': 1, 'sessionID': session,
+            'part': {
+                'id': part_id,
+                'sessionID': session if part_session is None else part_session,
+                'messageID': message,
+                'type': 'step-start',
+            },
+        }
+
     def rejection_result(code, *, returncode=1, stderr='', session=session_id,
-                         event_type='error', message_prefix=''):
-        events = [{
+                         event_type='error', message_prefix='', steps=1,
+                         error_type='unknown', extra_error=None):
+        events = [step_start(session, part_id='prt_' + str(index + 1))
+                  for index in range(steps)]
+        error = {
+            'type': error_type,
+            'message': message_prefix + REJECTION_PREFIX + code,
+        }
+        if extra_error:
+            error.update(extra_error)
+        events.append({
             'type': event_type, 'timestamp': 2, 'sessionID': session,
-            'error': {'type': 'unknown',
-                      'message': message_prefix + REJECTION_PREFIX + code},
-        }]
+            'error': error,
+        })
         return subprocess.CompletedProcess(
             [], returncode,
             '\n'.join(json.dumps(event, separators=(',', ':')) for event in events) + '\n',
@@ -496,12 +789,26 @@ def self_test():
                 'structured_rejection_verified': True,
                 'rejection_code': code,
                 'session_id_present': True,
-                'structured_event_count': 1}:
+                'structured_step_start_count': 1,
+                'structured_terminal_error_count': 1,
+                'structured_event_count': 2}:
             raise RuntimeError('structured_rejection_fixture_failed')
+    projected_rejection = _structured_rejection(
+        rejection_result('path_required', steps=0), 'missing-both')
+    if projected_rejection != {
+            'structured_rejection_verified': True,
+            'rejection_code': 'path_required',
+            'session_id_present': True,
+            'structured_step_start_count': 0,
+            'structured_terminal_error_count': 1,
+            'structured_event_count': 1}:
+        raise RuntimeError('structured_projected_rejection_fixture_failed')
     ambiguous_rejections = (
         rejection_result('path_required', returncode=2),
         rejection_result('path_required', stderr='warning'),
         rejection_result('path_required', session=''),
+        rejection_result('path_required', steps=2),
+        rejection_result('path_required', extra_error={'status': 500}),
         rejection_result('digest_required'),
         rejection_result('path_required', event_type='text'),
         rejection_result('path_required', message_prefix='request failed: '),
@@ -511,6 +818,68 @@ def self_test():
     if any(_structured_rejection(result, 'missing-both') is not None
            for result in ambiguous_rejections):
         raise RuntimeError('structured_rejection_ambiguity_fixture_failed')
+    transport_events = [
+        step_start(part_id='prt_' + str(index + 1))
+        for index in range(NEGATIVE_TRANSPORT_ATTEMPTS)
+    ]
+    transport_events.append({
+        'type': 'error', 'timestamp': 2, 'sessionID': session_id,
+        'error': {'type': 'provider.transport', 'message': 'TLS certificate rejected'},
+    })
+
+    def transport_result(events=transport_events, *, returncode=1, stderr=''):
+        return subprocess.CompletedProcess(
+            [], returncode,
+            '\n'.join(json.dumps(event, separators=(',', ':')) for event in events) + '\n',
+            stderr,
+        )
+
+    transport_proof = _structured_transport_terminal(transport_result())
+    if transport_proof != {
+            'structured_transport_verified': True,
+            'transport_error_type': 'provider.transport',
+            'transport_session_id_present': True,
+            'transport_step_start_count': NEGATIVE_TRANSPORT_ATTEMPTS,
+            'transport_terminal_error_count': 1,
+            'transport_trace_event_count': NEGATIVE_TRANSPORT_ATTEMPTS + 1}:
+        raise RuntimeError('structured_transport_fixture_failed')
+    projected_transport = _structured_transport_terminal(
+        transport_result(transport_events[-1:]))
+    if projected_transport != {
+            'structured_transport_verified': True,
+            'transport_error_type': 'provider.transport',
+            'transport_session_id_present': True,
+            'transport_step_start_count': 0,
+            'transport_terminal_error_count': 1,
+            'transport_trace_event_count': 1}:
+        raise RuntimeError('structured_projected_transport_fixture_failed')
+    mixed_session_events = copy.deepcopy(transport_events)
+    mixed_session_events[1]['sessionID'] = 'ses_OTHER'
+    wrong_error_events = copy.deepcopy(transport_events)
+    wrong_error_events[-1]['error']['type'] = 'provider.auth'
+    response_error_events = copy.deepcopy(transport_events)
+    response_error_events[-1]['error']['status'] = 502
+    text_events = copy.deepcopy(transport_events)
+    text_events[0]['type'] = 'text'
+    reordered_events = copy.deepcopy(transport_events)
+    reordered_events[-2], reordered_events[-1] = (
+        reordered_events[-1], reordered_events[-2])
+    ambiguous_transport = (
+        transport_result(returncode=2),
+        transport_result(stderr='warning'),
+        transport_result([step_start(part_id='prt_EXTRA' + str(index))
+                          for index in range(NEGATIVE_TRANSPORT_ATTEMPTS + 1)]
+                         + transport_events[-1:]),
+        transport_result(mixed_session_events),
+        transport_result(wrong_error_events),
+        transport_result(response_error_events),
+        transport_result(text_events),
+        transport_result(reordered_events),
+        subprocess.CompletedProcess([], 1, '', ''),
+    )
+    if any(_structured_transport_terminal(result) is not None
+           for result in ambiguous_transport):
+        raise RuntimeError('structured_transport_ambiguity_fixture_failed')
     identifier = 'c' * 64
     absence_cases = (
         ('container', '', 'Error response from daemon: No such container: ' + identifier),
@@ -979,9 +1348,7 @@ class _OwnedHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        with self.server.observation_lock:
-            self.server.http_requests += 1
-            self.server.unexpected_http_requests += 1
+        self.server.record_http(False, False, False)
         self.send_error(405)
 
     def do_POST(self):
@@ -991,21 +1358,23 @@ class _OwnedHandler(BaseHTTPRequestHandler):
         except ValueError:
             length = -1
         expected_path = self.path.split('?', 1)[0] == EXPECTED_PATH
-        expected_marker = (
+        expected_header = (
             self.headers.get(ARM_MARKER_HEADER) == self.server.expected_arm_marker)
-        with self.server.observation_lock:
-            self.server.http_requests += 1
-            if expected_path and expected_marker:
-                self.server.expected_path_requests += 1
-                self.server.dispatch_marker_requests += 1
-            else:
-                self.server.unexpected_http_requests += 1
         if length < 0 or length > MAX_REQUEST_BYTES:
+            self.server.record_http(expected_path, expected_header, False)
             self.send_error(413)
             return
-        if length:
-            self.rfile.read(length)
-        if not expected_path or not expected_marker:
+        body = self.rfile.read(length) if length else b''
+        dispatch_marker = False
+        if len(body) == length:
+            try:
+                document = json.loads(body)
+            except (UnicodeError, ValueError):
+                document = None
+            dispatch_marker = (
+                _json_scalar_count(document, self.server.expected_dispatch_prompt) == 1)
+        self.server.record_http(expected_path, expected_header, dispatch_marker)
+        if not expected_path or not expected_header or not dispatch_marker:
             self.send_error(404)
             return
         item = {'id': 'owned-exclusive-trust', 'object': 'chat.completion.chunk',
@@ -1029,17 +1398,26 @@ class _OwnedHandler(BaseHTTPRequestHandler):
 
 class _OwnedTLSServer(ThreadingHTTPServer):
     daemon_threads = True
+    block_on_close = False
     allow_reuse_address = False
 
     def __init__(self, address, context, expected_arm_marker):
         self.tls_context = context
         self.expected_arm_marker = expected_arm_marker
+        self.expected_dispatch_prompt = None
         self.observation_lock = threading.Lock()
+        self.responder_seal_started = False
+        self.responder_sealed = False
+        self.observation_revision = 0
+        self.active_connections = 0
+        self.active_sockets = set()
+        self.active_workers = set()
         self.tcp_connections = 0
         self.tls_handshakes = 0
         self.tls_failures = 0
         self.http_requests = 0
         self.expected_path_requests = 0
+        self.arm_header_requests = 0
         self.dispatch_marker_requests = 0
         self.unexpected_http_requests = 0
         super().__init__(address, _OwnedHandler)
@@ -1049,20 +1427,192 @@ class _OwnedTLSServer(ThreadingHTTPServer):
         raw.settimeout(5)
         with self.observation_lock:
             self.tcp_connections += 1
+            self.active_connections += 1
+            self.active_sockets.add(raw)
+            self.observation_revision += 1
+            reject_after_seal = self.responder_seal_started
+            if reject_after_seal:
+                self.active_connections -= 1
+                self.active_sockets.discard(raw)
+                self.observation_revision += 1
+        if reject_after_seal:
+            raw.close()
+            raise OSError('owned_responder_sealed')
         try:
             secure = self.tls_context.wrap_socket(raw, server_side=True)
         except (OSError, ssl.SSLError):
             with self.observation_lock:
                 self.tls_failures += 1
+                self.active_connections -= 1
+                self.active_sockets.discard(raw)
+                self.observation_revision += 1
             raw.close()
             raise OSError('owned_tls_handshake_failed') from None
         with self.observation_lock:
             self.tls_handshakes += 1
+            self.active_sockets.discard(raw)
+            self.active_sockets.add(secure)
+            self.observation_revision += 1
         return secure, address
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self.observation_lock:
+                self.active_connections -= 1
+                self.active_sockets.discard(request)
+                self.observation_revision += 1
+
+    def process_request_thread(self, request, client_address):
+        worker = threading.current_thread()
+        with self.observation_lock:
+            self.active_workers.add(worker)
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.observation_lock:
+                self.active_workers.discard(worker)
+
+    def record_http(self, expected_path, expected_header, dispatch_marker):
+        with self.observation_lock:
+            self.http_requests += 1
+            if expected_path:
+                self.expected_path_requests += 1
+            if expected_path and expected_header:
+                self.arm_header_requests += 1
+            if expected_path and expected_header and dispatch_marker:
+                self.dispatch_marker_requests += 1
+            else:
+                self.unexpected_http_requests += 1
+            self.observation_revision += 1
+
+    def activate_dispatch_prompt(self, dispatch_prompt):
+        if (not isinstance(dispatch_prompt, str)
+                or re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-[a-z0-9-]+',
+                                dispatch_prompt) is None):
+            raise CheckError('dispatch_marker_invalid')
+        with self.observation_lock:
+            snapshot = {key: getattr(self, key) for key in OBSERVATION_KEYS}
+            if (self.expected_dispatch_prompt is not None
+                    or self.active_connections != 0
+                    or not _observation_is_zero(snapshot)):
+                raise CheckError('dispatch_marker_activation_invalid')
+            self.expected_dispatch_prompt = dispatch_prompt
 
     def snapshot(self):
         with self.observation_lock:
             return {key: getattr(self, key) for key in OBSERVATION_KEYS}
+
+    def quiescence_state(self):
+        with self.observation_lock:
+            return ({key: getattr(self, key) for key in OBSERVATION_KEYS},
+                    self.active_connections, self.observation_revision)
+
+    def shutdown_state(self):
+        with self.observation_lock:
+            return (self.active_connections, len(self.active_sockets),
+                    len(self.active_workers),
+                    self.responder_sealed)
+
+    def begin_seal(self):
+        with self.observation_lock:
+            already_complete = self.responder_sealed
+            self.responder_seal_started = True
+            return already_complete
+
+    def complete_seal(self):
+        with self.observation_lock:
+            self.responder_sealed = True
+
+    def force_close_connections(self):
+        with self.observation_lock:
+            active = tuple(self.active_sockets)
+        for connection in active:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+
+def _json_scalar_count(value, expected):
+    if isinstance(value, str):
+        return int(value == expected)
+    if isinstance(value, list):
+        return sum(_json_scalar_count(item, expected) for item in value)
+    if isinstance(value, dict):
+        return sum(_json_scalar_count(item, expected) for item in value.values())
+    return 0
+
+
+def _wait_responder_quiescent(server):
+    deadline = time.monotonic() + DISPATCH_QUIET_TIMEOUT_SECONDS
+    quiet_since = None
+    quiet_revision = None
+    while time.monotonic() < deadline:
+        snapshot, active, revision = server.quiescence_state()
+        now = time.monotonic()
+        if active == 0:
+            if quiet_since is None or revision != quiet_revision:
+                quiet_since = now
+                quiet_revision = revision
+            elif now - quiet_since >= DISPATCH_QUIET_SECONDS:
+                return snapshot
+        else:
+            quiet_since = None
+            quiet_revision = revision
+        time.sleep(.05)
+    raise CheckError('owned_responder_not_quiescent')
+
+
+def _seal_owned_responder(server, thread):
+    if server.begin_seal():
+        snapshot, active, _revision = server.quiescence_state()
+        _connections, sockets, workers, sealed = server.shutdown_state()
+        if (thread.is_alive() or active != 0 or sockets != 0 or workers != 0
+                or sealed is not True):
+            raise CheckError('owned_responder_shutdown_failed')
+        return snapshot
+    server.force_close_connections()
+    shutdown_failures = []
+
+    def shutdown():
+        try:
+            server.shutdown()
+        except BaseException:
+            shutdown_failures.append(True)
+
+    shutdown_thread = None
+    if thread.ident is not None:
+        shutdown_thread = threading.Thread(target=shutdown, daemon=True)
+        shutdown_thread.start()
+        shutdown_thread.join(timeout=6)
+        thread.join(timeout=6)
+    close_failed = False
+    try:
+        server.server_close()
+    except OSError:
+        close_failed = True
+    if ((shutdown_thread is not None and shutdown_thread.is_alive())
+            or thread.is_alive() or shutdown_failures or close_failed):
+        raise CheckError('owned_responder_shutdown_failed')
+    deadline = time.monotonic() + 6
+    _snapshot, active, _revision = server.quiescence_state()
+    _connections, sockets, workers, _sealed = server.shutdown_state()
+    while (active or sockets or workers) and time.monotonic() < deadline:
+        server.force_close_connections()
+        time.sleep(.05)
+        _snapshot, active, _revision = server.quiescence_state()
+        _connections, sockets, workers, _sealed = server.shutdown_state()
+    if active != 0 or sockets != 0 or workers != 0:
+        raise CheckError('owned_responder_shutdown_failed')
+    snapshot = server.snapshot()
+    server.complete_seal()
+    return snapshot
 
 
 class Docker:
@@ -1087,8 +1637,13 @@ class Docker:
 def _critical_name(name):
     upper = name.upper()
     return (name in PROXY_ENV or name in TRUST_ENV or name in MUST_BE_ABSENT_ENV
-            or name in BOUNDARY_ENV or name in SERVER_CONTROL_ENV
+            or name in BOUNDARY_ENV or name in FIXED_RUNTIME_ENV
+            or name in SERVER_CONTROL_ENV
             or any(part in upper for part in SENSITIVE_ENV_PARTS))
+
+
+def _image_forbidden_name(name):
+    return _critical_name(name) and name not in FIXED_RUNTIME_ENV
 
 
 def _env_map(items):
@@ -1106,7 +1661,7 @@ def _inspect_image(docker, image_id):
             or data[0].get('Os') != 'linux' or data[0].get('Architecture') != 'amd64'):
         raise CheckError('exact_linux_amd64_image_required')
     image_env = _env_map(data[0].get('Config', {}).get('Env') or [])
-    if any(_critical_name(name) for name in image_env):
+    if any(_image_forbidden_name(name) for name in image_env):
         raise CheckError('image_contains_critical_environment')
     return {'id': image_id, 'os': 'linux', 'architecture': 'amd64'}
 
@@ -1165,7 +1720,8 @@ def _network(docker, nonce, resources, create_journal, persist):
         raise CheckError('internal_network_ipam_invalid') from None
     if gateway not in subnet or gateway.version != 4:
         raise CheckError('internal_network_gateway_invalid')
-    return {'id': identifier, 'name': name, 'gateway': str(gateway)}
+    return {'id': identifier, 'name': name, 'gateway': str(gateway),
+            'subnet': str(subnet)}
 
 
 def _arm_marker(nonce, arm):
@@ -1175,14 +1731,21 @@ def _arm_marker(nonce, arm):
     return marker
 
 
-def _config(path, base_url, arm_marker):
+def _new_dispatch_prompt(arm):
+    marker = 'lrh-dispatch-' + uuid.uuid4().hex + '-' + arm
+    if re.fullmatch(r'lrh-dispatch-[0-9a-f]{32}-[a-z0-9-]+', marker) is None:
+        raise CheckError('dispatch_marker_invalid')
+    return marker
+
+
+def _config_document(base_url, arm_marker, *, normalized):
     document = {
         '$schema': 'https://opencode.ai/config.json',
-        'model': MODEL,
+        'model': ({'providerID': 'opencode', 'model': MODEL_ID}
+                  if normalized else MODEL),
         'update': 'disable',
         'share': 'disabled',
         'plugins': [],
-        'mcp': {'servers': {}},
         'websearch': False,
         'warming': False,
         'permissions': [{'action': '*', 'resource': '*', 'effect': 'deny'}],
@@ -1195,12 +1758,17 @@ def _config(path, base_url, arm_marker):
                 'settings': {
                     'baseURL': base_url,
                     'transport': 'http',
-                    'headers': {ARM_MARKER_HEADER: arm_marker},
                 },
+                'headers': {ARM_MARKER_HEADER: arm_marker},
                 'models': {MODEL_ID: {'settings': {'baseURL': base_url}}},
             },
         },
     }
+    return document
+
+
+def _config(path, base_url, arm_marker):
+    document = _config_document(base_url, arm_marker, normalized=False)
     path.write_text(json.dumps(document, separators=(',', ':')) + '\n', encoding='utf-8')
     path.chmod(0o600)
 
@@ -1235,13 +1803,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
                       + ',dst=' + RUNTIME_CA_PATH + ',readonly')
     env = [name + '=' for name in PROXY_ENV]
     env += [
-        'HOME=/workspace/home',
-        'XDG_CONFIG_HOME=/workspace/config',
-        'XDG_DATA_HOME=/workspace/data',
-        'XDG_CACHE_HOME=/workspace/cache',
-        'XDG_STATE_HOME=/workspace/state',
-        'TMPDIR=/workspace/tmp',
-        'NO_COLOR=1',
+        *(name + '=' + value for name, value in FIXED_RUNTIME_ENV.items()),
         'SSL_CERT_FILE=' + AMBIENT_CA_PATH,
         *(name + '=' + value for name, value in BOUNDARY_ENV.items()),
     ]
@@ -1257,7 +1819,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
     argv = [
         'container', 'create', '--pull', 'never', '--platform', 'linux/amd64',
         '--name', name,
-        '--network', network['name'], '--add-host', 'opencode.ai:' + gateway,
+        '--network', 'none', '--add-host', 'opencode.ai:' + gateway,
         '--read-only', '--restart', 'no', '--log-driver', 'none',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges=true',
         '--user', str(os.getuid()) + ':' + str(os.getgid()),
@@ -1324,7 +1886,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
             or item.get('Config', {}).get('Labels', {}).get(LABEL) != nonce
             or item.get('Config', {}).get('Labels', {}).get(LABEL + '.arm') != arm
             or item.get('HostConfig', {}).get('ReadonlyRootfs') is not True
-            or item.get('HostConfig', {}).get('NetworkMode') != network['name']
+            or item.get('HostConfig', {}).get('NetworkMode') != 'none'
             or item.get('HostConfig', {}).get('CapDrop') != ['ALL']
             or item.get('HostConfig', {}).get('Memory') != 1024 * 1024 * 1024
             or item.get('HostConfig', {}).get('MemorySwap') != 1024 * 1024 * 1024
@@ -1342,7 +1904,8 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
                        for value in item.get('HostConfig', {}).get('SecurityOpt', []))
             or item.get('HostConfig', {}).get('Dns') != ['127.0.0.1']
             or item.get('HostConfig', {}).get('ExtraHosts') != ['opencode.ai:' + gateway]
-            or set(item.get('NetworkSettings', {}).get('Networks', {})) != {network['name']}
+            or not set(item.get('NetworkSettings', {}).get('Networks', {})).issubset(
+                {'none'})
             or bind_mounts != expected_bind_mounts
             or critical != {name: value for name, value in requested.items() if _critical_name(name)}
             or any(name in effective for name in MUST_BE_ABSENT_ENV)
@@ -1408,6 +1971,48 @@ def _start_server_container(docker, identifier):
     started = docker.run('container', 'start', identifier)
     if started.returncode:
         raise CheckError('container_start_failed')
+
+
+def _activate_dispatch_network(docker, identifier, network):
+    before = docker.json('container', 'inspect', identifier)
+    if not isinstance(before, list) or len(before) != 1:
+        raise CheckError('dispatch_network_prestate_unavailable')
+    before_item = before[0]
+    before_networks = before_item.get('NetworkSettings', {}).get('Networks')
+    if (before_item.get('Id') != identifier
+            or before_item.get('State', {}).get('Running') is not True
+            or before_item.get('HostConfig', {}).get('NetworkMode') != 'none'
+            or not isinstance(before_networks, dict)
+            or not set(before_networks).issubset({'none'})
+            or network['name'] in before_networks):
+        raise CheckError('dispatch_network_prestate_invalid')
+    result = docker.run('network', 'connect', network['id'], identifier)
+    if (type(result.returncode) is not int or result.returncode != 0
+            or not isinstance(result.stdout, str) or result.stdout.strip()
+            or not isinstance(result.stderr, str) or result.stderr.strip()):
+        raise CheckError('dispatch_network_connect_failed')
+    after = docker.json('container', 'inspect', identifier)
+    if not isinstance(after, list) or len(after) != 1:
+        raise CheckError('dispatch_network_readback_unavailable')
+    after_item = after[0]
+    after_networks = after_item.get('NetworkSettings', {}).get('Networks')
+    attachment = (after_networks.get(network['name'])
+                  if isinstance(after_networks, dict) else None)
+    try:
+        address = ipaddress.ip_address(attachment['IPAddress'])
+        subnet = ipaddress.ip_network(network['subnet'])
+    except (KeyError, TypeError, ValueError):
+        raise CheckError('dispatch_network_readback_invalid') from None
+    if (after_item.get('Id') != identifier
+            or after_item.get('State', {}).get('Running') is not True
+            or not isinstance(after_networks, dict)
+            or not set(after_networks).issubset({'none', network['name']})
+            or attachment.get('NetworkID') != network['id']
+            or attachment.get('Gateway') != network['gateway']
+            or address.version != 4 or address not in subnet
+            or str(address) == network['gateway']):
+        raise CheckError('dispatch_network_readback_invalid')
+    return True
 
 
 def _api_json(docker, identifier, method):
@@ -1526,9 +2131,23 @@ def _api_direct_list(docker, identifier, method):
     return parsed
 
 
-def _native_http_preflight(docker, identifier, base_url, arm_marker):
-    providers = _api_protocol_list(docker, identifier, 'provider.list')
+def _source_roots_pristine(workspace):
+    if not isinstance(workspace, Path):
+        return False
+    blocked = (
+        workspace / 'home/.agents',
+        workspace / 'home/.claude',
+        workspace / 'config/opencode/plugin',
+        workspace / 'config/opencode/plugins',
+    )
+    return all(not os.path.lexists(path) for path in blocked)
+
+
+def _native_http_preflight(docker, identifier, base_url, arm_marker, workspace):
+    if not _source_roots_pristine(workspace):
+        raise CheckError('native_http_readback_unavailable')
     models = _api_protocol_list(docker, identifier, 'model.list')
+    providers = _api_protocol_list(docker, identifier, 'provider.list')
     config_entries = _api_direct_list(docker, identifier, 'config.get')
     provider_matches = [
         row for row in providers
@@ -1543,56 +2162,30 @@ def _native_http_preflight(docker, identifier, base_url, arm_marker):
         raise CheckError('native_http_readback_unavailable')
     provider = provider_matches[0]
     model = model_matches[0]
-    source_matches = 0
-    conflicting_source = False
-    for entry in config_entries:
-        if not isinstance(entry, dict) or entry.get('type') != 'document':
-            continue
-        document = entry.get('info')
-        config_providers = document.get('providers') if isinstance(document, dict) else None
-        config_provider = (config_providers.get('opencode')
-                           if isinstance(config_providers, dict) else None)
-        provider_settings = (config_provider.get('settings')
-                             if isinstance(config_provider, dict) else None)
-        config_models = (config_provider.get('models')
-                         if isinstance(config_provider, dict) else None)
-        config_model = (config_models.get(MODEL_ID)
-                        if isinstance(config_models, dict) else None)
-        model_settings = config_model.get('settings') if isinstance(config_model, dict) else None
-        if not isinstance(config_provider, dict):
-            continue
-        relevant = (isinstance(provider_settings, dict)
-                    and any(key in provider_settings for key in ('baseURL', 'transport')))
-        relevant = relevant or (isinstance(model_settings, dict)
-                                and any(key in model_settings
-                                        for key in ('baseURL', 'transport')))
-        if not relevant:
-            continue
-        if (isinstance(provider_settings, dict)
-                and entry.get('path') == '/workspace/config/opencode/opencode.json'
-                and document.get('model') == MODEL
-                and isinstance(config_model, dict)
-                and isinstance(model_settings, dict)
-                and provider_settings.get('baseURL') == base_url
-                and provider_settings.get('transport') == 'http'
-                and provider_settings.get('headers') == {
-                    ARM_MARKER_HEADER: arm_marker}
-                and model_settings.get('baseURL') == base_url
-                and 'transport' not in model_settings):
-            source_matches += 1
-        else:
-            conflicting_source = True
-    if source_matches != 1 or conflicting_source:
+    expected_entries = [
+        {
+            'type': 'document',
+            'path': '/workspace/config/opencode/opencode.json',
+            'info': _config_document(base_url, arm_marker, normalized=True),
+        },
+        {'type': 'directory', 'path': '/workspace/config/opencode'},
+    ]
+    if config_entries != expected_entries:
+        raise CheckError('native_http_readback_unavailable')
+    if not _source_roots_pristine(workspace):
         raise CheckError('native_http_readback_unavailable')
     provider_settings = provider.get('settings')
     model_settings = model.get('settings')
     if not isinstance(provider_settings, dict) or not isinstance(model_settings, dict):
         raise CheckError('native_http_readback_unavailable')
+    expected_headers = {ARM_MARKER_HEADER: arm_marker}
     model_transport_override_absent = 'transport' not in model_settings
     provider_base_url_verified = provider_settings.get('baseURL') == base_url
     model_base_url_verified = model_settings.get('baseURL') == base_url
-    request_marker_verified = provider_settings.get('headers') == {
-        ARM_MARKER_HEADER: arm_marker}
+    provider_request_headers_verified = provider.get('headers') == expected_headers
+    model_request_headers_verified = model.get('headers') == expected_headers
+    request_marker_verified = (provider_request_headers_verified
+                               and model_request_headers_verified)
     facts = {
         'provider_package': provider.get('package'),
         'effective_model_package': model.get('package'),
@@ -1602,7 +2195,13 @@ def _native_http_preflight(docker, identifier, base_url, arm_marker):
         'provider_base_url_verified': provider_base_url_verified,
         'model_base_url_verified': model_base_url_verified,
         'base_url_verified': provider_base_url_verified and model_base_url_verified,
+        'provider_request_headers_verified': provider_request_headers_verified,
+        'model_request_headers_verified': model_request_headers_verified,
         'request_marker_verified': request_marker_verified,
+        'request_header_authority': 'provider.headers+model.headers',
+        'source_boundary_verified': True,
+        'preflight_method_scope': (
+            'openapi.get+server.info+model.list+provider.list+config.get'),
         'source_document_verified': True,
         'readback_scope': 'persistent-server-authority',
     }
@@ -1615,7 +2214,13 @@ def _native_http_preflight(docker, identifier, base_url, arm_marker):
         and facts['provider_base_url_verified'] is True
         and facts['model_base_url_verified'] is True
         and facts['base_url_verified'] is True
+        and facts['provider_request_headers_verified'] is True
+        and facts['model_request_headers_verified'] is True
         and facts['request_marker_verified'] is True
+        and facts['request_header_authority'] == 'provider.headers+model.headers'
+        and facts['source_boundary_verified'] is True
+        and facts['preflight_method_scope'] == (
+            'openapi.get+server.info+model.list+provider.list+config.get')
         and facts['source_document_verified'] is True
     )
     if not facts['native_http_verified']:
@@ -1636,32 +2241,106 @@ def _exit_kind(returncode):
 def _structured_rejection(result, input_mode):
     """Return a receipt-safe proof of one exact runtime-seam rejection."""
     expected = REJECTION_CODE.get(input_mode)
-    if (expected is None or result is None or type(result.returncode) is not int
-            or result.returncode != 1 or not isinstance(result.stdout, str)
-            or not isinstance(result.stderr, str) or result.stderr.strip()
-            or len(result.stdout.encode('utf-8')) > MAX_REJECTION_OUTPUT_BYTES):
+    trace = _structured_error_trace(result, max_step_starts=1)
+    if expected is None or trace is None:
         return None
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    if len(lines) != 1:
-        return None
-    try:
-        event = json.loads(lines[0])
-    except (TypeError, ValueError):
-        return None
-    if (not isinstance(event, dict)
-            or set(event) != {'type', 'timestamp', 'sessionID', 'error'}
-            or event.get('type') != 'error'
-            or type(event.get('timestamp')) is not int or event['timestamp'] < 0
-            or re.fullmatch(r'ses_[0-9A-Za-z]+', event.get('sessionID', '')) is None):
-        return None
-    if event.get('error') != {
+    if trace['error'] != {
             'type': 'unknown', 'message': REJECTION_PREFIX + expected}:
         return None
     return {
         'structured_rejection_verified': True,
         'rejection_code': expected,
         'session_id_present': True,
-        'structured_event_count': 1,
+        'structured_step_start_count': trace['step_start_count'],
+        'structured_terminal_error_count': 1,
+        'structured_event_count': trace['event_count'],
+    }
+
+
+def _structured_error_trace(result, max_step_starts):
+    """Parse one exact same-session step-start/error trace without retaining payloads."""
+    if (type(max_step_starts) is not int or max_step_starts < 0
+            or result is None or type(result.returncode) is not int
+            or result.returncode != 1 or not isinstance(result.stdout, str)
+            or not isinstance(result.stderr, str) or result.stderr.strip()
+            or len(result.stdout.encode('utf-8')) > MAX_STRUCTURED_OUTPUT_BYTES):
+        return None
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if not 1 <= len(lines) <= max_step_starts + 1:
+        return None
+    events = []
+    try:
+        for line in lines:
+            events.append(json.loads(line))
+    except (TypeError, ValueError):
+        return None
+    terminal = events[-1]
+    if (not isinstance(terminal, dict)
+            or set(terminal) != {'type', 'timestamp', 'sessionID', 'error'}
+            or terminal.get('type') != 'error'
+            or type(terminal.get('timestamp')) is not int
+            or terminal['timestamp'] < 0
+            or re.fullmatch(r'ses_[0-9A-Za-z]+',
+                            terminal.get('sessionID', '')) is None
+            or not isinstance(terminal.get('error'), dict)):
+        return None
+    session_id = terminal['sessionID']
+    part_ids = []
+    message_ids = []
+    for event in events[:-1]:
+        if (not isinstance(event, dict)
+                or set(event) != {'type', 'timestamp', 'sessionID', 'part'}
+                or event.get('type') != 'step_start'
+                or type(event.get('timestamp')) is not int
+                or event['timestamp'] < 0
+                or event.get('sessionID') != session_id):
+            return None
+        part = event.get('part')
+        if (not isinstance(part, dict)
+                or set(part) not in (
+                    {'id', 'sessionID', 'messageID', 'type'},
+                    {'id', 'sessionID', 'messageID', 'type', 'snapshot'},
+                )
+                or part.get('sessionID') != session_id
+                or part.get('type') != 'step-start'
+                or re.fullmatch(r'prt_[0-9A-Za-z]+', part.get('id', '')) is None
+                or re.fullmatch(r'msg_[0-9A-Za-z]+',
+                                part.get('messageID', '')) is None
+                or ('snapshot' in part
+                    and (not isinstance(part['snapshot'], str)
+                         or not part['snapshot']))):
+            return None
+        part_ids.append(part['id'])
+        message_ids.append(part['messageID'])
+    if (len(part_ids) != len(set(part_ids))
+            or (message_ids and len(set(message_ids)) != 1)):
+        return None
+    return {
+        'error': terminal['error'],
+        'step_start_count': len(events) - 1,
+        'event_count': len(events),
+    }
+
+
+def _structured_transport_terminal(result):
+    """Return a receipt-safe proof of the pinned retry trace's terminal TLS error."""
+    trace = _structured_error_trace(
+        result, max_step_starts=NEGATIVE_TRANSPORT_ATTEMPTS)
+    if trace is None:
+        return None
+    error = trace['error']
+    if (set(error) != {'type', 'message'}
+            or error.get('type') != 'provider.transport'
+            or not isinstance(error.get('message'), str)
+            or not error['message'].strip()):
+        return None
+    return {
+        'structured_transport_verified': True,
+        'transport_error_type': 'provider.transport',
+        'transport_session_id_present': True,
+        'transport_step_start_count': trace['step_start_count'],
+        'transport_terminal_error_count': 1,
+        'transport_trace_event_count': trace['event_count'],
     }
 
 
@@ -1865,6 +2544,12 @@ def _run_passes(verdict_complete, failure, unhandled, cleanup_ok,
             and cleanup_ok is True and temporary_removed is True)
 
 
+def _raise_unhandled(unhandled):
+    if isinstance(unhandled, SystemExit):
+        raise CheckError('execution_aborted') from None
+    raise unhandled
+
+
 def _latest_cleanup_pass(resources, cleanup):
     latest = {}
     for row in cleanup:
@@ -1925,9 +2610,9 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
     arm_marker = _arm_marker(nonce, name)
     server = _OwnedTLSServer((network['gateway'], 0), context, arm_marker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
     identifier = None
     try:
+        thread.start()
         initial_snapshot = server.snapshot()
         if not _observation_is_zero(initial_snapshot):
             raise CheckError('owned_responder_initial_state_invalid')
@@ -1967,31 +2652,55 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 fixture_identities['replacement.ca']['sha256'])
         if mounted_before != expected_mounted:
             raise CheckError('mounted_ca_identity_mismatch')
-        facts = _native_http_preflight(docker, identifier, base_url, arm_marker)
+        facts = _native_http_preflight(
+            docker, identifier, base_url, arm_marker, workspace)
         preflight_after = server.snapshot()
         preflight_delta = _observation_delta(preflight_after, preflight_before)
         if preflight_delta is None or any(preflight_delta.values()):
             raise CheckError('native_http_preflight_dispatched')
+        dispatch_network_activated = _activate_dispatch_network(
+            docker, identifier, network)
+        activation_snapshot = server.snapshot()
+        activation_delta = _observation_delta(activation_snapshot, preflight_after)
+        if activation_delta is None or any(activation_delta.values()):
+            raise CheckError('dispatch_network_activation_observed_traffic')
+        dispatch_prompt = _new_dispatch_prompt(name)
+        server.activate_dispatch_prompt(dispatch_prompt)
+        dispatch_baseline = server.snapshot()
+        if dispatch_baseline != activation_snapshot:
+            raise CheckError('dispatch_marker_activation_observed_traffic')
+        command_timeout = (NEGATIVE_COMMAND_TIMEOUT_SECONDS
+                           if name == 'ambient-rejected'
+                           else DEFAULT_COMMAND_TIMEOUT_SECONDS)
         run = _authenticated_exec(
             docker, identifier,
             'opencode', 'run', '--server', OPENCODE_SERVER_URL,
             '--agent', 'build', '--model', MODEL,
-            '--format', 'json', 'Reply with OK only. Do not use tools.', timeout=60,
+            '--format', 'json', dispatch_prompt, timeout=command_timeout,
         )
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            current = server.snapshot()
-            if current['http_requests'] or current['tls_failures']:
-                break
-            time.sleep(.05)
-        final_snapshot = server.snapshot()
-        dispatch = _observation_delta(final_snapshot, preflight_after)
-        if dispatch is None:
-            raise CheckError('owned_responder_observation_invalid')
+        if not _source_roots_pristine(workspace):
+            raise CheckError('native_http_readback_unavailable')
+        transport_terminal = {}
+        if name == 'ambient-rejected':
+            transport_terminal = _structured_transport_terminal(run)
+            if transport_terminal is None:
+                raise CheckError('candidate_transport_terminal_unverified')
         mounted_after = _mounted_ca_hashes(docker, identifier, image_role)
         if mounted_after != mounted_before:
             raise CheckError('mounted_ca_identity_changed')
         _require_fixture_identities(certificates, fixture_identities)
+        resource = next(item for item in resources
+                        if item['kind'] == 'container' and item['id'] == identifier)
+        _remove_resource(docker, resource, cleanup)
+        if resource['active']:
+            raise CheckError('container_remove_before_responder_seal_failed')
+        quiet_snapshot = _wait_responder_quiescent(server)
+        final_snapshot = _seal_owned_responder(server, thread)
+        if final_snapshot != quiet_snapshot:
+            raise CheckError('owned_responder_activity_after_quiescence')
+        dispatch = _observation_delta(final_snapshot, dispatch_baseline)
+        if dispatch is None:
+            raise CheckError('owned_responder_observation_invalid')
         row = {
             'arm': name, 'case_kind': 'core', 'image_role': image_role,
             'trust_mode': trust_mode, 'served_chain': served_chain,
@@ -2002,12 +2711,26 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 mounted_before['replacement']
                 if image_role == 'candidate' else None),
             'mounted_ca_hashes_stable': True,
-            'baseline_zero_verified': True,
+            'baseline_zero_verified': (
+                _observation_is_zero(preflight_delta)
+                and _observation_is_zero(dispatch_baseline)),
+            'dispatch_network_activated': dispatch_network_activated,
+            'preflight_network_mode': 'none',
+            'responder_quiescence_verified': True,
+            'responder_sealed': True,
+            'container_removed_before_responder_seal': True,
+            'quiescence_window_ms': int(DISPATCH_QUIET_SECONDS * 1000),
+            'command_timeout_seconds': command_timeout,
+            'expected_transport_attempts': (
+                NEGATIVE_TRANSPORT_ATTEMPTS
+                if name == 'ambient-rejected' else 1),
             'version_verified': version_verified, 'server_started': True, **facts,
-            'preflight_tcp_connections': preflight_delta['tcp_connections'],
-            'preflight_http_requests': preflight_delta['http_requests'],
+            **_prefixed_observation('preflight_', preflight_delta),
+            **_prefixed_observation('dispatch_baseline_', dispatch_baseline),
             'dispatched': True,
+            'exit_code': run.returncode,
             'exit_kind': _exit_kind(run.returncode),
+            **transport_terminal,
             **dispatch,
         }
         return row
@@ -2016,9 +2739,7 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
             resource = next(item for item in resources
                             if item['kind'] == 'container' and item['id'] == identifier)
             _remove_resource(docker, resource, cleanup)
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        _seal_owned_responder(server, thread)
 
 
 def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certificates,
@@ -2034,9 +2755,9 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
     arm_marker = _arm_marker(nonce, name)
     server = _OwnedTLSServer((network['gateway'], 0), context, arm_marker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
     identifier = None
     try:
+        thread.start()
         initial_snapshot = server.snapshot()
         if not _observation_is_zero(initial_snapshot):
             raise CheckError('owned_responder_initial_state_invalid')
@@ -2068,16 +2789,29 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
         server_started = _wait_server(docker, identifier)
         if not server_started:
             raise CheckError('candidate_server_start_failed')
-        facts = _native_http_preflight(docker, identifier, base_url, arm_marker)
+        facts = _native_http_preflight(
+            docker, identifier, base_url, arm_marker, workspace)
         preflight_after = server.snapshot()
         preflight_delta = _observation_delta(preflight_after, preflight_before)
         if preflight_delta is None or any(preflight_delta.values()):
             raise CheckError('native_http_preflight_dispatched')
+        dispatch_network_activated = _activate_dispatch_network(
+            docker, identifier, network)
+        activation_snapshot = server.snapshot()
+        activation_delta = _observation_delta(activation_snapshot, preflight_after)
+        if activation_delta is None or any(activation_delta.values()):
+            raise CheckError('dispatch_network_activation_observed_traffic')
+        dispatch_prompt = _new_dispatch_prompt(name)
+        server.activate_dispatch_prompt(dispatch_prompt)
+        dispatch_baseline = server.snapshot()
+        if dispatch_baseline != activation_snapshot:
+            raise CheckError('dispatch_marker_activation_observed_traffic')
         run = _authenticated_exec(
             docker, identifier,
             'opencode', 'run', '--server', OPENCODE_SERVER_URL,
             '--agent', 'build', '--model', MODEL,
-            '--format', 'json', 'Reply with OK only. Do not use tools.', timeout=60,
+            '--format', 'json', dispatch_prompt,
+            timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS,
         )
         rejection = _structured_rejection(run, input_mode)
         if rejection is None:
@@ -2087,14 +2821,20 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             raise CheckError('candidate_server_stopped_after_rejection')
         if not _wait_server(docker, identifier):
             raise CheckError('candidate_server_stopped_after_rejection')
-        facts_after = _native_http_preflight(docker, identifier, base_url, arm_marker)
+        facts_after = _native_http_preflight(
+            docker, identifier, base_url, arm_marker, workspace)
         if facts_after != facts:
             raise CheckError('native_http_readback_changed_after_rejection')
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and not any(server.snapshot().values()):
-            time.sleep(.05)
-        final_snapshot = server.snapshot()
-        dispatch = _observation_delta(final_snapshot, preflight_after)
+        resource = next(item for item in resources
+                        if item['kind'] == 'container' and item['id'] == identifier)
+        _remove_resource(docker, resource, cleanup)
+        if resource['active']:
+            raise CheckError('container_remove_before_responder_seal_failed')
+        quiet_snapshot = _wait_responder_quiescent(server)
+        final_snapshot = _seal_owned_responder(server, thread)
+        if final_snapshot != quiet_snapshot:
+            raise CheckError('owned_responder_activity_after_quiescence')
+        dispatch = _observation_delta(final_snapshot, dispatch_baseline)
         if dispatch is None:
             raise CheckError('owned_responder_observation_invalid')
         _require_fixture_identities(certificates, fixture_identities)
@@ -2106,16 +2846,27 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             'replacement_pair_state': PAIR_STATE[input_mode],
             'version_verified': version_verified,
             'server_started': True,
-            'baseline_zero_verified': True,
+            'baseline_zero_verified': (
+                _observation_is_zero(preflight_delta)
+                and _observation_is_zero(dispatch_baseline)),
+            'dispatch_network_activated': dispatch_network_activated,
+            'preflight_network_mode': 'none',
+            'responder_quiescence_verified': True,
+            'responder_sealed': True,
+            'container_removed_before_responder_seal': True,
+            'quiescence_window_ms': int(DISPATCH_QUIET_SECONDS * 1000),
+            'command_timeout_seconds': DEFAULT_COMMAND_TIMEOUT_SECONDS,
+            'expected_transport_attempts': 0,
             **facts,
-            'preflight_tcp_connections': preflight_delta['tcp_connections'],
-            'preflight_http_requests': preflight_delta['http_requests'],
+            **_prefixed_observation('preflight_', preflight_delta),
+            **_prefixed_observation('dispatch_baseline_', dispatch_baseline),
             'dispatched': True,
             'failure_stage': 'same-server-dispatch',
             'termination_verified': True,
             'server_alive_after_rejection': True,
             'native_readback_stable': True,
             **rejection,
+            'exit_code': run.returncode,
             'exit_kind': _exit_kind(run.returncode),
             **dispatch,
         }
@@ -2124,9 +2875,7 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             resource = next(item for item in resources
                             if item['kind'] == 'container' and item['id'] == identifier)
             _remove_resource(docker, resource, cleanup)
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        _seal_owned_responder(server, thread)
 
 
 def _label_absence(docker, nonce):
@@ -2159,7 +2908,8 @@ def execute(args):
     self_test()
     output = _safe_output(args.output)
     nonce = uuid.uuid4().hex
-    work = Path(tempfile.mkdtemp(prefix='t02-exclusive-trust-')).resolve()
+    temporary_root = Path(tempfile.gettempdir()).resolve()
+    work = temporary_root / ('t02-exclusive-trust-' + nonce)
     resource_arms = ([name for name, _, _, _ in CORE_ARMS]
                      + [name for name, _ in PRESOCKET_CASES])
     create_journal = []
@@ -2178,6 +2928,8 @@ def execute(args):
             'container_names': [_container_name(nonce, arm) for arm in resource_arms],
         },
         'retained_temporary_workspace': str(work),
+        'temporary_workspace_state': 'planned_not_created',
+        'pass_valid_only_with_checker_exit_code': 0,
         'external_provider_service_calls': 0, 'external_model_service_calls': 0,
     }
 
@@ -2192,7 +2944,20 @@ def execute(args):
     unhandled = None
     verdict_complete = False
     cleanup_ok = False
+    workspace_created = False
     try:
+        try:
+            os.mkdir(work, 0o700)
+            workspace_created = True
+            work_mode = work.lstat().st_mode
+            if (not stat.S_ISDIR(work_mode)
+                    or stat.S_IMODE(work_mode) != 0o700):
+                raise OSError
+            _fsync_directory(temporary_root)
+        except OSError:
+            raise CheckError('temporary_workspace_create_failed') from None
+        receipt['temporary_workspace_state'] = 'created_private'
+        persist()
         socket_path = Path('/var/run/docker.sock')
         if not socket_path.exists() or not stat.S_ISSOCK(socket_path.stat().st_mode):
             raise CheckError('local_docker_socket_required')
@@ -2333,12 +3098,17 @@ def execute(args):
             nonce_value, reconciliations, resources, cleanup, absence,
             create_journal)
         receipt['temporary_removed'] = False
-        if cleanup_ok and unhandled is None:
+        if cleanup_ok and unhandled is None and workspace_created:
             receipt['temporary_removed'] = _remove_workspace_durably(work)
         if receipt['temporary_removed']:
             receipt.pop('retained_temporary_workspace', None)
-        else:
+            receipt['temporary_workspace_state'] = 'removed_durable'
+        elif workspace_created:
             receipt['retained_temporary_workspace'] = str(work)
+            receipt['temporary_workspace_state'] = 'retained_for_recovery'
+        else:
+            receipt.pop('retained_temporary_workspace', None)
+            receipt['temporary_workspace_state'] = 'not_created'
         if failure is None and not verdict_complete:
             failure = 'execution_incomplete'
         if failure is None and (not cleanup_ok or not receipt['temporary_removed']):
@@ -2352,7 +3122,7 @@ def execute(args):
             receipt['error_code'] = failure if re.fullmatch(r'[a-z][a-z0-9_]{0,79}', failure) else 'failure'
         _write_json(output, receipt)
     if unhandled is not None:
-        raise unhandled
+        _raise_unhandled(unhandled)
     if failure is not None:
         raise CheckError(failure)
     return output

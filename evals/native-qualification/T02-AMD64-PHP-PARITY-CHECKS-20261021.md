@@ -67,4 +67,3 @@ Fail cleanup if any owned resource remains:
 A pass requires a repeatable command, exact source and image pins, redacted
 two-arm traces, a semantic comparison, independent review, and exact cleanup.
 It does not authorize a provider call or a model-driven application run.
-

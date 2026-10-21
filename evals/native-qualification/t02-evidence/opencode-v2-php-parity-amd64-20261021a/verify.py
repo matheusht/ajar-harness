@@ -38,7 +38,7 @@ EXPECTED_REPOSITORY_INPUTS = {
     'T02-RESEARCHER-BRIEF-PHP-8.4.26.md':
         '40044703ca38909e80b1db6f79694ed98e27e5892aedf9e269b4256188ad837e',
     'T02-AMD64-PHP-PARITY-CHECKS-20261021.md':
-        'e520c260f5d2daaa18e2ed7e5ee6297d8e435293ae1cccda161bf75b621dd20d',
+        '5b1adcd37762ae68f302ede6aca2c51437e3031220ce6c2999c0a47627ffafb5',
     'smoke/check_v2_php_parity.py':
         'e30a0f8237b5dcfb546611c8952a0699c013b7786d14d144bc08caa148935616',
     'smoke/check_v2_php_parity_amd64.py':

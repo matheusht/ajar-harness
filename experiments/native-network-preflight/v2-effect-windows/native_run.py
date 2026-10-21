@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 
 
 class RunStopped(RuntimeError):
@@ -28,20 +29,20 @@ def _directory(path):
 
 
 @contextmanager
-def _lock(path):
+def _lock(path, name='dispatch.lock', timeout=20, with_fd=False):
     path = _directory(path)
-    fd = os.open(path/'dispatch.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = os.open(path/name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError('native_run_lock_permissions')
-        deadline=time.monotonic()+20
+        deadline=time.monotonic()+timeout
         while True:
             try:fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB);break
             except BlockingIOError:
                 if time.monotonic()>=deadline:raise RunStopped('native_run_dispatch_lock_unavailable')
                 time.sleep(.01)
-        yield path
+        yield (path,fd) if with_fd else path
     finally: os.close(fd)
 
 
@@ -53,6 +54,20 @@ def _write_once(path, name, value):
     directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try: os.fsync(directory)
     finally: os.close(directory)
+
+
+def _write_atomic_once(path, name, value):
+    # A killed writer must never leave an empty STOPPING or REVOKED marker.
+    temporary=path/('.'+name+'-'+uuid.uuid4().hex)
+    try:
+        fd=os.open(temporary,os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,0o600)
+        with os.fdopen(fd,'w') as stream:
+            json.dump(value,stream,sort_keys=True);stream.write('\n');stream.flush();os.fsync(stream.fileno())
+        os.link(temporary,path/name)
+        directory=os.open(path,os.O_RDONLY | os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    finally:temporary.unlink(missing_ok=True)
 
 
 def snapshot(path):
@@ -136,17 +151,122 @@ def stop_reason(state_dir):
 def begin_stop(state_dir, reason):
     with _lock(state_dir) as path:
         _write_once(path,'STOP_REQUEST',{'reason':reason,'monotonic':time.monotonic()})
-        _write_once(path,'STOPPING',{'reason':reason,'monotonic':time.monotonic()})
+        if not (path/'STOPPING').exists():
+            _write_atomic_once(path,'STOPPING',{'reason':reason,'monotonic':time.monotonic()})
 
 
 def finish_stop(state_dir, stopped):
     with _lock(state_dir) as path:
         if not (path/'STOPPING').exists(): raise ValueError('native_run_stop_not_started')
-        _write_once(path,'REVOKED' if stopped else 'UNSAFE',{'producers_verified_stopped':bool(stopped),'monotonic':time.monotonic()})
+        if (path/'REVOKED').exists() or (path/'UNSAFE').exists():
+            raise ValueError('native_run_stop_already_terminal')
+        _write_atomic_once(path,'REVOKED' if stopped else 'UNSAFE',{'producers_verified_stopped':bool(stopped),'monotonic':time.monotonic()})
+
+
+def start_producers(state_dir, producers, fail_after=None, hold_dir=None):
+    with _lock(state_dir, 'stop.lock', 600, with_fd=True) as (path,lock_fd):
+        if stop_reason(state_dir): raise RunStopped('native_stop_before_start')
+        marker=path/'START_IN_FLIGHT'
+        def record_start(item,phase):
+            if phase=='begin':
+                if marker.exists():raise RunStopped('native_start_uncertain')
+                _write_once(path,'START_IN_FLIGHT',{'id':item['id'],'monotonic':time.monotonic()})
+            else:
+                marker.unlink()
+                directory=os.open(path,os.O_RDONLY | os.O_DIRECTORY)
+                try:os.fsync(directory)
+                finally:os.close(directory)
+        producers.start(fail_after, lambda: stop_reason(state_dir), hold_dir, lock_fd, record_start)
+        if stop_reason(state_dir): raise RunStopped('native_stop_during_start')
+        mark_ready(state_dir)
+
+
+def stop_producers(state_dir, producers, event, reason, evidence_ok=lambda: True):
+    # The process that wins this lock owns the entire stop and terminal marker.
+    with _lock(state_dir, 'stop.lock', 600):
+        path = _directory(state_dir)
+        if (path/'UNSAFE').exists(): return False
+        if (path/'REVOKED').exists():
+            try: return json.loads((path/'REVOKED').read_text())['producers_verified_stopped'] is True
+            except (OSError,ValueError,KeyError,TypeError): return False
+        uncertain_start=(path/'START_IN_FLIGHT').exists()
+        begin_stop(path, reason)
+        event_failed=False
+        def record(kind,data):
+            nonlocal event_failed
+            try:event(kind,data)
+            except Exception:event_failed=True
+        try: producers.freeze(record)
+        except Exception:
+            finish_stop(path, False)
+            return False
+        if uncertain_start or event_failed or not evidence_ok():
+            finish_stop(path, False)
+            return False
+        finish_stop(path, True)
+        return True
+
+
+def arm_stop_owner(state_dir, manifest, fault_id=None, kill_fault_id=None):
+    lifetime_read,lifetime_write=os.pipe();ready_read,ready_write=os.pipe()
+    process=None
+    try:
+        command=[sys.executable,str(Path(__file__).with_name('_native_stop_owner.py')),
+                 str(lifetime_read),str(ready_write),str(manifest),str(state_dir),
+                 fault_id or '-',kill_fault_id or '-']
+        process=subprocess.Popen(command,pass_fds=(lifetime_read,ready_write),
+                                 stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+        os.close(lifetime_read);lifetime_read=-1
+        os.close(ready_write);ready_write=-1
+        if not select.select([ready_read],[],[],10)[0] or os.read(ready_read,1)!=b'1' or process.poll() is not None:
+            raise RunStopped('native_stop_owner_unavailable')
+        return process,lifetime_write
+    except Exception:
+        os.close(lifetime_write)
+        if process is not None:
+            try:process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait(timeout=2)
+        raise
+    finally:
+        if lifetime_read>=0:os.close(lifetime_read)
+        if ready_write>=0:os.close(ready_write)
+        os.close(ready_read)
+
+
+def _armed_stop_owner_pid(state_dir):
+    path=_directory(state_dir)
+    log=path/'stop-owner.jsonl'
+    if not log.exists():return None
+    fd=os.open(log,os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd) as stream:
+        info=os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode & 0o077 or info.st_size>65536:
+            raise RunStopped('native_stop_owner_identity_unavailable')
+        try:armed=json.loads(stream.readline())
+        except (ValueError,TypeError):raise RunStopped('native_stop_owner_identity_unavailable')
+    pid=armed.get('data',{}).get('pid') if armed.get('kind')=='stop_owner_armed' else None
+    if type(pid) is not int or pid<=0:raise RunStopped('native_stop_owner_identity_unavailable')
+    return pid
+
+
+def _wait_stop_owner(state_dir, expected_pid=None):
+    pid=_armed_stop_owner_pid(state_dir)
+    if expected_pid is not None and pid!=expected_pid:raise RunStopped('native_stop_owner_identity_mismatch')
+    if pid is None:
+        if (_directory(state_dir)/'READY').exists():raise RunStopped('native_stop_owner_identity_unavailable')
+        return
+    deadline=time.monotonic()+10
+    while time.monotonic()<deadline:
+        try:os.kill(pid,0)
+        except ProcessLookupError:return
+        time.sleep(.02)
+    raise RunStopped('native_stop_owner_cleanup_unresolved')
 
 
 class NativeRun:
-    """Thin launcher: the existing CONNECT process is the sole stop watcher."""
+    """Thin launcher for the CONNECT watcher and its run-scoped stop owner."""
     def __init__(self, manifest, state_dir, timeout_seconds, proxy_args):
         self.manifest=Path(manifest);self.state_dir=Path(state_dir);self.process=None;self.producers=None
         self.argv=[sys.executable,str(Path(__file__).resolve().parent.parent/'v2_connect.py'),*proxy_args,
@@ -184,24 +304,29 @@ class NativeRun:
         state=_directory(self.state_dir)
         if not any((state/n).exists() for n in ('REVOKED','UNSAFE','STARTUP_CLOSED')):
             # Only the observed exited child's parent takes over; never race a live watcher.
-            begin_stop(state,'child_exited_without_stop')
             def event(kind,data):
                 fd=os.open(state/'parent-stop.jsonl',os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,0o600)
                 with os.fdopen(fd,'w') as stream:
                     stream.write(json.dumps({'kind':kind,'data':data,'monotonic':time.monotonic()})+'\n')
                     stream.flush();os.fsync(stream.fileno())
             event('parent_stop_takeover',{'child_pid':self.process.pid,'returncode':self.process.returncode})
-            try:self.producers.freeze(event)
-            except Exception as error:
-                finish_stop(state,False)
-                self.close_result={'status':'unsafe','child_alive':False,'returncode':self.process.returncode}
-                raise RunStopped('native_run_parent_stop_unsafe') from error
-            if (state/'RUN.json').exists():finish_stop(state,True)
+            if (state/'RUN.json').exists():
+                if not stop_producers(state,self.producers,event,'child_exited_without_stop'):
+                    self.close_result={'status':'unsafe','child_alive':False,'returncode':self.process.returncode}
+                    raise RunStopped('native_run_parent_stop_unsafe')
             else:
-                with _lock(state):_write_once(state,'STARTUP_CLOSED',{'producers_verified_stopped':True,'monotonic':time.monotonic()})
+                with _lock(state,'stop.lock',600):
+                    begin_stop(state,'child_exited_before_prepare')
+                    try:self.producers.freeze(event)
+                    except Exception as error:
+                        finish_stop(state,False)
+                        self.close_result={'status':'unsafe','child_alive':False,'returncode':self.process.returncode}
+                        raise RunStopped('native_run_parent_stop_unsafe') from error
+                    with _lock(state):_write_once(state,'STARTUP_CLOSED',{'producers_verified_stopped':True,'monotonic':time.monotonic()})
         status='stopped' if (state/'REVOKED').exists() else ('unsafe' if (state/'UNSAFE').exists() else ('closed_before_activation' if (state/'STARTUP_CLOSED').exists() else 'unresolved'))
         self.close_result={'status':status,'child_alive':False,'returncode':self.process.returncode}
         if status=='unresolved':raise RunStopped('native_run_stop_unresolved')
+        _wait_stop_owner(state,self.info.get('stop_owner_pid') if hasattr(self,'info') else None)
         return self.close_result
 
     def __enter__(self): self.start();return self

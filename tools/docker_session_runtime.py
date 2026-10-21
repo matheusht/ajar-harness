@@ -229,6 +229,7 @@ def _run_docker(
     *,
     timeout: float = DOCKER_COMMAND_TIMEOUT_SECONDS,
     allow_failure: bool = False,
+    pass_fds: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
     try:
         result = subprocess.run(
@@ -239,6 +240,7 @@ def _run_docker(
             env=_docker_environment(),
             timeout=timeout,
             check=False,
+            pass_fds=pass_fds,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise DockerRuntimeError("docker_command_unavailable") from exc

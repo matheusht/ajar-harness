@@ -16,6 +16,7 @@ import socket
 import socketserver
 import sqlite3
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -348,6 +349,7 @@ def main():
     parser.add_argument('--test-send-window',type=Path)
     parser.add_argument('--test-startup-delay',type=float,default=0)
     parser.add_argument('--test-start-failure-after',type=int)
+    parser.add_argument('--test-start-hold-dir',type=Path)
     args = parser.parse_args()
     if args.listen_address is not None or args.relay_peer is not None:
         if args.listen_address is None or args.relay_peer is None:parser.error('private_listener_requires_address_and_peer')
@@ -365,9 +367,13 @@ def main():
         parser.error("finite positive limits required")
     if args.dummy_port is not None and not 1 <= args.dummy_port <= 65535:
         parser.error("invalid owned loopback dummy port")
-    if (args.test_pause_failure_id or args.test_kill_failure_id or args.test_send_window or args.test_startup_delay or args.test_start_failure_after) and not args.dummy_port:
+    if (args.test_pause_failure_id or args.test_kill_failure_id or args.test_send_window or args.test_startup_delay or args.test_start_failure_after or args.test_start_hold_dir) and not args.dummy_port:
         parser.error('fault injection is restricted to the owned dummy experiment')
     if not 0<=args.test_startup_delay<=5:parser.error('bounded startup delay required')
+    if args.test_start_hold_dir:
+        entry=args.test_start_hold_dir
+        if not entry.is_dir() or entry.is_symlink() or entry.stat().st_uid!=os.getuid() or entry.stat().st_mode & 0o077:
+            parser.error('private owned startup hold directory required')
     if args.producer_manifest and not args.dummy_port and not args.native_run_state:
         parser.error('real CONNECT producer ownership requires native run state')
     if args.native_run_state and args.native_run_state.resolve()==args.state_dir.resolve():
@@ -391,6 +397,7 @@ def main():
     if args.test_send_window:server.daemon_threads=False
     server.pool = pool
     parent = args.native_owner_pid or os.getppid()
+    stop_owner=None;stop_owner_fd=None
     if args.producers:
         if not pool.active(check_run=False):
             server.server_close()
@@ -398,43 +405,51 @@ def main():
         if args.native_run_state:
             controls=[args.state_dir,args.capability_file]
             if args.test_send_window:controls.append(args.test_send_window)
+            if args.test_start_hold_dir:controls.append(args.test_start_hold_dir)
             args.native_control.prepare(args.native_run_state,args.producer_manifest,args.producers,args.native_run_duration,controls)
         try:
+            if args.native_run_state:
+                stop_owner,stop_owner_fd=args.native_control.arm_stop_owner(
+                    args.native_run_state,args.producer_manifest,args.test_pause_failure_id,args.test_kill_failure_id)
             if os.getppid()!=parent:raise RuntimeError('native_owner_lost_before_start')
-            if args.native_run_state and args.native_control.stop_reason(args.native_run_state):raise RuntimeError('native_stop_before_start')
-            args.producers.start(args.test_start_failure_after)
-            if args.native_run_state:args.native_control.mark_ready(args.native_run_state)
+            if stop_owner and stop_owner.poll() is not None:raise RuntimeError('native_stop_owner_lost_before_start')
+            if args.native_run_state:
+                args.native_control.start_producers(args.native_run_state,args.producers,args.test_start_failure_after,args.test_start_hold_dir)
+            else:args.producers.start(args.test_start_failure_after)
+            if stop_owner and stop_owner.poll() is not None:raise RuntimeError('native_stop_owner_lost_during_start')
         except Exception:
-            if args.native_run_state:args.native_control.begin_stop(args.native_run_state,'startup_failure')
             pool.stale=True;(args.state_dir/'REVOKED').touch()
             try:
-                args.producers.freeze(pool.event)
+                if args.native_run_state:
+                    stopped=args.native_control.stop_producers(args.native_run_state,args.producers,pool.event,'startup_failure')
+                    if not stopped:raise RuntimeError('producer_stop_failed')
+                else:args.producers.freeze(pool.event)
             except Exception:
-                if args.native_run_state:args.native_control.finish_stop(args.native_run_state,False)
                 pool.event('provider_shutdown_unsafe',{'target_stop':'failed_or_unknown','phase':'startup'})
-            else:
-                if args.native_run_state:args.native_control.finish_stop(args.native_run_state,True)
-            finally:server.server_close()
+            finally:
+                if stop_owner_fd is not None:os.close(stop_owner_fd)
+                server.server_close()
             raise
 
     def watch():
-        while os.getppid() == parent and pool.active():
+        while os.getppid() == parent and pool.active() and (stop_owner is None or stop_owner.poll() is None):
             time.sleep(.1)
-        reason='owner_lost' if os.getppid()!=parent else 'provider_authority_ended'
+        reason='owner_lost' if os.getppid()!=parent else ('stop_owner_lost' if stop_owner and stop_owner.poll() is not None else 'provider_authority_ended')
         if args.native_run_state:
             reason=args.native_control.stop_reason(args.native_run_state) or reason
-            args.native_control.begin_stop(args.native_run_state,reason)
             pool.stale=True
             (args.state_dir/'REVOKED').touch()  # Provider-only; never the run's verified-stop marker.
         pool.event('stop_detected', {'parent_lost': os.getppid() != parent, 'monotonic': time.monotonic(),'reason':reason})
         if args.producers:
             try:
-                args.producers.freeze(pool.event)
+                if args.native_run_state:
+                    stopped=args.native_control.stop_producers(args.native_run_state,args.producers,pool.event,reason)
+                    if not stopped:raise RuntimeError('producer_stop_failed')
+                else:args.producers.freeze(pool.event)
             except Exception:
                 # Closing provider admission cannot prove target stop when Docker stop failed.
                 pool.stale = True
                 pool.stop_unsafe=True
-                if args.native_run_state:args.native_control.finish_stop(args.native_run_state,False)
                 with pool.lock:
                     for connection in list(pool.sockets):
                         try:
@@ -444,7 +459,6 @@ def main():
                 pool.event('provider_shutdown_unsafe', {'target_stop': 'failed_or_unknown', 'monotonic': time.monotonic()})
                 server.shutdown()
                 return
-        if args.native_run_state:args.native_control.finish_stop(args.native_run_state,True)
         (args.state_dir / "REVOKED").touch()
         if args.test_send_window:
             (args.test_send_window/'STOP_PUBLISHED').touch()
@@ -461,11 +475,17 @@ def main():
 
     threading.Thread(target=watch, daemon=True).start()
     print(json.dumps({"host": server.server_address[0], "port": server.server_address[1],
-        "authority": AUTHORITY, "dummy": bool(args.dummy_port), "hard_limits": ["connections", "charged_tunnel_bytes", "wall", "workers"], **({"upstream_transport":"http_connect"} if pool.proxy else {})}), flush=True)
+        "authority": AUTHORITY, "dummy": bool(args.dummy_port), "hard_limits": ["connections", "charged_tunnel_bytes", "wall", "workers"],
+        **({"stop_owner_pid":stop_owner.pid} if stop_owner else {}),
+        **({"upstream_transport":"http_connect"} if pool.proxy else {})}), flush=True)
     try:
         server.serve_forever(poll_interval=.1)
     finally:
         server.server_close()
+        if stop_owner_fd is not None:os.close(stop_owner_fd)
+        if stop_owner is not None:
+            try:stop_owner.wait(timeout=10)
+            except subprocess.TimeoutExpired:pass  # NativeRun.close reports the surviving owner.
     if getattr(pool,'stop_unsafe',False):raise RuntimeError('producer_stop_unsafe')
 
 

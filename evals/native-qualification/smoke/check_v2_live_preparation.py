@@ -20,6 +20,14 @@ RELAY = ROOT / ('experiments/native-network-preflight/tcp-relay-host-override/'
                 'cloud-linux-amd64-20261020a/tcp-relay-linux-amd64')
 RELAY_SHA = '33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895'
 CURRENT_MANIFEST = ROOT / 'evals/native-qualification/t02-source/SOURCE-MANIFEST.json'
+EXCLUSIVE_CHECKER = ROOT / ('evals/native-qualification/smoke/'
+                            'check_opencode_exclusive_trust.py')
+EXCLUSIVE_PATCH = ROOT / ('evals/native-qualification/patches/'
+                          'opencode-v2.0.32-exclusive-ca.patch')
+EXCLUSIVE_RESEARCH = ROOT / ('evals/native-qualification/'
+                             'T02-OPENCODE-EXCLUSIVE-TRUST-RESEARCH-20261021.md')
+EXCLUSIVE_CONTRACT = ROOT / ('evals/native-qualification/'
+                             'T02-OPENCODE-EXCLUSIVE-TRUST-CHECKS-20261021.md')
 
 
 def sha(path):
@@ -28,6 +36,13 @@ def sha(path):
 
 def load_runner():
     spec = importlib.util.spec_from_file_location('live_preparation_runner_check', RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_exclusive_checker():
+    spec = importlib.util.spec_from_file_location('exclusive_trust_source_check', EXCLUSIVE_CHECKER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -210,6 +225,52 @@ def main():
             raise AssertionError('ambient_sslkeylogfile_effect')
 
         module = load_runner()
+        runner_source = RUNNER.read_text()
+        gate_offset = runner_source.index("parser.error('cloud_live_route_not_qualified')")
+        output_offset = runner_source.index('output = args.output.resolve()')
+        dormant = ('check_opencode_exclusive_trust' not in runner_source
+                   and 'OPENCODE_EXCLUSIVE_CA_FILE' not in runner_source
+                   and gate_offset < output_offset)
+        checks.append({'name': 'exclusive checker is dormant behind the unchanged live gate',
+                       'pass': dormant})
+        if not dormant:
+            raise AssertionError('exclusive_checker_not_dormant')
+
+        patch_source = EXCLUSIVE_PATCH.read_text()
+        patch_shape = all(fragment in patch_source for fragment in (
+            'packages/core/src/effect/app-node-platform.ts',
+            'if (path === undefined) throw new Error("OPENCODE_EXCLUSIVE_CA_FILE is required")',
+            'path !== EXCLUSIVE_CA_PATH',
+            'OPENCODE_EXCLUSIVE_CA_SHA256 is required',
+            'constants.O_NOFOLLOW | constants.O_NONBLOCK',
+            'createHash("sha256").update(ca).digest("hex") !== expected',
+            'tls: { ca, rejectUnauthorized: true }',
+            'Effect.provideService(FetchHttpClient.RequestInit, requestInit)',
+        ))
+        checks.append({'name': 'native HTTP patch uses a required fixed replacement CA',
+                       'pass': patch_shape})
+        if not patch_shape:
+            raise AssertionError('exclusive_patch_shape')
+
+        exclusive = load_exclusive_checker()
+        exclusive.self_test()
+        checks.append({'name': 'exclusive trust receipt evaluator passes its offline self-test',
+                       'pass': True})
+
+        research = EXCLUSIVE_RESEARCH.read_text()
+        contract = EXCLUSIVE_CONTRACT.read_text()
+        documented_holds = all(fragment in research + '\n' + contract for fragment in (
+            '843a6c514e606b436a7fe713422ace0a93ad3d61',
+            '744846f844374847c902b5e7fd59b4342a51ef99',
+            'cloud_live_route_not_qualified',
+            'WebSocket',
+            'AI SDK',
+        ))
+        checks.append({'name': 'exclusive trust sources pin identities and retain transport holds',
+                       'pass': documented_holds})
+        if not documented_holds:
+            raise AssertionError('exclusive_trust_holds')
+
         private = temp / 'private'
         private.mkdir(mode=0o700)
         snapshot = module.private_snapshot(private / 'runtime-ca.pem', ca.read_bytes())
@@ -283,7 +344,11 @@ def main():
                    'classification': 'offline source and parameter validation',
                    'checks': checks,
                    'source_sha256': {'runner': sha(RUNNER), 'checker': sha(Path(__file__)),
-                                     'manifest': sha(CURRENT_MANIFEST)},
+                                     'manifest': sha(CURRENT_MANIFEST),
+                                     'exclusive_checker': sha(EXCLUSIVE_CHECKER),
+                                     'exclusive_patch': sha(EXCLUSIVE_PATCH),
+                                     'exclusive_research': sha(EXCLUSIVE_RESEARCH),
+                                     'exclusive_contract': sha(EXCLUSIVE_CONTRACT)},
                    'synthetic_ca': {'sha256': ca_sha, 'bytes': ca.stat().st_size,
                                     'certificate_count': ca_text.count('-----BEGIN CERTIFICATE-----'),
                                     'private_key_present': private_key_present},

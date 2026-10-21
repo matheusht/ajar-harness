@@ -11,9 +11,19 @@
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
     },
     {
-      "bytes": 7441,
+      "bytes": 8728,
       "path": "evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md",
-      "sha256": "10723d186db792cf1eb7db36e67df074ebf9fee53931a9ad92e796861ac0d9a4"
+      "sha256": "1e4392da0750956218b64d985dd8fad9d062b6568e7f2973a16e087e83aa74cf"
+    },
+    {
+      "bytes": 9275,
+      "path": "evals/native-qualification/T02-OPENCODE-EXCLUSIVE-TRUST-CHECKS-20261021.md",
+      "sha256": "b64104a6704012d2c06d185ff7483a46b625008c18d4a51665174a2fb7a49596"
+    },
+    {
+      "bytes": 17822,
+      "path": "evals/native-qualification/T02-OPENCODE-EXCLUSIVE-TRUST-RESEARCH-20261021.md",
+      "sha256": "74ff7b8a952b307b71b8331ecd389635c7ffd4b757bad49d0552525679bc0815"
     },
     {
       "bytes": 16473,
@@ -26,9 +36,19 @@
       "sha256": "5c51199eca9e671ffb34093884780eff3842fdff6d4c61f2f3e40b6dd5af99d8"
     },
     {
+      "bytes": 3228,
+      "path": "evals/native-qualification/patches/opencode-v2.0.32-exclusive-ca.patch",
+      "sha256": "6bdcfe00195c224c5c37f946991f69ec19c240f5f1af8787d01c3bb8362cdebc"
+    },
+    {
       "bytes": 361,
       "path": "evals/native-qualification/smoke/check.php",
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
+    },
+    {
+      "bytes": 71366,
+      "path": "evals/native-qualification/smoke/check_opencode_exclusive_trust.py",
+      "sha256": "7a36d51ad0b46fb8da1b38d4a367a46cdb9bb1d4e63a11785a9b1a81c71e29d0"
     },
     {
       "bytes": 3898,
@@ -41,9 +61,9 @@
       "sha256": "e06453668bdd7f26f9f80847d15c087370e270ae92789570e65b42c8f166adbf"
     },
     {
-      "bytes": 15028,
+      "bytes": 18499,
       "path": "evals/native-qualification/smoke/check_v2_live_preparation.py",
-      "sha256": "e873349893d808b664f7b887bf1cf0a1155a16a8a560a6dfb56f957bf881491b"
+      "sha256": "87704f8a88f063c0add35b804991bddd9a2d60b533cf6930b4955b23a896d7d4"
     },
     {
       "bytes": 98,
@@ -91,9 +111,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1416,
+      "bytes": 1832,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "e7dd227bdcc6aba7f59d35a0e99fd0b37c62cbafdfeae09e685f9bbe883748f8"
+      "sha256": "749fc9121d3081efe361841b874f31fff7627ecc5753dbc18ed8126068e45cfc"
     },
     {
       "bytes": 11748,

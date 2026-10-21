@@ -14,6 +14,12 @@ Container readback treats proxy, credential, and trust environment variables as 
 
 This proves an explicit, hash-pinned trust input and exact source-level mount/environment plan; it does not prove a container request or that the pinned OpenCode runtime excludes every compiled-in or system root. Replacing that runtime's built-in trust authority would be a separate security-authority change, so this patch does not guess at a flag or hide the uncertainty. Before the live denial can move, an operator-reviewed design must identify the pinned runtime's supported replacement-store mechanism and use an owned dual-chain fixture to show that the supplied runtime CA succeeds while a chain trusted only by the ambient store fails. The result must be read back from the actual OpenCode TLS path. Until then, exclusive runtime trust is blocked, not passed.
 
+## Exclusive-store follow-up
+
+Primary-source review now confirms that `SSL_CERT_FILE`, `SSL_CERT_DIR`, and `NODE_EXTRA_CA_CERTS` cannot make the pinned OpenCode 2.0.32 executable trust only the supplied CA. Bun 1.4.2 keeps bundled roots in its default store, and OpenCode bakes `--use-system-ca`. The existing `SSL_CERT_FILE` plan therefore remains dormant input plumbing, not a qualified trust boundary.
+
+`T02-OPENCODE-EXCLUSIVE-TRUST-RESEARCH-20261021.md` records the source findings. `T02-OPENCODE-EXCLUSIVE-TRUST-CHECKS-20261021.md` defines a source-patched native HTTP design and a bounded owned check with three core arms plus ten pre-socket cases. `patches/opencode-v2.0.32-exclusive-ca.patch` and `smoke/check_opencode_exclusive_trust.py` are prepared inputs only. No patched image has been built or run, and no dual-chain result exists. The managed runner is intentionally unchanged, including its unconditional live denial.
+
 ## Responder-independent provider state
 
 Provider ledger reads always return the tunnel and byte facts. `owned_responses` and `owned_health` are integers only when the owned offline responder exists. They are `null` in a future live run. Zero must not stand in for an unobserved live receiver count.
@@ -24,11 +30,12 @@ Run:
 
 ```sh
 python3 evals/native-qualification/smoke/check_v2_live_preparation.py --output <new-private-output>
+python3 evals/native-qualification/smoke/check_opencode_exclusive_trust.py --self-test
 python3 evals/native-qualification/smoke/check_v2_cloud_manifest_layout.py
 python3 evals/native-qualification/smoke/check_v2_cloud_owned_source.py --current-manifest
 ```
 
-The preparation checker's public entrypoint uses a generated benign CA and a fake Docker executable. It must cover missing and partial pairs, offline-only misuse, invalid paths and bytes, digest failures, the valid-but-still-blocked case, exact trust mount/environment construction, unexpected trust override rejection, and provider state with and without an owned responder. The checker's core and all descendants run under `strace -f -e trace=network -e signal=none`; an unavailable observer or any network syscall fails without a receipt. The hidden core can emit only `status: unobserved`; only the observing parent can promote that object to `status: pass`. Its receipt may contain only named checks, fixed error codes, source hashes, synthetic CA size/hash/count, the Docker marker result, the zero-syscall observation method/count, and the retained live-gate code.
+The preparation checker's public entrypoint uses a generated benign CA and a fake Docker executable. It must cover missing and partial pairs, offline-only misuse, invalid paths and bytes, digest failures, the valid-but-still-blocked case, exact trust mount/environment construction, unexpected trust override rejection, provider state with and without an owned responder, the dormant exclusive-checker boundary, and the exclusive receipt evaluator's pure self-test. The checker's core and all descendants run under `strace -f -e trace=network -e signal=none`; an unavailable observer or any network syscall fails without a receipt. The hidden core can emit only `status: unobserved`; only the observing parent can promote that object to `status: pass`. Its receipt may contain only named checks, fixed error codes, source hashes, synthetic CA size/hash/count, the Docker marker result, the zero-syscall observation method/count, and the retained live-gate code.
 
 The owned managed workflow must still pass 64/64 with synthetic responses and zero provider calls after this source change. That result does not clear the owned-upstream, real-model, interruption/recovery, independent-review, hidden-case, false-proof, or adoption gates.
 
@@ -38,7 +45,7 @@ The selected managed sidecar still needs an operator-approved reachable owned re
 
 ## Complexity and source-authority record
 
-The concrete additions are one paired trust-input invariant, one responder-optional ledger projection, one standalone source checker, and one explicit current-source manifest. They add no service, runtime dependency, agent, or live entrypoint. The offline checker does add a Linux test-tool dependency on `strace`: absence or lack of ptrace capability blocks the receipt rather than degrading observation, so non-Linux and restricted executors cannot produce this evidence. The historical ZIP-root manifest remains the default authority; the new manifest is selected only by `--current-manifest`, so old readers keep their prior fail-closed behavior and correctly report the post-transfer bytes as drift.
+The concrete additions are one paired trust-input invariant, one responder-optional ledger projection, one standalone source checker, one explicit current-source manifest, and a later dormant exclusive-trust source patch/checker pair. They add no service, agent, or live entrypoint. The dual-chain checker is an explicit future runtime action, but neither the managed runner nor the source checker invokes that action. The offline checker does add a Linux test-tool dependency on `strace`: absence or lack of ptrace capability blocks the receipt rather than degrading observation, so non-Linux and restricted executors cannot produce this evidence. The historical ZIP-root manifest remains the default authority; the new manifest is selected only by `--current-manifest`, so old readers keep their prior fail-closed behavior and correctly report the post-transfer bytes as drift.
 
 The current manifest is necessary because changing the authenticated root manifest would rewrite the historical transfer while leaving it unable to pin the post-transfer bytes. Its stable path avoids a new dated selection branch for every qualification. The checker and this document are loaded only when the T02 preparation is invoked, so they do not increase the orchestrator's always-loaded context. The two standalone checks retain their short CA-generation commands rather than adding a shared test-helper module and another source pin.
 

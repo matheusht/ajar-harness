@@ -13,8 +13,11 @@ python3 evals/native-qualification/smoke/check_v2_reviewer_packet.py \
 Use a new output directory for each run. Expected: `PASS` and all checks true in
 `result.json`. The script builds a harmless baseline/candidate/note and synthetic
 native tool event, creates the exact review packet, mounts it into a network-none
-container read-only, checks a separate receipt copy, then tests byte drift, root
-replacement and secret refusal.
+container read-only, checks a separate receipt copy, proves the owned frozen
+bind can be removed after the container exits while the archive survives, then
+tests byte drift, root replacement, secret refusal and a delayed Docker writer
+that changes the candidate after its app-check hash was recorded. The changed input must leave
+the new packet directory empty before any reviewer start.
 The receipt records hashes and an image ID, not raw home paths or credentials.
 
 This is an offline packet and mount check only. It does not exercise a native

@@ -160,6 +160,16 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
         raise RuntimeError('review_packet_input_invalid')
     files = {'ORIGINAL-' + name: (originals / name).read_bytes() for name in PACKET_SOURCE_NAMES}
     files.update({name: (candidate / name).read_bytes() for name in PACKET_SOURCE_NAMES})
+    source_hashes = {
+        'baseline': {name: hashlib.sha256(files['ORIGINAL-' + name]).hexdigest()
+                     for name in PACKET_SOURCE_NAMES},
+        'candidate': {name: hashlib.sha256(files[name]).hexdigest()
+                      for name in PACKET_SOURCE_NAMES}}
+    if (not isinstance(app_checks, dict) or any(
+            not isinstance(app_checks.get(phase), dict)
+            or app_checks[phase].get('source_sha256') != source_hashes[phase]
+            for phase in ('baseline', 'candidate'))):
+        raise RuntimeError('review_packet_app_source_mismatch')
     files['RESEARCH.md'] = note.read_bytes()
     note_hash = hashlib.sha256(files['RESEARCH.md']).hexdigest()
     files['CLAIMS.md'] = (
@@ -167,10 +177,8 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
         + note_hash + '). This operator restatement records the intended local before/after PHP '
         'exercise only. It is not a security finding or protected original observation.\n').encode()
     tool_material = native_tool_material(native_stdout)
-    tool_material['source_before_sha256'] = {name: hashlib.sha256(files['ORIGINAL-' + name]).hexdigest()
-                                             for name in PACKET_SOURCE_NAMES}
-    tool_material['source_after_sha256'] = {name: hashlib.sha256(files[name]).hexdigest()
-                                            for name in PACKET_SOURCE_NAMES}
+    tool_material['source_before_sha256'] = source_hashes['baseline']
+    tool_material['source_after_sha256'] = source_hashes['candidate']
     files['RAW-NATIVE-TOOLS.json'] = (json.dumps(tool_material, indent=2, sort_keys=True) + '\n').encode()
     files['RAW-APP-CHECKS.json'] = (json.dumps({
         'provenance': 'independent host PHP replay; not researcher original observation',
@@ -641,6 +649,9 @@ def finish_owned(native, resources, nonce, docker, work, prior_stop=None, respon
                  or (result.get('native_stop') or {}).get('status')
                  in ('stopped', 'closed_before_activation', 'not_started'))):
         try:
+            handoff = work / 'handoff'
+            if handoff.is_dir() and not handoff.is_symlink():
+                handoff.chmod(0o700)
             shutil.rmtree(work)
         except OSError as error:
             result['temporary_cleanup_error'] = public_error(error)
@@ -1100,7 +1111,10 @@ def main():
                 server.wait(timeout=5)
             server.stdout.close()
 
-    def host_php(folder):
+    def host_php(folder, expected_source_hashes):
+        before = {name: sha(folder / name) for name in PACKET_SOURCE_NAMES}
+        if before != expected_source_hashes:
+            raise RuntimeError('host_php_source_changed_before_replay')
         made = created('host-check', 'none',
                        ['type=bind,src=' + str(folder) + ',dst=/workspace/project,readonly'])
         check('host-owned network-none checker started', docker('container', 'start', made).returncode == 0)
@@ -1110,6 +1124,8 @@ def main():
             rows.append(summarize_php(args, result.returncode, result.stdout, result.stderr))
         removed = docker('container', 'rm', '--force', '--volumes', made)
         check('host checker removed by exact ID', removed.returncode == 0 and inspect('container', made) is None)
+        if {name: sha(folder / name) for name in PACKET_SOURCE_NAMES} != before:
+            raise RuntimeError('host_php_source_changed_during_replay')
         return rows
 
     save()
@@ -1202,8 +1218,11 @@ def main():
                 fixture_source = input_source(fixture)
                 shutil.copy2(fixture_source, workspace / 'project' / fixture.name)
                 shutil.copy2(fixture_source, baseline_source / fixture.name)
-            original_hashes = {p.name: sha(workspace / 'project' / p.name) for p in FIXTURE}
-            report['baseline'] = host_php(baseline_source)
+            original_hashes = {name: sha(baseline_source / name) for name in PACKET_SOURCE_NAMES}
+            check('original snapshot matches seeded researcher project',
+                  original_hashes == {name: sha(workspace / 'project' / name)
+                                      for name in PACKET_SOURCE_NAMES})
+            report['baseline'] = host_php(baseline_source, original_hashes)
             check('original PHP fails local check and prints before',
                   report['baseline'][0]['exit'] == 0 and report['baseline'][0]['stdout_class'] == 'before'
                   and report['baseline'][0]['stderr_class'] == 'empty'
@@ -1533,6 +1552,18 @@ def main():
                                     'php check.php' in first_run['shell_checks_observed']
                                     for tool in first_run['tools'])
                    and responder.issued))
+            report['usage_after_first'] = usage(first, first_session)
+            first_usage = all_native_usage(first, 'first')
+            if live:
+                check('first native usage pages include primary session',
+                      any(x['id'] == first_session for x in first_usage['sessions'])
+                      and not any(a['had_error'] for x in first_usage['sessions']
+                                  for a in x['assistant_usage']))
+            first_stop = docker('container', 'stop', first)
+            first_stopped = inspect('container', first)
+            check('first producer process subtree stopped before candidate snapshot',
+                  first_stop.returncode == 0 and first_stopped is not None
+                  and not first_stopped['State']['Running'])
             project_files = list((workspace / 'project').iterdir())
             check('model outputs are regular project files without symlinks',
                   all(p.is_file() and not p.is_symlink() for p in project_files)
@@ -1546,6 +1577,16 @@ def main():
             note = workspace / 'project/research-note.md'
             check('actual harmless research note exists and is bounded',
                   note.is_file() and not note.is_symlink() and 0 < note.stat().st_size <= 2048)
+            candidate_source = work / 'candidate-source'
+            candidate_source.mkdir(mode=0o700)
+            for name in (*PACKET_SOURCE_NAMES, 'research-note.md'):
+                copied = private_snapshot(candidate_source / name,
+                                          (workspace / 'project' / name).read_bytes())
+                copied.chmod(0o444)
+            check('host-owned candidate snapshot matches stopped researcher output',
+                  {name: sha(candidate_source / name) for name in PACKET_SOURCE_NAMES} == changed
+                  and sha(candidate_source / 'research-note.md') == sha(note))
+            note = candidate_source / 'research-note.md'
             note_text = note.read_text()
             if live:
                 check('ordinary research note records local result only',
@@ -1557,24 +1598,17 @@ def main():
                 report['research_note'] = {'sha256': sha(note), 'bytes': note.stat().st_size,
                                            'mentions_after': 'after' in note_text.lower(),
                                            'mentions_check': 'check' in note_text.lower()}
-            report['host_after_first'] = host_php(workspace / 'project')
+            report['host_after_first'] = host_php(candidate_source, changed)
             check('independent host PHP check passes and prints after',
                   report['host_after_first'][0]['stdout_class'] == 'after'
                   and report['host_after_first'][1]['stdout_class'] == 'check_passed'
                   and all(x['stderr_class'] == 'empty' for x in report['host_after_first'])
                   and all(x['exit'] == 0 for x in report['host_after_first']))
-            report['usage_after_first'] = usage(first, first_session)
-            first_usage = all_native_usage(first, 'first')
-            if live:
-                check('first native usage pages include primary session',
-                      any(x['id'] == first_session for x in first_usage['sessions'])
-                      and not any(a['had_error'] for x in first_usage['sessions']
-                                  for a in x['assistant_usage']))
-            check('researcher quiescent and reviewer idle before packet publication',
-                  idle_top(docker('container', 'top', first))
+            check('researcher stopped and reviewer idle before packet publication',
+                  not inspect('container', first)['State']['Running']
                   and idle_top(docker('container', 'top', reviewer)))
             packet_pin = publish_review_packet(
-                handoff, baseline_source, workspace / 'project', note, first_native_stdout,
+                handoff, baseline_source, candidate_source, note, first_native_stdout,
                 {'baseline': {'source_sha256': original_hashes, 'network': 'none',
                               'image_id': selected['image_id'], 'results': report['baseline']},
                  'candidate': {'source_sha256': changed, 'network': 'none',
@@ -1658,7 +1692,7 @@ def main():
                                 and item['tool'] in ('read', 'shell', 'glob', 'grep') for item in completed)
             material_check = any(item['tool'] == 'shell' and 'php ' in json.dumps(item['input'])
                                  for item in completed)
-            report['host_after_review'] = host_php(workspace / 'project')
+            report['host_after_review'] = host_php(workspace / 'project', changed)
             report['reviewer_material_work'] = {
                 'packet_read_observed': material_read,
                 'reviewer_selected_php_check_observed': material_check,
@@ -1673,7 +1707,7 @@ def main():
                   report['host_after_review'] == report['host_after_first']
                   and {p.name: sha(workspace / 'project' / p.name) for p in FIXTURE} == changed)
             check('first producer stopped before exact-session resume',
-                  docker('container', 'stop', first).returncode == 0)
+                  not inspect('container', first)['State']['Running'])
             dbpath = workspace / 'data/opencode/opencode.db'
             report['stopped_store_files'] = {name: {'exists': (dbpath.parent / name).exists(),
                 'bytes': (dbpath.parent / name).stat().st_size if (dbpath.parent / name).exists() else None}
@@ -1733,7 +1767,7 @@ def main():
                   and (resume_run['pool_after']['charged_bytes'] > resume_run['pool_before']['charged_bytes']
                        if live else any(row['role'] == 'resume' and row['path'] == OWNED_PATH
                                         for row in responder.rows)))
-            report['host_after_resume'] = host_php(workspace / 'project')
+            report['host_after_resume'] = host_php(workspace / 'project', changed)
             check('host effect and source bytes retained after resume',
                   report['host_after_resume'] == report['host_after_first']
                   and {p.name: sha(workspace / 'project' / p.name) for p in FIXTURE} == changed)

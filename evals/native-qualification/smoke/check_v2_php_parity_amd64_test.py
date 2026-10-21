@@ -3,14 +3,21 @@
 
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE / 'smoke'))
 import check_v2_php_parity_amd64 as subject  # noqa: E402
+
+COMMAND = (HERE / 't02-evidence/opencode-v2-php-parity-amd64-20261021a/'
+           'run-command.txt')
 
 
 class ParityAdmissionTests(unittest.TestCase):
@@ -27,7 +34,12 @@ class ParityAdmissionTests(unittest.TestCase):
         return value
 
     def test_exact_image_admission(self):
-        image = {'Id': subject.IMAGE_ID, 'Architecture': 'amd64', 'Os': 'linux'}
+        image = {
+            'Id': subject.IMAGE_ID,
+            'Architecture': 'amd64',
+            'Os': 'linux',
+            'RepoTags': [subject.IMAGE],
+        }
         checks = subject.image_check_results(
             image, 'PHP 8.4.26 (cli)', ['Core', 'gd', 'PDO', 'pdo_sqlite'],
             subject.DOCKERFILE_SHA256)
@@ -44,6 +56,24 @@ class ParityAdmissionTests(unittest.TestCase):
         self.assertFalse(subject.image_check_results(
             image, 'PHP 8.4.26 (cli)', ['pdo_sqlite'],
             subject.DOCKERFILE_SHA256)['required_php_modules'])
+
+    def test_wrong_image_id_executes_no_container(self):
+        image = {
+            'Id': 'sha256:' + '0' * 64,
+            'Architecture': 'amd64',
+            'Os': 'linux',
+            'RepoTags': [subject.IMAGE],
+        }
+
+        def fail_closed(name, passed):
+            if not passed:
+                raise AssertionError(name)
+
+        with mock.patch.object(subject.subprocess, 'run') as run:
+            with self.assertRaisesRegex(AssertionError, 'exact image id'):
+                subject.admit_and_probe_image(
+                    image, subject.DOCKERFILE_SHA256, fail_closed)
+            run.assert_not_called()
 
     def test_ordinary_and_differentiating_behavior(self):
         current = self.current_result()
@@ -70,15 +100,24 @@ class ParityAdmissionTests(unittest.TestCase):
         self.assertFalse(subject.observer_check_results(
             bad_cleanup, self.original)['cleanup_complete'])
 
+        duplicate = self.current_result()
+        duplicate['arms'].append(copy.deepcopy(duplicate['arms'][0]))
+        self.assertFalse(subject.observer_check_results(
+            duplicate, self.original)['two_release_arms'])
+
     def test_public_artifact_admission(self):
         traces = {
             'vulnerable': [
                 {'actor': 'admin', 'method': 'createUser',
                  'params': ['alice', '[REDACTED]'], 'raw_response': '{"result": 2}'},
+                {'actor': 'admin', 'method': 'createUser',
+                 'params': ['bob', '[REDACTED]'], 'raw_response': '{"result": 3}'},
             ],
             'fixed': [
-                {'actor': 'bob', 'method': 'getSwimlane', 'params': [2],
-                 'raw_response': '{"error":{"code":403}}'},
+                {'actor': 'admin', 'method': 'createUser',
+                 'params': ['alice', '[REDACTED]'], 'raw_response': '{"result": 2}'},
+                {'actor': 'admin', 'method': 'createUser',
+                 'params': ['bob', '[REDACTED]'], 'raw_response': '{"result": 3}'},
             ],
         }
         checks = subject.artifact_check_results(
@@ -93,6 +132,10 @@ class ParityAdmissionTests(unittest.TestCase):
         self.assertFalse(subject.artifact_check_results(
             traces, {'fixed': '/tmp/private-parity-root/fixed-run'},
             ['/tmp/private-parity-root'])['private_paths_absent'])
+        missing = subject.artifact_check_results(
+            {'vulnerable': [], 'fixed': []}, {}, [])
+        self.assertFalse(missing['expected_traces_present'])
+        self.assertFalse(missing['expected_create_user_entries'])
 
     def test_docker_baseline_requires_exact_identity(self):
         before = {
@@ -104,6 +147,39 @@ class ParityAdmissionTests(unittest.TestCase):
         after['containers'].append('leftover-container')
         self.assertFalse(subject.docker_baseline_check_results(
             before, after)['containers_restored'])
+
+    def test_repeatable_command_is_shell_valid_and_mismatch_stops(self):
+        syntax = subprocess.run(
+            ['bash', '-n', str(COMMAND)], capture_output=True, text=True)
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / 'python-called'
+            fake_docker = root / 'docker'
+            fake_docker.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1 $2" = "image inspect" ]; then\n'
+                '  printf "%s\\n" '
+                "'sha256:d0b96c08541486079634fd70a0ffb221c32b07a2a04a1a2ab7d041912a7c9a91'\n"
+                'fi\n')
+            fake_docker.chmod(0o700)
+            fake_python = root / 'python3'
+            fake_python.write_text(
+                '#!/bin/sh\nprintf called > "$PYTHON_MARKER"\n')
+            fake_python.chmod(0o700)
+            env = os.environ.copy()
+            env.update({
+                'PATH': f'{root}:/usr/bin:/bin',
+                'PARITY_CA_BUNDLE': str(root / 'ca.pem'),
+                'PARITY_OUTPUT': str(root / 'output'),
+                'PYTHON_MARKER': str(marker),
+            })
+            run = subprocess.run(
+                ['bash', str(COMMAND)], cwd=HERE.parent.parent,
+                env=env, capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertFalse(marker.exists(), run.stdout + run.stderr)
 
 
 if __name__ == '__main__':

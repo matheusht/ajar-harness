@@ -22,6 +22,50 @@ EXPECTED_NETWORKS = {
     ('host', 'dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb'),
     ('none', '8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216'),
 }
+EXPECTED_REPOSITORY_INPUTS = {
+    'Dockerfile.opencode-kanboard-runtime':
+        '7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b',
+    'observer_case.py':
+        '72273bfd4e1c1aa9f7f53279e525ec1c74c2669324fa62f1b6b22abf65d596bf',
+    'observer-evidence-final/observer-results.json':
+        '9db3bc220484a7a786729847f3c8fa8cc1d364a74b1e4a81d2bb78f80dc924fa',
+    'CHECKS.md':
+        'aad8009c7d1870cf278c192fb97d36d01829428c02ffedf377072af8a527cd19',
+    'RESEARCHER-BRIEF.md':
+        '8f2b5604870cf86719ae94ac180cb6cbe0c5c12cdd2356bc90f4104bb7179a5a',
+    'T02-PHP-PARITY-CHECKS-20261020.md':
+        '850a68458864f8e0cb4850e36c71c7589c4b570cefbb9205071b4aaa26cabe37',
+    'T02-RESEARCHER-BRIEF-PHP-8.4.26.md':
+        '40044703ca38909e80b1db6f79694ed98e27e5892aedf9e269b4256188ad837e',
+    'T02-AMD64-PHP-PARITY-CHECKS-20261021.md':
+        'e520c260f5d2daaa18e2ed7e5ee6297d8e435293ae1cccda161bf75b621dd20d',
+    'smoke/check_v2_php_parity.py':
+        'e30a0f8237b5dcfb546611c8952a0699c013b7786d14d144bc08caa148935616',
+    'smoke/check_v2_php_parity_amd64.py':
+        'bf983ccc93fac42033c7785fab35aa10e263c9035ee8680a3896c183df281927',
+    'smoke/check_v2_php_parity_amd64_test.py':
+        '3bd6542d300de103a8f142655c576de74c6f4665b97a5ee8c57a161b30235c18',
+    't02-evidence/live-preparation-owned-20261021a/runtime-build.json':
+        'e21c872cbefc53022d6dd6f23b88795e873de93c1a183d7adcdb3883fbfc2c8c',
+}
+EXPECTED_ARCHIVES = {
+    'vulnerable': {
+        'release': 'v1.2.49',
+        'commit': 'f0f7d27007f5a788f14416c548421efd740b7bce',
+        'url': ('https://codeload.github.com/kanboard/kanboard/tar.gz/'
+                'f0f7d27007f5a788f14416c548421efd740b7bce'),
+        'sha256': '3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf',
+        'retrieved': False,
+    },
+    'fixed': {
+        'release': 'v1.2.50',
+        'commit': 'a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3',
+        'url': ('https://codeload.github.com/kanboard/kanboard/tar.gz/'
+                'a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3'),
+        'sha256': '44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56',
+        'retrieved': False,
+    },
+}
 
 
 def sha256(path: Path) -> str:
@@ -37,7 +81,8 @@ def receipt_checks(result: dict, inputs: dict, command: str, readme: str) -> dic
     final_networks = {
         (item.get('name'), item.get('id'))
         for item in cleanup.get('final_networks', []) if isinstance(item, dict)}
-    serialized = json.dumps({'result': result, 'inputs': inputs}, sort_keys=True) + command
+    serialized = (json.dumps({'result': result, 'inputs': inputs}, sort_keys=True)
+                  + command + readme)
     secret_pattern = re.compile(
         r'(?i)(authorization\s*[:=]|basic\s+[a-z0-9+/=]{8,}|'
         r'"(?:cookie|token|access_token|password)"\s*:\s*"[^"]+"|'
@@ -75,8 +120,7 @@ def receipt_checks(result: dict, inputs: dict, command: str, readme: str) -> dic
         'archives not retrieved': (
             execution.get('archive_retrieval_attempted') is False
             and execution.get('archives_verified') == 0
-            and set(archives) == {'vulnerable', 'fixed'}
-            and all(item.get('retrieved') is False for item in archives.values())),
+            and archives == EXPECTED_ARCHIVES),
         'zero external execution': (
             execution.get('application_containers_started') == 0
             and execution.get('researcher_bundle_created') is False
@@ -100,9 +144,13 @@ def receipt_checks(result: dict, inputs: dict, command: str, readme: str) -> dic
             and cleanup.get('baseline_restored') is True),
         'command marks blocked boundary': (
             EXPECTED_IMAGE in command and ACTUAL_IMAGE in command
-            and '# NOT RUN:' in command
-            and '<existing-combined-ca-bundle>' in command
-            and '<new-private-output-directory>' in command),
+            and ': "${PARITY_CA_BUNDLE:?' in command
+            and ': "${PARITY_OUTPUT:?' in command
+            and 'if [ "${ACTUAL_IMAGE_ID}" != "${EXPECTED_IMAGE_ID}" ]; then' in command
+            and '  exit 1\n' in command
+            and 'python3 evals/native-qualification/smoke/' in command
+            and command.index('  exit 1\n')
+            < command.index('python3 evals/native-qualification/smoke/')),
         'readme states blocked scope': (
             'blocked before parity execution' in readme
             and 'does not establish current-image Kanboard parity' in readme
@@ -116,11 +164,12 @@ def receipt_checks(result: dict, inputs: dict, command: str, readme: str) -> dic
 
 def source_checks(inputs: dict) -> dict[str, bool]:
     pins = inputs.get('repository_inputs', {})
-    return {
+    checks = {'source pin manifest exact': pins == EXPECTED_REPOSITORY_INPUTS}
+    checks.update({
         f'source pin {relative}': (NATIVE / relative).is_file()
         and sha256(NATIVE / relative) == digest
-        for relative, digest in pins.items()
-    }
+        for relative, digest in EXPECTED_REPOSITORY_INPUTS.items()})
+    return checks
 
 
 def verify(result: dict, inputs: dict, command: str, readme: str) -> dict[str, bool]:
@@ -146,6 +195,20 @@ def self_test(result: dict, inputs: dict, command: str, readme: str) -> dict[str
     dirty['cleanup']['final_images'] = [ACTUAL_IMAGE]
     tests['reject incomplete cleanup'] = not receipt_checks(
         dirty, inputs, command, readme)['cleanup exact']
+
+    missing_sources = copy.deepcopy(inputs)
+    missing_sources.pop('repository_inputs')
+    tests['reject missing source pin manifest'] = not source_checks(
+        missing_sources)['source pin manifest exact']
+
+    substituted_archive = copy.deepcopy(inputs)
+    substituted_archive['archives']['fixed']['sha256'] = '0' * 64
+    tests['reject substituted archive pin'] = not receipt_checks(
+        result, substituted_archive, command, readme)['archives not retrieved']
+
+    unguarded_command = command.replace('  exit 1\n', '  :\n', 1)
+    tests['reject missing command exit gate'] = not receipt_checks(
+        result, inputs, unguarded_command, readme)['command marks blocked boundary']
     return tests
 
 

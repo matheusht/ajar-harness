@@ -56,6 +56,7 @@ def image_check_results(image_info: dict, php_version: str, php_modules: list[st
     modules = {value.lower() for value in php_modules}
     return {
         'exact_image_id': image_info.get('Id') == IMAGE_ID,
+        'expected_tag': IMAGE in image_info.get('RepoTags', []),
         'linux_amd64': (
             image_info.get('Os') == 'linux'
             and image_info.get('Architecture') == 'amd64'),
@@ -65,11 +66,34 @@ def image_check_results(image_info: dict, php_version: str, php_modules: list[st
     }
 
 
+def admit_and_probe_image(image_info: dict, dockerfile_sha256: str, check) -> tuple[str, list[str]]:
+    """Reject an unqualified image before executing even an offline probe."""
+    identity = image_check_results(image_info, '', [], dockerfile_sha256)
+    for name in ('exact_image_id', 'expected_tag', 'linux_amd64', 'dockerfile_pin'):
+        check(name.replace('_', ' '), identity[name])
+
+    version = subprocess.run([
+        'docker', 'run', '--rm', '--pull=never', '--network', 'none',
+        '--entrypoint', 'php', IMAGE_ID, '-v'], capture_output=True, text=True)
+    modules = subprocess.run([
+        'docker', 'run', '--rm', '--pull=never', '--network', 'none',
+        '--entrypoint', 'php', IMAGE_ID, '-m'], capture_output=True, text=True)
+    php_version = version.stdout.splitlines()[0] if version.returncode == 0 else ''
+    php_modules = sorted(set(modules.stdout.splitlines())) if modules.returncode == 0 else []
+    runtime = image_check_results(image_info, php_version, php_modules, dockerfile_sha256)
+    for name in ('php_8_4_26', 'required_php_modules'):
+        check(name.replace('_', ' '), runtime[name])
+    return php_version, php_modules
+
+
 def _arms_by_release(result: dict) -> dict[str, dict]:
     arms = result.get('arms')
-    if not isinstance(arms, list):
+    if not isinstance(arms, list) or len(arms) != 2:
         return {}
-    return {arm.get('release'): arm for arm in arms if isinstance(arm, dict)}
+    if not all(isinstance(arm, dict) for arm in arms):
+        return {}
+    by_release = {arm.get('release'): arm for arm in arms}
+    return by_release if len(by_release) == len(arms) else {}
 
 
 def _denied(value: object) -> bool:
@@ -139,7 +163,22 @@ def observer_check_results(current: dict, original: dict) -> dict[str, bool]:
 
 def artifact_check_results(traces: dict[str, list], texts: dict[str, str],
                            forbidden_roots: list[str]) -> dict[str, bool]:
+    expected_labels = set(EXPECTED_PINS)
+    expected_traces = (
+        set(traces) == expected_labels
+        and all(isinstance(traces[label], list) and traces[label]
+                for label in expected_labels))
     entries = [entry for trace in traces.values() for entry in trace]
+    create_users = {
+        label: [entry for entry in traces.get(label, [])
+                if isinstance(entry, dict) and entry.get('method') == 'createUser']
+        for label in expected_labels}
+    expected_creates = expected_traces and all(
+        len(create_users[label]) == 2
+        and {entry.get('actor') for entry in create_users[label]} == {'admin'}
+        and {tuple(entry.get('params', [])) for entry in create_users[label]}
+        == {('alice', '[REDACTED]'), ('bob', '[REDACTED]')}
+        for label in expected_labels)
     create_user_redacted = all(
         len(entry.get('params', [])) > 1 and entry['params'][1] == '[REDACTED]'
         for entry in entries if entry.get('method') == 'createUser')
@@ -148,7 +187,9 @@ def artifact_check_results(traces: dict[str, list], texts: dict[str, str],
         r'(?i)(authorization\s*[:=]|basic\s+[a-z0-9+/=]{8,}|'
         r'"(?:cookie|token|access_token|password)"\s*:\s*"(?!\[REDACTED\])[^\"]+")')
     return {
-        'create_user_passwords_redacted': create_user_redacted,
+        'expected_traces_present': expected_traces,
+        'expected_create_user_entries': expected_creates,
+        'create_user_passwords_redacted': expected_creates and create_user_redacted,
         'authorization_cookie_token_values_absent': sensitive_value.search(serialized) is None,
         'private_paths_absent': all(root not in serialized for root in forbidden_roots),
     }
@@ -256,26 +297,18 @@ def main() -> int:
             ['docker', 'image', 'inspect', IMAGE], capture_output=True, text=True)
         check('pinned local image is available without pull', inspected.returncode == 0)
         image_info = json.loads(inspected.stdout)[0]
-        check('pinned tag resolves to expected image', IMAGE in image_info.get('RepoTags', []))
-        version = subprocess.run([
-            'docker', 'run', '--rm', '--pull=never', '--network', 'none',
-            '--entrypoint', 'php', IMAGE, '-v'], capture_output=True, text=True)
-        modules = subprocess.run([
-            'docker', 'run', '--rm', '--pull=never', '--network', 'none',
-            '--entrypoint', 'php', IMAGE, '-m'], capture_output=True, text=True)
-        php_version = version.stdout.splitlines()[0] if version.returncode == 0 else ''
-        php_modules = sorted(set(modules.stdout.splitlines())) if modules.returncode == 0 else []
         report['image'].update({
             'actual_id': image_info.get('Id'),
             'actual_platform': f"{image_info.get('Os')}/{image_info.get('Architecture')}",
-            'php_version': php_version,
-            'php_modules': php_modules,
+            'repo_tags': image_info.get('RepoTags') or [],
             'repo_digests': image_info.get('RepoDigests') or [],
         })
-        image_checks = image_check_results(
-            image_info, php_version, php_modules, sha256(DOCKERFILE))
-        for name, passed in image_checks.items():
-            check(name.replace('_', ' '), passed)
+        php_version, php_modules = admit_and_probe_image(
+            image_info, sha256(DOCKERFILE), check)
+        report['image'].update({
+            'php_version': php_version,
+            'php_modules': php_modules,
+        })
 
         original_brief = output / 'original-RESEARCHER-BRIEF.md'
         original_result = output / 'original-T01-observer-results.json'
@@ -285,7 +318,7 @@ def main() -> int:
               sha256(original_brief) == BRIEF_SHA256
               and sha256(original_result) == T01_RESULT_SHA256)
 
-        observer_case.PHP_IMAGE = IMAGE
+        observer_case.PHP_IMAGE = IMAGE_ID
         observer_case.PHP_IMAGE_DIGEST = IMAGE_RUNTIME_LABEL
         evidence = output / 'evidence'
         evidence.mkdir(mode=0o700)

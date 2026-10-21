@@ -1,6 +1,12 @@
-# Executed bounded build command. Set PARITY_CA_BUNDLE to the existing combined
-# CA bundle required by the managed environment; do not add system trust.
-PARITY_CA_BUNDLE=<existing-combined-ca-bundle>
+#!/usr/bin/env bash
+set -eu
+
+# Redacted repeatable form of the executed bounded build. Supply an existing
+# combined CA bundle required by the managed environment; do not add trust.
+: "${PARITY_CA_BUNDLE:?set PARITY_CA_BUNDLE to the existing combined CA bundle}"
+: "${PARITY_OUTPUT:?set PARITY_OUTPUT to a new private output directory}"
+EXPECTED_IMAGE_ID='sha256:9ef722322521322a1288a18427ba5bf6ce1479085c97e0ac821982eec4f01769'
+
 docker buildx build --platform linux/amd64 --load \
   --build-arg OPENCODE_BASE=ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319 \
   --secret id=proxy_ca,type=file,src="${PARITY_CA_BUNDLE}" \
@@ -8,12 +14,18 @@ docker buildx build --platform linux/amd64 --load \
   -t t02-kanboard-runtime:amd64-live-prep \
   evals/native-qualification
 
-# Admission check performed after the build. Expected exact ID:
-# sha256:9ef722322521322a1288a18427ba5bf6ce1479085c97e0ac821982eec4f01769
-docker image inspect t02-kanboard-runtime:amd64-live-prep
+# Exact admission gate performed after the build and before any image execution,
+# archive retrieval, or parity runner. The recorded attempt stopped here.
+ACTUAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' \
+  t02-kanboard-runtime:amd64-live-prep)"
+if [ "${ACTUAL_IMAGE_ID}" != "${EXPECTED_IMAGE_ID}" ]; then
+  printf 'exact image ID mismatch: expected %s; actual %s\n' \
+    "${EXPECTED_IMAGE_ID}" "${ACTUAL_IMAGE_ID}" >&2
+  exit 1
+fi
 
-# NOT RUN: the admission check returned image ID
+# NOT REACHED in the recorded attempt: the gate returned image ID
 # sha256:d0b96c08541486079634fd70a0ffb221c32b07a2a04a1a2ab7d041912a7c9a91,
-# so the required stop occurred before this command or any archive retrieval.
+# so the required stop occurred before the runner or archive retrieval.
 python3 evals/native-qualification/smoke/check_v2_php_parity_amd64.py \
-  --output <new-private-output-directory>
+  --output "${PARITY_OUTPUT}"

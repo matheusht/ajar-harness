@@ -2,8 +2,8 @@
   "schema_version": 1,
   "kind": "t02-cloud-amd64-kanboard-parity-public-verification",
   "status": "pass",
-  "checks_passed": 25,
-  "checks_total": 25,
+  "checks_passed": 29,
+  "checks_total": 29,
   "network_required": false,
   "docker_required": false,
   "checks": [
@@ -17,6 +17,7 @@
     {"name": "command marks blocked boundary", "pass": true},
     {"name": "readme states blocked scope", "pass": true},
     {"name": "no raw secret material", "pass": true},
+    {"name": "source pin manifest exact", "pass": true},
     {"name": "source pin Dockerfile.opencode-kanboard-runtime", "pass": true},
     {"name": "source pin observer_case.py", "pass": true},
     {"name": "source pin observer-evidence-final/observer-results.json", "pass": true},
@@ -31,6 +32,9 @@
     {"name": "source pin t02-evidence/live-preparation-owned-20261021a/runtime-build.json", "pass": true},
     {"name": "self-test reject false parity upgrade", "pass": true},
     {"name": "self-test reject inconsistent exact-image substitution", "pass": true},
-    {"name": "self-test reject incomplete cleanup", "pass": true}
+    {"name": "self-test reject incomplete cleanup", "pass": true},
+    {"name": "self-test reject missing source pin manifest", "pass": true},
+    {"name": "self-test reject substituted archive pin", "pass": true},
+    {"name": "self-test reject missing command exit gate", "pass": true}
   ]
 }

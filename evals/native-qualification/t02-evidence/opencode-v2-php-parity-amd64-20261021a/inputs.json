@@ -24,8 +24,8 @@
     "T02-RESEARCHER-BRIEF-PHP-8.4.26.md": "40044703ca38909e80b1db6f79694ed98e27e5892aedf9e269b4256188ad837e",
     "T02-AMD64-PHP-PARITY-CHECKS-20261021.md": "e520c260f5d2daaa18e2ed7e5ee6297d8e435293ae1cccda161bf75b621dd20d",
     "smoke/check_v2_php_parity.py": "e30a0f8237b5dcfb546611c8952a0699c013b7786d14d144bc08caa148935616",
-    "smoke/check_v2_php_parity_amd64.py": "ab9d207c92e903712a6bc97493a50b1f022d957945e06ea6048fd0aa4dcefa0d",
-    "smoke/check_v2_php_parity_amd64_test.py": "352cf76e18b77cb529061e1c36b8e3d6ebba8685a435ea21cb0c18850d983ca6",
+    "smoke/check_v2_php_parity_amd64.py": "bf983ccc93fac42033c7785fab35aa10e263c9035ee8680a3896c183df281927",
+    "smoke/check_v2_php_parity_amd64_test.py": "3bd6542d300de103a8f142655c576de74c6f4665b97a5ee8c57a161b30235c18",
     "t02-evidence/live-preparation-owned-20261021a/runtime-build.json": "e21c872cbefc53022d6dd6f23b88795e873de93c1a183d7adcdb3883fbfc2c8c"
   },
   "archives": {

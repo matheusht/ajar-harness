@@ -49,3 +49,15 @@ input is the exact image
 made available through a supported route under the pinned tag, or a trusted
 OCI artifact whose loaded image ID verifies exactly. A different rebuild must
 not be substituted.
+
+PR #174 later added a separate local arm64 application-parity receipt at
+`b9323ee64d2e670aaca22e89d77ceb8cab82846e`. It does not qualify this cloud
+amd64 image and does not change the blocked status above.
+
+A later bounded cloud rerun is safe to prepare if its candidate is assigned a
+new immutable image ID and input receipt, made locally available through a
+supported route, and checked before any image execution. The rerun must keep
+`--pull=never`, verify the two archive hashes before extraction, preserve the
+same ordinary and differentiating checks, and restore a newly frozen Docker
+baseline. It must use a new evidence directory rather than overwrite this
+failed attempt.

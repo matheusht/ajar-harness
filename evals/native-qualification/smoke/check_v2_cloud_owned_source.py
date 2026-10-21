@@ -14,6 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNNER = ROOT / 'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
+STOP_OWNER = ROOT / 'experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py'
 RELAY = 'experiments/native-network-preflight/tcp-relay-host-override/cloud-linux-amd64-20261020a/tcp-relay-linux-amd64'
 RELAY_SHA = '33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895'
 CURRENT_MANIFEST = Path('evals/native-qualification/t02-source/SOURCE-MANIFEST.json')
@@ -76,7 +77,8 @@ def load(path):
     return module
 
 
-def run(staged, output, marker, corrupt_copy=False, live_free=False, runtime_ca=None):
+def run(staged, output, marker, corrupt_copy=False, corrupt_stop_owner_copy=False,
+        live_free=False, runtime_ca=None):
     runner = staged / RUNNER.relative_to(ROOT)
     args = ['--output', str(output), '--cloud-platform', 'linux/amd64',
             '--cloud-image-id', 'sha256:' + 'a' * 64,
@@ -95,15 +97,16 @@ def run(staged, output, marker, corrupt_copy=False, live_free=False, runtime_ca=
     env['HTTPS_PROXY'] = 'http://127.0.0.1:3128'
     env['T02_DOCKER_MARKER'] = str(marker)
     env['PATH'] = str(staged / 'fake-bin') + os.pathsep + env.get('PATH', '')
-    if corrupt_copy:
-        code = '''
+    if corrupt_copy or corrupt_stop_owner_copy:
+        source_name = 'STOP_OWNER' if corrupt_stop_owner_copy else 'CONFIG'
+        code = f'''
 import importlib.util, pathlib, sys
 path = pathlib.Path(sys.argv[1]); spec = importlib.util.spec_from_file_location('candidate', path)
 candidate = importlib.util.module_from_spec(spec); spec.loader.exec_module(candidate)
 original = candidate.shutil.copy2
 def corrupt(source, destination, *args, **kwargs):
     result = original(source, destination, *args, **kwargs)
-    if pathlib.Path(source) == candidate.CONFIG and 'source' in pathlib.Path(destination).parts:
+    if pathlib.Path(source) == candidate.{source_name} and 'source' in pathlib.Path(destination).parts:
         pathlib.Path(destination).write_bytes(pathlib.Path(destination).read_bytes() + b' ')
     return result
 candidate.shutil.copy2 = corrupt
@@ -175,6 +178,8 @@ def main():
         fake.chmod(0o700)
         staged_module = load(staged / RUNNER.relative_to(ROOT))
         module = staged_module
+        helper = staged / STOP_OWNER.relative_to(ROOT)
+        assert staged_module.STOP_OWNER in staged_module.CONTROL_SHA and helper.is_file()
         assert len(staged_module.CLOUD_OWNED_INPUT_SHA) == 7
         ca_pem = None
         if args.current_manifest:
@@ -193,6 +198,18 @@ def main():
         result = run(staged, output, marker, live_free=True, runtime_ca=ca_pem)
         assert result.returncode != 0 and 'cloud_live_route_not_qualified' in result.stderr
         assert not output.exists() and not marker.exists()
+        original_helper = helper.read_bytes()
+        for name, changed in (('missing-stop-owner', None),
+                              ('mutated-stop-owner', original_helper + b' ')):
+            if changed is None:
+                helper.unlink()
+            else:
+                helper.write_bytes(changed)
+            output = temp / name
+            result = run(staged, output, marker)
+            assert result.returncode != 0 and 'control_pin_mismatch' in result.stderr
+            assert not output.exists() and not marker.exists()
+            helper.write_bytes(original_helper)
         for index, path in enumerate(staged_module.CLOUD_OWNED_INPUT_SHA):
             source = staged / path.relative_to(staged_module.ROOT)
             original = source.read_bytes()
@@ -208,14 +225,21 @@ def main():
         report = json.loads((output / 'result.json').read_text())
         assert {'name': 'archived cloud owned inputs match fixed reviewed pins', 'pass': False} in report['checks']
         assert report['status'] == 'fail'
+        output = temp / 'archive-stop-owner-mutated'
+        result = run(staged, output, marker, corrupt_stop_owner_copy=True)
+        assert result.returncode != 0 and not marker.exists()
+        report = json.loads((output / 'result.json').read_text())
+        assert report['status'] == 'fail' and 'active_control_origins' not in report
+        assert report['error']['code'] == 'archived_control_pin_mismatch'
         output = temp / 'archive-unchanged'
         result = run(staged, output, marker)
         assert result.returncode != 0 and marker.exists()
         report = json.loads((output / 'result.json').read_text())
         assert {'name': 'archived cloud owned inputs match fixed reviewed pins', 'pass': True} in report['checks']
         assert {'name': 'cloud owned mounts and fixture sources select archive', 'pass': True} in report['checks']
+        assert report['active_control_origins']['stop_owner'] == str((output / 'source' / STOP_OWNER.relative_to(ROOT)).resolve())
         check_teardown(module, temp)
-    print('PASS: live-free pre-output denial, 7 mutations, archive origins, 9 teardown cases; no real Docker/provider/CI')
+    print('PASS: live-free pre-output denial, 7 input mutations, stop-owner pins/origin, 9 teardown cases; no real Docker/provider/CI')
 
 
 if __name__ == '__main__':

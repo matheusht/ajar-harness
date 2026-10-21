@@ -18,13 +18,17 @@ with every check passed, `cleanup_complete: true`, and
 expected traceback while the E2E script still exits zero after verifying the
 fail-closed outcome.
 
-All 11 runs passed on the local macOS Docker host. Dual launcher and CONNECT
+All 12 runs passed on the local macOS Docker host. Dual launcher and CONNECT
 SIGKILL, and each single-loss control, wrote STOPPING then REVOKED only after
 the entire sealed set was paused or exited. The independent receiver had one
 positive effect before the fault and no staged pending or fresh effect after
 the verified stop. A loss during completed partial startup also froze the set
 before REVOKED. An in-flight Docker start with uncertain completion stayed
-UNSAFE after freeze. Injected stop-command failure left a runnable producer,
+UNSAFE after freeze. In the separate inherited-CLI hang check, STOP_REQUEST
+closed dispatch while the CLI held `stop.lock`; the owner published STOPPING
+and UNSAFE after the bounded lock wait, with no freeze claim or REVOKED. On
+release, that CLI started one producer, which remained runnable under UNSAFE
+until owned cleanup. Injected stop-command failure left a runnable producer,
 one fresh receiver effect, and UNSAFE; injected owner-log failure froze the set
 but also stayed UNSAFE. The late CONNECT send check held an upload after charge
 and before dispatch; stopping the run prevented those bytes from reaching the
@@ -37,5 +41,9 @@ The dual-loss scenario stages the pending effect behind a private gate before
 killing both host processes. There is still a real interval between SIGKILL
 and the owner's durable stop request and freeze; already-dispatched effects
 cannot be recalled, and an unstaged producer could act in that interval.
-This evidence proves the tested gated boundary and fail-closed outcomes, not
-instantaneous zero effect at the moment of host death.
+An inherited CLI that never releases cannot be frozen by this owner: it gets a
+bounded, truthful UNSAFE marker, and it may start a producer later. This
+35-second stop-lock bound may also classify a slow but healthy stop as UNSAFE.
+That is conservative, but does not prove the producers stopped. This evidence
+proves the tested gated boundary and fail-closed outcomes, not
+instantaneous zero effect at host death or complete #161 stop assurance.

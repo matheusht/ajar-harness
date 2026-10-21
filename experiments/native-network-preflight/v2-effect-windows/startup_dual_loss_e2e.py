@@ -24,11 +24,12 @@ IMAGE='ghcr.io/anomalyco/opencode@sha256:2fc782d346b0670c43378557cf8a2a9926a1f3d
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--inflight-start',action='store_true');args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--inflight-start',action='store_true');ap.add_argument('--stuck-cli',action='store_true');args=ap.parse_args()
+    if args.stuck_cli and not args.inflight_start:ap.error('--stuck-cli requires --inflight-start')
     out=args.output.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
     sources=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE.parent/'v2_connect.py',HERE.parents[2]/'tools/docker_session_runtime.py']
     sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-    d={'classification':'owned partial-start dual-loss E2E; partial T05','inflight_start':args.inflight_start,'provider_calls':0,'native_calls':0,
+    d={'classification':'owned partial-start dual-loss E2E; partial T05','inflight_start':args.inflight_start,'stuck_cli':args.stuck_cli,'provider_calls':0,'native_calls':0,
        'checks':[],'resources':[],'cleanup':[],'source_sha256':{p.name:sha(p) for p in sources}}
     (out/'source').mkdir()
     for p in sources:shutil.copyfile(p,out/'source'/p.name)
@@ -83,6 +84,7 @@ def main():
                 script=wrapper/'docker'
                 script.write_text('#!/usr/bin/env python3\nimport os,sys,time\nfrom pathlib import Path\n'
                     f'if sys.argv[1:4]==["container","start",{producers[0]["id"]!r}]:\n'
+                    f'    Path({str(hooks/"CLI_PID")!r}).write_text(str(os.getpid()))\n'
                     f'    Path({str(hooks/"CLI_READY")!r}).touch()\n'
                     f'    while not Path({str(hooks/"RELEASE")!r}).exists():time.sleep(.01)\n'
                     f'os.execv({real_docker!r},[{real_docker!r},*sys.argv[1:]])\n')
@@ -112,18 +114,26 @@ def main():
             launcher.wait(timeout=5)
             check('both host processes absent',wait(lambda:absent(child)))
             if args.inflight_start:
-                time.sleep(.2)
-                check('owner waits for in-flight Docker start before any stop marker',(state/'START_IN_FLIGHT').exists() and
-                      not any((state/name).exists() for name in ('STOP_REQUEST','STOPPING','REVOKED','UNSAFE')))
+                check('owner requests stop while in-flight Docker start holds lock',wait(lambda:(state/'STOP_REQUEST').exists(),seconds=3) and
+                      (state/'START_IN_FLIGHT').exists() and
+                      not any((state/name).exists() for name in ('STOPPING','REVOKED','UNSAFE')))
+                if args.stuck_cli:
+                    cli_pid=int((hooks/'CLI_PID').read_text())
+                    check('inherited CLI remains alive before bounded timeout',not absent(cli_pid))
+                    check('bounded lock timeout publishes UNSAFE without freeze claim',wait(lambda:(state/'UNSAFE').exists(),seconds=45) and
+                          not (state/'REVOKED').exists() and not (state/'READY').exists() and not (hooks/'RELEASE').exists() and not absent(cli_pid))
+                    d['before_cli_release']={'markers':{name:(state/name).exists() for name in ('READY','START_IN_FLIGHT','STOP_REQUEST','STOPPING','REVOKED','UNSAFE')},
+                                             'producer_states':{p['id']:inspect('container',p['id'])['State'] for p in producers}}
                 (hooks/'RELEASE').touch()
+                if args.stuck_cli:check('held CLI exits after owned release',wait(lambda:absent(cli_pid),seconds=10))
             check('terminal result bounded',wait(lambda:(state/'REVOKED').exists() or (state/'UNSAFE').exists()))
             d['producer_states']={p['id']:inspect('container',p['id'])['State'] for p in producers}
             d['markers']={name:(state/name).exists() for name in ('READY','START_IN_FLIGHT','STOP_REQUEST','STOPPING','REVOKED','UNSAFE')}
             stopped=all(not s['Running'] or s['Paused'] for s in d['producer_states'].values())
             if args.inflight_start:
-                check('uncertain in-flight start stays UNSAFE despite exact freeze',not d['markers']['READY'] and
+                check('uncertain in-flight start stays UNSAFE'+(' without freeze claim' if args.stuck_cli else ' despite exact freeze'),not d['markers']['READY'] and
                       d['markers']['START_IN_FLIGHT'] and d['markers']['STOPPING'] and d['markers']['UNSAFE'] and
-                      not d['markers']['REVOKED'] and stopped)
+                      not d['markers']['REVOKED'] and (args.stuck_cli or stopped))
             else:
                 check('partial-start exact set verified before REVOKED',not d['markers']['READY'] and d['markers']['STOPPING'] and
                       d['markers']['REVOKED'] and not d['markers']['UNSAFE'] and stopped and
@@ -131,7 +141,7 @@ def main():
             check('stop owner exits after takeover',wait(lambda:absent(stop_owner)))
             check('research retained unchanged',sha(research)==research_hash)
             shutil.copyfile(research,out/'research.txt')
-            d['status']='inflight_start_dual_loss_unsafe_partial_T05' if args.inflight_start else 'partial_start_dual_loss_pass_partial_T05'
+            d['status']=('inflight_start_lock_timeout_unsafe_partial_T05' if args.stuck_cli else 'inflight_start_dual_loss_unsafe_partial_T05') if args.inflight_start else 'partial_start_dual_loss_pass_partial_T05'
     except Exception as error:d['status']='failed_or_unavailable';d['error']=type(error).__name__+': '+str(error)
     finally:
         if 'hooks' in locals() and hooks.exists():(hooks/'RELEASE').touch()

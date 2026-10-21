@@ -2,6 +2,9 @@
 
 This stable directory identifies the post-transfer source state for the fail-closed OSLIT preparation change. `SOURCE-MANIFEST.json` pins the materialized candidate bytes used by the no-Docker source checks. It is separate from the immutable 20 October transfer ZIP and manifest at `cloud-transfer/t02-20261020/`.
 
+The current manifest also pins the owned #161 stop-owner source and the managed
+runner that archives it. The historical transfer manifest remains unchanged.
+
 The historical ZIP-root or sidecar manifest remains the default source-check authority. It therefore rejects these post-transfer bytes as drift. Reviewers select this manifest explicitly with `check_v2_cloud_owned_source.py --current-manifest`; its presence never overrides the historical root implicitly. If this source is adopted into a canonical repository manifest, this explicit option and directory can be removed together.
 
 The change adds explicit, hash-pinned runtime CA validation and dormant private-snapshot plumbing, rejects unexpected trust overrides, and makes provider ledger reads safe when no owned offline responder exists. The unconditional `cloud_live_route_not_qualified` denial remains before output creation and Docker.

@@ -265,7 +265,9 @@ def main():
             "'cleanup_recovery':",
             'return (not uncertain_creates',
             'def _require_fixture_identities(',
-            "'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256']",
+            'def _mounted_ca_hashes(',
+            "'ambient_ca_sha256': mounted_before['ambient']",
+            "'mounted_ca_hashes_stable': True",
             "get('MemorySwap') != 1024 * 1024 * 1024",
             "get('LogConfig') != {",
         ))

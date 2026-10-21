@@ -194,6 +194,7 @@ def evaluate_arms(rows, fixture):
             and row.get('served_chain') == served_chain
             and row.get('version_verified') is True
             and row.get('server_started') is True
+            and row.get('mounted_ca_hashes_stable') is True
             and fixture_valid
             and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
             and row.get('replacement_ca_sha256') == (
@@ -263,10 +264,6 @@ def evaluate_arms(rows, fixture):
             and row.get('image_role') == 'candidate'
             and row.get('input_mode') == input_mode
             and row.get('version_verified') is True
-            and fixture_valid
-            and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
-            and row.get('replacement_ca_sha256')
-            == fixture.get('replacement_ca_sha256')
             and row.get('replacement_pair_state') == PAIR_STATE[input_mode]
             and authority_valid
             and row.get('termination_verified') is True
@@ -308,6 +305,7 @@ def self_test():
         'base_url_verified': True,
         'source_document_verified': True,
         'readback_scope': 'persistent-server-authority',
+        'mounted_ca_hashes_stable': True,
         'preflight_tcp_connections': 0,
         'preflight_http_requests': 0,
         'dispatched': True,
@@ -340,8 +338,6 @@ def self_test():
             'image_role': 'candidate',
             'input_mode': input_mode,
             'version_verified': True,
-            'ambient_ca_sha256': fixture['ambient_ca_sha256'],
-            'replacement_ca_sha256': fixture['replacement_ca_sha256'],
             'replacement_pair_state': PAIR_STATE[input_mode],
             **base,
             'exit_kind': 'nonzero',
@@ -378,6 +374,7 @@ def self_test():
         (2, 'exit_kind', 'unknown'),
         (1, 'ambient_ca_sha256', 'c' * 64),
         (2, 'replacement_ca_sha256', 'c' * 64),
+        (1, 'mounted_ca_hashes_stable', False),
         (0, 'image_role', 'candidate'),
         (1, 'image_role', 'control'),
         (3, 'image_role', 'control'),
@@ -438,6 +435,25 @@ def self_test():
     unavailable = FakeDocker(subprocess.CompletedProcess([], 1, '', 'daemon unavailable'))
     if not _docker_engine_responds(responding) or _docker_engine_responds(unavailable):
         raise RuntimeError('cleanup_engine_liveness_fixture_failed')
+    mounted = FakeDocker(subprocess.CompletedProcess(
+        [], 0,
+        fixture['ambient_ca_sha256'] + '  ' + AMBIENT_CA_PATH + '\n'
+        + fixture['replacement_ca_sha256'] + '  ' + RUNTIME_CA_PATH + '\n',
+        '',
+    ))
+    if _mounted_ca_hashes(mounted, identifier, 'candidate') != {
+            'ambient': fixture['ambient_ca_sha256'],
+            'replacement': fixture['replacement_ca_sha256']}:
+        raise RuntimeError('mounted_ca_readback_fixture_failed')
+    malformed_mount = FakeDocker(subprocess.CompletedProcess(
+        [], 0, fixture['ambient_ca_sha256'] + '  /wrong/path\n', ''))
+    try:
+        _mounted_ca_hashes(malformed_mount, identifier, 'control')
+    except CheckError as error:
+        if str(error) != 'mounted_ca_readback_invalid':
+            raise
+    else:
+        raise RuntimeError('mounted_ca_readback_mutation_failed')
     absence = {'containers_absent': True, 'networks_absent': True}
     reconciliations = [{'pass': True, 'discovered': 0}]
     if not _cleanup_complete(identifier, reconciliations, [], [], absence, []):
@@ -446,6 +462,47 @@ def self_test():
             {'kind': 'container', 'name': 'uncertain',
              'outcome': 'create_result_unconfirmed'}]):
         raise RuntimeError('cleanup_uncertain_create_fixture_failed')
+
+    class FailingDocker:
+        def __init__(self, error):
+            self.error = error
+
+        def run(self, *_args):
+            raise self.error
+
+    pending_network = []
+    try:
+        _network(FailingDocker(KeyboardInterrupt()), identifier, [], pending_network)
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise RuntimeError('network_create_interrupt_fixture_failed')
+    if pending_network != [{
+            'kind': 'network', 'name': _network_name(identifier),
+            'outcome': 'create_result_unconfirmed'}]:
+        raise RuntimeError('network_create_journal_fixture_failed')
+    pending_container = []
+    try:
+        _container(
+            FailingDocker(RuntimeError('ordinary_non_check_error')),
+            'sha256:' + 'd' * 64,
+            {'name': _network_name(identifier)}, '172.18.0.1', identifier,
+            'replacement-positive', 'candidate', 'valid',
+            Path('/fixture/workspace'), Path('/fixture/opencode.json'),
+            Path('/fixture/ambient.pem'), Path('/fixture/replacement.pem'),
+            'b' * 64, [], pending_container,
+        )
+    except RuntimeError as error:
+        if str(error) != 'ordinary_non_check_error':
+            raise
+        pass
+    else:
+        raise RuntimeError('container_create_interrupt_fixture_failed')
+    if pending_container != [{
+            'kind': 'container',
+            'name': _container_name(identifier, 'replacement-positive'),
+            'outcome': 'create_result_unconfirmed'}]:
+        raise RuntimeError('container_create_journal_fixture_failed')
     return True
 
 
@@ -756,24 +813,23 @@ def _container_name(nonce, arm):
 
 
 def _uncertain_create(uncertain_creates, kind, name):
-    uncertain_creates.append({'kind': kind, 'name': name,
-                              'outcome': 'create_result_unconfirmed'})
+    record = {'kind': kind, 'name': name,
+              'outcome': 'create_result_unconfirmed'}
+    uncertain_creates.append(record)
+    return record
 
 
 def _network(docker, nonce, resources, uncertain_creates):
     name = _network_name(nonce)
-    try:
-        result = docker.run('network', 'create', '--internal', '--driver', 'bridge',
-                            '--label', LABEL + '=' + nonce, name)
-    except CheckError:
-        _uncertain_create(uncertain_creates, 'network', name)
-        raise
+    pending = _uncertain_create(uncertain_creates, 'network', name)
+    result = docker.run('network', 'create', '--internal', '--driver', 'bridge',
+                        '--label', LABEL + '=' + nonce, name)
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', result.stdout.strip()):
-        _uncertain_create(uncertain_creates, 'network', name)
         raise CheckError('internal_network_create_failed')
     identifier = result.stdout.strip()
     resources.append({'kind': 'network', 'id': identifier, 'name': name,
                       'active': True, 'nonce': nonce})
+    uncertain_creates.remove(pending)
     data = docker.json('network', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('internal_network_inspect_failed')
@@ -898,17 +954,14 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         'export OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; '
         'exec opencode serve --hostname 127.0.0.1 --port '
         + str(OPENCODE_SERVER_PORT))
-    try:
-        result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
-    except CheckError:
-        _uncertain_create(uncertain_creates, 'container', name)
-        raise
+    pending = _uncertain_create(uncertain_creates, 'container', name)
+    result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
     identifier = result.stdout.strip()
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', identifier):
-        _uncertain_create(uncertain_creates, 'container', name)
         raise CheckError('container_create_failed')
     resources.append({'kind': 'container', 'id': identifier, 'name': name,
                       'active': True, 'nonce': nonce})
+    uncertain_creates.remove(pending)
     data = docker.json('container', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('container_inspect_failed')
@@ -1070,6 +1123,28 @@ def _wait_server(docker, identifier):
             return False
         time.sleep(.1)
     raise CheckError('persistent_server_readiness_timeout')
+
+
+def _mounted_ca_hashes(docker, identifier, image_role):
+    paths = [AMBIENT_CA_PATH]
+    if image_role == 'candidate':
+        paths.append(RUNTIME_CA_PATH)
+    result = docker.run(
+        'container', 'exec', identifier,
+        '/bin/busybox', 'sha256sum', *paths,
+    )
+    if result.returncode:
+        raise CheckError('mounted_ca_readback_unavailable')
+    lines = result.stdout.splitlines()
+    if len(lines) != len(paths):
+        raise CheckError('mounted_ca_readback_invalid')
+    hashes = {}
+    for key, path, line in zip(('ambient', 'replacement'), paths, lines):
+        match = re.fullmatch(r'([0-9a-f]{64})[ \t]+\*?' + re.escape(path), line)
+        if match is None:
+            raise CheckError('mounted_ca_readback_invalid')
+        hashes[key] = match.group(1)
+    return hashes
 
 
 def _version_verified(workspace):
@@ -1399,6 +1474,15 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
             raise CheckError('opencode_version_mismatch')
         if not _wait_server(docker, identifier):
             raise CheckError('persistent_server_start_failed')
+        mounted_before = _mounted_ca_hashes(docker, identifier, image_role)
+        expected_mounted = {
+            'ambient': fixture_identities['ambient.ca']['sha256'],
+        }
+        if image_role == 'candidate':
+            expected_mounted['replacement'] = (
+                fixture_identities['replacement.ca']['sha256'])
+        if mounted_before != expected_mounted:
+            raise CheckError('mounted_ca_identity_mismatch')
         facts = _native_http_preflight(docker, identifier, base_url)
         preflight_after = server.snapshot()
         preflight_tcp = preflight_after['tcp_connections'] - preflight_before['tcp_connections']
@@ -1418,16 +1502,20 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 break
             time.sleep(.05)
         snapshot = server.snapshot()
+        mounted_after = _mounted_ca_hashes(docker, identifier, image_role)
+        if mounted_after != mounted_before:
+            raise CheckError('mounted_ca_identity_changed')
         _require_fixture_identities(certificates, fixture_identities)
         row = {
             'arm': name, 'case_kind': 'core', 'image_role': image_role,
             'trust_mode': trust_mode, 'served_chain': served_chain,
             'replacement_pair_state': (
                 'complete' if image_role == 'candidate' else 'absent'),
-            'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
+            'ambient_ca_sha256': mounted_before['ambient'],
             'replacement_ca_sha256': (
-                fixture_identities['replacement.ca']['sha256']
+                mounted_before['replacement']
                 if image_role == 'candidate' else None),
+            'mounted_ca_hashes_stable': True,
             'version_verified': version_verified, 'server_started': True, **facts,
             'preflight_tcp_connections': preflight_tcp,
             'preflight_http_requests': preflight_http,
@@ -1499,8 +1587,6 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
                 'image_role': 'candidate',
                 'input_mode': input_mode,
                 'replacement_pair_state': PAIR_STATE[input_mode],
-                'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
-                'replacement_ca_sha256': fixture_identities['replacement.ca']['sha256'],
                 'version_verified': version_verified,
                 'server_started': False,
                 'native_http_verified': False,
@@ -1537,8 +1623,6 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             'image_role': 'candidate',
             'input_mode': input_mode,
             'replacement_pair_state': PAIR_STATE[input_mode],
-            'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
-            'replacement_ca_sha256': fixture_identities['replacement.ca']['sha256'],
             'version_verified': version_verified,
             'server_started': True,
             **facts,

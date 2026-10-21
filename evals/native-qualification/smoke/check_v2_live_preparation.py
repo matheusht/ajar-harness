@@ -257,6 +257,23 @@ def main():
         checks.append({'name': 'exclusive trust receipt evaluator passes its offline self-test',
                        'pass': True})
 
+        exclusive_source = EXCLUSIVE_CHECKER.read_text()
+        cleanup_and_identity_shape = all(fragment in exclusive_source for fragment in (
+            'def _exact_absence_claim(',
+            'post_remove_engine_responding',
+            'create_result_unconfirmed',
+            "'cleanup_recovery':",
+            'return (not uncertain_creates',
+            'def _require_fixture_identities(',
+            "'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256']",
+            "get('MemorySwap') != 1024 * 1024 * 1024",
+            "get('LogConfig') != {",
+        ))
+        checks.append({'name': 'exclusive checker keeps exact cleanup and fixture identity proofs',
+                       'pass': cleanup_and_identity_shape})
+        if not cleanup_and_identity_shape:
+            raise AssertionError('exclusive_cleanup_or_identity_shape')
+
         research = EXCLUSIVE_RESEARCH.read_text()
         contract = EXCLUSIVE_CONTRACT.read_text()
         documented_holds = all(fragment in research + '\n' + contract for fragment in (

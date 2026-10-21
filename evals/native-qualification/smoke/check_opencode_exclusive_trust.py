@@ -151,7 +151,7 @@ def _native_facts_verified(row):
             and row.get('readback_scope') == 'persistent-server-authority')
 
 
-def evaluate_arms(rows):
+def evaluate_arms(rows, fixture):
     """Evaluate sanitized core-arm and candidate pre-socket observations.
 
     Positive arms must complete an owned HTTP request.  The negative arm must
@@ -165,6 +165,14 @@ def evaluate_arms(rows):
         checks.append({'name': name, 'pass': bool(passed)})
 
     valid_rows = isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
+    fixture_valid = (isinstance(fixture, dict)
+                     and re.fullmatch(r'[0-9a-f]{64}',
+                                      fixture.get('ambient_ca_sha256', '')) is not None
+                     and re.fullmatch(r'[0-9a-f]{64}',
+                                      fixture.get('replacement_ca_sha256', '')) is not None
+                     and fixture.get('ambient_ca_sha256')
+                     != fixture.get('replacement_ca_sha256'))
+    add('initial CA fixture hashes are distinct and valid', fixture_valid)
     names = [row.get('arm') for row in rows] if valid_rows else []
     expected_names = ([name for name, _, _, _ in CORE_ARMS]
                       + [name for name, _ in PRESOCKET_CASES])
@@ -186,6 +194,11 @@ def evaluate_arms(rows):
             and row.get('served_chain') == served_chain
             and row.get('version_verified') is True
             and row.get('server_started') is True
+            and fixture_valid
+            and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
+            and row.get('replacement_ca_sha256') == (
+                fixture.get('replacement_ca_sha256')
+                if image_role == 'candidate' else None)
             and row.get('replacement_pair_state') == (
                 'complete' if image_role == 'candidate' else 'absent'))
         add(name + ' native HTTP package preflight', _native_facts_verified(row))
@@ -212,6 +225,15 @@ def evaluate_arms(rows):
         and denied.get('http_requests') == 0
         and denied.get('expected_path_requests') == 0
         and denied.get('unexpected_http_requests') == 0)
+
+    positive = by_name.get('replacement-positive', {})
+    add('candidate arms used identical ambient and replacement CA inputs',
+        fixture_valid
+        and positive.get('ambient_ca_sha256') == denied.get('ambient_ca_sha256')
+        == fixture.get('ambient_ca_sha256')
+        and positive.get('replacement_ca_sha256')
+        == denied.get('replacement_ca_sha256')
+        == fixture.get('replacement_ca_sha256'))
 
     for name, input_mode in PRESOCKET_CASES:
         row = by_name.get(name, {})
@@ -241,6 +263,10 @@ def evaluate_arms(rows):
             and row.get('image_role') == 'candidate'
             and row.get('input_mode') == input_mode
             and row.get('version_verified') is True
+            and fixture_valid
+            and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
+            and row.get('replacement_ca_sha256')
+            == fixture.get('replacement_ca_sha256')
             and row.get('replacement_pair_state') == PAIR_STATE[input_mode]
             and authority_valid
             and row.get('termination_verified') is True
@@ -264,6 +290,10 @@ def self_test():
                   (None, 'unknown'), (True, 'unknown'))
     if any(_exit_kind(code) != expected for code, expected in exit_cases):
         raise RuntimeError('exit_classification_fixture_failed')
+    fixture = {
+        'ambient_ca_sha256': 'a' * 64,
+        'replacement_ca_sha256': 'b' * 64,
+    }
     base = {
         'version_verified': True,
         'server_started': True,
@@ -293,6 +323,10 @@ def self_test():
     for name, image_role, trust_mode, served_chain in CORE_ARMS:
         row = dict(base, arm=name, case_kind='core', image_role=image_role,
                    trust_mode=trust_mode, served_chain=served_chain,
+                   ambient_ca_sha256=fixture['ambient_ca_sha256'],
+                   replacement_ca_sha256=(
+                       fixture['replacement_ca_sha256']
+                       if image_role == 'candidate' else None),
                    replacement_pair_state=(
                        'complete' if image_role == 'candidate' else 'absent'))
         if name == 'ambient-rejected':
@@ -306,6 +340,8 @@ def self_test():
             'image_role': 'candidate',
             'input_mode': input_mode,
             'version_verified': True,
+            'ambient_ca_sha256': fixture['ambient_ca_sha256'],
+            'replacement_ca_sha256': fixture['replacement_ca_sha256'],
             'replacement_pair_state': PAIR_STATE[input_mode],
             **base,
             'exit_kind': 'nonzero',
@@ -322,7 +358,7 @@ def self_test():
         })
     rows[3].update(server_started=False, native_http_verified=False,
                    dispatched=False, failure_stage='server-startup')
-    if not evaluate_arms(rows)['pass']:
+    if not evaluate_arms(rows, fixture)['pass']:
         raise RuntimeError('evaluator_positive_fixture_failed')
     mutations = (
         (0, 'native_http_verified', False),
@@ -340,6 +376,8 @@ def self_test():
         (2, 'http_requests', 1),
         (2, 'exit_kind', 'zero'),
         (2, 'exit_kind', 'unknown'),
+        (1, 'ambient_ca_sha256', 'c' * 64),
+        (2, 'replacement_ca_sha256', 'c' * 64),
         (0, 'image_role', 'candidate'),
         (1, 'image_role', 'control'),
         (3, 'image_role', 'control'),
@@ -361,15 +399,108 @@ def self_test():
     for index, key, value in mutations:
         changed = copy.deepcopy(rows)
         changed[index][key] = value
-        if evaluate_arms(changed)['pass']:
+        if evaluate_arms(changed, fixture)['pass']:
             raise RuntimeError('evaluator_negative_fixture_failed')
-    if evaluate_arms(rows[:-1])['pass']:
+    if evaluate_arms(rows[:-1], fixture)['pass']:
         raise RuntimeError('evaluator_missing_arm_failed')
+    changed_fixture = dict(fixture, replacement_ca_sha256=fixture['ambient_ca_sha256'])
+    if evaluate_arms(rows, changed_fixture)['pass']:
+        raise RuntimeError('evaluator_fixture_identity_failed')
+    identifier = 'c' * 64
+    absence_cases = (
+        ('container', 'Error response from daemon: No such container: ' + identifier),
+        ('container', 'Error: No such object: ' + identifier),
+        ('network', 'Error response from daemon: No such network: ' + identifier),
+        ('network', 'network ' + identifier + ' not found'),
+    )
+    if any(not _exact_absence_claim(
+            kind, identifier,
+            subprocess.CompletedProcess([], 1, '', message))
+            for kind, message in absence_cases):
+        raise RuntimeError('cleanup_absence_fixture_failed')
+    ambiguous = (
+        subprocess.CompletedProcess([], 1, '', 'Cannot connect to the Docker daemon'),
+        subprocess.CompletedProcess([], 1, '', 'No such container: ' + 'd' * 64),
+        subprocess.CompletedProcess([], 0, '[]', ''),
+    )
+    if any(_exact_absence_claim('container', identifier, result)
+           for result in ambiguous):
+        raise RuntimeError('cleanup_ambiguity_fixture_failed')
+
+    class FakeDocker:
+        def __init__(self, result):
+            self.result = result
+
+        def run(self, *_args):
+            return self.result
+
+    responding = FakeDocker(subprocess.CompletedProcess([], 0, '"27.0.0"\n', ''))
+    unavailable = FakeDocker(subprocess.CompletedProcess([], 1, '', 'daemon unavailable'))
+    if not _docker_engine_responds(responding) or _docker_engine_responds(unavailable):
+        raise RuntimeError('cleanup_engine_liveness_fixture_failed')
+    absence = {'containers_absent': True, 'networks_absent': True}
+    reconciliations = [{'pass': True, 'discovered': 0}]
+    if not _cleanup_complete(identifier, reconciliations, [], [], absence, []):
+        raise RuntimeError('cleanup_success_fixture_failed')
+    if _cleanup_complete(identifier, reconciliations, [], [], absence, [
+            {'kind': 'container', 'name': 'uncertain',
+             'outcome': 'create_result_unconfirmed'}]):
+        raise RuntimeError('cleanup_uncertain_create_fixture_failed')
     return True
 
 
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _stable_file_identity(path, *, maximum=MAX_EXCLUSIVE_CA_BYTES):
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        raise CheckError('fixture_identity_unavailable') from None
+    try:
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_size <= 0
+                or before.st_size > maximum or stat.S_IMODE(before.st_mode) != 0o600):
+            raise CheckError('fixture_identity_invalid')
+        chunks = []
+        remaining = before.st_size + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+    except OSError:
+        raise CheckError('fixture_identity_unavailable') from None
+    finally:
+        os.close(descriptor)
+    data = b''.join(chunks)
+    if (len(data) != before.st_size or before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns):
+        raise CheckError('fixture_identity_changed')
+    return {
+        'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
+        'device': before.st_dev, 'inode': before.st_ino,
+        'mtime_ns': before.st_mtime_ns, 'ctime_ns': before.st_ctime_ns,
+    }
+
+
+def _fixture_identities(certificates):
+    return {
+        chain + '.' + field: _stable_file_identity(certificates[chain][field])
+        for chain in ('ambient', 'replacement')
+        for field in ('ca', 'leaf', 'leaf_key')
+    }
+
+
+def _require_fixture_identities(certificates, expected):
+    if _fixture_identities(certificates) != expected:
+        raise CheckError('certificate_fixture_changed')
 
 
 def _safe_output(raw):
@@ -616,15 +747,33 @@ def _inspect_image(docker, image_id):
     return {'id': image_id, 'os': 'linux', 'architecture': 'amd64'}
 
 
-def _network(docker, nonce, resources):
-    name = 'nq-exclusive-' + nonce[:12]
-    result = docker.run('network', 'create', '--internal', '--driver', 'bridge',
-                        '--label', LABEL + '=' + nonce, name)
+def _network_name(nonce):
+    return 'nq-exclusive-' + nonce[:12]
+
+
+def _container_name(nonce, arm):
+    return _network_name(nonce) + '-' + arm
+
+
+def _uncertain_create(uncertain_creates, kind, name):
+    uncertain_creates.append({'kind': kind, 'name': name,
+                              'outcome': 'create_result_unconfirmed'})
+
+
+def _network(docker, nonce, resources, uncertain_creates):
+    name = _network_name(nonce)
+    try:
+        result = docker.run('network', 'create', '--internal', '--driver', 'bridge',
+                            '--label', LABEL + '=' + nonce, name)
+    except CheckError:
+        _uncertain_create(uncertain_creates, 'network', name)
+        raise
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', result.stdout.strip()):
+        _uncertain_create(uncertain_creates, 'network', name)
         raise CheckError('internal_network_create_failed')
     identifier = result.stdout.strip()
-    resources.append({'kind': 'network', 'id': identifier, 'active': True,
-                      'nonce': nonce})
+    resources.append({'kind': 'network', 'id': identifier, 'name': name,
+                      'active': True, 'nonce': nonce})
     data = docker.json('network', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('internal_network_inspect_failed')
@@ -671,7 +820,7 @@ def _config(path, base_url):
 
 def _container(docker, image_id, network, gateway, nonce, arm, image_role, input_mode,
                workspace, config, ambient_ca, exclusive_input, exclusive_sha256,
-               resources):
+               resources, uncertain_creates):
     allowed = {
         'control': {'absent'},
         'candidate': {'valid', 'missing-both', 'missing-path-env',
@@ -717,12 +866,15 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         env.append(EXCLUSIVE_CA_ENV + '=/fixture/not-runtime-ca.pem')
     if input_mode in hash_modes:
         env.append(EXCLUSIVE_CA_HASH_ENV + '=' + exclusive_sha256)
+    name = _container_name(nonce, arm)
     argv = [
         'container', 'create', '--pull', 'never', '--platform', 'linux/amd64',
+        '--name', name,
         '--network', network['name'], '--add-host', 'opencode.ai:' + gateway,
         '--read-only', '--restart', 'no', '--log-driver', 'none',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges=true',
-        '--user', str(os.getuid()) + ':' + str(os.getgid()), '--memory', '1g', '--cpus', '1',
+        '--user', str(os.getuid()) + ':' + str(os.getgid()),
+        '--memory', '1g', '--memory-swap', '1g', '--cpus', '1',
         '--pids-limit', '64', '--ulimit', 'core=0:0',
         '--tmpfs', '/tmp:' + TMPFS_OPTIONS,
         '--workdir', '/workspace/project', '--dns', '127.0.0.1',
@@ -746,12 +898,17 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
         'export OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; '
         'exec opencode serve --hostname 127.0.0.1 --port '
         + str(OPENCODE_SERVER_PORT))
-    result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
+    try:
+        result = docker.run(*argv, '--entrypoint', 'sh', image_id, '-c', server_command)
+    except CheckError:
+        _uncertain_create(uncertain_creates, 'container', name)
+        raise
     identifier = result.stdout.strip()
     if result.returncode or not re.fullmatch(r'[0-9a-f]{64}', identifier):
+        _uncertain_create(uncertain_creates, 'container', name)
         raise CheckError('container_create_failed')
-    resources.append({'kind': 'container', 'id': identifier, 'active': True,
-                      'nonce': nonce})
+    resources.append({'kind': 'container', 'id': identifier, 'name': name,
+                      'active': True, 'nonce': nonce})
     data = docker.json('container', 'inspect', identifier)
     if not isinstance(data, list) or len(data) != 1:
         raise CheckError('container_inspect_failed')
@@ -774,6 +931,7 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
                 raise CheckError('container_mount_readback_failed')
             bind_mounts[destination] = (mount.get('Source'), mount.get('RW'))
     if (item.get('Id') != identifier or item.get('Image') != image_id
+            or item.get('Name') != '/' + name
             or item.get('State', {}).get('Status') != 'created'
             or item.get('Config', {}).get('User') != str(os.getuid()) + ':' + str(os.getgid())
             or item.get('Config', {}).get('WorkingDir') != '/workspace/project'
@@ -784,6 +942,14 @@ def _container(docker, image_id, network, gateway, nonce, arm, image_role, input
             or item.get('HostConfig', {}).get('ReadonlyRootfs') is not True
             or item.get('HostConfig', {}).get('NetworkMode') != network['name']
             or item.get('HostConfig', {}).get('CapDrop') != ['ALL']
+            or item.get('HostConfig', {}).get('Memory') != 1024 * 1024 * 1024
+            or item.get('HostConfig', {}).get('MemorySwap') != 1024 * 1024 * 1024
+            or item.get('HostConfig', {}).get('NanoCpus') != 1_000_000_000
+            or item.get('HostConfig', {}).get('PidsLimit') != 64
+            or item.get('HostConfig', {}).get('RestartPolicy') != {
+                'Name': 'no', 'MaximumRetryCount': 0}
+            or item.get('HostConfig', {}).get('LogConfig') != {
+                'Type': 'none', 'Config': {}}
             or item.get('HostConfig', {}).get('Tmpfs') != {'/tmp': TMPFS_OPTIONS}
             or item.get('HostConfig', {}).get('Ulimits') != [
                 {'Name': 'core', 'Hard': 0, 'Soft': 0}]
@@ -1055,6 +1221,32 @@ def _exit_kind(returncode):
     return 'unknown'
 
 
+def _exact_absence_claim(kind, identifier, result):
+    if (kind not in {'container', 'network'} or result is None
+            or result.returncode == 0 or not isinstance(result.stderr, str)):
+        return False
+    expected = (
+        ('no such container: ' + identifier, 'no such object: ' + identifier)
+        if kind == 'container'
+        else ('no such network: ' + identifier, 'network ' + identifier + ' not found'))
+    lowered = result.stderr.lower()
+    return any(message in lowered for message in expected)
+
+
+def _docker_engine_responds(docker):
+    try:
+        result = docker.run('info', '--format', '{{json .ServerVersion}}')
+    except CheckError:
+        return False
+    if result.returncode:
+        return False
+    try:
+        version = json.loads(result.stdout)
+    except ValueError:
+        return False
+    return isinstance(version, str) and bool(version.strip())
+
+
 def _remove_resource(docker, resource, cleanup):
     if not resource['active']:
         return
@@ -1063,7 +1255,8 @@ def _remove_resource(docker, resource, cleanup):
     except CheckError:
         cleanup.append({'kind': resource['kind'], 'id': resource['id'],
                         'ownership_verified': False, 'remove_exit': None,
-                        'post_inspect_absent': False, 'pass': False})
+                        'post_inspect_absent': False,
+                        'post_remove_engine_responding': False, 'pass': False})
         return
     ownership_verified = False
     if inspected_before.returncode == 0:
@@ -1079,7 +1272,8 @@ def _remove_resource(docker, resource, cleanup):
     if not ownership_verified:
         cleanup.append({'kind': resource['kind'], 'id': resource['id'],
                         'ownership_verified': False, 'remove_exit': None,
-                        'post_inspect_absent': False, 'pass': False})
+                        'post_inspect_absent': False,
+                        'post_remove_engine_responding': False, 'pass': False})
         return
     command = ('container', 'rm', '--force', '--volumes', resource['id']) \
         if resource['kind'] == 'container' else ('network', 'rm', resource['id'])
@@ -1092,12 +1286,17 @@ def _remove_resource(docker, resource, cleanup):
     except CheckError:
         inspected = None
     remove_exit = removed.returncode if removed is not None else None
-    post_inspect_absent = inspected is not None and inspected.returncode != 0
-    passed = remove_exit == 0 and post_inspect_absent
+    post_inspect_absent = _exact_absence_claim(
+        resource['kind'], resource['id'], inspected)
+    post_remove_engine_responding = (
+        post_inspect_absent and _docker_engine_responds(docker))
+    passed = (remove_exit == 0 and post_inspect_absent
+              and post_remove_engine_responding)
     cleanup.append({'kind': resource['kind'], 'id': resource['id'],
                     'ownership_verified': True,
                     'remove_exit': remove_exit,
                     'post_inspect_absent': post_inspect_absent,
+                    'post_remove_engine_responding': post_remove_engine_responding,
                     'pass': passed})
     if passed:
         resource['active'] = False
@@ -1150,12 +1349,26 @@ def _latest_cleanup_pass(resources, cleanup):
                for resource in resources)
 
 
+def _cleanup_complete(nonce, reconciliations, resources, cleanup, absence,
+                      uncertain_creates):
+    return (not uncertain_creates
+            and (not nonce or (reconciliations
+                               and reconciliations[-1].get('pass') is True))
+            and _latest_cleanup_pass(resources, cleanup)
+            and isinstance(absence, dict)
+            and absence.get('containers_absent') is True
+            and absence.get('networks_absent') is True)
+
+
 def _arm(docker, image_id, image_role, network, nonce, work, certificates,
-         resources, cleanup, name, trust_mode, served_chain):
+         fixture_identities,
+         resources, cleanup, uncertain_creates, name, trust_mode, served_chain):
+    _require_fixture_identities(certificates, fixture_identities)
     chain = certificates[served_chain]
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(chain['leaf']), str(chain['leaf_key']))
+    _require_fixture_identities(certificates, fixture_identities)
     server = _OwnedTLSServer((network['gateway'], 0), context)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1170,13 +1383,15 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
         config = arm_root / 'opencode.json'
         _config(config, base_url)
         input_mode = 'absent' if image_role == 'control' else 'valid'
+        _require_fixture_identities(certificates, fixture_identities)
         identifier = _container(
             docker, image_id, network, network['gateway'], nonce, name, image_role,
             input_mode,
             workspace, config, certificates['ambient']['ca'], certificates['replacement']['ca'],
-            sha256(certificates['replacement']['ca']),
-            resources,
+            fixture_identities['replacement.ca']['sha256'],
+            resources, uncertain_creates,
         )
+        _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
         _start_server_container(docker, identifier)
         version_verified = _version_verified(workspace)
@@ -1203,11 +1418,16 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 break
             time.sleep(.05)
         snapshot = server.snapshot()
+        _require_fixture_identities(certificates, fixture_identities)
         row = {
             'arm': name, 'case_kind': 'core', 'image_role': image_role,
             'trust_mode': trust_mode, 'served_chain': served_chain,
             'replacement_pair_state': (
                 'complete' if image_role == 'candidate' else 'absent'),
+            'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
+            'replacement_ca_sha256': (
+                fixture_identities['replacement.ca']['sha256']
+                if image_role == 'candidate' else None),
             'version_verified': version_verified, 'server_started': True, **facts,
             'preflight_tcp_connections': preflight_tcp,
             'preflight_http_requests': preflight_http,
@@ -1227,11 +1447,15 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
 
 
 def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certificates,
-                     exclusive_inputs, resources, cleanup, name, input_mode):
+                     fixture_identities, exclusive_inputs, resources, cleanup,
+                     uncertain_creates,
+                     name, input_mode):
+    _require_fixture_identities(certificates, fixture_identities)
     chain = certificates['replacement']
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(chain['leaf']), str(chain['leaf_key']))
+    _require_fixture_identities(certificates, fixture_identities)
     server = _OwnedTLSServer((network['gateway'], 0), context)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1247,11 +1471,14 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
         config = arm_root / 'opencode.json'
         _config(config, base_url)
         exclusive_input = exclusive_inputs[input_mode]
+        _require_fixture_identities(certificates, fixture_identities)
         identifier = _container(
             docker, candidate_image_id, network, network['gateway'], nonce, name,
             'candidate', input_mode, workspace, config, certificates['ambient']['ca'],
             exclusive_input['path'], exclusive_input['sha256'], resources,
+            uncertain_creates,
         )
+        _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
         _start_server_container(docker, identifier)
         version_verified = _version_verified(workspace)
@@ -1264,6 +1491,7 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             exit_kind = _exit_kind(exit_code)
             if state.get('Running') is not False or exit_kind != 'nonzero':
                 raise CheckError('candidate_rejection_state_unavailable')
+            _require_fixture_identities(certificates, fixture_identities)
             snapshot = server.snapshot()
             return {
                 'arm': name,
@@ -1271,6 +1499,8 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
                 'image_role': 'candidate',
                 'input_mode': input_mode,
                 'replacement_pair_state': PAIR_STATE[input_mode],
+                'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
+                'replacement_ca_sha256': fixture_identities['replacement.ca']['sha256'],
                 'version_verified': version_verified,
                 'server_started': False,
                 'native_http_verified': False,
@@ -1300,12 +1530,15 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline and not any(server.snapshot().values()):
             time.sleep(.05)
+        _require_fixture_identities(certificates, fixture_identities)
         return {
             'arm': name,
             'case_kind': 'pre-socket',
             'image_role': 'candidate',
             'input_mode': input_mode,
             'replacement_pair_state': PAIR_STATE[input_mode],
+            'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
+            'replacement_ca_sha256': fixture_identities['replacement.ca']['sha256'],
             'version_verified': version_verified,
             'server_started': True,
             **facts,
@@ -1351,6 +1584,10 @@ def execute(args):
         raise CheckError('separate_control_and_candidate_images_required')
     self_test()
     output = _safe_output(args.output)
+    nonce = uuid.uuid4().hex
+    resource_arms = ([name for name, _, _, _ in CORE_ARMS]
+                     + [name for name, _ in PRESOCKET_CASES])
+    uncertain_creates = []
     receipt = {
         'schema_version': 1,
         'kind': 't02-opencode-exclusive-trust-owned-check',
@@ -1359,6 +1596,12 @@ def execute(args):
                            'and candidate images; zero external or live provider/model '
                            'service calls'),
         'checks': [], 'arms': [], 'resources': [], 'cleanup': [],
+        'uncertain_creates': uncertain_creates,
+        'cleanup_recovery': {
+            'label': LABEL, 'nonce': nonce,
+            'network_name': _network_name(nonce),
+            'container_names': [_container_name(nonce, arm) for arm in resource_arms],
+        },
         'external_provider_service_calls': 0, 'external_model_service_calls': 0,
     }
     _write_json(output, receipt)
@@ -1380,11 +1623,12 @@ def execute(args):
         cert_dir.mkdir(mode=0o700)
         ambient, replacement = _prepare_certificates(cert_dir)
         certificates = {'ambient': ambient, 'replacement': replacement}
+        fixture_identities = _fixture_identities(certificates)
         receipt['certificate_fixture'] = {
-            'ambient_ca_sha256': sha256(ambient['ca']),
-            'replacement_ca_sha256': sha256(replacement['ca']),
-            'ambient_leaf_sha256': sha256(ambient['leaf']),
-            'replacement_leaf_sha256': sha256(replacement['leaf']),
+            'ambient_ca_sha256': fixture_identities['ambient.ca']['sha256'],
+            'replacement_ca_sha256': fixture_identities['replacement.ca']['sha256'],
+            'ambient_leaf_sha256': fixture_identities['ambient.leaf']['sha256'],
+            'replacement_leaf_sha256': fixture_identities['replacement.leaf']['sha256'],
             'ambient_root_serial': str(AMBIENT_ROOT_SERIAL),
             'replacement_root_serial': str(REPLACEMENT_ROOT_SERIAL),
             'ambient_leaf_serial': str(AMBIENT_LEAF_SERIAL),
@@ -1396,10 +1640,10 @@ def execute(args):
             'cross_chains_rejected': True,
             'private_material_recorded': False,
         }
-        nonce = uuid.uuid4().hex
-        network = _network(docker, nonce, resources)
+        network = _network(docker, nonce, resources, uncertain_creates)
         receipt['resources'].append({
-            'kind': 'network', 'id': network['id'], 'internal': True, 'driver': 'bridge'})
+            'kind': 'network', 'id': network['id'], 'name': network['name'],
+            'internal': True, 'driver': 'bridge'})
         invalid_dir = work / 'invalid-replacement-inputs'
         invalid_dir.mkdir(mode=0o700)
         empty_ca = invalid_dir / 'empty.pem'
@@ -1413,7 +1657,7 @@ def execute(args):
         unreadable_hash = sha256(unreadable_ca)
         unreadable_ca.chmod(0o000)
         missing_ca = invalid_dir / 'missing.pem'
-        replacement_hash = sha256(replacement['ca'])
+        replacement_hash = fixture_identities['replacement.ca']['sha256']
         exclusive_inputs = {
             'missing-both': {'path': replacement['ca'], 'sha256': replacement_hash},
             'missing-path-env': {'path': replacement['ca'], 'sha256': replacement_hash},
@@ -1425,7 +1669,9 @@ def execute(args):
             'unreadable': {'path': unreadable_ca, 'sha256': unreadable_hash},
             'empty': {'path': empty_ca, 'sha256': sha256(empty_ca)},
             'oversized': {'path': oversized_ca, 'sha256': sha256(oversized_ca)},
-            'hash-mismatch': {'path': replacement['ca'], 'sha256': sha256(ambient['ca'])},
+            'hash-mismatch': {
+                'path': replacement['ca'],
+                'sha256': fixture_identities['ambient.ca']['sha256']},
         }
         receipt['invalid_input_fixture'] = {
             'empty_bytes': empty_ca.stat().st_size,
@@ -1442,11 +1688,11 @@ def execute(args):
         }
         for name, image_role, trust_mode, served_chain in CORE_ARMS:
             row = _arm(docker, image_ids[image_role], image_role, network, nonce,
-                       work, certificates, resources, cleanup, name, trust_mode,
-                       served_chain)
+                       work, certificates, fixture_identities, resources, cleanup,
+                       uncertain_creates, name, trust_mode, served_chain)
             receipt['arms'].append(row)
             receipt['resources'].extend(
-                {'kind': item['kind'], 'id': item['id']}
+                {'kind': item['kind'], 'id': item['id'], 'name': item['name']}
                 for item in resources
                 if item['kind'] == 'container'
                 and not any(record['id'] == item['id'] for record in receipt['resources'])
@@ -1455,17 +1701,19 @@ def execute(args):
         for name, input_mode in PRESOCKET_CASES:
             row = _pre_socket_case(
                 docker, args.candidate_image_id, network, nonce, work, certificates,
-                exclusive_inputs, resources, cleanup, name, input_mode,
+                fixture_identities, exclusive_inputs, resources, cleanup,
+                uncertain_creates, name, input_mode,
             )
             receipt['arms'].append(row)
             receipt['resources'].extend(
-                {'kind': item['kind'], 'id': item['id']}
+                {'kind': item['kind'], 'id': item['id'], 'name': item['name']}
                 for item in resources
                 if item['kind'] == 'container'
                 and not any(record['id'] == item['id'] for record in receipt['resources'])
             )
             _write_json(output, receipt)
-        verdict = evaluate_arms(receipt['arms'])
+        _require_fixture_identities(certificates, fixture_identities)
+        verdict = evaluate_arms(receipt['arms'], receipt['certificate_fixture'])
         receipt['checks'] = verdict['checks']
         if not verdict['pass']:
             raise CheckError('exclusive_trust_arms_failed')
@@ -1479,7 +1727,7 @@ def execute(args):
         for resource in reversed(resources):
             if resource['active']:
                 _remove_resource(docker, resource, cleanup)
-        nonce_value = locals().get('nonce')
+        nonce_value = nonce
         reconciliations = []
         if nonce_value:
             reconciliations.append(
@@ -1490,14 +1738,15 @@ def execute(args):
         for item in resources:
             if not any(record.get('kind') == item['kind'] and record.get('id') == item['id']
                        for record in receipt['resources']):
-                receipt['resources'].append({'kind': item['kind'], 'id': item['id']})
+                receipt['resources'].append({
+                    'kind': item['kind'], 'id': item['id'],
+                    'name': item.get('name')})
         absence = _label_absence(docker, nonce_value) if nonce_value else {
             'containers_absent': True, 'networks_absent': True}
         receipt['label_cleanup'] = absence
-        cleanup_ok = ((not nonce_value or (reconciliations
-                                           and reconciliations[-1]['pass'] is True))
-                      and _latest_cleanup_pass(resources, cleanup)
-                      and all(absence.values()))
+        cleanup_ok = _cleanup_complete(
+            nonce_value, reconciliations, resources, cleanup, absence,
+            uncertain_creates)
         receipt['temporary_removed'] = False
         if cleanup_ok:
             try:

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "kanboard-current-runtime-public-verification",
   "qualification_id": "t01-kanboard-php8427-amd64-20261021c",
-  "verifier_sha256": "25e13f0b8f4f85b4d9cdb8b227e692f0fb3e0f504a23358e94fe0eb3250e5452",
+  "verifier_sha256": "d52afed9083230fda1e4001b291d28a923974efd22fe4768ba086d059719238a",
   "artifact_sha256": {
     "README.md": "65b77519db23ff9a6f352603a16c24da324634ae27a333c9fea91fbf47dba600",
     "build-command.txt": "26c36644ee686c7538b6da2f266fbc445f37ff5710ecd8081017381e151ee2be",
@@ -13,12 +13,12 @@
     "evidence/vulnerable-requests.json": "088257b93fffbe83284c25ffec0b2a938cbffcc41c31ddf86b5623c1c64aad00",
     "inputs.json": "915656a1ef7798d5b1bcec0bc33a06f689a5274d8bd11ef7280310b0b1ff6c33",
     "result.json": "eaef887fe2aa1c527b1db4d260001e2ecf0475b4dcfae85a43de2d40ff58aef7",
-    "run-command.txt": "32d88a17c9aca8728b9722e86cc22cf50ae7734d5967dc834f6b7c82e81a85e2",
+    "run-command.txt": "d1a7d7519cdcd5a277026642b6947518f1b44f4232e72d91a97c7b46f6f15213",
     "runtime-admission.json": "0481663a5d4e62b8ec84054288af98523300128fda04512b02c4e89a77ed1e4c"
   },
   "status": "pass",
-  "checks_passed": 209,
-  "checks_total": 209,
+  "checks_passed": 211,
+  "checks_total": 211,
   "network_required": false,
   "docker_required": false,
   "checks": [
@@ -571,6 +571,10 @@
       "pass": true
     },
     {
+      "name": "replay binds exact adapter before image execution",
+      "pass": true
+    },
+    {
       "name": "readme states current-runtime limits and oracle boundary",
       "pass": true
     },
@@ -852,6 +856,10 @@
     },
     {
       "name": "self-test wrong-id replay executes no python",
+      "pass": true
+    },
+    {
+      "name": "self-test changed adapter replay executes no docker or python",
       "pass": true
     },
     {

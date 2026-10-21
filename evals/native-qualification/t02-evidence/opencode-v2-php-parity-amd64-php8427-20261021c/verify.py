@@ -36,6 +36,8 @@ CA_SHA256 = '43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73'
 BASELINE_SHA256 = 'd9de6c807003c1bc84d7d5575fab1bf19281e4c5d964085d13119db274ed2df1'
 BUILD_METADATA_SHA256 = '12d9c6ea2780aab8fc7a9b00a288705682a9602ca859b44adad7c95ff83b9a8b'
 FINAL_READBACK_SHA256 = '68b705d23b677242e0a8a229ccfac73e02c7a8aaca34683bb1e89feea5f4fc41'
+ADAPTER_RELATIVE = 'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py'
+ADAPTER_SHA256 = '100cebaaf715e42fa9c10e4c396a5075c931f6f780baac64f590844308d0973d'
 
 RUNTIME_COMMANDS = [
     ['docker', 'run', '--rm', '--pull=never', '--network', 'none',
@@ -72,7 +74,7 @@ ARTIFACT_SHA256 = {
         '088257b93fffbe83284c25ffec0b2a938cbffcc41c31ddf86b5623c1c64aad00',
     'inputs.json': '915656a1ef7798d5b1bcec0bc33a06f689a5274d8bd11ef7280310b0b1ff6c33',
     'result.json': 'eaef887fe2aa1c527b1db4d260001e2ecf0475b4dcfae85a43de2d40ff58aef7',
-    'run-command.txt': '32d88a17c9aca8728b9722e86cc22cf50ae7734d5967dc834f6b7c82e81a85e2',
+    'run-command.txt': 'd1a7d7519cdcd5a277026642b6947518f1b44f4232e72d91a97c7b46f6f15213',
     'runtime-admission.json': RUNTIME_SHA256,
 }
 
@@ -127,8 +129,7 @@ INSTALLED_PACKAGES = [
 ]
 
 DECLARED_REPOSITORY_INPUT_PINS = {
-    'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py':
-        '100cebaaf715e42fa9c10e4c396a5075c931f6f780baac64f590844308d0973d',
+    ADAPTER_RELATIVE: ADAPTER_SHA256,
     'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427_test.py':
         '5f2fd1a889df96b21bb7aad73f7fd3a3ced7ad99d79d971e4d262edb480cd0fd',
     'evals/native-qualification/smoke/check_v2_php_parity_amd64.py':
@@ -1122,14 +1123,24 @@ def command_checks(raw: dict[str, bytes]) -> dict[str, bool]:
         capture_output=True).returncode
     forbidden_run = re.search(
         r'(?m)^[^#\n]*\bdocker\s+(?:build|buildx|tag|pull)\b', run)
+    inspect_index = -1
     try:
         inspect_index = run.index('ACTUAL="$(docker image inspect')
         mismatch_index = run.index('if [ "${ACTUAL}" != "${EXPECTED}" ]; then')
         exit_index = run.index('  exit 1\n', mismatch_index)
         python_index = run.index('exec python3 ')
-        gate_order = inspect_index < mismatch_index < exit_index < python_index
+        image_gate_order = inspect_index < mismatch_index < exit_index < python_index
     except ValueError:
-        gate_order = False
+        image_gate_order = False
+    try:
+        adapter_assignment_index = run.index(f"ADAPTER='{ADAPTER_RELATIVE}'")
+        adapter_gate_index = run.index(
+            '[ "$(sha256sum "${ADAPTER}" | cut -d\' \' -f1)" = '
+            f"'{ADAPTER_SHA256}' ]")
+        adapter_gate_order = (inspect_index >= 0
+                              and adapter_assignment_index < adapter_gate_index < inspect_index)
+    except ValueError:
+        adapter_gate_order = False
     return {
         'build and replay commands are shell-valid': build_syntax == run_syntax == 0,
         'historical build command exact and bounded': (
@@ -1141,11 +1152,13 @@ def command_checks(raw: dict[str, bytes]) -> dict[str, bool]:
             and '--secret id=proxy_ca,type=file,src=/etc/ssl/certs/ca-certificates.crt'
             in build and '--build-arg' not in build),
         'replay command never builds tags or pulls': forbidden_run is None,
-        'replay mismatch gate precedes python': gate_order,
+        'replay mismatch gate precedes python': image_gate_order,
         'replay binds exact receipts image and platform': (
             CANDIDATE_SHA256 in run and RUNTIME_SHA256 in run
             and f"EXPECTED='{IMAGE_ID} {PLATFORM}'" in run
             and 'docker image inspect "${TAG}"' in run),
+        'replay binds exact adapter before image execution': (
+            adapter_gate_order),
         'readme states current-runtime limits and oracle boundary': (
             'This is **not** byte-identical PHP 8.4.26 parity' in readme
             and re.search(r'`result\.json`\s+remains `needs_review`', readme)
@@ -1186,6 +1199,42 @@ def executable_wrong_id_negative() -> bool:
             ['bash', str(HERE / 'run-command.txt')], cwd=ROOT, env=env,
             capture_output=True, text=True)
         return run.returncode != 0 and not marker.exists()
+
+
+def executable_changed_adapter_negative() -> bool:
+    with tempfile.TemporaryDirectory(prefix='php8427-adapter-negative-') as temp:
+        root = Path(temp)
+        docker_marker = root / 'docker-called'
+        python_marker = root / 'python-called'
+        fake_sha256sum = root / 'sha256sum'
+        fake_docker = root / 'docker'
+        fake_python = root / 'python3'
+        fake_sha256sum.write_text(
+            '#!/bin/sh\n'
+            'case "$1" in\n'
+            f"  *candidate.json) digest='{CANDIDATE_SHA256}' ;;\n"
+            f"  *runtime-admission.json) digest='{RUNTIME_SHA256}' ;;\n"
+            "  *) digest='0000000000000000000000000000000000000000000000000000000000000000' ;;\n"
+            'esac\n'
+            'printf "%s  %s\\n" "$digest" "$1"\n')
+        fake_docker.write_text(
+            '#!/bin/sh\nprintf called > "$DOCKER_MARKER"\nexit 97\n')
+        fake_python.write_text(
+            '#!/bin/sh\nprintf called > "$PYTHON_MARKER"\nexit 97\n')
+        for path in (fake_sha256sum, fake_docker, fake_python):
+            path.chmod(0o700)
+        env = os.environ.copy()
+        env.update({
+            'PATH': f'{root}:/usr/bin:/bin',
+            'PHP8427_OUTPUT': str(root / 'output'),
+            'DOCKER_MARKER': str(docker_marker),
+            'PYTHON_MARKER': str(python_marker),
+        })
+        run = subprocess.run(
+            ['bash', str(HERE / 'run-command.txt')], cwd=ROOT, env=env,
+            capture_output=True, text=True)
+        return (run.returncode != 0 and not docker_marker.exists()
+                and not python_marker.exists())
 
 
 def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
@@ -1497,6 +1546,8 @@ def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
         sha256_bytes(hidden_gate) != ARTIFACT_SHA256['run-command.txt'])
 
     tests['wrong-id replay executes no python'] = executable_wrong_id_negative()
+    tests['changed adapter replay executes no docker or python'] = (
+        executable_changed_adapter_negative())
 
     wrong_source = copy.deepcopy(inputs)
     key = next(iter(DECLARED_REPOSITORY_INPUT_PINS))

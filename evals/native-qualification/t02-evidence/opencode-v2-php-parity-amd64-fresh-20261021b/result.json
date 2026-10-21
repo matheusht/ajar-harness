@@ -31,7 +31,8 @@
   },
   "execution": {
     "build_attempted": true,
-    "metadata_only_candidate_inspection_attempted": false,
+    "candidate_tag_absence_checks_performed": true,
+    "registered_candidate_metadata_inspection_succeeded": false,
     "docker_run_calls": 0,
     "archive_retrieval_attempted": false,
     "archives_verified": 0,
@@ -84,6 +85,8 @@
     "final_build_cache_bytes": 0,
     "dockerfile_sha256_after": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b",
     "managed_ca_sha256_after": "43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73",
+    "docker_observations_sha256": "d8720995a146140339a2eab86d2967d1d32a74ed86ead96f7795bbe326cd91da",
+    "independent_final_readback_private_sha256": "ecc94f6b186ecf4f237adb5b05bb603e4fd23ad6376d3418ec65fa1ff05e7a64",
     "baseline_restored": true
   },
   "follow_up_defects": [

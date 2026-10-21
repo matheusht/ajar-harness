@@ -25,6 +25,10 @@ Consequently:
   external credential was used; and
 - this receipt does not establish fresh cloud amd64 application parity.
 
+`inputs.json` is a sanitized post-run derivative assembled at 20:04:03Z from
+the separately frozen provenance observation, Docker baseline, and committed
+failure contract; it was not itself present before the build.
+
 Six BuildKit cache records were created after the empty baseline. They were
 removed by exact ID, with two zero-byte parent records retried only after
 their children were gone. Final readback found zero cache records, no
@@ -37,6 +41,8 @@ Files:
   Docker baseline, source pins, candidate intent, and public archive pins.
 - `result.json` records the bounded build failure, non-execution facts, exact
   cache cleanup, restored baseline, limitations, and inherited follow-ups.
+- `docker-observations.txt` preserves the sanitized state and exact-ID cleanup
+  outputs, plus the hash of an independently retained final raw readback.
 - `failed-build-command.txt` is the redacted historical build shape. It
   refuses to overwrite an existing tag and contains no parity runner.
 - `verify.py` validates narrow receipt schemas, full command bytes, source

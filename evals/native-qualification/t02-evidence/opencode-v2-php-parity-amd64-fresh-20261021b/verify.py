@@ -18,7 +18,11 @@ BASE = '9c0c0e3f0f7d25fece945a564c8c991a5368d8b9'
 TAG = 't02-kanboard-runtime:amd64-parity-20261021b'
 DOCKERFILE_SHA256 = '7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b'
 CA_SHA256 = '43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73'
-COMMAND_SHA256 = 'c3a959566f671198546490b1c68e626e4410ce74ebdde5811d83ab14c3aaa85c'
+README_SHA256 = '32bf91b3f7c4d17a11b52987c99d6c0ed1f43c43a182f9b4596ee0dd9e501f45'
+INPUTS_SHA256 = '8306c081fcf7d11d137d6c3a773b8d225b4ca0027ddc9a70b1a686d20fcb18a3'
+RESULT_SHA256 = '3c0fd35b083a4df64831d672eecaada3fb7026d375313dbefbece8905e2cd610'
+COMMAND_SHA256 = '2414b40a2b7674a0553e215eeea5a5c06e0c48433c600bc0ca7e0b27ba459997'
+OBSERVATIONS_SHA256 = 'd8720995a146140339a2eab86d2967d1d32a74ed86ead96f7795bbe326cd91da'
 NETWORKS = [
     {'name': 'bridge', 'id': '1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba'},
     {'name': 'host', 'id': 'dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb'},
@@ -76,8 +80,9 @@ REPOSITORY_INPUTS = {
 
 INPUT_KEYS = {
     'schema_version', 'kind', 'recorded_at', 'status', 'qualification_base',
-    'platform', 'docker', 'dockerfile', 'base_images', 'managed_ca', 'candidate',
-    'pre_build_baseline', 'archives', 'repository_inputs', 'constraints',
+    'platform', 'derivation', 'docker', 'dockerfile', 'base_images', 'managed_ca',
+    'candidate', 'pre_build_baseline', 'archives', 'repository_inputs',
+    'constraints',
 }
 RESULT_KEYS = {
     'schema_version', 'kind', 'recorded_at', 'status', 'classification',
@@ -85,6 +90,11 @@ RESULT_KEYS = {
     'follow_up_defects', 'limits', 'remaining_input',
 }
 NESTED_KEYS = {
+    'derivation': {
+        'provenance_observed_at', 'docker_baseline_observed_at',
+        'failure_contract_frozen_at', 'sanitized_receipt_assembled_at',
+        'pre_build_baseline_private_sha256',
+    },
     'docker': {
         'context', 'client_version', 'server_version', 'server_os', 'server_arch',
         'api_version', 'buildx_version', 'buildx_revision', 'buildkit_version',
@@ -93,8 +103,8 @@ NESTED_KEYS = {
     'base_images': {'dockerfile_default', 'effective_build_argument'},
     'managed_ca': {
         'source_class', 'source_path', 'sha256_before', 'size_bytes', 'mode',
-        'buildkit_secret_id', 'buildkit_target', 'bytes_recorded',
-        'proxy_values_recorded', 'system_trust_changed',
+        'uid', 'gid', 'mtime', 'buildkit_secret_id', 'buildkit_target',
+        'bytes_recorded', 'proxy_values_recorded', 'system_trust_changed',
     },
     'candidate_input': {
         'tag', 'tag_present_before_build', 'required_new_image',
@@ -121,8 +131,9 @@ NESTED_KEYS = {
         'registered', 'registration_receipt_created', 'decision',
     },
     'execution': {
-        'build_attempted', 'metadata_only_candidate_inspection_attempted',
-        'docker_run_calls', 'archive_retrieval_attempted', 'archives_verified',
+        'build_attempted', 'candidate_tag_absence_checks_performed',
+        'registered_candidate_metadata_inspection_succeeded', 'docker_run_calls',
+        'archive_retrieval_attempted', 'archives_verified',
         'archives_extracted', 'application_containers_started',
         'ordinary_behavior_run', 'vulnerable_arm_run', 'fixed_arm_run',
         'parity_runner_executed', 'parity_established',
@@ -136,6 +147,7 @@ NESTED_KEYS = {
         'final_images', 'final_volumes', 'final_networks',
         'final_build_cache_record_ids', 'final_build_cache_bytes',
         'dockerfile_sha256_after', 'managed_ca_sha256_after',
+        'docker_observations_sha256', 'independent_final_readback_private_sha256',
         'baseline_restored',
     },
 }
@@ -167,6 +179,7 @@ def schema_checks(inputs: dict, result: dict) -> dict[str, bool]:
         'result top-level schema exact': set(result) == RESULT_KEYS,
     }
     mappings = [
+        ('derivation', inputs.get('derivation'), 'derivation'),
         ('docker', inputs.get('docker'), 'docker'),
         ('dockerfile', inputs.get('dockerfile'), 'dockerfile'),
         ('base images', inputs.get('base_images'), 'base_images'),
@@ -194,7 +207,8 @@ def schema_checks(inputs: dict, result: dict) -> dict[str, bool]:
     return checks
 
 
-def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dict[str, bool]:
+def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
+                   observations: str) -> dict[str, bool]:
     dockerfile = inputs.get('dockerfile', {})
     bases = inputs.get('base_images', {})
     ca = inputs.get('managed_ca', {})
@@ -206,7 +220,7 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
     cleanup = result.get('cleanup', {})
 
     serialized = json.dumps({'inputs': inputs, 'result': result}, sort_keys=True)
-    serialized += '\n' + command + '\n' + readme
+    serialized += '\n' + command + '\n' + readme + '\n' + observations
     json_secret = re.compile(
         r'(?i)"(?:authorization|api[_-]?key|apikey|cookie|token|access_token|password)"'
         r'\s*:\s*"(?!\[REDACTED\])[^"\n]+"')
@@ -222,7 +236,8 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
     }
     zero_execution = {
         'build_attempted': True,
-        'metadata_only_candidate_inspection_attempted': False,
+        'candidate_tag_absence_checks_performed': True,
+        'registered_candidate_metadata_inspection_succeeded': False,
         'docker_run_calls': 0,
         'archive_retrieval_attempted': False,
         'archives_verified': 0,
@@ -243,9 +258,18 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
         'qualification base and platform exact': (
             inputs.get('qualification_base') == result.get('qualification_base') == BASE
             and inputs.get('platform') == 'linux/amd64'),
-        'frozen input status exact': (
-            inputs.get('status') == 'frozen_before_build'
-            and inputs.get('kind') == 't02-cloud-amd64-kanboard-fresh-candidate-inputs'),
+        'derived input provenance exact': (
+            inputs.get('recorded_at') == '2026-10-21T20:04:03Z'
+            and inputs.get('status') == 'derived_from_frozen_pre_build_inputs'
+            and inputs.get('kind') == 't02-cloud-amd64-kanboard-fresh-candidate-inputs'
+            and inputs.get('derivation') == {
+                'provenance_observed_at': '2026-10-21T19:55:09Z',
+                'docker_baseline_observed_at': '2026-10-21T19:55:40Z',
+                'failure_contract_frozen_at': '2026-10-21T20:00:27Z',
+                'sanitized_receipt_assembled_at': '2026-10-21T20:04:03Z',
+                'pre_build_baseline_private_sha256':
+                    'c3ecbd07c9d784f3782a4f161dccc1141a0d60d24869658d1d9ac2e0f152ecca',
+            }),
         'dockerfile and bases exact': (
             dockerfile == {
                 'path': 'evals/native-qualification/Dockerfile.opencode-kanboard-runtime',
@@ -259,6 +283,10 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
             ca.get('source_path') == '/etc/ssl/certs/ca-certificates.crt'
             and ca.get('sha256_before') == CA_SHA256
             and ca.get('size_bytes') == 230249
+            and ca.get('mode') == '0644'
+            and ca.get('uid') == 65534
+            and ca.get('gid') == 65534
+            and ca.get('mtime') == '2026-10-21T03:49:54.214645667Z'
             and ca.get('buildkit_secret_id') == 'proxy_ca'
             and ca.get('buildkit_target') == '/etc/apk/ca.pem'
             and ca.get('bytes_recorded') is False
@@ -268,7 +296,10 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
             candidate_input.get('tag') == TAG
             and candidate_input.get('tag_present_before_build') is False
             and candidate_input.get('required_new_image') is True
-            and len(candidate_input.get('prior_nonqualifying_image_ids', [])) == 2),
+            and candidate_input.get('prior_nonqualifying_image_ids') == [
+                'sha256:9ef722322521322a1288a18427ba5bf6ce1479085c97e0ac821982eec4f01769',
+                'sha256:d0b96c08541486079634fd70a0ffb221c32b07a2a04a1a2ab7d041912a7c9a91',
+            ]),
         'outer baseline exact': (
             before.get('containers') == before.get('images') == before.get('volumes') == []
             and before.get('networks') == NETWORKS
@@ -315,6 +346,9 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
             and cleanup.get('final_build_cache_bytes') == 0
             and cleanup.get('dockerfile_sha256_after') == DOCKERFILE_SHA256
             and cleanup.get('managed_ca_sha256_after') == CA_SHA256
+            and cleanup.get('docker_observations_sha256') == OBSERVATIONS_SHA256
+            and cleanup.get('independent_final_readback_private_sha256')
+            == 'ecc94f6b186ecf4f237adb5b05bb603e4fd23ad6376d3418ec65fa1ff05e7a64'
             and cleanup.get('baseline_restored') is True),
         'follow-up defects retained': (
             len(result.get('follow_up_defects', [])) == 4
@@ -322,18 +356,42 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str) -> dic
         'full failed command bytes pinned': (
             hashlib.sha256(command.encode()).hexdigest() == COMMAND_SHA256
             and 'refusing to overwrite existing candidate tag' in command
+            and 'set -euC' in command and 'umask 077' in command
+            and 'Dockerfile or managed CA SHA-256 mismatch' in command
+            and 'PARITY_PRIVATE_ROOT must be a new non-root path' in command
             and 'docker buildx build --platform linux/amd64 --load' in command
             and 'python3 ' not in command),
         'readme states honest blocked scope': (
             'blocked during image build' in readme
             and 'does not establish fresh cloud amd64 application parity' in readme
             and 'No global prune was used' in readme),
+        'cleanup observations pinned': (
+            hashlib.sha256(observations.encode()).hexdigest() == OBSERVATIONS_SHA256
+            and 'After failed build' in observations
+            and 'First exact-ID removal pass' in observations
+            and 'Independent retained final readback' in observations),
         'no raw secret or private task material': (
             json_secret.search(serialized) is None
             and other_secret.search(serialized) is None
             and '/workspace/' not in serialized
             and '/private/tmp/' not in serialized
             and '-----BEGIN CERTIFICATE-----' not in serialized),
+    }
+
+
+def artifact_byte_checks(inputs_text: str, result_text: str, command: str,
+                         readme: str, observations: str) -> dict[str, bool]:
+    return {
+        'complete inputs bytes pinned':
+            hashlib.sha256(inputs_text.encode()).hexdigest() == INPUTS_SHA256,
+        'complete result bytes pinned':
+            hashlib.sha256(result_text.encode()).hexdigest() == RESULT_SHA256,
+        'complete readme bytes pinned':
+            hashlib.sha256(readme.encode()).hexdigest() == README_SHA256,
+        'complete command bytes pinned':
+            hashlib.sha256(command.encode()).hexdigest() == COMMAND_SHA256,
+        'complete cleanup observations bytes pinned':
+            hashlib.sha256(observations.encode()).hexdigest() == OBSERVATIONS_SHA256,
     }
 
 
@@ -348,34 +406,37 @@ def source_checks(inputs: dict) -> dict[str, bool]:
     return checks
 
 
-def verify(inputs: dict, result: dict, command: str, readme: str) -> dict[str, bool]:
+def verify(inputs: dict, result: dict, command: str, readme: str,
+           observations: str, inputs_text: str, result_text: str) -> dict[str, bool]:
     return (schema_checks(inputs, result)
-            | receipt_checks(inputs, result, command, readme)
+            | receipt_checks(inputs, result, command, readme, observations)
+            | artifact_byte_checks(inputs_text, result_text, command, readme, observations)
             | source_checks(inputs))
 
 
-def self_test(inputs: dict, result: dict, command: str, readme: str) -> dict[str, bool]:
+def self_test(inputs: dict, result: dict, command: str, readme: str,
+              observations: str, inputs_text: str, result_text: str) -> dict[str, bool]:
     tests = {}
 
     forged = copy.deepcopy(result)
     forged['status'] = 'pass'
     tests['reject false pass status'] = not receipt_checks(
-        inputs, forged, command, readme)['build blocker exact']
+        inputs, forged, command, readme, observations)['build blocker exact']
 
     executed = copy.deepcopy(result)
     executed['execution']['vulnerable_arm_run'] = True
     tests['reject hidden arm execution'] = not receipt_checks(
-        inputs, executed, command, readme)['zero dependent execution']
+        inputs, executed, command, readme, observations)['zero dependent execution']
 
     dirty = copy.deepcopy(result)
     dirty['cleanup']['task_cache_record_ids_removed'].pop()
     tests['reject incomplete cache cleanup'] = not receipt_checks(
-        inputs, dirty, command, readme)['cleanup exact']
+        inputs, dirty, command, readme, observations)['cleanup exact']
 
     retrieved = copy.deepcopy(inputs)
     retrieved['archives']['fixed']['retrieved'] = True
     tests['reject false archive state'] = not receipt_checks(
-        retrieved, result, command, readme)['archives remained unretrieved']
+        retrieved, result, command, readme, observations)['archives remained unretrieved']
 
     extra = copy.deepcopy(result)
     extra['unreviewed'] = True
@@ -385,14 +446,20 @@ def self_test(inputs: dict, result: dict, command: str, readme: str) -> dict[str
     hidden_gate = command.replace(
         'if docker image inspect', 'if false; then :; fi\nif docker image inspect', 1)
     tests['reject false-branch command mutation'] = not receipt_checks(
-        inputs, result, hidden_gate, readme)['full failed command bytes pinned']
+        inputs, result, hidden_gate, readme, observations)['full failed command bytes pinned']
 
     tests['reject quoted Authorization value'] = not receipt_checks(
-        inputs, result, command, readme + '\n{"Authorization":"Bearer secret"}')[
+        inputs, result, command, readme + '\n{"Authorization":"Bearer secret"}', observations)[
             'no raw secret or private task material']
     tests['reject quoted api_key value'] = not receipt_checks(
-        inputs, result, command, readme + '\n{"api_key":"secret"}')[
+        inputs, result, command, readme + '\n{"api_key":"secret"}', observations)[
             'no raw secret or private task material']
+    tests['reject any complete inputs mutation'] = not artifact_byte_checks(
+        inputs_text + ' ', result_text, command, readme, observations)[
+            'complete inputs bytes pinned']
+    tests['reject any complete result mutation'] = not artifact_byte_checks(
+        inputs_text, result_text + ' ', command, readme, observations)[
+            'complete result bytes pinned']
     return tests
 
 
@@ -403,17 +470,26 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        inputs = load_json(HERE / 'inputs.json')
-        result = load_json(HERE / 'result.json')
+        inputs_text = (HERE / 'inputs.json').read_text()
+        result_text = (HERE / 'result.json').read_text()
+        inputs = json.loads(inputs_text, object_pairs_hook=reject_duplicates)
+        result = json.loads(result_text, object_pairs_hook=reject_duplicates)
+        if not isinstance(inputs, dict) or not inputs:
+            raise ValueError('inputs.json: expected non-empty JSON object')
+        if not isinstance(result, dict) or not result:
+            raise ValueError('result.json: expected non-empty JSON object')
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(json.dumps({'status': 'fail', 'error': str(error)}, indent=2))
         return 1
     command = (HERE / 'failed-build-command.txt').read_text()
     readme = (HERE / 'README.md').read_text()
-    checks = verify(inputs, result, command, readme)
+    observations = (HERE / 'docker-observations.txt').read_text()
+    checks = verify(
+        inputs, result, command, readme, observations, inputs_text, result_text)
     if args.self_test:
         checks |= {f'self-test {name}': passed for name, passed in self_test(
-            inputs, result, command, readme).items()}
+            inputs, result, command, readme, observations,
+            inputs_text, result_text).items()}
 
     receipt = {
         'schema_version': 1,

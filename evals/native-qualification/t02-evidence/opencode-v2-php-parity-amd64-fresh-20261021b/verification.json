@@ -2,8 +2,8 @@
   "schema_version": 1,
   "kind": "t02-cloud-amd64-kanboard-fresh-candidate-public-verification",
   "status": "pass",
-  "checks_passed": 53,
-  "checks_total": 53,
+  "checks_passed": 62,
+  "checks_total": 62,
   "network_required": false,
   "docker_required": false,
   "checks": [
@@ -13,6 +13,10 @@
     },
     {
       "name": "result top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "derivation schema exact",
       "pass": true
     },
     {
@@ -72,7 +76,7 @@
       "pass": true
     },
     {
-      "name": "frozen input status exact",
+      "name": "derived input provenance exact",
       "pass": true
     },
     {
@@ -128,7 +132,31 @@
       "pass": true
     },
     {
+      "name": "cleanup observations pinned",
+      "pass": true
+    },
+    {
       "name": "no raw secret or private task material",
+      "pass": true
+    },
+    {
+      "name": "complete inputs bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete result bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete readme bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete command bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete cleanup observations bytes pinned",
       "pass": true
     },
     {
@@ -217,6 +245,14 @@
     },
     {
       "name": "self-test reject quoted api_key value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject any complete inputs mutation",
+      "pass": true
+    },
+    {
+      "name": "self-test reject any complete result mutation",
       "pass": true
     }
   ]

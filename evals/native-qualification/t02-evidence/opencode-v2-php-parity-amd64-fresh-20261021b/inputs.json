@@ -1,8 +1,15 @@
 {
   "schema_version": 1,
   "kind": "t02-cloud-amd64-kanboard-fresh-candidate-inputs",
-  "recorded_at": "2026-10-21T20:00:27Z",
-  "status": "frozen_before_build",
+  "recorded_at": "2026-10-21T20:04:03Z",
+  "status": "derived_from_frozen_pre_build_inputs",
+  "derivation": {
+    "provenance_observed_at": "2026-10-21T19:55:09Z",
+    "docker_baseline_observed_at": "2026-10-21T19:55:40Z",
+    "failure_contract_frozen_at": "2026-10-21T20:00:27Z",
+    "sanitized_receipt_assembled_at": "2026-10-21T20:04:03Z",
+    "pre_build_baseline_private_sha256": "c3ecbd07c9d784f3782a4f161dccc1141a0d60d24869658d1d9ac2e0f152ecca"
+  },
   "qualification_base": "9c0c0e3f0f7d25fece945a564c8c991a5368d8b9",
   "platform": "linux/amd64",
   "docker": {
@@ -30,6 +37,9 @@
     "sha256_before": "43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73",
     "size_bytes": 230249,
     "mode": "0644",
+    "uid": 65534,
+    "gid": 65534,
+    "mtime": "2026-10-21T03:49:54.214645667Z",
     "buildkit_secret_id": "proxy_ca",
     "buildkit_target": "/etc/apk/ca.pem",
     "bytes_recorded": false,

@@ -10,7 +10,7 @@ is recorded as a blocked result; it is never converted into a weaker run.
 - The integration source is exactly
   `b8f0453575740cb1482dc716fa1807c195459f58`, the published head of PR #180.
 - The image source is imported without semantic change from candidate PR #182
-  head `adf6692474c81771e7e6fa2bc19e2a8dd067eb30`. Its Dockerfile SHA-256 is
+  lineage. The Dockerfile SHA-256 is
   `be4948ac34c02f1cf84560f86874f07dc4d6c4b4efc8b1141956d2bf16f7497e`
   and its direct base is
   `ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319`.
@@ -27,6 +27,14 @@ is recorded as a blocked result; it is never converted into a weaker run.
 - The PR #180 current source manifest, managed runner, owned fixture/config,
   reviewer-packet controls, exact-set stop owner, and Docker runtime must pass
   their no-Docker source checks before the build.
+- The preserved two-arm observer is supplied from exact PR #182 head
+  `03c936e3e6e17947b6d061ab5bd8025904e3f0a7`. Before Docker baseline capture,
+  require a clean checkout at that head and exact hashes for its adapter,
+  preserved amd64 runner, observer, T01 comparator, researcher brief,
+  Dockerfile, and checks. Copy only those admitted bytes into the private
+  source snapshot; execute only the snapshot. Never invoke PR #182's sealed
+  `main()` or `load_fixed_policy()`, which correctly remain bound to removed
+  image `sha256:241dd8...` and its immutable historical receipts.
 
 ## Pre-build failures
 
@@ -57,8 +65,31 @@ pre-existing resources.
   the first image execution. Every subsequent image reference must be that ID
   with `--pull=never`; no tag substitution or pull is allowed.
 
+## Same-image application parity failures
+
+- Before the first application arm, retrieve exactly the two frozen public
+  Kanboard archives and verify their recorded SHA-256 values. No unverified
+  archive may be extracted or executed, and no other remote URL is permitted.
+- Parameterize a new additive adapter binding with this attempt's candidate
+  receipt, tag, immutable image ID, Dockerfile hash, and private output. Do not
+  edit or relabel PR #182's adapter, candidate, runtime, result, or verifier.
+- Re-run package/PHP admission and the preserved ordinary synthetic observer
+  on the registered image ID only. Both vulnerable and fixed arms must report
+  that exact ID and PHP 8.4.27; ordinary controls, the vulnerable effect, fixed
+  denial, frozen archive pins, historical semantic comparison, redaction, and
+  per-arm cleanup must all pass. No observer material is mounted into a
+  researcher and no provider, model, target, credential, or live route is used.
+- Persist and admit the parity result before starting the managed runner. A
+  missing/malformed result, any failed check, an ID mismatch, a tag-only image
+  reference, archive failure, source change, residual observer container/port/
+  database, or failed redaction stops the managed rehearsal.
+
 ## Managed rehearsal failures
 
+- Invoke the managed runner only after the same attempt's runtime and two-arm
+  parity receipts have passed. Reinspect the candidate and require its ID to
+  remain identical to the pre-execution registration and both arm runtime IDs;
+  pass that same value through `--cloud-image-id`.
 - Invoke `opencode_v2_managed_owned.py` only without `--live-free` and without
   live runtime-CA arguments. The provider/model endpoint is the runner's
   ephemeral owned TLS responder; no external provider, model, target,
@@ -96,6 +127,9 @@ publish raw logs, proxy values, credentials, CA bytes, capability material,
 private paths, container IDs, ports, disposable databases, or unredacted
 native transcripts.
 
-Passing this rehearsal qualifies only the integrated owned-response workflow
-on the recorded immutable image. It does not qualify a provider/model route,
-live TLS, hosted CI, a target, default adoption, #165, or any retirement work.
+Passing this lifecycle qualifies only the recorded fresh immutable image's
+package/PHP admission, preserved two-arm owned application semantics, and
+integrated owned-response workflow. It does not qualify a provider/model
+route, live TLS, hosted CI, a target, default adoption, #165, or any retirement
+work. A managed-only pass without the preceding same-image parity pass is
+procedurally excluded and is not readiness evidence.

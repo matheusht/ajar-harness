@@ -1,0 +1,60 @@
+{
+  "base_commit": "5425d5869f4d835b3111b05be7b14b3769953028",
+  "case_outcomes": {
+    "authorized-read": "supported",
+    "denied-change": "supported",
+    "direct-bypass": "capture_claim_refused",
+    "effect-write": "supported",
+    "host-replay": "host_replay",
+    "state-consumption": "supported"
+  },
+  "chain_state": {
+    "consumed": [
+      "owned-effect-state-v1"
+    ],
+    "contrary_results": [
+      "denied-change",
+      "direct-bypass"
+    ],
+    "missing_transitions": [
+      "direct-bypass:application-observer-receipt"
+    ],
+    "produced": [
+      "owned-effect-state-v1"
+    ]
+  },
+  "expected_status": "owned_e2e_pass_not_managed_native_qualified",
+  "failure_checks": [
+    "source_pin_mismatch",
+    "observer_unavailable",
+    "observer_channel_exposed",
+    "trace_incomplete",
+    "session_binding_missing",
+    "tool_binding_missing",
+    "request_binding_ambiguous",
+    "host_replay_miscredited",
+    "host_activity_in_researcher_window",
+    "causal_order_invalid",
+    "authorized_result_mismatch",
+    "denied_effect_changed",
+    "unexpected_route",
+    "capture_completeness_unproven",
+    "producer_can_write_observer",
+    "sensitive_evidence_detected",
+    "stop_unverified",
+    "cleanup_incomplete",
+    "normalized_repeat_mismatch"
+  ],
+  "handoff_commit": "ac6348b56df9334e54a09dada382b425bf29d4c6",
+  "nonclaims": [
+    "agent_discovery",
+    "managed_native_process_attribution",
+    "model_or_provider_qualification",
+    "route_enforcement",
+    "live_target_observation",
+    "fresh_independent_review",
+    "adaptive_investigation"
+  ],
+  "scenario_id": "owned-original-application-observation-v1",
+  "schema_version": 1
+}

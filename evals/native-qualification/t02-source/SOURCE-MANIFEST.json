@@ -11,9 +11,9 @@
       "sha256": "be4948ac34c02f1cf84560f86874f07dc4d6c4b4efc8b1141956d2bf16f7497e"
     },
     {
-      "bytes": 5852,
+      "bytes": 8144,
       "path": "evals/native-qualification/T02-AMD64-MANAGED-OWNED-PHP8427-CHECKS-20261021.md",
-      "sha256": "a41d16baa20cbb5971df05b4f0621c147b6a4a592c76bec82fe3091cec826d99"
+      "sha256": "9eca021870ac7b52b974c58f65de511e950481c246ecf3d34552ed6bad71290d"
     },
     {
       "bytes": 1362,
@@ -104,6 +104,11 @@
       "bytes": 1634,
       "path": "evals/native-qualification/smoke/opencode_v2_request_observer/server.js",
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
+    },
+    {
+      "bytes": 22627,
+      "path": "evals/native-qualification/smoke/same_image_php8427_parity.py",
+      "sha256": "3e5a43cb5b3f6eda3ceb6a189a01f62822f9bcb8876bc9fe5f65856b214c48dd"
     },
     {
       "bytes": 7324,

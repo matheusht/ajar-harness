@@ -22,18 +22,39 @@ from urllib.parse import urlsplit
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 INTEGRATION_HEAD = 'b8f0453575740cb1482dc716fa1807c195459f58'
-IMAGE_SOURCE_HEAD = 'adf6692474c81771e7e6fa2bc19e2a8dd067eb30'
-IMAGE_TAG = 't02-managed-runtime:amd64-php8427-20261021a'
+IMAGE_SOURCE_HEAD = '03c936e3e6e17947b6d061ab5bd8025904e3f0a7'
+IMAGE_TAG = 't02-managed-runtime:amd64-php8427-20261021d'
 PLATFORM = 'linux/amd64'
 BASE_IMAGE = ('ghcr.io/anomalyco/opencode@sha256:'
               '85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319')
 DOCKERFILE = ROOT / 'evals/native-qualification/Dockerfile.opencode-kanboard-runtime-php8427'
 DOCKERFILE_SHA256 = 'be4948ac34c02f1cf84560f86874f07dc4d6c4b4efc8b1141956d2bf16f7497e'
 CHECKS = ROOT / 'evals/native-qualification/T02-AMD64-MANAGED-OWNED-PHP8427-CHECKS-20261021.md'
-CHECKS_SHA256 = 'a41d16baa20cbb5971df05b4f0621c147b6a4a592c76bec82fe3091cec826d99'
+CHECKS_SHA256 = '9eca021870ac7b52b974c58f65de511e950481c246ecf3d34552ed6bad71290d'
 SOURCE_MANIFEST = ROOT / 'evals/native-qualification/t02-source/SOURCE-MANIFEST.json'
 MANAGED_RUNNER = HERE / 'opencode_v2_managed_owned.py'
 MANAGED_RUNNER_SHA256 = 'e5f442ddcda8515cb0fb29b9a601cdea068e6c66da795c4b8c8da0e351569475'
+PARITY_WRAPPER = HERE / 'same_image_php8427_parity.py'
+PARITY_WRAPPER_SHA256 = '3e5a43cb5b3f6eda3ceb6a189a01f62822f9bcb8876bc9fe5f65856b214c48dd'
+PARITY_SOURCE_HEAD = '03c936e3e6e17947b6d061ab5bd8025904e3f0a7'
+PARITY_ADAPTER_RELATIVE = Path(
+    'evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py')
+PARITY_SOURCE_FILES = {
+    PARITY_ADAPTER_RELATIVE:
+        '100cebaaf715e42fa9c10e4c396a5075c931f6f780baac64f590844308d0973d',
+    Path('evals/native-qualification/smoke/check_v2_php_parity_amd64.py'):
+        'bf983ccc93fac42033c7785fab35aa10e263c9035ee8680a3896c183df281927',
+    Path('evals/native-qualification/observer_case.py'):
+        '72273bfd4e1c1aa9f7f53279e525ec1c74c2669324fa62f1b6b22abf65d596bf',
+    Path('evals/native-qualification/observer-evidence-final/observer-results.json'):
+        '9db3bc220484a7a786729847f3c8fa8cc1d364a74b1e4a81d2bb78f80dc924fa',
+    Path('evals/native-qualification/RESEARCHER-BRIEF.md'):
+        '8f2b5604870cf86719ae94ac180cb6cbe0c5c12cdd2356bc90f4104bb7179a5a',
+    Path('evals/native-qualification/Dockerfile.opencode-kanboard-runtime-php8427'):
+        DOCKERFILE_SHA256,
+    Path('evals/native-qualification/T01-AMD64-KANBOARD-PHP8427-CHECKS-20261021.md'):
+        'eac607c837d9d356f79662cc0050958d0cf67384565a298be108fedc2636bc94',
+}
 RELAY = ROOT / ('experiments/native-network-preflight/tcp-relay-host-override/'
                 'cloud-linux-amd64-20261020a/tcp-relay-linux-amd64')
 RELAY_SHA256 = '33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895'
@@ -259,6 +280,7 @@ def validate_sources() -> dict[str, object]:
         DOCKERFILE: DOCKERFILE_SHA256,
         CHECKS: CHECKS_SHA256,
         MANAGED_RUNNER: MANAGED_RUNNER_SHA256,
+        PARITY_WRAPPER: PARITY_WRAPPER_SHA256,
         RELAY: RELAY_SHA256,
     }
     critical_reads = {}
@@ -330,6 +352,52 @@ def validate_sources() -> dict[str, object]:
     }
 
 
+def validate_parity_source(root: Path) -> dict[str, object]:
+    """Admit the exact published PR #182 observer source before Docker use."""
+    try:
+        resolved = root.expanduser().resolve(strict=True)
+    except OSError as error:
+        raise GateError('parity_source_root_mismatch') from error
+    if not root.is_absolute() or resolved != root or not root.is_dir():
+        raise GateError('parity_source_root_mismatch')
+    top = subprocess.run(
+        ['git', 'rev-parse', '--show-toplevel'], cwd=root,
+        capture_output=True, text=True, timeout=15)
+    head = subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], cwd=root,
+        capture_output=True, text=True, timeout=15)
+    status = subprocess.run(
+        ['git', 'status', '--porcelain', '--untracked-files=all'], cwd=root,
+        capture_output=True, text=True, timeout=15)
+    if (top.returncode or head.returncode or status.returncode
+            or Path(top.stdout.strip()).resolve() != root
+            or head.stdout.strip() != PARITY_SOURCE_HEAD or status.stdout):
+        raise GateError('parity_source_lineage_or_cleanliness_mismatch')
+    entries = []
+    for relative, digest in PARITY_SOURCE_FILES.items():
+        data, mode = _read_regular_stable(
+            root / relative, 'parity_source_pin_mismatch',
+            expected_sha256=digest)
+        entries.append({
+            'path': relative.as_posix(),
+            'bytes': len(data),
+            'sha256': digest,
+            'executable': bool(mode.st_mode & 0o111),
+        })
+    final_status = subprocess.run(
+        ['git', 'status', '--porcelain', '--untracked-files=all'], cwd=root,
+        capture_output=True, text=True, timeout=15)
+    if final_status.returncode or final_status.stdout:
+        raise GateError('parity_source_changed_during_validation')
+    return {
+        'source_head': PARITY_SOURCE_HEAD,
+        'adapter_sha256': PARITY_SOURCE_FILES[PARITY_ADAPTER_RELATIVE],
+        'files': [{key: value for key, value in entry.items()
+                   if key != 'executable'} for entry in entries],
+        'private': {'root': root, 'entries': entries},
+    }
+
+
 def stage_sources(source: dict[str, object], output: Path) -> dict[str, Path]:
     """Take a digest-checked private snapshot and use only it after validation."""
     private = source.get('private')
@@ -366,7 +434,9 @@ def stage_sources(source: dict[str, object], output: Path) -> dict[str, Path]:
         'root': stage_root,
         'cleanup_root': stage_root,
         'dockerfile': stage_root / DOCKERFILE.relative_to(ROOT),
+        'checks': stage_root / CHECKS.relative_to(ROOT),
         'managed_runner': stage_root / MANAGED_RUNNER.relative_to(ROOT),
+        'parity_wrapper': stage_root / PARITY_WRAPPER.relative_to(ROOT),
         'relay': stage_root / RELAY.relative_to(ROOT),
     }
     if any(not path.is_file() for key, path in staged.items()
@@ -374,6 +444,40 @@ def stage_sources(source: dict[str, object], output: Path) -> dict[str, Path]:
         shutil.rmtree(stage_root, ignore_errors=True)
         raise GateError('source_snapshot_incomplete')
     return staged
+
+
+def stage_parity_source(parity: dict[str, object], staged_root: Path) -> dict[str, Path]:
+    private = parity.get('private')
+    if not isinstance(private, dict):
+        raise GateError('parity_source_snapshot_contract_failed')
+    source_root = private.get('root')
+    entries = private.get('entries')
+    if not isinstance(source_root, Path) or not isinstance(entries, list):
+        raise GateError('parity_source_snapshot_contract_failed')
+    destination_root = staged_root / 'parity-pr182'
+    destination_root.mkdir(mode=0o700)
+    for entry in entries:
+        if (not isinstance(entry, dict)
+                or set(entry) != {'path', 'bytes', 'sha256', 'executable'}):
+            raise GateError('parity_source_snapshot_contract_failed')
+        relative = Path(entry['path'])
+        data, _mode = _read_regular_stable(
+            source_root / relative, 'parity_source_changed_before_snapshot',
+            expected_sha256=entry['sha256'], expected_size=entry['bytes'])
+        destination = destination_root / relative
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _private_write(destination, data)
+        if entry['executable']:
+            destination.chmod(0o700)
+    adapter = destination_root / PARITY_ADAPTER_RELATIVE
+    native_root = destination_root / 'evals/native-qualification'
+    dockerfile = native_root / 'Dockerfile.opencode-kanboard-runtime-php8427'
+    checks = native_root / 'T01-AMD64-KANBOARD-PHP8427-CHECKS-20261021.md'
+    if (not adapter.is_file() or not native_root.is_dir()
+            or not dockerfile.is_file() or not checks.is_file()):
+        raise GateError('parity_source_snapshot_incomplete')
+    return {'root': destination_root, 'native_root': native_root,
+            'adapter': adapter, 'dockerfile': dockerfile, 'checks': checks}
 
 
 def validate_ca(path: Path) -> dict[str, object]:
@@ -759,9 +863,93 @@ def admit_runtime(commands, image_info: dict, image_id: str,
     return receipt
 
 
-def _managed_summary(value: dict) -> dict:
+def _parity_summary(value: dict, image_id: str,
+                    candidate_receipt_sha256: str) -> dict:
+    expected_keys = {
+        'schema_version', 'kind', 'status', 'platform', 'image_tag', 'image_id',
+        'checks_passed', 'both_arms_same_image', 'docker_baseline_restored',
+        'archive_inputs', 'source_pins', 'receipt_sha256', 'external_activity',
+        'claim_limits',
+    }
+    expected_archives = {
+        'vulnerable': {
+            'commit': 'f0f7d27007f5a788f14416c548421efd740b7bce',
+            'sha256': '3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf',
+        },
+        'fixed': {
+            'commit': 'a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3',
+            'sha256': '44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56',
+        },
+    }
+    expected_sources = {
+        'adapter_sha256': PARITY_SOURCE_FILES[PARITY_ADAPTER_RELATIVE],
+        'runner_sha256': PARITY_SOURCE_FILES[
+            Path('evals/native-qualification/smoke/check_v2_php_parity_amd64.py')],
+        'dockerfile_sha256': DOCKERFILE_SHA256,
+    }
+    receipts = value.get('receipt_sha256')
+    if (set(value) != expected_keys
+            or value.get('schema_version') != 1
+            or value.get('kind') != 't02-same-image-php8427-application-parity'
+            or value.get('status') != 'pass'
+            or value.get('platform') != PLATFORM
+            or value.get('image_tag') != IMAGE_TAG
+            or value.get('image_id') != image_id
+            or value.get('checks_passed') != 32
+            or value.get('both_arms_same_image') is not True
+            or value.get('docker_baseline_restored') is not True
+            or value.get('archive_inputs') != expected_archives
+            or value.get('source_pins') != expected_sources
+            or not isinstance(receipts, dict)
+            or receipts.get('outer_candidate') != candidate_receipt_sha256
+            or set(receipts) != {
+                'outer_candidate', 'registration_compatibility',
+                'archive_admission', 'parity_result',
+                'public_observer_result'}
+            or any(not isinstance(digest, str)
+                   or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                   for digest in receipts.values())
+            or value.get('external_activity') != {
+                'public_source_archives_retrieved': 2,
+                'provider_calls': 0,
+                'model_calls': 0,
+                'live_targets_contacted': 0,
+                'researcher_bundle_created': False,
+            }
+            or value.get('claim_limits') != {
+                'owned_offline_application_semantics_only': True,
+                'provider_or_model_route_qualified': False,
+                'default_adoption': False,
+            }):
+        raise GateError('same_image_parity_result_admission_failed')
+    return {
+        'status': 'pass',
+        'image_id': image_id,
+        'checks_passed': 32,
+        'both_arms_same_image': True,
+        'docker_baseline_restored': True,
+        'archive_inputs': expected_archives,
+        'receipt_sha256': receipts,
+        'external_activity': value['external_activity'],
+        'claim_limits': value['claim_limits'],
+    }
+
+
+def _managed_summary(value: dict, image_id: str) -> dict:
     checks = value.get('checks')
     runs = value.get('native_runs')
+    boundary = value.get('selected_boundary')
+    expected_boundary = {
+        'cloud': True,
+        'platform': PLATFORM,
+        'image_id': image_id,
+        'relay_sha': RELAY_SHA256,
+        'internal_subnet': INTERNAL_SUBNET,
+        'external_subnet': EXTERNAL_SUBNET,
+        'listen': LISTEN_ADDRESS,
+        'peer': RELAY_PEER,
+        'upstream_route': UPSTREAM_ROUTE,
+    }
     if (value.get('status') != 'pass'
             or value.get('classification') !=
             'owned TLS/native managed CONNECT offline E2E; zero provider calls'
@@ -775,7 +963,8 @@ def _managed_summary(value: dict) -> dict:
             or value.get('cleanup_complete') is not True
             or value.get('temporary_secret_files_removed') is not True
             or value.get('source_pins_stable') is not True
-            or value.get('source_copies_match') is not True):
+            or value.get('source_copies_match') is not True
+            or boundary != expected_boundary):
         raise GateError('managed_result_admission_failed')
     names = [item.get('name') for item in checks]
     if Counter(names) != Counter(REQUIRED_MANAGED_CHECK_COUNTS):
@@ -792,6 +981,7 @@ def _managed_summary(value: dict) -> dict:
         'temporary_secret_files_removed': True,
         'source_pins_stable': True,
         'source_copies_match': True,
+        'selected_boundary': expected_boundary,
     }
 
 
@@ -814,7 +1004,8 @@ def _cache_cleanup_order(rows: list[dict], new_ids: set[str]) -> list[str]:
                   reverse=True)
 
 
-def cleanup_outer(commands, baseline: dict | None, image_id: str | None) -> dict:
+def cleanup_outer(commands, baseline: dict | None, image_id: str | None,
+                  owned_cache_ids: set[str] | None) -> dict:
     result = {'image_removed': False, 'cache_ids_removed': [],
               'unresolved_cache_ids': [], 'errors': []}
     if baseline is None:
@@ -851,8 +1042,17 @@ def cleanup_outer(commands, baseline: dict | None, image_id: str | None) -> dict
     try:
         current_cache = _cache_rows(commands)
         baseline_ids = {row['id'] for row in baseline['cache']}
-        new_ids = {row['id'] for row in current_cache} - baseline_ids
-        for identifier in _cache_cleanup_order(current_cache, new_ids):
+        current_new_ids = {row['id'] for row in current_cache} - baseline_ids
+        registered = set() if owned_cache_ids is None else set(owned_cache_ids)
+        unexpected = current_new_ids - registered
+        missing = registered - current_new_ids
+        if unexpected:
+            result['errors'].append('unregistered_cache_records_present')
+        if missing:
+            result['errors'].append('registered_cache_records_missing')
+        removable = (current_new_ids & registered
+                     if not unexpected and not missing else set())
+        for identifier in _cache_cleanup_order(current_cache, removable):
             pruned = _run(commands, [
                 'docker', 'buildx', 'prune', '--force', '--filter', 'id=' + identifier])
             if pruned.returncode == 0:
@@ -867,8 +1067,12 @@ def cleanup_outer(commands, baseline: dict | None, image_id: str | None) -> dict
 
 
 def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
-                *, source_validator=validate_sources, ca_validator=validate_ca,
+                *, parity_source_root: Path,
+                source_validator=validate_sources,
+                parity_source_validator=validate_parity_source,
+                ca_validator=validate_ca,
                 source_snapshotter=stage_sources,
+                parity_source_snapshotter=stage_parity_source,
                 expected_source_commit: str,
                 recorded_at: Callable[[], str]) -> int:
     output = output.resolve()
@@ -876,9 +1080,12 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
     baseline = None
     image_id = None
     managed = None
+    parity_result = None
+    parity_source = None
     runtime = None
     source = None
     staged = None
+    owned_cache_ids = None
     failure = None
     attempted = False
     private_ca = output / 'managed-ca.private.pem'
@@ -891,6 +1098,12 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
                 or not re.fullmatch(r'[0-9a-f]{40}', expected_source_commit)
                 or source.get('source_commit') != expected_source_commit):
             raise GateError('exact_source_commit_mismatch')
+        parity_source = parity_source_validator(parity_source_root)
+        if (not isinstance(parity_source, dict)
+                or parity_source.get('source_head') != PARITY_SOURCE_HEAD
+                or parity_source.get('adapter_sha256')
+                != PARITY_SOURCE_FILES[PARITY_ADAPTER_RELATIVE]):
+            raise GateError('parity_source_validation_contract_failed')
         ca = ca_validator(ca_path)
         if (ca.get('sha256') != CA_SHA256 or ca.get('size_bytes') != CA_SIZE
                 or not isinstance(ca.get('bytes'), bytes)):
@@ -909,6 +1122,16 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
                 or not all(isinstance(staged.get(key), Path)
                            for key in ('root', 'dockerfile', 'managed_runner', 'relay'))):
             raise GateError('source_snapshot_contract_failed')
+        staged_parity = parity_source_snapshotter(parity_source, staged['root'])
+        if (not isinstance(staged_parity, dict)
+                or not all(isinstance(staged_parity.get(key), Path)
+                           for key in ('root', 'native_root', 'adapter',
+                                       'dockerfile', 'checks'))):
+            raise GateError('parity_source_snapshot_contract_failed')
+        staged['parity_source'] = staged_parity['native_root']
+        staged['parity_adapter'] = staged_parity['adapter']
+        staged['parity_dockerfile'] = staged_parity['dockerfile']
+        staged['parity_checks'] = staged_parity['checks']
         baseline = docker_snapshot(commands)
         _write_json(output / 'baseline.private.json', baseline)
         _assert_fresh_topology(baseline, commands, environ)
@@ -925,6 +1148,14 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
         attempted = True
         built = _run(commands, build, timeout=600, env=environ)
         build_output_hash = sha256_bytes((built.stdout + '\0' + built.stderr).encode())
+        post_build_cache = _cache_rows(commands)
+        baseline_cache_ids = {row['id'] for row in baseline['cache']}
+        owned_cache_ids = {row['id'] for row in post_build_cache} - baseline_cache_ids
+        _write_json(output / 'build-cache-registration.private.json', {
+            'baseline_ids': sorted(baseline_cache_ids),
+            'post_build_ids': sorted(row['id'] for row in post_build_cache),
+            'owned_delta_ids': sorted(owned_cache_ids),
+        })
         if built.returncode:
             raise GateError('candidate_build_failed')
         private_ca.unlink()
@@ -941,6 +1172,8 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
             'kind': 't02-managed-owned-amd64-php8427-candidate',
             'recorded_at': recorded_at(),
             'status': 'registered_before_execution',
+            'scope': 'build-and-registration-only',
+            'parity_status': 'not_run',
             'integration_head': INTEGRATION_HEAD,
             'image_source_head': IMAGE_SOURCE_HEAD,
             'source_commit': source['source_commit'],
@@ -957,9 +1190,39 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
             'build_output_private_sha256': build_output_hash,
             'image_execution_attempted': False,
             'baseline_private_sha256': sha256_file(output / 'baseline.private.json'),
+            'build_cache_registration_private_sha256': sha256_file(
+                output / 'build-cache-registration.private.json'),
         }
         _write_json(output / 'candidate.json', candidate)
         runtime = admit_runtime(commands, info, image_id, recorded_at, output)
+        parity_output = output / 'parity-run.private'
+        parity_argv = [
+            sys.executable, str(staged['parity_wrapper']),
+            '--source-root', str(staged['parity_source']),
+            '--output', str(parity_output),
+            '--image-tag', IMAGE_TAG,
+            '--image-id', image_id,
+            '--dockerfile', str(staged['parity_dockerfile']),
+            '--checks', str(staged['parity_checks']),
+            '--qualification-base', source['source_commit'],
+            '--outer-candidate-receipt', str(output / 'candidate.json'),
+        ]
+        parity_run = _run(commands, parity_argv, timeout=900, env=environ)
+        if parity_run.returncode:
+            raise GateError('same_image_parity_runner_failed')
+        parity_value = strict_json(
+            (parity_output / 'same-image-summary.json').read_bytes())
+        if not isinstance(parity_value, dict):
+            raise GateError('same_image_parity_result_invalid')
+        parity_result = _parity_summary(
+            parity_value, image_id, sha256_file(output / 'candidate.json'))
+        tag_after_parity = _image_info(
+            commands, IMAGE_TAG, 'candidate_missing_after_parity')
+        id_after_parity = _image_info(
+            commands, image_id, 'candidate_id_missing_after_parity')
+        if (tag_after_parity.get('Id') != image_id
+                or id_after_parity.get('Id') != image_id):
+            raise GateError('candidate_identity_changed_after_parity')
         managed_output = output / 'managed-run.private'
         argv = [
             sys.executable, str(staged['managed_runner']), '--output', str(managed_output),
@@ -977,7 +1240,7 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
         managed_value = strict_json((managed_output / 'result.json').read_bytes())
         if not isinstance(managed_value, dict):
             raise GateError('managed_result_invalid')
-        managed = _managed_summary(managed_value)
+        managed = _managed_summary(managed_value, image_id)
     except (GateError, OSError, subprocess.SubprocessError, ValueError) as error:
         failure = str(error) if isinstance(error, GateError) else 'controller_internal_failure'
     finally:
@@ -994,7 +1257,7 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
                 shutil.rmtree(cleanup_root)
             except OSError:
                 failure = failure or 'source_snapshot_cleanup_failed'
-        cleanup = cleanup_outer(commands, baseline, image_id)
+        cleanup = cleanup_outer(commands, baseline, image_id, owned_cache_ids)
         if baseline is not None:
             try:
                 final = docker_snapshot(commands)
@@ -1003,7 +1266,8 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
             except (GateError, OSError):
                 baseline_restored = False
                 cleanup['errors'].append('final_baseline_unverifiable')
-    success = (failure is None and managed is not None and runtime is not None
+    success = (failure is None and managed is not None and parity_result is not None
+               and runtime is not None
                and cleanup['image_removed']
                and not cleanup['unresolved_cache_ids']
                and not cleanup['errors'] and baseline_restored)
@@ -1016,8 +1280,12 @@ def run_attempt(output: Path, ca_path: Path, commands, environ: dict[str, str],
         'failure': failure,
         'source': ({key: value for key, value in source.items()
                     if key != 'private'} if isinstance(source, dict) else None),
+        'parity_source': ({key: value for key, value in parity_source.items()
+                           if key != 'private'}
+                          if isinstance(parity_source, dict) else None),
         'candidate_image_id': image_id,
         'runtime_admitted': runtime is not None,
+        'same_image_parity': parity_result,
         'managed': managed,
         'external_activity': {
             'provider_calls': 0, 'model_calls': 0, 'live_targets_contacted': 0,
@@ -1042,6 +1310,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--managed-ca', required=True, type=Path)
+    parser.add_argument('--parity-source-root', required=True, type=Path)
     parser.add_argument('--source-commit', required=True)
     args = parser.parse_args()
 
@@ -1051,6 +1320,7 @@ def main() -> int:
             microsecond=0).isoformat().replace('+00:00', 'Z')
 
     return run_attempt(args.output, args.managed_ca, subprocess, dict(os.environ),
+                       parity_source_root=args.parity_source_root.expanduser().resolve(),
                        expected_source_commit=args.source_commit,
                        recorded_at=recorded_at)
 

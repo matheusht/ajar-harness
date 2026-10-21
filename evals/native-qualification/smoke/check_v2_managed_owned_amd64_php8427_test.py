@@ -59,7 +59,9 @@ class FakeCommands:
                  bad_provenance=False, bad_env=False, truncated_managed=False,
                  bad_env_value=False, bad_cache_size=False,
                  missing_cache_parents=False, leave_cache=False,
-                 remote_builder=False):
+                 remote_builder=False, bad_managed_image=False,
+                 bad_parity=False, bad_parity_image=False,
+                 late_unknown_cache=False):
         self.preexisting_tag = preexisting_tag
         self.bad_php = bad_php
         self.bad_provenance = bad_provenance
@@ -70,6 +72,10 @@ class FakeCommands:
         self.truncated_managed = truncated_managed
         self.leave_cache = leave_cache
         self.remote_builder = remote_builder
+        self.bad_managed_image = bad_managed_image
+        self.bad_parity = bad_parity
+        self.bad_parity_image = bad_parity_image
+        self.late_unknown_cache = late_unknown_cache
         self.built = False
         self.image_present = preexisting_tag
         self.cache_rows = {
@@ -216,6 +222,74 @@ class FakeCommands:
             if entry == 'sh':
                 return completed(argv, stdout='sh\nphp\nwget\nopencode\n')
             return completed(argv, returncode=98, stderr='unexpected probe')
+        if (argv and argv[0].endswith('python3') and len(argv) > 1
+                and Path(argv[1]).name == controller.PARITY_WRAPPER.name):
+            candidate_path = self.output_root / 'candidate.json'
+            runtime_path = self.output_root / 'runtime-admission.json'
+            if not candidate_path.is_file() or not runtime_path.is_file():
+                return completed(argv, returncode=95,
+                                 stderr='parity started before registration/runtime')
+            if self.bad_parity:
+                return completed(argv, returncode=1, stderr='bounded parity failure')
+            parity_output = Path(argv[argv.index('--output') + 1])
+            parity_output.mkdir(mode=0o700)
+            candidate_sha = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+            summary = {
+                'schema_version': 1,
+                'kind': 't02-same-image-php8427-application-parity',
+                'status': 'pass',
+                'platform': controller.PLATFORM,
+                'image_tag': controller.IMAGE_TAG,
+                'image_id': ('sha256:' + '8' * 64
+                             if self.bad_parity_image else IMAGE_ID),
+                'checks_passed': 32,
+                'both_arms_same_image': True,
+                'docker_baseline_restored': True,
+                'archive_inputs': {
+                    'vulnerable': {
+                        'commit': 'f0f7d27007f5a788f14416c548421efd740b7bce',
+                        'sha256': ('3f24269475bf00137d4b0d957d97a2567a5249101'
+                                   'dad89067a49d609f4df2edf'),
+                    },
+                    'fixed': {
+                        'commit': 'a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3',
+                        'sha256': ('44db3df81a25bbd56c768c8b3180a1f05879e2c7'
+                                   'fbaa6ac73707e7f3e9098f56'),
+                    },
+                },
+                'source_pins': {
+                    'adapter_sha256': controller.PARITY_SOURCE_FILES[
+                        controller.PARITY_ADAPTER_RELATIVE],
+                    'runner_sha256': controller.PARITY_SOURCE_FILES[Path(
+                        'evals/native-qualification/smoke/check_v2_php_parity_amd64.py')],
+                    'dockerfile_sha256': controller.DOCKERFILE_SHA256,
+                },
+                'receipt_sha256': {
+                    'outer_candidate': candidate_sha,
+                    'registration_compatibility': '4' * 64,
+                    'archive_admission': '7' * 64,
+                    'parity_result': '5' * 64,
+                    'public_observer_result': '6' * 64,
+                },
+                'external_activity': {
+                    'public_source_archives_retrieved': 2,
+                    'provider_calls': 0,
+                    'model_calls': 0,
+                    'live_targets_contacted': 0,
+                    'researcher_bundle_created': False,
+                },
+                'claim_limits': {
+                    'owned_offline_application_semantics_only': True,
+                    'provider_or_model_route_qualified': False,
+                    'default_adoption': False,
+                },
+            }
+            (parity_output / 'same-image-summary.json').write_text(
+                json.dumps(summary))
+            if self.late_unknown_cache:
+                self.cache_rows['cache-unregistered'] = {
+                    'ID': 'cache-unregistered', 'Size': '1kB', 'Parents': None}
+            return completed(argv, stdout=json.dumps({'status': 'pass'}))
         if argv and argv[0].endswith('python3') and str(controller.MANAGED_RUNNER) in argv:
             if '--live-free' in argv or '--live-runtime-ca' in argv:
                 return completed(argv, returncode=96, stderr='live flag forbidden')
@@ -241,6 +315,18 @@ class FakeCommands:
                 'temporary_secret_files_removed': True,
                 'source_pins_stable': True,
                 'source_copies_match': True,
+                'selected_boundary': {
+                    'cloud': True,
+                    'platform': controller.PLATFORM,
+                    'image_id': ('sha256:' + '9' * 64
+                                 if self.bad_managed_image else IMAGE_ID),
+                    'relay_sha': controller.RELAY_SHA256,
+                    'internal_subnet': controller.INTERNAL_SUBNET,
+                    'external_subnet': controller.EXTERNAL_SUBNET,
+                    'listen': controller.LISTEN_ADDRESS,
+                    'peer': controller.RELAY_PEER,
+                    'upstream_route': controller.UPSTREAM_ROUTE,
+                },
             }
             (managed / 'result.json').write_text(json.dumps(result))
             return completed(argv, stdout=json.dumps({'status': 'pass'}))
@@ -258,6 +344,7 @@ class FakeCommands:
 
 class ControllerTests(unittest.TestCase):
     def attempt(self, commands, source_validator=None, source_snapshotter=None,
+                parity_source_validator=None, parity_source_snapshotter=None,
                 env_updates=None):
         temp = tempfile.TemporaryDirectory(prefix='managed-controller-test-')
         self.addCleanup(temp.cleanup)
@@ -271,20 +358,39 @@ class ControllerTests(unittest.TestCase):
         snapshotter = source_snapshotter or (lambda _source, _output: {
             'root': controller.ROOT,
             'dockerfile': controller.DOCKERFILE,
+            'checks': controller.CHECKS,
             'managed_runner': controller.MANAGED_RUNNER,
+            'parity_wrapper': controller.PARITY_WRAPPER,
             'relay': controller.RELAY,
         })
+        parity_validator = parity_source_validator or (lambda _root: {
+            'source_head': controller.PARITY_SOURCE_HEAD,
+            'adapter_sha256': controller.PARITY_SOURCE_FILES[
+                controller.PARITY_ADAPTER_RELATIVE],
+            'files': [],
+        })
+        parity_snapshotter = parity_source_snapshotter or (
+            lambda _source, _staged_root: {
+                'root': controller.ROOT,
+                'native_root': controller.ROOT / 'evals/native-qualification',
+                'adapter': controller.ROOT / controller.PARITY_ADAPTER_RELATIVE,
+                'dockerfile': controller.DOCKERFILE,
+                'checks': controller.CHECKS,
+            })
         environment = {'HTTPS_PROXY': 'http://managed.invalid:3128'}
         environment.update(env_updates or {})
         result = controller.run_attempt(
             output, Path('/managed/ca.pem'), commands, environment,
+            parity_source_root=Path('/published/pr182'),
             source_validator=source,
+            parity_source_validator=parity_validator,
             ca_validator=lambda _path: {
                 'sha256': controller.CA_SHA256,
                 'size_bytes': controller.CA_SIZE,
                 'bytes': b'owned synthetic CA bytes',
             },
             source_snapshotter=snapshotter,
+            parity_source_snapshotter=parity_snapshotter,
             expected_source_commit='f' * 40,
             recorded_at=lambda: '2026-10-21T22:00:00Z')
         return output, result
@@ -313,6 +419,20 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual([], commands.calls)
         receipt = json.loads((output / 'result.json').read_text())
         self.assertEqual('source_changed_before_snapshot', receipt['failure'])
+
+    def test_parity_source_failure_prevents_every_docker_command(self):
+        commands = FakeCommands()
+
+        def fail_parity(_root):
+            raise controller.GateError('parity_source_pin_mismatch')
+
+        output, result = self.attempt(
+            commands, parity_source_validator=fail_parity)
+        self.assertEqual(1, result)
+        self.assertEqual([], commands.calls)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual('blocked', receipt['status'])
+        self.assertEqual('parity_source_pin_mismatch', receipt['failure'])
 
     def test_validate_ca_rejects_symlink_without_following_it(self):
         with tempfile.TemporaryDirectory(prefix='managed-ca-test-') as folder:
@@ -360,8 +480,13 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(any(call[:4] ==
                              ['docker', 'buildx', 'inspect', 'default']
                              for call in commands.calls))
+        parity = next(call for call in commands.calls
+                      if call and call[0].endswith('python3')
+                      and Path(call[1]).name == controller.PARITY_WRAPPER.name)
         managed = next(call for call in commands.calls
-                       if call and call[0].endswith('python3'))
+                       if call and call[0].endswith('python3')
+                       and '--cloud-image-id' in call)
+        self.assertLess(commands.calls.index(parity), commands.calls.index(managed))
         self.assertNotIn('--live-free', managed)
         self.assertNotIn('--live-runtime-ca', managed)
         self.assertEqual(IMAGE_ID, managed[managed.index('--cloud-image-id') + 1])
@@ -376,6 +501,9 @@ class ControllerTests(unittest.TestCase):
             baseline['cache'])
         self.assertEqual(549, baseline['cache_bytes'])
         self.assertEqual(0, receipt['external_activity']['provider_calls'])
+        self.assertEqual(IMAGE_ID, receipt['same_image_parity']['image_id'])
+        self.assertEqual(
+            IMAGE_ID, receipt['managed']['selected_boundary']['image_id'])
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
         self.assertEqual(
@@ -447,6 +575,46 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual('managed_required_checks_missing', receipt['failure'])
         self.assertFalse(commands.image_present)
         self.assertFalse(commands.cache_present)
+
+    def test_failed_parity_skips_managed_run_and_still_cleans(self):
+        commands = FakeCommands(bad_parity=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual('same_image_parity_runner_failed', receipt['failure'])
+        self.assertFalse(any('--cloud-image-id' in call for call in commands.calls))
+        self.assertFalse(commands.image_present)
+        self.assertFalse(commands.cache_present)
+
+    def test_parity_image_mismatch_skips_managed_run_and_still_cleans(self):
+        commands = FakeCommands(bad_parity_image=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual(
+            'same_image_parity_result_admission_failed', receipt['failure'])
+        self.assertFalse(any('--cloud-image-id' in call for call in commands.calls))
+        self.assertFalse(commands.image_present)
+        self.assertFalse(commands.cache_present)
+
+    def test_managed_boundary_image_mismatch_fails_and_still_cleans(self):
+        commands = FakeCommands(bad_managed_image=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertEqual('managed_result_admission_failed', receipt['failure'])
+        self.assertFalse(commands.image_present)
+        self.assertFalse(commands.cache_present)
+
+    def test_unregistered_late_cache_is_not_removed(self):
+        commands = FakeCommands(late_unknown_cache=True)
+        output, result = self.attempt(commands)
+        self.assertEqual(1, result)
+        receipt = json.loads((output / 'result.json').read_text())
+        self.assertIn('unregistered_cache_records_present',
+                      receipt['cleanup']['errors'])
+        self.assertIn('cache-unregistered', receipt['cleanup']['unresolved_cache_ids'])
+        self.assertEqual([], commands.pruned_cache_ids)
 
     def test_unremoved_exact_cache_fails_outer_cleanup(self):
         commands = FakeCommands(leave_cache=True)

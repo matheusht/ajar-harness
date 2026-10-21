@@ -49,7 +49,9 @@ pre-existing resources.
 - Stop before any candidate container if the build fails, the new tag does
   not resolve to exactly one newly registered immutable image ID, its platform
   is not `linux/amd64`, the base/diff provenance is inconsistent, OpenCode is
-  not `v2.0.32`, PHP is not 8.4.27, a requested module is absent, or any
+  not `v2.0.32`, PHP is not 8.4.27, any of `sh`, `php`, `wget`, or `opencode`
+  is unavailable, a requested module is absent, the image supplies an
+  unexpected critical proxy/trust/credential environment value, or any
   installed `php84*` package has a revision other than `8.4.27-r0`.
 - Register the immutable image ID and build/source pins in a receipt before
   the first image execution. Every subsequent image reference must be that ID

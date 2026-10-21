@@ -1,0 +1,289 @@
+{
+  "classification": "offline researcher-side Kanboard runtime prerequisite; no model/provider call",
+  "status": "offline_ordinary_app_pass",
+  "image": "t02-kanboard-runtime:20261020a",
+  "expected_image_id": "sha256:31b7fa2b80f17bbddfeffd0577634257df40490f1b8d4c57f8507b40956cdf15",
+  "source_sha256": {
+    "smoke/opencode_v2_kanboard_runtime_offline.py": "6a2aa459cf45fc77501132ac832a936381072c9d82f636150b6a6450ca818090",
+    "smoke/opencode_v2_observed_config.json": "8c63991951ecf580549be2e5cb08ad6746e10adae91f404e11c3a5138bc4215b",
+    "smoke/opencode_v2_request_observer/server.js": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd",
+    "smoke/opencode_v2_request_observer/package.json": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae",
+    "Dockerfile.opencode-kanboard-runtime": "f93e4ea1f38b4837af3b763c6e1c1cc3ec80b012c858ba26a568dc792fba3dea",
+    "T02-KANBOARD-RUNTIME-CHECKS.md": "6691f2939b99f70bceb90d9870f3ed1a43093920983f477a72fa75ade5c97a3a",
+    "observer_case.py": "72273bfd4e1c1aa9f7f53279e525ec1c74c2669324fa62f1b6b22abf65d596bf"
+  },
+  "checks": [
+    {
+      "check": "derived V2 image exact ID present",
+      "status": "pass"
+    },
+    {
+      "check": "pinned vulnerable archive cached",
+      "status": "pass"
+    },
+    {
+      "check": "clean answer-free vulnerable copy",
+      "status": "pass"
+    },
+    {
+      "check": "first: researcher application container created",
+      "status": "pass"
+    },
+    {
+      "check": "first: only owned workspace and read-only config/plugin mounted",
+      "status": "pass"
+    },
+    {
+      "check": "first: PHP app started in researcher container",
+      "status": "pass"
+    },
+    {
+      "check": "first: mount-free host-owned client created",
+      "status": "pass"
+    },
+    {
+      "check": "first: client shares only app network namespace",
+      "status": "pass"
+    },
+    {
+      "check": "first: host-owned client started",
+      "status": "pass"
+    },
+    {
+      "check": "packaged release has vendor and key PHP files lint inside researcher image",
+      "status": "pass"
+    },
+    {
+      "check": "native V2 and pinned model/config/plugin load without inference",
+      "status": "pass"
+    },
+    {
+      "check": "native store begins with no sessions",
+      "status": "pass"
+    },
+    {
+      "check": "native session created in same persistent workspace without inference",
+      "status": "pass"
+    },
+    {
+      "check": "host observes ordinary application effect and private-project control",
+      "status": "pass"
+    },
+    {
+      "check": "first: host_client removed",
+      "status": "pass"
+    },
+    {
+      "check": "first: researcher_app removed",
+      "status": "pass"
+    },
+    {
+      "check": "owned workspace and SQLite state retained after container replacement",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: researcher application container created",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: only owned workspace and read-only config/plugin mounted",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: PHP app started in researcher container",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: mount-free host-owned client created",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: client shares only app network namespace",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: host-owned client started",
+      "status": "pass"
+    },
+    {
+      "check": "exact native session survives app/researcher replacement with zero cost",
+      "status": "pass"
+    },
+    {
+      "check": "host observes retained ordinary effect and control in replacement",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: host_client removed",
+      "status": "pass"
+    },
+    {
+      "check": "replacement: researcher_app removed",
+      "status": "pass"
+    },
+    {
+      "check": "host reads intact exact native session after clean stop",
+      "status": "pass"
+    },
+    {
+      "check": "source and config pins unchanged",
+      "status": "pass"
+    }
+  ],
+  "resources": [
+    {
+      "role": "researcher_app",
+      "stage": "first",
+      "id": "e9f1f437efabee34121278b89d25dd62c599e16ac0d2f2292a5552479e203ac9"
+    },
+    {
+      "role": "host_client",
+      "stage": "first",
+      "id": "a25313beced93c3789846c6b90c2fb03707006ce6af58c5217eec8af878a60f7"
+    },
+    {
+      "role": "researcher_app",
+      "stage": "replacement",
+      "id": "d6733ceb1f3702cd4c42e8e8585703bf2d677c2157d3bba8ff3bba8be9e4f03c"
+    },
+    {
+      "role": "host_client",
+      "stage": "replacement",
+      "id": "2381d91a0a780e662f9d1b848906e94b6f25549f5f4aa9694a8a94e2b1a2685a"
+    }
+  ],
+  "cleanup": [
+    {
+      "role": "host_client",
+      "stage": "first",
+      "id": "a25313beced93c3789846c6b90c2fb03707006ce6af58c5217eec8af878a60f7",
+      "remove_exit": 0,
+      "absent": true
+    },
+    {
+      "role": "researcher_app",
+      "stage": "first",
+      "id": "e9f1f437efabee34121278b89d25dd62c599e16ac0d2f2292a5552479e203ac9",
+      "remove_exit": 0,
+      "absent": true
+    },
+    {
+      "role": "host_client",
+      "stage": "replacement",
+      "id": "2381d91a0a780e662f9d1b848906e94b6f25549f5f4aa9694a8a94e2b1a2685a",
+      "remove_exit": 0,
+      "absent": true
+    },
+    {
+      "role": "researcher_app",
+      "stage": "replacement",
+      "id": "d6733ceb1f3702cd4c42e8e8585703bf2d677c2157d3bba8ff3bba8be9e4f03c",
+      "remove_exit": 0,
+      "absent": true
+    }
+  ],
+  "application": {
+    "commit": "f0f7d27007f5a788f14416c548421efd740b7bce",
+    "archive_sha256": "3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf",
+    "source_files": 2100
+  },
+  "researcher_php_lint": {
+    "index.php": 0,
+    "jsonrpc.php": 0,
+    "app/common.php": 0,
+    "app/check_setup.php": 0,
+    "vendor/autoload.php": 0
+  },
+  "native_session": {
+    "id": "ses_ea8b5e176ffed4PuAKdrutwJ6L",
+    "store": "/workspace/data/opencode/opencode.db"
+  },
+  "host_readiness": {
+    "http_status": 200,
+    "body_sha256": "efdb5938a9736727f5cce2b60355588e4fa541d19d022d222d8a09b8efd5dcce"
+  },
+  "host_observation": {
+    "route": "host-owned client in app network namespace; loopback :8081",
+    "requests": [
+      {
+        "actor": "admin",
+        "method": "createUser",
+        "http_status": 200
+      },
+      {
+        "actor": "admin",
+        "method": "createUser",
+        "http_status": 200
+      },
+      {
+        "actor": "admin",
+        "method": "createProject",
+        "http_status": 200
+      },
+      {
+        "actor": "admin",
+        "method": "addProjectUser",
+        "http_status": 200
+      },
+      {
+        "actor": "alice",
+        "method": "getProjectById",
+        "http_status": 200
+      },
+      {
+        "actor": "bob",
+        "method": "getProjectById",
+        "http_status": 403
+      },
+      {
+        "actor": "alice",
+        "method": "getProjectById",
+        "http_status": 200
+      },
+      {
+        "actor": "bob",
+        "method": "getProjectById",
+        "http_status": 403
+      }
+    ],
+    "authorized_project": {
+      "id": 1,
+      "name": "T02 Ordinary Project"
+    },
+    "private_project_control": {
+      "code": 403,
+      "message": "Forbidden"
+    },
+    "db_created": true,
+    "db_bytes": 405504
+  },
+  "native_session_after_replacement": {
+    "ids": [
+      "ses_ea8b5e176ffed4PuAKdrutwJ6L"
+    ],
+    "cost": 0,
+    "parentID": null
+  },
+  "host_observation_after_replacement": {
+    "authorized_project": {
+      "id": 1,
+      "name": "T02 Ordinary Project"
+    },
+    "private_project_control": {
+      "code": 403,
+      "message": "Forbidden"
+    },
+    "db_bytes": 405504
+  },
+  "stopped_native_store": {
+    "quick_check": "ok",
+    "sessions": [
+      {
+        "id": "ses_ea8b5e176ffed4PuAKdrutwJ6L",
+        "cost": 0.0
+      }
+    ]
+  },
+  "host_port_published": false,
+  "workspace_removed": true
+}

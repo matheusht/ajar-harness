@@ -1,0 +1,31 @@
+[Tue Oct 20 09:45:51 2026] PHP 8.4.26 Development Server (http://0.0.0.0:50976) started
+[Tue Oct 20 09:45:51 2026] 172.17.0.1:59104 Accepted
+[Tue Oct 20 09:45:51 2026] 172.17.0.1:59104 [200]: GET /robots.txt
+[Tue Oct 20 09:45:51 2026] 172.17.0.1:59104 Closing
+[Tue Oct 20 09:45:51 2026] 172.17.0.1:59110 Accepted
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59110 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59110 Closing
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59126 Accepted
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59126 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59126 Closing
+[Tue Oct 20 09:45:52 2026] 172.17.0.1:59132 Accepted
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59132 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59132 Closing
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59134 Accepted
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59134 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59134 Closing
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59144 Accepted
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59144 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59144 Closing
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59148 Accepted
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59148 [403]: POST /jsonrpc.php
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59148 Closing
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59160 Accepted
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59160 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59160 Closing
+[Tue Oct 20 09:45:53 2026] 172.17.0.1:59164 Accepted
+[Tue Oct 20 09:45:54 2026] 172.17.0.1:59164 [200]: POST /jsonrpc.php
+[Tue Oct 20 09:45:54 2026] 172.17.0.1:59164 Closing
+[Tue Oct 20 09:45:54 2026] 172.17.0.1:59166 Accepted
+[Tue Oct 20 09:45:54 2026] 172.17.0.1:59166 [403]: POST /jsonrpc.php
+[Tue Oct 20 09:45:54 2026] 172.17.0.1:59166 Closing

@@ -11,14 +11,14 @@
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
     },
     {
-      "bytes": 16399,
+      "bytes": 16473,
       "path": "evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md",
-      "sha256": "079e472f49eb8ae1594f7affc69c4b74543ee3aa16675b06bab8ba4970aff6d0"
+      "sha256": "04f76bc7365afe7a2d4f796bad9af20ebef5633d54b3f383c585f6919bfc79b3"
     },
     {
-      "bytes": 10894,
+      "bytes": 12706,
       "path": "evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md",
-      "sha256": "6f4e4b8da42980f90253a18f5b4a588b64805a1052a5aa9f5b35caf5ecc997c1"
+      "sha256": "5c51199eca9e671ffb34093884780eff3842fdff6d4c61f2f3e40b6dd5af99d8"
     },
     {
       "bytes": 361,
@@ -31,9 +31,9 @@
       "sha256": "cdb1cb0c5f445b99b1bde19eda6aad32ca00c648595cde102ec8b57a4e403750"
     },
     {
-      "bytes": 8362,
+      "bytes": 9304,
       "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
-      "sha256": "b0b531e80483657ca9047260ab928bfe929c69c392c76e645a176913afb6f888"
+      "sha256": "e53febc6784c89de25df4068afa31e266815051447733d86e40046e153b757f9"
     },
     {
       "bytes": 98,
@@ -51,9 +51,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 84482,
+      "bytes": 90345,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "ef2c6104331ccbd5dc072de28347151a01b5c98ce6a5f466eb43c8f5b70bf336"
+      "sha256": "03b05a19c0d3a5d447742c56750a6517eb1a3f435efc7df2ea79a847443b62cf"
     },
     {
       "bytes": 1222,
@@ -76,9 +76,9 @@
       "sha256": "f3116d1f9555e600aa774f15a80fef0620a5e9d073854bb7ef2c62f985f010bd"
     },
     {
-      "bytes": 7177,
+      "bytes": 7324,
       "path": "evals/native-qualification/t02-cloud-transfer-20261020/README.md",
-      "sha256": "51a3946fdce544ffa5181be1a2b952ba46fb0060db9e229226279445ee66183f"
+      "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
       "bytes": 11748,

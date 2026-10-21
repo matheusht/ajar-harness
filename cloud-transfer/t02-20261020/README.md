@@ -59,9 +59,17 @@ all ten proxy variables empty. It built and inspected immutable amd64 image
 The runner then failed check 17 before `NativeRun`, because this daemon
 rejects a static relay IP on an internal bridge whose subnet Docker assigned
 automatically. It removed its exact containers, networks, image and cache;
-no native session started. This bundle adds an explicit cloud internal
-subnet and keeps the relay's reserved address while stopped. This revision
-needs a new cloud run; the prior check 17 failure does not establish success.
+no native session started. The later `5aa13885` bundle added an explicit
+internal subnet and passed 35/35 cloud pre-session checks, including stopped
+static relay attachment, owned CONNECT/native TLS and exact cleanup; it
+deliberately stopped before `session.create`. A separate owned-only challenge
+on that pinned topology passed 126/126: the kernel observed distinct relay
+and unrelated-container peers, denied an unrelated same-capability spoof
+without ledger or receiver spend, denied direct researcher access, and
+restored the Docker baseline. It made no native session or provider call. This
+refreshed runner checks the wrong peer and direct bypass again on each cloud
+owned-response run before `session.create`; that new guard has not yet had a
+cloud execution receipt.
 
 The runner accepts an explicit cloud platform, immutable image ID, relay SHA,
 nonoverlapping private internal and external subnets, external listener/peer,
@@ -82,24 +90,18 @@ The next cloud operator should:
    use the exact amd64 build command above; record the build command and
    immutable derived image ID. Stop if PHP 8.4.26, SQLite or GD cannot be
    verified in that image. Keep the CA secret out of the image and logs.
-3. Read back the private internal and external Docker bridge subnets, intended
-   gateway and relay peer. On the currently observed clean cloud daemon,
-   `172.18.0.0/16` was Docker's prior internal allocation. A separate
-   disposable network-only preflight accepted it with `Internal=true` and an
-   empty gateway, then restored the daemon baseline; static attachment remains
-   untested. Require a fresh no-conflict observation before supplying it.
-   The earlier standalone relay run does not prove the researcher's Docker
-   peer. Require an independent exact kernel-observed peer check for this
-   topology and reject researcher/unrelated-container bypass. If Docker NAT
-   makes peers indistinguishable, stop.
+3. Choose and read back nonoverlapping private internal and external Docker
+   bridge subnets, intended gateway and relay peer on each run. The 126/126
+   peer result applies only to its pinned topology and daemon. Before native
+   inference, require per-run wrong-peer and researcher
+   direct-bypass probes to fail closed. If Docker NAT makes peers
+   indistinguishable, stop.
 4. Prove the selected executor HTTP CONNECT sidecar with an owned receiver,
    then prove native TLS trust through the relay without disabling certificate
-   checks. The bundled runner deliberately raises
-   `cloud_kernel_peer_challenge_required` before `session.create`; it cannot
-   perform the cloud native E2E as bundled. Require the independent exact-peer
-   result and a reviewed new runner bundle before repeating the full
+   checks. This candidate runner places the per-run wrong-peer guard before
+   its first cloud native request. Exercise that guard and then the full
    owned-response native E2E with source/image/relay pins, producer stop, and
-   exact cleanup.
+   exact cleanup. The 126/126 one-off challenge alone does not qualify it.
 5. Review that receipt before considering the one bounded harmless free-model
    diagnostic in `T02-V2-MANAGED-LIVE-CHECKS-20261020.md`. A failed preflight
    is an unavailable result, not a reason to relax isolation or retry blindly.
@@ -107,5 +109,5 @@ The next cloud operator should:
 The bundle contains no raw prior run outputs, native stores, Docker volumes,
 capabilities, keys, or provider credentials. It supplies source and the
 previously cloud-exercised relay binary. The separate cloud checks apply to
-their recorded inputs; this revised runner still needs managed Docker
-environment readback, exact-peer, native, sidecar, and provider qualification.
+their recorded inputs; the new per-run guard and managed native E2E still need
+cloud execution. The upstream sidecar and provider remain unqualified.

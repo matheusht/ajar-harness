@@ -4,7 +4,7 @@ Recorded: 2026-10-21 UTC
 
 ## Result
 
-The remaining owned-receiver proof cannot use a receiver inside this OSLIT client. The selected environment exposes managed outbound proxies, but no inbound receiver or authority-remap route. The prior managed-proxy attempt to reach two client-owned addresses returned `503`, and the receiver recorded zero connections. This assessment did not repeat that known failed probe.
+The remaining owned-receiver proof cannot use a receiver inside this OSLIT client. The selected policy declares managed outbound proxies and no receiver, callback, or authority-remap field. The prior managed-proxy attempt to reach two client-owned addresses returned `503`, and the receiver recorded zero connections. This assessment did not repeat that known failed probe.
 
 `--live-free` remains unconditionally denied with `cloud_live_route_not_qualified` before output creation or Docker. No source gate, transport authority, network policy, system trust, or persistent setting changed. No network probe, provider request, model call, or Docker mutation occurred.
 
@@ -17,6 +17,14 @@ The remaining owned-receiver proof cannot use a receiver inside this OSLIT clien
 - The Docker baseline contained no containers, images, or volumes and only the default `bridge`, `host`, and `none` networks.
 
 The policy file describes outbound access. The lack of a reverse route is an inference from the environment contract and the retained zero-connection result, not a claim about every deployment of the managed proxy.
+
+## Evidence method and limits
+
+`verify.py` parses the current policy and source, checks their hashes and fail-closed predicates, rejects retained raw proxy values, and emits `verification.json`. Its public entrypoint observes the checker and descendants with `strace -f -e trace=network`; the retained result records zero network syscalls. The verifier does not contact a receiver, provider, model, or Docker.
+
+The no-probe and no-mutation fields describe this agent run from its command transcript. They are transcript attestations, not independent runtime observations. The Docker counts came from read-only `version`, `info`, `ps`, `image ls`, `volume ls`, and `network ls` commands. The repository projection omits daemon and network identifiers.
+
+The three owned offline receipt hashes point to local prior-run artifacts that are not published here. The managed self-receiver failure has no raw probe receipt. Its retained provenance is the prior-run summary and append-only decision trail. This bundle keeps that limitation explicit instead of upgrading the summary into machine evidence.
 
 ## Smallest supported alternative
 
@@ -41,4 +49,4 @@ A later live transport test must interrupt an active sidecar/TLS send, show no n
 
 `native_run.py` remains transport-neutral. `opencode_v2_managed_owned.py` is the OpenCode qualification adapter, not the general harness architecture. The fixed PHP workflow qualifies this adapter and does not prove model/provider/runtime-agnostic in-run hypothesis adaptation. No outer optimizer is introduced by this assessment.
 
-The machine-readable receipt is `topology-assessment.json`. Its local deterministic verifier and full receipt were retained outside the repository at `/workspace/oslit-task/continuation-20261021/`; the published JSON omits raw proxy values and Docker identifiers.
+The machine-readable receipt is `topology-assessment.json`. The deterministic checker is `verify.py`, and its observed result is `verification.json`. The published files omit raw proxy values and Docker identifiers.

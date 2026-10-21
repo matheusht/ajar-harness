@@ -28,7 +28,8 @@
     },
     "tcp_destination_domain_count": 0,
     "tcp_destination_ip_range_count": 0,
-    "receiver_callback_or_authority_remap_field_present": false
+    "receiver_callback_or_authority_remap_field_present": false,
+    "observation_method": "read-only parse of /etc/codex/network-policy.json"
   },
   "source_readback": {
     "live_admission_error": "cloud_live_route_not_qualified",
@@ -42,11 +43,19 @@
     "shared_limit_seconds": 300
   },
   "prior_evidence": {
-    "direct_owned_receipt_sha256": "0fef363a6e711da2ada35371bd1788395010f61c460be816975d1b8b883c264a",
-    "owned_private_listener_receipt_sha256": "7112f38d43313ea4435289750d1af6b08bd615943037b09097c6ada75608604f",
-    "owned_fake_proxy_receipt_sha256": "8c0d6859a05f61bcda540213dc1dbfc1e702036467bdfe802c7d83cd4d01a5df",
+    "owned_offline_receipts": {
+      "availability": "local_unpublished",
+      "evidence_grade": "hash_pointer_only",
+      "sha256": {
+        "direct": "0fef363a6e711da2ada35371bd1788395010f61c460be816975d1b8b883c264a",
+        "private_listener": "7112f38d43313ea4435289750d1af6b08bd615943037b09097c6ada75608604f",
+        "fake_proxy": "8c0d6859a05f61bcda540213dc1dbfc1e702036467bdfe802c7d83cd4d01a5df"
+      }
+    },
     "managed_self_receiver": {
-      "provenance": "retained prior-run summary and append-only decision trail; no raw probe receipt",
+      "availability": "summary_only",
+      "evidence_grade": "prior_run_summary_no_raw_probe_receipt",
+      "provenance": "retained prior-run summary and append-only decision trail",
       "outcome": "known_failed_503_zero_receiver_connections",
       "probe_repeated": false
     }
@@ -71,7 +80,9 @@
         "driver": "null"
       }
     ],
-    "identifiers_retained": false
+    "identifiers_retained": false,
+    "evidence_grade": "agent_transcript_attestation",
+    "observation_method": "read-only docker version, info, ps, image ls, volume ls, and network ls"
   },
   "decision": {
     "supported_local_substitute": false,
@@ -101,11 +112,19 @@
     "165": "no_go_unchanged"
   },
   "activity": {
+    "evidence_grade": "agent_transcript_attestation",
+    "observation_method": "reviewed command transcript; the published verifier observes only its own execution",
     "network_probe_performed": false,
     "provider_or_model_call_performed": false,
     "docker_mutation_performed": false,
     "runtime_source_changed": false,
     "network_policy_changed": false,
     "trust_store_changed": false
+  },
+  "verification": {
+    "checker": "verify.py",
+    "result": "verification.json",
+    "checker_network_syscalls_observed": 0,
+    "checker_scope_only": true
   }
 }

@@ -1,0 +1,42 @@
+{
+  "checks": {
+    "activity_is_not_upgraded_to_machine_evidence": true,
+    "docker_readback_is_labeled_attestation": true,
+    "issue_states_remain_open_or_no_go": true,
+    "live_gate_precedes_output": true,
+    "managed_failure_limit_is_explicit": true,
+    "owned_receipt_limit_is_explicit": true,
+    "policy_hash_matches": true,
+    "policy_mode_matches": true,
+    "policy_shape_matches": true,
+    "proxy_shapes_match_without_values": true,
+    "raw_proxy_values_absent": true,
+    "readme_names_evidence_limits": true,
+    "readme_separates_inference": true,
+    "runner_hash_matches": true,
+    "transport_authority_fixed": true,
+    "transport_hash_matches": true
+  },
+  "kind": "t02-oslit-topology-receipt-check",
+  "limits": {
+    "owned_offline_receipts_published_here": false,
+    "prior_managed_probe_raw_receipt_available": false,
+    "whole_assessment_activity_independently_observed": false
+  },
+  "network_observation": {
+    "method": "strace -qq -f -e trace=network -e signal=none",
+    "scope": "checker child and all descendants",
+    "syscalls_observed": 0
+  },
+  "observation_complete": true,
+  "schema_version": 1,
+  "source_sha256": {
+    "checker": "c4f875942cd42da90fc59d26cc3aaa388ab4151a41aed8d7532f71661656dccf",
+    "policy": "266ee47b22dd736206e1454a525c3003a458e742c7fca6b13765f4d8b5289275",
+    "readme": "2a7aff407dc685708770e8ed9c72d2af3b3aef792dccec484cb6d5e8f0958d39",
+    "receipt": "74418a9ec5958e99c28fdea42b95aa1686216da7a06c401078c5e1386154fccc",
+    "runner": "659920699cd3c0a70807ef2d0ade83e14c7123feafd2e31ec4b5031734dd24b9",
+    "transport": "f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea"
+  },
+  "status": "pass"
+}

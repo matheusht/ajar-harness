@@ -6,6 +6,16 @@
       "sha256": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b"
     },
     {
+      "bytes": 549,
+      "path": "evals/native-qualification/Dockerfile.opencode-kanboard-runtime-php8427",
+      "sha256": "be4948ac34c02f1cf84560f86874f07dc4d6c4b4efc8b1141956d2bf16f7497e"
+    },
+    {
+      "bytes": 5706,
+      "path": "evals/native-qualification/T02-AMD64-MANAGED-OWNED-PHP8427-CHECKS-20261021.md",
+      "sha256": "dcce25875f2fb7a4b6bfb8f6cb510e9d778ff7e01082354089ed9795e9acf4c2"
+    },
+    {
       "bytes": 1362,
       "path": "evals/native-qualification/T02-CLOUD-SOURCE-CHECKER-FAILURES-20261020.md",
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "kind": "t02-cloud-amd64-kanboard-fresh-candidate-public-verification",
   "status": "pass",
-  "checks_passed": 62,
-  "checks_total": 62,
+  "checks_passed": 64,
+  "checks_total": 64,
   "network_required": false,
   "docker_required": false,
   "checks": [
@@ -17,6 +17,10 @@
     },
     {
       "name": "derivation schema exact",
+      "pass": true
+    },
+    {
+      "name": "result provenance schema exact",
       "pass": true
     },
     {
@@ -77,6 +81,10 @@
     },
     {
       "name": "derived input provenance exact",
+      "pass": true
+    },
+    {
+      "name": "result provenance exact",
       "pass": true
     },
     {

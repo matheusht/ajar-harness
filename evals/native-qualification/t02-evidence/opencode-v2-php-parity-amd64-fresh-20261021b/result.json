@@ -1,10 +1,15 @@
 {
   "schema_version": 1,
   "kind": "t02-cloud-amd64-kanboard-fresh-candidate-attempt",
-  "recorded_at": "2026-10-21T20:02:20Z",
+  "recorded_at": "2026-10-21T20:13:06Z",
   "status": "blocked_build_dependency_unavailable",
   "classification": "owned offline candidate build; zero image execution and zero provider/model calls",
   "qualification_base": "9c0c0e3f0f7d25fece945a564c8c991a5368d8b9",
+  "provenance": {
+    "cleanup_observed_at": "2026-10-21T20:02:20Z",
+    "independent_final_readback_observed_at": "2026-10-21T20:07:51Z",
+    "sanitized_result_assembled_at": "2026-10-21T20:13:06Z"
+  },
   "failure": {
     "phase": "candidate_image_build",
     "build_started_at": "2026-10-21T20:00:58Z",

@@ -20,7 +20,7 @@ DOCKERFILE_SHA256 = '7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a
 CA_SHA256 = '43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73'
 README_SHA256 = '32bf91b3f7c4d17a11b52987c99d6c0ed1f43c43a182f9b4596ee0dd9e501f45'
 INPUTS_SHA256 = '8306c081fcf7d11d137d6c3a773b8d225b4ca0027ddc9a70b1a686d20fcb18a3'
-RESULT_SHA256 = '3c0fd35b083a4df64831d672eecaada3fb7026d375313dbefbece8905e2cd610'
+RESULT_SHA256 = 'b7f0875cdb80f2dd567a5be22ce4624858df664b7c96add28a19b3a508b32046'
 COMMAND_SHA256 = '2414b40a2b7674a0553e215eeea5a5c06e0c48433c600bc0ca7e0b27ba459997'
 OBSERVATIONS_SHA256 = 'd8720995a146140339a2eab86d2967d1d32a74ed86ead96f7795bbe326cd91da'
 NETWORKS = [
@@ -86,7 +86,7 @@ INPUT_KEYS = {
 }
 RESULT_KEYS = {
     'schema_version', 'kind', 'recorded_at', 'status', 'classification',
-    'qualification_base', 'failure', 'candidate', 'execution', 'cleanup',
+    'qualification_base', 'provenance', 'failure', 'candidate', 'execution', 'cleanup',
     'follow_up_defects', 'limits', 'remaining_input',
 }
 NESTED_KEYS = {
@@ -94,6 +94,10 @@ NESTED_KEYS = {
         'provenance_observed_at', 'docker_baseline_observed_at',
         'failure_contract_frozen_at', 'sanitized_receipt_assembled_at',
         'pre_build_baseline_private_sha256',
+    },
+    'result_provenance': {
+        'cleanup_observed_at', 'independent_final_readback_observed_at',
+        'sanitized_result_assembled_at',
     },
     'docker': {
         'context', 'client_version', 'server_version', 'server_os', 'server_arch',
@@ -180,6 +184,7 @@ def schema_checks(inputs: dict, result: dict) -> dict[str, bool]:
     }
     mappings = [
         ('derivation', inputs.get('derivation'), 'derivation'),
+        ('result provenance', result.get('provenance'), 'result_provenance'),
         ('docker', inputs.get('docker'), 'docker'),
         ('dockerfile', inputs.get('dockerfile'), 'dockerfile'),
         ('base images', inputs.get('base_images'), 'base_images'),
@@ -269,6 +274,13 @@ def receipt_checks(inputs: dict, result: dict, command: str, readme: str,
                 'sanitized_receipt_assembled_at': '2026-10-21T20:04:03Z',
                 'pre_build_baseline_private_sha256':
                     'c3ecbd07c9d784f3782a4f161dccc1141a0d60d24869658d1d9ac2e0f152ecca',
+            }),
+        'result provenance exact': (
+            result.get('recorded_at') == '2026-10-21T20:13:06Z'
+            and result.get('provenance') == {
+                'cleanup_observed_at': '2026-10-21T20:02:20Z',
+                'independent_final_readback_observed_at': '2026-10-21T20:07:51Z',
+                'sanitized_result_assembled_at': '2026-10-21T20:13:06Z',
             }),
         'dockerfile and bases exact': (
             dockerfile == {

@@ -16,9 +16,9 @@
       "sha256": "10723d186db792cf1eb7db36e67df074ebf9fee53931a9ad92e796861ac0d9a4"
     },
     {
-      "bytes": 3464,
+      "bytes": 3637,
       "path": "evals/native-qualification/T02-REVIEWER-PACKET-CHECKS-20261021.md",
-      "sha256": "6bb970480d097f135843b1451c16c5568319c51d69febd018fdf2160eecd8b6a"
+      "sha256": "619f9d440ad3f433d2e87aefc366fe1f2aa2ebd4aaac279b89a48c8f860b98a7"
     },
     {
       "bytes": 16473,
@@ -51,9 +51,9 @@
       "sha256": "e873349893d808b664f7b887bf1cf0a1155a16a8a560a6dfb56f957bf881491b"
     },
     {
-      "bytes": 6997,
+      "bytes": 7353,
       "path": "evals/native-qualification/smoke/check_v2_reviewer_packet.py",
-      "sha256": "a5cb3a399fc481a5b2dc360665be1cdb7de3a2291b85ad239f4ada154e052238"
+      "sha256": "ef8e43cced7e66a7d9393e4aa2689a3f6eeebd128f6d3299d23799abf5f528b4"
     },
     {
       "bytes": 98,
@@ -71,9 +71,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 113070,
+      "bytes": 113895,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "0d10ff07ee97b6b3662d0c3a8983d93d856a902ffbd22937c79af8ad006559cf"
+      "sha256": "de9a14c624e3958ebd43fa838a72fe1dce17dcc05f4cfd88da5d16d4a09a7191"
     },
     {
       "bytes": 1222,

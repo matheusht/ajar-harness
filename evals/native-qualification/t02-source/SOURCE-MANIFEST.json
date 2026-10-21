@@ -46,9 +46,9 @@
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
     },
     {
-      "bytes": 145035,
+      "bytes": 147760,
       "path": "evals/native-qualification/smoke/check_opencode_exclusive_trust.py",
-      "sha256": "b4168fe2362b86caa2780ccd399a60ce2c246d37b46cc887dadd1dfe9976b789"
+      "sha256": "161b041d7a487dca600878d151015f5aa93a787cc6112bed7e8e2ae7aa18fd81"
     },
     {
       "bytes": 3898,

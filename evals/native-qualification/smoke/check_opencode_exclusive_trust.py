@@ -209,6 +209,15 @@ PRESOCKET_ROW_KEYS = frozenset({
     'structured_terminal_error_count', 'structured_event_count', 'exit_code',
     'exit_kind',
 }) | NATIVE_FACT_KEYS | OBSERVATION_ROW_KEYS
+CERTIFICATE_FIXTURE_KEYS = frozenset({
+    'ambient_ca_sha256', 'replacement_ca_sha256',
+    'ambient_leaf_sha256', 'replacement_leaf_sha256',
+    'ambient_root_serial', 'replacement_root_serial',
+    'ambient_leaf_serial', 'replacement_leaf_serial',
+    'root_serials_distinct', 'leaf_serials_distinct', 'roots_distinct',
+    'matching_chains_verified', 'cross_chains_rejected',
+    'private_material_recorded',
+})
 
 
 class CheckError(RuntimeError):
@@ -222,6 +231,32 @@ def _count(value):
 def _exact_count(row, key, expected):
     value = row.get(key)
     return _count(value) and value == expected
+
+
+def _certificate_fixture_valid(fixture):
+    if (not isinstance(fixture, dict)
+            or set(fixture) != CERTIFICATE_FIXTURE_KEYS):
+        return False
+    hashes = (
+        fixture['ambient_ca_sha256'], fixture['replacement_ca_sha256'],
+        fixture['ambient_leaf_sha256'], fixture['replacement_leaf_sha256'],
+    )
+    return (
+        all(isinstance(value, str)
+            and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+            for value in hashes)
+        and len(set(hashes)) == len(hashes)
+        and fixture['ambient_root_serial'] == str(AMBIENT_ROOT_SERIAL)
+        and fixture['replacement_root_serial'] == str(REPLACEMENT_ROOT_SERIAL)
+        and fixture['ambient_leaf_serial'] == str(AMBIENT_LEAF_SERIAL)
+        and fixture['replacement_leaf_serial'] == str(REPLACEMENT_LEAF_SERIAL)
+        and fixture['root_serials_distinct'] is True
+        and fixture['leaf_serials_distinct'] is True
+        and fixture['roots_distinct'] is True
+        and fixture['matching_chains_verified'] is True
+        and fixture['cross_chains_rejected'] is True
+        and fixture['private_material_recorded'] is False
+    )
 
 
 def _observation_delta(after, before):
@@ -289,18 +324,8 @@ def evaluate_arms(rows, fixture):
         checks.append({'name': name, 'pass': bool(passed)})
 
     valid_rows = isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
-    ambient_hash = (fixture.get('ambient_ca_sha256')
-                    if isinstance(fixture, dict) else None)
-    replacement_hash = (fixture.get('replacement_ca_sha256')
-                        if isinstance(fixture, dict) else None)
-    fixture_valid = (
-        isinstance(ambient_hash, str)
-        and isinstance(replacement_hash, str)
-        and re.fullmatch(r'[0-9a-f]{64}', ambient_hash) is not None
-        and re.fullmatch(r'[0-9a-f]{64}', replacement_hash) is not None
-        and ambient_hash != replacement_hash
-    )
-    add('initial CA fixture hashes are distinct and valid', fixture_valid)
+    fixture_valid = _certificate_fixture_valid(fixture)
+    add('closed CA fixture schema is exact and valid', fixture_valid)
     names = [row.get('arm') for row in rows] if valid_rows else []
     names_valid = valid_rows and all(isinstance(name, str) for name in names)
     expected_names = ([name for name, _, _, _ in CORE_ARMS]
@@ -525,6 +550,18 @@ def self_test():
     fixture = {
         'ambient_ca_sha256': 'a' * 64,
         'replacement_ca_sha256': 'b' * 64,
+        'ambient_leaf_sha256': 'c' * 64,
+        'replacement_leaf_sha256': 'd' * 64,
+        'ambient_root_serial': str(AMBIENT_ROOT_SERIAL),
+        'replacement_root_serial': str(REPLACEMENT_ROOT_SERIAL),
+        'ambient_leaf_serial': str(AMBIENT_LEAF_SERIAL),
+        'replacement_leaf_serial': str(REPLACEMENT_LEAF_SERIAL),
+        'root_serials_distinct': True,
+        'leaf_serials_distinct': True,
+        'roots_distinct': True,
+        'matching_chains_verified': True,
+        'cross_chains_rejected': True,
+        'private_material_recorded': False,
     }
     base = {
         'version_verified': True,
@@ -748,6 +785,29 @@ def self_test():
     changed_fixture = dict(fixture, replacement_ca_sha256=fixture['ambient_ca_sha256'])
     if evaluate_arms(rows, changed_fixture)['pass']:
         raise RuntimeError('evaluator_fixture_identity_failed')
+    invalid_fixture_values = {
+        'ambient_ca_sha256': None,
+        'replacement_ca_sha256': 'e' * 63,
+        'ambient_leaf_sha256': fixture['ambient_ca_sha256'],
+        'replacement_leaf_sha256': [],
+        'ambient_root_serial': AMBIENT_ROOT_SERIAL,
+        'replacement_root_serial': '0',
+        'ambient_leaf_serial': None,
+        'replacement_leaf_serial': str(REPLACEMENT_LEAF_SERIAL + 1),
+        'root_serials_distinct': False,
+        'leaf_serials_distinct': False,
+        'roots_distinct': False,
+        'matching_chains_verified': False,
+        'cross_chains_rejected': False,
+        'private_material_recorded': True,
+    }
+    for key, value in invalid_fixture_values.items():
+        changed_fixture = dict(fixture, **{key: value})
+        if evaluate_arms(rows, changed_fixture)['pass']:
+            raise RuntimeError('evaluator_fixture_schema_failed')
+    changed_fixture = dict(fixture, raw_provider_log='must-not-be-retained')
+    if evaluate_arms(rows, changed_fixture)['pass']:
+        raise RuntimeError('evaluator_fixture_unknown_field_failed')
     session_id = 'ses_01TESTFIXTURE'
 
     def step_start(session=session_id, *, part_session=None, message='msg_01TEST',

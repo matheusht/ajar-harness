@@ -239,14 +239,16 @@ def main():
         patch_source = EXCLUSIVE_PATCH.read_text()
         patch_shape = all(fragment in patch_source for fragment in (
             'packages/core/src/effect/app-node-platform.ts',
-            'if (path === undefined) throw new Error("OPENCODE_EXCLUSIVE_CA_FILE is required")',
+            'if (path === undefined) return rejectExclusiveCa("path_required")',
             'path !== EXCLUSIVE_CA_PATH',
-            'OPENCODE_EXCLUSIVE_CA_SHA256 is required',
+            'return rejectExclusiveCa("digest_required")',
             'constants.O_NOFOLLOW | constants.O_NONBLOCK',
             'createHash("sha256").update(ca).digest("hex") !== expected',
             'tls: { ca, rejectUnauthorized: true }',
-            'Effect.provideService(FetchHttpClient.RequestInit, requestInit)',
-        ))
+            'Effect.orDie(Effect.try({ try: exclusiveRequestInit, catch: normalizeExclusiveCaError }))',
+            'Effect.provideService(response, FetchHttpClient.RequestInit, requestInit)',
+            'OPENCODE_EXCLUSIVE_CA_REJECT:',
+        )) and 'yield* Effect.sync(exclusiveRequestInit)' not in patch_source
         checks.append({'name': 'native HTTP patch uses a required fixed replacement CA',
                        'pass': patch_shape})
         if not patch_shape:
@@ -260,10 +262,14 @@ def main():
         exclusive_source = EXCLUSIVE_CHECKER.read_text()
         cleanup_and_identity_shape = all(fragment in exclusive_source for fragment in (
             'def _exact_absence_claim(',
+            'def _stdout_proves_no_objects(',
             'return len(lines) == 1 and lines[0] in expected',
             'post_remove_engine_responding',
             'prior_remove_reverified',
             '_fsync_directory(parent)',
+            'def _remove_workspace_durably(',
+            'sync(path.parent)',
+            'def _run_passes(',
             'path.lstat()',
             'create_result_unconfirmed',
             "'cleanup_recovery':",
@@ -277,6 +283,11 @@ def main():
             'def _mounted_ca_hashes(',
             "'ambient_ca_sha256': mounted_before['ambient']",
             "'mounted_ca_hashes_stable': True",
+            "'structured_rejection_verified': True",
+            "'server_alive_after_rejection': True",
+            "'baseline_zero_verified': True",
+            'def _observation_delta(',
+            'ARM_MARKER_HEADER',
             "get('MemorySwap') != 1024 * 1024 * 1024",
             "get('LogConfig') != {",
         ))

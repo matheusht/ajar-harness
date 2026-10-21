@@ -53,6 +53,7 @@ MODEL_ID = 'deepseek-v4.1-flash-free'
 NATIVE_PACKAGE = '@opencode/ai/providers/openai-compatible'
 EXPECTED_VERSION = 'opencode v2.0.32'
 EXPECTED_PATH = '/inference/openai/v1/chat/completions'
+ARM_MARKER_HEADER = 'X-LRH-Arm-Marker'
 DOCKER_HOST = 'unix:///var/run/docker.sock'
 RUNTIME_CA_PATH = '/fixture/runtime-ca.pem'
 AMBIENT_CA_PATH = '/fixture/ambient-ca.pem'
@@ -70,6 +71,8 @@ REPLACEMENT_ROOT_SERIAL = 40002
 AMBIENT_LEAF_SERIAL = 41001
 REPLACEMENT_LEAF_SERIAL = 42001
 MALFORMED_EXCLUSIVE_CA_HASH = 'NOT-A-SHA256'
+REJECTION_PREFIX = 'OPENCODE_EXCLUSIVE_CA_REJECT:'
+MAX_REJECTION_OUTPUT_BYTES = 64 * 1024
 
 PROXY_ENV = (
     'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY',
@@ -127,6 +130,23 @@ PAIR_STATE = {
     'oversized': 'complete',
     'hash-mismatch': 'complete',
 }
+REJECTION_CODE = {
+    'missing-both': 'path_required',
+    'missing-path-env': 'path_required',
+    'missing-hash-env': 'digest_required',
+    'malformed-hash': 'digest_format',
+    'wrong-path': 'path_fixed',
+    'missing-file': 'open_failed',
+    'unreadable': 'open_failed',
+    'empty': 'size_invalid',
+    'oversized': 'size_invalid',
+    'hash-mismatch': 'digest_mismatch',
+}
+OBSERVATION_KEYS = (
+    'tcp_connections', 'tls_handshakes', 'tls_failures', 'http_requests',
+    'expected_path_requests', 'dispatch_marker_requests',
+    'unexpected_http_requests',
+)
 
 
 class CheckError(RuntimeError):
@@ -135,6 +155,22 @@ class CheckError(RuntimeError):
 
 def _count(value):
     return type(value) is int and value >= 0
+
+
+def _observation_delta(after, before):
+    if (not isinstance(after, dict) or not isinstance(before, dict)
+            or set(after) != set(OBSERVATION_KEYS)
+            or set(before) != set(OBSERVATION_KEYS)
+            or not all(_count(after[key]) and _count(before[key])
+                       and after[key] >= before[key]
+                       for key in OBSERVATION_KEYS)):
+        return None
+    return {key: after[key] - before[key] for key in OBSERVATION_KEYS}
+
+
+def _observation_is_zero(snapshot):
+    return (isinstance(snapshot, dict) and set(snapshot) == set(OBSERVATION_KEYS)
+            and all(snapshot[key] == 0 for key in OBSERVATION_KEYS))
 
 
 def _native_facts_verified(row):
@@ -147,6 +183,7 @@ def _native_facts_verified(row):
             and row.get('provider_base_url_verified') is True
             and row.get('model_base_url_verified') is True
             and row.get('base_url_verified') is True
+            and row.get('request_marker_verified') is True
             and row.get('source_document_verified') is True
             and row.get('readback_scope') == 'persistent-server-authority')
 
@@ -185,7 +222,7 @@ def evaluate_arms(rows, fixture):
         counts_valid = all(_count(row.get(key)) for key in (
             'preflight_tcp_connections', 'preflight_http_requests', 'tcp_connections',
             'tls_handshakes', 'tls_failures', 'http_requests', 'expected_path_requests',
-            'unexpected_http_requests',
+            'dispatch_marker_requests', 'unexpected_http_requests',
         ))
         add(name + ' observation schema', counts_valid
             and row.get('case_kind') == 'core'
@@ -194,6 +231,7 @@ def evaluate_arms(rows, fixture):
             and row.get('served_chain') == served_chain
             and row.get('version_verified') is True
             and row.get('server_started') is True
+            and row.get('baseline_zero_verified') is True
             and row.get('mounted_ca_hashes_stable') is True
             and fixture_valid
             and row.get('ambient_ca_sha256') == fixture.get('ambient_ca_sha256')
@@ -216,6 +254,7 @@ def evaluate_arms(rows, fixture):
             and row.get('tls_failures') == 0
             and _count(row.get('http_requests')) and row.get('http_requests') >= 1
             and row.get('expected_path_requests') == row.get('http_requests')
+            and row.get('dispatch_marker_requests') == row.get('http_requests')
             and row.get('unexpected_http_requests') == 0)
 
     denied = by_name.get('ambient-rejected', {})
@@ -225,6 +264,7 @@ def evaluate_arms(rows, fixture):
         and _count(denied.get('tls_failures')) and denied.get('tls_failures') >= 1
         and denied.get('http_requests') == 0
         and denied.get('expected_path_requests') == 0
+        and denied.get('dispatch_marker_requests') == 0
         and denied.get('unexpected_http_requests') == 0)
 
     positive = by_name.get('replacement-positive', {})
@@ -241,23 +281,23 @@ def evaluate_arms(rows, fixture):
         counts_valid = all(_count(row.get(key)) for key in (
             'preflight_tcp_connections', 'preflight_http_requests', 'tcp_connections',
             'tls_handshakes', 'tls_failures', 'http_requests',
-            'expected_path_requests', 'unexpected_http_requests',
+            'expected_path_requests', 'dispatch_marker_requests',
+            'unexpected_http_requests',
         ))
-        server_started = row.get('server_started') is True
         authority_valid = (
-            server_started
+            row.get('server_started') is True
+            and row.get('baseline_zero_verified') is True
             and _native_facts_verified(row)
             and row.get('preflight_tcp_connections') == 0
             and row.get('preflight_http_requests') == 0
             and row.get('dispatched') is True
             and row.get('failure_stage') == 'same-server-dispatch'
-        ) or (
-            row.get('server_started') is False
-            and row.get('native_http_verified') is False
-            and row.get('preflight_tcp_connections') == 0
-            and row.get('preflight_http_requests') == 0
-            and row.get('dispatched') is False
-            and row.get('failure_stage') == 'server-startup'
+            and row.get('structured_rejection_verified') is True
+            and row.get('rejection_code') == REJECTION_CODE[input_mode]
+            and row.get('session_id_present') is True
+            and row.get('structured_event_count') == 1
+            and row.get('server_alive_after_rejection') is True
+            and row.get('native_readback_stable') is True
         )
         add(name + ' candidate input rejected before socket',
             row.get('case_kind') == 'pre-socket'
@@ -271,7 +311,8 @@ def evaluate_arms(rows, fixture):
             and counts_valid
             and all(row.get(key) == 0 for key in (
                 'tcp_connections', 'tls_handshakes', 'tls_failures', 'http_requests',
-                'expected_path_requests', 'unexpected_http_requests',
+                'expected_path_requests', 'dispatch_marker_requests',
+                'unexpected_http_requests',
             )))
     return {'pass': bool(checks) and all(check['pass'] for check in checks), 'checks': checks}
 
@@ -287,6 +328,16 @@ def self_test():
                   (None, 'unknown'), (True, 'unknown'))
     if any(_exit_kind(code) != expected for code, expected in exit_cases):
         raise RuntimeError('exit_classification_fixture_failed')
+    zero_observation = {key: 0 for key in OBSERVATION_KEYS}
+    final_observation = dict(zero_observation, tcp_connections=1,
+                             tls_handshakes=1, http_requests=1,
+                             expected_path_requests=1,
+                             dispatch_marker_requests=1)
+    if (not _observation_is_zero(zero_observation)
+            or _observation_is_zero(final_observation)
+            or _observation_delta(final_observation, zero_observation) != final_observation
+            or _observation_delta(zero_observation, final_observation) is not None):
+        raise RuntimeError('observation_delta_fixture_failed')
     fixture = {
         'ambient_ca_sha256': 'a' * 64,
         'replacement_ca_sha256': 'b' * 64,
@@ -303,9 +354,11 @@ def self_test():
         'provider_base_url_verified': True,
         'model_base_url_verified': True,
         'base_url_verified': True,
+        'request_marker_verified': True,
         'source_document_verified': True,
         'readback_scope': 'persistent-server-authority',
         'mounted_ca_hashes_stable': True,
+        'baseline_zero_verified': True,
         'preflight_tcp_connections': 0,
         'preflight_http_requests': 0,
         'dispatched': True,
@@ -314,6 +367,7 @@ def self_test():
         'tls_failures': 0,
         'http_requests': 1,
         'expected_path_requests': 1,
+        'dispatch_marker_requests': 1,
         'unexpected_http_requests': 0,
         'exit_kind': 'zero',
     }
@@ -329,7 +383,8 @@ def self_test():
                        'complete' if image_role == 'candidate' else 'absent'))
         if name == 'ambient-rejected':
             row.update(exit_kind='nonzero', tls_handshakes=0, tls_failures=1,
-                       http_requests=0, expected_path_requests=0)
+                       http_requests=0, expected_path_requests=0,
+                       dispatch_marker_requests=0)
         rows.append(row)
     for name, input_mode in PRESOCKET_CASES:
         rows.append({
@@ -343,6 +398,12 @@ def self_test():
             'exit_kind': 'nonzero',
             'termination_verified': True,
             'failure_stage': 'same-server-dispatch',
+            'structured_rejection_verified': True,
+            'rejection_code': REJECTION_CODE[input_mode],
+            'session_id_present': True,
+            'structured_event_count': 1,
+            'server_alive_after_rejection': True,
+            'native_readback_stable': True,
             'preflight_tcp_connections': 0,
             'preflight_http_requests': 0,
             'tcp_connections': 0,
@@ -350,10 +411,9 @@ def self_test():
             'tls_failures': 0,
             'http_requests': 0,
             'expected_path_requests': 0,
+            'dispatch_marker_requests': 0,
             'unexpected_http_requests': 0,
         })
-    rows[3].update(server_started=False, native_http_verified=False,
-                   dispatched=False, failure_stage='server-startup')
     if not evaluate_arms(rows, fixture)['pass']:
         raise RuntimeError('evaluator_positive_fixture_failed')
     mutations = (
@@ -365,11 +425,14 @@ def self_test():
         (1, 'transport_authority', 'model.settings'),
         (1, 'model_base_url_verified', False),
         (1, 'base_url_verified', False),
+        (1, 'request_marker_verified', False),
         (2, 'preflight_http_requests', 1),
         (2, 'dispatched', False),
         (2, 'tcp_connections', 0),
         (2, 'tls_failures', 0),
         (2, 'http_requests', 1),
+        (1, 'dispatch_marker_requests', 0),
+        (2, 'dispatch_marker_requests', 1),
         (2, 'exit_kind', 'zero'),
         (2, 'exit_kind', 'unknown'),
         (1, 'ambient_ca_sha256', 'c' * 64),
@@ -378,9 +441,18 @@ def self_test():
         (0, 'image_role', 'candidate'),
         (1, 'image_role', 'control'),
         (3, 'image_role', 'control'),
-        (3, 'dispatched', True),
+        (3, 'server_started', False),
+        (3, 'baseline_zero_verified', False),
+        (3, 'dispatched', False),
         (3, 'preflight_tcp_connections', 1),
         (3, 'replacement_pair_state', 'complete'),
+        (3, 'structured_rejection_verified', False),
+        (3, 'rejection_code', 'digest_required'),
+        (3, 'session_id_present', False),
+        (3, 'structured_event_count', 0),
+        (3, 'server_alive_after_rejection', False),
+        (3, 'native_readback_stable', False),
+        (3, 'failure_stage', 'server-startup'),
         (4, 'replacement_pair_state', 'absent'),
         (5, 'replacement_pair_state', 'complete'),
         (6, 'replacement_pair_state', 'complete'),
@@ -403,17 +475,53 @@ def self_test():
     changed_fixture = dict(fixture, replacement_ca_sha256=fixture['ambient_ca_sha256'])
     if evaluate_arms(rows, changed_fixture)['pass']:
         raise RuntimeError('evaluator_fixture_identity_failed')
+    session_id = 'ses_01TESTFIXTURE'
+
+    def rejection_result(code, *, returncode=1, stderr='', session=session_id,
+                         event_type='error', message_prefix=''):
+        events = [{
+            'type': event_type, 'timestamp': 2, 'sessionID': session,
+            'error': {'type': 'unknown',
+                      'message': message_prefix + REJECTION_PREFIX + code},
+        }]
+        return subprocess.CompletedProcess(
+            [], returncode,
+            '\n'.join(json.dumps(event, separators=(',', ':')) for event in events) + '\n',
+            stderr,
+        )
+
+    for input_mode, code in REJECTION_CODE.items():
+        proof = _structured_rejection(rejection_result(code), input_mode)
+        if proof != {
+                'structured_rejection_verified': True,
+                'rejection_code': code,
+                'session_id_present': True,
+                'structured_event_count': 1}:
+            raise RuntimeError('structured_rejection_fixture_failed')
+    ambiguous_rejections = (
+        rejection_result('path_required', returncode=2),
+        rejection_result('path_required', stderr='warning'),
+        rejection_result('path_required', session=''),
+        rejection_result('digest_required'),
+        rejection_result('path_required', event_type='text'),
+        rejection_result('path_required', message_prefix='request failed: '),
+        subprocess.CompletedProcess([], 1, '{"type":"error"}\n', ''),
+        subprocess.CompletedProcess([], 1, '', ''),
+    )
+    if any(_structured_rejection(result, 'missing-both') is not None
+           for result in ambiguous_rejections):
+        raise RuntimeError('structured_rejection_ambiguity_fixture_failed')
     identifier = 'c' * 64
     absence_cases = (
-        ('container', 'Error response from daemon: No such container: ' + identifier),
-        ('container', 'Error: No such object: ' + identifier),
-        ('network', 'Error response from daemon: No such network: ' + identifier),
-        ('network', 'network ' + identifier + ' not found'),
+        ('container', '', 'Error response from daemon: No such container: ' + identifier),
+        ('container', '[]\n', 'Error: No such object: ' + identifier),
+        ('network', '', 'Error response from daemon: No such network: ' + identifier),
+        ('network', '[]', 'network ' + identifier + ' not found'),
     )
     if any(not _exact_absence_claim(
             kind, identifier,
-            subprocess.CompletedProcess([], 1, '', message))
-            for kind, message in absence_cases):
+            subprocess.CompletedProcess([], 1, stdout, message))
+            for kind, stdout, message in absence_cases):
         raise RuntimeError('cleanup_absence_fixture_failed')
     ambiguous = (
         subprocess.CompletedProcess([], 1, '', 'Cannot connect to the Docker daemon'),
@@ -425,6 +533,8 @@ def self_test():
         subprocess.CompletedProcess([], None, '',
                                     'No such container: ' + identifier),
         subprocess.CompletedProcess([], 0, '[]', ''),
+        subprocess.CompletedProcess([], 1, '[{}]',
+                                    'No such container: ' + identifier),
     )
     if any(_exact_absence_claim('container', identifier, result)
            for result in ambiguous):
@@ -439,8 +549,18 @@ def self_test():
 
     responding = FakeDocker(subprocess.CompletedProcess([], 0, '"27.0.0"\n', ''))
     unavailable = FakeDocker(subprocess.CompletedProcess([], 1, '', 'daemon unavailable'))
-    if not _docker_engine_responds(responding) or _docker_engine_responds(unavailable):
+    warning_engine = FakeDocker(subprocess.CompletedProcess(
+        [], 0, '"27.0.0"\n', 'daemon warning'))
+    if (not _docker_engine_responds(responding)
+            or _docker_engine_responds(unavailable)
+            or _docker_engine_responds(warning_engine)):
         raise RuntimeError('cleanup_engine_liveness_fixture_failed')
+    warning_listing = FakeDocker(subprocess.CompletedProcess(
+        [], 0, '', 'daemon reported incomplete listing'))
+    if (_labeled_ids(warning_listing, 'container', identifier) is not None
+            or _label_absence(warning_listing, identifier) != {
+                'containers_absent': False, 'networks_absent': False}):
+        raise RuntimeError('cleanup_listing_stderr_fixture_failed')
 
     class RecoveryDocker:
         def run(self, *args):
@@ -638,6 +758,37 @@ def self_test():
             or _path_entry_absent(FakePathEntry(OSError()))
             or _path_entry_absent(FakePathEntry(object()))):
         raise RuntimeError('temporary_workspace_absence_fixture_failed')
+    durability_calls = []
+    fake_workspace = Path('/fixture/private-workspace')
+
+    def fake_remove(path):
+        durability_calls.append(('remove', path))
+
+    def fake_absent(path):
+        durability_calls.append(('absent', path))
+        return True
+
+    def fake_sync(path):
+        durability_calls.append(('sync', path))
+
+    if (not _remove_workspace_durably(
+            fake_workspace, remove=fake_remove, absent=fake_absent, sync=fake_sync)
+            or durability_calls != [
+                ('remove', fake_workspace), ('absent', fake_workspace),
+                ('sync', fake_workspace.parent), ('absent', fake_workspace)]):
+        raise RuntimeError('temporary_workspace_durability_fixture_failed')
+
+    def failed_sync(_path):
+        raise OSError
+
+    if _remove_workspace_durably(
+            fake_workspace, remove=lambda _path: None,
+            absent=lambda _path: True, sync=failed_sync):
+        raise RuntimeError('temporary_workspace_sync_failure_fixture_failed')
+    if (not _run_passes(True, None, None, True, True)
+            or _run_passes(False, None, None, True, True)
+            or _run_passes(True, None, SystemExit(0), True, True)):
+        raise RuntimeError('run_completion_fixture_failed')
     return True
 
 
@@ -839,11 +990,14 @@ class _OwnedHandler(BaseHTTPRequestHandler):
             length = int(length_text)
         except ValueError:
             length = -1
-        expected = self.path.split('?', 1)[0] == EXPECTED_PATH
+        expected_path = self.path.split('?', 1)[0] == EXPECTED_PATH
+        expected_marker = (
+            self.headers.get(ARM_MARKER_HEADER) == self.server.expected_arm_marker)
         with self.server.observation_lock:
             self.server.http_requests += 1
-            if expected:
+            if expected_path and expected_marker:
                 self.server.expected_path_requests += 1
+                self.server.dispatch_marker_requests += 1
             else:
                 self.server.unexpected_http_requests += 1
         if length < 0 or length > MAX_REQUEST_BYTES:
@@ -851,7 +1005,7 @@ class _OwnedHandler(BaseHTTPRequestHandler):
             return
         if length:
             self.rfile.read(length)
-        if not expected:
+        if not expected_path or not expected_marker:
             self.send_error(404)
             return
         item = {'id': 'owned-exclusive-trust', 'object': 'chat.completion.chunk',
@@ -877,14 +1031,16 @@ class _OwnedTLSServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, address, context):
+    def __init__(self, address, context, expected_arm_marker):
         self.tls_context = context
+        self.expected_arm_marker = expected_arm_marker
         self.observation_lock = threading.Lock()
         self.tcp_connections = 0
         self.tls_handshakes = 0
         self.tls_failures = 0
         self.http_requests = 0
         self.expected_path_requests = 0
+        self.dispatch_marker_requests = 0
         self.unexpected_http_requests = 0
         super().__init__(address, _OwnedHandler)
 
@@ -906,10 +1062,7 @@ class _OwnedTLSServer(ThreadingHTTPServer):
 
     def snapshot(self):
         with self.observation_lock:
-            return {key: getattr(self, key) for key in (
-                'tcp_connections', 'tls_handshakes', 'tls_failures', 'http_requests',
-                'expected_path_requests', 'unexpected_http_requests',
-            )}
+            return {key: getattr(self, key) for key in OBSERVATION_KEYS}
 
 
 class Docker:
@@ -921,7 +1074,9 @@ class Docker:
 
     def json(self, *args, timeout=30):
         result = self.run(*args, timeout=timeout)
-        if result.returncode:
+        if (type(result.returncode) is not int or result.returncode != 0
+                or not isinstance(result.stdout, str)
+                or not isinstance(result.stderr, str) or result.stderr.strip()):
             raise CheckError('docker_read_failed')
         try:
             return json.loads(result.stdout)
@@ -1013,7 +1168,14 @@ def _network(docker, nonce, resources, create_journal, persist):
     return {'id': identifier, 'name': name, 'gateway': str(gateway)}
 
 
-def _config(path, base_url):
+def _arm_marker(nonce, arm):
+    marker = 'lrh-' + nonce + '-' + arm
+    if re.fullmatch(r'lrh-[0-9a-f]{32}-[a-z0-9-]+', marker) is None:
+        raise CheckError('arm_marker_invalid')
+    return marker
+
+
+def _config(path, base_url, arm_marker):
     document = {
         '$schema': 'https://opencode.ai/config.json',
         'model': MODEL,
@@ -1030,7 +1192,11 @@ def _config(path, base_url):
         ],
         'providers': {
             'opencode': {
-                'settings': {'baseURL': base_url, 'transport': 'http'},
+                'settings': {
+                    'baseURL': base_url,
+                    'transport': 'http',
+                    'headers': {ARM_MARKER_HEADER: arm_marker},
+                },
                 'models': {MODEL_ID: {'settings': {'baseURL': base_url}}},
             },
         },
@@ -1360,7 +1526,7 @@ def _api_direct_list(docker, identifier, method):
     return parsed
 
 
-def _native_http_preflight(docker, identifier, base_url):
+def _native_http_preflight(docker, identifier, base_url, arm_marker):
     providers = _api_protocol_list(docker, identifier, 'provider.list')
     models = _api_protocol_list(docker, identifier, 'model.list')
     config_entries = _api_direct_list(docker, identifier, 'config.get')
@@ -1409,6 +1575,8 @@ def _native_http_preflight(docker, identifier, base_url):
                 and isinstance(model_settings, dict)
                 and provider_settings.get('baseURL') == base_url
                 and provider_settings.get('transport') == 'http'
+                and provider_settings.get('headers') == {
+                    ARM_MARKER_HEADER: arm_marker}
                 and model_settings.get('baseURL') == base_url
                 and 'transport' not in model_settings):
             source_matches += 1
@@ -1423,6 +1591,8 @@ def _native_http_preflight(docker, identifier, base_url):
     model_transport_override_absent = 'transport' not in model_settings
     provider_base_url_verified = provider_settings.get('baseURL') == base_url
     model_base_url_verified = model_settings.get('baseURL') == base_url
+    request_marker_verified = provider_settings.get('headers') == {
+        ARM_MARKER_HEADER: arm_marker}
     facts = {
         'provider_package': provider.get('package'),
         'effective_model_package': model.get('package'),
@@ -1432,6 +1602,7 @@ def _native_http_preflight(docker, identifier, base_url):
         'provider_base_url_verified': provider_base_url_verified,
         'model_base_url_verified': model_base_url_verified,
         'base_url_verified': provider_base_url_verified and model_base_url_verified,
+        'request_marker_verified': request_marker_verified,
         'source_document_verified': True,
         'readback_scope': 'persistent-server-authority',
     }
@@ -1444,6 +1615,7 @@ def _native_http_preflight(docker, identifier, base_url):
         and facts['provider_base_url_verified'] is True
         and facts['model_base_url_verified'] is True
         and facts['base_url_verified'] is True
+        and facts['request_marker_verified'] is True
         and facts['source_document_verified'] is True
     )
     if not facts['native_http_verified']:
@@ -1461,10 +1633,55 @@ def _exit_kind(returncode):
     return 'unknown'
 
 
+def _structured_rejection(result, input_mode):
+    """Return a receipt-safe proof of one exact runtime-seam rejection."""
+    expected = REJECTION_CODE.get(input_mode)
+    if (expected is None or result is None or type(result.returncode) is not int
+            or result.returncode != 1 or not isinstance(result.stdout, str)
+            or not isinstance(result.stderr, str) or result.stderr.strip()
+            or len(result.stdout.encode('utf-8')) > MAX_REJECTION_OUTPUT_BYTES):
+        return None
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    try:
+        event = json.loads(lines[0])
+    except (TypeError, ValueError):
+        return None
+    if (not isinstance(event, dict)
+            or set(event) != {'type', 'timestamp', 'sessionID', 'error'}
+            or event.get('type') != 'error'
+            or type(event.get('timestamp')) is not int or event['timestamp'] < 0
+            or re.fullmatch(r'ses_[0-9A-Za-z]+', event.get('sessionID', '')) is None):
+        return None
+    if event.get('error') != {
+            'type': 'unknown', 'message': REJECTION_PREFIX + expected}:
+        return None
+    return {
+        'structured_rejection_verified': True,
+        'rejection_code': expected,
+        'session_id_present': True,
+        'structured_event_count': 1,
+    }
+
+
+def _stdout_proves_no_objects(stdout):
+    if not isinstance(stdout, str):
+        return False
+    if not stdout.strip():
+        return True
+    try:
+        parsed = json.loads(stdout)
+    except ValueError:
+        return False
+    return type(parsed) is list and not parsed
+
+
 def _exact_absence_claim(kind, identifier, result):
     if (kind not in {'container', 'network'} or result is None
             or re.fullmatch(r'[0-9a-f]{64}', identifier) is None
             or type(result.returncode) is not int or result.returncode == 0
+            or not _stdout_proves_no_objects(result.stdout)
             or not isinstance(result.stderr, str)):
         return False
     core = (
@@ -1484,7 +1701,9 @@ def _docker_engine_responds(docker):
         result = docker.run('info', '--format', '{{json .ServerVersion}}')
     except CheckError:
         return False
-    if result.returncode:
+    if (type(result.returncode) is not int or result.returncode != 0
+            or not isinstance(result.stdout, str)
+            or not isinstance(result.stderr, str) or result.stderr.strip()):
         return False
     try:
         version = json.loads(result.stdout)
@@ -1526,7 +1745,10 @@ def _remove_resource(docker, resource, cleanup):
             resource['active'] = False
         return
     ownership_verified = False
-    if inspected_before.returncode == 0:
+    if (type(inspected_before.returncode) is int and inspected_before.returncode == 0
+            and isinstance(inspected_before.stdout, str)
+            and isinstance(inspected_before.stderr, str)
+            and not inspected_before.stderr.strip()):
         try:
             rows = json.loads(inspected_before.stdout)
             item = rows[0] if isinstance(rows, list) and len(rows) == 1 else {}
@@ -1576,7 +1798,9 @@ def _labeled_ids(docker, kind, nonce):
         result = docker.run(*command, '--filter', 'label=' + LABEL + '=' + nonce)
     except CheckError:
         return None
-    if result.returncode:
+    if (type(result.returncode) is not int or result.returncode != 0
+            or not isinstance(result.stdout, str)
+            or not isinstance(result.stderr, str) or result.stderr.strip()):
         return None
     identifiers = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if len(set(identifiers)) != len(identifiers) \
@@ -1616,6 +1840,29 @@ def _path_entry_absent(path):
     except OSError:
         return False
     return False
+
+
+def _remove_workspace_durably(path, *, remove=shutil.rmtree,
+                              absent=_path_entry_absent, sync=_fsync_directory):
+    try:
+        remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    if not absent(path):
+        return False
+    try:
+        sync(path.parent)
+    except OSError:
+        return False
+    return absent(path)
+
+
+def _run_passes(verdict_complete, failure, unhandled, cleanup_ok,
+                temporary_removed):
+    return (verdict_complete is True and failure is None and unhandled is None
+            and cleanup_ok is True and temporary_removed is True)
 
 
 def _latest_cleanup_pass(resources, cleanup):
@@ -1675,11 +1922,15 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(chain['leaf']), str(chain['leaf_key']))
     _require_fixture_identities(certificates, fixture_identities)
-    server = _OwnedTLSServer((network['gateway'], 0), context)
+    arm_marker = _arm_marker(nonce, name)
+    server = _OwnedTLSServer((network['gateway'], 0), context, arm_marker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     identifier = None
     try:
+        initial_snapshot = server.snapshot()
+        if not _observation_is_zero(initial_snapshot):
+            raise CheckError('owned_responder_initial_state_invalid')
         base_url = 'https://opencode.ai:' + str(server.server_address[1]) + '/inference/openai/v1'
         arm_root = work / ('arm-' + name)
         workspace = arm_root / 'workspace'
@@ -1687,7 +1938,7 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
             (workspace / relative).mkdir(parents=True, exist_ok=True)
         (workspace / 'project/README.md').write_text('Owned TLS trust fixture.\n', encoding='utf-8')
         config = arm_root / 'opencode.json'
-        _config(config, base_url)
+        _config(config, base_url, arm_marker)
         input_mode = 'absent' if image_role == 'control' else 'valid'
         _require_fixture_identities(certificates, fixture_identities)
         identifier = _container(
@@ -1699,6 +1950,8 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
         )
         _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
+        if preflight_before != initial_snapshot:
+            raise CheckError('owned_responder_prebaseline_activity')
         _start_server_container(docker, identifier)
         version_verified = _version_verified(workspace)
         if not version_verified:
@@ -1714,11 +1967,10 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 fixture_identities['replacement.ca']['sha256'])
         if mounted_before != expected_mounted:
             raise CheckError('mounted_ca_identity_mismatch')
-        facts = _native_http_preflight(docker, identifier, base_url)
+        facts = _native_http_preflight(docker, identifier, base_url, arm_marker)
         preflight_after = server.snapshot()
-        preflight_tcp = preflight_after['tcp_connections'] - preflight_before['tcp_connections']
-        preflight_http = preflight_after['http_requests'] - preflight_before['http_requests']
-        if preflight_tcp != 0 or preflight_http != 0:
+        preflight_delta = _observation_delta(preflight_after, preflight_before)
+        if preflight_delta is None or any(preflight_delta.values()):
             raise CheckError('native_http_preflight_dispatched')
         run = _authenticated_exec(
             docker, identifier,
@@ -1732,7 +1984,10 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
             if current['http_requests'] or current['tls_failures']:
                 break
             time.sleep(.05)
-        snapshot = server.snapshot()
+        final_snapshot = server.snapshot()
+        dispatch = _observation_delta(final_snapshot, preflight_after)
+        if dispatch is None:
+            raise CheckError('owned_responder_observation_invalid')
         mounted_after = _mounted_ca_hashes(docker, identifier, image_role)
         if mounted_after != mounted_before:
             raise CheckError('mounted_ca_identity_changed')
@@ -1747,12 +2002,13 @@ def _arm(docker, image_id, image_role, network, nonce, work, certificates,
                 mounted_before['replacement']
                 if image_role == 'candidate' else None),
             'mounted_ca_hashes_stable': True,
+            'baseline_zero_verified': True,
             'version_verified': version_verified, 'server_started': True, **facts,
-            'preflight_tcp_connections': preflight_tcp,
-            'preflight_http_requests': preflight_http,
+            'preflight_tcp_connections': preflight_delta['tcp_connections'],
+            'preflight_http_requests': preflight_delta['http_requests'],
             'dispatched': True,
             'exit_kind': _exit_kind(run.returncode),
-            **snapshot,
+            **dispatch,
         }
         return row
     finally:
@@ -1775,11 +2031,15 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(chain['leaf']), str(chain['leaf_key']))
     _require_fixture_identities(certificates, fixture_identities)
-    server = _OwnedTLSServer((network['gateway'], 0), context)
+    arm_marker = _arm_marker(nonce, name)
+    server = _OwnedTLSServer((network['gateway'], 0), context, arm_marker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     identifier = None
     try:
+        initial_snapshot = server.snapshot()
+        if not _observation_is_zero(initial_snapshot):
+            raise CheckError('owned_responder_initial_state_invalid')
         base_url = 'https://opencode.ai:' + str(server.server_address[1]) + '/inference/openai/v1'
         arm_root = work / ('arm-' + name)
         workspace = arm_root / 'workspace'
@@ -1788,7 +2048,7 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
         (workspace / 'project/README.md').write_text(
             'Owned invalid replacement-CA fixture.\n', encoding='utf-8')
         config = arm_root / 'opencode.json'
-        _config(config, base_url)
+        _config(config, base_url, arm_marker)
         exclusive_input = exclusive_inputs[input_mode]
         _require_fixture_identities(certificates, fixture_identities)
         identifier = _container(
@@ -1799,44 +2059,19 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
         )
         _require_fixture_identities(certificates, fixture_identities)
         preflight_before = server.snapshot()
+        if preflight_before != initial_snapshot:
+            raise CheckError('owned_responder_prebaseline_activity')
         _start_server_container(docker, identifier)
         version_verified = _version_verified(workspace)
         if not version_verified:
             raise CheckError('opencode_version_mismatch')
         server_started = _wait_server(docker, identifier)
         if not server_started:
-            state = _container_state(docker, identifier)
-            exit_code = state.get('ExitCode')
-            exit_kind = _exit_kind(exit_code)
-            if state.get('Running') is not False or exit_kind != 'nonzero':
-                raise CheckError('candidate_rejection_state_unavailable')
-            _require_fixture_identities(certificates, fixture_identities)
-            snapshot = server.snapshot()
-            return {
-                'arm': name,
-                'case_kind': 'pre-socket',
-                'image_role': 'candidate',
-                'input_mode': input_mode,
-                'replacement_pair_state': PAIR_STATE[input_mode],
-                'version_verified': version_verified,
-                'server_started': False,
-                'native_http_verified': False,
-                'readback_scope': 'persistent-server-authority',
-                'preflight_tcp_connections': (
-                    snapshot['tcp_connections'] - preflight_before['tcp_connections']),
-                'preflight_http_requests': (
-                    snapshot['http_requests'] - preflight_before['http_requests']),
-                'dispatched': False,
-                'failure_stage': 'server-startup',
-                'termination_verified': True,
-                'exit_kind': exit_kind,
-                **snapshot,
-            }
-        facts = _native_http_preflight(docker, identifier, base_url)
+            raise CheckError('candidate_server_start_failed')
+        facts = _native_http_preflight(docker, identifier, base_url, arm_marker)
         preflight_after = server.snapshot()
-        preflight_tcp = preflight_after['tcp_connections'] - preflight_before['tcp_connections']
-        preflight_http = preflight_after['http_requests'] - preflight_before['http_requests']
-        if preflight_tcp != 0 or preflight_http != 0:
+        preflight_delta = _observation_delta(preflight_after, preflight_before)
+        if preflight_delta is None or any(preflight_delta.values()):
             raise CheckError('native_http_preflight_dispatched')
         run = _authenticated_exec(
             docker, identifier,
@@ -1844,9 +2079,24 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             '--agent', 'build', '--model', MODEL,
             '--format', 'json', 'Reply with OK only. Do not use tools.', timeout=60,
         )
+        rejection = _structured_rejection(run, input_mode)
+        if rejection is None:
+            raise CheckError('candidate_rejection_unverified')
+        state = _container_state(docker, identifier)
+        if state.get('Running') is not True:
+            raise CheckError('candidate_server_stopped_after_rejection')
+        if not _wait_server(docker, identifier):
+            raise CheckError('candidate_server_stopped_after_rejection')
+        facts_after = _native_http_preflight(docker, identifier, base_url, arm_marker)
+        if facts_after != facts:
+            raise CheckError('native_http_readback_changed_after_rejection')
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline and not any(server.snapshot().values()):
             time.sleep(.05)
+        final_snapshot = server.snapshot()
+        dispatch = _observation_delta(final_snapshot, preflight_after)
+        if dispatch is None:
+            raise CheckError('owned_responder_observation_invalid')
         _require_fixture_identities(certificates, fixture_identities)
         return {
             'arm': name,
@@ -1856,14 +2106,18 @@ def _pre_socket_case(docker, candidate_image_id, network, nonce, work, certifica
             'replacement_pair_state': PAIR_STATE[input_mode],
             'version_verified': version_verified,
             'server_started': True,
+            'baseline_zero_verified': True,
             **facts,
-            'preflight_tcp_connections': preflight_tcp,
-            'preflight_http_requests': preflight_http,
+            'preflight_tcp_connections': preflight_delta['tcp_connections'],
+            'preflight_http_requests': preflight_delta['http_requests'],
             'dispatched': True,
             'failure_stage': 'same-server-dispatch',
-            'termination_verified': _exit_kind(run.returncode) == 'nonzero',
+            'termination_verified': True,
+            'server_alive_after_rejection': True,
+            'native_readback_stable': True,
+            **rejection,
             'exit_kind': _exit_kind(run.returncode),
-            **server.snapshot(),
+            **dispatch,
         }
     finally:
         if identifier is not None:
@@ -1883,8 +2137,13 @@ def _label_absence(docker, nonce):
                               '--filter', 'label=' + LABEL + '=' + nonce)
     except CheckError:
         return {'containers_absent': False, 'networks_absent': False}
-    return {'containers_absent': containers.returncode == 0 and not containers.stdout.strip(),
-            'networks_absent': networks.returncode == 0 and not networks.stdout.strip()}
+    def exact_empty_success(result):
+        return (type(result.returncode) is int and result.returncode == 0
+                and isinstance(result.stdout, str) and not result.stdout.strip()
+                and isinstance(result.stderr, str) and not result.stderr.strip())
+
+    return {'containers_absent': exact_empty_success(containers),
+            'networks_absent': exact_empty_success(networks)}
 
 
 def execute(args):
@@ -1930,6 +2189,8 @@ def execute(args):
     resources = []
     cleanup = receipt['cleanup']
     failure = None
+    unhandled = None
+    verdict_complete = False
     cleanup_ok = False
     try:
         socket_path = Path('/var/run/docker.sock')
@@ -2037,12 +2298,16 @@ def execute(args):
         receipt['checks'] = verdict['checks']
         if not verdict['pass']:
             raise CheckError('exclusive_trust_arms_failed')
+        verdict_complete = True
     except CheckError as error:
         failure = str(error)
     except KeyboardInterrupt:
         failure = 'interrupted'
     except Exception:
         failure = 'unexpected_failure'
+    except BaseException as error:
+        failure = 'execution_aborted'
+        unhandled = error
     finally:
         for resource in reversed(resources):
             if resource['active']:
@@ -2068,22 +2333,26 @@ def execute(args):
             nonce_value, reconciliations, resources, cleanup, absence,
             create_journal)
         receipt['temporary_removed'] = False
-        if cleanup_ok:
-            try:
-                shutil.rmtree(work)
-            except OSError:
-                pass
-            receipt['temporary_removed'] = _path_entry_absent(work)
+        if cleanup_ok and unhandled is None:
+            receipt['temporary_removed'] = _remove_workspace_durably(work)
         if receipt['temporary_removed']:
             receipt.pop('retained_temporary_workspace', None)
         else:
             receipt['retained_temporary_workspace'] = str(work)
+        if failure is None and not verdict_complete:
+            failure = 'execution_incomplete'
         if failure is None and (not cleanup_ok or not receipt['temporary_removed']):
             failure = 'cleanup_failed'
-        receipt['status'] = 'pass' if failure is None else 'failed'
+        receipt['status'] = ('pass' if _run_passes(
+            verdict_complete, failure, unhandled, cleanup_ok,
+            receipt['temporary_removed']) else 'failed')
+        if receipt['status'] != 'pass' and failure is None:
+            failure = 'execution_incomplete'
         if failure is not None:
             receipt['error_code'] = failure if re.fullmatch(r'[a-z][a-z0-9_]{0,79}', failure) else 'failure'
         _write_json(output, receipt)
+    if unhandled is not None:
+        raise unhandled
     if failure is not None:
         raise CheckError(failure)
     return output

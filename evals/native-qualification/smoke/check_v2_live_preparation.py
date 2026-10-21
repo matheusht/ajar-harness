@@ -260,7 +260,11 @@ def main():
         exclusive_source = EXCLUSIVE_CHECKER.read_text()
         cleanup_and_identity_shape = all(fragment in exclusive_source for fragment in (
             'def _exact_absence_claim(',
+            'return len(lines) == 1 and lines[0] in expected',
             'post_remove_engine_responding',
+            'prior_remove_reverified',
+            '_fsync_directory(parent)',
+            'path.lstat()',
             'create_result_unconfirmed',
             "'cleanup_recovery':",
             'def _begin_create(',

@@ -46,9 +46,9 @@
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
     },
     {
-      "bytes": 90957,
+      "bytes": 96372,
       "path": "evals/native-qualification/smoke/check_opencode_exclusive_trust.py",
-      "sha256": "0031aa9f9dffe8c1aa9c2e822d40803e918c2bbad802e9edc79ab1ba8edb00bb"
+      "sha256": "1299458bd5b87ed0155e54753f601b1295bd2f10bfa85620fa637394176c0ca1"
     },
     {
       "bytes": 3898,
@@ -61,9 +61,9 @@
       "sha256": "e06453668bdd7f26f9f80847d15c087370e270ae92789570e65b42c8f166adbf"
     },
     {
-      "bytes": 19648,
+      "bytes": 19818,
       "path": "evals/native-qualification/smoke/check_v2_live_preparation.py",
-      "sha256": "ea7f2cd511f13210f41759cff4071ee1cc82421f37cbe813e0bce710ce89835e"
+      "sha256": "469a002adaa3cd6ab609a2f2d329e257198c8221c708c43a7792dc074d3999f5"
     },
     {
       "bytes": 98,

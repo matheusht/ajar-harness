@@ -418,6 +418,12 @@ def self_test():
     ambiguous = (
         subprocess.CompletedProcess([], 1, '', 'Cannot connect to the Docker daemon'),
         subprocess.CompletedProcess([], 1, '', 'No such container: ' + 'd' * 64),
+        subprocess.CompletedProcess([], 1, '',
+                                    'No such container: ' + identifier + 'suffix'),
+        subprocess.CompletedProcess([], 1, '',
+                                    'No such container: ' + identifier + '\nwarning'),
+        subprocess.CompletedProcess([], None, '',
+                                    'No such container: ' + identifier),
         subprocess.CompletedProcess([], 0, '[]', ''),
     )
     if any(_exact_absence_claim('container', identifier, result)
@@ -435,6 +441,38 @@ def self_test():
     unavailable = FakeDocker(subprocess.CompletedProcess([], 1, '', 'daemon unavailable'))
     if not _docker_engine_responds(responding) or _docker_engine_responds(unavailable):
         raise RuntimeError('cleanup_engine_liveness_fixture_failed')
+
+    class RecoveryDocker:
+        def run(self, *args):
+            if args[:2] == ('container', 'inspect'):
+                return subprocess.CompletedProcess(
+                    [], 1, '', 'No such container: ' + identifier)
+            if args[:2] == ('info', '--format'):
+                return subprocess.CompletedProcess([], 0, '"27.0.0"\n', '')
+            raise RuntimeError('unexpected_recovery_docker_command')
+
+    recovered_resource = {
+        'kind': 'container', 'id': identifier, 'name': 'owned',
+        'active': True, 'nonce': identifier,
+    }
+    recovered_cleanup = [{
+        'kind': 'container', 'id': identifier, 'ownership_verified': True,
+        'remove_exit': 0, 'post_inspect_absent': False,
+        'post_remove_engine_responding': False, 'pass': False,
+    }]
+    _remove_resource(RecoveryDocker(), recovered_resource, recovered_cleanup)
+    if (recovered_resource['active'] is not False
+            or recovered_cleanup[-1].get('pass') is not True
+            or recovered_cleanup[-1].get('prior_remove_reverified') is not True):
+        raise RuntimeError('cleanup_prior_remove_recovery_fixture_failed')
+    unowned_absent_resource = dict(recovered_resource, active=True)
+    unowned_absent_cleanup = []
+    _remove_resource(
+        RecoveryDocker(), unowned_absent_resource, unowned_absent_cleanup)
+    if (unowned_absent_resource['active'] is not True
+            or unowned_absent_cleanup[-1].get('pass') is not False
+            or unowned_absent_cleanup[-1].get('ownership_verified') is not False):
+        raise RuntimeError('cleanup_unowned_absence_fixture_failed')
     mounted = FakeDocker(subprocess.CompletedProcess(
         [], 0,
         fixture['ambient_ca_sha256'] + '  ' + AMBIENT_CA_PATH + '\n'
@@ -566,6 +604,40 @@ def self_test():
             or _create_journal_confirmed(
                 interrupted_confirmation, [confirmed_resource])):
         raise RuntimeError('create_confirmation_rollback_fixture_failed')
+
+    class InterruptingRecord(dict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if key == 'outcome':
+                raise KeyboardInterrupt
+
+    assignment_interrupted = InterruptingRecord({
+        'kind': 'container', 'name': confirmed_name,
+        'outcome': 'create_result_unconfirmed'})
+    try:
+        _confirm_create(assignment_interrupted, confirmed_id, lambda: None)
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise RuntimeError('create_confirmation_assignment_interrupt_fixture_failed')
+    if assignment_interrupted != {
+            'kind': 'container', 'name': confirmed_name,
+            'outcome': 'create_result_unconfirmed'}:
+        raise RuntimeError('create_confirmation_assignment_rollback_fixture_failed')
+
+    class FakePathEntry:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        def lstat(self):
+            if isinstance(self.outcome, BaseException):
+                raise self.outcome
+            return self.outcome
+
+    if (not _path_entry_absent(FakePathEntry(FileNotFoundError()))
+            or _path_entry_absent(FakePathEntry(OSError()))
+            or _path_entry_absent(FakePathEntry(object()))):
+        raise RuntimeError('temporary_workspace_absence_fixture_failed')
     return True
 
 
@@ -646,7 +718,23 @@ def _safe_output(raw):
         os.mkdir(path, 0o700)
     except OSError:
         raise CheckError('output_create_failed') from None
+    try:
+        _fsync_directory(parent)
+    except OSError:
+        raise CheckError('output_parent_sync_failed') from None
     return path.resolve(strict=True)
+
+
+def _fsync_directory(path):
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0)
+        | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _write_json(output, receipt):
@@ -666,13 +754,7 @@ def _write_json(output, receipt):
     finally:
         os.close(descriptor)
     os.replace(temporary, target)
-    directory = os.open(
-        output, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0)
-        | getattr(os, 'O_CLOEXEC', 0))
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    _fsync_directory(output)
 
 
 def _run(argv, timeout=30, input_text=None, environment=None):
@@ -892,9 +974,9 @@ def _begin_create(create_journal, kind, name, persist):
 
 def _confirm_create(record, identifier, persist):
     pending = dict(record)
-    record['id'] = identifier
-    record['outcome'] = 'exact_id_recorded'
     try:
+        record['id'] = identifier
+        record['outcome'] = 'exact_id_recorded'
         persist()
     except BaseException:
         record.clear()
@@ -1381,14 +1463,20 @@ def _exit_kind(returncode):
 
 def _exact_absence_claim(kind, identifier, result):
     if (kind not in {'container', 'network'} or result is None
-            or result.returncode == 0 or not isinstance(result.stderr, str)):
+            or re.fullmatch(r'[0-9a-f]{64}', identifier) is None
+            or type(result.returncode) is not int or result.returncode == 0
+            or not isinstance(result.stderr, str)):
         return False
-    expected = (
+    core = (
         ('no such container: ' + identifier, 'no such object: ' + identifier)
         if kind == 'container'
         else ('no such network: ' + identifier, 'network ' + identifier + ' not found'))
-    lowered = result.stderr.lower()
-    return any(message in lowered for message in expected)
+    expected = set(core)
+    expected.update('error response from daemon: ' + message for message in core)
+    expected.update('error: ' + message for message in core)
+    lines = [line.strip().lower() for line in result.stderr.splitlines()
+             if line.strip()]
+    return len(lines) == 1 and lines[0] in expected
 
 
 def _docker_engine_responds(docker):
@@ -1415,6 +1503,27 @@ def _remove_resource(docker, resource, cleanup):
                         'ownership_verified': False, 'remove_exit': None,
                         'post_inspect_absent': False,
                         'post_remove_engine_responding': False, 'pass': False})
+        return
+    prior_remove = next((row for row in reversed(cleanup)
+                         if row.get('kind') == resource['kind']
+                         and row.get('id') == resource['id']
+                         and row.get('ownership_verified') is True
+                         and row.get('remove_exit') == 0), None)
+    if _exact_absence_claim(resource['kind'], resource['id'], inspected_before):
+        engine_responding = (
+            prior_remove is not None and _docker_engine_responds(docker))
+        passed = prior_remove is not None and engine_responding
+        cleanup.append({
+            'kind': resource['kind'], 'id': resource['id'],
+            'ownership_verified': prior_remove is not None,
+            'remove_exit': 0 if prior_remove is not None else None,
+            'post_inspect_absent': True,
+            'post_remove_engine_responding': engine_responding,
+            'prior_remove_reverified': prior_remove is not None,
+            'pass': passed,
+        })
+        if passed:
+            resource['active'] = False
         return
     ownership_verified = False
     if inspected_before.returncode == 0:
@@ -1492,7 +1601,21 @@ def _reconcile_labeled_resources(docker, nonce, resources, cleanup):
             else:
                 resource['active'] = True
             _remove_resource(docker, resource, cleanup)
+        for resource in resources:
+            if (resource['kind'] == kind and resource['active']
+                    and resource['id'] not in identifiers):
+                _remove_resource(docker, resource, cleanup)
     return {'pass': True, 'discovered': discovered}
+
+
+def _path_entry_absent(path):
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
 
 
 def _latest_cleanup_pass(resources, cleanup):
@@ -1950,7 +2073,7 @@ def execute(args):
                 shutil.rmtree(work)
             except OSError:
                 pass
-            receipt['temporary_removed'] = not work.exists()
+            receipt['temporary_removed'] = _path_entry_absent(work)
         if receipt['temporary_removed']:
             receipt.pop('retained_temporary_workspace', None)
         else:

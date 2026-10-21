@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "kind": "t02-oslit-topology-assessment",
+  "recorded_at": "2026-10-21T18:36:32Z",
+  "status": "blocked_external_owned_receiver",
+  "source": {
+    "repository": "matheusht/redteam-harness",
+    "branch": "codex/t02-live-prep-fail-closed-20261021",
+    "head": "5425d5869f4d835b3111b05be7b14b3769953028",
+    "worktree_clean_before_assessment": true,
+    "runner_sha256": "659920699cd3c0a70807ef2d0ade83e14c7123feafd2e31ec4b5031734dd24b9",
+    "transport_sha256": "f3bca478555f72a5411987a51e59d630b69dd8b86dd3c8ecc5d7d9971e4f24ea"
+  },
+  "managed_policy": {
+    "sha256": "266ee47b22dd736206e1454a525c3003a458e742c7fca6b13765f4d8b5289275",
+    "mode": "0444",
+    "vpn_configured": false,
+    "http_policy_type": "unrestricted",
+    "http_proxy": {
+      "scheme": "http",
+      "credentials_present": false,
+      "raw_value_retained": false
+    },
+    "tcp_connect_proxy": {
+      "scheme": "http",
+      "credentials_present": false,
+      "raw_value_retained": false
+    },
+    "tcp_destination_domain_count": 0,
+    "tcp_destination_ip_range_count": 0,
+    "receiver_callback_or_authority_remap_field_present": false
+  },
+  "source_readback": {
+    "live_admission_error": "cloud_live_route_not_qualified",
+    "live_denial_precedes_output_creation": true,
+    "production_connect_authority": "opencode.ai:443",
+    "production_authority_caller_selectable": false,
+    "runtime_ca_input_hash_pinned": true,
+    "runtime_exclusive_trust_proved": false,
+    "shared_limit_tunnels": 16,
+    "shared_limit_charged_bytes": 8388608,
+    "shared_limit_seconds": 300
+  },
+  "prior_evidence": {
+    "direct_owned_receipt_sha256": "0fef363a6e711da2ada35371bd1788395010f61c460be816975d1b8b883c264a",
+    "owned_private_listener_receipt_sha256": "7112f38d43313ea4435289750d1af6b08bd615943037b09097c6ada75608604f",
+    "owned_fake_proxy_receipt_sha256": "8c0d6859a05f61bcda540213dc1dbfc1e702036467bdfe802c7d83cd4d01a5df",
+    "managed_self_receiver": {
+      "provenance": "retained prior-run summary and append-only decision trail; no raw probe receipt",
+      "outcome": "known_failed_503_zero_receiver_connections",
+      "probe_repeated": false
+    }
+  },
+  "docker_baseline": {
+    "server_version": "28.4.0",
+    "architecture": "amd64",
+    "container_count": 0,
+    "image_count": 0,
+    "volume_count": 0,
+    "networks": [
+      {
+        "name": "bridge",
+        "driver": "bridge"
+      },
+      {
+        "name": "host",
+        "driver": "host"
+      },
+      {
+        "name": "none",
+        "driver": "null"
+      }
+    ],
+    "identifiers_retained": false
+  },
+  "decision": {
+    "supported_local_substitute": false,
+    "source_route_change_warranted_before_external_input": false,
+    "live_admission": "closed",
+    "required_external_input": [
+      "operator-approved task-owned TLS receiver outside this OSLIT client",
+      "fixed managed-proxy-reachable FQDN and port",
+      "receiver ownership and route authorization",
+      "hostname-matching certificate chain and CA hashes",
+      "ambient-only negative chain",
+      "actual OpenCode dual-chain runtime observation",
+      "sanitized receiver-side receipt and cleanup terms"
+    ],
+    "forbidden_shortcuts": [
+      "repeat the same self-receiver probe",
+      "direct proxy bypass",
+      "general caller-selected CONNECT authority",
+      "self-attested route receipt",
+      "system trust modification",
+      "provider request before proof review"
+    ]
+  },
+  "issue_state": {
+    "158": "incomplete_blocked_external_owned_receiver_and_native_tls_proof",
+    "161": "incomplete_blocked_live_interruption_and_recovery",
+    "165": "no_go_unchanged"
+  },
+  "activity": {
+    "network_probe_performed": false,
+    "provider_or_model_call_performed": false,
+    "docker_mutation_performed": false,
+    "runtime_source_changed": false,
+    "network_policy_changed": false,
+    "trust_store_changed": false
+  }
+}

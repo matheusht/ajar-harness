@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "t02-cloud-amd64-kanboard-parity-attempt",
+  "recorded_at": "2026-10-21T19:31:12Z",
+  "status": "blocked_exact_image_unavailable",
+  "classification": "owned offline preparation; zero provider/model calls; parity not run",
+  "qualification_base": "513b662eda0345d943eb0582f7bc39a8a6512617",
+  "admission": {
+    "check": "tag resolves locally without pull to the published exact image ID on linux/amd64",
+    "tag_initially_present": false,
+    "build_attempted": true,
+    "build_exit_code": 0,
+    "expected_image_id": "sha256:9ef722322521322a1288a18427ba5bf6ce1479085c97e0ac821982eec4f01769",
+    "actual_image_id": "sha256:d0b96c08541486079634fd70a0ffb221c32b07a2a04a1a2ab7d041912a7c9a91",
+    "actual_image_platform": "linux/amd64",
+    "actual_image_inspect": {
+      "repo_tags": [
+        "t02-kanboard-runtime:amd64-live-prep"
+      ],
+      "repo_digests": [],
+      "architecture": "amd64",
+      "os": "linux",
+      "created": "2026-10-21T19:28:42.926363951Z",
+      "size_bytes": 270737338
+    },
+    "exact_image_id_match": false,
+    "decision": "stop_before_archive_retrieval_or_application_execution"
+  },
+  "execution": {
+    "archive_retrieval_attempted": false,
+    "archives_verified": 0,
+    "application_containers_started": 0,
+    "ordinary_behavior_run": false,
+    "vulnerable_arm_run": false,
+    "fixed_arm_run": false,
+    "parity_runner_executed": false,
+    "parity_established": false,
+    "researcher_bundle_created": false,
+    "provider_calls": 0,
+    "model_calls": 0,
+    "live_targets_contacted": 0,
+    "credentials_used": 0
+  },
+  "cleanup": {
+    "mismatched_image_removed": true,
+    "removed_image_id": "sha256:d0b96c08541486079634fd70a0ffb221c32b07a2a04a1a2ab7d041912a7c9a91",
+    "build_cache_records_removed": [
+      "6bc6r30ukozcuch8mql78f469",
+      "b2mzgc1t95gw4d2rlg4gabrg0",
+      "nkn1irbdo5mdwfsvn13b9p3rt",
+      "nxo7bzzly2x484vlvh1yyiy5k",
+      "yxl1n8iy8rsxmex6n3ixcmygr",
+      "r3kdrh1jytugzq62zwxq80whi",
+      "je5vwmfrq4mw2fmc0piyoguxo"
+    ],
+    "global_prune_used": false,
+    "final_task_tag_absent": true,
+    "final_containers": [],
+    "final_images": [],
+    "final_volumes": [],
+    "final_build_cache_bytes": 0,
+    "network_ids_match_baseline": true,
+    "final_networks": [
+      {
+        "name": "bridge",
+        "id": "1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba"
+      },
+      {
+        "name": "host",
+        "id": "dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb"
+      },
+      {
+        "name": "none",
+        "id": "8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216"
+      }
+    ],
+    "baseline_restored": true
+  },
+  "limits": [
+    "No current-image application behavior was observed.",
+    "The rebuild is not a substitute for the unavailable exact image.",
+    "Historical arm64 parity and ordinary-run results do not qualify this amd64 image."
+  ],
+  "remaining_input": "Make the exact expected image available under the pinned tag through a supported route, or provide a trusted OCI artifact whose loaded image ID verifies exactly."
+}

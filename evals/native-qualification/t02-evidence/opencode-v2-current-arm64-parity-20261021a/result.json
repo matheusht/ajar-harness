@@ -1,0 +1,117 @@
+{
+  "classification": "offline current-Dockerfile arm64 app parity; no model/provider calls",
+  "status": "pass",
+  "image": "nq-kanboard-current:arm64-20261021",
+  "image_id": "sha256:76bd7fcb18d052bd7bd744db6ce0db324c78210de8c5c52433bce6f27aecb513",
+  "checks": [
+    {
+      "name": "frozen source and T01 receipt",
+      "pass": true
+    },
+    {
+      "name": "exact local arm64 image",
+      "pass": true
+    },
+    {
+      "name": "PHP 8.4.26 and OpenCode V2",
+      "pass": true
+    },
+    {
+      "name": "vulnerable archive hash",
+      "pass": true
+    },
+    {
+      "name": "fixed archive hash",
+      "pass": true
+    },
+    {
+      "name": "vulnerable exact cleanup",
+      "pass": true
+    },
+    {
+      "name": "fixed exact cleanup",
+      "pass": true
+    },
+    {
+      "name": "both arms match T01 app outcomes",
+      "pass": true
+    },
+    {
+      "name": "both arms use current local image",
+      "pass": true
+    }
+  ],
+  "source_sha256": {
+    "Dockerfile.opencode-kanboard-runtime": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b",
+    "observer_case.py": "72273bfd4e1c1aa9f7f53279e525ec1c74c2669324fa62f1b6b22abf65d596bf",
+    "RESEARCHER-BRIEF.md": "8f2b5604870cf86719ae94ac180cb6cbe0c5c12cdd2356bc90f4104bb7179a5a",
+    "observer-evidence-final/observer-results.json": "9db3bc220484a7a786729847f3c8fa8cc1d364a74b1e4a81d2bb78f80dc924fa"
+  },
+  "arms": [
+    {
+      "release": "vulnerable",
+      "loopback": true,
+      "php": "PHP 8.4.26 (cli) (built: Sep 25 2026 15:57:16) (NTS)",
+      "runtime": "nq-kanboard-current:arm64-20261021@sha256:76bd7fcb18d052bd7bd744db6ce0db324c78210de8c5c52433bce6f27aecb513",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "result": {
+          "id": 2,
+          "project_id": 1,
+          "name": "Observer Swimlane"
+        }
+      },
+      "cleanup": {
+        "container_id": "f22c5e88dbb6dc0f000b47432fb9c1d43f29d39b82e61d4e51b3d22d2ebb9ab6",
+        "host_pid": null,
+        "loopback_port": 52108,
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir_absent": true,
+        "db_absent": true
+      },
+      "commit": "f0f7d27007f5a788f14416c548421efd740b7bce",
+      "archive_sha256": "3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf"
+    },
+    {
+      "release": "fixed",
+      "loopback": true,
+      "php": "PHP 8.4.26 (cli) (built: Sep 25 2026 15:57:16) (NTS)",
+      "runtime": "nq-kanboard-current:arm64-20261021@sha256:76bd7fcb18d052bd7bd744db6ce0db324c78210de8c5c52433bce6f27aecb513",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "denial": {
+          "code": 403,
+          "message": "Forbidden"
+        }
+      },
+      "cleanup": {
+        "container_id": "bbc8eeb9bc5be4dca546375f00ed845d18f62969bb07c65d9adfa0c16c46a1ab",
+        "host_pid": null,
+        "loopback_port": 52129,
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir_absent": true,
+        "db_absent": true
+      },
+      "commit": "a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3",
+      "archive_sha256": "44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56"
+    }
+  ]
+}

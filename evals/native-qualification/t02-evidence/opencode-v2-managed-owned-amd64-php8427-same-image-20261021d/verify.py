@@ -22,9 +22,9 @@ SOURCE_COMMIT = "1781eb457b633f9391c89a911ebd3c66c378d3f4"
 BASELINE_SHA256 = "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5"
 
 PUBLIC_FILE_SHA256 = {
-    "README.md": "a7eeafeecc030064da68e41e5a0a14921573dac77346144595c7d2cc8ba983de",
+    "README.md": "9cfa2af94c85ef78b422dde6ff2d003eaaa328af0e3b364ff658260dcb5a329d",
     "inputs.json": "d2e7181e0f72e6986c9c1fbea3b4fb60cb324acb66c39b0b33f73eb50e907192",
-    "result.json": "598dfbcdba310a01bfc7ca89f44616f70c669a779b87fbeade2a4df1925fa4dd",
+    "result.json": "9e91f1d437395c56c956efabd4b48cf3d0e4add8576ce82ac3d12bc8e8c3cbb5",
     "run-command.txt": "ae37848c4fe81ffc19b052a2805eda5d92fc60bec67372b800d6166ae2d8427f",
 }
 
@@ -295,7 +295,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
     checks.equal(value["image_id"], IMAGE_ID, "result image ID")
 
     runtime = value["runtime_admission"]
-    exact_keys(checks, runtime, {"status", "image_id", "platform", "php_package_revision", "opencode_version", "pull", "network"}, "runtime admission")
+    exact_keys(checks, runtime, {"status", "image_id", "platform", "php_package_revision", "php_version", "opencode_version", "pull", "network"}, "runtime admission")
     checks.equal(
         runtime,
         {
@@ -303,6 +303,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
             "image_id": IMAGE_ID,
             "platform": "linux/amd64",
             "php_package_revision": "8.4.27-r0",
+            "php_version": "8.4.27",
             "opencode_version": "v2.0.32",
             "pull": "never",
             "network": "none",
@@ -317,6 +318,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
         {
             "status",
             "image_id",
+            "arm_image_ids",
             "checks_passed",
             "checks_total",
             "archives_verified_before_first_arm",
@@ -328,6 +330,11 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
     )
     checks.equal(parity["status"], "pass", "application parity status")
     checks.equal(parity["image_id"], IMAGE_ID, "application parity image")
+    checks.equal(
+        parity["arm_image_ids"],
+        {"vulnerable": IMAGE_ID, "fixed": IMAGE_ID},
+        "application parity arm images",
+    )
     checks.equal((parity["checks_passed"], parity["checks_total"]), (32, 32), "application parity checks")
     checks.equal(parity["archives_verified_before_first_arm"], 2, "archives verified before first arm")
     for key in ("both_arms_same_image", "historical_semantic_comparison_complete", "inner_docker_baseline_restored"):
@@ -444,6 +451,7 @@ def validate_relationships(inputs: dict[str, Any], result: dict[str, Any], check
         result["image_id"],
         result["runtime_admission"]["image_id"],
         result["application_parity"]["image_id"],
+        *result["application_parity"]["arm_image_ids"].values(),
         result["managed_owned"]["image_id"],
     }
     checks.equal(image_ids, {IMAGE_ID}, "same-image relationship")
@@ -519,6 +527,10 @@ def run_self_tests(inputs: dict[str, Any], result: dict[str, Any]) -> int:
         validate_relationships(inputs, changed, Checks())
 
     expect_rejected("changed managed image", lambda: reject_result(lambda value: value["managed_owned"].__setitem__("image_id", EXCLUDED_IMAGE_ID)))
+    count += 1
+    expect_rejected("changed PHP runtime", lambda: reject_result(lambda value: value["runtime_admission"].__setitem__("php_version", "8.4.26")))
+    count += 1
+    expect_rejected("changed fixed-arm image", lambda: reject_result(lambda value: value["application_parity"]["arm_image_ids"].__setitem__("fixed", EXCLUDED_IMAGE_ID)))
     count += 1
     expect_rejected("provider call", lambda: reject_result(lambda value: value["external_activity"].__setitem__("provider_calls", 1)))
     count += 1

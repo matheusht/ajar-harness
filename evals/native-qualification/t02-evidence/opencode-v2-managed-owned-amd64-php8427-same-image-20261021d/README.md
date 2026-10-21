@@ -6,7 +6,7 @@ The image ID was `sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c
 
 ## Result
 
-- Runtime admission passed with PHP `8.4.27-r0`, OpenCode `v2.0.32`, `--pull=never`, and no runtime network.
+- Runtime admission passed with all PHP packages at `8.4.27-r0`, PHP `8.4.27`, OpenCode `v2.0.32`, `--pull=never`, and no runtime network.
 - The preserved Kanboard observer passed `32/32` checks. Both archive hashes were verified before the first arm. Both arms reported the fresh image ID, and the inner Docker baseline was restored.
 - The owned managed workflow passed `80/80` checks across first, reviewer, and resume stages. Its selected boundary reported the same image ID.
 - Provider calls, model calls, live target contacts, external credentials, and engagements were all zero. Live admission remained disabled.

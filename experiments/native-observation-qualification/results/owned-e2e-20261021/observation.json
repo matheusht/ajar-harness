@@ -203,19 +203,19 @@
         "native_review_handoff_manifest": "26056e8abd33e6b55cfac99929e611b7f8bc8b9193bf914c589c4592c15f7f74"
       },
       "files": {
-        "experiments/native-observation-qualification/FAILURE-CHECKS.md": "4b68cf5ac2a123c8620f4e3cc7eeb820f04e5d7fde352d444fbf36fb3658e2f8",
-        "experiments/native-observation-qualification/README.md": "89d2012b8e68cfb4533511351a4fff7ad1b2c12b477a4e203296ef1b14cc16f6",
-        "experiments/native-observation-qualification/check_owned_e2e.py": "edbfd7acaa0cd2946df5aae7af82c811b9d9728994adcd0eb629f166d68707e3",
+        "experiments/native-observation-qualification/FAILURE-CHECKS.md": "f45914fdf117172360ee68cf9186a09f40af2cb8e9d1edac317e9dbcf7312b01",
+        "experiments/native-observation-qualification/README.md": "2c9d3f70acdd60e06c46abbc5e570c081950851ee9225718b4a8e2a2c5c61517",
+        "experiments/native-observation-qualification/check_owned_e2e.py": "e73901f5ab2bf4e2bc29e708fa4273da53ed429e0c0e1c1eae635980aec25318",
         "experiments/native-observation-qualification/fixtures/expected-owned-e2e.json": "d98e80d9cab052af6bccda7a07f1b7d5f252e6a7ded5a5bc1675b8ed409abea0",
-        "experiments/native-observation-qualification/native_observation.py": "38d6ce63d2336c6a151498974d829c65b593e8c08e77758ec5f1abab38e634eb",
-        "experiments/native-review-qualification/OBSERVATION-INTEGRATION-SEAM-20261021.md": "5e35541fba253de3f5533f86f033261a8fd13ae1d59505d0b8ef39aa7ac47717"
+        "experiments/native-observation-qualification/native_observation.py": "b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c",
+        "experiments/native-review-qualification/OBSERVATION-INTEGRATION-SEAM-20261021.md": "6401bc7764f890a204681599229b33cfd62dbbac3f0cc5914b5afae136c5aea5"
       },
       "parent_version_ids": [
         "ac6348b56df9334e54a09dada382b425bf29d4c6"
       ],
       "source_id": "redteam-harness:native-observation-qualification",
-      "version_id": "9a38db39dfcd6d86ad26fef6e8922d446f325069"
+      "version_id": "dd6ee7fcca37e0643162d74e25fc7712f7d959a4"
     },
-    "manifest_sha256": "d9572671f3ccf9ca930641675cc7f20e18682ff761e0f1eb8a3234d396a6ff3f"
+    "manifest_sha256": "44c5592b9bc54ad9a698d95e1f6fb9a6dfdc8a3f8310ac19347bc275f69f3bdb"
   }
 }

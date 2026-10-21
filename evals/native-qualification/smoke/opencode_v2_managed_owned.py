@@ -47,6 +47,7 @@ DOCKER_RUNTIME = ROOT / 'tools/docker_session_runtime.py'
 CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md'
 LIVE_CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md'
 LIVE_PREPARATION_CHECKS = ROOT / 'evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md'
+REVIEW_CHECKS = ROOT / 'evals/native-qualification/T02-REVIEWER-PACKET-CHECKS-20261021.md'
 MOCK_PHP = HERE / 'opencode_v2_mock_provider.php'
 FIXTURE = (HERE / 'index.php', HERE / 'message.php', HERE / 'check.php')
 LABEL = 'io.lrh.t02-managed-owned'
@@ -81,13 +82,134 @@ CLOUD_OWNED_INPUT_SHA = {CONFIG: '8c63991951ecf580549be2e5cb08ad6746e10adae91f40
 SHELL = ('cat index.php message.php check.php && '
          'sed -i "s/return \'before\';/return \'after\';/" message.php && '
          'php -l index.php && php -l message.php && php -l check.php && '
-         'php check.php && php index.php')
+         'php check.php && php index.php && '
+         "printf 'Harmless local change: message() returns after; php check.php passed.\\n' > research-note.md")
 PHP_CHECKS = ('php -l index.php', 'php -l message.php', 'php -l check.php',
               'php check.php', 'php index.php')
+PACKET_SOURCE_NAMES = ('index.php', 'message.php', 'check.php')
+PACKET_PROMPT = (
+    'Read /handoff/REQUEST.json and verify every listed file and SHA256 before relying on it. '
+    'Inspect CLAIMS.md, RESEARCH.md, all ORIGINAL-* and candidate PHP, RAW-NATIVE-TOOLS.json, '
+    'RAW-APP-CHECKS.json and UNFINISHED.json. The original files use ORIGINAL-* names only in '
+    '/handoff; copy them to a separate scratch directory with their normal PHP names if you replay '
+    'a baseline. Choose and run a material causal or control check using your own tools. State the '
+    'exact check and output, which bases remain valid, contrary evidence, any unsupported dismissal, '
+    'unfinished conditions, assistance, and limits. This is a harmless local PHP exercise; do not '
+    'infer a security finding or an original protected observation from host replay.\n')
 
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def packet_public_bytes(value, capability, forbidden_paths=()):
+    data = value if isinstance(value, bytes) else value.encode()
+    if not 0 < len(data) <= 128 * 1024:
+        raise RuntimeError('review_packet_material_size')
+    try:
+        content = data.decode('utf-8')
+    except UnicodeDecodeError:
+        raise RuntimeError('review_packet_material_encoding') from None
+    encoded_capability = base64.b64encode(('run:' + capability).encode()).decode()
+    if (capability in content or encoded_capability in content
+            or any(path and path in content for path in forbidden_paths)
+            or re.search(r'(?i)(?:/Users/|/private/tmp/|/tmp/|/home/|'
+                         r'/workspace/(?!project(?:/|\b))|/observer/|file://|https?://|'
+                         r'authorization|bearer|cookie|password|secret|credential|'
+                         r'api[_-]?key|local_[0-9a-f]{32}|BEGIN [A-Z ]*PRIVATE KEY)', content)):
+        raise RuntimeError('review_packet_sensitive_material')
+    return data
+
+
+def native_tool_material(stdout):
+    records = []
+    for line_number, line in enumerate(stdout.splitlines(), 1):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            raise RuntimeError('native_tool_stream_invalid') from None
+        if not isinstance(event, dict):
+            raise RuntimeError('native_tool_stream_invalid')
+        part = event.get('part')
+        if not isinstance(part, dict) or part.get('type') != 'tool':
+            continue
+        state = part.get('state')
+        if not isinstance(state, dict) or not isinstance(part.get('tool'), str):
+            raise RuntimeError('native_tool_part_invalid')
+        records.append({'line': line_number, 'session_id': event.get('sessionID'),
+                        'tool': part['tool'], 'status': state.get('status'),
+                        'input': state.get('input'), 'output': state.get('output'),
+                        'error': state.get('error')})
+    if not records:
+        raise RuntimeError('native_tool_evidence_missing')
+    return {'source': 'native JSONL tool parts in observed order', 'records': records,
+            'stream_line_count': len(stdout.splitlines()),
+            'intermediate_source_versions': 'unavailable; baseline and final candidate are separately pinned'}
+
+
+def publish_review_packet(directory, originals, candidate, note, native_stdout, app_checks,
+                          capability, forbidden_paths=(), protected_observation=None):
+    if protected_observation is not None:
+        raise RuntimeError('protected_observation_source_unreviewed')
+    if (directory.is_symlink() or not directory.is_dir() or list(directory.iterdir())
+            or any(not (base / name).is_file() or (base / name).is_symlink()
+                   for base in (originals, candidate) for name in PACKET_SOURCE_NAMES)
+            or note.is_symlink() or not note.is_file()):
+        raise RuntimeError('review_packet_input_invalid')
+    files = {'ORIGINAL-' + name: (originals / name).read_bytes() for name in PACKET_SOURCE_NAMES}
+    files.update({name: (candidate / name).read_bytes() for name in PACKET_SOURCE_NAMES})
+    files['RESEARCH.md'] = note.read_bytes()
+    note_hash = hashlib.sha256(files['RESEARCH.md']).hexdigest()
+    files['CLAIMS.md'] = (
+        '# Harmless local result\n\nThe actual researcher note is RESEARCH.md (SHA256 '
+        + note_hash + '). This operator restatement records the intended local before/after PHP '
+        'exercise only. It is not a security finding or protected original observation.\n').encode()
+    tool_material = native_tool_material(native_stdout)
+    tool_material['source_before_sha256'] = {name: hashlib.sha256(files['ORIGINAL-' + name]).hexdigest()
+                                             for name in PACKET_SOURCE_NAMES}
+    tool_material['source_after_sha256'] = {name: hashlib.sha256(files[name]).hexdigest()
+                                            for name in PACKET_SOURCE_NAMES}
+    files['RAW-NATIVE-TOOLS.json'] = (json.dumps(tool_material, indent=2, sort_keys=True) + '\n').encode()
+    files['RAW-APP-CHECKS.json'] = (json.dumps({
+        'provenance': 'independent host PHP replay; not researcher original observation',
+        'checks': app_checks}, indent=2, sort_keys=True) + '\n').encode()
+    files['UNFINISHED.json'] = (json.dumps({'operator_authored': True, 'items': [{
+        'basis': 'harmless local PHP note and candidate',
+        'uncertain_condition': 'fresh reviewer causal/control check and protected original capture unavailable',
+        'next_check': 'review packet and independently inspect the PHP behavior',
+        'status': 'unreviewed'}]}, indent=2, sort_keys=True) + '\n').encode()
+    files['PROMPT.txt'] = PACKET_PROMPT.encode()
+    files = {name: packet_public_bytes(data, capability, forbidden_paths)
+             for name, data in files.items()}
+    request = {'version': 1, 'kind': 't02-harmless-php-review', 'claim_version': note_hash,
+               'original_observation': {'status': 'unavailable',
+                                        'reason': 'protected_capture_source_unreviewed'},
+               'source_map': {'ORIGINAL-' + name: name for name in PACKET_SOURCE_NAMES},
+               'previous_actual_review': None,
+               'files': {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())}}
+    files['REQUEST.json'] = packet_public_bytes(json.dumps(request, indent=2, sort_keys=True) + '\n',
+                                                 capability, forbidden_paths)
+    identity = (directory.stat().st_dev, directory.stat().st_ino)
+    for name, data in files.items():
+        private_snapshot(directory / name, data)
+        (directory / name).chmod(0o444)
+    directory.chmod(0o555)
+    return {'dev': identity[0], 'ino': identity[1],
+            'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
+
+
+def verify_review_packet(directory, pin):
+    try:
+        info = directory.stat()
+        return (not directory.is_symlink() and (info.st_dev, info.st_ino) ==
+                (pin['dev'], pin['ino']) and info.st_mode & 0o222 == 0
+                and set(path.name for path in directory.iterdir()) == set(pin['files'])
+                and all((directory / name).is_file() and not (directory / name).is_symlink()
+                        and (directory / name).stat().st_mode & 0o222 == 0
+                        and sha(directory / name) == digest
+                        for name, digest in pin['files'].items()))
+    except (OSError, KeyError, TypeError):
+        return False
 
 
 def validated_runtime_ca(args, parser):
@@ -352,6 +474,7 @@ def activate_controls(source_root, relay=RELAY, relay_sha=RELAY_SHA):
     globals().update(DockerRuntimeError=runtime.DockerRuntimeError,
                      _inspect_one=runtime._inspect_one, _is_absent=runtime._is_absent,
                      NativeRun=native.NativeRun, RunStopped=native.RunStopped,
+                     snapshot_native_run=native.snapshot, active_native_run=native.active,
                      dispatch_guard=native.dispatch_guard, request_stop=native.request_stop,
                      binding=producer.binding)
     return {name: str(path.resolve()) for name, path in paths.items()} | {'v2_connect': str(connect_path.resolve())}
@@ -560,7 +683,11 @@ def summarize_native(stage, returncode, stdout, stderr):
 
 
 def summarize_php(argv, returncode, stdout, stderr):
+    if stdout not in ('', 'before\n', 'after\n', 'check passed\n') or \
+            stderr not in ('', 'message() must return after\n'):
+        raise RuntimeError('unexpected_php_output')
     return {'argv': argv, 'exit': returncode,
+            'stdout': stdout, 'stderr': stderr,
             'stdout_class': ('before' if stdout == 'before\n' else
                              'after' if stdout == 'after\n' else
                              'check_passed' if stdout == 'check passed\n' else 'other'),
@@ -666,7 +793,8 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, mode=0o700, exist_ok=False)
     nonce = uuid.uuid4().hex
-    qualification_docs = (LIVE_CHECKS, LIVE_PREPARATION_CHECKS) if live else (CHECKS,)
+    qualification_docs = ((LIVE_CHECKS, LIVE_PREPARATION_CHECKS, REVIEW_CHECKS) if live
+                          else (CHECKS, REVIEW_CHECKS))
     pin_files = (Path(__file__), CONNECT, NATIVE, PRODUCER, DOCKER_RUNTIME, selected['relay'], config,
                  *qualification_docs,
                  MOCK_PHP, OBSERVER / 'server.js', OBSERVER / 'package.json', *FIXTURE)
@@ -701,6 +829,8 @@ def main():
     native = None
     responder = None
     work = None
+    first_native_stdout = None
+    reviewer_native_stdout = None
 
     def save():
         (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -774,6 +904,7 @@ def main():
         return json.loads(result.stdout)
 
     def native_call(identifier, stage, session, prompt):
+        nonlocal first_native_stdout, reviewer_native_stdout
         if responder:
             responder.current_role = stage
         before = ledger_totals() if live else None
@@ -782,6 +913,10 @@ def main():
                         '--format', 'json', '--session', session, prompt, timeout=180)
         if responder:
             responder.current_role = None
+        if stage == 'first':
+            first_native_stdout = result.stdout
+        elif stage == 'reviewer':
+            reviewer_native_stdout = result.stdout
         row = summarize_native(stage, result.returncode, result.stdout, result.stderr)
         if live:
             row['pool_before'] = before
@@ -868,6 +1003,21 @@ def main():
         with sqlite3.connect(output / 'provider/tunnel.sqlite3') as db:
             return {'charged_bytes': db.execute('SELECT bytes FROM pool').fetchone()[0],
                     'tunnels': db.execute('SELECT count(*) FROM tunnels').fetchone()[0]}
+
+    def authority_snapshot():
+        run = snapshot_native_run(output / 'run')
+        with sqlite3.connect(output / 'provider/tunnel.sqlite3') as db:
+            config_text, created, charged = db.execute('SELECT config,created,bytes FROM pool').fetchone()
+            tunnels = db.execute('SELECT count(*) FROM tunnels').fetchone()[0]
+        config_data = json.loads(config_text)
+        return {'run_identity': {key: run[key] for key in
+                                 ('manifest_sha256', 'nonce', 'ids', 'deadline_monotonic', 'created_monotonic')},
+                'pool_config': config_text, 'pool_created': created,
+                'pool_deadline': created + config_data['duration'],
+                'max_connections': config_data['max_connections'],
+                'max_bytes': config_data['max_bytes'],
+                'charged_bytes': charged, 'tunnels': tunnels,
+                'active': active_native_run(output / 'run')}
 
     def settled_surface(identifier):
         server = subprocess.Popen(['docker', 'container', 'exec', '-w', '/workspace/project',
@@ -1024,15 +1174,20 @@ def main():
                 report['tls'] = {'ca_sha256': sha(ca_pem), 'authority': 'opencode.ai:443',
                                  'responder_loopback': True}
             workspace, review = work / 'workspace', work / 'reviewer'
+            baseline_source, handoff = work / 'baseline-source', work / 'handoff'
+            baseline_source.mkdir(mode=0o700)
+            handoff.mkdir(mode=0o700)
+            handoff_identity = (handoff.stat().st_dev, handoff.stat().st_ino)
             for base in (workspace, review):
                 for name in ('home', 'config/opencode', 'data', 'cache', 'state', 'tmp', 'project', 'telemetry'):
                     (base / name).mkdir(parents=True, exist_ok=True)
                 (base / 'config/opencode/opencode.json').touch()
-                for fixture in FIXTURE:
-                    fixture_source = input_source(fixture)
-                    shutil.copy2(fixture_source, base / 'project' / fixture.name)
+            for fixture in FIXTURE:
+                fixture_source = input_source(fixture)
+                shutil.copy2(fixture_source, workspace / 'project' / fixture.name)
+                shutil.copy2(fixture_source, baseline_source / fixture.name)
             original_hashes = {p.name: sha(workspace / 'project' / p.name) for p in FIXTURE}
-            report['baseline'] = host_php(workspace / 'project')
+            report['baseline'] = host_php(baseline_source)
             check('original PHP fails local check and prints before',
                   report['baseline'][0]['exit'] == 0 and report['baseline'][0]['stdout_class'] == 'before'
                   and report['baseline'][0]['stderr_class'] == 'empty'
@@ -1097,6 +1252,8 @@ def main():
                 mounts = ['type=bind,src=' + str(base) + ',dst=/workspace',
                           'type=bind,src=' + str(config_mount) + ',dst=/workspace/config/opencode/opencode.json,readonly',
                           'type=bind,src=' + str(observer_mount) + ',dst=/observer/opencode_v2_request_observer,readonly']
+                if role == 'reviewer':
+                    mounts.append('type=bind,src=' + str(handoff) + ',dst=/handoff,readonly')
                 trust = researcher_trust(live, runtime_ca_snapshot, ca_pem)
                 mounts += trust['mounts']
                 env = [name + '=' + proxy for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')]
@@ -1146,6 +1303,13 @@ def main():
                   and (ready['proxy_info'].get('upstream_transport') == 'http_connect') ==
                       (live and selected['upstream_route'] != 'direct')
                   and ready['ids'] == list(ids))
+            first_authority = authority_snapshot()
+            check('one original NativeRun and CONNECT allowance recorded',
+                  first_authority['run_identity']['nonce'] == nonce
+                  and first_authority['run_identity']['manifest_sha256'] == sha(manifest)
+                  and first_authority['run_identity']['ids'] == list(ids)
+                  and first_authority['active']
+                  and first_authority['tunnels'] == 0 and first_authority['charged_bytes'] == 0)
             with sqlite3.connect(output / 'provider/tunnel.sqlite3') as db:
                 frozen = json.loads(db.execute('SELECT config FROM pool').fetchone()[0])
             check('frozen private peer and upstream mode match launch selection',
@@ -1361,12 +1525,13 @@ def main():
             check('only intended fixture source changed',
                   changed['message.php'] != original_hashes['message.php']
                   and all(changed[n] == original_hashes[n] for n in ('index.php', 'check.php'))
-                  and (set(p.name for p in project_files) ==
-                       {'index.php', 'message.php', 'check.php', 'research-note.md'} if live else True))
+                  and set(p.name for p in project_files) ==
+                      {'index.php', 'message.php', 'check.php', 'research-note.md'})
+            note = workspace / 'project/research-note.md'
+            check('actual harmless research note exists and is bounded',
+                  note.is_file() and not note.is_symlink() and 0 < note.stat().st_size <= 2048)
+            note_text = note.read_text()
             if live:
-                note = workspace / 'project/research-note.md'
-                check('ordinary research note is bounded', note.stat().st_size <= 2048)
-                note_text = note.read_text()
                 check('ordinary research note records local result only',
                       'after' in note_text.lower() and 'check' in note_text.lower() and
                       capability not in note_text and
@@ -1383,19 +1548,63 @@ def main():
                   and all(x['stderr_class'] == 'empty' for x in report['host_after_first'])
                   and all(x['exit'] == 0 for x in report['host_after_first']))
             report['usage_after_first'] = usage(first, first_session)
+            first_usage = all_native_usage(first, 'first')
             if live:
-                first_usage = all_native_usage(first, 'first')
                 check('first native usage pages include primary session',
                       any(x['id'] == first_session for x in first_usage['sessions'])
                       and not any(a['had_error'] for x in first_usage['sessions']
                                   for a in x['assistant_usage']))
+            check('researcher quiescent and reviewer idle before packet publication',
+                  idle_top(docker('container', 'top', first))
+                  and idle_top(docker('container', 'top', reviewer)))
+            packet_pin = publish_review_packet(
+                handoff, baseline_source, workspace / 'project', note, first_native_stdout,
+                {'baseline': {'source_sha256': original_hashes, 'network': 'none',
+                              'image_id': selected['image_id'], 'results': report['baseline']},
+                 'candidate': {'source_sha256': changed, 'network': 'none',
+                               'image_id': selected['image_id'], 'results': report['host_after_first']}},
+                capability, forbidden_paths=(str(ROOT), str(output), str(work)))
+            report['review_packet'] = {'files': packet_pin['files'],
+                'classification': 'fixed observer-selected harmless packet; original protected capture unavailable'}
+            check('fixed packet root and exact bytes frozen before reviewer session',
+                  (packet_pin['dev'], packet_pin['ino']) == handoff_identity
+                  and verify_review_packet(handoff, packet_pin))
+            reviewer_state = inspect('container', reviewer)
+            check('fresh reviewer has only read-only packet and separate empty project',
+                  any(item.get('Source') == str(handoff) and item.get('Destination') == '/handoff'
+                          and item.get('RW') is False for item in reviewer_state['Mounts'])
+                  and not any((review / 'project').iterdir())
+                  and all(item.get('Source') != str(workspace) for item in reviewer_state['Mounts']))
+            review_authority = authority_snapshot()
+            authority_keys = ('run_identity', 'pool_config', 'pool_created', 'pool_deadline',
+                              'max_connections', 'max_bytes')
+            report['review_allowance_before'] = {
+                'pool_config_sha256': hashlib.sha256(review_authority['pool_config'].encode()).hexdigest(),
+                'tunnels': review_authority['tunnels'],
+                'charged_bytes': review_authority['charged_bytes'],
+                'same_original_authority': all(review_authority[k] == first_authority[k]
+                                               for k in authority_keys),
+                'active': review_authority['active']}
+            report['review_status'] = 'unfinished_until_actual_material_review'
+            check('review retains original active run, pool and remaining allowance',
+                  report['review_allowance_before']['same_original_authority']
+                  and review_authority['active'] and time.time() < review_authority['pool_deadline']
+                  and first_authority['tunnels'] <= review_authority['tunnels'] < review_authority['max_connections']
+                  and first_authority['charged_bytes'] <= review_authority['charged_bytes'] < review_authority['max_bytes']
+                  and verify_review_packet(handoff, packet_pin))
+            empty_reviewer = all_native_usage(reviewer, 'pre-review')
+            check('fresh reviewer native store has no prior sessions', not empty_reviewer['sessions'])
             reviewer_session = api(reviewer, 'session.create', '--data', '{"title":"managed reviewer"}')['data']['id']
             report['reviewer_session'] = reviewer_session
+            check('new reviewer session has no old messages',
+                  api(reviewer, 'session.message.list', '--param', 'sessionID=' + reviewer_session,
+                      '--param', 'limit=100').get('data') == []
+                  and verify_review_packet(handoff, packet_pin))
             review_run = native_call(reviewer, 'reviewer', reviewer_session,
-                                     'Review only the stated harmless local result in one sentence. Do not use tools.')
+                                     (handoff / 'PROMPT.txt').read_text())
             report['usage_after_review'] = usage(reviewer, reviewer_session)
+            review_usage = all_native_usage(reviewer, 'reviewer')
             if live:
-                review_usage = all_native_usage(reviewer, 'reviewer')
                 check('reviewer native usage pages include reviewer session',
                       any(x['id'] == reviewer_session for x in review_usage['sessions'])
                       and not any(a['had_error'] for x in review_usage['sessions']
@@ -1407,6 +1616,41 @@ def main():
                   and (review_run['pool_after']['charged_bytes'] > review_run['pool_before']['charged_bytes']
                        if live else any(row['role'] == 'reviewer' and row['path'] == OWNED_PATH
                                         for row in responder.rows)))
+            after_review_authority = authority_snapshot()
+            check('review did not replace pool, reset counters or change frozen packet',
+                  all(after_review_authority[k] == first_authority[k] for k in authority_keys)
+                  and after_review_authority['tunnels'] >= review_authority['tunnels']
+                  and after_review_authority['charged_bytes'] >= review_authority['charged_bytes']
+                  and verify_review_packet(handoff, packet_pin))
+            try:
+                review_tools = native_tool_material(reviewer_native_stdout)
+            except RuntimeError as error:
+                if str(error) != 'native_tool_evidence_missing':
+                    raise
+                review_tools = {'source': 'native reviewer JSONL', 'records': [],
+                                'status': 'no_reviewer_tool_action'}
+            tool_bytes = packet_public_bytes(json.dumps(review_tools, indent=2) + '\n', capability,
+                                             (str(ROOT), str(output), str(work)))
+            private_snapshot(output / 'reviewer-tools.json', tool_bytes)
+            completed = [item for item in review_tools['records'] if item['status'] == 'completed']
+            material_read = any('/handoff/' in json.dumps(item['input'])
+                                and item['tool'] in ('read', 'shell', 'glob', 'grep') for item in completed)
+            material_check = any(item['tool'] == 'shell' and 'php ' in json.dumps(item['input'])
+                                 for item in completed)
+            report['host_after_review'] = host_php(workspace / 'project')
+            report['reviewer_material_work'] = {
+                'packet_read_observed': material_read,
+                'reviewer_selected_php_check_observed': material_check,
+                'independent_candidate_effect_replayed': report['host_after_review'] == report['host_after_first'],
+                'native_tool_evidence_sha256': hashlib.sha256(tool_bytes).hexdigest(),
+                'qualification': ('candidate_for_operator_review' if live and material_read and material_check
+                                  and report['host_after_review'] == report['host_after_first']
+                                  else 'unqualified_owned_synthetic_response' if not live
+                                  else 'unfinished_material_review')}
+            report['review_status'] = report['reviewer_material_work']['qualification']
+            check('candidate source and independent effect stable after reviewer',
+                  report['host_after_review'] == report['host_after_first']
+                  and {p.name: sha(workspace / 'project' / p.name) for p in FIXTURE} == changed)
             check('first producer stopped before exact-session resume',
                   docker('container', 'stop', first).returncode == 0)
             dbpath = workspace / 'data/opencode/opencode.db'

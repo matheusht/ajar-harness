@@ -10,7 +10,7 @@ The image ID was `sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c
 - The preserved Kanboard observer passed `32/32` checks. Both archive hashes were verified before the first arm. Both arms reported the fresh image ID, and the inner Docker baseline was restored.
 - The owned managed workflow passed `80/80` checks across first, reviewer, and resume stages. Its selected boundary reported the same image ID.
 - Provider calls, model calls, live target contacts, external credentials, and engagements were all zero. Live admission remained disabled.
-- Cleanup removed the task image and seven registered build-cache records. It left no unresolved task cache records and restored the byte-identical Docker baseline.
+- The controller cleanup readback recorded removal of the task image and seven registered build-cache records, no unresolved task cache records, and a byte-identical Docker baseline. No separately hashed post-run daemon readback was retained, so independent cleanup verification remains unclaimed.
 
 ## Evidence files
 

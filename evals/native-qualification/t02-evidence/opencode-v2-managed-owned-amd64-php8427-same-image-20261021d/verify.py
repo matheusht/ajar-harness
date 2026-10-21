@@ -22,9 +22,9 @@ SOURCE_COMMIT = "1781eb457b633f9391c89a911ebd3c66c378d3f4"
 BASELINE_SHA256 = "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5"
 
 PUBLIC_FILE_SHA256 = {
-    "README.md": "9cfa2af94c85ef78b422dde6ff2d003eaaa328af0e3b364ff658260dcb5a329d",
+    "README.md": "95e5493faf4333348cbcfe65f07137b0671ad088714c2dc14bd862f5b7f2155d",
     "inputs.json": "d2e7181e0f72e6986c9c1fbea3b4fb60cb324acb66c39b0b33f73eb50e907192",
-    "result.json": "9e91f1d437395c56c956efabd4b48cf3d0e4add8576ce82ac3d12bc8e8c3cbb5",
+    "result.json": "12c040ca3d81572373e89a0a8ce08c867bc74ba8a9533c39ae4890bd73b46cfb",
     "run-command.txt": "ae37848c4fe81ffc19b052a2805eda5d92fc60bec67372b800d6166ae2d8427f",
 }
 
@@ -407,7 +407,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
             "baseline_before_sha256",
             "baseline_after_sha256",
             "baseline_restored",
-            "independent_post_run_readback",
+            "controller_post_cleanup_readback",
         },
         "cleanup",
     )
@@ -418,7 +418,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
     checks.equal(cleanup["baseline_before_sha256"], BASELINE_SHA256, "baseline before")
     checks.equal(cleanup["baseline_after_sha256"], BASELINE_SHA256, "baseline after")
     checks.equal(cleanup["baseline_restored"], True, "outer baseline restored")
-    readback = cleanup["independent_post_run_readback"]
+    readback = cleanup["controller_post_cleanup_readback"]
     exact_keys(checks, readback, {"containers", "images", "volumes", "build_cache_records", "default_networks_unchanged"}, "cleanup readback")
     checks.equal(readback, {"containers": 0, "images": 0, "volumes": 0, "build_cache_records": 0, "default_networks_unchanged": True}, "cleanup readback result")
 
@@ -433,6 +433,7 @@ def validate_result(value: dict[str, Any], checks: Checks) -> None:
             "receiver_qualified",
             "target_qualified",
             "hosted_ci_qualified",
+            "independent_cleanup_readback_verified",
             "default_adoption",
             "issue_165_unblocked",
             "retirement_work_authorized",
@@ -537,6 +538,8 @@ def run_self_tests(inputs: dict[str, Any], result: dict[str, Any]) -> int:
     expect_rejected("live admission", lambda: reject_result(lambda value: value.__setitem__("live_admission_enabled", True)))
     count += 1
     expect_rejected("baseline mismatch", lambda: reject_result(lambda value: value["cleanup"].__setitem__("baseline_after_sha256", "0" * 64)))
+    count += 1
+    expect_rejected("independent cleanup claim", lambda: reject_result(lambda value: value["claim_limits"].__setitem__("independent_cleanup_readback_verified", True)))
     count += 1
 
     changed_inputs = copy.deepcopy(inputs)

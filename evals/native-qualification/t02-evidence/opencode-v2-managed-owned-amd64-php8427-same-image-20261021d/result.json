@@ -70,7 +70,7 @@
     "baseline_before_sha256": "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5",
     "baseline_after_sha256": "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5",
     "baseline_restored": true,
-    "independent_post_run_readback": {
+    "controller_post_cleanup_readback": {
       "containers": 0,
       "images": 0,
       "volumes": 0,
@@ -85,6 +85,7 @@
     "receiver_qualified": false,
     "target_qualified": false,
     "hosted_ci_qualified": false,
+    "independent_cleanup_readback_verified": false,
     "default_adoption": false,
     "issue_165_unblocked": false,
     "retirement_work_authorized": false

@@ -521,11 +521,11 @@ def bind_dispatch(run_root: Path, target: str, dispatch_id: str) -> dict:
 def freeze(run_root: Path, target: str) -> dict:
     """Stop collector after the native owner has stopped the target producer."""
     root = _private_dir(run_root)
+    _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
     plan = _json(root / "plan.json", root)
     _approved_capture(plan)
     _source(root, plan, target)
     _set_docker(plan)
-    _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
     slot = _private_dir(root / "controls/observer" / target)
     ledger_path = slot / "resources.json"
     ledger = _json(ledger_path, root)

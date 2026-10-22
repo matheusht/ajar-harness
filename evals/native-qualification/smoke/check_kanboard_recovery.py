@@ -52,10 +52,11 @@ def make_case(base: Path):
     return root, dispatch_id, db_path, collector, dispatch
 
 
-def arm(root, dispatch_id, collector):
+def arm(root, dispatch_id, collector, *, origin_ingress=False):
     return arm_kanboard_role_grant(root, dispatch_id, s=1, q=2, t=1,
                                    actor_a=2, subject_b=3, researcher_ip='172.30.0.8',
-                                   app_ip='172.30.0.7', collector_db=collector)
+                                   app_ip='172.30.0.7', collector_db=collector,
+                                   origin_ingress=origin_ingress)
 
 
 def projection(role=None):
@@ -88,11 +89,34 @@ def effect(db_path, collector, *, actor=2, source='127.0.0.1', request_id='b' * 
             db.execute('INSERT INTO receipts(peer,payload) VALUES (?,?)', ('172.30.0.7', json.dumps(row)))
 
 
-def one_case(label, mutate=None, expected='hold_unknown'):
+def origin_record(root, dispatch_id, *, broker_id='f' * 32, role='researcher'):
+    controls = root / 'controls'
+    ledger = controls / 'origin/ledger' / role / 'requests.jsonl'
+    ledger.parent.mkdir(parents=True, mode=0o700)
+    row = {'kind': 'native-origin-request-v1', 'role': role, 'target': 'target',
+           'dispatch_id': dispatch_id, 'broker_request_id': broker_id,
+           'run_nonce': 'a' * 32, 'gate_nonce': 'b' * 32,
+           'root_pid': 42, 'root_starttime': 1234, 'sender_uid': 501,
+           'sender_pid': 43, 'sender_starttime': 1235,
+           'ancestry': [{'pid': 43, 'parent': 42, 'starttime': 1235},
+                        {'pid': 42, 'parent': 1, 'starttime': 1234}],
+           'method': 'POST', 'route_sha256': 'c' * 64,
+           'body_sha256': 'd' * 64, 'request_sha256': 'e' * 64,
+           'response_sha256': 'f' * 64}
+    ledger.write_text(json.dumps(row) + '\n')
+    stopped = controls / 'origin/stopped.json'
+    stopped.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    stopped.write_text(json.dumps({'kind': 'native-origin-stopped-v1',
+                                   'native_stop_kind': 'REVOKED',
+                                   'ledger_sha256': {role: hashlib.sha256(ledger.read_bytes()).hexdigest()}}))
+    return ledger, stopped
+
+
+def one_case(label, mutate=None, expected='hold_unknown', *, origin_ingress=False):
     with TemporaryDirectory(prefix='kanboard-recovery-') as temp:
         root, dispatch_id, db_path, collector, dispatch = make_case(Path(temp).resolve())
         before = (db_path.read_bytes(), collector.read_bytes(), dispatch.read_bytes())
-        arm(root, dispatch_id, collector)
+        arm(root, dispatch_id, collector, origin_ingress=origin_ingress)
         assert before == (db_path.read_bytes(), collector.read_bytes(), dispatch.read_bytes()), label + ': arm changed source'
         if mutate:
             mutate(root, dispatch_id, db_path, collector, dispatch)
@@ -140,6 +164,28 @@ def main():
     one_case('missing collector', lambda r, d, p, c, x: c.unlink())
     one_case('changed dispatch', lambda r, d, p, c, x: x.write_text('{"status":"acknowledged"}'))
     one_case('corrupt sidecar', lambda r, d, p, c, x: (r / 'controls/recovery' / (d + '.json')).write_text('{'))
+    def origin_effect(r, d, p, c, x):
+        origin_record(r, d)
+        effect(p, c, broker_peer_ip='127.0.0.1')
+    one_case('origin ingress exact ledger and loopback peer', origin_effect,
+             'effect_observed', origin_ingress=True)
+    one_case('origin ingress app receipt without ledger',
+             lambda r, d, p, c, x: effect(p, c, broker_peer_ip='127.0.0.1'),
+             origin_ingress=True)
+    def origin_mismatch(r, d, p, c, x):
+        origin_record(r, d, broker_id='e' * 32)
+        effect(p, c, broker_peer_ip='127.0.0.1')
+    one_case('origin ingress mismatched broker ID', origin_mismatch, origin_ingress=True)
+    def origin_wrong_role(r, d, p, c, x):
+        origin_record(r, d, role='resume')
+        effect(p, c, broker_peer_ip='127.0.0.1')
+    one_case('origin ingress wrong role ledger', origin_wrong_role, origin_ingress=True)
+    def origin_changed_ledger(r, d, p, c, x):
+        ledger, _ = origin_record(r, d)
+        ledger.write_text(ledger.read_text() + '{}\n')
+        effect(p, c, broker_peer_ip='127.0.0.1')
+    one_case('origin ingress ledger changed after stop', origin_changed_ledger,
+             origin_ingress=True)
     with TemporaryDirectory(prefix='kanboard-recovery-') as temp:
         root, dispatch_id, db_path, collector, dispatch = make_case(Path(temp).resolve())
         with closing(sqlite3.connect(db_path)) as db, db:
@@ -152,7 +198,7 @@ def main():
             raise AssertionError('preexisting B-Q role accepted')
         assert not (root / 'controls/recovery' / (dispatch_id + '.json')).exists()
         print('PASS preexisting role rejects before dispatch')
-    print('PASS 20 offline checks; zero model, provider, Docker or application calls')
+    print('PASS 25 offline checks; zero model, provider, Docker or application calls')
 
 
 if __name__ == '__main__':

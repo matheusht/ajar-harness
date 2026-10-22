@@ -231,7 +231,8 @@ def _write_once(path: Path, value: dict):
 
 def arm_kanboard_role_grant(run_root: Path, dispatch_id: str, *, s: int, q: int, t: int,
                              actor_a: int, subject_b: int, researcher_ip: str,
-                             app_ip: str, collector_db: Path) -> dict:
+                             app_ip: str, collector_db: Path,
+                             origin_ingress: bool = False) -> dict:
     """Durably bind one S10 B-Q role-grant observation before native dispatch."""
     root = _root(run_root)
     dispatch_id = _dispatch_id(dispatch_id)
@@ -272,9 +273,12 @@ def arm_kanboard_role_grant(run_root: Path, dispatch_id: str, *, s: int, q: int,
             os.fsync(directory)
         finally:
             os.close(directory)
+    if type(origin_ingress) is not bool:
+        _fail('origin_mode_invalid')
     record = {
         'kind': KIND, 'dispatch_id': dispatch_id, 'dispatch_sha256': _sha(dispatch),
         'ids': ids, 'researcher_ip': research_ip, 'app_ip': application_ip,
+        'origin_ingress': origin_ingress,
         'target_db_identity': _identity(target_db), 'collector_identity': _identity(collector),
         'collector_relative': str(collector.relative_to(controls)),
         'controller_sha256': _sha(controller), 'baseline': baseline,
@@ -297,6 +301,46 @@ def _valid_state(value: object) -> bool:
         and value['b_q_role'] in (None, 'project-manager', 'project-member', 'project-viewer'))
 
 
+def _origin_ledger_matches(root: Path, dispatch_id: str, broker_id: str, role: str) -> bool:
+    """Read only the stopped ingress record; no model-authored text is evidence."""
+    if role not in ('researcher', 'resume'):
+        return False
+    controls = root / 'controls'
+    try:
+        stopped = _json_file(controls / 'origin/stopped.json', root)
+        ledger = _regular(controls / 'origin/ledger' / role / 'requests.jsonl', root)
+        if (stopped.get('kind') != 'native-origin-stopped-v1'
+                or stopped.get('native_stop_kind') != 'REVOKED'
+                or stopped.get('ledger_sha256', {}).get(role) != _sha(ledger)
+                or ledger.stat().st_size > 16 * 1024 * 1024):
+            return False
+        rows = []
+        for line in ledger.read_bytes().splitlines():
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                return False
+            if row.get('dispatch_id') == dispatch_id:
+                rows.append(row)
+        if len(rows) != 1:
+            return False
+        row = rows[0]
+        ancestry = row.get('ancestry')
+        return (row.get('kind') == 'native-origin-request-v1'
+                and row.get('role') == role and row.get('target') == 'target'
+                and row.get('broker_request_id') == broker_id
+                and row.get('method') == 'POST'
+                and isinstance(ancestry, list) and 1 <= len(ancestry) <= 64
+                and ancestry[0].get('pid') == row.get('sender_pid')
+                and ancestry[0].get('starttime') == row.get('sender_starttime')
+                and ancestry[-1].get('pid') == row.get('root_pid')
+                and ancestry[-1].get('starttime') == row.get('root_starttime')
+                and all(isinstance(row.get(key), str) and HEX64.fullmatch(row[key])
+                        for key in ('route_sha256', 'body_sha256', 'request_sha256',
+                                    'response_sha256')))
+    except (RecoveryError, OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
 def _reconcile(root: Path, dispatch_id: str) -> dict:
     sidecar = _json_file(root / 'controls/recovery' / (dispatch_id + '.json'), root)
     if (sidecar.get('kind') != KIND or sidecar.get('dispatch_id') != dispatch_id
@@ -306,6 +350,7 @@ def _reconcile(root: Path, dispatch_id: str) -> dict:
             or not _valid_state(sidecar.get('baseline'))
             or sidecar['baseline']['b_q_role'] is not None
             or not isinstance(sidecar.get('dispatch_sha256'), str)
+            or type(sidecar.get('origin_ingress', False)) is not bool
             or not HEX64.fullmatch(sidecar['dispatch_sha256'])):
         _fail('recovery_record_invalid')
     dispatch = _dispatch(root, dispatch_id)
@@ -348,7 +393,9 @@ def _reconcile(root: Path, dispatch_id: str) -> dict:
             or new[0][1] != sidecar.get('app_ip')
             or receipt.get('kind') != 'web_add' or receipt.get('method') != 'POST'
             or receipt.get('remote_addr') != '127.0.0.1'
-            or receipt.get('broker_peer_ip') != sidecar.get('researcher_ip')
+            or receipt.get('broker_peer_ip') != (
+                '127.0.0.1' if sidecar.get('origin_ingress', False)
+                else sidecar.get('researcher_ip'))
             or receipt.get('broker_handle') != 'A'
             or not isinstance(receipt.get('broker_request_id'), str)
             or not HEX32.fullmatch(receipt['broker_request_id'])
@@ -365,6 +412,9 @@ def _reconcile(root: Path, dispatch_id: str) -> dict:
             or not isinstance(receipt.get('request_id'), str)
             or not HEX24.fullmatch(receipt['request_id'])):
         _fail('effect_observation_ambiguous')
+    if sidecar.get('origin_ingress', False) and not _origin_ledger_matches(
+            root, dispatch_id, receipt['broker_request_id'], _json_file(dispatch, root).get('role')):
+        _fail('origin_ingress_record_unavailable')
     after, same_rowid = _target(root, ids)
     if after != state or same_rowid != rowid or _receipts(collector, root) != rows:
         _fail('observation_changed_during_read')

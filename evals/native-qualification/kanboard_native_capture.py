@@ -595,7 +595,9 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
                       mount.get("RW") is False,
                       "capture_producer_observer_access")
     env = dict(item.split("=", 1) for item in app.get("Config", {}).get("Env", []) if "=" in item)
-    expected = ({"DB_FILENAME": "/target/data/db.sqlite"} if case == "t01" else
+    origin_ingress = isinstance(plan.get("native_origin"), dict)
+    expected = ({"DB_FILENAME": "/target/data/db.sqlite",
+                 **({"LRH_ORIGIN_INGRESS": "1"} if origin_ingress else {})} if case == "t01" else
                 {"NATIVE_EFFECT_COLLECTOR": "http://kanboard-effect-collector:8765/receipt.php",
                  "NATIVE_EFFECT_SOURCE_DIR": "/target", "NATIVE_EFFECT_S": str(stage_record["ids"]["s"]),
                  "NATIVE_EFFECT_Q": str(stage_record["ids"]["q"]),
@@ -605,9 +607,11 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
     command = (app.get("Config", {}).get("Entrypoint") or []) + (app.get("Config", {}).get("Cmd") or [])
     expected_command = ["php", "/observer/broker.php", str(plan["target_port"]), "/target",
                         "http://kanboard-effect-collector:8765/receipt.php"]
+    listener = "127.0.0.1" if origin_ingress else "0.0.0.0"
     _need(all(env.get(key) == value for key, value in expected.items()) and
           (command == expected_command if case == "t01" else
-           "auto_prepend_file=/observer/effect.php" in command) and
+           "auto_prepend_file=/observer/effect.php" in command and
+           ("broker.php " + listener + ":" + str(plan["target_port"])) in command) and
           dict(item.split("=", 1) for item in collector.get("Config", {}).get("Env", [])
                if "=" in item).get("EXPECTED_APP_IP") == app_ip,
           "capture_hook_or_collector_not_loaded")
@@ -699,10 +703,11 @@ def close_dispatch(run_root: Path, target: str, dispatch_id: str,
             record = json.loads(payload)
         except (UnicodeError, ValueError) as error:
             raise CaptureHold("t01_receipt_invalid") from error
+        broker_peer = "127.0.0.1" if isinstance(_json(root / "plan.json", root).get("native_origin"), dict) else topology["native_client_ip"]
         _need(peer == topology["app_observer_ip"] and
               isinstance(record, dict) and
               record.get("kind") == "t01-kanboard-jsonrpc-v1" and
-              record.get("peer_ip") == topology["native_client_ip"] and
+              record.get("peer_ip") == broker_peer and
               isinstance(record.get("request_id"), str) and
               re.fullmatch(r"[0-9a-f]{32}", record["request_id"]),
               "t01_receipt_origin_invalid")

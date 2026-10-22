@@ -415,7 +415,8 @@ function t01_main($argv)
             'actor_ids' => $ids, 'admin_default_revoked' => true,
             'project_count' => 0, 'swimlane_count' => 0,
             'db_sha256' => hash_file('sha256', $source.'/data/db.sqlite')]);
-        $listener = @stream_socket_server('tcp://0.0.0.0:'.$argv[1], $error, $message);
+        $listenHost = getenv('LRH_ORIGIN_INGRESS') === '1' ? '127.0.0.1' : '0.0.0.0';
+        $listener = @stream_socket_server('tcp://'.$listenHost.':'.$argv[1], $error, $message);
         t01_need(is_resource($listener), 'broker_bind_failed');
         while (($peer = @stream_socket_accept($listener, -1)) !== false) {
             try {

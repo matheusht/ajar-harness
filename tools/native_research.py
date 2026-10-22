@@ -43,10 +43,10 @@ CONTROL_SHA = {
     'experiments/native-review-qualification/fresh_review.py': 'ee5875bb5585aa80bf4a30291a1c7b5a4cfe0d317bebb774e4aee1e9e4763e42',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
     'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
-    'tools/native_effect_recovery.py': '789b8fe02f67251a2a9bca4c60f40a779e79d2f8917be7d0efea3093d27f592e',
+    'tools/native_effect_recovery.py': 'a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'bdb17a3cc172d79a15b7b359f43c77bb236b8e19ec245714b5cdef8ebc27c1e7',
+    'evals/native-qualification/kanboard_native_capture.py': 'c706ab0762d2819a7bd7e618e992551a206a6d98d31f4033bdff41da81d1d366',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': '5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5',
     'evals/native-qualification/smoke/kanboard_role_broker.php': '2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d',
@@ -54,14 +54,21 @@ CAPTURE_FILES = {
 CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
 CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
 T01_CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'bdb17a3cc172d79a15b7b359f43c77bb236b8e19ec245714b5cdef8ebc27c1e7',
-    'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '90ee251646538baf04be560185363c38fad4e1157aa1d0a2e217bef30d001517',
+    'evals/native-qualification/kanboard_native_capture.py': 'c706ab0762d2819a7bd7e618e992551a206a6d98d31f4033bdff41da81d1d366',
+    'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '84854db4eac14538200852a58d22e1cd0eaffc3f6fdd47603864ea3fa5f893e6',
     'evals/native-qualification/smoke/t01_receipt_collector.php': '21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c',
 }
 T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
 T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'
 T01_BRIEF_SHA = 'cfa72ecb1279d292cd915c4c8b7c9405095405e422d1bf96e211db809b139c95'
 CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
+ORIGIN_ROLES = {'researcher': 'target', 'resume': 'target',
+                'reviewer-1': 'review-target-1', 'reviewer-2': 'review-target-2'}
+ORIGIN_SOURCE_FILES = {
+    'tools/native_origin/protocol.go': '17b99d8fb6e243470f6a58f1ba0cb931a8f5fff5d8301eaaf4544284061ccf19',
+    'tools/native_origin/main_linux.go': '048126cae823ac48fe0684fe569d51c814a5ea82fc7c673692c6acbc96a02be5',
+}
+ORIGIN_GO_VERSION = 'go1.26.4'
 MODEL = 'opencode/deepseek-v4.1-flash-free'
 PROVIDER_ROUTE = 'opencode-keyless-free'
 AUTHORITY = 'opencode.ai:443'
@@ -440,6 +447,31 @@ def _capture_mode(plan: dict) -> str | None:
     return 't01' if 't01_capture' in plan else ('s10' if 'kanboard_capture' in plan else None)
 
 
+def _origin_enabled(plan: dict) -> bool:
+    return isinstance(plan.get('native_origin'), dict) and _capture_mode(plan) is not None
+
+
+def _origin_binary(root: Path, plan: dict) -> Path:
+    if not _origin_enabled(plan):
+        _fail('native_origin_not_configured')
+    pin = plan['native_origin']
+    binary = _file(_controls(root) / 'origin/bin/native-origin', private=True)
+    header = binary.read_bytes()[:20]
+    machine = {'linux/amd64': 62, 'linux/arm64': 183}[plan['platform']]
+    if (pin.get('kind') != 'native-origin-build-v1'
+            or pin.get('go_version') != ORIGIN_GO_VERSION
+            or pin.get('source_sha256') != ORIGIN_SOURCE_FILES
+            or pin.get('binary_sha256') != _sha(binary)
+            or len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
+            or int.from_bytes(header[18:20], 'little') != machine
+            or binary.stat().st_mode & 0o022 or not binary.stat().st_mode & 0o111):
+        _fail('native_origin_binary_pin_mismatch')
+    for relative, digest in ORIGIN_SOURCE_FILES.items():
+        if _sha(_file(_controls(root) / relative, private=True)) != digest:
+            _fail('native_origin_source_pin_mismatch')
+    return binary
+
+
 def _capture_pins(case: str = 's10') -> dict[str, str]:
     if case == 't01':
         return {'adapter_sha256': T01_CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py'],
@@ -541,7 +573,8 @@ def _arm_kanboard_role_grant(root: Path, dispatch_id: str, role: str) -> dict:
     result = module.arm_kanboard_role_grant(
         root, dispatch_id, s=ids['s'], q=ids['q'], t=ids['t'], actor_a=managers[0][0],
         subject_b=ids['b'], researcher_ip=topology['native_client_ip'],
-        app_ip=topology['app_observer_ip'], collector_db=Path(topology['collector_db']))
+        app_ip=topology['app_observer_ip'], collector_db=Path(topology['collector_db']),
+        origin_ingress=_origin_enabled(_plan(root)))
     sidecar = _read_json(_controls(root) / 'recovery' / (dispatch_id + '.json'))
     if (sidecar.get('collector_max_id') != window.get('collector_max_id_before')
             or sidecar.get('collector_prefix_count') != window.get('collector_count_before')
@@ -604,8 +637,28 @@ def prepare(args: argparse.Namespace) -> dict:
     source_inventory = _inventory(source)
     capture = bool(getattr(args, 'kanboard_capture', False))
     t01_capture = bool(getattr(args, 't01_capture', False))
+    origin_ingress = bool(getattr(args, 'origin_ingress', False))
     if capture and t01_capture:
         _fail('capture_modes_conflict')
+    if origin_ingress and not (capture or t01_capture):
+        _fail('native_origin_requires_capture')
+    go_binary = None
+    if origin_ingress:
+        for relative, digest in ORIGIN_SOURCE_FILES.items():
+            if _sha(ROOT / relative) != digest:
+                _fail('native_origin_source_pin_mismatch')
+        found = shutil.which('go')
+        if not found:
+            _fail('native_origin_go_unavailable')
+        go_binary = Path(found).resolve(strict=True)
+        if go_binary.stat().st_mode & 0o022:
+            _fail('native_origin_go_writable')
+        version = subprocess.run([str(go_binary), 'version'], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 timeout=10, check=False)
+        if version.returncode or not version.stdout.decode(errors='replace').startswith(
+                'go version ' + ORIGIN_GO_VERSION + ' '):
+            _fail('native_origin_go_version_mismatch')
     if capture:
         manifest = hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest()
         if (manifest != CAPTURE_SOURCE_SHA or
@@ -658,14 +711,50 @@ def prepare(args: argparse.Namespace) -> dict:
         controls.mkdir(mode=0o700)
         (controls / 'dispatch').mkdir(mode=0o700)
         capture_files = CAPTURE_FILES if capture else (T01_CAPTURE_FILES if t01_capture else {})
-        for relative in (*CONTROL_SHA, *capture_files):
+        for relative in (*CONTROL_SHA, *capture_files, *(ORIGIN_SOURCE_FILES if origin_ingress else {})):
             destination = controls / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
-            if relative in capture_files:
+            if relative in capture_files or relative in ORIGIN_SOURCE_FILES:
                 destination.chmod(0o600)
-            if _sha(destination) != (CONTROL_SHA | capture_files)[relative]:
+            if _sha(destination) != (CONTROL_SHA | capture_files |
+                                     (ORIGIN_SOURCE_FILES if origin_ingress else {}))[relative]:
                 _fail('archived_control_pin_mismatch')
+        origin_build = None
+        if origin_ingress:
+            for role in ORIGIN_ROLES:
+                (controls / 'origin/socket' / role).mkdir(parents=True, mode=0o700)
+                (controls / 'origin/ledger' / role).mkdir(parents=True, mode=0o700)
+            (controls / 'origin/arms').mkdir(parents=True, mode=0o700)
+            (controls / 'origin/registrations').mkdir(parents=True, mode=0o700)
+            (controls / 'origin/proofs').mkdir(parents=True, mode=0o700)
+            (controls / 'origin/window-close').mkdir(parents=True, mode=0o700)
+            binary = controls / 'origin/bin/native-origin'
+            binary.parent.mkdir(parents=True, mode=0o700)
+            build_env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+                         'HOME': os.environ.get('HOME', str(root)),
+                         'GO111MODULE': 'off', 'GOTOOLCHAIN': 'local',
+                         'CGO_ENABLED': '0', 'GOOS': 'linux',
+                         'GOARCH': args.platform.split('/')[1], 'GOPROXY': 'off',
+                         'GOSUMDB': 'off', 'GOFLAGS': '', 'GOWORK': 'off'}
+            built = subprocess.run([str(go_binary), 'build', '-trimpath', '-buildvcs=false',
+                                    '-ldflags=-buildid=', '-o', str(binary),
+                                    *(str(controls / name) for name in ORIGIN_SOURCE_FILES)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, env=build_env, timeout=120, check=False)
+            if built.returncode or not binary.exists():
+                _fail('native_origin_build_failed')
+            binary.chmod(0o700)
+            header = binary.open('rb').read(20)
+            machine = {'linux/amd64': 62, 'linux/arm64': 183}[args.platform]
+            if (len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
+                    or int.from_bytes(header[18:20], 'little') != machine):
+                _fail('native_origin_build_platform_mismatch')
+            origin_build = {'kind': 'native-origin-build-v1',
+                            'go_version': ORIGIN_GO_VERSION,
+                            'go_binary_sha256': _sha(go_binary),
+                            'source_sha256': ORIGIN_SOURCE_FILES,
+                            'binary_sha256': _sha(binary)}
         for source_path, name in ((relay, 'relay'), (ca, 'runtime-ca.pem'),
                                   (scope, 'scope.md'), (brief, 'BRIEF.md'),
                                   (Path(args.target_command), 'target-command.json')):
@@ -700,6 +789,8 @@ def prepare(args: argparse.Namespace) -> dict:
             plan['kanboard_capture'] = _capture_pins()
         if t01_capture:
             plan['t01_capture'] = _capture_pins('t01')
+        if origin_build is not None:
+            plan['native_origin'] = origin_build
         _write_json(root / 'plan.json', plan, once=True)
         return {'status': 'prepared_provider_free', 'run_root': str(root),
                 'plan_sha256': _sha(root / 'plan.json'), 'source_files': len(source_inventory),
@@ -775,6 +866,10 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     for relative, digest in CONTROL_SHA.items():
         if _sha(controls / relative) != digest:
             _fail('archived_control_pin_mismatch')
+    if 'native_origin' in plan:
+        if _capture_mode(plan) is None:
+            _fail('native_origin_capture_missing')
+        _origin_binary(root, plan)
     if 'kanboard_capture' in plan:
         if plan['kanboard_capture'] != _capture_pins():
             _fail('capture_plan_pin_mismatch')
@@ -1060,10 +1155,26 @@ def _research_environment(root: Path, base: str, relay_ip: str, target_ip: str,
 
 def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> None:
     info = {
-        'url': f'http://{target_ip}:{plan["target_port"]}',
+        'url': ('unix:///origin/socket/ingress.sock' if _origin_enabled(plan) else
+                f'http://{target_ip}:{plan["target_port"]}'),
         'source_manifest_sha256': plan['source_manifest_sha256'],
         'role': role,
     }
+    if _origin_enabled(plan):
+        info['native_origin_route'] = {
+            'binary': '/origin/bin/native-origin',
+            'actor_handles': ['A', 'B'] if 't01_capture' in plan else ['A', 'B', 'C'],
+            'tcp_port_is_target_loopback_only': True,
+        }
+        if 'kanboard_capture' in plan:
+            info['native_origin_route']['get'] = '/origin/bin/native-origin request A GET /'
+            info['native_origin_route']['post'] = (
+                'printf FORM | /origin/bin/native-origin request A POST PATH '
+                'application/x-www-form-urlencoded')
+        else:
+            info['native_origin_route']['post'] = (
+                'printf BODY | /origin/bin/native-origin request A POST '
+                '/jsonrpc.php application/json')
     if 'kanboard_capture' in plan:
         info['synthetic_actor_route'] = {
             'header': 'X-Native-Actor', 'handles': ['A', 'B', 'C'],
@@ -1172,7 +1283,8 @@ def _capture_specs(root: Path, plan: dict, command: list[str], *, materialize: b
                     or stage['broker_sha256'] != _capture_pins('t01')['broker_sha256']):
                 _fail('t01_capture_stage_changed')
             specs[target] = ([_mount(slot / 'broker.php', '/observer/broker.php', readonly=True)],
-                             ['DB_FILENAME=/target/data/db.sqlite'],
+                             ['DB_FILENAME=/target/data/db.sqlite',
+                              *(['LRH_ORIGIN_INGRESS=1'] if _origin_enabled(plan) else [])],
                              ['php', '/observer/broker.php', str(plan['target_port']), '/target',
                               'http://kanboard-effect-collector:8765/receipt.php'])
         return specs, {}
@@ -1241,9 +1353,10 @@ def _capture_specs(root: Path, plan: dict, command: list[str], *, materialize: b
         listen_port = plan['target_port']
         if listen_port == 18081:
             _fail('capture_target_port_conflict')
+        listen_host = '127.0.0.1' if _origin_enabled(plan) else '0.0.0.0'
         app_command = ('php -d auto_prepend_file=/observer/effect.php -S 127.0.0.1:18081 '
                        '-t /target >/dev/null 2>&1 & '
-                       'exec php /observer/broker.php 0.0.0.0:' + str(listen_port) +
+                       'exec php /observer/broker.php ' + listen_host + ':' + str(listen_port) +
                        ' /observer/actors.json 127.0.0.1:18081')
         specs[target] = (mounts, environment, ['sh', '-c', app_command])
     return specs, db_pins
@@ -1330,6 +1443,9 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         mounts = [_mount(base, '/workspace'),
                   _mount(controls / 'opencode.json', '/workspace/config/opencode/opencode.json', readonly=True),
                   _mount(controls / 'runtime-ca.pem', '/runtime-ca.pem', readonly=True)]
+        if _origin_enabled(plan):
+            mounts.extend([_mount(_origin_binary(root, plan), '/origin/bin/native-origin', readonly=True),
+                           _mount(controls / 'origin/socket' / role, '/origin/socket', readonly=True)])
         if role in ('reviewer-1', 'reviewer-2'):
             mounts.append(_mount(root / 'handoff' / role, '/handoff', readonly=True))
             mounts.append(_mount(root / 'original', '/workspace/original', readonly=True))
@@ -1375,6 +1491,219 @@ def _capture_stop(root: Path, plan: dict, native_status: str) -> dict:
         else:
             _fail('capture_native_stop_unverified')
     return {'status': 'complete', 'targets': results}
+
+
+def _origin_resources_path(root: Path) -> Path:
+    return _controls(root) / 'origin/resources.json'
+
+
+def _origin_resolve_row(root: Path, record: dict, row: dict, *, allow_absent: bool = False) -> str | None:
+    """Resolve a create interrupted before its exact ID was sealed."""
+    identifier = row.get('id')
+    if identifier is None:
+        name = row.get('name')
+        listing = _docker('container', 'ls', '-a', '--no-trunc',
+                          '--filter', 'name=^/' + name + '$', '--format', '{{.ID}}')
+        matches = listing.stdout.decode().splitlines()
+        if not matches:
+            return None
+        if len(matches) != 1 or not HEX_RE.fullmatch(matches[0]):
+            _fail('native_origin_resource_ambiguous')
+        identifier = matches[0]
+        row['id'] = identifier
+        _write_json(_origin_resources_path(root), record)
+    if not isinstance(identifier, str) or not HEX_RE.fullmatch(identifier):
+        _fail('native_origin_resource_invalid')
+    if allow_absent:
+        listed = _docker('container', 'ls', '-a', '--no-trunc',
+                         '--filter', 'id=' + identifier, '--format', '{{.ID}}')
+        if listed.stdout.strip() == b'':
+            return None
+        if listed.stdout.decode().strip() != identifier:
+            _fail('native_origin_resource_ambiguous')
+    info = _inspect('container', identifier)
+    if (info.get('Id') != identifier or info.get('Name') != '/' + row['name']
+            or info.get('Config', {}).get('Labels', {}).get(LABEL) != record['nonce']
+            or info.get('Config', {}).get('Labels', {}).get('io.lrh.native-origin') != row['role']):
+        _fail('native_origin_resource_owner_changed')
+    return identifier
+
+
+def _origin_start(root: Path, plan: dict, nonce: str, bindings: dict) -> dict:
+    if not _origin_enabled(plan):
+        return {'status': 'not_configured'}
+    binary = _origin_binary(root, plan)
+    controls = _controls(root)
+    rows = [{'role': role, 'target': target,
+             'name': 'lrh-origin-' + nonce[:12] + '-' + role, 'id': None}
+            for role, target in ORIGIN_ROLES.items()]
+    ledger = {'kind': 'native-origin-resources-v1', 'nonce': nonce,
+              'status': 'creating', 'resources': rows,
+              'producer_manifest_sha256': _sha(controls / 'producer-manifest.json')}
+    _write_json(_origin_resources_path(root), ledger, once=True)
+    for row in rows:
+        role, target = row['role'], row['target']
+        agent_id, target_id = bindings[role], bindings[target]
+        for identifier, image in ((agent_id, plan['image_id']), (target_id, plan['target_image_id'])):
+            inspected = _inspect('container', identifier)
+            if (inspected.get('Id') != identifier or inspected.get('Image') != image
+                    or inspected.get('State', {}).get('Running') is not True
+                    or inspected.get('Config', {}).get('Labels', {}).get(LABEL) != nonce):
+                _fail('native_origin_namespace_owner_invalid')
+        mounts = [_mount(binary, '/origin/bin/native-origin', readonly=True),
+                  _mount(controls / 'origin/socket' / role, '/origin/socket'),
+                  _mount(controls / 'origin/ledger' / role, '/origin/ledger'),
+                  _mount(controls / 'origin/arms', '/origin/arms', readonly=True)]
+        command = ['/origin/bin/native-origin', 'ingress', role, target,
+                   str(plan['target_port']), '/origin/socket', '/origin/ledger',
+                   '/origin/arms', str(os.getuid())]
+        arguments = ['container', 'create', '--name', row['name'], '--pull', 'never',
+                     '--platform', plan['platform'], '--network', 'container:' + target_id,
+                     '--pid', 'container:' + agent_id, '--read-only', '--restart', 'no',
+                     '--log-driver', 'none', '--cap-drop', 'ALL',
+                     '--security-opt', 'no-new-privileges=true',
+                     '--user', f'{os.getuid()}:{os.getgid()}',
+                     '--memory', '256m', '--cpus', '0.5', '--pids-limit', '32',
+                     '--label', LABEL + '=' + nonce,
+                     '--label', 'io.lrh.native-origin=' + role,
+                     '--env', 'LRH_RUN_NONCE=' + nonce]
+        for mount in mounts:
+            arguments += ['--mount', mount]
+        arguments += ['--entrypoint', command[0], plan['image_id'], *command[1:]]
+        identifier = _docker(*arguments).stdout.decode().strip()
+        if not HEX_RE.fullmatch(identifier):
+            _fail('native_origin_create_id_invalid')
+        row['id'] = identifier
+        _write_json(_origin_resources_path(root), ledger)
+        info = _inspect('container', identifier)
+        host = info.get('HostConfig', {})
+        actual_mounts = {(item.get('Source'), item.get('Destination'), item.get('RW'))
+                         for item in info.get('Mounts', [])}
+        expected_mounts = {(str(binary), '/origin/bin/native-origin', False),
+                           (str(controls / 'origin/socket' / role), '/origin/socket', True),
+                           (str(controls / 'origin/ledger' / role), '/origin/ledger', True),
+                           (str(controls / 'origin/arms'), '/origin/arms', False)}
+        if (info.get('Id') != identifier or info.get('Image') != plan['image_id']
+                or info.get('State', {}).get('Status') != 'created'
+                or info.get('Name') != '/' + row['name']
+                or host.get('NetworkMode') != 'container:' + target_id
+                or host.get('PidMode') != 'container:' + agent_id
+                or host.get('ReadonlyRootfs') is not True
+                or host.get('Privileged') is not False
+                or host.get('CapDrop') != ['ALL']
+                or 'no-new-privileges=true' not in host.get('SecurityOpt', [])
+                or actual_mounts != expected_mounts
+                or info.get('Config', {}).get('Labels', {}).get(LABEL) != nonce):
+            _fail('native_origin_container_topology_invalid')
+        _docker('container', 'start', identifier)
+        running = _inspect('container', identifier)
+        socket_path = controls / 'origin/socket' / role / 'ingress.sock'
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not socket_path.exists():
+            time.sleep(.05)
+        if (running.get('State', {}).get('Running') is not True
+                or not socket_path.exists() or not stat.S_ISSOCK(socket_path.stat().st_mode)
+                or socket_path.stat().st_uid != os.getuid()
+                or socket_path.stat().st_mode & 0o077):
+            _fail('native_origin_socket_unavailable')
+    ledger['status'] = 'active'
+    _write_json(_origin_resources_path(root), ledger)
+    return {'status': 'active', 'roles': list(ORIGIN_ROLES),
+            'resource_ledger_sha256': _sha(_origin_resources_path(root))}
+
+
+def _origin_stop(root: Path, plan: dict, native_status: str) -> dict:
+    if not _origin_enabled(plan):
+        return {'status': 'not_configured'}
+    path = _origin_resources_path(root)
+    if not path.exists():
+        return {'status': 'not_started'}
+    if native_status not in ('stopped', 'closed_before_activation', 'not_started'):
+        _fail('native_origin_native_stop_unverified')
+    record = _read_json(path)
+    if (record.get('kind') != 'native-origin-resources-v1'
+            or record.get('producer_manifest_sha256') != _sha(_controls(root) / 'producer-manifest.json')
+            or [row.get('role') for row in record.get('resources', [])] != list(ORIGIN_ROLES)):
+        _fail('native_origin_resource_ledger_invalid')
+    stopped = []
+    for row in record['resources']:
+        identifier = _origin_resolve_row(root, record, row)
+        if identifier is None:
+            stopped.append({'role': row['role'], 'id': None, 'status': 'absent'})
+            continue
+        info = _inspect('container', identifier)
+        if info.get('State', {}).get('Running') is True:
+            _docker('container', 'stop', '--time', '10', identifier)
+        info = _inspect('container', identifier)
+        if info.get('State', {}).get('Status') not in ('exited', 'dead', 'created'):
+            _fail('native_origin_container_stop_unknown')
+        stopped.append({'role': row['role'], 'id': identifier,
+                        'status': info['State']['Status']})
+    ledger_hashes = {}
+    for role in ORIGIN_ROLES:
+        file = _controls(root) / 'origin/ledger' / role / 'requests.jsonl'
+        ledger_hashes[role] = _sha(file) if file.exists() else None
+    stop_kind = {'stopped': 'REVOKED', 'closed_before_activation': 'STARTUP_CLOSED',
+                 'not_started': 'NOT_STARTED'}[native_status]
+    stop_path = _controls(root) / 'native-state' / stop_kind
+    if stop_kind != 'NOT_STARTED' and not stop_path.exists():
+        _fail('native_origin_native_stop_unverified')
+    receipt = {'kind': 'native-origin-stopped-v1', 'nonce': record['nonce'],
+               'native_stop_kind': stop_kind,
+               'native_stop_sha256': _sha(stop_path) if stop_kind != 'NOT_STARTED' else None,
+               'producer_manifest_sha256': record['producer_manifest_sha256'],
+               'containers': stopped, 'ledger_sha256': ledger_hashes}
+    output = _controls(root) / 'origin/stopped.json'
+    if output.exists():
+        if _read_json(output) != receipt:
+            _fail('native_origin_stop_receipt_changed')
+    else:
+        _write_json(output, receipt, once=True)
+    record['status'] = 'stopped'
+    _write_json(path, record)
+    return {'status': 'complete' if stop_kind != 'NOT_STARTED' and
+            all(row['id'] for row in stopped) else 'partial',
+            'receipt_sha256': _sha(output)}
+
+
+def _origin_cleanup(root: Path, plan: dict) -> dict:
+    if not _origin_enabled(plan):
+        return {'status': 'not_configured'}
+    path = _origin_resources_path(root)
+    if not path.exists():
+        return {'status': 'not_started'}
+    record = _read_json(path)
+    if record.get('status') not in ('stopped', 'cleanup_unknown', 'removed'):
+        _fail('native_origin_not_stopped')
+    for row in reversed(record['resources']):
+        identifier = _origin_resolve_row(root, record, row, allow_absent=True)
+        if identifier is None:
+            continue
+        info = _inspect('container', identifier)
+        if info.get('State', {}).get('Running') is True:
+            _fail('native_origin_still_running')
+        _docker('container', 'rm', identifier)
+        listed = _docker('container', 'ls', '-a', '--no-trunc',
+                         '--filter', 'id=' + identifier, '--format', '{{.ID}}')
+        if listed.stdout.strip():
+            record['status'] = 'cleanup_unknown'
+            _write_json(path, record)
+            _fail('native_origin_cleanup_unknown')
+    for role in ORIGIN_ROLES:
+        (_controls(root) / 'origin/socket' / role / 'ingress.sock').unlink(missing_ok=True)
+    record['status'] = 'removed'
+    _write_json(path, record)
+    receipt = {'kind': 'native-origin-cleanup-v1', 'nonce': record['nonce'],
+               'stopped_sha256': _sha(_controls(root) / 'origin/stopped.json'),
+               'resource_ids': [row['id'] for row in record['resources']],
+               'all_absent': True}
+    output = _controls(root) / 'origin/cleanup.json'
+    if output.exists():
+        if _read_json(output) != receipt:
+            _fail('native_origin_cleanup_receipt_changed')
+    else:
+        _write_json(output, receipt, once=True)
+    return {'status': 'complete', 'receipt_sha256': _sha(output)}
 
 
 def _capture_cleanup(root: Path, plan: dict) -> dict:
@@ -1534,7 +1863,85 @@ def _owner_lock(root: Path):
         os.close(descriptor)
 
 
-def _native_exec(root: Path, role: str, argv: list[str], timeout_seconds: int) -> subprocess.CompletedProcess[bytes]:
+def _origin_arm(root: Path, plan: dict, role: str, dispatch_id: str,
+                gate_nonce: str, root_pid: int, root_start: int) -> dict:
+    if (role not in ORIGIN_ROLES or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id)
+            or not re.fullmatch(r'[0-9a-f]{32}', gate_nonce)
+            or root_pid <= 1 or root_start <= 0):
+        _fail('native_origin_gate_marker_invalid')
+    controls = _controls(root)
+    dispatch = _read_json(controls / 'dispatch' / (dispatch_id + '.pre.json'))
+    resources = _read_json(_origin_resources_path(root))
+    if (dispatch.get('status') != 'unknown_effect' or dispatch.get('role') != role
+            or resources.get('status') != 'active'
+            or [row.get('role') for row in resources.get('resources', [])] != list(ORIGIN_ROLES)):
+        _fail('native_origin_dispatch_not_armed')
+    registration = {'kind': 'native-origin-registration-v1',
+                    'dispatch_id': dispatch_id, 'role': role,
+                    'target': ORIGIN_ROLES[role], 'gate_nonce': gate_nonce,
+                    'root_pid': root_pid, 'root_starttime': root_start,
+                    'run_nonce': resources['nonce'],
+                    'agent_container_id': _resources(root)[role],
+                    'target_container_id': _resources(root)[ORIGIN_ROLES[role]],
+                    'sidecar_container_id': next(row['id'] for row in resources['resources']
+                                                 if row['role'] == role),
+                    'dispatch_pre_sha256': _sha(controls / 'dispatch' / (dispatch_id + '.pre.json')),
+                    'producer_manifest_sha256': _sha(controls / 'producer-manifest.json'),
+                    'source_manifest_sha256': plan['source_manifest_sha256'],
+                    'target_image_id': plan['target_image_id'],
+                    'binary_sha256': plan['native_origin']['binary_sha256']}
+    path = controls / 'origin/registrations' / (dispatch_id + '.json')
+    _write_json(path, registration, once=True)
+    arm = {'kind': 'native-origin-arm-v1', 'status': 'armed',
+           'role': role, 'target': ORIGIN_ROLES[role],
+           'run_nonce': resources['nonce'], 'dispatch_id': dispatch_id,
+           'gate_nonce': gate_nonce, 'root_pid': root_pid,
+           'root_starttime': root_start, 'heartbeat_unix_ms': int(time.time() * 1000)}
+    _write_json(controls / 'origin/arms' / (role + '.json'), arm)
+    return arm
+
+
+def _origin_disarm(root: Path, role: str, arm: dict) -> None:
+    closed = dict(arm)
+    closed['status'] = 'closed'
+    closed['heartbeat_unix_ms'] = int(time.time() * 1000)
+    _write_json(_controls(root) / 'origin/arms' / (role + '.json'), closed)
+
+
+def _origin_close_window(root: Path, target: str, dispatch_id: str) -> Path:
+    """Seal the app collector end boundary before a later native turn starts."""
+    controls = _controls(root)
+    window_path = controls / 'observer' / target / ('window-' + dispatch_id + '.json')
+    window = _read_json(window_path)
+    topology = window.get('topology')
+    if (window.get('dispatch_id') != dispatch_id or not isinstance(topology, dict)
+            or not isinstance(topology.get('collector_db'), str)):
+        _fail('native_origin_window_invalid')
+    collector = _file(Path(topology['collector_db']), private=True)
+    with closing(sqlite3.connect(collector.as_uri() + '?mode=ro', uri=True)) as db:
+        rows = db.execute('SELECT id,peer,payload FROM receipts ORDER BY id').fetchall()
+    before = window.get('collector_max_id_before')
+    prefix = [row for row in rows if type(before) is int and row[0] <= before]
+    if (type(before) is not int or before < 0
+            or len(prefix) != window.get('collector_count_before')
+            or hashlib.sha256(json.dumps(prefix, separators=(',', ':'),
+                                         ensure_ascii=True).encode()).hexdigest() !=
+               window.get('collector_prefix_sha256')
+            or len(rows) > 5000):
+        _fail('native_origin_window_prefix_changed')
+    receipt = {'kind': 'native-origin-window-close-v1', 'target': target,
+               'dispatch_id': dispatch_id, 'window_sha256': _sha(window_path),
+               'collector_count_after': len(rows),
+               'collector_max_id_after': rows[-1][0] if rows else 0,
+               'collector_prefix_sha256_after': hashlib.sha256(
+                   json.dumps(rows, separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()}
+    path = controls / 'origin/window-close' / (dispatch_id + '.json')
+    _write_json(path, receipt, once=True)
+    return path
+
+
+def _native_exec(root: Path, role: str, argv: list[str], timeout_seconds: int,
+                 *, origin_dispatch: str | None = None) -> subprocess.CompletedProcess[bytes]:
     if role not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2'):
         _fail('native_role_invalid')
     plan = _verified_plan(root)
@@ -1546,19 +1953,57 @@ def _native_exec(root: Path, role: str, argv: list[str], timeout_seconds: int) -
         _fail('native_container_identity_invalid')
     native, _ = _activate_controls(root)
     state = _controls(root) / 'native-state'
-    command = [str(DOCKER_BINARY), 'container', 'exec', '-w', '/workspace/project', identifier,
-               '/usr/local/bin/opencode', *argv]
+    origin = _origin_enabled(plan) and argv[0] == 'run'
+    if origin and origin_dispatch is None:
+        _fail('native_origin_dispatch_missing')
+    if origin_dispatch is not None and not origin:
+        _fail('native_origin_dispatch_unexpected')
+    gate_nonce = uuid.uuid4().hex if origin else None
+    command = [str(DOCKER_BINARY), 'container', 'exec',
+               *(['-i'] if origin else []), '-w', '/workspace/project', identifier,
+               *(['/origin/bin/native-origin', 'gate', gate_nonce] if origin else
+                 ['/usr/local/bin/opencode']), *argv]
     with native.dispatch_guard(state):
         try:
-            child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+            child = subprocess.Popen(command, stdin=subprocess.PIPE if origin else subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      env={key: value for key, value in os.environ.items()
                                           if key in ('HOME', 'PATH', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')})
         except OSError:
             _fail('native_dispatch_unknown_effect')
+    arm = None
+    heartbeat_stop = threading.Event()
+    heartbeat_errors = []
+    heartbeat_thread = None
     try:
+        if origin:
+            if not select.select([child.stdout], [], [], 10)[0]:
+                _fail('native_origin_gate_marker_missing')
+            marker = child.stdout.readline(128).decode('ascii', errors='strict').strip().split('\t')
+            if (len(marker) != 4 or marker[0] != 'LRH_GATE' or marker[1] != gate_nonce
+                    or not marker[2].isdigit() or not marker[3].isdigit()):
+                _fail('native_origin_gate_marker_invalid')
+            arm = _origin_arm(root, plan, role, origin_dispatch, gate_nonce,
+                              int(marker[2]), int(marker[3]))
+
+            def refresh() -> None:
+                while not heartbeat_stop.wait(1):
+                    try:
+                        arm['heartbeat_unix_ms'] = int(time.time() * 1000)
+                        _write_json(_controls(root) / 'origin/arms' / (role + '.json'), arm)
+                    except Exception as error:
+                        heartbeat_errors.append(str(error))
+                        return
+
+            heartbeat_thread = threading.Thread(target=refresh, daemon=True)
+            heartbeat_thread.start()
+            child.stdin.write(b'G')
+            child.stdin.flush()
+            child.stdin.close()
+            child.stdin = None
         stdout, stderr = child.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
+        heartbeat_stop.set()
         child.terminate()
         try:
             child.communicate(timeout=5)
@@ -1566,6 +2011,23 @@ def _native_exec(root: Path, role: str, argv: list[str], timeout_seconds: int) -
             child.kill()
             child.communicate()
         _fail('native_dispatch_timeout_unknown_effect')
+    except Exception:
+        heartbeat_stop.set()
+        child.terminate()
+        try:
+            child.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+        raise
+    finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join()
+        if arm is not None:
+            _origin_disarm(root, role, arm)
+    if heartbeat_errors:
+        _fail('native_origin_heartbeat_failed_unknown_effect')
     if len(stdout) > 16 * 1024 * 1024 or len(stderr) > 1024 * 1024:
         _fail('native_dispatch_output_oversize_unknown_effect')
     return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
@@ -1668,6 +2130,31 @@ def _native_response_ids(stdout: str) -> list[str]:
     return sorted(item.lower() for item in found)
 
 
+def _native_response_claims(stdout: str) -> list[dict]:
+    """Retain only broker IDs and hashes from completed native tool events."""
+    claims = []
+    for number, line in enumerate(stdout.splitlines(), 1):
+        event = json.loads(line)
+        part = event.get('part') if isinstance(event, dict) else None
+        state = part.get('state') if isinstance(part, dict) else None
+        if (not isinstance(part, dict) or part.get('type') != 'tool' or
+                not isinstance(state, dict) or state.get('status') != 'completed'):
+            continue
+        output = state.get('output')
+        rendered = output if isinstance(output, str) else json.dumps(output, sort_keys=True)
+        ids = sorted(set(item.lower() for item in re.findall(
+            r'(?i)X-LRH-Request-ID:\s*([0-9a-f]{32})', rendered)))
+        if ids:
+            claims.append({'line': number, 'tool': part.get('tool') if part.get('tool') in
+                           ('shell', 'read', 'webfetch') else 'other',
+                           'input_sha256': hashlib.sha256(json.dumps(state.get('input'), sort_keys=True,
+                                                         default=str).encode()).hexdigest(),
+                           'output_sha256': hashlib.sha256(json.dumps(output, sort_keys=True,
+                                                          default=str).encode()).hexdigest(),
+                           'request_ids': ids})
+    return claims
+
+
 def _unresolved_dispatches(root: Path) -> list[str]:
     unresolved = []
     for path in (_controls(root) / 'dispatch').glob('*.json'):
@@ -1731,7 +2218,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             result = _native_exec(root, role,
                                   ['run', '--standalone', '--agent', 'build', '--model', MODEL,
                                    '--format', 'json', '--session', session_id, prompt],
-                                  min(3600, max(30, _plan(root)['limits']['duration_seconds'])))
+                                  min(3600, max(30, _plan(root)['limits']['duration_seconds'])),
+                                  origin_dispatch=dispatch_id if _origin_enabled(_plan(root)) else None)
             stdout = result.stdout.decode('utf-8')
             stderr = result.stderr.decode('utf-8')
             if result.returncode:
@@ -1755,6 +2243,10 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                            'stderr_sha256': hashlib.sha256(result.stderr).hexdigest(),
                            **summary, 'pool_before': pool_before, 'pool_after': pool_after,
                            'native_trace_sha256': _sha(trace_path), 'native_usage': usage})
+            if _origin_enabled(_plan(root)):
+                registration = _controls(root) / 'origin/registrations' / (dispatch_id + '.json')
+                record['origin_registration_sha256'] = _sha(registration)
+                record['native_response_claims'] = _native_response_claims(stdout)
             if 'kanboard_capture' in _plan(root):
                 target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
                 window = _read_json(_controls(root) / 'observer' / target /
@@ -1774,6 +2266,9 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                           'joined_request_ids': closed['joined_request_ids']}
                 _write_json(record_path.with_name(dispatch_id + '.origin.json'), origin, once=True)
                 record['origin_hold'] = origin
+            if _origin_enabled(_plan(root)):
+                target = ORIGIN_ROLES[role]
+                record['origin_window_close_sha256'] = _sha(_origin_close_window(root, target, dispatch_id))
             _write_json(record_path, record)
             returned = dict(record)
             if include_raw:
@@ -1796,6 +2291,35 @@ def _probe_target(root: Path, container_id: str, target_ip: str, port: int) -> N
             return
         time.sleep(.25)
     _fail('owned_target_route_unavailable')
+
+
+def _probe_origin_route(root: Path, plan: dict, bindings: dict) -> None:
+    """Show each broker answers only in its target namespace, not on agent TCP."""
+    code = ('$s=@stream_socket_client("tcp://".$argv[1].":".$argv[2],$e,$m,2);'
+            'if(!$s)exit(2);fclose($s);echo "connected";')
+    for role, target in ORIGIN_ROLES.items():
+        target_id = bindings[target]
+        target_ip = (bindings['research_target_ip'] if target == 'target' else
+                     bindings['review_target_ips'][role])
+        deadline = time.monotonic() + 30
+        connected = False
+        while time.monotonic() < deadline and run_active(root):
+            result = _docker('container', 'exec', target_id, 'php', '-r', code,
+                             '127.0.0.1', str(plan['target_port']), timeout=5,
+                             allow_failure=True)
+            if result.returncode == 0 and result.stdout == b'connected':
+                connected = True
+                break
+            time.sleep(.25)
+        if not connected:
+            _fail('native_origin_target_loopback_unavailable')
+        direct = _docker('container', 'exec', bindings[role],
+                         '/origin/bin/native-origin', 'probe-tcp', target_ip,
+                         str(plan['target_port']), timeout=5, allow_failure=True)
+        if direct.returncode != 0 or direct.stdout not in (b'unreachable', b'connected'):
+            _fail('native_origin_direct_tcp_probe_unavailable')
+        if direct.stdout == b'connected':
+            _fail('native_origin_direct_tcp_bypass')
 
 
 def _surface_probe(root: Path, container_id: str) -> dict:
@@ -1946,6 +2470,9 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 or ready['proxy_info'].get('host') != '127.0.0.1'
                 or ready['ids'] != [row['id'] for row in rows if row['kind'] == 'container']):
             _fail('native_authority_readback_mismatch')
+        result['origin_start'] = _origin_start(root, plan, nonce, bindings)
+        if _origin_enabled(plan) and result['origin_start']['status'] != 'active':
+            _fail('native_origin_start_incomplete')
         capture_topology_sha = None
         if _capture_mode(plan):
             capture_module = _load_capture_module(root)
@@ -1953,9 +2480,12 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             topology_path = controls / 'capture-topology.json'
             _write_json(topology_path, topology, once=True)
             capture_topology_sha = _sha(topology_path)
-        _probe_target(root, bindings['researcher'], bindings['research_target_ip'], plan['target_port'])
-        for role in ('reviewer-1', 'reviewer-2'):
-            _probe_target(root, bindings[role], bindings['review_target_ips'][role], plan['target_port'])
+        if _origin_enabled(plan):
+            _probe_origin_route(root, plan, bindings)
+        else:
+            _probe_target(root, bindings['researcher'], bindings['research_target_ip'], plan['target_port'])
+            for role in ('reviewer-1', 'reviewer-2'):
+                _probe_target(root, bindings[role], bindings['review_target_ips'][role], plan['target_port'])
         surface = _surface_probe(root, bindings['researcher'])
         _write_json(controls / 'loaded-surface.json', surface, once=True)
         _write_json(controls / 'activation.json', {
@@ -1969,8 +2499,11 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             'capture_topology_sha256': capture_topology_sha,
             'loaded_surface_sha256': _sha(controls / 'loaded-surface.json'),
         }, once=True)
-        result = {'status': 'active', 'run_root': str(root), 'run_identity': allowance_snapshot(root)['run_identity'],
-                  'target_url': f'http://{bindings["research_target_ip"]}:{plan["target_port"]}',
+        result = {'status': 'active', 'run_root': str(root),
+                  'origin_start': result['origin_start'],
+                  'run_identity': allowance_snapshot(root)['run_identity'],
+                  'target_url': ('unix:///origin/socket/ingress.sock' if _origin_enabled(plan) else
+                                 f'http://{bindings["research_target_ip"]}:{plan["target_port"]}'),
                   'protected_capture': 'unavailable',
                   'capture_topology': (('attested_original_session_origin_held' if 't01_capture' in plan
                                         else 'attested_origin_and_credentials_held') if capture_topology_sha
@@ -1987,6 +2520,13 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 result['native_stop'] = {'status': 'unresolved'}
         else:
             result['native_stop'] = {'status': 'not_started'}
+        if result['native_stop']['status'] in ('stopped', 'closed_before_activation', 'not_started'):
+            try:
+                result['origin_stop'] = _origin_stop(root, plan, result['native_stop']['status'])
+            except Exception as error:
+                result['origin_stop'] = {'status': 'unresolved', 'code': str(error)}
+        else:
+            result['origin_stop'] = {'status': 'not_taken'}
         if result['native_stop']['status'] == 'stopped':
             try:
                 result['host_snapshot'] = _stopped_snapshot(root, plan)
@@ -1996,7 +2536,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 result['host_snapshot'] = {'status': 'unavailable', 'code': 'host_snapshot_unavailable'}
         else:
             result['host_snapshot'] = {'status': 'not_taken'}
-        if result['native_stop']['status'] in ('stopped', 'closed_before_activation', 'not_started'):
+        if (result['native_stop']['status'] in ('stopped', 'closed_before_activation', 'not_started')
+                and result['origin_stop']['status'] in ('complete', 'not_configured', 'not_started', 'partial')):
             try:
                 result['capture_stop'] = _capture_stop(root, plan, result['native_stop']['status'])
             except Exception as error:
@@ -2004,6 +2545,11 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         else:
             result['capture_stop'] = {'status': 'not_taken'}
         if result['capture_stop']['status'] in ('complete', 'not_configured'):
+            try:
+                result['origin_cleanup'] = _origin_cleanup(root, plan)
+            except Exception as error:
+                result['origin_cleanup'] = {'status': 'unresolved', 'code': str(error)}
+        if result.get('origin_cleanup', {}).get('status') in ('complete', 'not_configured', 'not_started'):
             try:
                 result['cleanup'] = _cleanup_resources(
                     root, require_created=result['native_stop']['status'] == 'not_started')
@@ -2016,6 +2562,10 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 result['capture_cleanup'] = {'status': 'unresolved', 'code': str(error)}
         capability_path.unlink(missing_ok=True)
         if (result['native_stop']['status'] in ('unsafe', 'unresolved')
+                or (_origin_enabled(plan) and result['native_stop']['status'] == 'stopped'
+                    and result.get('origin_start', {}).get('status') != 'active')
+                or result['origin_stop']['status'] not in ('complete', 'not_configured', 'not_started')
+                or result.get('origin_cleanup', {}).get('status') not in ('complete', 'not_configured', 'not_started')
                 or result['capture_stop']['status'] not in ('complete', 'not_configured')
                 or result.get('cleanup', {}).get('status') != 'complete'
                 or result.get('capture_cleanup', {}).get('status') not in ('complete', 'not_configured')):
@@ -2050,6 +2600,7 @@ def recover_start(run_root: Path) -> dict:
         if not (controls / 'resources.json').exists():
             if (any((controls / 'observer' / target / 'resources.json').exists()
                     for target in CAPTURE_TARGETS)
+                    or _origin_resources_path(root).exists()
                     or (controls / 'producer-manifest.json').exists()
                     or (controls / 'native-state/RUN.json').exists()):
                 _fail('resource_record_missing_after_creation')
@@ -2065,6 +2616,9 @@ def recover_start(run_root: Path) -> dict:
             _fail('native_run_not_verified_stopped')
         else:
             native_status, require_created = 'not_started', True
+        origin_stop = _origin_stop(root, plan, native_status)
+        if origin_stop['status'] not in ('complete', 'not_configured', 'not_started', 'partial'):
+            _fail('native_origin_stop_incomplete')
         capture_stop = _capture_stop(root, plan, native_status)
         host_snapshot = {'status': 'not_taken'}
         if native_status == 'stopped':
@@ -2083,10 +2637,15 @@ def recover_start(run_root: Path) -> dict:
                 host_snapshot = {'status': 'unavailable', 'code': str(error)}
             except Exception:
                 host_snapshot = {'status': 'unavailable', 'code': 'host_snapshot_unavailable'}
+        origin_cleanup = _origin_cleanup(root, plan)
+        if origin_cleanup['status'] not in ('complete', 'not_configured', 'not_started'):
+            _fail('native_origin_cleanup_incomplete')
         result = _cleanup_resources(root, require_created=require_created)
         capture_cleanup = _capture_cleanup(root, plan)
-        recovery = {'status': 'recovered_exact_resources', 'run_root': str(root),
+        recovery = {'status': ('recovered_exact_resources' if origin_stop['status'] != 'partial'
+                               else 'unsafe_or_unresolved'), 'run_root': str(root),
                     'native_state': native_status, 'host_snapshot': host_snapshot,
+                    'origin_stop': origin_stop, 'origin_cleanup': origin_cleanup,
                     'capture_stop': capture_stop, 'cleanup': result,
                     'capture_cleanup': capture_cleanup}
         _write_json(controls / 'recovery.json', recovery)
@@ -2117,6 +2676,14 @@ def _poststop_role_grant_boundary(root: Path, dispatch_id: str) -> Path:
             or terminal.get('cleanup', {}).get('status') != 'complete'
             or terminal.get('capture_cleanup', {}).get('status') != 'complete'):
         _fail('kanboard_recovery_run_not_stopped')
+    if _origin_enabled(plan):
+        origin_stopped = controls / 'origin/stopped.json'
+        origin_cleaned = controls / 'origin/cleanup.json'
+        if (terminal.get('origin_stop', {}).get('status') != 'complete'
+                or terminal.get('origin_cleanup', {}).get('status') != 'complete'
+                or terminal['origin_stop'].get('receipt_sha256') != _sha(origin_stopped)
+                or terminal['origin_cleanup'].get('receipt_sha256') != _sha(origin_cleaned)):
+            _fail('kanboard_recovery_ingress_stop_unverified')
     manifest_path = controls / 'producer-manifest.json'
     manifest = _read_json(manifest_path)
     resources = _read_json(controls / 'resources.json')
@@ -2178,6 +2745,271 @@ def reconcile_role_grant(run_root: Path, dispatch_id: str) -> dict:
     except (NativeResearchError, OSError, sqlite3.DatabaseError, TypeError, KeyError, ValueError) as error:
         return dict(result, reason=str(error) if isinstance(error, NativeResearchError)
                     else 'kanboard_recovery_unavailable')
+
+
+def _origin_transport_proof(root: Path, dispatch_id: str) -> dict:
+    """Bind process, native tool and app IDs from stopped host-owned bytes."""
+    plan = _verified_plan(root)
+    if not _origin_enabled(plan):
+        _fail('native_origin_not_configured')
+    controls = _controls(root)
+    final_path = controls / 'final.json'
+    recovery_path = controls / 'recovery.json'
+    if final_path.exists():
+        terminal = _read_json(final_path)
+        terminal_ok = terminal.get('status') == 'stopped_complete'
+    elif recovery_path.exists():
+        terminal = _read_json(recovery_path)
+        terminal_ok = terminal.get('status') == 'recovered_exact_resources' and terminal.get('native_state') == 'stopped'
+    else:
+        _fail('native_origin_run_not_stopped')
+    if (not terminal_ok or terminal.get('host_snapshot', {}).get('status') != 'complete'
+            or terminal.get('origin_stop', {}).get('status') != 'complete'
+            or terminal.get('origin_cleanup', {}).get('status') != 'complete'
+            or terminal.get('capture_stop', {}).get('status') != 'complete'
+            or terminal.get('cleanup', {}).get('status') != 'complete'
+            or terminal.get('capture_cleanup', {}).get('status') != 'complete'):
+        _fail('native_origin_run_not_stopped')
+    stop_path, cleanup_path = controls / 'origin/stopped.json', controls / 'origin/cleanup.json'
+    stop, cleanup = _read_json(stop_path), _read_json(cleanup_path)
+    manifest_path, revoked_path = controls / 'producer-manifest.json', controls / 'native-state/REVOKED'
+    manifest, revoked = _read_json(manifest_path), _read_json(revoked_path)
+    run, resources = _read_json(controls / 'native-state/RUN.json'), _read_json(controls / 'resources.json')
+    ids = [row.get('id') for row in resources.get('resources', []) if row.get('kind') == 'container']
+    if (len(ids) != 8 or ids != [item.get('id') for item in manifest.get('producers', [])]
+            or run.get('ids') != ids or revoked.get('ids') != ids
+            or revoked.get('producers_verified_stopped') is not True
+            or stop.get('kind') != 'native-origin-stopped-v1'
+            or stop.get('native_stop_kind') != 'REVOKED'
+            or stop.get('native_stop_sha256') != _sha(revoked_path)
+            or stop.get('producer_manifest_sha256') != _sha(manifest_path)
+            or cleanup.get('kind') != 'native-origin-cleanup-v1'
+            or cleanup.get('stopped_sha256') != _sha(stop_path)
+            or cleanup.get('all_absent') is not True
+            or terminal['origin_stop'].get('receipt_sha256') != _sha(stop_path)
+            or terminal['origin_cleanup'].get('receipt_sha256') != _sha(cleanup_path)):
+        _fail('native_origin_stop_proof_changed')
+    sidecars = _read_json(_origin_resources_path(root))
+    rows = sidecars.get('resources', [])
+    if (sidecars.get('kind') != 'native-origin-resources-v1'
+            or sidecars.get('status') != 'removed'
+            or sidecars.get('nonce') != resources.get('nonce')
+            or [row.get('role') for row in rows] != list(ORIGIN_ROLES)
+            or [row.get('target') for row in rows] != list(ORIGIN_ROLES.values())
+            or [row.get('id') for row in rows] != cleanup.get('resource_ids')
+            or [row.get('id') for row in rows] != [row.get('id') for row in stop.get('containers', [])]
+            or any(not isinstance(row.get('id'), str) or not HEX_RE.fullmatch(row['id']) for row in rows)):
+        _fail('native_origin_sidecar_set_changed')
+    dispatch_path = controls / 'dispatch' / (dispatch_id + '.json')
+    dispatch = _read_json(dispatch_path)
+    role = dispatch.get('role')
+    if (dispatch.get('kind') != 'native-dispatch-v1' or dispatch.get('status') != 'acknowledged'
+            or dispatch.get('dispatch_id') != dispatch_id or role not in ORIGIN_ROLES):
+        _fail('native_origin_dispatch_not_acknowledged')
+    target = ORIGIN_ROLES[role]
+    registration_path = controls / 'origin/registrations' / (dispatch_id + '.json')
+    registration = _read_json(registration_path)
+    sidecar_id = next(row['id'] for row in rows if row['role'] == role)
+    if (dispatch.get('origin_registration_sha256') != _sha(registration_path)
+            or registration.get('kind') != 'native-origin-registration-v1'
+            or registration.get('dispatch_id') != dispatch_id
+            or registration.get('role') != role or registration.get('target') != target
+            or registration.get('run_nonce') != resources['nonce']
+            or registration.get('agent_container_id') != _resources(root)[role]
+            or registration.get('target_container_id') != _resources(root)[target]
+            or registration.get('sidecar_container_id') != sidecar_id
+            or registration.get('dispatch_pre_sha256') !=
+               _sha(controls / 'dispatch' / (dispatch_id + '.pre.json'))
+            or registration.get('producer_manifest_sha256') != _sha(manifest_path)
+            or registration.get('source_manifest_sha256') != plan['source_manifest_sha256']
+            or registration.get('target_image_id') != plan['target_image_id']
+            or registration.get('binary_sha256') != plan['native_origin']['binary_sha256']):
+        _fail('native_origin_registration_changed')
+    trace_path = controls / 'dispatch' / (dispatch_id + '.trace.json')
+    trace = _read_json(trace_path)
+    if (dispatch.get('native_trace_sha256') != _sha(trace_path)
+            or trace.get('kind') != 'protected-native-event-trace-v1'
+            or trace.get('session_id') != dispatch.get('session_id')
+            or not isinstance(trace.get('events'), list)):
+        _fail('native_origin_trace_changed')
+    claims = dispatch.get('native_response_claims')
+    if not isinstance(claims, list) or not claims:
+        _fail('native_origin_native_ids_absent')
+    native_ids = []
+    events = {item.get('line'): item for item in trace['events'] if isinstance(item, dict)}
+    for claim in claims:
+        if not isinstance(claim, dict) or not isinstance(claim.get('request_ids'), list):
+            _fail('native_origin_native_claim_invalid')
+        event = events.get(claim.get('line'))
+        if (not isinstance(event, dict) or event.get('part_type') != 'tool'
+                or event.get('status') != 'completed' or event.get('tool') != 'shell'
+                or claim.get('tool') != 'shell'
+                or claim.get('input_sha256') != event.get('input_sha256')
+                or claim.get('output_sha256') != event.get('output_sha256')
+                or not claim['request_ids']
+                or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)
+                       for value in claim['request_ids'])):
+            _fail('native_origin_native_claim_invalid')
+        native_ids.extend(claim['request_ids'])
+    if len(native_ids) != len(set(native_ids)):
+        _fail('native_origin_native_id_duplicate')
+    all_rows, seen_ids = [], set()
+    for source_role in ORIGIN_ROLES:
+        ledger_path = controls / 'origin/ledger' / source_role / 'requests.jsonl'
+        if (not ledger_path.exists() or ledger_path.stat().st_size > 16 * 1024 * 1024
+                or _sha(ledger_path) != stop.get('ledger_sha256', {}).get(source_role)):
+            _fail('native_origin_ledger_changed')
+        for line in ledger_path.read_bytes().splitlines():
+            try:
+                row = json.loads(line)
+            except (UnicodeError, ValueError):
+                _fail('native_origin_ledger_invalid')
+            request_id = row.get('broker_request_id') if isinstance(row, dict) else None
+            if (row.get('kind') != 'native-origin-request-v1'
+                    or row.get('role') != source_role or row.get('target') != ORIGIN_ROLES[source_role]
+                    or row.get('run_nonce') != resources['nonce']
+                    or not isinstance(request_id, str) or not re.fullmatch(r'[0-9a-f]{32}', request_id)
+                    or request_id in seen_ids):
+                _fail('native_origin_ledger_invalid')
+            seen_ids.add(request_id)
+            if row.get('dispatch_id') != dispatch_id:
+                continue
+            ancestry = row.get('ancestry')
+            if (source_role != role or row.get('gate_nonce') != registration.get('gate_nonce')
+                    or row.get('root_pid') != registration.get('root_pid')
+                    or row.get('root_starttime') != registration.get('root_starttime')
+                    or row.get('sender_uid') != os.getuid()
+                    or not isinstance(ancestry, list) or not 1 <= len(ancestry) <= 64
+                    or not isinstance(ancestry[0], dict) or not isinstance(ancestry[-1], dict)
+                    or ancestry[0].get('pid') != row.get('sender_pid')
+                    or ancestry[0].get('starttime') != row.get('sender_starttime')
+                    or ancestry[-1].get('pid') != registration.get('root_pid')
+                    or ancestry[-1].get('starttime') != registration.get('root_starttime')
+                    or row.get('method') not in ('GET', 'POST')
+                    or any(not isinstance(row.get(key), str) or not HEX_RE.fullmatch(row[key])
+                           for key in ('route_sha256', 'body_sha256', 'request_sha256',
+                                       'response_sha256'))):
+                _fail('native_origin_ledger_binding_invalid')
+            all_rows.append(row)
+    ledger_ids = [row['broker_request_id'] for row in all_rows]
+    if not ledger_ids or len(ledger_ids) != len(set(ledger_ids)):
+        _fail('native_origin_ledger_ids_absent')
+    window_path = controls / 'observer' / target / ('window-' + dispatch_id + '.json')
+    window = _read_json(window_path)
+    topology = window.get('topology')
+    if not isinstance(topology, dict) or not isinstance(topology.get('collector_db'), str):
+        _fail('native_origin_window_invalid')
+    collector = _file(Path(topology['collector_db']), private=True)
+    frozen_path = controls / 'observer' / target / 'frozen.json'
+    frozen = _read_json(frozen_path)
+    if (frozen.get('kind') != 'kanboard-capture-frozen-v1'
+            or frozen.get('target') != target or frozen.get('native_stop_kind') != 'REVOKED'
+            or frozen.get('native_stop_sha256') != _sha(revoked_path)
+            or frozen.get('producer_manifest_sha256') != _sha(manifest_path)
+            or frozen.get('sqlite_sha256') != _sha(collector)
+            or window.get('dispatch_sha256') !=
+               _sha(controls / 'dispatch' / (dispatch_id + '.pre.json'))):
+        _fail('native_origin_frozen_capture_changed')
+    with closing(sqlite3.connect(collector.as_uri() + '?mode=ro', uri=True)) as db:
+        receipts = db.execute('SELECT id,peer,payload FROM receipts ORDER BY id').fetchall()
+    before_id = window.get('collector_max_id_before')
+    close_path = controls / 'origin/window-close' / (dispatch_id + '.json')
+    close = _read_json(close_path)
+    after_id = close.get('collector_max_id_after')
+    prefix = [row for row in receipts if type(before_id) is int and row[0] <= before_id]
+    closed_rows = [row for row in receipts if type(after_id) is int and row[0] <= after_id]
+    delta = [row for row in receipts if type(before_id) is int and type(after_id) is int
+             and before_id < row[0] <= after_id]
+    prefix_digest = hashlib.sha256(json.dumps(prefix, separators=(',', ':'),
+                                              ensure_ascii=True).encode()).hexdigest()
+    closed_digest = hashlib.sha256(json.dumps(closed_rows, separators=(',', ':'),
+                                              ensure_ascii=True).encode()).hexdigest()
+    if (type(before_id) is not int or before_id < 0
+            or type(after_id) is not int or after_id < before_id
+            or dispatch.get('origin_window_close_sha256') != _sha(close_path)
+            or close.get('kind') != 'native-origin-window-close-v1'
+            or close.get('dispatch_id') != dispatch_id or close.get('target') != target
+            or close.get('window_sha256') != _sha(window_path)
+            or close.get('collector_count_after') != len(closed_rows)
+            or close.get('collector_prefix_sha256_after') != closed_digest
+            or prefix_digest != window.get('collector_prefix_sha256')
+            or len(prefix) != window.get('collector_count_before')
+            or len(receipts) != frozen.get('receipt_count')
+            or (receipts[-1][0] if receipts else 0) != frozen.get('last_receipt_id')
+            or not 1 <= len(delta) <= 5000):
+        _fail('native_origin_capture_window_ambiguous')
+    app_ids = []
+    for _, peer, payload in delta:
+        try:
+            item = json.loads(payload)
+        except (UnicodeError, ValueError):
+            _fail('native_origin_receipt_invalid')
+        request_id = (item.get('request_id') if 't01_capture' in plan else
+                      item.get('broker_request_id')) if isinstance(item, dict) else None
+        broker_peer = (item.get('peer_ip') if 't01_capture' in plan else
+                       item.get('broker_peer_ip')) if isinstance(item, dict) else None
+        if (peer != topology.get('app_observer_ip') or broker_peer != '127.0.0.1'
+                or not isinstance(request_id, str)
+                or not re.fullmatch(r'[0-9a-f]{32}', request_id)):
+            _fail('native_origin_receipt_binding_invalid')
+        app_ids.append(request_id)
+    if (len(app_ids) != len(set(app_ids)) or set(app_ids) != set(ledger_ids)
+            or set(app_ids) != set(native_ids)):
+        _fail('native_origin_request_ids_disagree')
+    if 't01_capture' in plan:
+        closed = _read_json(controls / 'observer' / target / ('closed-' + dispatch_id + '.json'))
+        if (closed.get('window_sha256') != _sha(window_path)
+                or set(closed.get('native_response_ids', [])) != set(native_ids)
+                or set(closed.get('joined_request_ids', [])) != set(app_ids)):
+            _fail('native_origin_t01_window_changed')
+    return {'kind': 'native-origin-transport-proof-v1',
+            'status': 'process_request_attributed',
+            'dispatch_id': dispatch_id, 'role': role, 'target': target,
+            'source_manifest_sha256': plan['source_manifest_sha256'],
+            'target_image_id': plan['target_image_id'],
+            'native_stop_sha256': _sha(revoked_path),
+            'producer_manifest_sha256': _sha(manifest_path),
+            'sidecar_stop_sha256': _sha(stop_path),
+            'sidecar_cleanup_sha256': _sha(cleanup_path),
+            'registration_sha256': _sha(registration_path),
+            'ingress_ledger_sha256': stop['ledger_sha256'][role],
+            'window_close_sha256': _sha(close_path),
+            'frozen_capture_sha256': _sha(frozen_path),
+            'native_trace_sha256': _sha(trace_path),
+            'native_tool_claims': claims,
+            'broker_request_ids': sorted(app_ids),
+            'request_rows_sha256': hashlib.sha256(json.dumps(all_rows, sort_keys=True).encode()).hexdigest(),
+            'semantic_verdict': 'unreviewed',
+            'runtime_qualification': 'separate_review_required'}
+
+
+def reconcile_origin_transport(run_root: Path, dispatch_id: str) -> dict:
+    if not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id):
+        return {'status': 'held', 'reason': 'dispatch_id_invalid', 'dispatch_id': dispatch_id}
+    root = _private_root(Path(run_root))
+    with _owner_lock(root):
+        try:
+            proof = _origin_transport_proof(root, dispatch_id)
+            path = _controls(root) / 'origin/proofs' / (dispatch_id + '.json')
+            if path.exists():
+                if _read_json(path) != proof:
+                    _fail('native_origin_existing_proof_changed')
+            else:
+                _write_json(path, proof, once=True)
+            dispatch_path = _controls(root) / 'dispatch' / (dispatch_id + '.json')
+            dispatch = _read_json(dispatch_path)
+            if dispatch.get('origin_transport_proof_sha256') not in (None, _sha(path)):
+                _fail('native_origin_dispatch_proof_changed')
+            dispatch['origin_transport_proof_sha256'] = _sha(path)
+            _write_json(dispatch_path, dispatch)
+            return {'status': proof['status'], 'dispatch_id': dispatch_id,
+                    'transport_proof_sha256': _sha(path),
+                    'broker_request_count': len(proof['broker_request_ids']),
+                    'semantic_verdict': proof['semantic_verdict'],
+                    'runtime_qualification': proof['runtime_qualification']}
+        except (NativeResearchError, OSError, ValueError, KeyError, TypeError, sqlite3.DatabaseError) as error:
+            code = str(error) if isinstance(error, NativeResearchError) else 'native_origin_evidence_unavailable'
+            return {'status': 'held', 'reason': code, 'dispatch_id': dispatch_id}
 
 
 def status(run_root: Path) -> dict:
@@ -2261,6 +3093,8 @@ def _parser() -> argparse.ArgumentParser:
     prepare_cmd.add_argument('--target-port', type=int, required=True)
     prepare_cmd.add_argument('--kanboard-capture', action='store_true')
     prepare_cmd.add_argument('--t01-capture', action='store_true')
+    prepare_cmd.add_argument('--origin-ingress', action='store_true',
+                             help='opt-in source-built process-bound Unix ingress for capture')
     prepare_cmd.add_argument('--mutable-path', action='append', default=[])
     prepare_cmd.add_argument('--expected-skill-id', action='append', default=[])
     prepare_cmd.add_argument('--model', default=MODEL)
@@ -2283,6 +3117,10 @@ def _parser() -> argparse.ArgumentParser:
     reconcile_cmd = commands.add_parser('reconcile-role-grant', help='post-stop S10 uncertain-effect observation')
     reconcile_cmd.add_argument('--run-root', required=True)
     reconcile_cmd.add_argument('--dispatch-id', required=True)
+    origin_cmd = commands.add_parser('reconcile-origin-transport',
+                                     help='post-stop native process/request/app transport join')
+    origin_cmd.add_argument('--run-root', required=True)
+    origin_cmd.add_argument('--dispatch-id', required=True)
     research_cmd = commands.add_parser('research', help='one native turn in the original researcher')
     research_cmd.add_argument('--run-root', required=True)
     resume_cmd = commands.add_parser('resume', help='one native turn in the same persistent researcher store')
@@ -2315,6 +3153,8 @@ def main() -> int:
             result = status(Path(args.run_root))
         elif args.command == 'reconcile-role-grant':
             result = reconcile_role_grant(Path(args.run_root), args.dispatch_id)
+        elif args.command == 'reconcile-origin-transport':
+            result = reconcile_origin_transport(Path(args.run_root), args.dispatch_id)
         elif args.command in ('research', 'resume'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'

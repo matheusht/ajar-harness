@@ -73,8 +73,8 @@ def fake_bind(root, target, dispatch_id):
 def invoke(root, plan, selected):
     called = []
 
-    def fake_native(*args):
-        called.append(args)
+    def fake_native(*args, **kwargs):
+        called.append((args, kwargs))
         raise runner.NativeResearchError('synthetic_interruption')
 
     with patch.object(runner, '_plan', return_value=plan), \

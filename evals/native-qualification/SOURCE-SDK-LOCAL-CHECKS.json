@@ -1,0 +1,36 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tools",
+    "-p",
+    "test_native_source_sdk.py"
+  ],
+  "diff_check_exit": 0,
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "exit_code": 0,
+  "kind": "source-sdk-offline-contract-checks-v1",
+  "not_executed": [
+    "Docker",
+    "Go SDK",
+    "provider",
+    "credential containment",
+    "TLS gateway integration",
+    "dependency retrieval",
+    "full qualification matrix"
+  ],
+  "output": "....\n----------------------------------------------------------------------\nRan 4 tests in 0.020s\n\nOK\n",
+  "python_version": "3.14.6",
+  "source_base": "b3892856a42a4a1aaa227978a37d1bfaae433b6c",
+  "source_sha256": {
+    "tools/native_provider_gateway.py": "73a6fc70a7c27d3ff14baef5ba45136440d64d0fa612f7b02436f8c77e8a6256",
+    "tools/native_research.py": "d1eb6b0293230a0ae985466aa8028e68ce9a28fc2699ba7705adb82502ef9680",
+    "tools/test_native_source_sdk.py": "6e3a6527803ac7c9b4c14a539f8b0219a9001ce4c4f3b21cf711d44fc7ff3ec0"
+  },
+  "syntax_parse": "passed"
+}

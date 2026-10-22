@@ -10,6 +10,11 @@ procedure described below.
 
 ## Start and resume
 
+For a Go SDK with no application listener, use the
+[source-only adapter](native-source-sdk.md). Its environment and paid-provider
+requirements differ from the service profile below. Source implementation is
+available; live qualification is still pending.
+
 1. Read root `AGENTS.md`/`CLAUDE.md`, the actual task permission, effect and
    escalation ceiling, target/source identity, exclusions, stop conditions,
    allowance, and cleanup authority. Verify the target-local signed

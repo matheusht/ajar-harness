@@ -685,6 +685,15 @@ def main():
         put(poststop_path, poststop)
         repin(run, observer, manifest, poststop_name)
 
+        for field, invalid in (('review_dispatch_id', []),
+                               ('effect_dispatch_id', {}),
+                               ('limits', ['valid limit', {}])):
+            put(poststop_path, poststop | {field: invalid})
+            repin(run, observer, manifest, poststop_name)
+            reject(run, observer, 'fresh_review_candidate')
+        put(poststop_path, poststop)
+        repin(run, observer, manifest, poststop_name)
+
         review_path = run / 'controls/review-reviewer-1.json'
         review_bytes = review_path.read_bytes()
         request_path = run / 'handoff/reviewer-1/REQUEST.json'
@@ -741,6 +750,17 @@ def main():
         ledger_path.write_bytes(ledger)
         ledger_path.chmod(0o600)
         repin(run, observer, manifest, ledger_name)
+
+        final_path = run / 'controls/final.json'
+        final_bytes = final_path.read_bytes()
+        final = json.loads(final_bytes)
+        final['origin_stop'] = None
+        put(final_path, final)
+        repin(run, observer, manifest, 'controls/final.json')
+        reject(run, observer, 'origin_receipts_bound')
+        final_path.write_bytes(final_bytes)
+        final_path.chmod(0o600)
+        repin(run, observer, manifest, 'controls/final.json')
 
         poststop_path.unlink()
         reject(run, observer, 'run_receipts_bound')

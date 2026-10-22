@@ -164,9 +164,11 @@ def poststop_review_candidate(root, records, researcher_sessions, plan):
     for role in ('reviewer-1', 'reviewer-2'):
         path = root / 'controls' / ('poststop-review-' + role + '.json')
         receipt = read_json(path)
-        if receipt is None:
+        if not isinstance(receipt, dict):
             continue
         reviewer_id = receipt.get('review_dispatch_id')
+        if not isinstance(reviewer_id, str) or not re.fullmatch(r'[0-9a-f]{32}', reviewer_id):
+            continue
         review_path = root / 'controls' / ('review-' + role + '.json')
         review = read_json(review_path)
         native = review.get('native') if isinstance(review, dict) else None
@@ -179,18 +181,21 @@ def poststop_review_candidate(root, records, researcher_sessions, plan):
         trace_path = root / 'controls/dispatch' / (reviewer_id + '.trace.json')
         request_path = relative_file(root, f'handoff/{role}/REQUEST.json')
         effects = [row for row in records if row.get('role') in ('researcher', 'resume')]
-        effect_ids = {row.get('dispatch_id') for row in effects}
+        effect_ids = {row.get('dispatch_id') for row in effects
+                      if isinstance(row.get('dispatch_id'), str)}
         effect_proofs = receipt.get('effect_origin_proof_sha256')
         limits = receipt.get('limits')
         required_limits = {'does not establish full #159 qualification',
                            'does not independently assess strong-lead dismissal',
                            'model lead_dispositions remain untrusted review material'}
         input_id = review.get('input_id')
+        effect_id = receipt.get('effect_dispatch_id')
         poststop_valid = (
             receipt.get('status') == 'candidate_for_operator_review'
             and receipt.get('scope') == 't01_original_vulnerable_arm'
             and receipt.get('reviewer_role') == role
-            and receipt.get('effect_dispatch_id') in effect_ids
+            and isinstance(effect_id, str) and re.fullmatch(r'[0-9a-f]{32}', effect_id)
+            and effect_id in effect_ids
             and all(re.fullmatch(r'[0-9a-f]{32}', str(receipt.get(name, '')))
                     for name in ('review_dispatch_id', 'effect_dispatch_id',
                                  'effect_request_id', 'review_effect_request_id'))
@@ -199,8 +204,10 @@ def poststop_review_candidate(root, records, researcher_sessions, plan):
             and receipt.get('clean_replay') == 'not_assessed'
             and receipt.get('fixed_control') == 'not_assessed'
             and receipt.get('lead_dispositions') == 'unfinished_unassessed'
-            and isinstance(limits, list) and required_limits.issubset(limits)
-            and reviewer.get('session_id') == session and session not in researcher_sessions
+            and isinstance(limits, list) and all(isinstance(item, str) for item in limits)
+            and required_limits.issubset(limits)
+            and isinstance(session, str) and reviewer.get('session_id') == session
+            and session not in researcher_sessions
             and review.get('reviewer_role') == role
             and review.get('status') == 'native_turn_observed_unassessed'
             and review.get('same_original_allowance') is True
@@ -362,16 +369,17 @@ def origin_receipts_match(root, plan, records, final):
     resources, stop, cleanup = map(read_json, (resource_path, stop_path, cleanup_path))
     if not all(isinstance(value, dict) for value in (resources, stop, cleanup)):
         return False
+    origin_stop, origin_cleanup = final.get('origin_stop'), final.get('origin_cleanup')
     if (resources.get('kind') != 'native-origin-resources-v1'
             or resources.get('status') != 'removed'
             or stop.get('kind') != 'native-origin-stopped-v1'
             or cleanup.get('kind') != 'native-origin-cleanup-v1'
             or cleanup.get('stopped_sha256') != sha(stop_path)
             or cleanup.get('all_absent') is not True
-            or final.get('origin_stop', {}).get('status') != 'complete'
-            or final.get('origin_stop', {}).get('receipt_sha256') != sha(stop_path)
-            or final.get('origin_cleanup', {}).get('status') != 'complete'
-            or final.get('origin_cleanup', {}).get('receipt_sha256') != sha(cleanup_path)):
+            or not isinstance(origin_stop, dict) or origin_stop.get('status') != 'complete'
+            or origin_stop.get('receipt_sha256') != sha(stop_path)
+            or not isinstance(origin_cleanup, dict) or origin_cleanup.get('status') != 'complete'
+            or origin_cleanup.get('receipt_sha256') != sha(cleanup_path)):
         return False
     ledger_hashes = stop.get('ledger_sha256')
     if not isinstance(ledger_hashes, dict) or set(ledger_hashes) != set(ORIGIN_ROLES):

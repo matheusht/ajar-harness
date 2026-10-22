@@ -13,6 +13,29 @@ stateful pause and continuation, or an effect that fails clean replay/control.
 The former first-hypothesis-test interruption rule is historical and must not
 be used for the current run.
 
+## Separate T01 API-only variant — prepared, not qualified
+
+The source-pinned T01 broker exposes only JSON-RPC for two ordinary synthetic
+actors and redacts response strings and dynamic object keys. This is **API-only
+and non-equivalent** to the original web-or-JSON-RPC T04 task. Preserve the
+historical visible briefs unchanged. If an explicitly selected API-only run is
+later approved, use [RESEARCHER-BRIEF-T01-API.md](RESEARCHER-BRIEF-T01-API.md),
+SHA-256 `cfa72ecb1279d292cd915c4c8b7c9405095405e422d1bf96e211db809b139c95`,
+with a separately frozen run configuration. The visible brief supplies the
+broker protocol but no flaw, API method, source file, answer, or test order.
+
+Before a provider call, recheck the exact source, image, PHP runtime, broker
+and collector pins; run a fresh independent observer preflight on both releases
+in that runtime; demonstrate ordinary creation, read and denial controls
+through the original app route; verify native session, shared allowance,
+material-state pause, review, stop and cleanup. The present code and offline
+checks do not supply that evidence. In particular,
+`native_original_session_origin_unqualified` remains held under #85: a broker
+receipt and native response ID join do not by themselves prove the original
+session's same-operation effect. Text-dependent alternative findings remain
+unresolved if redaction hides their effect. A full-surface T04 claim stays on
+hold until a separately qualified web route exists.
+
 ## Verified offline inputs and separation
 
 The [T01 case record](README.md), [prewritten checks](CHECKS.md),
@@ -50,8 +73,9 @@ historical training-data recall; this public case cannot establish novelty.
 
 ## Researcher input and run parameters
 
-The complete visible brief is the selected runtime-matched ordinary brief plus a separate frozen
-run configuration containing only: exact target/source pin and ordinary setup,
+For the original web-or-JSON-RPC T04 path, the complete visible brief is the
+selected runtime-matched ordinary brief plus a separate frozen run configuration
+containing only: exact target/source pin and ordinary setup,
 synthetic local roles, local target/effect/cleanup permission, runtime/model/mode,
 enabled tools/context, and one total allowance with stop rule. Let the
 researcher choose and chain its tests. No added instruction selects a flaw,
@@ -151,7 +175,8 @@ inputs/check, all sessions/cost/help, uncertain effects, cleanup IDs and port
 closure, and the verdict with limits. Retain the observer's original receipt
 unchanged. No issue closure or adoption follows from this preparation note.
 
-**Next action once #158 and #159 have passing evidence:** freeze the missing
+**Next action for the original full-surface T04 path once #158 and #159 have
+passing evidence:** freeze the missing
 run-configuration fields and authority, make new private observer/researcher
 roots, rerun the exact T01 preflight on #158-equivalent resources, verify the
 new researcher copy and mounts contain only source/brief plus approved runtime

@@ -37,7 +37,7 @@ def main():
         checks["api_route_and_actor_contract"] = (
             all(token in brief for token in
                 ("JSON-RPC", "X-Native-Actor", "A", "B", "integer", "id")) and
-            "supplied local target URL" in lower)
+            "supplied local target url" in lower)
         checks["broker_owns_credentials"] = (
             "broker" in lower and "credentials" in lower)
         checks["redaction_and_uncertainty_visible"] = (
@@ -55,6 +55,8 @@ def main():
     checks["operator_variant_separated"] = all(text in preflight for text in
         ("RESEARCHER-BRIEF-T01-API.md", "API-only", "non-equivalent",
          "native_original_session_origin_unqualified"))
+    checks["operator_pin_matches_visible"] = (
+        VISIBLE.is_file() and f"`{sha(VISIBLE)}`" in preflight)
     result = {"kind": "t04_api_only_brief_hygiene_provider_free",
               "status": "pass" if all(checks.values()) else "fail",
               "checks": checks, "visible_brief_sha256": sha(VISIBLE) if VISIBLE.is_file() else None,

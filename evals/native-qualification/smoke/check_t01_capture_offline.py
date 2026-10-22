@@ -53,6 +53,16 @@ def main() -> None:
     if "--t01-capture" not in runner.read_text() or "--kanboard-capture" not in runner.read_text():
         raise SystemExit("FAIL capture_mode_separation")
 
+    retained = json.loads((ROOT / "evals/native-qualification/observer-evidence-final/"
+                           "vulnerable-requests.json").read_text())
+    denied = [row for row in retained if row.get("actor") == "bob"
+              and row.get("method") == "getProjectById"]
+    if len(denied) != 1 or denied[0].get("http_status") != 403:
+        raise SystemExit("FAIL retained_denial_missing")
+    denial = json.loads(denied[0]["raw_response"])
+    if denial.get("id", "missing") is not None or denial.get("error", {}).get("code") != 403:
+        raise SystemExit("FAIL retained_denial_shape")
+
     # The fake value is a protocol fixture, never a real credential. Production
     # broker code is included but its CLI server entrypoint is not executed.
     php = r'''
@@ -67,6 +77,8 @@ $value = t01_scrub_reply($reply, $safe, 'fixture-hmac-key', $changed);
 $error = t01_scrub_reply(['jsonrpc'=>'2.0',
     'error'=>['code'=>403, 'message'=>'opaque-error'], 'id'=>2],
     $safe, 'fixture-hmac-key', $changed);
+$denial = t01_scrub_reply(json_decode($argv[2], true, 32, JSON_THROW_ON_ERROR),
+    $safe, 'fixture-hmac-key', $changed);
 $body = json_encode(['jsonrpc'=>'2.0', 'method'=>'getMe', 'id'=>'opaque-id']);
 $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
 fwrite($pair[0], "POST /jsonrpc.php HTTP/1.1\r\nHost: fixture\r\n"
@@ -76,16 +88,18 @@ $stringIdRejected = false;
 try { t01_read_request($pair[1]); }
 catch (RuntimeException $problem) { $stringIdRejected = true; }
 fclose($pair[0]); fclose($pair[1]);
-echo json_encode(['result'=>$value, 'error'=>$error,
+echo json_encode(['result'=>$value, 'error'=>$error, 'retained_denial'=>$denial,
     'changed'=>$changed, 'string_id_rejected'=>$stringIdRejected]);
 '''
-    result = subprocess.run(["php", "-r", php, str(broker)], capture_output=True, text=True)
+    result = subprocess.run(["php", "-r", php, str(broker), json.dumps(denial)],
+                            capture_output=True, text=True)
     if result.returncode:
         raise SystemExit("FAIL broker_scrub_function")
     value = json.loads(result.stdout)
     reply = value.get("result", {})
     payload = reply.get("result", {})
     error = value.get("error", {})
+    retained_denial = value.get("retained_denial", {})
     dynamic = [key for key in payload if key not in ("id", "project_id", "name")]
     if (reply.get("jsonrpc") != "2.0" or reply.get("id") != 1
             or payload.get("id") != 17 or payload.get("project_id") != 9
@@ -95,6 +109,10 @@ echo json_encode(['result'=>$value, 'error'=>$error,
             or error.get("jsonrpc") != "2.0" or error.get("id") != 2
             or error.get("error", {}).get("code") != 403
             or error.get("error", {}).get("message") != "[REDACTED]"
+            or retained_denial.get("jsonrpc") != "2.0"
+            or retained_denial.get("id", "missing") is not None
+            or retained_denial.get("error", {}).get("code") != 403
+            or retained_denial.get("error", {}).get("message") != "[REDACTED]"
             or value.get("changed") is not True
             or value.get("string_id_rejected") is not True
             or any(secret in result.stdout for secret in

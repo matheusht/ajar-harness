@@ -35,7 +35,7 @@ def main():
     managed=HERE.parents[2]/'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
     files=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'POST-EFFECT-NO-ACK-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE/'receiver.php',HERE.parent/'v2_connect.py',managed]
     sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-    d={'classification':'owned launcher/CONNECT loss E2E; partial T05',
+    d={'classification':'owned effect-before-ack E2E; partial #161' if args.effect_before_ack else 'owned launcher/CONNECT loss E2E; partial T05',
        'fault':args.fault,'stop_failure':args.stop_failure,'log_failure':args.log_failure,'effect_before_ack':args.effect_before_ack,'provider_calls':0,'native_calls':0,'model_inference_requested':False,'checks':[],'resources':[],'cleanup':[],
        'source_sha256':{p.name:sha(p) for p in files},'target_boundary_acceptance':False}
     (out/'source').mkdir()
@@ -214,7 +214,7 @@ def main():
             check('research retained unchanged',sha(research)==research_hash);shutil.copyfile(research,out/'research.txt')
             if (receiver_state/'effects.jsonl').exists():shutil.copyfile(receiver_state/'effects.jsonl',out/'effects.jsonl')
             if args.effect_before_ack:shutil.copyfile(receiver_state/'response-attempted',out/'response-attempted')
-            d['status']='dual_loss_stop_failure_unsafe_partial_T05' if args.stop_failure else ('dual_loss_log_failure_unsafe_partial_T05' if args.log_failure else ('effect_before_ack_boundary_pass_partial_T05' if args.effect_before_ack else args.fault+'_loss_boundary_pass_partial_T05'))
+            d['status']='dual_loss_stop_failure_unsafe_partial_T05' if args.stop_failure else ('dual_loss_log_failure_unsafe_partial_T05' if args.log_failure else ('effect_before_ack_boundary_pass_partial_issue_161' if args.effect_before_ack else args.fault+'_loss_boundary_pass_partial_T05'))
     except Exception as error:d['status']='failed_or_unavailable';d['error']=type(error).__name__+': '+str(error)
     finally:
         if 'state' in locals() and (state/'stop-owner.jsonl').exists():(state/'stop-owner.jsonl').chmod(0o600)

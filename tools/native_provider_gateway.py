@@ -110,10 +110,12 @@ class Gateway:
                     validate_request(request[0], request[1], body)
                     upstream = http.client.HTTPSConnection('opencode.ai', 443, timeout=5,
                                                            context=ssl.create_default_context())
-                    upstream.connect()
-                    with gateway.lock:
-                        gateway.sockets.add(upstream.sock)
                     with dispatch_guard():
+                        if not active() or gateway.closed.is_set():
+                            return
+                        upstream.connect()
+                        with gateway.lock:
+                            gateway.sockets.add(upstream.sock)
                         if not active() or gateway.closed.is_set():
                             return
                         upstream.request('POST', PATH, body=body,

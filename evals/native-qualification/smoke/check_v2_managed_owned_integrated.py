@@ -13,7 +13,7 @@ ENTRY = HERE / 'check_v2_managed_owned_integrated.py'
 FROZEN = HERE / 'check_v2_managed_owned_amd64_php8427.py'
 FROZEN_SHA256 = '3c91fca0a6fe7af4570248de5d6f18ebe6b4f709118fc3c75a31b6b68d726164'
 INTEGRATION_HEAD = 'c74d6086e262206a28aa97a8bb94d351a8c98619'
-MANAGED_RUNNER_SHA256 = '524abbd26c2bede524b463d0e902fe4f8dd986f8f678f2732ccbc9b842d0ae24'
+MANAGED_RUNNER_SHA256 = '76f8d942932a721e9d8a8ec6ff9c623ead5548bb7f1eeafc80826e06e39df53b'
 IMAGE_TAG = 't02-managed-runtime:amd64-php8427-integrated-20261022a'
 TEST = HERE / 'check_v2_managed_owned_integrated_test.py'
 

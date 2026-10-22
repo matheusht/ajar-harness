@@ -56,6 +56,11 @@
       "sha256": "5c51199eca9e671ffb34093884780eff3842fdff6d4c61f2f3e40b6dd5af99d8"
     },
     {
+      "bytes": 7062,
+      "path": "evals/native-qualification/T03-FRESH-REVIEW-CHECKS-20261022.md",
+      "sha256": "b9e1ae21ad1879f365021bbad0a5ade57ac019c2604a4e3c9efa92fd07a2c8e2"
+    },
+    {
       "bytes": 4243,
       "path": "evals/native-qualification/patches/opencode-v2.0.32-exclusive-ca.patch",
       "sha256": "94d6de42e53f41bcb2479fd9b770cc0af38e0ab0657529f1d4516cae163f31f2"
@@ -69,6 +74,11 @@
       "bytes": 156301,
       "path": "evals/native-qualification/smoke/check_opencode_exclusive_trust.py",
       "sha256": "06f67ab32b9fa27d3b0dcd1434666f8fedb60a8f0ee61b464df76ee3816d4905"
+    },
+    {
+      "bytes": 5257,
+      "path": "evals/native-qualification/smoke/check_t03_review_input_lifetime.py",
+      "sha256": "6acdf01cd8929aa5392789fe8b1d1ef1a93570bee77ffe015af3b85994d298ab"
     },
     {
       "bytes": 19383,
@@ -93,7 +103,7 @@
     {
       "bytes": 2554,
       "path": "evals/native-qualification/smoke/check_v2_managed_owned_integrated.py",
-      "sha256": "ca2b8ccaebc7e00ec2758a7426f823f3b3eed408144e9bc3966e81bd42e77843"
+      "sha256": "7aa50ff2a6e841a90c965c822cca01bb1b33dd94116caa9b1dd39bb3749a4ca9"
     },
     {
       "bytes": 4157,
@@ -121,9 +131,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 123479,
+      "bytes": 124789,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "524abbd26c2bede524b463d0e902fe4f8dd986f8f678f2732ccbc9b842d0ae24"
+      "sha256": "76f8d942932a721e9d8a8ec6ff9c623ead5548bb7f1eeafc80826e06e39df53b"
     },
     {
       "bytes": 1222,

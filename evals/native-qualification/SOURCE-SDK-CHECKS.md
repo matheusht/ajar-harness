@@ -30,7 +30,7 @@ the authorized target workflow. Synthetic success is not target qualification.
 | Build exits nonzero | Host receipt preserves exit status and both output hashes; no success claim |
 | Command hangs or output exceeds limit | Stop the run, retain unknown execution; do not retry silently |
 | Owner dies during execution | Existing producer stop kills all executors; unfinished receipt stays unknown |
-| Child process outlives command | Executor is paused before hashing; a second protected batch is refused |
+| Child process outlives command | Executor is paused before capture; the next batch kills old processes before resetting files |
 | Workspace changes during capture | Freeze researcher/resume before copying; verify the captured manifest |
 | Replay uses modified first-run tree | Each executor starts from its own pinned clean source copy |
 | Replay differs | Record mismatch; never emit confirmed |
@@ -48,3 +48,21 @@ Paid route acceptance additionally needs a real authorized model response, loade
 policy readback and credential-canary containment checks. Neither result alone
 confirms a security finding. Dependency retrieval and live calls need their own
 existing authorization; this change grants neither.
+
+## Shared source mode extension (checks written before implementation)
+
+- Generic runtime: exact version stdout and dependency probe; reject malformed argv,
+  ambiguous Go/custom profile combinations and credential-like arguments.
+- Repeat batches: stop all old executor processes, restore original files, reset
+  private caches, and restart only the same sealed IDs under live dispatch authority.
+  Preserve old input, output bytes, manifests and receipts before reset.
+- Review: fresh native session receives the pinned packet and clean original source;
+  reviewer adds a check plus a distinct control. Freeze both with the source.
+  Reject any original-file edit/deletion. Execute each on three clean copies.
+- Bind review to the packet, source snapshot, check definition, execution receipts,
+  native trace and final evidence read. Missing control, stale evidence, unknown
+  effects or run stop must prevent a candidate disposition. No automatic finding.
+- Repeatable checks: `python3 tools/check_native_source_mode.py`; add `--docker
+  sha256:<local-image>` for synthetic executor integration. It must preserve the
+  first batch after the second and reject changed originals and unknown effects.
+  This is not a native/provider or engagement E2E test.

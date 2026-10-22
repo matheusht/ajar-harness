@@ -10,8 +10,8 @@ procedure described below.
 
 ## Start and resume
 
-For a Go SDK with no application listener, use the
-[source-only adapter](native-source-sdk.md). Its environment and paid-provider
+For source with no application listener, use
+[source mode](native-source-sdk.md). Its environment and paid-provider
 requirements differ from the service profile below. Source implementation is
 available; live qualification is still pending.
 

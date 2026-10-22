@@ -16,6 +16,11 @@
       "sha256": "9eca021870ac7b52b974c58f65de511e950481c246ecf3d34552ed6bad71290d"
     },
     {
+      "bytes": 4246,
+      "path": "evals/native-qualification/T02-CAPTURE-REVIEW-BRIDGE-CHECKS-20261021.md",
+      "sha256": "e2c21c3c65eefff981d93fceefced95940c9b804d1ed56a3859b4f3bbd248bbc"
+    },
+    {
       "bytes": 1362,
       "path": "evals/native-qualification/T02-CLOUD-SOURCE-CHECKER-FAILURES-20261020.md",
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
@@ -46,13 +51,18 @@
       "sha256": "48198c955323cd63bd31e7bdf6a758a5785de513123f00786a6a12aca14e3ba5"
     },
     {
+      "bytes": 19980,
+      "path": "evals/native-qualification/smoke/check_v2_capture_review_bridge.py",
+      "sha256": "04118a0d07917fe2f53bbe35107f1826f978007c9445fd67271e38c8eb30d6b2"
+    },
+    {
       "bytes": 3898,
       "path": "evals/native-qualification/smoke/check_v2_cloud_manifest_layout.py",
       "sha256": "d3e26736f2f31e30aae70dbac5ab2b0111af35ea84018d90de9b3634ae47400e"
     },
     {
-      "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
       "bytes": 12165,
+      "path": "evals/native-qualification/smoke/check_v2_cloud_owned_source.py",
       "sha256": "548100fa9f77e62a191c5ebd716eedc88e92a9ea7ccf9637346ef2cf062b8af8"
     },
     {
@@ -81,9 +91,9 @@
       "sha256": "9e208956245a68324aebb8b02ff3adda289a8efa3bfa1f132b0d33c7b530c3e8"
     },
     {
-      "bytes": 117329,
+      "bytes": 123479,
       "path": "evals/native-qualification/smoke/opencode_v2_managed_owned.py",
-      "sha256": "e5f442ddcda8515cb0fb29b9a601cdea068e6c66da795c4b8c8da0e351569475"
+      "sha256": "524abbd26c2bede524b463d0e902fe4f8dd986f8f678f2732ccbc9b842d0ae24"
     },
     {
       "bytes": 1222,
@@ -116,9 +126,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1574,
+      "bytes": 1746,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "7995196f86a458978875472b8d14ad718c56fa4d40ab1050ddace36aeec967d8"
+      "sha256": "be8a41dad9a2b97bbbd5a71e6521351714a456a9a26c3e7245876764fa6c79b1"
     },
     {
       "bytes": 11748,
@@ -201,28 +211,33 @@
       "sha256": "ebacc88d41e64b4f088f675be039f2318e3ad67549259274cdd37a9b41089fca"
     },
     {
-      "path": "experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py",
       "bytes": 2184,
+      "path": "experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py",
       "sha256": "dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175"
     },
     {
-      "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
       "bytes": 19437,
+      "path": "experiments/native-network-preflight/v2-effect-windows/native_run.py",
       "sha256": "759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f"
     },
     {
-      "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
       "bytes": 5791,
+      "path": "experiments/native-network-preflight/v2-effect-windows/producer_stop.py",
       "sha256": "94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd"
     },
     {
-      "path": "experiments/native-network-preflight/v2_connect.py",
       "bytes": 28157,
+      "path": "experiments/native-network-preflight/v2_connect.py",
       "sha256": "7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3"
     },
     {
-      "path": "tools/docker_session_runtime.py",
+      "bytes": 50361,
+      "path": "experiments/native-observation-qualification/native_observation.py",
+      "sha256": "b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c"
+    },
+    {
       "bytes": 59310,
+      "path": "tools/docker_session_runtime.py",
       "sha256": "9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651"
     }
   ],

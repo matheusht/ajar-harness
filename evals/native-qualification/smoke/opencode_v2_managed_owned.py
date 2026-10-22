@@ -45,6 +45,7 @@ NATIVE = CONTROLS / 'v2-effect-windows/native_run.py'
 STOP_OWNER = CONTROLS / 'v2-effect-windows/_native_stop_owner.py'
 PRODUCER = CONTROLS / 'v2-effect-windows/producer_stop.py'
 DOCKER_RUNTIME = ROOT / 'tools/docker_session_runtime.py'
+OBSERVATION = ROOT / 'experiments/native-observation-qualification/native_observation.py'
 CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-OFFLINE-CHECKS-20261020.md'
 LIVE_CHECKS = ROOT / 'evals/native-qualification/T02-V2-MANAGED-LIVE-CHECKS-20261020.md'
 LIVE_PREPARATION_CHECKS = ROOT / 'evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md'
@@ -67,8 +68,9 @@ STOP_OWNER_SHA = 'dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f1
 PRODUCER_SHA = '94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd'
 RELAY_SHA = 'f2b4a65487fecbace54ea4954d26f80566b9ccd8a7c476d826b40fe5bf65bbb8'
 DOCKER_RUNTIME_SHA = '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651'
+OBSERVATION_SHA = 'b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c'
 CONTROL_SHA = {CONNECT: CONNECT_SHA, NATIVE: NATIVE_SHA, STOP_OWNER: STOP_OWNER_SHA, PRODUCER: PRODUCER_SHA,
-               DOCKER_RUNTIME: DOCKER_RUNTIME_SHA}
+               DOCKER_RUNTIME: DOCKER_RUNTIME_SHA, OBSERVATION: OBSERVATION_SHA}
 COMMON_INPUT_SHA = {
     HERE / 'index.php': 'f070f8308bda12bb56df51717675d86558a53891666d419052013e811ce3b7b7',
     HERE / 'message.php': 'ac12d930241f36a93d5e83b7b37737219a8d04fe0d3d5a417a8c3b7edbf8c9d9',
@@ -149,10 +151,15 @@ def native_tool_material(stdout):
             'intermediate_source_versions': 'unavailable; baseline and final candidate are separately pinned'}
 
 
+def observation_evaluator():
+    if sha(OBSERVATION) != OBSERVATION_SHA:
+        raise RuntimeError('observation_evaluator_pin_mismatch')
+    return runpy.run_path(str(OBSERVATION))
+
+
 def publish_review_packet(directory, originals, candidate, note, native_stdout, app_checks,
-                          capability, forbidden_paths=(), protected_observation=None):
-    if protected_observation is not None:
-        raise RuntimeError('protected_observation_source_unreviewed')
+                          capability, forbidden_paths=(), protected_observation=None,
+                          current_run_id=None):
     if (directory.is_symlink() or not directory.is_dir() or list(directory.iterdir())
             or any(not (base / name).is_file() or (base / name).is_symlink()
                    for base in (originals, candidate) for name in PACKET_SOURCE_NAMES)
@@ -188,7 +195,50 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
         'uncertain_condition': 'fresh reviewer causal/control check and protected original capture unavailable',
         'next_check': 'review packet and independently inspect the PHP behavior',
         'status': 'unreviewed'}]}, indent=2, sort_keys=True) + '\n').encode()
-    files['PROMPT.txt'] = PACKET_PROMPT.encode()
+    capture_pin = None
+    if protected_observation is not None:
+        expected_keys = {'path', 'manifest_sha256', 'source_manifest_sha256',
+                         'scenario_id', 'session_id'}
+        if (not isinstance(protected_observation, dict)
+                or set(protected_observation) != expected_keys
+                or any(not isinstance(protected_observation[key], str)
+                       for key in expected_keys - {'path'})
+                or any(not re.fullmatch(r'[0-9a-f]{64}', protected_observation[key])
+                       for key in ('manifest_sha256', 'source_manifest_sha256'))):
+            raise RuntimeError('protected_observation_binding_invalid')
+        path = Path(protected_observation['path'])
+        evaluator = observation_evaluator()
+        capture, capture_files, capture_sha = evaluator['_read_sealed_capture'](path)
+        observations = capture['observation']['case_observations']
+        dispatched = [item for item in observations if 'runtime_binding' in item]
+        if (capture_sha != protected_observation['manifest_sha256']
+                or capture['observation']['source_pins']['manifest_sha256']
+                    != protected_observation['source_manifest_sha256']
+                or capture['result']['scenario_id'] != protected_observation['scenario_id']
+                or capture['hypothesis']['conditions'].get('claim_sha256') != note_hash
+                or not any(item['status'] == 'observed' for item in dispatched)
+                or any(item['runtime_binding']['session'] != protected_observation['session_id']
+                       for item in dispatched)):
+            raise RuntimeError('protected_observation_binding_mismatch')
+        if (not isinstance(current_run_id, str)
+                or current_run_id != capture['result']['scenario_id']):
+            raise RuntimeError('protected_observation_current_run_mismatch')
+        if capture['observation']['source_pins']['manifest']['files'] != source_hashes['candidate']:
+            raise RuntimeError('protected_observation_source_mismatch')
+        if any(item['session_id'] != protected_observation['session_id']
+               for item in tool_material['records']):
+            raise RuntimeError('protected_observation_native_session_mismatch')
+        for name, digest in capture_files.items():
+            data = (path / name).read_bytes()
+            if hashlib.sha256(data).hexdigest() != digest:
+                raise RuntimeError('protected_observation_changed_during_copy')
+            files['CAPTURE-' + name] = data
+        capture_pin = {key: protected_observation[key] for key in expected_keys - {'path'}}
+    files['PROMPT.txt'] = (PACKET_PROMPT + (
+        'REQUEST.json also binds CAPTURE-hypothesis.json, CAPTURE-observation.json, '
+        'CAPTURE-evidence.json and CAPTURE-result.json. Inspect their contrary, host-replay and '
+        'unfinished states. This caller-supplied capture is not final or native-qualified; '
+        'check its provenance independently.\n' if capture_pin else '')).encode()
     files = {name: packet_public_bytes(data, capability, forbidden_paths)
              for name, data in files.items()}
     request = {'version': 1, 'kind': 't02-harmless-php-review', 'claim_version': note_hash,
@@ -197,6 +247,14 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
                'source_map': {'ORIGINAL-' + name: name for name in PACKET_SOURCE_NAMES},
                'previous_actual_review': None,
                'files': {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())}}
+    if capture_pin:
+        request['capture_candidate'] = {
+            'status': 'observation_capture_ready_not_finalized',
+            'qualification': 'caller_supplied_unqualified',
+            'capture_manifest_sha256': capture_pin['manifest_sha256'],
+            'source_manifest_sha256': capture_pin['source_manifest_sha256'],
+            'scenario_id': capture_pin['scenario_id'],
+            'session_id': capture_pin['session_id']}
     files['REQUEST.json'] = packet_public_bytes(json.dumps(request, indent=2, sort_keys=True) + '\n',
                                                  capability, forbidden_paths)
     identity = (directory.stat().st_dev, directory.stat().st_ino)
@@ -205,7 +263,8 @@ def publish_review_packet(directory, originals, candidate, note, native_stdout, 
         (directory / name).chmod(0o444)
     directory.chmod(0o555)
     return {'dev': identity[0], 'ino': identity[1],
-            'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
+            'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
+            'capture': capture_pin}
 
 
 def verify_review_packet(directory, pin):
@@ -230,6 +289,46 @@ def archive_review_packet(directory, archive, pin):
         private_snapshot(archive / name, (directory / name).read_bytes())
         if sha(archive / name) != digest:
             raise RuntimeError('review_packet_archive_mismatch')
+
+
+def finalize_review_capture(capture_path, packet_pin, packet_archive, stop_readback,
+                            cleanup_result, final_cleanup, receipt_output):
+    capture_pin = packet_pin.get('capture')
+    if not capture_pin:
+        raise RuntimeError('review_capture_not_bound')
+    if (not isinstance(stop_readback, dict) or any(stop_readback.get(key) is not True
+            for key in ('run_verified', 'provider_admission_closed',
+                        'exact_producers_stopped', 'ordered_monotonic'))
+            or not isinstance(cleanup_result, dict)
+            or any(cleanup_result.get(key) is not True for key in
+                   ('cleanup_complete', 'temporary_secret_files_removed', 'source_pins_stable'))):
+        raise RuntimeError('review_capture_stop_or_cleanup_unverified')
+    archive = Path(packet_archive)
+    def archive_matches():
+        try:
+            return (archive.is_dir() and not archive.is_symlink()
+                    and set(item.name for item in archive.iterdir()) == set(packet_pin['files'])
+                    and all((archive / name).is_file() and not (archive / name).is_symlink()
+                            and sha(archive / name) == digest
+                            for name, digest in packet_pin['files'].items()))
+        except (OSError, KeyError, TypeError):
+            return False
+    if not archive_matches():
+        raise RuntimeError('review_packet_archive_mismatch')
+    evaluator = observation_evaluator()
+    receipt = evaluator['finalize_observation_capture'](
+        Path(capture_path), capture_pin['manifest_sha256'], final_cleanup)
+    if (receipt['status'] != 'observation_capture_finalized'
+            or receipt['qualification_scope'] != 'capture_lifecycle_only'
+            or receipt['review_status'] != 'not_observed'
+            or receipt['scenario_id'] != capture_pin['scenario_id']
+            or receipt['source_manifest_sha256'] != capture_pin['source_manifest_sha256']
+            or any(sha(archive / ('CAPTURE-' + name)) != digest
+                   for name, digest in receipt['capture_file_sha256'].items())
+            or not archive_matches()):
+        raise RuntimeError('review_capture_finalization_mismatch')
+    evaluator['write_finalization_receipt'](receipt, Path(receipt_output))
+    return receipt
 
 
 def validated_runtime_ca(args, parser):
@@ -857,7 +956,8 @@ def main():
     nonce = uuid.uuid4().hex
     qualification_docs = ((LIVE_CHECKS, LIVE_PREPARATION_CHECKS, REVIEW_CHECKS) if live
                           else (CHECKS, REVIEW_CHECKS))
-    pin_files = (Path(__file__), CONNECT, NATIVE, STOP_OWNER, PRODUCER, DOCKER_RUNTIME, selected['relay'], config,
+    pin_files = (Path(__file__), CONNECT, NATIVE, STOP_OWNER, PRODUCER, DOCKER_RUNTIME, OBSERVATION,
+                 selected['relay'], config,
                  *qualification_docs,
                  MOCK_PHP, OBSERVER / 'server.js', OBSERVER / 'package.json', *FIXTURE)
     source_root = output / 'source'

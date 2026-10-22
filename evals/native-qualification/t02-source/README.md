@@ -1,12 +1,20 @@
 # T02 live-path preparation source
 
-This stable directory identifies the post-transfer source state for the fail-closed OSLIT preparation change. `SOURCE-MANIFEST.json` pins the materialized candidate bytes used by the no-Docker source checks. It is separate from the immutable 20 October transfer ZIP and manifest at `cloud-transfer/t02-20261020/`.
+`SOURCE-MANIFEST.json` pins this post-transfer source state for explicit
+`check_v2_cloud_owned_source.py --current-manifest` checks. The immutable
+20 October transfer ZIP and manifest remain the default historical authority;
+this file does not replace them.
 
-The current manifest also pins the owned #161 stop-owner source and the managed
-runner that archives it. The historical transfer manifest remains unchanged.
+This source combines the owned stop owner and managed runner, same-image PHP
+8.4.27 offline rehearsal, and an opt-in sealed-capture bridge to the fixed
+reviewer packet. It also carries a dormant OpenCode 2.0.32 exclusive-CA patch
+and dual-chain checker. The managed runner does not invoke that checker, and
+the patch has not been qualified in a built image. The unconditional
+`cloud_live_route_not_qualified` denial remains before output creation and
+Docker.
 
-The historical ZIP-root or sidecar manifest remains the default source-check authority. It therefore rejects these post-transfer bytes as drift. Reviewers select this manifest explicitly with `check_v2_cloud_owned_source.py --current-manifest`; its presence never overrides the historical root implicitly. If this source is adopted into a canonical repository manifest, this explicit option and directory can be removed together.
-
-The change adds explicit, hash-pinned runtime CA validation and dormant private-snapshot plumbing, rejects unexpected trust overrides, and makes provider ledger reads safe when no owned offline responder exists. It also pins the opt-in sealed-capture bridge for the fixed reviewer packet and its separate post-stop receipt. The unconditional `cloud_live_route_not_qualified` denial remains before output creation and Docker.
-
-The source manifest and offline receipts are preparation evidence only. They do not prove protected capture provenance or native review, the managed sidecar reaches an owned receiver, that OpenCode excludes built-in trust roots, or live TLS or provider qualification. They do not complete issues #158 or #161, unblock issues #159, #160 or #162, or change the #165 no-go decision.
+The source manifest and offline receipts are preparation evidence only. They
+do not prove protected original observation, fresh native review, live TLS or
+provider behavior, all-route containment, or the first-test interruption and
+resume required for T04. They do not complete #158 or #161, unblock #159,
+#160, or #162, or change the #165 no-go decision.

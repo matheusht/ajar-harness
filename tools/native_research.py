@@ -42,6 +42,7 @@ CONTROL_SHA = {
     'experiments/native-network-preflight/v2-effect-windows/producer_stop.py': '94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd',
     'experiments/native-review-qualification/fresh_review.py': 'f92957f55c89c0af3b7e9554c7042e038ed8843f59ceafa6cda8533db555bf11',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
+    'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
 }
 CAPTURE_FILES = {
     'evals/native-qualification/kanboard_native_capture.py': '150ea1019ea2c68e908f4e5306ef89cd315591e6d5c859cf6812e02c29b70be6',
@@ -438,6 +439,18 @@ def _load_capture_module(root: Path):
     spec = importlib.util.spec_from_file_location('native_kanboard_capture', path)
     if spec is None or spec.loader is None:
         _fail('capture_adapter_unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_origin_gate(root: Path):
+    path = _controls(root) / 'tools/native_kanboard_origin_gate.py'
+    if _sha(_file(path)) != CONTROL_SHA['tools/native_kanboard_origin_gate.py']:
+        _fail('origin_gate_pin_mismatch')
+    spec = importlib.util.spec_from_file_location('native_kanboard_origin_gate', path)
+    if spec is None or spec.loader is None:
+        _fail('origin_gate_unavailable')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -1334,7 +1347,7 @@ def _protected_trace(stdout: str, session_id: str) -> dict:
 def _unresolved_dispatches(root: Path) -> list[str]:
     unresolved = []
     for path in (_controls(root) / 'dispatch').glob('*.json'):
-        if path.name.endswith(('.trace.json', '.pre.json')):
+        if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
             continue
         record = _read_json(path)
         if record.get('status') == 'unknown_effect':
@@ -1413,6 +1426,13 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                            'stderr_sha256': hashlib.sha256(result.stderr).hexdigest(),
                            **summary, 'pool_before': pool_before, 'pool_after': pool_after,
                            'native_trace_sha256': _sha(trace_path), 'native_usage': usage})
+            if 'kanboard_capture' in _plan(root):
+                target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
+                window = _read_json(_controls(root) / 'observer' / target /
+                                    ('window-' + dispatch_id + '.json'))
+                before = _file(record_path.with_name(dispatch_id + '.pre.json'), private=True).read_bytes()
+                origin = _load_origin_gate(root).assess(window, before, record, trace_path.read_bytes())
+                _write_json(record_path.with_name(dispatch_id + '.origin.json'), origin, once=True)
             _write_json(record_path, record)
             returned = dict(record)
             if include_raw:

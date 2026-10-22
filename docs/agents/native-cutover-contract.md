@@ -45,8 +45,11 @@ engagements remain unchanged. Other blind behavioral and GEPA adapters stay sepa
 The candidate native route uses `tools/native_research.py prepare`, `research`,
 `resume`, `review`, `status`, `stop`, and `recover-start` on a persistent
 run root; consult each command's `--help` for current arguments. For the pinned
-Kanboard T01 API-only route, `prepare` opts into `--t01-capture
---origin-ingress`; `--kanboard-capture` selects the separate UI capture route.
+Kanboard T01 protected API route, `prepare` opts into `--t01-capture
+--origin-ingress`; select the exact workspace or historical API-only brief
+as described in the [native guide](native-local-research.md#start-and-resume).
+Workspace research does not expand the protected API's effect coverage.
+`--kanboard-capture` selects the separate S10 UI case.
 `capture-stage` binds each private target copy, and the qualification approval
 binds the frozen plan and target state. A future standing grant needs exact
 target/model/effect/expiry binding. After stop, `reconcile-origin-transport`

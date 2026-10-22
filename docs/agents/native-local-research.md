@@ -24,8 +24,16 @@ decision does not activate this route.
    queue or record kernel for this native task.
 3. Use `python3 tools/native_research.py prepare --help` as the source for
    current preparation inputs and inspect the frozen plan. For the pinned
-   Kanboard T01 API-only route, opt into both `--t01-capture` and
-   `--origin-ingress`; `--kanboard-capture` is the separate UI capture route.
+   Kanboard T01 protected API route, opt into both `--t01-capture` and
+   `--origin-ingress`. Use the exact
+   [workspace brief](../../evals/native-qualification/RESEARCHER-BRIEF-T01-WORKSPACE.md)
+   for researcher-led setup and normal web/API experiments in the own-copy
+   workspace; its separate protected copy still supports only T01 API evidence.
+   Startup checks the workspace image's PHP dependencies before native research.
+   The historical API-only brief retains its narrower contract;
+   `--kanboard-capture` selects the separate S10 UI case. Read the
+   [T04 limits](../../evals/native-qualification/T04-UNHINTED-PREFLIGHT.md#workspace-research-with-a-separate-protected-api-copy)
+   before treating either capture path as evidence for a selected effect.
    Use `capture-stage --help` for staging each private target copy. Read the
    current `start`, `research`, `resume`, `reconstruct`, and `stop` help before invoking them;
    keep the human-authored approval bound to the frozen plan and exact target

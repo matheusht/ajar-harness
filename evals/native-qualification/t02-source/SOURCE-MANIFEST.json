@@ -91,6 +91,16 @@
       "sha256": "7132039b50fc0d4229c846b1bf16154e6e541fc0a0b347828ae95b5c12cda46a"
     },
     {
+      "bytes": 2554,
+      "path": "evals/native-qualification/smoke/check_v2_managed_owned_integrated.py",
+      "sha256": "ca2b8ccaebc7e00ec2758a7426f823f3b3eed408144e9bc3966e81bd42e77843"
+    },
+    {
+      "bytes": 4157,
+      "path": "evals/native-qualification/smoke/check_v2_managed_owned_integrated_test.py",
+      "sha256": "68b6b1849063211630f19e126eea8b2a3c663ed814cdeed63623bb89dd6bb7ae"
+    },
+    {
       "bytes": 10100,
       "path": "evals/native-qualification/smoke/check_v2_reviewer_packet.py",
       "sha256": "e3319cdc3728eee0a7186474458fa8f5f62e97b673b4debdbfce9fa62b4c6b91"
@@ -146,9 +156,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1111,
+      "bytes": 1380,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "6bc2648d25341228e9809057d8c166bcc4a9f8d19a86e160d6f3b46fad90af28"
+      "sha256": "9a9b066fcb5a8f9dec0a2aef55857231c8db46caed3fc6967c302c536157068e"
     },
     {
       "bytes": 11748,

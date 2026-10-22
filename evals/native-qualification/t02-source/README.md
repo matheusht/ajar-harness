@@ -13,6 +13,11 @@ the patch has not been qualified in a built image. The unconditional
 `cloud_live_route_not_qualified` denial remains before output creation and
 Docker.
 
+Fresh owned rehearsals from this branch use
+`smoke/check_v2_managed_owned_integrated.py` with the exact source commit.
+The older same-image controller and its receipt remain pinned to their original
+source commit; that receipt must be replayed from that source state.
+
 The source manifest and offline receipts are preparation evidence only. They
 do not prove protected original observation, fresh native review, live TLS or
 provider behavior, all-route containment, or the first-test interruption and

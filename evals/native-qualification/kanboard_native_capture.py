@@ -518,8 +518,61 @@ def bind_dispatch(run_root: Path, target: str, dispatch_id: str) -> dict:
             "window": str(root / "controls/observer" / target / ("window-" + dispatch_id + ".json"))}
 
 
-def freeze(run_root: Path, target: str) -> dict:
-    """Stop collector after the native owner has stopped the target producer."""
+def _producer_binding(info: dict) -> str:
+    """Recheck the exact NativeRun manifest binding on a startup close."""
+    try:
+        value = {key: info[key] for key in ("Id", "Image", "Config", "Mounts")}
+        value["Mounts"] = sorted(info["Mounts"], key=lambda mount: mount["Destination"])
+        value["networks"] = sorted(info["NetworkSettings"]["Networks"])
+        value["host"] = {key: info["HostConfig"][key] for key in
+                         ("ReadonlyRootfs", "Privileged", "RestartPolicy", "CapDrop", "SecurityOpt")}
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    except (KeyError, TypeError, ValueError) as error:
+        raise CaptureHold("capture_startup_manifest_mismatch") from error
+
+
+def _stop_proof(root: Path, ledger: dict, resources: dict, stop_kind: str) -> None:
+    rows = resources.get("resources")
+    _need(isinstance(rows, list), "capture_resources_invalid")
+    producers = [row for row in rows if isinstance(row, dict) and row.get("kind") == "container"]
+    ids = [row.get("id") for row in producers]
+    _need(len(ids) == 8 and all(isinstance(identifier, str) and HEX64.fullmatch(identifier)
+                                for identifier in ids) and ledger["app_id"] in ids,
+          "capture_resources_invalid")
+    state = root / "controls/native-state"
+    if stop_kind == "REVOKED":
+        proof = _json(state / "REVOKED", root)
+        _need(proof.get("producers_verified_stopped") is True and proof.get("ids") == ids,
+              "capture_native_stop_unverified")
+        return
+    _need(stop_kind == "STARTUP_CLOSED" and not any((state / name).exists()
+          for name in ("RUN.json", "REVOKED", "UNSAFE")) and (state / "STOPPING").exists(),
+          "capture_native_stop_unverified")
+    stopping = _json(state / "STOPPING", root)
+    proof = _json(state / "STARTUP_CLOSED", root)
+    _need(isinstance(stopping.get("reason"), str) and
+          proof.get("producers_verified_stopped") is True,
+          "capture_native_stop_unverified")
+    manifest = _json(root / "controls/producer-manifest.json", root)
+    items = manifest.get("producers")
+    _need(manifest.get("version") == 1 and manifest.get("nonce") == resources.get("nonce") and
+          isinstance(items, list) and len(items) == 8 and
+          all(isinstance(item, dict) for item in items) and
+          [item.get("id") for item in items] == ids,
+          "capture_startup_manifest_mismatch")
+    for item in items:
+        info = _inspect("container", item["id"])
+        running = info.get("State", {})
+        _need(info.get("Id") == item["id"] and
+              info.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == resources["nonce"] and
+              (running.get("Running") is False or running.get("Paused") is True),
+              "capture_producer_not_stopped_or_owner_changed")
+        _need(_producer_binding(info) == item.get("binding"),
+              "capture_startup_manifest_mismatch")
+
+
+def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
+    """Freeze a stopped collector after one of NativeRun's terminal markers."""
     root = _private_dir(run_root)
     _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
     plan = _json(root / "plan.json", root)
@@ -529,26 +582,29 @@ def freeze(run_root: Path, target: str) -> dict:
     slot = _private_dir(root / "controls/observer" / target)
     ledger_path = slot / "resources.json"
     ledger = _json(ledger_path, root)
-    _need(ledger.get("status") == "active" and
+    _need(ledger.get("kind") == "kanboard-capture-resources-v1" and
+          ledger.get("target") == target and ledger.get("status") in ("active", "frozen") and
           all(isinstance(ledger.get(key), str) and HEX64.fullmatch(ledger[key])
               for key in ("app_id", "collector_id", "network_id")),
           "capture_not_active")
     app = _inspect("container", ledger["app_id"])
     collector = _inspect("container", ledger["collector_id"])
     resources = _json(root / "controls/resources.json", root)
-    producer_ids = [row.get("id") for row in resources.get("resources", [])
-                    if isinstance(row, dict) and row.get("kind") == "container"]
-    revoked = _json(root / "controls/native-state/REVOKED", root)
-    _need(revoked.get("producers_verified_stopped") is True and
-          revoked.get("ids") == producer_ids and ledger["app_id"] in producer_ids,
-          "capture_native_stop_unverified")
+    _need(ledger.get("nonce") == resources.get("nonce"), "capture_resource_owner_changed")
+    _stop_proof(root, ledger, resources, stop_kind)
     state = app.get("State", {})
     _need(app.get("Id") == ledger["app_id"] and
           (state.get("Running") is False or state.get("Paused") is True) and
+          app.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == ledger["nonce"] and
           collector.get("Id") == ledger["collector_id"] and
           collector.get("Config", {}).get("Labels", {}).get("io.lrh.kanboard-capture") == ledger["nonce"],
           "capture_producer_not_stopped_or_owner_changed")
+    frozen_path = slot / "frozen.json"
+    if ledger["status"] == "frozen":
+        _need(frozen_path.exists() and collector.get("State", {}).get("Status") in ("exited", "dead"),
+              "capture_frozen_record_mismatch")
     if collector.get("State", {}).get("Status") == "running":
+        _need(not frozen_path.exists(), "capture_frozen_record_mismatch")
         _docker("container", "stop", "--time", "10", ledger["collector_id"])
     _need(_inspect("container", ledger["collector_id"]).get("State", {}).get("Status") in
           ("exited", "dead"), "capture_collector_stop_unknown")
@@ -565,12 +621,29 @@ def freeze(run_root: Path, target: str) -> dict:
     result = {"kind": "kanboard-capture-frozen-v1", "target": target,
               "collector_id": ledger["collector_id"], "network_id": ledger["network_id"],
               "sqlite_sha256": _sha(database), "receipt_count": count, "last_receipt_id": maximum,
+              "native_stop_kind": stop_kind,
               "native_origin": "unproven", "credential_route": "unavailable"}
-    _write_once(slot / "frozen.json", result)
-    ledger["status"] = "frozen"
-    _write_replace(ledger_path, ledger)
-    return {"status": "frozen_origin_and_credentials_held", "target": target,
+    if frozen_path.exists():
+        _need(_json(frozen_path, root) == result, "capture_frozen_record_mismatch")
+    else:
+        _need(ledger["status"] == "active", "capture_frozen_record_mismatch")
+        _write_once(frozen_path, result)
+    if ledger["status"] != "frozen":
+        ledger["status"] = "frozen"
+        _write_replace(ledger_path, ledger)
+    return {"status": "startup_frozen_origin_and_credentials_held" if stop_kind == "STARTUP_CLOSED"
+            else "frozen_origin_and_credentials_held", "target": target,
             "receipt_count": count, "sqlite_sha256": result["sqlite_sha256"]}
+
+
+def freeze(run_root: Path, target: str) -> dict:
+    """Stop collector after NativeRun publishes REVOKED for eight producers."""
+    return _freeze(run_root, target, "REVOKED")
+
+
+def close_startup(run_root: Path, target: str) -> dict:
+    """Freeze a partial-start collector only after verified STARTUP_CLOSED."""
+    return _freeze(run_root, target, "STARTUP_CLOSED")
 
 
 def _listed(kind: str, identifier: str) -> bool:

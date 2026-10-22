@@ -89,6 +89,8 @@ hold, even if app receipts and protected effects match.
 | N07 | B fresh authenticated read is absent or reads a different task/actor; protected state or source changes before review | Hold result; do not call a role row alone a completed impact chain. |
 | N08 | Password/cookie/header/raw body enters native storage or a saved observer result | Reject/redact and hold. Credential injection is an explicit missing prerequisite. |
 | N09 | Collector/target fails, native stop is uncertain, or cleanup cannot identify exact owned resources | Hold with a fixed reason; leave originals for operator review and never infer success from absence. |
+| N10 | NativeRun exits before `RUN.json`, after a partial producer start | `close_startup` accepts only `STARTUP_CLOSED` with no `RUN.json`/`REVOKED`/`UNSAFE`, the exact eight manifest IDs and owner labels, and all eight producers stopped; then it freezes the collector before producer removal. A missing/false marker, changed binding, or running producer holds. |
+| N11 | Owner dies between writing `frozen.json` and setting observer ledger `frozen` | Retrying the same close must verify the immutable frozen record against the stopped collector DB and complete the ledger transition. A changed DB or record holds; it must not overwrite or silently accept either. The same retry rule applies to normal `REVOKED` freeze. |
 
 Provider-free checks must exercise valid and mutated manifests, mount/network
 isolation, source drift, stale/mismatched dispatch, unrelated collector rows,
@@ -109,3 +111,17 @@ simulated collector-create failure even when the network ID was not sealed.
 This check uses a local fake Docker executable and makes zero Docker/provider
 calls; runtime topology, process origin, fresh authenticated read, and live
 cleanup still need a separate owned native run.
+
+Provider-free terminal-close check (written before the close-path change):
+
+```sh
+python3 evals/native-qualification/smoke/check_kanboard_capture_close.py \
+  --source /private/tmp/kanboard-source-644ad391 \
+  --output /private/tmp/kanboard-capture-close-NEW
+```
+
+It must reject a false/missing `STARTUP_CLOSED`, a `RUN.json` overlap, a changed
+manifest binding, a running producer, and a changed frozen record. It must
+accept a verified startup close and retry the crash window after the immutable
+record exists. It also retries an ordinary `REVOKED` close. The test uses a
+fake local Docker executable only; it cannot qualify a live run.

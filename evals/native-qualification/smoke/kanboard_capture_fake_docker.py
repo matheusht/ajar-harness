@@ -22,6 +22,16 @@ def out(value):
     sys.exit(0)
 
 
+if state.get("mode") == "freeze":
+    if args[:2] == ["container", "inspect"] and args[2] in state["containers"]:
+        out(json.dumps([state["containers"][args[2]]]))
+    if args[:2] == ["container", "stop"] and args[-1] == state["collector_id"]:
+        collector = state["containers"][state["collector_id"]]
+        collector["State"] = {"Status": "exited", "Running": False, "Paused": False}
+        state["stop_calls"] = state.get("stop_calls", 0) + 1
+        out(state["collector_id"])
+    sys.exit(2)
+
 if args[:2] == ["container", "inspect"] and args[2] == state["app"]["Id"]:
     out(json.dumps([state["app"]]))
 if args[:2] == ["network", "create"]:

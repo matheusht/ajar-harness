@@ -26,6 +26,11 @@
       "sha256": "8ae05b96a12cbcc16d76b99e9938e09c035be539748977ef933817ec4d7b430d"
     },
     {
+      "bytes": 2342,
+      "path": "evals/native-qualification/T02-INTEGRATED-SOURCE-ADMISSION-CHECKS-20261022.md",
+      "sha256": "9d242acfc191b2834b03ac10fa3f6e52838f22ea0d8f11bd4be70e77abd0cd0a"
+    },
+    {
       "bytes": 8728,
       "path": "evals/native-qualification/T02-LIVE-PREPARATION-CHECKS-20261021.md",
       "sha256": "1e4392da0750956218b64d985dd8fad9d062b6568e7f2973a16e087e83aa74cf"
@@ -101,14 +106,14 @@
       "sha256": "7132039b50fc0d4229c846b1bf16154e6e541fc0a0b347828ae95b5c12cda46a"
     },
     {
-      "bytes": 2554,
+      "bytes": 5300,
       "path": "evals/native-qualification/smoke/check_v2_managed_owned_integrated.py",
-      "sha256": "7aa50ff2a6e841a90c965c822cca01bb1b33dd94116caa9b1dd39bb3749a4ca9"
+      "sha256": "21bffffdcd021a2f0d868086bb6e7f1688c3494f0e5132428cc958013a1f1a80"
     },
     {
-      "bytes": 4157,
+      "bytes": 8703,
       "path": "evals/native-qualification/smoke/check_v2_managed_owned_integrated_test.py",
-      "sha256": "68b6b1849063211630f19e126eea8b2a3c663ed814cdeed63623bb89dd6bb7ae"
+      "sha256": "a4749d57410d639132e992664969eb89f77099892a498c295e87d1977be0c544"
     },
     {
       "bytes": 10100,
@@ -166,9 +171,9 @@
       "sha256": "062ee4bee67b661ca4641ed9e6d5b22d9f32fc679f9c002d34b9f35059f278a1"
     },
     {
-      "bytes": 1380,
+      "bytes": 1597,
       "path": "evals/native-qualification/t02-source/README.md",
-      "sha256": "9a9b066fcb5a8f9dec0a2aef55857231c8db46caed3fc6967c302c536157068e"
+      "sha256": "468bf5f195f82b17d646f6c0e114ec150ad3740eadc889f2184828bcfb664663"
     },
     {
       "bytes": 11748,

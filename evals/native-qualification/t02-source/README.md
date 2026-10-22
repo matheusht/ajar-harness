@@ -14,7 +14,10 @@ the patch has not been qualified in a built image. The unconditional
 Docker.
 
 Fresh owned rehearsals from this branch use
-`smoke/check_v2_managed_owned_integrated.py` with the exact source commit.
+`smoke/check_v2_managed_owned_integrated.py` with an independently reviewed
+exact source commit. Its current-manifest preflight and early blocked receipt
+follow `T02-INTEGRATED-SOURCE-ADMISSION-CHECKS-20261022.md`; the caller's
+`--source-commit` alone does not establish reviewer provenance.
 The older same-image controller and its receipt remain pinned to their original
 source commit; that receipt must be replayed from that source state.
 

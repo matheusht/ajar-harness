@@ -55,13 +55,50 @@ def main() -> None:
 
     # The fake value is a protocol fixture, never a real credential. Production
     # broker code is included but its CLI server entrypoint is not executed.
-    php = r'''require $argv[1]; $v = t01_scrub(["id"=>17,"token"=>"fixture-only","nested"=>["password"=>"fixture-only","project_id"=>9]]); echo json_encode($v);'''
+    php = r'''
+require $argv[1];
+$db = new PDO('sqlite::memory:');
+$db->exec('CREATE TABLE objects (id INTEGER, project_id INTEGER, name TEXT)');
+$safe = t01_safe_keys($db);
+$changed = false;
+$reply = ['jsonrpc'=>'2.0', 'result'=>['id'=>17, 'project_id'=>9,
+    'name'=>'sensitive-text', 'opaqueNeutral'=>'fixture-only'], 'id'=>1];
+$value = t01_scrub_reply($reply, $safe, 'fixture-hmac-key', $changed);
+$error = t01_scrub_reply(['jsonrpc'=>'2.0',
+    'error'=>['code'=>403, 'message'=>'opaque-error'], 'id'=>2],
+    $safe, 'fixture-hmac-key', $changed);
+$body = json_encode(['jsonrpc'=>'2.0', 'method'=>'getMe', 'id'=>'opaque-id']);
+$pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
+fwrite($pair[0], "POST /jsonrpc.php HTTP/1.1\r\nHost: fixture\r\n"
+    ."Content-Type: application/json\r\nX-Native-Actor: A\r\n"
+    .'Content-Length: '.strlen($body)."\r\n\r\n".$body);
+$stringIdRejected = false;
+try { t01_read_request($pair[1]); }
+catch (RuntimeException $problem) { $stringIdRejected = true; }
+fclose($pair[0]); fclose($pair[1]);
+echo json_encode(['result'=>$value, 'error'=>$error,
+    'changed'=>$changed, 'string_id_rejected'=>$stringIdRejected]);
+'''
     result = subprocess.run(["php", "-r", php, str(broker)], capture_output=True, text=True)
     if result.returncode:
         raise SystemExit("FAIL broker_scrub_function")
     value = json.loads(result.stdout)
-    if (value.get("id") != 17 or value.get("nested", {}).get("project_id") != 9
-            or "fixture-only" in result.stdout):
+    reply = value.get("result", {})
+    payload = reply.get("result", {})
+    error = value.get("error", {})
+    dynamic = [key for key in payload if key not in ("id", "project_id", "name")]
+    if (reply.get("jsonrpc") != "2.0" or reply.get("id") != 1
+            or payload.get("id") != 17 or payload.get("project_id") != 9
+            or payload.get("name") != "[REDACTED]"
+            or len(dynamic) != 1 or not dynamic[0].startswith("field_")
+            or payload.get(dynamic[0]) != "[REDACTED]"
+            or error.get("jsonrpc") != "2.0" or error.get("id") != 2
+            or error.get("error", {}).get("code") != 403
+            or error.get("error", {}).get("message") != "[REDACTED]"
+            or value.get("changed") is not True
+            or value.get("string_id_rejected") is not True
+            or any(secret in result.stdout for secret in
+                   ("fixture-only", "opaqueNeutral", "sensitive-text", "opaque-error"))):
         raise SystemExit("FAIL broker_scrub_result")
     if "Authorization" in collector.read_text() or "Cookie" in collector.read_text():
         raise SystemExit("FAIL receipt_schema_secret_field")

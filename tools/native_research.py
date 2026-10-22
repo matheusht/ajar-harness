@@ -1016,6 +1016,8 @@ def _protected_trace(stdout: str, session_id: str) -> dict:
 def _unresolved_dispatches(root: Path) -> list[str]:
     unresolved = []
     for path in (_controls(root) / 'dispatch').glob('*.json'):
+        if path.name.endswith('.trace.json'):
+            continue
         record = _read_json(path)
         if record.get('status') == 'unknown_effect':
             unresolved.append(record.get('dispatch_id', path.stem))
@@ -1062,8 +1064,6 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         try:
             if before_dispatch is not None:
                 before_dispatch(root, dispatch_id)
-                record['observer_arm_status'] = 'armed_before_native_exec'
-                _write_json(record_path, record)
             result = _native_exec(root, role,
                                   ['run', '--standalone', '--agent', 'build', '--model', MODEL,
                                    '--format', 'json', '--session', session_id, prompt],
@@ -1098,6 +1098,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             return returned
         except Exception:
             # The durable pre-dispatch record remains uncertain; no automatic retry.
+            record['status'] = 'unknown_effect'
             return dict(record)
 
 

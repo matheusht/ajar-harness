@@ -61,6 +61,8 @@ def seed_capture(run, observer, plan, manifest, dispatch_ids, final):
     plan['kanboard_capture'] = pins
     plan_sha = put(run / 'plan.json', plan)
     manifest['plan_sha256'] = plan_sha
+    revoked_sha = hashlib.sha256((run / 'controls/native-state/REVOKED').read_bytes()).hexdigest()
+    producer_sha = hashlib.sha256((run / 'controls/producer-manifest.json').read_bytes()).hexdigest()
     activation_path = run / 'controls/activation.json'
     activation = json.loads(activation_path.read_text())
     activation['plan_sha256'] = plan_sha
@@ -102,7 +104,8 @@ def seed_capture(run, observer, plan, manifest, dispatch_ids, final):
             'kind': 'kanboard-capture-frozen-v1', 'target': target,
             'collector_id': collector_id, 'network_id': network_id,
             'sqlite_sha256': db_sha, 'receipt_count': 1, 'last_receipt_id': 1,
-            'native_stop_kind': 'REVOKED', 'native_origin': 'unproven',
+            'native_stop_kind': 'REVOKED', 'native_stop_sha256': revoked_sha,
+            'producer_manifest_sha256': producer_sha, 'native_origin': 'unproven',
             'credential_route': 'unavailable'})
         put(slot / 'resources.json', {
             'kind': 'kanboard-capture-resources-v1', 'status': 'removed',
@@ -374,6 +377,13 @@ def main():
         reject(run, observer, 'capture_receipts_bound')
         frozen_path.write_bytes(frozen_bytes)
         frozen_path.chmod(0o600)
+        frozen = json.loads(frozen_bytes)
+        for field in ('native_stop_sha256', 'producer_manifest_sha256'):
+            put(frozen_path, dict(frozen, **{field: '0' * 64}))
+            repin(run, observer, manifest, frozen_name)
+            reject(run, observer, 'capture_receipts_bound')
+        put(frozen_path, frozen)
+        repin(run, observer, manifest, frozen_name)
 
         ledger_name = 'controls/observer/target/resources.json'
         ledger_path = run / ledger_name

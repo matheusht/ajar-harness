@@ -275,6 +275,11 @@ def capture_matches(root, plan, plan_hash, activation, final, records):
     adapter = root / 'controls/evals/native-qualification/kanboard_native_capture.py'
     topology_path = root / 'controls/capture-topology.json'
     topology = read_json(topology_path)
+    revoked = relative_file(root, 'controls/native-state/REVOKED')
+    producer_manifest = relative_file(root, 'controls/producer-manifest.json')
+    if revoked is None or producer_manifest is None:
+        return False
+    revoked_sha, producer_sha = sha(revoked), sha(producer_manifest)
     if (not regular(adapter) or not isinstance(topology, dict) or set(topology) != set(CAPTURE_TARGETS)
             or sha(adapter) != pins.get('adapter_sha256')
             or activation.get('capture_topology_sha256') != sha(topology_path)
@@ -330,6 +335,8 @@ def capture_matches(root, plan, plan_hash, activation, final, records):
                 or topo.get('source_manifest_sha256') != pins['source_manifest_sha256']
                 or frozen.get('kind') != 'kanboard-capture-frozen-v1'
                 or frozen.get('target') != target or frozen.get('native_stop_kind') != 'REVOKED'
+                or frozen.get('native_stop_sha256') != revoked_sha
+                or frozen.get('producer_manifest_sha256') != producer_sha
                 or frozen.get('sqlite_sha256') != sha(db_path)
                 or type(count) is not int or type(last_id) is not int
                 or frozen.get('receipt_count') != count or frozen.get('last_receipt_id') != last_id

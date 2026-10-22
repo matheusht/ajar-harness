@@ -1,0 +1,21 @@
+{
+  "source_base": "parent experiment directory",
+  "source_references_sha256": {
+    "fixture/app.py": "053e7d0979e9e33fe136b7573c831a81ebafb9ad7211f73e3f9039bc67639b29",
+    "fixture/note.json": "97c43250ae98066677012b9b2d06d9cee8def0383b8650d45a0f02fab8995bbf",
+    "fixture/policy-v2.json": "34e387a2d469ae1750880ae7185a7493013861f42da2b87ab329e77256f518b9"
+  },
+  "reviewer_visible_sha256": {
+    "CLAIMS-BEFORE-DROP.md": "6bc0af88d19c6c4f30cf99755f5db2b212637a8336ce95bccbda41f8b9407772",
+    "BEFORE-DROP.json": "57f517cfe7a748347d79e7febe9f6cbb6c5ccec91d9fd33dd2b351888e4b561e",
+    "ATTEMPTED-DISPOSITION.md": "8e56339f33c0dd837b301ad52c97c84c7665f081b47ad51870179458850d1e9a",
+    "AFTER-DROP-CHECK.json": "c106c38122a79d7e872208cbecdf8b4003aa025238597ef0571f192620f1c81d"
+  },
+  "observer_only": [
+    "EXPECTED-CHECKS.md",
+    "PREP-RECEIPT.json",
+    "SHA256SUMS"
+  ],
+  "actual_reviewer_reads": [],
+  "stage_order": "Preserve pre-drop basis, inspect attempted disposition, then compare actual discriminating checks; do not hide contrary evidence."
+}

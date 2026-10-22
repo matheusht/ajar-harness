@@ -1,0 +1,19 @@
+{
+  "source_references_sha256": {
+    "fixture/app.py": "053e7d0979e9e33fe136b7573c831a81ebafb9ad7211f73e3f9039bc67639b29",
+    "fixture/note.json": "97c43250ae98066677012b9b2d06d9cee8def0383b8650d45a0f02fab8995bbf",
+    "fixture/policy-v1.json": "1c42cb70e7daffdd5fc18c6afc8840e615f0d26dfa45e5be981d20e8bd3ababc"
+  },
+  "reviewer_visible_sha256": {
+    "CLAIMS.md": "6980599d047744eaae0b61728ed74c643f17656deb9c00aec8916ad0f22dc8f8",
+    "CLAIMED-TRANSCRIPT.txt": "c842bd4a031e941d795bf7a48087649d9d34b3795af33374eb1d60889778a686",
+    "OBSERVER-SANITIZED.json": "ec966ce21ebc45b8f616f75bc49a8680b24bccba07b4a58ba7bd235624b615a1"
+  },
+  "observer_only": [
+    "EXPECTED-CHECKS.md",
+    "PREP-RECEIPT.json",
+    "SHA256SUMS"
+  ],
+  "source_reference_base": "parent experiment directory; verify hashes before mounting read-only",
+  "actual_native_reviewer_inputs": "not delivered; no native context exists"
+}

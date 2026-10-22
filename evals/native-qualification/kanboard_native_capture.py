@@ -41,7 +41,7 @@ T01_SOURCE_PINS = {
     "app/Api/Procedure/SwimlaneProcedure.php": "0bdaf617b9b26f9ca4bc21766b08ae5989a858bfc4d991d8899f01b24332ac16",
     "app/Api/Authorization/ProjectAuthorization.php": "e05d0f980eaed023e5a8b118c888b67768a4384c8e58203b5131aac13c5b8591",
 }
-T01_BROKER_SHA256 = "a9ba3172442009b94060b0e89df6b0d0dfd2973c0ea6696e3ed5f99958ca6b9a"
+T01_BROKER_SHA256 = "90ee251646538baf04be560185363c38fad4e1157aa1d0a2e217bef30d001517"
 T01_COLLECTOR_SHA256 = "21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c"
 TARGET_TO_RESEARCH = {"target": "researcher", "review-target-1": "reviewer-1",
                       "review-target-2": "reviewer-2"}

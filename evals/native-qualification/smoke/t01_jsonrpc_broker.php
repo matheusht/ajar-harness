@@ -52,10 +52,13 @@ function t01_scrub($value, $safeKeys, $redactionKey, &$changed)
 
 function t01_scrub_reply($reply, $safeKeys, $redactionKey, &$changed)
 {
+    $hasError = is_array($reply) && array_key_exists('error', $reply);
     t01_need(is_array($reply) && !array_is_list($reply) &&
         ($reply['jsonrpc'] ?? null) === '2.0' &&
-        isset($reply['id']) && is_int($reply['id']) && count($reply) === 3 &&
-        (array_key_exists('result', $reply) !== array_key_exists('error', $reply)),
+        array_key_exists('id', $reply) &&
+        (is_int($reply['id']) || ($reply['id'] === null && $hasError &&
+            is_array($reply['error']) && !array_is_list($reply['error']))) &&
+        count($reply) === 3 && (array_key_exists('result', $reply) !== $hasError),
         'backend_json_invalid');
     unset($reply['jsonrpc']);
     return ['jsonrpc' => '2.0'] + t01_scrub($reply, $safeKeys, $redactionKey, $changed);
@@ -335,8 +338,13 @@ function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids,
     $before = t01_snapshot($db, $method, $params, $ids[$actor]);
     [$status, $backendBody] = t01_app_call($port, $username, $secrets[$actor], $body);
     $reply = json_decode($backendBody, true, 32);
+    $matchedId = is_array($reply) && isset($reply['id']) &&
+        $reply['id'] === $request['id'];
+    $nullErrorId = is_array($reply) && array_key_exists('id', $reply) &&
+        $reply['id'] === null && is_array($reply['error'] ?? null) &&
+        !array_is_list($reply['error']);
     t01_need(is_array($reply) && !array_is_list($reply) &&
-        ($reply['id'] ?? null) === $request['id'], 'backend_json_invalid');
+        ($matchedId || $nullErrorId), 'backend_json_invalid');
     [$kind, $matches] = t01_result_class($status, $reply, $method, $before);
     $after = t01_snapshot($db, $method, $params, $ids[$actor]);
     $changed = false;

@@ -33,8 +33,44 @@ checks do not supply that evidence. In particular,
 `native_original_session_origin_unqualified` remains held under #85: a broker
 receipt and native response ID join do not by themselves prove the original
 session's same-operation effect. Text-dependent alternative findings remain
-unresolved if redaction hides their effect. A full-surface T04 claim stays on
-hold until a separately qualified web route exists.
+unresolved if redaction hides their effect. This API-only brief cannot supply
+the original T04 research contract.
+
+## Workspace research with a separate protected API copy
+
+[RESEARCHER-BRIEF-T01-WORKSPACE.md](RESEARCHER-BRIEF-T01-WORKSPACE.md) permits
+researcher-led setup, synthetic administrator and ordinary-user creation, and
+normal web or JSON-RPC experiments in the isolated workspace. The separate
+protected T01 API copy retains its two ordinary actors and string redaction.
+The new brief does not select a flaw or require research to use that copy.
+Its SHA-256 is `64b2b256fdc3285237bdf5c69f478ad680121e4a30284e1090819cff05b9cf09`;
+the runner binds it to `t01_research_mode: workspace_research`. Historical
+briefs and API-only prepared plans retain their original meaning.
+
+Select a researcher image with PHP and the pinned application's required
+extensions, such as the candidate derived image described in
+[T02-KANBOARD-RUNTIME-CHECKS.md](T02-KANBOARD-RUNTIME-CHECKS.md). Workspace-mode
+startup checks PHP version, required extensions, writable data, and the shipped
+autoload file before native research. This dependency check does not build or
+start the app, verify ordinary behavior, or replace exact-image case preflight.
+
+This restores the broader exploration contract, not full capture coverage or
+qualification. Workspace services and agent-written results remain research
+material. Before accepting a selected claim, independently observe a decisive
+check on clean original source through its intended entry path. T01's current
+observer can support only its implemented API semantics. A different effect
+needs the smallest observer suited to that claim, written and checked before
+the decisive operation; later replay cannot establish an earlier unwitnessed
+operation's origin. Keep unsupported effects unfinished.
+
+Adding GET/forms to the current broker would still omit researcher-owned
+setup, administrator use, text-dependent results, and ordinary session behavior.
+Use the existing native source/build tools for exploration. Extend protected
+observation only when a selected effect shows what is missing. The new brief's
+credential-handling instruction does not enforce redaction of arbitrary native
+tool output. Actual setup, secret-free retained evidence, material-state
+continuation, independent effect/control/review and cleanup still need the
+deferred live workflow check.
 
 ## Verified offline inputs and separation
 

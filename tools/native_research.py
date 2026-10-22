@@ -64,6 +64,7 @@ T01_CAPTURE_FILES = {
 T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
 T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'
 T01_BRIEF_SHA = 'cfa72ecb1279d292cd915c4c8b7c9405095405e422d1bf96e211db809b139c95'
+T01_WORKSPACE_BRIEF_SHA = '64b2b256fdc3285237bdf5c69f478ad680121e4a30284e1090819cff05b9cf09'
 CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
 ORIGIN_ROLES = {'researcher': 'target', 'resume': 'target',
                 'reviewer-1': 'review-target-1', 'reviewer-2': 'review-target-2'}
@@ -709,7 +710,7 @@ def prepare(args: argparse.Namespace) -> dict:
         _fail('brief_encoding_invalid')
     if not brief_text.strip() or CREDENTIAL_TEXT.search(brief_text):
         _fail('brief_empty_or_credential_like')
-    if t01_capture and _sha(brief) != T01_BRIEF_SHA:
+    if t01_capture and _sha(brief) not in (T01_BRIEF_SHA, T01_WORKSPACE_BRIEF_SHA):
         _fail('t01_capture_brief_pin_mismatch')
     mutable_paths = list(args.mutable_path or [])
     if (len(mutable_paths) != len(set(mutable_paths))
@@ -832,6 +833,8 @@ def prepare(args: argparse.Namespace) -> dict:
             plan['kanboard_capture'] = _capture_pins()
         if t01_capture:
             plan['t01_capture'] = _capture_pins('t01')
+            if plan['brief_sha256'] == T01_WORKSPACE_BRIEF_SHA:
+                plan['t01_research_mode'] = 'workspace_research'
         if origin_build is not None:
             plan['native_origin'] = origin_build
         _write_json(root / 'plan.json', plan, once=True)
@@ -892,6 +895,9 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     global DOCKER_BINARY
     plan = _plan(root)
     controls = _controls(root)
+    if ('t01_research_mode' in plan and
+            (plan['t01_research_mode'] != 'workspace_research' or 't01_capture' not in plan)):
+        _fail('t01_capture_research_mode_invalid')
     if (plan.get('provider_route') != PROVIDER_ROUTE or plan.get('provider_authority') != AUTHORITY
             or plan.get('model') != MODEL or plan.get('opencode_version') != VERSION
             or plan.get('control_sha256') != CONTROL_SHA
@@ -924,7 +930,8 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     if 't01_capture' in plan:
         if _capture_mode(plan) != 't01' or plan['t01_capture'] != _capture_pins('t01'):
             _fail('t01_capture_plan_pin_mismatch')
-        if plan.get('brief_sha256') != T01_BRIEF_SHA:
+        expected_brief = T01_WORKSPACE_BRIEF_SHA if 't01_research_mode' in plan else T01_BRIEF_SHA
+        if plan.get('brief_sha256') != expected_brief:
             _fail('t01_capture_brief_pin_mismatch')
         for relative, digest in T01_CAPTURE_FILES.items():
             if _sha(_file(controls / relative, private=True)) != digest:
@@ -1236,6 +1243,19 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
             'response_request_id_header': 'X-LRH-Request-ID',
             'backend_identity_and_session': 'target-owned; original same-operation origin held',
         }
+        if plan.get('t01_research_mode') == 'workspace_research':
+            info['url_role'] = 'protected_original_api_copy'
+            info['protected_api_limits'] = [
+                'JSON-RPC only', 'ordinary actors A and B only',
+                'response strings and dynamic keys redacted',
+                'no protected web or administrator access; effect coverage is case-specific',
+            ]
+            if role == 'researcher':
+                info['workspace_research'] = {
+                    'source': '/workspace/project', 'service_bind': '127.0.0.1',
+                    'entry_paths': ['web', 'JSON-RPC'],
+                    'setup': 'researcher-controlled; separate from the supplied protected API copy',
+                }
     _write_json(root / role / 'project/target.json', info, once=True)
 
 
@@ -2484,7 +2504,42 @@ def _probe_origin_route(root: Path, plan: dict, bindings: dict) -> None:
             _fail('native_origin_direct_tcp_bypass')
 
 
+def _workspace_runtime_probe(root: Path, container_id: str) -> dict | None:
+    if _plan(root).get('t01_research_mode') != 'workspace_research':
+        return None
+    extensions = ['pdo_sqlite', 'gd', 'mbstring', 'hash', 'openssl', 'json',
+                  'ctype', 'filter', 'session', 'dom', 'SimpleXML', 'xml']
+    code = ('$extensions=' + json.dumps(extensions) + ';'
+            'echo json_encode(["php_version"=>PHP_VERSION,"extensions"=>array_combine('
+            '$extensions,array_map("extension_loaded",$extensions)),'
+            '"data_writable"=>is_writable("/workspace/project/data"),'
+            '"vendor_autoload_present"=>is_file("/workspace/project/vendor/autoload.php")]);')
+    try:
+        result = _docker('container', 'exec', container_id, 'php', '-r', code,
+                         timeout=10, allow_failure=True)
+    except NativeResearchError:
+        _fail('workspace_php_runtime_unavailable')
+    if result.returncode or len(result.stdout) > 4096:
+        _fail('workspace_php_runtime_unavailable')
+    try:
+        value = json.loads(result.stdout)
+    except (UnicodeError, ValueError, RecursionError):
+        _fail('workspace_php_runtime_unavailable')
+    if (not isinstance(value, dict) or
+            set(value) != {'php_version', 'extensions', 'data_writable', 'vendor_autoload_present'} or
+            not isinstance(value['php_version'], str) or
+            not isinstance(value['extensions'], dict) or set(value['extensions']) != set(extensions) or
+            any(loaded is not True for loaded in value['extensions'].values()) or
+            value['data_writable'] is not True or value['vendor_autoload_present'] is not True):
+        _fail('workspace_php_runtime_unavailable')
+    version = re.fullmatch(r'([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,3})', value['php_version'])
+    if version is None or tuple(map(int, version.groups())) < (8, 1, 0):
+        _fail('workspace_php_runtime_unavailable')
+    return {**value, 'extensions': extensions}
+
+
 def _surface_probe(root: Path, container_id: str) -> dict:
+    workspace_runtime = _workspace_runtime_probe(root, container_id)
     version = _docker('container', 'exec', container_id, '/usr/local/bin/opencode', '--version')
     if version.stdout.decode(errors='replace').strip() != VERSION:
         _fail('opencode_version_mismatch')
@@ -2550,6 +2605,8 @@ def _surface_probe(root: Path, container_id: str) -> dict:
             'mcp_count': len(mcp), 'reference_count': len(references),
             'command_count': len(commands), 'native_db_path': '/workspace/data/opencode/opencode.db',
         }
+        if workspace_runtime is not None:
+            inventory['workspace_runtime'] = workspace_runtime
         effective = inventory['effective_config']
         if (effective['model'] != {'providerID': 'opencode', 'model': 'deepseek-v4.1-flash-free'}
                 or effective['fallback'] is not None

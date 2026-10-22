@@ -78,3 +78,39 @@ The inventory does not establish that reconstruction actually recovered a
 hypothesis or that a file's final claim is sound. Missing claim-material evidence
 or a missing requested result remains unfinished for live acceptance; do not
 add blanket raw stdout export or a report-writing service to satisfy this check.
+
+## Workspace brief pairing checks (before implementation, 22 October)
+
+Extend `smoke/check_t01_capture_stage.py` before changing the runner. Keep the
+historical API-only brief exact and unchanged. The new exact workspace brief
+may select `t01_research_mode: workspace_research` under the existing T01
+capture profile; no new capture profile or CLI flag is needed.
+
+- The historical brief prepares and stages with no research-mode field and
+  unchanged target information. The new brief prepares, freezes all visible and
+  protected brief copies, and stages all three protected T01 targets.
+- Reject an altered workspace brief before creating its run root. Reject an
+  unknown, null, list or object mode, a mode outside T01 capture, and either
+  mismatch between the exact brief hash and its required mode.
+- Workspace-mode target information distinguishes researcher/resume own-copy
+  research at `/workspace/project` on loopback from the supplied protected
+  original API copy. Reviewer information must not advertise a researcher-local
+  source path. Preserve protected API actor, authentication and text limitations.
+- Exercise public prepare/stage against a read/copied pinned source only. A fake
+  Docker executable records any call; no Docker, application or provider runs.
+
+Save the first failing receipt before implementation and the passing repeatable
+command afterward. These checks establish configuration compatibility only;
+they add no web capture, effect coverage, redaction guarantee or live evidence.
+
+Before adding the workspace runtime probe, extend the same smoke with explicitly
+substituted Docker, native-server and surface-API responses. Exercise the actual
+`_surface_probe` path: workspace PHP inspection must precede server startup and
+its safe result must enter the loaded-surface inventory; API-only mode must
+neither invoke PHP nor add workspace-runtime metadata. Require PHP 8.1 or newer,
+the pinned app's twelve distinct SQLite/PHP extensions, writable project data
+and a present vendor autoloader. Missing PHP, command failure, malformed or
+oversized output, invalid/old versions, missing extensions and absent/unwritable
+paths must all produce one bounded setup error before any server starts.
+The probe only evaluates fixed runtime introspection; it never includes app
+source, runs the app, installs packages or establishes runtime qualification.

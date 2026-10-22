@@ -34,9 +34,12 @@ decision does not activate this route.
    from `reconcile-origin-transport` is not semantic effect proof;
    `reconcile-t01-semantic` separately checks the frozen T01 API receipts and
    stopped target state. `assess-poststop-review` still requires reviewer
-   target and material-link proof. That repair is in flight, so do not treat
-   its output as a review candidate until the repair and live qualification
-   pass. These source and offline checks do not qualify a provider or target.
+   target effect/control receipts, completed reviewer actions, and
+   process-origin attribution for the selected requests. A successful
+   assessment produces at most a partial candidate for operator review. It
+   still requires live qualification, clean replay and fixed-control evidence;
+   review strong-lead dispositions separately when needed. Source and offline
+   checks do not qualify a provider or target.
    After a scoped #165 adopt, any standing permission still needs exact
    target/model/effect/expiry binding. Save observations and contrary results
    as ordinary research files in the run root.
@@ -57,9 +60,12 @@ disposition, or formal engagement closure.
 ## Review and result
 
 The public `review` command takes an observer-selected frozen packet and a fresh
-reviewer slot. A returned review remains unfinished until the independent
-reviewer-target and material-link proof is repaired and qualified. Freeze a
-sanitized observer-owned handoff for each fresh independent reviewer.
+reviewer slot. After stop, `assess-poststop-review` checks the reviewer-target
+T01 effect/control chain and process-origin attribution for the reviewer's
+actions. A successful assessment is at most a partial operator-review
+candidate; live qualification, clean replay, fixed control, and fresh review
+of strong-lead dismissal remain separate as applicable. Freeze a sanitized
+observer-owned handoff for each fresh independent reviewer.
 The reviewer must see the exact claim/evidence version, original-target
 effect origin and reachability, contrary evidence, and what remains uncertain.
 A changed material claim or evidence invalidates the affected conclusion and

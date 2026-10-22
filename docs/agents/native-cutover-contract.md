@@ -54,10 +54,12 @@ assesses process-bound transport origin, while `reconcile-t01-semantic`
 separately assesses the selected API effect and controls from frozen receipts
 and target state. Neither establishes clean replay or fixed-control
 qualification. `assess-poststop-review` composes the reviewer turn with
-reviewer-target origin and semantic evidence; its reviewer-target material-link
-repair is still in flight, so a candidate result must not be promised until
-that repair lands and the live workflow qualifies. Offline checks exercise
-source and synthetic evidence only; they do not qualify a provider or target.
+the reviewer-target T01 effect/control chain and process-origin attribution for
+the selected requests. A successful assessment produces at most a partial
+candidate for operator review. Live qualification, clean replay, fixed control,
+and review of strong-lead dismissal remain separate requirements as applicable.
+Offline checks exercise source and synthetic evidence only; they do not qualify
+a provider or target.
 Research files live in the run root, with observer capture and sanitized
 reviewer handoff. The route preserves the legacy queue and record path for
 existing work and has no dependency on either.

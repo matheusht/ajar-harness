@@ -40,6 +40,7 @@ CONTROL_SHA = {
     'experiments/native-network-preflight/v2-effect-windows/native_run.py': '759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f',
     'experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py': 'dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175',
     'experiments/native-network-preflight/v2-effect-windows/producer_stop.py': '94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd',
+    'experiments/native-review-qualification/fresh_review.py': 'f92957f55c89c0af3b7e9554c7042e038ed8843f59ceafa6cda8533db555bf11',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
 }
 MODEL = 'opencode/deepseek-v4.1-flash-free'
@@ -1360,8 +1361,8 @@ def status(run_root: Path) -> dict:
             'provider_request_count': None, 'monetary_spend': None}
 
 
-def _load_review_module():
-    path = ROOT / 'experiments/native-review-qualification/fresh_review.py'
+def _load_review_module(root: Path):
+    path = _controls(root) / 'experiments/native-review-qualification/fresh_review.py'
     if not path.is_file():
         _fail('fresh_review_module_unavailable')
     spec = importlib.util.spec_from_file_location('native_fresh_review', path)
@@ -1380,7 +1381,7 @@ def review(run_root: Path, observer_root: Path, selection: Path,
         _fail('review_input_invalid')
     if not run_active(root) or _unresolved_dispatches(root):
         _fail('review_run_closed_or_uncertain')
-    module = _load_review_module()
+    module = _load_review_module(root)
     packet_dir = root / 'handoff' / role
     pin = module.prepare_packet(observer_root, selection, selection_sha256, packet_dir,
                                 public_bytes=module.validate_public_bytes)

@@ -1,8 +1,7 @@
 <?php
-// Disposable E2E client. Inputs are synthetic and mounted only in the client container.
+// Disposable E2E client. Synthetic credentials arrive over stdin for each run.
 // Stdout contains statuses and digests, never credentials, cookies, or response bodies.
 
-$input = json_decode(file_get_contents('/input/seed.json'), true, 512, JSON_THROW_ON_ERROR);
 $mode = $argv[1] ?? 'positive';
 $base = 'http://kanboard-effect-app:8000';
 $cookies = [];
@@ -83,9 +82,11 @@ function taskRead($task, $marker)
 }
 
 if ($mode === 'collector-reach') {
-    $probe = @file_get_contents('http://kanboard-effect-collector:8765/receipt.php', false,
-        stream_context_create(['http' => ['timeout' => 1]]));
-    echo json_encode(['collector_reachable' => $probe !== false], JSON_THROW_ON_ERROR)."\n";
+    $http_response_header = [];
+    @file_get_contents('http://kanboard-effect-collector:8765/receipt.php', false,
+        stream_context_create(['http' => ['timeout' => 1, 'ignore_errors' => true]]));
+    echo json_encode(['collector_reachable' => isset($http_response_header[0]) &&
+        preg_match('/^HTTP\/\S+\s+\d+/', $http_response_header[0]) === 1], JSON_THROW_ON_ERROR)."\n";
     exit;
 }
 
@@ -103,6 +104,8 @@ if ($mode === 'batch') {
     echo json_encode(['batch_status' => $status], JSON_THROW_ON_ERROR)."\n";
     exit;
 }
+
+$input = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
 
 if ($mode === 'second') {
     login($input['users']['B']['username'], $input['users']['B']['password']);

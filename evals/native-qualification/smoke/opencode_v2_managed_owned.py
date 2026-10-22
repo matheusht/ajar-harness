@@ -281,6 +281,25 @@ def verify_review_packet(directory, pin):
         return False
 
 
+def review_inputs_current(directory, pin, originals, candidate, note):
+    if not verify_review_packet(directory, pin) or originals.is_symlink() or candidate.is_symlink():
+        return False
+    try:
+        if (note != candidate / 'research-note.md'
+                or {path.name for path in originals.iterdir()} != set(PACKET_SOURCE_NAMES)
+                or {path.name for path in candidate.iterdir()} !=
+                   set(PACKET_SOURCE_NAMES) | {'research-note.md'}):
+            return False
+        files = {'RESEARCH.md': note}
+        for name in PACKET_SOURCE_NAMES:
+            files['ORIGINAL-' + name] = originals / name
+            files[name] = candidate / name
+        return all(path.is_file() and not path.is_symlink() and sha(path) == pin['files'][name]
+                   for name, path in files.items())
+    except (OSError, KeyError, TypeError):
+        return False
+
+
 def archive_review_packet(directory, archive, pin):
     if not verify_review_packet(directory, pin):
         raise RuntimeError('review_packet_changed_before_archive')
@@ -2024,6 +2043,12 @@ def main():
                   and fresh == {'denied': True}
                   and not sent
                   and owned_health_count(responder) == health_before)
+            report['review_inputs_current_after_stop'] = review_inputs_current(
+                handoff, packet_pin, baseline_source, workspace / 'project',
+                workspace / 'project/research-note.md')
+            if not report['review_inputs_current_after_stop']:
+                report['review_status'] = 'stale_review_inputs'
+                raise RuntimeError('review_inputs_changed_after_resume')
             if not live:
                 report['responder_rows'] = responder.rows
                 report['responder_required_shell_fields'] = responder.required

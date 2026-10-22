@@ -223,6 +223,154 @@ def _verify_target_state(directory: Path, source: dict[str, str], mutable_paths:
         _fail('target_source_or_state_changed')
 
 
+def _snapshot_tree(directory: Path) -> tuple[dict, dict[str, str], dict[str, int]]:
+    """Hash a bounded tree; discovered names remain in memory only."""
+    if not directory.is_dir() or directory.is_symlink():
+        _fail('snapshot_directory_invalid')
+    rows: list[tuple[str, str]] = []
+    observed: dict[str, str] = {}
+    sizes: dict[str, int] = {}
+    byte_count = 0
+    entry_count = 0
+    for path in directory.rglob('*'):
+        entry_count += 1
+        if entry_count > 100_000:
+            _fail('snapshot_entry_limit')
+        relative = path.relative_to(directory).as_posix()
+        if len(relative.encode('utf-8')) > 4096 or len(path.parts) - len(directory.parts) > 64:
+            _fail('snapshot_path_limit')
+        if path.is_symlink():
+            _fail('snapshot_symlink_forbidden')
+        entry = path.stat(follow_symlinks=False)
+        if stat.S_ISDIR(entry.st_mode):
+            continue
+        if not stat.S_ISREG(entry.st_mode):
+            _fail('snapshot_special_file_forbidden')
+        byte_count += entry.st_size
+        if byte_count > 2 * 1024 * 1024 * 1024:
+            _fail('snapshot_byte_limit')
+        digest = _sha(path)
+        after = path.stat(follow_symlinks=False)
+        if ((entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns) !=
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+            _fail('snapshot_file_changed_during_hash')
+        rows.append((relative, digest))
+        observed[relative] = digest
+        sizes[relative] = entry.st_size
+    aggregate = hashlib.sha256()
+    for relative, digest in sorted(rows):
+        aggregate.update(json.dumps([relative, digest], separators=(',', ':'),
+                                    ensure_ascii=False).encode('utf-8') + b'\n')
+    return ({'files': len(rows), 'bytes': byte_count,
+             'tree_sha256': aggregate.hexdigest()}, observed, sizes)
+
+
+def _snapshot_delta(observed: dict[str, str], baseline: dict[str, str]) -> dict[str, int]:
+    return {'added': len(observed.keys() - baseline.keys()),
+            'modified': sum(observed[name] != baseline[name]
+                            for name in observed.keys() & baseline.keys()),
+            'removed': len(baseline.keys() - observed.keys())}
+
+
+def _snapshot_store(root: Path) -> dict:
+    directory = root / 'researcher/data/opencode'
+    if not directory.exists():
+        return {'status': 'missing', 'present': False}
+    summary, _, _ = _snapshot_tree(directory)
+    main = directory / 'opencode.db'
+    if not main.exists():
+        return {'status': 'missing', 'present': False, 'tree': summary}
+    if main.is_symlink() or not main.is_file():
+        _fail('snapshot_store_file_invalid')
+    identity = {}
+    for label, path in (('main', main), ('wal', directory / 'opencode.db-wal'),
+                        ('shm', directory / 'opencode.db-shm')):
+        if not path.exists():
+            identity[label] = {'present': False}
+            continue
+        if path.is_symlink() or not path.is_file():
+            _fail('snapshot_store_file_invalid')
+        entry = path.stat(follow_symlinks=False)
+        identity[label] = {'present': True, 'sha256': _sha(path), 'bytes': entry.st_size,
+                           'device': entry.st_dev, 'inode': entry.st_ino}
+    with main.open('rb') as stream:
+        header = stream.read(16)
+    return {'status': 'present' if header == b'SQLite format 3\x00' else 'invalid_header',
+            'present': True, 'tree': summary, **identity}
+
+
+def _filesystem_snapshot(root: Path, plan: dict) -> dict:
+    """Provider-free byte collection; caller is responsible for stop proof."""
+    _verify_inventory(root / 'original', plan['source_sha256'])
+    project, project_files, _ = _snapshot_tree(root / 'researcher/project')
+    project['delta'] = _snapshot_delta(project_files, plan['source_sha256'])
+    targets = {}
+    mutable_paths = plan['mutable_paths']
+    for role in ('target', 'review-target-1', 'review-target-2'):
+        summary, observed, sizes = _snapshot_tree(root / role)
+        immutable = {name: digest for name, digest in observed.items()
+                     if not _mutable(name, mutable_paths)}
+        baseline = {name: digest for name, digest in plan['source_sha256'].items()
+                    if not _mutable(name, mutable_paths)}
+        summary['immutable_delta'] = _snapshot_delta(immutable, baseline)
+        summary['mutable_files'] = sum(_mutable(name, mutable_paths) for name in observed)
+        summary['mutable_bytes'] = sum(size for name, size in sizes.items()
+                                       if _mutable(name, mutable_paths))
+        targets[role] = summary
+    store = _snapshot_store(root)
+    return {'kind': 'native-research-host-byte-receipt-v1',
+            'status': 'complete' if store['status'] == 'present' else 'incomplete',
+            'researcher_project': project, 'native_store': store,
+            'targets': targets, 'target_image_id': plan['target_image_id'],
+            'plan_sha256': _sha(root / 'plan.json')}
+
+
+def _stopped_snapshot(root: Path, plan: dict) -> dict:
+    """Bind byte collection to the exact NativeRun terminal producer set."""
+    controls = _controls(root)
+    manifest_path = controls / 'producer-manifest.json'
+    manifest = _read_json(manifest_path)
+    state = _read_json(controls / 'native-state/RUN.json')
+    revoked = _read_json(controls / 'native-state/REVOKED')
+    resources = _read_json(controls / 'resources.json')
+    ids = [row.get('id') for row in resources.get('resources', [])
+           if row.get('kind') == 'container']
+    manifest_ids = [item.get('id') for item in manifest.get('producers', [])]
+    manifest_digest = _sha(manifest_path)
+    if (len(ids) != 8 or ids != manifest_ids or state.get('ids') != ids
+            or revoked.get('ids') != ids or revoked.get('producers_verified_stopped') is not True
+            or state.get('manifest_sha256') != manifest_digest
+            or revoked.get('manifest_sha256') != manifest_digest):
+        _fail('snapshot_native_stop_proof_invalid')
+    _, producer = _activate_controls(root)
+    by_id = {row['id']: row.get('role') for row in resources['resources']
+             if row.get('kind') == 'container'}
+    target_builds = set()
+    for item in manifest['producers']:
+        info = _inspect('container', item['id'])
+        run_state = info.get('State', {})
+        if (info.get('Id') != item['id'] or producer.binding(info) != item.get('binding')
+                or (run_state.get('Running') is True and run_state.get('Paused') is not True)):
+            _fail('snapshot_producer_not_frozen')
+        if by_id.get(item['id']) in ('target', 'review-target-1', 'review-target-2'):
+            if info.get('Image') != plan['target_image_id']:
+                _fail('snapshot_target_build_changed')
+            target_builds.add(by_id[item['id']])
+    if target_builds != {'target', 'review-target-1', 'review-target-2'}:
+        _fail('snapshot_target_build_missing')
+    receipt = _filesystem_snapshot(root, plan)
+    receipt['target_build'] = {'image_id': plan['target_image_id'],
+                               'matching_frozen_containers': len(target_builds)}
+    receipt['native_stop'] = {'manifest_sha256': manifest_digest,
+                              'producer_ids_sha256': hashlib.sha256(
+                                  json.dumps(ids, separators=(',', ':')).encode()).hexdigest(),
+                              'revoked_sha256': _sha(controls / 'native-state/REVOKED')}
+    path = controls / 'host-snapshot.json'
+    _write_json(path, receipt, once=True)
+    return {'status': receipt['status'], 'receipt_path': str(path),
+            'receipt_sha256': _sha(path)}
+
+
 def _controls(root: Path) -> Path:
     return root / 'controls'
 
@@ -630,7 +778,8 @@ def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, pla
                 {str(_inspect('network', network).get('Name'))}):
         _fail('container_create_mismatch')
     network_state = next(iter(info['NetworkSettings']['Networks'].values()))
-    if ip is not None and network_state.get('IPAddress') != ip:
+    if ip is not None and (network_state.get('IPAddress') != ip
+                           and (network_state.get('IPAMConfig') or {}).get('IPv4Address') != ip):
         _fail('container_network_ip_mismatch')
     actual_mounts = {(item.get('Source'), item.get('Destination'), item.get('RW'))
                      for item in info.get('Mounts', [])}
@@ -719,7 +868,8 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         _docker('network', 'connect', '--ip', relay_ip, network, relay)
         network_names[role] = _inspect('network', network)['Name']
         actual = _inspect('container', relay)['NetworkSettings']['Networks'][network_names[role]]
-        if actual.get('IPAddress') != relay_ip:
+        if (actual.get('IPAddress') != relay_ip
+                and (actual.get('IPAMConfig') or {}).get('IPv4Address') != relay_ip):
             _fail('relay_internal_ip_mismatch')
     target_command = _validate_target_command(controls / 'target-command.json')
     targets = {}
@@ -1286,6 +1436,15 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 result['native_stop'] = {'status': 'unresolved'}
         else:
             result['native_stop'] = {'status': 'not_started'}
+        if result['native_stop']['status'] == 'stopped':
+            try:
+                result['host_snapshot'] = _stopped_snapshot(root, plan)
+            except NativeResearchError as error:
+                result['host_snapshot'] = {'status': 'unavailable', 'code': str(error)}
+            except Exception:
+                result['host_snapshot'] = {'status': 'unavailable', 'code': 'host_snapshot_unavailable'}
+        else:
+            result['host_snapshot'] = {'status': 'not_taken'}
         if result['native_stop']['status'] in ('stopped', 'closed_before_activation', 'not_started'):
             try:
                 result['cleanup'] = _cleanup_resources(root)
@@ -1295,6 +1454,9 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         if (result['native_stop']['status'] in ('unsafe', 'unresolved')
                 or result.get('cleanup', {}).get('status') != 'complete'):
             result['status'] = 'unsafe_or_unresolved'
+        elif (result['native_stop']['status'] == 'stopped'
+              and result['host_snapshot']['status'] != 'complete'):
+            result['status'] = 'stopped_evidence_incomplete'
         elif result.get('status') == 'active' and result['native_stop']['status'] == 'stopped':
             result['status'] = 'stopped_complete'
         else:
@@ -1481,7 +1643,7 @@ def main() -> int:
             _fail('command_invalid')
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0 if (result.get('status') not in ('unknown_effect', 'unfinished', 'start_incomplete',
-                                                'unsafe_or_unresolved')
+                                                'unsafe_or_unresolved', 'stopped_evidence_incomplete')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:
         print(json.dumps({'status': 'interrupted', 'run_root': getattr(args, 'run_root', None)},

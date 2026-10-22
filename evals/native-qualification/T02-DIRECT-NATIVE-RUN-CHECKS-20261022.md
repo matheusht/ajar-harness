@@ -42,13 +42,17 @@ material effect and control. The current runner reports
 | A large protected trace is mistaken for a dispatch control record during resume | Scan only dispatch identity JSON files; trace JSON is evidence and must not block a valid subsequent turn because it exceeds the control-file size limit. |
 | Owner dies, stop races dispatch, a producer is still running, or Docker cannot prove absence | NativeRun stop owner closes admission and freezes exact IDs. The public `recover-start` command handles only created-stopped resources before activation or terminal verified-stop state after owner loss. Keep control files/resources on unsafe or unverifiable cleanup; do not label the run stopped or remove evidence. |
 | Native producers stopped but owned cleanup or observer freeze remains unresolved | Public status must report the terminal unsafe state from `final.json`, not infer a clean stop from `native_stop.status` alone. |
-| Researcher changes project or native store after the host snapshots it | Save a protected event-order trace with content hashes and native session usage, without raw prompt, response, credential, or application secret. A stopped native SQLite and candidate-source snapshot are not yet implemented; no stable post-run application claim follows from the trace. |
+| Researcher changes project or native store after the host snapshots it | After the exact producer set is frozen and before owned Docker cleanup, write a host receipt for persistent project bytes, native SQLite main/sidecars, and each target source/build copy. Verify the native `REVOKED` proof matches the frozen manifest and IDs. Save only aggregate checksums/counts and static image IDs, with no raw content or discovered filenames. A failed or absent snapshot is not a complete stop receipt; preserve the prepared run data and report evidence incomplete. This byte receipt does not prove application impact or a coherent SQLite transaction. |
+| Post-stop tree contains a symlink/special file, oversized inventory, or changed original source | Reject a complete receipt before cleanup and preserve the source. If traversal cannot be bounded or safely hashed, report evidence incomplete. If the tree is safe to hash but target source changed outside declared mutable paths, report the exact change counts as drift rather than silently normalizing them. |
+| Native SQLite is missing, wrong header, or changes across the snapshot | Record absence or invalid identity as incomplete; include main, WAL, and SHM byte identities when present, and never save table rows or native transcript text. A provider-free fixture check must exercise missing store, changed project/target, and secret-like filename redaction without starting Docker or a provider. |
 | Transcript or source diff claims a protected application effect without independent original-target capture | Leave effect `unverified`; the target-specific observer supplies request, actor, protected effect and denied controls outside researcher write access. No native transcript promotes this claim. |
 | CONNECT tunnel/byte/time cap is mistaken for a provider request or charge cap | Report enforced dimensions only. Keyless HTTPS inference count and charge are opaque inside TLS; #158 remains open until an independent whole-run allowance is provided and checked. |
 
 Provider-free checks for this implementation: `prepare` on a disposable harmless
 source, `status`, exact input/source pin readback, rejection of missing approval,
-changed source/control pins, Python syntax, and changed-files review. No
+changed source/control pins, stopped-byte receipt fixture checks, Python syntax,
+and changed-files review. The byte-receipt fixture does not exercise NativeRun's
+live stop proof. No
 application/provider call, native first turn, native resume, fresh reviewer, or
 target-side independent capture has been run by this change. The first live
 execution must prove those paths and record its own bounded artifacts.

@@ -44,7 +44,7 @@ CONTROL_SHA = {
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': '6918e571caf52ed44f4240a37e8beb8f4fe69eeaf82c098221da07d7986c21de',
+    'evals/native-qualification/kanboard_native_capture.py': '150ea1019ea2c68e908f4e5306ef89cd315591e6d5c859cf6812e02c29b70be6',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': 'f49420150c9dab5b4d228d5a62d70f29b008a4be546d35c641227e14ea0e8feb',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '4560f3ed8b01cedc9b3135a9ad4a05e4cf5d3ca9d65c689234bd443fcd511f02',
 }

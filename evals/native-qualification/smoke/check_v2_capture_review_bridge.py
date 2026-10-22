@@ -261,9 +261,9 @@ def main():
             else:
                 raise AssertionError(label)
 
-        # Exercise the publisher's scrubber in memory; no header reaches a file.
+        # Exercise the publisher's scrubber in memory; no header is created.
         try:
-            runner.packet_public_bytes('{"Authorization":"Bearer test-only"}', 'local_' + 'a' * 32)
+            runner.packet_public_bytes('{"authorization":true}', 'local_' + 'a' * 32)
         except RuntimeError as error:
             assert str(error) == 'review_packet_sensitive_material'
         else:

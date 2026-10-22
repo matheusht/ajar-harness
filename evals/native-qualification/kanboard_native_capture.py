@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Host-owned Kanboard capture seam for a native research/review run.
+"""Host-owned Kanboard capture seam for distinct S10 and T01 native cases.
 
-The PHP files are the PR187 app hook and collector. This module stages their
-read-only mounts, then attests the actual Docker topology before a dispatch.
-It cannot turn an app receipt or an OpenCode trace into proof of tool origin.
+The two case profiles share collector topology, dispatch windows and cleanup.
+Neither an app receipt nor a native trace alone proves original tool origin.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import time
 import uuid
 
 
@@ -25,17 +25,38 @@ HERE = Path(__file__).resolve().parent
 PROBE = HERE / "smoke/kanboard_effect_probe.php"
 COLLECTOR = HERE / "smoke/kanboard_effect_collector.php"
 BROKER = HERE / "smoke/kanboard_role_broker.php"
+T01_BROKER = HERE / "smoke/t01_jsonrpc_broker.php"
+T01_COLLECTOR = HERE / "smoke/t01_receipt_collector.php"
 PROBE_SHA256 = "5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d"
 COLLECTOR_SHA256 = "991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5"
 BROKER_SHA256 = "2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d"
 SOURCE_MANIFEST_SHA256 = "056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839"
 CONTROLLER_SHA256 = "6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6"
 CONTROLLER = Path("app/Controller/ProjectPermissionController.php")
+T01_SOURCE_MANIFEST_SHA256 = "5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884"
+T01_SOURCE_PINS = {
+    "jsonrpc.php": "fe930f53e4a7c264249f3cb1629788ce4362112b2aef6226a42dfc0197aeff84",
+    "app/Api/Middleware/AuthenticationMiddleware.php": "b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f",
+    "app/Api/Procedure/MeProcedure.php": "70b879a3e98bd92c7e28b52d401f74fd1b857d0cbc699ec57928a5323691d3d0",
+    "app/Api/Procedure/SwimlaneProcedure.php": "0bdaf617b9b26f9ca4bc21766b08ae5989a858bfc4d991d8899f01b24332ac16",
+    "app/Api/Authorization/ProjectAuthorization.php": "e05d0f980eaed023e5a8b118c888b67768a4384c8e58203b5131aac13c5b8591",
+}
+T01_BROKER_SHA256 = "b76cecc5a8820dccb604e1677cba09006b251bba0bbaec2d75fa0605d7208026"
+T01_COLLECTOR_SHA256 = "21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c"
 TARGET_TO_RESEARCH = {"target": "researcher", "review-target-1": "reviewer-1",
                       "review-target-2": "reviewer-2"}
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 SESSION = re.compile(r"ses_[A-Za-z0-9]{1,64}\Z")
 DOCKER_BINARY: Path | None = None
+
+
+def _case(plan: dict) -> str:
+    _need(not ("kanboard_capture" in plan and "t01_capture" in plan),
+          "capture_modes_conflict")
+    if "t01_capture" in plan:
+        return "t01"
+    _need("kanboard_capture" in plan, "capture_mode_missing")
+    return "s10"
 
 
 class CaptureHold(RuntimeError):
@@ -135,7 +156,10 @@ def _write_replace(path: Path, value: dict) -> None:
 
 
 def _source(root: Path, plan: dict, target: str) -> None:
-    _need(plan.get("source_manifest_sha256") == SOURCE_MANIFEST_SHA256 and
+    case = _case(plan)
+    manifest = T01_SOURCE_MANIFEST_SHA256 if case == "t01" else SOURCE_MANIFEST_SHA256
+    pins = T01_SOURCE_PINS if case == "t01" else {str(CONTROLLER): CONTROLLER_SHA256}
+    _need(plan.get("source_manifest_sha256") == manifest and
           isinstance(plan.get("source_sha256"), dict), "kanboard_source_pin_mismatch")
     for name in ("original", target):
         base = root / name
@@ -150,11 +174,23 @@ def _source(root: Path, plan: dict, target: str) -> None:
                 observed[relative] = _sha(path)
         expected = {key: value for key, value in plan["source_sha256"].items()
                     if key != "data" and not key.startswith("data/")}
-        _need(observed == expected and _sha(base / CONTROLLER) == CONTROLLER_SHA256,
+        _need(observed == expected and
+              all(_sha(base / relative) == digest for relative, digest in pins.items()),
               "kanboard_source_copy_changed")
 
 
 def _approved_capture(plan: dict) -> None:
+    if _case(plan) == "t01":
+        expected = {"adapter_sha256": _sha(Path(__file__)),
+                    "broker_sha256": T01_BROKER_SHA256,
+                    "collector_sha256": T01_COLLECTOR_SHA256,
+                    "source_manifest_sha256": T01_SOURCE_MANIFEST_SHA256,
+                    "middleware_sha256": T01_SOURCE_PINS["app/Api/Middleware/AuthenticationMiddleware.php"]}
+        _need(_sha(T01_BROKER) == T01_BROKER_SHA256 and
+              _sha(T01_COLLECTOR) == T01_COLLECTOR_SHA256 and
+              plan.get("t01_capture") == expected,
+              "t01_capture_code_not_bound_to_plan")
+        return
     expected = {"adapter_sha256": _sha(Path(__file__)), "probe_sha256": PROBE_SHA256,
                 "collector_sha256": COLLECTOR_SHA256, "broker_sha256": BROKER_SHA256,
                 "source_manifest_sha256": SOURCE_MANIFEST_SHA256,
@@ -165,16 +201,22 @@ def _approved_capture(plan: dict) -> None:
           "capture_code_not_bound_to_plan")
 
 
-def stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dict:
+def stage(run_root: Path, target: str, *, s: int | None = None, q: int | None = None,
+          t: int | None = None, b: int | None = None) -> dict:
     """Prepare observer-only files and return exact target/collector Docker inputs.
 
     The native owner must create the returned network and containers, retain
     their IDs in resources.json, and call attest before any relevant dispatch.
     """
     root = _private_dir(run_root)
-    _need(target in TARGET_TO_RESEARCH and all(type(x) is int and x > 0 for x in (s, q, t, b))
-          and s != q, "capture_case_ids_invalid")
     plan = _json(root / "plan.json", root)
+    case = _case(plan)
+    _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
+    if case == "s10":
+        _need(all(type(x) is int and x > 0 for x in (s, q, t, b)) and s != q,
+              "capture_case_ids_invalid")
+    else:
+        _need(all(x is None for x in (s, q, t, b)), "t01_seed_ids_forbidden")
     _approved_capture(plan)
     _source(root, plan, target)
     controls = _private_dir(root / "controls")
@@ -187,8 +229,9 @@ def stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dic
     try:
         receipts = slot / "receipts"
         receipts.mkdir(mode=0o700)
-        for original, name in ((PROBE, "effect.php"), (COLLECTOR, "receipt.php"),
-                               (BROKER, "broker.php")):
+        files = ((T01_COLLECTOR, "receipt.php"), (T01_BROKER, "broker.php")) if case == "t01" else (
+            (PROBE, "effect.php"), (COLLECTOR, "receipt.php"), (BROKER, "broker.php"))
+        for original, name in files:
             destination = slot / name
             shutil.copyfile(original, destination)
             destination.chmod(0o600)
@@ -197,18 +240,33 @@ def stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dic
             db.execute("CREATE TABLE receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                        "peer TEXT NOT NULL, payload TEXT NOT NULL)")
         database.chmod(0o600)
-        record = {"kind": "kanboard-native-capture-stage-v1", "target": target,
-                  "research_role": TARGET_TO_RESEARCH[target], "ids": {"s": s, "q": q, "t": t, "b": b},
-                  "source_manifest_sha256": SOURCE_MANIFEST_SHA256,
-                  "controller_sha256": CONTROLLER_SHA256, "image_id": plan.get("target_image_id"),
+        record = {"kind": "kanboard-t01-capture-stage-v1" if case == "t01" else
+                  "kanboard-native-capture-stage-v1", "target": target,
+                  "research_role": TARGET_TO_RESEARCH[target],
+                  "source_manifest_sha256": T01_SOURCE_MANIFEST_SHA256 if case == "t01" else
+                  SOURCE_MANIFEST_SHA256, "image_id": plan.get("target_image_id"),
                   "plan_sha256": _sha(root / "plan.json"),
-                  "probe_sha256": _sha(slot / "effect.php"),
                   "collector_sha256": _sha(slot / "receipt.php"),
                   "broker_sha256": _sha(slot / "broker.php")}
+        if case == "s10":
+            record.update({"ids": {"s": s, "q": q, "t": t, "b": b},
+                           "controller_sha256": CONTROLLER_SHA256,
+                           "probe_sha256": _sha(slot / "effect.php")})
         _write_once(slot / "stage.json", record)
     except Exception:
         shutil.rmtree(slot)
         raise
+    if case == "t01":
+        return {"status": "staged_original_session_origin_held", "target": target,
+                "observer_dir": str(slot), "network_role": "capture-net-" + target,
+                "collector_role": "capture-" + target,
+                "target_mount": {"source": str(slot / "broker.php"),
+                                 "destination": "/observer/broker.php", "readonly": True},
+                "collector_mounts": [
+                    {"source": str(slot / "receipt.php"), "destination": "/collector/receipt.php", "readonly": True},
+                    {"source": str(slot / "receipts"), "destination": "/receipts", "readonly": False}],
+                "collector_db": str(database),
+                "missing": ["native_original_session_origin_unqualified"]}
     return {"status": "staged_origin_and_credentials_held", "target": target,
             "observer_dir": str(slot),
             "network_role": "capture-net-" + target,
@@ -269,6 +327,7 @@ def activate(run_root: Path, target: str) -> dict:
     slot = _private_dir(root / "controls/observer" / target)
     stage_record = _json(slot / "stage.json", root)
     plan = _json(root / "plan.json", root)
+    case = _case(plan)
     _approved_capture(plan)
     _set_docker(plan)
     resources = _json(root / "controls/resources.json", root)
@@ -281,12 +340,15 @@ def activate(run_root: Path, target: str) -> dict:
           HEX64.fullmatch(apps[0]["id"]), "capture_target_not_created")
     app_id = apps[0]["id"]
     app = _inspect("container", app_id)
+    required_mounts = ({(str(slot / "broker.php"), "/observer/broker.php", False)}
+                       if case == "t01" else
+                       {(str(slot / "effect.php"), "/observer/effect.php", False),
+                        (str(slot / "broker.php"), "/observer/broker.php", False),
+                        (str(slot / "actors.json"), "/observer/actors.json", False)})
     _need(app.get("Id") == app_id and app.get("State", {}).get("Status") == "created" and
           app.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == resources.get("nonce") and
           app.get("Image") == plan.get("target_image_id") and
-          {(str(slot / "effect.php"), "/observer/effect.php", False),
-           (str(slot / "broker.php"), "/observer/broker.php", False),
-           (str(slot / "actors.json"), "/observer/actors.json", False)} <= _mounts(app),
+          required_mounts <= _mounts(app),
           "capture_target_create_mismatch")
     nonce = resources["nonce"]
     _need(isinstance(nonce, str) and re.fullmatch(r"[0-9a-f]{24,64}", nonce),
@@ -355,7 +417,8 @@ def activate(run_root: Path, target: str) -> dict:
               "capture_collector_start_unknown")
         ledger["status"] = "active"
         _write_replace(ledger_path, ledger)
-        return {"status": "collector_active_origin_and_credentials_held", "target": target,
+        return {"status": "collector_active_original_session_origin_held" if case == "t01" else
+                "collector_active_origin_and_credentials_held", "target": target,
                 "collector_id": collector_id, "network_id": network_id}
     except Exception:
         ledger["status"] = "activation_unknown"
@@ -368,28 +431,79 @@ def _mounts(info: dict) -> set[tuple[str, str, bool]]:
             for row in info.get("Mounts", [])}
 
 
+def _t01_setup_readback(root: Path, slot: Path, app_ip: str) -> dict:
+    database = _regular(slot / "receipts/receipts.sqlite", root)
+    setup = None
+    for _ in range(100):
+        try:
+            with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+                row = db.execute("SELECT id,peer,payload FROM receipts ORDER BY id LIMIT 1").fetchone()
+            if row is not None:
+                setup = (row[0], row[1], json.loads(row[2]))
+                break
+        except (sqlite3.DatabaseError, UnicodeError, ValueError) as error:
+            raise CaptureHold("t01_setup_receipt_invalid") from error
+        time.sleep(.1)
+    _need(setup is not None and setup[0] == 1 and setup[1] == app_ip and
+          isinstance(setup[2], dict),
+          "t01_setup_receipt_unavailable")
+    receipt = setup[2]
+    _need(receipt.get("kind") == "t01-kanboard-setup-v1" and
+          receipt.get("source_manifest_sha256") == T01_SOURCE_MANIFEST_SHA256 and
+          receipt.get("admin_default_revoked") is True and
+          receipt.get("project_count") == receipt.get("swimlane_count") == 0 and
+          isinstance(receipt.get("actor_ids"), dict) and
+          set(receipt["actor_ids"]) == {"A", "B"} and
+          all(type(value) is int and value > 0 for value in receipt["actor_ids"].values()) and
+          receipt["actor_ids"]["A"] != receipt["actor_ids"]["B"] and
+          isinstance(receipt.get("db_sha256"), str) and
+          HEX64.fullmatch(receipt["db_sha256"]), "t01_setup_receipt_invalid")
+    payload_sha = hashlib.sha256(row[2].encode()).hexdigest()
+    readback_path = slot / "setup-readback.json"
+    if not readback_path.exists():
+        app_db = _regular(root / slot.name / "data/db.sqlite", root)
+        _need(_sha(app_db) == receipt["db_sha256"], "t01_setup_db_changed_before_start")
+        with sqlite3.connect(app_db.as_uri() + "?mode=ro", uri=True) as db:
+            users = db.execute("SELECT id,username,role,is_active FROM users WHERE username IN ('alice','bob') ORDER BY username").fetchall()
+            projects = db.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+            lanes = db.execute("SELECT COUNT(*) FROM swimlanes").fetchone()[0]
+        _need(users == [(receipt["actor_ids"]["A"], "alice", "app-user", 1),
+                        (receipt["actor_ids"]["B"], "bob", "app-user", 1)] and
+              projects == lanes == 0, "t01_setup_state_mismatch")
+        _write_once(readback_path, {"kind": "t01-setup-readback-v1", "receipt_sha256": payload_sha,
+                                    "db_sha256": receipt["db_sha256"]})
+    _need(_json(readback_path, root) ==
+          {"kind": "t01-setup-readback-v1", "receipt_sha256": payload_sha,
+           "db_sha256": receipt["db_sha256"]}, "t01_setup_readback_changed")
+    return {"receipt_sha256": payload_sha, "actor_ids": receipt["actor_ids"]}
+
+
 def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
     """Host-inspect actual Docker IDs, mounts, networks, and clean source."""
     root = _private_dir(run_root)
     _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
     plan = _json(root / "plan.json", root)
+    case = _case(plan)
     _approved_capture(plan)
     _set_docker(plan)
     slot = _private_dir(root / "controls/observer" / target)
     stage_record = _json(slot / "stage.json", root)
     _need(stage_record.get("target") == target and stage_record.get("plan_sha256") == _sha(root / "plan.json")
-          and stage_record.get("probe_sha256") == _sha(slot / "effect.php")
+          and stage_record.get("kind") == ("kanboard-t01-capture-stage-v1" if case == "t01" else
+                                            "kanboard-native-capture-stage-v1")
+          and (case == "t01" or stage_record.get("probe_sha256") == _sha(slot / "effect.php"))
           and stage_record.get("collector_sha256") == _sha(slot / "receipt.php")
           and stage_record.get("broker_sha256") == _sha(slot / "broker.php"),
           "capture_stage_changed")
-    actor_route = _json(slot / "actor-route.json", root)
-    approval = _json(root / "controls/approval.json", root)
-    _need(actor_route.get("kind") == "kanboard-native-actor-route-v1" and
-          actor_route.get("target") == target and
-          actor_route.get("map_sha256") == _sha(slot / "actors.json") and
-          actor_route.get("baseline_db_sha256") ==
-          (approval.get("capture_target_db_sha256") or {}).get(target),
-          "capture_actor_route_changed")
+    if case == "s10":
+        actor_route = _json(slot / "actor-route.json", root)
+        approval = _json(root / "controls/approval.json", root)
+        _need(actor_route.get("kind") == "kanboard-native-actor-route-v1" and
+              actor_route.get("target") == target and
+              actor_route.get("map_sha256") == _sha(slot / "actors.json") and
+              actor_route.get("baseline_db_sha256") ==
+              (approval.get("capture_target_db_sha256") or {}).get(target),
+              "capture_actor_route_changed")
     _source(root, plan, target)
     resources = _json(root / "controls/resources.json", root)
     rows = resources.get("resources")
@@ -456,10 +570,11 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
           "capture_app_ip_invalid")
     _need(app_ip == observer_resources.get("app_ip"), "capture_app_ip_changed")
     source_mount = (str(root / target), "/target", True)
-    probe_mount = (str(slot / "effect.php"), "/observer/effect.php", False)
     broker_mount = (str(slot / "broker.php"), "/observer/broker.php", False)
-    actors_mount = (str(slot / "actors.json"), "/observer/actors.json", False)
-    _need(_mounts(app) == {source_mount, probe_mount, broker_mount, actors_mount} and
+    expected_app_mounts = ({source_mount, broker_mount} if case == "t01" else
+                           {source_mount, (str(slot / "effect.php"), "/observer/effect.php", False),
+                            broker_mount, (str(slot / "actors.json"), "/observer/actors.json", False)})
+    _need(_mounts(app) == expected_app_mounts and
           _mounts(collector) == {(str(slot / "receipt.php"), "/collector/receipt.php", False),
                                  (str(slot / "receipts"), "/receipts", True)},
           "capture_mounts_invalid")
@@ -474,32 +589,42 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
             source = str(mount.get("Source", ""))
             if source.startswith(observer_path + os.sep):
                 other = row.get("role")
-                _need(other in TARGET_TO_RESEARCH and
+                _need(case == "s10" and other in TARGET_TO_RESEARCH and
                       source == str(root / "controls/observer" / other / "effect.php") and
                       mount.get("Destination") == "/observer/effect.php" and
                       mount.get("RW") is False,
                       "capture_producer_observer_access")
     env = dict(item.split("=", 1) for item in app.get("Config", {}).get("Env", []) if "=" in item)
-    expected = {"NATIVE_EFFECT_COLLECTOR": "http://kanboard-effect-collector:8765/receipt.php",
-                "NATIVE_EFFECT_SOURCE_DIR": "/target", "NATIVE_EFFECT_S": str(stage_record["ids"]["s"]),
-                "NATIVE_EFFECT_Q": str(stage_record["ids"]["q"]),
-                "NATIVE_EFFECT_T": str(stage_record["ids"]["t"]),
-                "NATIVE_EFFECT_B": str(stage_record["ids"]["b"]),
-                "DB_FILENAME": "/target/data/db.sqlite"}
+    expected = ({"DB_FILENAME": "/target/data/db.sqlite"} if case == "t01" else
+                {"NATIVE_EFFECT_COLLECTOR": "http://kanboard-effect-collector:8765/receipt.php",
+                 "NATIVE_EFFECT_SOURCE_DIR": "/target", "NATIVE_EFFECT_S": str(stage_record["ids"]["s"]),
+                 "NATIVE_EFFECT_Q": str(stage_record["ids"]["q"]),
+                 "NATIVE_EFFECT_T": str(stage_record["ids"]["t"]),
+                 "NATIVE_EFFECT_B": str(stage_record["ids"]["b"]),
+                 "DB_FILENAME": "/target/data/db.sqlite"})
     command = (app.get("Config", {}).get("Entrypoint") or []) + (app.get("Config", {}).get("Cmd") or [])
+    expected_command = ["php", "/observer/broker.php", str(plan["target_port"]), "/target",
+                        "http://kanboard-effect-collector:8765/receipt.php"]
     _need(all(env.get(key) == value for key, value in expected.items()) and
-          "auto_prepend_file=/observer/effect.php" in command and
+          (command == expected_command if case == "t01" else
+           "auto_prepend_file=/observer/effect.php" in command) and
           dict(item.split("=", 1) for item in collector.get("Config", {}).get("Env", [])
                if "=" in item).get("EXPECTED_APP_IP") == app_ip,
           "capture_hook_or_collector_not_loaded")
-    return {"status": "topology_attested_origin_and_credentials_held", "target": target,
+    setup = _t01_setup_readback(root, slot, app_ip) if case == "t01" else None
+    _need(setup is None or setup["receipt_sha256"], "t01_setup_readback_invalid")
+    return {"status": "topology_attested_original_session_origin_held" if case == "t01" else
+            "topology_attested_origin_and_credentials_held", "target": target,
             "target_id": ids[app_role], "researcher_id": ids[producer],
             "collector_id": ids["collector"], "observer_network_id": ids["network"],
             "app_observer_ip": app_ip, "native_client_ip": client_ip,
             "native_target_network": client_network,
             "collector_db": str(slot / "receipts/receipts.sqlite"),
-            "source_manifest_sha256": SOURCE_MANIFEST_SHA256,
-            "missing": ["native_credential_route_unavailable", "native_origin_unproven"]}
+            "source_manifest_sha256": T01_SOURCE_MANIFEST_SHA256 if case == "t01" else
+            SOURCE_MANIFEST_SHA256,
+            "setup_receipt_sha256": setup["receipt_sha256"] if setup else None,
+            "missing": ["native_original_session_origin_unqualified"] if case == "t01" else
+            ["native_credential_route_unavailable", "native_origin_unproven"]}
 
 
 def bind_dispatch(run_root: Path, target: str, dispatch_id: str) -> dict:
@@ -514,6 +639,7 @@ def bind_dispatch(run_root: Path, target: str, dispatch_id: str) -> dict:
           isinstance(dispatch.get("session_id"), str) and SESSION.fullmatch(dispatch["session_id"]),
           "capture_dispatch_not_open")
     topology = attest(root, target, dispatch["role"])
+    case = _case(_json(root / "plan.json", root))
     database = _regular(Path(topology["collector_db"]), root)
     try:
         with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
@@ -523,17 +649,79 @@ def bind_dispatch(run_root: Path, target: str, dispatch_id: str) -> dict:
             rows = db.execute("SELECT id,peer,payload FROM receipts ORDER BY id").fetchall()
     except sqlite3.DatabaseError as error:
         raise CaptureHold("capture_collector_unavailable") from error
-    window = {"kind": "kanboard-native-window-v1", "dispatch_id": dispatch_id,
+    window = {"kind": "kanboard-t01-window-v1" if case == "t01" else
+              "kanboard-native-window-v1", "dispatch_id": dispatch_id,
               "dispatch_sha256": _sha(dispatch_path), "session_id": dispatch["session_id"],
               "role": dispatch["role"], "target": target, "topology": topology,
               "collector_count_before": count, "collector_max_id_before": maximum,
               "collector_prefix_sha256": hashlib.sha256(
                   json.dumps(rows, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest(),
-              "credential_route": "unavailable", "native_origin": "unproven"}
+              "credential_route": "brokered_identity_control" if case == "t01" else
+              "unavailable", "native_origin": "unproven"}
     _write_once(root / "controls/observer" / target / ("window-" + dispatch_id + ".json"), window)
-    return {"status": "held", "reason": "native_credential_route_unavailable",
+    return {"status": "held", "reason": "native_original_session_origin_unqualified" if case == "t01" else
+            "native_credential_route_unavailable",
             "dispatch_id": dispatch_id, "target": target, "native_origin": "unproven",
             "window": str(root / "controls/observer" / target / ("window-" + dispatch_id + ".json"))}
+
+
+def close_dispatch(run_root: Path, target: str, dispatch_id: str,
+                   response_ids: list[str]) -> dict:
+    """Close a T01 receipt window; correlation is evidence, never an origin pass."""
+    root = _private_dir(run_root)
+    _need(_case(_json(root / "plan.json", root)) == "t01" and
+          bool(re.fullmatch(r"[0-9a-f]{32}", dispatch_id)) and
+          isinstance(response_ids, list) and len(response_ids) <= 5000 and
+          all(isinstance(item, str) and re.fullmatch(r"[0-9a-f]{32}", item)
+              for item in response_ids), "t01_close_input_invalid")
+    slot = _private_dir(root / "controls/observer" / target)
+    window = _json(slot / ("window-" + dispatch_id + ".json"), root)
+    _need(window.get("kind") == "kanboard-t01-window-v1" and
+          window.get("dispatch_id") == dispatch_id and
+          window.get("native_origin") == "unproven", "t01_window_invalid")
+    topology = attest(root, target, window["role"])
+    _need(topology == window.get("topology"), "t01_topology_changed")
+    db_path = _regular(Path(topology["collector_db"]), root)
+    try:
+        with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True) as db:
+            prefix = db.execute("SELECT id,peer,payload FROM receipts WHERE id<=? ORDER BY id",
+                                (window["collector_max_id_before"],)).fetchall()
+            rows = db.execute("SELECT id,peer,payload FROM receipts WHERE id>? ORDER BY id",
+                              (window["collector_max_id_before"],)).fetchall()
+    except sqlite3.DatabaseError as error:
+        raise CaptureHold("t01_collector_unavailable") from error
+    _need(hashlib.sha256(json.dumps(prefix, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+          == window["collector_prefix_sha256"] and len(rows) <= 5000,
+          "t01_collector_prefix_changed")
+    receipts = []
+    for identifier, peer, payload in rows:
+        try:
+            record = json.loads(payload)
+        except (UnicodeError, ValueError) as error:
+            raise CaptureHold("t01_receipt_invalid") from error
+        _need(peer == topology["app_observer_ip"] and
+              isinstance(record, dict) and
+              record.get("kind") == "t01-kanboard-jsonrpc-v1" and
+              record.get("peer_ip") == topology["native_client_ip"] and
+              isinstance(record.get("request_id"), str) and
+              re.fullmatch(r"[0-9a-f]{32}", record["request_id"]),
+              "t01_receipt_origin_invalid")
+        receipts.append({"row_id": identifier, "request_id": record["request_id"],
+                         "actor": record.get("actor"), "method": record.get("method"),
+                         "result_class": record.get("result_class"),
+                         "result_matches_db": record.get("result_matches_db")})
+    _need(len({item["request_id"] for item in receipts}) == len(receipts),
+          "t01_receipt_id_replayed")
+    joined = sorted(set(response_ids) & {item["request_id"] for item in receipts})
+    result = {"kind": "kanboard-t01-window-closed-v1", "dispatch_id": dispatch_id,
+              "window_sha256": _sha(slot / ("window-" + dispatch_id + ".json")),
+              "collector_count_after": len(prefix) + len(rows),
+              "receipt_rows": receipts, "native_response_ids": sorted(set(response_ids)),
+              "joined_request_ids": joined, "native_origin": "unproven",
+              "status": "held", "reason": "native_original_session_origin_unqualified" if joined else
+              "native_response_receipt_join_unavailable"}
+    _write_once(slot / ("closed-" + dispatch_id + ".json"), result)
+    return result
 
 
 def _producer_binding(info: dict) -> str:
@@ -597,6 +785,7 @@ def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
     root = _private_dir(run_root)
     _need(target in TARGET_TO_RESEARCH, "capture_target_invalid")
     plan = _json(root / "plan.json", root)
+    case = _case(plan)
     _approved_capture(plan)
     _source(root, plan, target)
     _set_docker(plan)
@@ -665,7 +854,8 @@ def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
               "native_stop_kind": stop_kind,
               "native_stop_sha256": _sha(root / "controls/native-state" / stop_kind),
               "producer_manifest_sha256": _sha(root / "controls/producer-manifest.json"),
-              "native_origin": "unproven", "credential_route": "unavailable"}
+              "native_origin": "unproven", "credential_route":
+              "brokered_identity_control" if case == "t01" else "unavailable"}
     if frozen_path.exists():
         _need(_json(frozen_path, root) == result, "capture_frozen_record_mismatch")
     else:
@@ -674,8 +864,10 @@ def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
     if active:
         ledger["status"] = "frozen"
         _write_replace(ledger_path, ledger)
-    return {"status": "startup_frozen_origin_and_credentials_held" if stop_kind == "STARTUP_CLOSED"
-            else "frozen_origin_and_credentials_held", "target": target,
+    return {"status": ("startup_frozen_original_session_origin_held" if stop_kind == "STARTUP_CLOSED"
+                       else "frozen_original_session_origin_held") if case == "t01" else
+            ("startup_frozen_origin_and_credentials_held" if stop_kind == "STARTUP_CLOSED"
+             else "frozen_origin_and_credentials_held"), "target": target,
             "receipt_count": count, "sqlite_sha256": result["sqlite_sha256"]}
 
 

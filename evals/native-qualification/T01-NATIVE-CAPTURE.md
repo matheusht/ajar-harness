@@ -16,7 +16,7 @@ ordinary synthetic users, Alice and Bob, may be prepared.
 | Default admin or app-token route lets a client bypass the broker | Broker bootstraps A/B, rotates the shipped admin password, and serves only the broker port; backend binds loopback | Refuse readiness if rotation or backend isolation cannot be shown |
 | Credential leaked via command, environment, mount, log, receipt, or response header | Fresh secrets exist only in the long-lived broker and individual Basic requests; inspect all staged files/commands/env and emitted receipt schema | No plaintext credential survives setup or appears in an artifact |
 | Claimed actor differs from app account | Source-pinned Basic-auth middleware and `getMe` checks with the injected credential; match user ID and role to read-only SQLite rows | Refuse request and receipt on mismatch; broker selection alone is not app-session proof |
-| Agent spoofs Authorization, cookie, host, or actor | Accept only Alice/Bob actor selection; strip client headers and construct backend request with broker Basic | Refuse malformed or ambiguous selector/header |
+| Agent spoofs Authorization, cookie, or actor | Accept only Alice/Bob actor selection; reject client credentials, strip and ignore the client Host, and construct the backend request with broker Basic | Refuse malformed or ambiguous selector/header; client Host cannot reach the backend |
 | Observer receives request body or protected response | Collector accepts exact allowlisted scalar/digest schema from the app peer only | Reject extra keys, oversize input, or wrong peer |
 | A synthetic project/swimlane is preseeded or state is injected to make a claim | Setup creates only A/B users and changes admin password; request receipt snapshots source DB rows before and after | Refuse unexpected setup rows; no finding inferred from setup |
 | Result, control, or resource identity is wrong | Match `getSwimlane` result ID/project/name digest to DB; record `getProjectById` denial and same-user normal read separately | Hold positive if any required identity/control is absent |
@@ -25,9 +25,11 @@ ordinary synthetic users, Alice and Bob, may be prepared.
 | Researcher sees observer answer or another run | Separate private observer mount/network; sanitized brief and clean source pin | Stop on exposure |
 
 Provider-free checks: `php -l` both PHP files; `python3
-evals/native-qualification/smoke/check_t01_capture_offline.py` validates exact
-source pins, runner mode separation, forbidden credential-bearing output fields,
-and staged schema. These are source/protocol checks, not application or native
-behavior. The held final E2E must run both original and fixed owned apps through
-the native bridge, inspect raw receipts and controls, verify cleanup, and prove
-source parity, actor/effect origin, and unhinted researcher behavior.
+evals/native-qualification/smoke/check_t01_capture_offline.py --source
+<retained-v1.2.49-source>` validates exact source pins, runner mode separation,
+and token redaction. These are source/protocol checks, not application or native
+behavior. The held final E2E must run the original owned app through the native
+bridge, inspect raw receipts and controls, verify cleanup, and prove actor/effect
+origin and unhinted researcher behavior. A fresh independent observer arm on
+v1.2.50 must show denial with ordinary behavior preserved using its pinned
+parity recipe; that fixed arm is separate from the native runner.

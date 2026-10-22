@@ -46,13 +46,20 @@ CONTROL_SHA = {
     'tools/native_effect_recovery.py': '789b8fe02f67251a2a9bca4c60f40a779e79d2f8917be7d0efea3093d27f592e',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': '4f596f91f787364376c80a24774861e8f26b98033363db93fa31bd749f351cbd',
+    'evals/native-qualification/kanboard_native_capture.py': 'e1e088ab6dc4267f282a5c6f8c5305885300bc0f9d9fe25f2a407f9546ef1635',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': '5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5',
     'evals/native-qualification/smoke/kanboard_role_broker.php': '2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d',
 }
 CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
 CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
+T01_CAPTURE_FILES = {
+    'evals/native-qualification/kanboard_native_capture.py': 'e1e088ab6dc4267f282a5c6f8c5305885300bc0f9d9fe25f2a407f9546ef1635',
+    'evals/native-qualification/smoke/t01_jsonrpc_broker.php': 'b76cecc5a8820dccb604e1677cba09006b251bba0bbaec2d75fa0605d7208026',
+    'evals/native-qualification/smoke/t01_receipt_collector.php': '21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c',
+}
+T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
+T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'
 CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
 MODEL = 'opencode/deepseek-v4.1-flash-free'
 PROVIDER_ROUTE = 'opencode-keyless-free'
@@ -426,7 +433,18 @@ def _validate_target_command(path: Path) -> list[str]:
     return command
 
 
-def _capture_pins() -> dict[str, str]:
+def _capture_mode(plan: dict) -> str | None:
+    if 'kanboard_capture' in plan and 't01_capture' in plan:
+        _fail('capture_modes_conflict')
+    return 't01' if 't01_capture' in plan else ('s10' if 'kanboard_capture' in plan else None)
+
+
+def _capture_pins(case: str = 's10') -> dict[str, str]:
+    if case == 't01':
+        return {'adapter_sha256': T01_CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py'],
+                'broker_sha256': T01_CAPTURE_FILES['evals/native-qualification/smoke/t01_jsonrpc_broker.php'],
+                'collector_sha256': T01_CAPTURE_FILES['evals/native-qualification/smoke/t01_receipt_collector.php'],
+                'source_manifest_sha256': T01_SOURCE_SHA, 'middleware_sha256': T01_MIDDLEWARE_SHA}
     return {'adapter_sha256': CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py'],
             'probe_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_probe.php'],
             'collector_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_collector.php'],
@@ -584,6 +602,9 @@ def prepare(args: argparse.Namespace) -> dict:
         _fail('docker_executable_invalid')
     source_inventory = _inventory(source)
     capture = bool(getattr(args, 'kanboard_capture', False))
+    t01_capture = bool(getattr(args, 't01_capture', False))
+    if capture and t01_capture:
+        _fail('capture_modes_conflict')
     if capture:
         manifest = hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest()
         if (manifest != CAPTURE_SOURCE_SHA or
@@ -592,6 +613,15 @@ def prepare(args: argparse.Namespace) -> dict:
         for relative, digest in CAPTURE_FILES.items():
             if _sha(ROOT / relative) != digest:
                 _fail('capture_code_pin_mismatch')
+    if t01_capture:
+        manifest = hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest()
+        if (manifest != T01_SOURCE_SHA or
+                target_command != ['php', '-S', f'0.0.0.0:{args.target_port}', '-t', '/target'] or
+                args.target_port == 8764):
+            _fail('t01_capture_source_or_command_unqualified')
+        for relative, digest in T01_CAPTURE_FILES.items():
+            if _sha(ROOT / relative) != digest:
+                _fail('t01_capture_code_pin_mismatch')
     try:
         brief_text = brief.read_text()
     except UnicodeError:
@@ -624,13 +654,14 @@ def prepare(args: argparse.Namespace) -> dict:
         controls = _controls(root)
         controls.mkdir(mode=0o700)
         (controls / 'dispatch').mkdir(mode=0o700)
-        for relative in (*CONTROL_SHA, *(CAPTURE_FILES if capture else ())):
+        capture_files = CAPTURE_FILES if capture else (T01_CAPTURE_FILES if t01_capture else {})
+        for relative in (*CONTROL_SHA, *capture_files):
             destination = controls / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
-            if relative in CAPTURE_FILES:
+            if relative in capture_files:
                 destination.chmod(0o600)
-            if _sha(destination) != (CONTROL_SHA | CAPTURE_FILES)[relative]:
+            if _sha(destination) != (CONTROL_SHA | capture_files)[relative]:
                 _fail('archived_control_pin_mismatch')
         for source_path, name in ((relay, 'relay'), (ca, 'runtime-ca.pem'),
                                   (scope, 'scope.md'), (brief, 'BRIEF.md'),
@@ -664,6 +695,8 @@ def prepare(args: argparse.Namespace) -> dict:
         }
         if capture:
             plan['kanboard_capture'] = _capture_pins()
+        if t01_capture:
+            plan['t01_capture'] = _capture_pins('t01')
         _write_json(root / 'plan.json', plan, once=True)
         return {'status': 'prepared_provider_free', 'run_root': str(root),
                 'plan_sha256': _sha(root / 'plan.json'), 'source_files': len(source_inventory),
@@ -747,6 +780,14 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
                 _fail('archived_capture_pin_mismatch')
         if plan.get('source_manifest_sha256') != CAPTURE_SOURCE_SHA:
             _fail('capture_source_pin_mismatch')
+    if 't01_capture' in plan:
+        if _capture_mode(plan) != 't01' or plan['t01_capture'] != _capture_pins('t01'):
+            _fail('t01_capture_plan_pin_mismatch')
+        for relative, digest in T01_CAPTURE_FILES.items():
+            if _sha(_file(controls / relative, private=True)) != digest:
+                _fail('archived_t01_capture_pin_mismatch')
+        if plan.get('source_manifest_sha256') != T01_SOURCE_SHA:
+            _fail('t01_capture_source_pin_mismatch')
     for name, key in (('relay', 'relay_sha256'), ('runtime-ca.pem', 'runtime_ca_sha256'),
                       ('scope.md', 'scope_sha256'), ('BRIEF.md', 'brief_sha256'),
                       ('target-command.json', 'target_command_sha256'),
@@ -765,10 +806,11 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     return plan
 
 
-def capture_stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dict:
+def capture_stage(run_root: Path, target: str, *, s: int | None = None, q: int | None = None,
+                  t: int | None = None, b: int | None = None) -> dict:
     root = _private_root(Path(run_root))
     plan = _verified_plan(root, pristine=True)
-    if 'kanboard_capture' not in plan or (_controls(root) / 'resources.json').exists():
+    if _capture_mode(plan) is None or (_controls(root) / 'resources.json').exists():
         _fail('capture_stage_not_prestart')
     result = _load_capture_module(root).stage(root, target, s=s, q=q, t=t, b=b)
     result['stage_sha256'] = _sha(_controls(root) / 'observer' / target / 'stage.json')
@@ -777,7 +819,7 @@ def capture_stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int
 
 def _approval(root: Path, plan: dict, path: Path) -> None:
     capture_db_pins = {}
-    if 'kanboard_capture' in plan:
+    if _capture_mode(plan):
         _, capture_db_pins = _capture_specs(
             root, plan, _validate_target_command(_controls(root) / 'target-command.json'))
     approval = _read_json(path)
@@ -792,10 +834,11 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         'target_image_id': plan['target_image_id'],
         'limits': plan['limits'],
     }
-    if 'kanboard_capture' in plan:
+    if _capture_mode(plan):
         expected['capture_stage_sha256'] = {
             target: _sha(_controls(root) / 'observer' / target / 'stage.json')
             for target in CAPTURE_TARGETS}
+    if 'kanboard_capture' in plan:
         expected['capture_target_db_sha256'] = capture_db_pins
     if any(approval.get(key) != value for key, value in expected.items()):
         _fail('live_approval_mismatch')
@@ -1022,6 +1065,13 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
             'form_csrf_placeholder': 'broker-managed',
             'backend_identity_and_session': 'target-owned',
         }
+    if 't01_capture' in plan:
+        info['synthetic_actor_route'] = {
+            'header': 'X-Native-Actor', 'handles': ['A', 'B'],
+            'entrypoint': 'POST /jsonrpc.php',
+            'response_request_id_header': 'X-LRH-Request-ID',
+            'backend_identity_and_session': 'target-owned; original same-operation origin held',
+        }
     _write_json(root / role / 'project/target.json', info, once=True)
 
 
@@ -1089,10 +1139,38 @@ def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
 
 def _capture_specs(root: Path, plan: dict, command: list[str], *, materialize: bool = False) -> tuple[
         dict[str, tuple[list[str], list[str], list[str]]], dict[str, str]]:
-    if 'kanboard_capture' not in plan:
+    case = _capture_mode(plan)
+    if case is None:
         return {}, {}
     if command != ['php', '-S', f'0.0.0.0:{plan["target_port"]}', '-t', '/target']:
         _fail('capture_target_command_changed')
+    if case == 't01':
+        if plan['target_port'] == 8764:
+            _fail('t01_backend_port_conflict')
+        specs = {}
+        for target in CAPTURE_TARGETS:
+            slot = _controls(root) / 'observer' / target
+            stage = _read_json(slot / 'stage.json')
+            if (set(stage) != {'kind', 'target', 'research_role', 'source_manifest_sha256',
+                               'image_id', 'plan_sha256', 'collector_sha256', 'broker_sha256'}
+                    or stage['kind'] != 'kanboard-t01-capture-stage-v1'
+                    or stage['target'] != target
+                    or stage['research_role'] != {'target': 'researcher',
+                                                  'review-target-1': 'reviewer-1',
+                                                  'review-target-2': 'reviewer-2'}[target]
+                    or stage['source_manifest_sha256'] != T01_SOURCE_SHA
+                    or stage['image_id'] != plan['target_image_id']
+                    or stage['plan_sha256'] != _sha(root / 'plan.json')
+                    or stage['collector_sha256'] != _sha(_file(slot / 'receipt.php', private=True))
+                    or stage['broker_sha256'] != _sha(_file(slot / 'broker.php', private=True))
+                    or stage['collector_sha256'] != _capture_pins('t01')['collector_sha256']
+                    or stage['broker_sha256'] != _capture_pins('t01')['broker_sha256']):
+                _fail('t01_capture_stage_changed')
+            specs[target] = ([_mount(slot / 'broker.php', '/observer/broker.php', readonly=True)],
+                             ['DB_FILENAME=/target/data/db.sqlite'],
+                             ['php', '/observer/broker.php', str(plan['target_port']), '/target',
+                              'http://kanboard-effect-collector:8765/receipt.php'])
+        return specs, {}
     specs = {}
     db_pins = {}
     for target in CAPTURE_TARGETS:
@@ -1168,6 +1246,17 @@ def _capture_specs(root: Path, plan: dict, command: list[str], *, materialize: b
 
 def _capture_approved_specs(root: Path, plan: dict, command: list[str], *,
                             verify_source: bool = False) -> dict[str, tuple[list[str], list[str], list[str]]]:
+    if _capture_mode(plan) == 't01':
+        specs, _ = _capture_specs(root, plan, command)
+        approval = _read_json(_controls(root) / 'approval.json')
+        if approval.get('capture_stage_sha256') != {
+                target: _sha(_controls(root) / 'observer' / target / 'stage.json')
+                for target in CAPTURE_TARGETS}:
+            _fail('t01_capture_stage_approval_changed')
+        if verify_source:
+            for target in CAPTURE_TARGETS:
+                _verify_target_state(root / target, plan['source_sha256'], plan['mutable_paths'])
+        return specs
     _, db_pins = _capture_specs(root, plan, command)
     if db_pins:
         approval = _read_json(_controls(root) / 'approval.json')
@@ -1223,7 +1312,8 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
                                 network, ip, [_mount(root / role, '/target'), *extra_mounts],
                                 ['HOME=/target', 'HTTP_PROXY=', 'HTTPS_PROXY=', 'ALL_PROXY=',
                                  'http_proxy=', 'https_proxy=', 'all_proxy=', 'NO_PROXY=*', 'no_proxy=*',
-                                 *extra_env], command, workdir='/target')
+                                 *extra_env], command, workdir='/target',
+                                dns_isolated=not bool(capture_specs))
         if capture is not None:
             capture.activate(root, role)
     _write_target_info(root, 'researcher', research_target_ip, plan)
@@ -1258,7 +1348,7 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
 
 
 def _capture_stop(root: Path, plan: dict, native_status: str) -> dict:
-    if 'kanboard_capture' not in plan:
+    if _capture_mode(plan) is None:
         return {'status': 'not_configured'}
     module = _load_capture_module(root)
     results = []
@@ -1283,7 +1373,7 @@ def _capture_stop(root: Path, plan: dict, native_status: str) -> dict:
 
 
 def _capture_cleanup(root: Path, plan: dict) -> dict:
-    if 'kanboard_capture' not in plan:
+    if _capture_mode(plan) is None:
         return {'status': 'not_configured'}
     module = _load_capture_module(root)
     results = []
@@ -1555,6 +1645,24 @@ def _protected_trace(stdout: str, session_id: str) -> dict:
             'stdout_sha256': hashlib.sha256(stdout.encode()).hexdigest(), 'events': rows}
 
 
+def _native_response_ids(stdout: str) -> list[str]:
+    """Read only completed native tool output, never model text, for T01 joins."""
+    found = set()
+    for line in stdout.splitlines():
+        event = json.loads(line)
+        part = event.get('part') if isinstance(event, dict) else None
+        state = part.get('state') if isinstance(part, dict) else None
+        if (not isinstance(part, dict) or part.get('type') != 'tool' or
+                not isinstance(state, dict) or state.get('status') != 'completed'):
+            continue
+        output = state.get('output')
+        if output is None:
+            continue
+        rendered = output if isinstance(output, str) else json.dumps(output, sort_keys=True)
+        found.update(re.findall(r'(?i)X-LRH-Request-ID:\s*([0-9a-f]{32})', rendered))
+    return sorted(item.lower() for item in found)
+
+
 def _unresolved_dispatches(root: Path) -> list[str]:
     unresolved = []
     for path in (_controls(root) / 'dispatch').glob('*.json'):
@@ -1608,7 +1716,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         _write_json(record_path, record, once=True)
         _write_json(record_path.with_name(dispatch_id + '.pre.json'), record, once=True)
         try:
-            if 'kanboard_capture' in _plan(root):
+            if _capture_mode(_plan(root)):
                 target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
                 _load_capture_module(root).bind_dispatch(root, target, dispatch_id)
             if kanboard_role_grant:
@@ -1648,6 +1756,17 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                                     ('window-' + dispatch_id + '.json'))
                 before = _file(record_path.with_name(dispatch_id + '.pre.json'), private=True).read_bytes()
                 origin = _load_origin_gate(root).assess(window, before, record, trace_path.read_bytes())
+                _write_json(record_path.with_name(dispatch_id + '.origin.json'), origin, once=True)
+                record['origin_hold'] = origin
+            elif 't01_capture' in _plan(root):
+                target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
+                closed = _load_capture_module(root).close_dispatch(
+                    root, target, dispatch_id, _native_response_ids(stdout))
+                origin = {'status': 'held', 'reason': closed['reason'],
+                          'dispatch_id': dispatch_id, 'native_request_attributable': False,
+                          'closed_window_sha256': _sha(_controls(root) / 'observer' / target /
+                                                       ('closed-' + dispatch_id + '.json')),
+                          'joined_request_ids': closed['joined_request_ids']}
                 _write_json(record_path.with_name(dispatch_id + '.origin.json'), origin, once=True)
                 record['origin_hold'] = origin
             _write_json(record_path, record)
@@ -1810,7 +1929,7 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                       '--duration', str(plan['limits']['duration_seconds']), '--port', str(port)]
         native = native_module.NativeRun(manifest, controls / 'native-state',
                                          plan['limits']['duration_seconds'], proxy_args)
-        if 'kanboard_capture' in plan:
+        if _capture_mode(plan):
             _capture_approved_specs(root, plan,
                                     _validate_target_command(controls / 'target-command.json'),
                                     verify_source=True)
@@ -1823,7 +1942,7 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 or ready['ids'] != [row['id'] for row in rows if row['kind'] == 'container']):
             _fail('native_authority_readback_mismatch')
         capture_topology_sha = None
-        if 'kanboard_capture' in plan:
+        if _capture_mode(plan):
             capture_module = _load_capture_module(root)
             topology = {target: capture_module.attest(root, target) for target in CAPTURE_TARGETS}
             topology_path = controls / 'capture-topology.json'
@@ -1848,7 +1967,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         result = {'status': 'active', 'run_root': str(root), 'run_identity': allowance_snapshot(root)['run_identity'],
                   'target_url': f'http://{bindings["research_target_ip"]}:{plan["target_port"]}',
                   'protected_capture': 'unavailable',
-                  'capture_topology': ('attested_origin_and_credentials_held' if capture_topology_sha
+                  'capture_topology': (('attested_original_session_origin_held' if 't01_capture' in plan
+                                        else 'attested_origin_and_credentials_held') if capture_topology_sha
                                        else 'not_configured'),
                   'provider_request_count': None, 'monetary_spend': None}
         print(json.dumps(result, sort_keys=True), flush=True)
@@ -2135,6 +2255,7 @@ def _parser() -> argparse.ArgumentParser:
         prepare_cmd.add_argument('--' + name, required=True)
     prepare_cmd.add_argument('--target-port', type=int, required=True)
     prepare_cmd.add_argument('--kanboard-capture', action='store_true')
+    prepare_cmd.add_argument('--t01-capture', action='store_true')
     prepare_cmd.add_argument('--mutable-path', action='append', default=[])
     prepare_cmd.add_argument('--expected-skill-id', action='append', default=[])
     prepare_cmd.add_argument('--model', default=MODEL)
@@ -2150,7 +2271,7 @@ def _parser() -> argparse.ArgumentParser:
     stage_cmd.add_argument('--run-root', required=True)
     stage_cmd.add_argument('--target', choices=CAPTURE_TARGETS, required=True)
     for name in ('s', 'q', 't', 'b'):
-        stage_cmd.add_argument('--' + name, type=int, required=True)
+        stage_cmd.add_argument('--' + name, type=int)
     for name in ('status', 'stop', 'recover-start'):
         item = commands.add_parser(name)
         item.add_argument('--run-root', required=True)

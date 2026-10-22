@@ -27,7 +27,7 @@ decision does not activate this route.
    Kanboard T01 API-only route, opt into both `--t01-capture` and
    `--origin-ingress`; `--kanboard-capture` is the separate UI capture route.
    Use `capture-stage --help` for staging each private target copy. Read the
-   current `start`, `research`, `resume`, and `stop` help before invoking them;
+   current `start`, `research`, `resume`, `reconstruct`, and `stop` help before invoking them;
    keep the human-authored approval bound to the frozen plan and exact target
    state. After the exact run has stopped, use the relevant `reconcile-*`
    command help and reconcile the selected dispatch. Transport attribution
@@ -41,10 +41,17 @@ decision does not activate this route.
    review strong-lead dispositions separately when needed. Source and offline
    checks do not qualify a provider or target.
    After a scoped #165 adopt, any standing permission still needs exact
-   target/model/effect/expiry binding. Save observations and contrary results
-   as ordinary research files in the run root.
+   target/model/effect/expiry binding. The runner stages the portable
+   [research workflow](../../engine/native-research-workflow.md), frozen brief,
+   and current host-derived allowance snapshot at read-only `/research`.
+   Keep hypotheses, experiment results, contrary observations, pending conditions,
+   and links to scripts and internal output in `/workspace/RESEARCH.md`.
 4. For continuation, inspect the previous result and unresolved effects, then
-   use `resume --help` to continue the exact native session. Keep a material
+   use `resume --help` to continue the exact native session or `reconstruct --help`
+   to create a fresh context over the same files and run. Reconstruction is
+   distinct from restoring native history; it cannot restore spent allowance or
+   authorize retry of an unknown effect. The per-turn run snapshot is an observation
+   of the shared allowance, not a new grant. Keep a material
    strong lead as unfinished when time or access stops work. Use `stop --help`
    and `status --help` to stop the run and inspect actual cleanup and remaining
    effects. After owner loss, use `recover-start --help` only for the runner's

@@ -151,6 +151,19 @@ def native_tool_material(stdout):
             'intermediate_source_versions': 'unavailable; baseline and final candidate are separately pinned'}
 
 
+def reviewer_material_php_check(records, reviewer_session):
+    # shortcut: this fixed PHP packet has two direct checks; general claims need an effect verifier.
+    expected = {'php /handoff/index.php': 'after',
+                'php /handoff/check.php': 'check passed'}
+    return any(isinstance(item, dict) and item.get('session_id') == reviewer_session
+               and item.get('tool') == 'shell' and item.get('status') == 'completed'
+               and not item.get('error') and isinstance(item.get('input'), dict)
+               and item['input'].get('command') in expected
+               and isinstance(item.get('output'), str)
+               and item['output'].strip() == expected[item['input']['command']]
+               for item in records)
+
+
 def observation_evaluator():
     if sha(OBSERVATION) != OBSERVATION_SHA:
         raise RuntimeError('observation_evaluator_pin_mismatch')
@@ -1842,10 +1855,10 @@ def main():
                                              (str(ROOT), str(output), str(work)))
             private_snapshot(output / 'reviewer-tools.json', tool_bytes)
             completed = [item for item in review_tools['records'] if item['status'] == 'completed']
-            material_read = any('/handoff/' in json.dumps(item['input'])
+            material_read = any(item['session_id'] == reviewer_session
+                                and '/handoff/' in json.dumps(item['input'])
                                 and item['tool'] in ('read', 'shell', 'glob', 'grep') for item in completed)
-            material_check = any(item['tool'] == 'shell' and 'php ' in json.dumps(item['input'])
-                                 for item in completed)
+            material_check = reviewer_material_php_check(completed, reviewer_session)
             report['host_after_review'] = host_php(workspace / 'project', changed)
             report['reviewer_material_work'] = {
                 'packet_read_observed': material_read,

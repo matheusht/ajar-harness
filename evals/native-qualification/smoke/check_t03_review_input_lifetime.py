@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 
 
@@ -43,9 +44,10 @@ def main():
             for directory in (originals, candidate, packet):
                 directory.mkdir(mode=0o700)
             for name in NAMES:
-                (originals / name).write_text("<?php return 'before';\n")
-                (candidate / name).write_text("<?php return 'after';\n" if name == 'message.php'
-                                              else "<?php return 'before';\n")
+                data = (ROOT / 'evals/native-qualification/smoke' / name).read_bytes()
+                (originals / name).write_bytes(data)
+                (candidate / name).write_bytes(data.replace(b"return 'before';", b"return 'after';")
+                                                  if name == 'message.php' else data)
             note = candidate / 'research-note.md'
             note.write_text('Provisional local claim from an ordinary file change.\n')
             note_bytes = note.read_bytes()
@@ -54,14 +56,58 @@ def main():
                 'part': {'type': 'tool', 'tool': 'read', 'state': {'status': 'completed',
                     'input': {'filePath': '/workspace/project/message.php'},
                     'output': 'local file read', 'error': None}}}) + '\n'
-            sources = {phase: {'source_sha256': {name: sha(folder / name) for name in NAMES},
-                               'results': []}
-                       for phase, folder in (('baseline', originals), ('candidate', candidate))}
+            sources = {}
+            for phase, folder in (('baseline', originals), ('candidate', candidate)):
+                rows = []
+                for name in ('index.php', 'check.php'):
+                    run = subprocess.run(['php', str(folder / name)], capture_output=True,
+                                         text=True, timeout=10)
+                    rows.append({'command': 'php ' + name, 'exit': run.returncode,
+                                 'stdout': run.stdout, 'stderr': run.stderr})
+                sources[phase] = {'source_sha256': {name: sha(folder / name) for name in NAMES},
+                                  'results': rows}
             pin = runner.publish_review_packet(packet, originals, candidate, note, stream,
                                                sources, 'owned-capability')
             try:
                 check('unchanged actual claim and source match frozen packet',
                       runner.review_inputs_current(packet, pin, originals, candidate, note))
+                raw = json.loads((packet / 'RAW-APP-CHECKS.json').read_text())['checks']
+                check('frozen packet retains contrary baseline and candidate effect',
+                      raw['baseline']['results'][1]['exit'] == 1
+                      and raw['baseline']['results'][1]['stderr'] ==
+                          'message() must return after\n'
+                      and raw['candidate']['results'][1]['exit'] == 0
+                      and raw['candidate']['results'][1]['stdout'] == 'check passed\n')
+                observed = subprocess.run(['php', str(packet / 'index.php')], capture_output=True,
+                                          text=True, timeout=10)
+                check('offline PHP execution observes frozen candidate result',
+                      observed.returncode == 0 and observed.stdout == 'after\n'
+                      and observed.stderr == '')
+
+                def reviewer_tool(session, command, output, status='completed', error=None):
+                    event = {'type': 'tool_use', 'sessionID': session, 'part': {'type': 'tool',
+                        'tool': 'shell', 'state': {'status': status,
+                            'input': {'command': command}, 'output': output, 'error': error}}}
+                    return runner.native_tool_material(json.dumps(event) + '\n')['records']
+
+                session = 'ses_Reviewer1'
+                direct = reviewer_tool(session, 'php /handoff/index.php', observed.stdout)
+                check('material signal requires reviewer execution and observed result',
+                      runner.reviewer_material_php_check(direct, session))
+                check('quoted PHP is not execution',
+                      not runner.reviewer_material_php_check(
+                          reviewer_tool(session, "echo 'php /handoff/index.php'", observed.stdout), session))
+                check('other session cannot provide reviewer material check',
+                      not runner.reviewer_material_php_check(direct, 'ses_Other1'))
+                check('failed or result-free tool is not a material check',
+                      not runner.reviewer_material_php_check(
+                          reviewer_tool(session, 'php /handoff/index.php', observed.stdout,
+                                        status='failed', error='failed'), session)
+                      and not runner.reviewer_material_php_check(
+                          reviewer_tool(session, 'php /handoff/index.php', ''), session))
+                check('unbound PHP path is not the frozen candidate',
+                      not runner.reviewer_material_php_check(
+                          reviewer_tool(session, 'php /tmp/index.php', observed.stdout), session))
                 note.write_text('Changed claim after review.\n')
                 check('changed claim is stale despite intact packet',
                       runner.verify_review_packet(packet, pin)

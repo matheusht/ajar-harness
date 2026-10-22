@@ -26,6 +26,7 @@ and empty actual-predecessor set as historical preparation, not a live input pin
 | A failed or contrary result, raw tool part, supported partial base, missing transition, or material lead basis is omitted or rewritten by the researcher | Refuse the packet or leave the affected conclusion unfinished. Freeze the actual claim version, raw ordered evidence and source conditions outside researcher write access; label operator help. A proposed relabeling cannot silently erase a distinct lead. |
 | Reviewer shares researcher history/store or writable evidence, receives an answer/observer result, starts before packet freeze, or reads changed/extra packet bytes | No review dispatch. Preseal a fresh isolated context under the same NativeRun and allowance; verify only selected read-only source and packet mounts, empty native history, exact inventory, bind-root identity and hashes before and after review. |
 | Reviewer supplies agreement or plausible tool prose but does not select and run a material causal/control check on a clean original application copy | No accepted review. Save its actual tool action and result, independently observed application effect and ordinary/causal control, and distinguish reviewer work from host-issued replay. A mock response remains plumbing evidence. |
+| A reviewer tool input merely mentions `php`, uses another session, fails, or reports no matching result | Keep material review unfinished. For this fixed PHP packet, count only a completed reviewer-session shell action that executes the frozen candidate at `/handoff` and returns its expected observed output. Preserve the exact native tool record for operator assessment; a textual match or host replay alone is insufficient. |
 | Review text, checked input, effect, or shared-allowance readback is missing; reviewer rejects one branch and drops another supported base or lead | Keep the affected work open. Save the reviewer's own conclusion and limits with session/context identity, exact packet/claim/source versions, files examined, check, host effect/control, assistance and shared-ledger usage; record unavailable provider cost as unavailable, not zero. |
 | Source, claim, conditions, raw evidence, packet, or reviewer conclusion changes after review | Mark the affected review and dependent current conclusion stale. Retain the old reviewed bytes and valid observations; require a fresh bound review before accepting the changed conclusion. A prepared prior request is not a prior review. |
 | User stop, deadline, or shared cap arrives before or during review | Stop new dispatch through the existing run boundary, preserve charged/in-flight usage and the lead as unfinished, and report review unavailable. Do not reset the pool, block stopping, or say the target is safe. |
@@ -64,6 +65,13 @@ inventory, absent packet, and mutated packet. The managed runner calls it after
 its verified stop.
 This only proves an owned input-lifetime boundary. It does not establish a
 reviewer judgment, complete raw evidence, or an original application effect.
+The 22 October offline material-gate replay at
+`t02-evidence/t03-material-gate-offline-20261022a/` passed 13/13 checks with
+real local PHP output and synthetic reviewer tool records. The fixed PHP
+candidate signal now requires the exact reviewer session, a completed direct
+`/handoff` PHP command and its expected output; mentioning `php` in an `echo`
+does not count. This still cannot qualify a model review or generalize the
+fixed PHP result to an application claim.
 
 Later, after #158 and the provider/route hold clear, run one bounded unhinted application workflow:
 fresh ordinary researcher input, protected original effect, clean original replay

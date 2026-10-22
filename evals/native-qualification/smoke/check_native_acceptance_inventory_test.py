@@ -158,6 +158,104 @@ def seed_capture(run, observer, plan, manifest, dispatch_ids, final):
     return paths
 
 
+def seed_t01(run, observer, plan, manifest, dispatch_ids, final, old_paths):
+    """Turn the S10 fixture into a T01 fixture before changing the checker."""
+    middleware = 'app/Api/Middleware/AuthenticationMiddleware.php'
+    plan['source_sha256'][middleware] = put(run / 'original' / middleware, 'synthetic middleware\n')
+    source_sha = hashlib.sha256(json.dumps(plan['source_sha256'], sort_keys=True).encode()).hexdigest()
+    plan['source_manifest_sha256'] = manifest['source_manifest_sha256'] = source_sha
+    adapter = 'controls/evals/native-qualification/kanboard_native_capture.py'
+    broker_sha = hashlib.sha256(b'synthetic T01 broker\n').hexdigest()
+    pins = {'adapter_sha256': hashlib.sha256((run / adapter).read_bytes()).hexdigest(),
+            'broker_sha256': broker_sha, 'collector_sha256': hashlib.sha256(
+                b'synthetic collector\n').hexdigest(), 'source_manifest_sha256': source_sha,
+            'middleware_sha256': plan['source_sha256'][middleware]}
+    plan.pop('kanboard_capture')
+    plan['t01_capture'] = pins
+    plan_sha = put(run / 'plan.json', plan)
+    manifest['plan_sha256'] = plan_sha
+    activation_path = run / 'controls/activation.json'
+    activation = json.loads(activation_path.read_text())
+    activation['plan_sha256'] = plan_sha
+    snapshot_path = run / 'controls/host-snapshot.json'
+    snapshot = json.loads(snapshot_path.read_text())
+    snapshot['plan_sha256'] = plan_sha
+    final['host_snapshot']['receipt_sha256'] = put(snapshot_path, snapshot)
+    paths = set(old_paths) - {f'controls/observer/{target}/effect.php' for target in TARGETS}
+    topology = json.loads((run / 'controls/capture-topology.json').read_text())
+    for target in TARGETS:
+        slot = run / 'controls/observer' / target
+        put(slot / 'broker.php', 'synthetic T01 broker\n')
+        paths.add(f'controls/observer/{target}/broker.php')
+        stage = json.loads((slot / 'stage.json').read_text())
+        for name in ('controller_sha256', 'probe_sha256', 'ids'):
+            stage.pop(name)
+        stage.update(kind='kanboard-t01-capture-stage-v1', plan_sha256=plan_sha,
+                     source_manifest_sha256=source_sha, broker_sha256=broker_sha)
+        put(slot / 'stage.json', stage)
+        topology[target].update(status='topology_attested_original_session_origin_held',
+                                source_manifest_sha256=source_sha,
+                                app_observer_ip='172.28.0.10',
+                                native_client_ip='172.29.0.10')
+        setup = {'kind': 't01-kanboard-setup-v1', 'request_id': 'a' * 32,
+                 'source_manifest_sha256': source_sha, 'actor_ids': {'A': 2, 'B': 3},
+                 'admin_default_revoked': True, 'project_count': 0,
+                 'swimlane_count': 0, 'db_sha256': 'd' * 64}
+        payload = json.dumps(setup, separators=(',', ':'))
+        db_path = slot / 'receipts/receipts.sqlite'
+        with sqlite3.connect(db_path) as db:
+            db.execute('UPDATE receipts SET peer=?,payload=? WHERE id=1',
+                       ('172.28.0.10', payload))
+        db_sha = hashlib.sha256(db_path.read_bytes()).hexdigest()
+        put(slot / 'setup-readback.json', {'kind': 't01-setup-readback-v1',
+             'receipt_sha256': hashlib.sha256(payload.encode()).hexdigest(),
+             'db_sha256': setup['db_sha256']})
+        paths.add(f'controls/observer/{target}/setup-readback.json')
+        frozen = json.loads((slot / 'frozen.json').read_text())
+        frozen.update(sqlite_sha256=db_sha, credential_route='brokered_identity_control')
+        put(slot / 'frozen.json', frozen)
+    topology_sha = put(run / 'controls/capture-topology.json', topology)
+    activation['capture_topology_sha256'] = topology_sha
+    put(activation_path, activation)
+    for index, dispatch_id in enumerate(dispatch_ids):
+        target = 'target' if index < 2 else 'review-target-1'
+        slot = run / 'controls/observer' / target
+        record_path = run / f'controls/dispatch/{dispatch_id}.json'
+        record = json.loads(record_path.read_text())
+        window_path = slot / f'window-{dispatch_id}.json'
+        window = json.loads(window_path.read_text())
+        with sqlite3.connect(slot / 'receipts/receipts.sqlite') as db:
+            rows = db.execute('SELECT id,peer,payload FROM receipts ORDER BY id').fetchall()
+        window.update(kind='kanboard-t01-window-v1', topology=topology[target],
+                      collector_count_before=1, collector_max_id_before=1,
+                      collector_prefix_sha256=hashlib.sha256(json.dumps(
+                          rows, separators=(',', ':')).encode()).hexdigest(),
+                      credential_route='brokered_identity_control')
+        put(window_path, window)
+        closed = {'kind': 'kanboard-t01-window-closed-v1', 'dispatch_id': dispatch_id,
+                  'window_sha256': hashlib.sha256(window_path.read_bytes()).hexdigest(),
+                  'collector_count_after': 1, 'receipt_rows': [],
+                  'native_response_ids': [], 'joined_request_ids': [],
+                  'native_origin': 'unproven', 'status': 'held',
+                  'reason': 'native_response_receipt_join_unavailable'}
+        closed_path = slot / f'closed-{dispatch_id}.json'
+        closed_sha = put(closed_path, closed)
+        paths.add(f'controls/observer/{target}/closed-{dispatch_id}.json')
+        origin = {'status': 'held', 'reason': closed['reason'],
+                  'dispatch_id': dispatch_id, 'native_request_attributable': False,
+                  'closed_window_sha256': closed_sha, 'joined_request_ids': []}
+        put(run / f'controls/dispatch/{dispatch_id}.origin.json', origin)
+        record['origin_hold'] = origin
+        put(record_path, record)
+    for row in final['capture_stop']['targets']:
+        row['status'] = 'frozen_original_session_origin_held'
+        row['sqlite_sha256'] = json.loads((run / f'controls/observer/{row["target"]}/frozen.json').read_text())['sqlite_sha256']
+    put(run / 'controls/final.json', final)
+    manifest['run_receipts'] = run_receipts(run, paths)
+    put(observer / 'manifest.json', manifest)
+    return paths
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='native-acceptance-synthetic-') as tmp:
         parent = Path(tmp)
@@ -429,7 +527,41 @@ def main():
         code, report = invoke(run, observer)
         assert code == 2 and 'observer_manifest' in report['failed_checks'], report
 
-    print('PASS: synthetic T04/F01 inventory rejects missing/changed host snapshot and capture receipts, stale artifacts, changed surface/brief/session, unassessed review and unknown challenge; provider_calls=0 target_calls=0')
+        manifest['scenario'] = 'F01'
+        t01_paths = seed_t01(run, observer, plan, manifest, dispatch_ids, final, capture_paths)
+        code, report = invoke(run, observer)
+        assert code == 0 and report['checks']['capture_receipts_bound'] is True, report
+        assert set(manifest['run_receipts']) == t01_paths
+
+        for name in (f'controls/observer/target/{item}' for item in
+                     ('broker.php', 'setup-readback.json', f'closed-{dispatch_ids[0]}.json')):
+            path = run / name
+            original = path.read_bytes()
+            path.unlink()
+            reject(run, observer, 'capture_receipts_bound')
+            path.write_bytes(original)
+            path.chmod(0o600)
+        closed_name = f'controls/observer/target/closed-{dispatch_ids[0]}.json'
+        closed_path = run / closed_name
+        closed = json.loads(closed_path.read_text())
+        put(closed_path, dict(closed, window_sha256='0' * 64))
+        repin(run, observer, manifest, closed_name)
+        reject(run, observer, 'capture_receipts_bound')
+        put(closed_path, closed)
+        repin(run, observer, manifest, closed_name)
+        setup_name = 'controls/observer/target/setup-readback.json'
+        setup_path = run / setup_name
+        setup = json.loads(setup_path.read_text())
+        put(setup_path, dict(setup, receipt_sha256='0' * 64))
+        repin(run, observer, manifest, setup_name)
+        reject(run, observer, 'capture_receipts_bound')
+        put(setup_path, setup)
+        repin(run, observer, manifest, setup_name)
+
+        code, report = invoke(run, observer)
+        assert code == 0 and report['checks']['capture_receipts_bound'] is True, report
+
+    print('PASS: synthetic T04/F01 S10/T01 inventory rejects missing/changed host snapshot and capture receipts, stale artifacts, changed surface/brief/session, unassessed review and unknown challenge; provider_calls=0 target_calls=0')
 
 
 if __name__ == '__main__':

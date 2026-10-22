@@ -2,6 +2,7 @@
 """Provider-free CLI acceptance smoke; all evidence here is synthetic."""
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import sqlite3
@@ -159,7 +160,7 @@ def seed_capture(run, observer, plan, manifest, dispatch_ids, final):
 
 
 def seed_t01(run, observer, plan, manifest, dispatch_ids, final, old_paths):
-    """Turn the S10 fixture into a T01 fixture before changing the checker."""
+    """Turn the S10 fixture into a T01 fixture."""
     middleware = 'app/Api/Middleware/AuthenticationMiddleware.php'
     plan['source_sha256'][middleware] = put(run / 'original' / middleware, 'synthetic middleware\n')
     source_sha = hashlib.sha256(json.dumps(plan['source_sha256'], sort_keys=True).encode()).hexdigest()
@@ -172,6 +173,11 @@ def seed_t01(run, observer, plan, manifest, dispatch_ids, final, old_paths):
             'middleware_sha256': plan['source_sha256'][middleware]}
     plan.pop('kanboard_capture')
     plan['t01_capture'] = pins
+    origin_sources = ('tools/native_origin/protocol.go', 'tools/native_origin/main_linux.go')
+    plan['native_origin'] = {
+        'kind': 'native-origin-build-v1', 'binary_sha256': 'b' * 64,
+        'source_sha256': {name: put(run / 'controls' / name, 'synthetic origin source\n')
+                          for name in origin_sources}}
     plan_sha = put(run / 'plan.json', plan)
     manifest['plan_sha256'] = plan_sha
     activation_path = run / 'controls/activation.json'
@@ -256,6 +262,125 @@ def seed_t01(run, observer, plan, manifest, dispatch_ids, final, old_paths):
     return paths
 
 
+def seed_poststop_origin(run, observer, manifest, paths, dispatch_ids):
+    """Add synthetic origin lifecycle and once-only partial review receipts."""
+    roles = ('researcher', 'resume', 'reviewer-1', 'reviewer-2')
+    origin_paths = {f'controls/{name}' for name in plan_source_names(run)}
+    ledger_hashes = {}
+    for role in roles:
+        name = f'controls/origin/ledger/{role}/requests.jsonl'
+        ledger_hashes[role] = put(run / name, '')
+        origin_paths.add(name)
+    revoked_sha = hashlib.sha256((run / 'controls/native-state/REVOKED').read_bytes()).hexdigest()
+    manifest_sha = hashlib.sha256((run / 'controls/producer-manifest.json').read_bytes()).hexdigest()
+    nonce = 'a' * 32
+    resource_rows = [{'role': role, 'target': target, 'id': f'{index + 10:064x}'}
+                     for index, (role, target) in enumerate((
+                         ('researcher', 'target'), ('resume', 'target'),
+                         ('reviewer-1', 'review-target-1'), ('reviewer-2', 'review-target-2')))]
+    put(run / 'controls/origin/resources.json', {
+        'kind': 'native-origin-resources-v1', 'status': 'removed', 'nonce': nonce,
+        'resources': resource_rows})
+    stop_sha = put(run / 'controls/origin/stopped.json', {
+        'kind': 'native-origin-stopped-v1', 'nonce': nonce, 'native_stop_kind': 'REVOKED',
+        'native_stop_sha256': revoked_sha, 'producer_manifest_sha256': manifest_sha,
+        'ledger_sha256': ledger_hashes,
+        'containers': [{'role': row['role'], 'id': row['id'], 'status': 'exited'}
+                       for row in resource_rows]})
+    cleanup_sha = put(run / 'controls/origin/cleanup.json', {
+        'kind': 'native-origin-cleanup-v1', 'nonce': nonce, 'stopped_sha256': stop_sha,
+        'resource_ids': [row['id'] for row in resource_rows], 'all_absent': True})
+    origin_paths.update(('controls/origin/resources.json', 'controls/origin/stopped.json',
+                         'controls/origin/cleanup.json'))
+    records = []
+    for dispatch_id in dispatch_ids:
+        record_path = run / f'controls/dispatch/{dispatch_id}.json'
+        record = json.loads(record_path.read_text())
+        records.append(record)
+        registration = f'controls/origin/registrations/{dispatch_id}.json'
+        close = f'controls/origin/window-close/{dispatch_id}.json'
+        target = 'target' if record['role'] in ('researcher', 'resume') else 'review-target-' + record['role'][-1]
+        pre_path = run / 'controls/dispatch' / f'{dispatch_id}.pre.json'
+        put(run / registration, {'kind': 'native-origin-registration-v1',
+             'dispatch_id': dispatch_id, 'role': record['role'],
+             'target': target,
+             'dispatch_pre_sha256': hashlib.sha256(pre_path.read_bytes()).hexdigest(),
+             'source_manifest_sha256': json.loads((run / 'plan.json').read_text())['source_manifest_sha256'],
+             'target_image_id': json.loads((run / 'plan.json').read_text())['target_image_id'],
+             'binary_sha256': json.loads((run / 'plan.json').read_text())['native_origin']['binary_sha256']})
+        window_path = run / 'controls/observer' / target / f'window-{dispatch_id}.json'
+        put(run / close, {'kind': 'native-origin-window-close-v1',
+             'dispatch_id': dispatch_id,
+             'target': 'target' if record['role'] in ('researcher', 'resume')
+             else 'review-target-' + record['role'][-1],
+             'window_sha256': hashlib.sha256(window_path.read_bytes()).hexdigest()})
+        record['origin_registration_sha256'] = hashlib.sha256((run / registration).read_bytes()).hexdigest()
+        record['origin_window_close_sha256'] = hashlib.sha256((run / close).read_bytes()).hexdigest()
+        if dispatch_id == dispatch_ids[0]:
+            proof = f'controls/origin/proofs/{dispatch_id}.json'
+            put(run / proof, {'kind': 'native-origin-transport-proof-v1',
+                 'status': 'process_request_attributed', 'dispatch_id': dispatch_id,
+                 'role': record['role']})
+            record['origin_transport_proof_sha256'] = hashlib.sha256((run / proof).read_bytes()).hexdigest()
+            origin_paths.add(proof)
+        put(record_path, record)
+        origin_paths.update((registration, close))
+
+    review_path = run / 'controls/review-reviewer-1.json'
+    review = json.loads(review_path.read_text())
+    review['input_id'] = 'a' * 64
+    review['assessment']['status'] = 'unfinished'
+    request_path = run / 'handoff/reviewer-1/REQUEST.json'
+    request_sha = put(request_path, {'synthetic': 'review packet'})
+    reviewer_id = dispatch_ids[2]
+    trace_path = run / f'controls/dispatch/{reviewer_id}.trace.json'
+    trace_sha = hashlib.sha256(trace_path.read_bytes()).hexdigest()
+    review['native']['native_trace_sha256'] = trace_sha
+    review['material'] = {
+        'input_id': review['input_id'], 'packet_request_sha256': request_sha,
+        'native_trace_sha256': trace_sha,
+        'packet_pin': {'files': {'REQUEST.json': request_sha}},
+        'shell_actions': [],
+    }
+    review_sha = put(review_path, review)
+    put(run / f'controls/poststop-review-reviewer-1.json', {
+        'status': 'candidate_for_operator_review', 'scope': 't01_original_vulnerable_arm',
+        'reviewer_role': 'reviewer-1', 'review_dispatch_id': reviewer_id,
+        'effect_dispatch_id': dispatch_ids[1], 'effect_request_id': 'e' * 32,
+        'review_effect_request_id': 'f' * 32,
+        'reviewer_material_check': 't01_effect_and_controls_observed',
+        'qualification': 'partial', 'clean_replay': 'not_assessed',
+        'fixed_control': 'not_assessed', 'lead_dispositions': 'unfinished_unassessed',
+        'limits': ['does not establish full #159 qualification',
+                   'does not independently assess strong-lead dismissal',
+                   'model lead_dispositions remain untrusted review material'],
+        'review_receipt_sha256': review_sha,
+        'review_packet_request_sha256': request_sha,
+        'review_trace_sha256': trace_sha,
+        'semantic_receipt_sha256': '1' * 64,
+        'review_semantic_receipt_sha256': '2' * 64,
+        'reviewer_origin_proof_sha256': '3' * 64,
+        'effect_origin_proof_sha256': {dispatch_ids[1]: '4' * 64},
+    })
+    poststop = 'controls/poststop-review-reviewer-1.json'
+    paths.update(origin_paths)
+    paths.add(poststop)
+    final_path = run / 'controls/final.json'
+    final = json.loads(final_path.read_text())
+    final['origin_stop'] = {'status': 'complete', 'receipt_sha256': stop_sha}
+    final['origin_cleanup'] = {'status': 'complete', 'receipt_sha256': cleanup_sha}
+    put(final_path, final)
+    paths.add('controls/final.json')
+    manifest['run_receipts'] = run_receipts(run, paths)
+    put(observer / 'manifest.json', manifest)
+    return poststop, origin_paths
+
+
+def plan_source_names(run):
+    plan = json.loads((run / 'plan.json').read_text())
+    return plan['native_origin']['source_sha256']
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='native-acceptance-synthetic-') as tmp:
         parent = Path(tmp)
@@ -338,7 +463,7 @@ def main():
         put(observer / 'manifest.json', manifest)
 
         code, report = invoke(run, observer)
-        assert code == 0 and report['status'] == 'inventory_complete_for_operator_review', report
+        assert code == 2 and 'fresh_review_candidate' in report['failed_checks'], report
         assert report['native_qualification'] == 'not_assessed', report
         assert report['checks']['capture_not_configured'] is True, report
 
@@ -406,7 +531,7 @@ def main():
 
         capture_paths = seed_capture(run, observer, plan, manifest, dispatch_ids, final)
         code, report = invoke(run, observer)
-        assert code == 0 and report['status'] == 'inventory_complete_for_operator_review', report
+        assert code == 2 and 'fresh_review_candidate' in report['failed_checks'], report
         assert report['native_qualification'] == 'not_assessed', report
         assert report['checks']['capture_receipts_bound'] is True, report
 
@@ -509,7 +634,7 @@ def main():
         repin(run, observer, manifest, final_name)
         assert set(manifest['run_receipts']) == capture_paths
         code, report = invoke(run, observer)
-        assert code == 0 and report['status'] == 'inventory_complete_for_operator_review', report
+        assert code == 2 and 'fresh_review_candidate' in report['failed_checks'], report
 
         challenge_names = ('challenge_input', 'host_trace', 'contrary_and_controls',
                            'native_review', 'updated_claim_and_output', 'cost_and_cleanup')
@@ -521,7 +646,7 @@ def main():
         manifest['artifacts'] = challenge_artifacts
         put(observer / 'manifest.json', manifest)
         code, report = invoke(run, observer)
-        assert code == 0 and report['status'] == 'inventory_complete_for_operator_review', report
+        assert code == 2 and 'fresh_review_candidate' in report['failed_checks'], report
         manifest['scenario'] = 'F99'
         put(observer / 'manifest.json', manifest)
         code, report = invoke(run, observer)
@@ -529,9 +654,119 @@ def main():
 
         manifest['scenario'] = 'F01'
         t01_paths = seed_t01(run, observer, plan, manifest, dispatch_ids, final, capture_paths)
+        poststop_name, origin_paths = seed_poststop_origin(
+            run, observer, manifest, t01_paths, dispatch_ids)
         code, report = invoke(run, observer)
-        assert code == 0 and report['checks']['capture_receipts_bound'] is True, report
-        assert set(manifest['run_receipts']) == t01_paths
+        assert code == 0 and report['status'] == 'inventory_complete_for_operator_review', report
+        assert report['checks']['capture_receipts_bound'] is True, report
+        assert report['review_candidate']['reviewer_material_check'] == 't01_effect_and_controls_observed'
+        assert report['review_candidate']['qualification'] == 'partial'
+        assert set(manifest['run_receipts']) == t01_paths | origin_paths | {poststop_name}
+        spec = importlib.util.spec_from_file_location('native_inventory', CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        records = [json.loads((run / f'controls/dispatch/{ident}.json').read_text())
+                   for ident in dispatch_ids]
+        second_review = dict(records[-1], dispatch_id='4' * 32, role='reviewer-2')
+        needed = checker.required_run_receipts(run, json.loads((run / 'plan.json').read_text()),
+                                               records + [second_review], manifest)
+        assert poststop_name in needed and 'controls/poststop-review-reviewer-2.json' not in needed
+
+        poststop_path = run / poststop_name
+        poststop = json.loads(poststop_path.read_text())
+        variants = {'status': 'held', 'reviewer_role': 'reviewer-2',
+                    'review_dispatch_id': dispatch_ids[0], 'effect_dispatch_id': 'f' * 32,
+                    'effect_request_id': 'not-a-request-id',
+                    'review_effect_request_id': 'not-a-request-id'}
+        for field, invalid in variants.items():
+            put(poststop_path, poststop | {field: invalid})
+            repin(run, observer, manifest, poststop_name)
+            reject(run, observer, 'fresh_review_candidate')
+        put(poststop_path, poststop)
+        repin(run, observer, manifest, poststop_name)
+
+        review_path = run / 'controls/review-reviewer-1.json'
+        review_bytes = review_path.read_bytes()
+        request_path = run / 'handoff/reviewer-1/REQUEST.json'
+        request_bytes = request_path.read_bytes()
+        review = json.loads(review_bytes)
+        review['session_id'] = 'ses_Unrelated'
+        put(review_path, review)
+        reject(run, observer, 'fresh_review_candidate')
+        review['session_id'] = 'ses_Review1'
+        review['material']['native_trace_sha256'] = '0' * 64
+        put(review_path, review)
+        reject(run, observer, 'fresh_review_candidate')
+        request_sha = put(request_path, {'synthetic': 'changed packet'})
+        review['material']['packet_request_sha256'] = request_sha
+        review['material']['packet_pin']['files']['REQUEST.json'] = request_sha
+        put(review_path, review)
+        reject(run, observer, 'fresh_review_candidate')
+        review_path.write_bytes(review_bytes)
+        review_path.chmod(0o600)
+        request_path.write_bytes(request_bytes)
+        request_path.chmod(0o600)
+
+        for name in ('controls/tools/native_origin/protocol.go',
+                     'controls/origin/stopped.json',
+                     'controls/origin/ledger/researcher/requests.jsonl',
+                     f'controls/origin/registrations/{dispatch_ids[0]}.json',
+                     f'controls/origin/window-close/{dispatch_ids[0]}.json',
+                     f'controls/origin/proofs/{dispatch_ids[0]}.json'):
+            path = run / name
+            original = path.read_bytes()
+            path.unlink()
+            reject(run, observer, 'run_receipts_bound')
+            path.write_bytes(original)
+            path.chmod(0o600)
+            path.write_bytes(original + b'changed')
+            reject(run, observer, 'run_receipts_bound')
+            path.write_bytes(original)
+            path.chmod(0o600)
+
+        registration_name = f'controls/origin/registrations/{dispatch_ids[0]}.json'
+        registration_path = run / registration_name
+        registration = json.loads(registration_path.read_text())
+        put(registration_path, registration | {'dispatch_id': dispatch_ids[1]})
+        repin(run, observer, manifest, registration_name)
+        reject(run, observer, 'origin_receipts_bound')
+        put(registration_path, registration)
+        repin(run, observer, manifest, registration_name)
+        ledger_name = 'controls/origin/ledger/researcher/requests.jsonl'
+        ledger_path = run / ledger_name
+        ledger = ledger_path.read_bytes()
+        ledger_path.write_bytes(b'changed ledger\n')
+        repin(run, observer, manifest, ledger_name)
+        reject(run, observer, 'origin_receipts_bound')
+        ledger_path.write_bytes(ledger)
+        ledger_path.chmod(0o600)
+        repin(run, observer, manifest, ledger_name)
+
+        poststop_path.unlink()
+        reject(run, observer, 'run_receipts_bound')
+        put(poststop_path, poststop)
+        poststop['effect_dispatch_id'] = 'f' * 32
+        put(poststop_path, poststop)
+        repin(run, observer, manifest, poststop_name)
+        reject(run, observer, 'fresh_review_candidate')
+        poststop['effect_dispatch_id'] = dispatch_ids[1]
+        put(poststop_path, poststop)
+        repin(run, observer, manifest, poststop_name)
+
+        review = json.loads(review_path.read_text())
+        review['assessment']['status'] = 'candidate_for_operator_review'
+        put(review_path, review)
+        poststop_path.unlink()
+        manifest['run_receipts'].pop(poststop_name)
+        put(observer / 'manifest.json', manifest)
+        reject(run, observer, 'fresh_review_candidate')
+        poststop['effect_dispatch_id'] = dispatch_ids[1]
+        put(poststop_path, poststop)
+        review['assessment']['status'] = 'unfinished'
+        put(review_path, review)
+        manifest['run_receipts'] = run_receipts(
+            run, t01_paths | origin_paths | {poststop_name})
+        put(observer / 'manifest.json', manifest)
 
         for name in (f'controls/observer/target/{item}' for item in
                      ('broker.php', 'setup-readback.json', f'closed-{dispatch_ids[0]}.json')):
@@ -561,7 +796,7 @@ def main():
         code, report = invoke(run, observer)
         assert code == 0 and report['checks']['capture_receipts_bound'] is True, report
 
-    print('PASS: synthetic T04/F01 S10/T01 inventory rejects missing/changed host snapshot and capture receipts, stale artifacts, changed surface/brief/session, unassessed review and unknown challenge; provider_calls=0 target_calls=0')
+    print('PASS: synthetic T04/F01 S10/T01 inventory holds stale legacy review, admits only a bound partial T01 poststop candidate, and rejects missing/changed origin lifecycle evidence; provider_calls=0 target_calls=0')
 
 
 if __name__ == '__main__':

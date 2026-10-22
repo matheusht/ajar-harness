@@ -12,7 +12,7 @@ accumulates what it learns as reusable methodology.
 
 ## Scope fence (read first)
 
-Three zones, enforced structurally (not just documented):
+The legacy loop has three zones with structural gates:
 
 | Zone | What | Gate |
 | --- | --- | --- |
@@ -20,7 +20,10 @@ Three zones, enforced structurally (not just documented):
 | ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | signed `scope.md` **+** fresh human confirmation or kernel-enforced standing local-PoC grant **+** containment **+** cleanup obligation recorded at creation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
-**Authorization is mandatory.** No `scope.md` filled and signed → the loop refuses to run.
+**Authorization is mandatory.** The legacy loop refuses to run without a filled and
+signed `scope.md`. The native candidate binds scope bytes to its approval, but its
+entry procedure must verify the signature and a card's benign `safe_signal`; the
+native runner does not check either one itself.
 
 ## What it is / isn't
 

@@ -29,7 +29,7 @@ does not enable this cutover.
 | Candidate | Current caller or consumer | Cutover treatment |
 | --- | --- | --- |
 | `tools/run-work-queue.py`, `work_queue_driver.py`, `work_queue_admission.py`, `driver_action_admission.py`, `work_queue_actions.py` | Public Docker queue CLI, `run-engagement.py` queue commands, Docker session runtime, CI and queue tests | Retain for supported legacy work. Native CLI must have no import or dispatch to these modules. |
-| `.claude/settings.json`, `claude-stop-hook.py`, `container-broker-client.py` | Project Claude Stop setting and legacy Docker queue session | Retain while a supported legacy Claude caller exists; native OpenCode route does not load Claude settings. |
+| `.claude/settings.json`, `tools/claude-stop-hook.py`, `tools/container_broker_client.py` | Project Claude Stop setting and legacy Docker queue session | Retain while a supported legacy Claude caller exists; native OpenCode route does not load Claude settings. |
 | `run-engagement.py`, `engagement_state.py`, `engagement_records.py` | Public legacy record writer/reader, `inspect-dossier.py`, `finding_lifecycle.py`, `reporting.py`, migration and self-tests | Retain. Native files are outside `engagements/<id>` and do not append legacy ledger entries. |
 | `completion_claims.py`, `engagement_views.py` | Legacy mutation/render/read path in `run-engagement.py` and `engagement_state.py`; historical inspector | Retain for legacy state integrity. Native output has no generated-view admission. |
 | `finding_review.py`, `reporting.py`, `memory_disposition.py` | Legacy finding/review/report/submission and closure commands | Retain for legacy. Native review/output does not call these writers; external filing stays separate. |

@@ -25,12 +25,21 @@ decision does not activate this route.
 3. Use `python3 tools/native_research.py prepare --help` for the current
    source/brief/scope, target-runtime, image, model, and pinned relay/CA
    inputs. Inspect its frozen plan. For the pinned Kanboard case, pass
-   `--kanboard-capture --mutable-path data`, seed each of the three private
+   `--kanboard-capture --mutable-path data` and point `--target-command` at a
+   JSON file containing `["php","-S","0.0.0.0:<target-port>","-t","/target"]`,
+   with the same port passed to `--target-port`. Seed each of the three private
    target `data/db.sqlite` copies, and call `capture-stage` once per target
    (`target`, `review-target-1`, `review-target-2`) with that copy's S/Q/T/B
-   IDs. The fresh human-authored approval must bind the plan SHA, scope SHA,
-   three stage-file SHAs, and three database SHAs. After a scoped #165 adopt,
-   standing permission still needs exact target/model/effect/expiry binding.
+   IDs. The private, human-authored approval JSON has exactly `kind` set to
+   `native-research-live-approval-v1`, `plan_sha256`, `scope_sha256`,
+   `provider_route`, `provider_authority`, `model`, `image_id`,
+   `target_image_id`, `limits`, `approved_by`, `approved_at`, and `expires_at`.
+   For Kanboard it also has `capture_stage_sha256` and
+   `capture_target_db_sha256`, each mapping all three target names to their
+   SHA-256 digests. Copy the frozen plan values exactly; use UTC timestamps
+   formatted `YYYY-MM-DDTHH:MM:SSZ` and an expiry within 24 hours. After a
+   scoped #165 adopt, standing permission still needs exact
+   target/model/effect/expiry binding.
    Call `start --run-root <absolute-path> --approval <file>` in a foreground
    owner terminal. Then call `research --run-root <absolute-path>` for the
    frozen brief's first native session. The runner owns the target and
@@ -83,4 +92,6 @@ Existing work that depends on `tools/run-work-queue.py`, `tools/run-engagement.p
 Native research does not convert or
 rewrite those records. The [cutover contract](native-cutover-contract.md)
 lists the retained callers and checks that must pass before adopting the
-default.
+default. The [native acceptance inventory](../../evals/native-qualification/NATIVE-ACCEPTANCE-INVENTORY-CHECKS.md)
+checks private artifact bytes and receipt relationships after a run; a complete
+inventory is not native qualification or an adoption decision.

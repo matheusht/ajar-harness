@@ -156,18 +156,20 @@ def assess_chain(rows: list[dict], effect_request_id: str,
           po["project"].get("is_private") in (0, 1) and
           po["project"].get("name_sha256") == po["input_name_sha256"],
           "t01_project_creation_unproven")
-    after_creation = [item for item in before_effect if item["row_id"] > lane_created["row_id"]]
+    after_project = [item for item in before_effect if item["row_id"] > project_created["row_id"]]
+    after_lane = [item for item in before_effect if item["row_id"] > lane_created["row_id"]]
 
-    def read(method: str, actor: str, requested_id: int, result: str, status: int) -> dict:
-        selected = _one(after_creation, lambda r: r.get("method") == method and
+    def read(pool: list[dict], method: str, actor: str, requested_id: int,
+             result: str, status: int) -> dict:
+        selected = _one(pool, lambda r: r.get("method") == method and
                         r.get("actor") == actor and r.get("requested_id") == requested_id and
                         r.get("backend_status") == status and r.get("result_class") == result,
                         "t01_" + method + "_" + actor + "_control_missing_or_duplicated")
         return selected["receipt"]
 
-    a_project = read("getProjectById", "A", project_id, "project_result", 200)
-    a_lane = read("getSwimlane", "A", lane_id, "swimlane_result", 200)
-    b_project = read("getProjectById", "B", project_id, "access_denied", 403)
+    a_project = read(after_project, "getProjectById", "A", project_id, "project_result", 200)
+    a_lane = read(after_lane, "getSwimlane", "A", lane_id, "swimlane_result", 200)
+    b_project = read(after_project, "getProjectById", "B", project_id, "access_denied", 403)
     for receipt, lane_selected, manager, actor_id in (
         (a_project, None, True, a_id), (a_lane, lane_id, True, a_id),
         (b_project, None, False, b_id)):

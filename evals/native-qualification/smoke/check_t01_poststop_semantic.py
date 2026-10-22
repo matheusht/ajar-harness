@@ -96,6 +96,11 @@ def main() -> int:
             return False
 
     checks["original_chain"] = observed(rows)
+    project_control_early = copy.deepcopy(rows)
+    project_control_early[1]["row_id"] = 4
+    project_control_early[2]["row_id"] = 3
+    project_control_early.sort(key=lambda item: item["row_id"])
+    checks["project_control_before_lane_creation"] = observed(project_control_early)
     unrelated = copy.deepcopy(rows)
     extra = copy.deepcopy(rows[0])
     extra["row_id"] = 35

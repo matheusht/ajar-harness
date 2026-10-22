@@ -21,7 +21,7 @@ types below describe the original conceptual pipeline, not the complete current 
 1. **Composable two axes** — vuln (`what`) × technique (`how`), judged by oracles. Coverage is
    multiplicative. (Convergent with PyRIT converter / garak probe / promptfoo strategy.)
 2. **Skills-as-modules, portable + deterministic** — plain `SKILL.md`, orchestrator loads the exact
-   card by id. Engine-agnostic; native `.claude/skills/` mirror optional later. (See CLAUDE.md §3.)
+   card by id. Engine-agnostic; native `.claude/skills/` mirror optional later. (See `docs/agents/legacy-local-research.md` §3.)
 3. **`safe_signal` is a load-gate** — a vuln card without a benign win-condition won't load. The
    scope fence made structural.
 4. **Three record types** — `attempt` (many) → `finding` (few) → `pattern` (very few). Prevents one

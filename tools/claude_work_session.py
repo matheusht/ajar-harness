@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run one broker-scoped Claude Code session without retaining model content.
+"""Run one explicit legacy broker-scoped Claude session without retaining model content.
 
 The outer work-queue driver owns repetition and completion.  This adapter owns only one process:
-it starts Claude in the already-bound target workspace, applies the harness Stop-hook settings,
-enforces a leader wall timeout, and returns a content-free execution summary. Cleanup proves absence
+it starts Claude in the already-bound target workspace, applies caller-provided per-session Stop
+settings, enforces a leader wall timeout, and returns a content-free execution summary. Cleanup proves absence
 of the original process group and same-UID descendants that retain the inherited sentinel vnode.
 On Darwin, filesystem reads default to denied outside a bounded runtime policy and writes default to
 denied outside per-session scratch. It does not claim to contain non-filesystem channels or a

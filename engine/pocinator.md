@@ -213,7 +213,7 @@ The actual verdict call (lens interrogation, deciding whether a mock dodges the 
 the final verdict) is a judgment task catching subtle self-deception, and belongs on the
 planning/reasoning tier per `engine/whitebox-analysis.md` §5's Opus-plan/Codex-grunt split — not
 delegated wholesale to a faster/cheaper model. But this maps cleanly onto the harness's existing
-three-tier role split (`CLAUDE.md` §2: Orchestrator/Hunter/Helper): the *mechanical* legwork a
+three-tier role split (`docs/agents/legacy-local-research.md` §2: Orchestrator/Hunter/Helper): the *mechanical* legwork a
 pocinator pass needs — fresh extraction, running the build, `diff -r` against a source folder,
 collecting/grepping logs, listing zip contents — is exactly Helper-tier work (offline, no target
 contact, no judgment required) that can feed the planning-tier verdict rather than being redone by

@@ -38,7 +38,7 @@ Nothing objected, because nothing had to. See `fixtures/preregistration/spotify-
 
 | action | role | why |
 |---|---|---|
-| write to `unproven/` | hunter, orchestrator | a hunter may propose, never confirm (`CLAUDE.md` §2) |
+| write to `unproven/` | hunter, orchestrator | a hunter may propose, never confirm (`docs/agents/legacy-local-research.md` §2) |
 | `promote` | **orchestrator only** | this is decision selection, the stage that stays human-supervised |
 | `demote` | **any role, any time** | a wrong demote costs a re-review; a wrong promote reaches a vendor |
 

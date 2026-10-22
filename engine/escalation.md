@@ -106,7 +106,7 @@ that replays a control flow the real code would never take.
 
 - **Hunters generate; the orchestrator confirms against ground truth.** Never promote a hunter's "this
   escalates" to `confirmed` on its word. Re-read every decisive code hop yourself, or re-run the check
-  against the real pinned deps. (`CLAUDE.md` §2: only the orchestrator/oracle emits `confirmed`.)
+  against the real pinned deps. (`docs/agents/legacy-local-research.md` §2: only the orchestrator/oracle emits `confirmed`.)
 - **Re-run PoCs in your own hand; a builder's "PASS" is not ground truth.** Builders stall, summarize
   optimistically, or paste output they didn't produce. Read pass/fail from the raw log yourself
   (`memory/rtk-test-summary-unreliable`).
@@ -201,7 +201,7 @@ update only on oracle-confirmed; operator re-authors + files; cleanup.md logged.
 
 ## 7. Model tiers
 
-Same split as the sibling docs (`CLAUDE.md` §2). The escalation *judgment* — is this a real amplifier
+Same split as the sibling docs (`docs/agents/legacy-local-research.md` §2). The escalation *judgment* — is this a real amplifier
 or a clean cap, does the marginal-contribution critique hold, what's the honest ceiling — is
 planning/orchestration-tier (Opus). The mechanical legwork under a move (trace a call graph, grep
 siblings, re-run a check) is Hunter/Helper-tier feeding the planning-tier verdict. The independent

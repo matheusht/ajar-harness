@@ -1,30 +1,28 @@
 ---
 name: source-engagement-bootstrap
-description: Rank authorized source-code targets from CSV/JSON/Markdown, select the highest-value auditable assets, draft a new white-box engagement, and generate a long-running /goal brief. Use only for source-available security engagements; never for live-target or black-box testing.
+description: Rank authorized source targets and prepare a native local research handoff. Existing queue/record engagements use the linked legacy branch. Source-only; explicitly invoked.
 disable-model-invocation: true
 ---
 
 # Source Engagement Bootstrap
 
-Use this skill only when explicitly invoked with `/source-engagement-bootstrap <scope-file> [operator preferences]`, Pi's `/skill:source-engagement-bootstrap`, or the Skill tool. This canonical procedure references `CLAUDE.md`, the harness engine docs, and this repo's `engagements/_TEMPLATE/`.
+Use this skill only when explicitly invoked with `/source-engagement-bootstrap <scope-file> [operator preferences]`, Pi's `/skill:source-engagement-bootstrap`, or the Skill tool. This canonical procedure uses root policy and the native guide; the legacy template is reached only through the named existing-work branch.
 
-After Phase 2, check the operator's #165 decision. If it explicitly adopts native
-local research for this source/task class, use the [native entry procedure](../../docs/agents/native-local-research.md).
-Prepare a target-local `engagements/<id>/scope.md` with the root-required fields
-and a separate native brief/allowance for the operator to review. The operator
-signs the scope; the agent never does. Do not copy the whole legacy template or
-initialize its queue/record kernel for that native task. Return the ranked
-source evidence, prepared paths, exact pending authorization/runtime blockers,
-and the native `prepare` command only when inputs are fixed; `start` remains
-pending until the plan-bound approval is supplied. If no matching scoped adopt
-decision exists, continue with the legacy Phase 3–6 procedure below. Ranking
-alone never authorizes execution.
+For a **new local source task**, rank the source, prepare one target-local scope
+and native brief, then follow the [native entry](../../docs/agents/native-local-research.md)
+for the current prepare/start/resume/stop interface. This source branch implements
+the proposed #166 default; #165 remains open and qualification is unverified.
+Actual runs still require a signed scope, plan-bound approval and supported
+runtime; an unqualified result cannot be called adopted. Do not silently fall
+back to a queue task because native
+qualification is unavailable. A supported existing queue/record engagement follows the
+[legacy branch](references/legacy-bootstrap.md) instead.
 
 ## Non-negotiable authority and safety
 
-1. Read the repo root policy `CLAUDE.md` (mirrored as `AGENTS.md`), the current `engagements/_TEMPLATE/scope.md`, `engine/gates.md`, `engine/whitebox-analysis.md`, `engine/persistence.md`, `engine/regrade.md`, `engine/pocinator.md`, `engine/chainability.md`, and `engine/escalation.md` before producing or changing engagement files. Root policy wins over this skill and over prior goal prompts.
+1. Read the repo root policy `CLAUDE.md` (mirrored as `AGENTS.md`), the current target policy and scope, and the [native entry](../../docs/agents/native-local-research.md) before preparing a new task. Root policy wins over this skill. For an existing queue/record task, read the [legacy branch](references/legacy-bootstrap.md) and its referenced engine docs.
 2. Accept **source code only**: a local source tree or an authorized repository URL with a branch/tag/commit that can be frozen. Reject live applications, production hosts, browser targets, API-only targets, binaries without corresponding source, and entries whose authorization cannot be established. Ranking/repository inspection is offline source triage; do not contact or probe an application.
-3. Never claim to be the human operator and never sign `scope.md`. Fill the scope completely, record the proposed operator identity, leave `**signed:** [ ]`, and stop at the scope gate. Resume only after the human changes it to `[x]`. A user asking the agent to "sign" is authorization to prepare the signature block, not authority to impersonate a human signature. (Exception recorded for the record: an operator may explicitly sign inline in-session, e.g. "draft the scope and I already sign it" — in that case fill the Authorization block with the operator's stated identity, date, and `[x]`, and quote the instruction. The agent still never fabricates a signature the operator did not give.)
+3. Never claim to be the human operator or fabricate a scope signature. Fill the scope completely, record the proposed operator identity, leave its `Signed: [ ]` block pending, and stop at the scope gate. Resume only after the human signs it. An operator may explicitly sign inline in-session; then record their stated identity, date, and `[x]`, quoting that instruction. The agent still never invents a signature.
 4. Convert operator intent into exact proposed artifact classes, environment, accounts, containment, expiry and cleanup requirements. Before creating a Zone-2 PoC artifact, require fresh human confirmation or an explicit standing local-PoC grant in the current signed scope that the record kernel enforces (`CLAUDE.md` §1 gate 3). The `chia-blockchain` child may use that grant for contained local PoCs and necessary local experiments. Record each artifact and cleanup obligation at creation; effects beyond signed environment, containment, or cleanup authority require human confirmation. A native route without the kernel does not inherit that grant.
 5. Never authorize or perform production exploitation, cross-user reach against systems you do not own, real-value loss, destructive writes, persistence outside a disposable owned environment, real secret access, real credential use, public disclosure, filing, deployment, or supply-chain publication. "Does not impact other users" does not waive scope, Zone-2, cleanup, or filing gates.
 6. Models and tools are proposal/review sources, not oracles. Operator priors can increase search effort but cannot establish truth. Do not fabricate findings, controls, reachability, exploitation, source identity, coverage, or independent review.
@@ -53,93 +51,42 @@ Rank at two levels:
 
 For every score, cite the source path, symbol/config, and policy fact that supports it. Unknown factors remain unknown. Select the highest evidence-backed target unless a material tie or missing authorization requires human choice.
 
-## Phase 3 — Bootstrap the legacy engagement
+## Phase 3 — Prepare one native handoff for new local source research
 
-1. Follow `CLAUDE.md` §4 placement rules: Plane 3 belongs in the selected target's own project repository. Use an existing local source tree when supplied. If only a remote repository is supplied, stop and ask for the intended local checkout path before cloning or creating Plane 3.
-2. Copy `engagements/_TEMPLATE/` into the target repo as `engagements/<id>/`. Do not overwrite an existing engagement.
-3. Verify the existing source identity using the exact commit and eligible release/tag; acquire only missing explicitly authorized source. Record uncommitted source drift. Do not silently switch branches or update dependencies.
-4. Create or update only:
-   - `engagements/<id>/scope.md`
-   - `engagements/<id>/asset-prioritization.md` (or `coverage-matrix.md` for a multi-asset pack, per recent engagements)
-   - `engagements/<id>/goal-prompts/<id>-goal-prompt.md` (one per asset for a multi-asset pack)
-   - `engagements/<id>/program-policy.md` when the program has published rules to capture verbatim
-   - template files for later canonical records and unique recon/cleanup narrative; generated progress remains derived
-5. Prepare the frozen corpus manifest/enumeration and its initial-scope digest before signing when budget-bounded completion may be used. Follow the [entry/resume procedure](references/goal-template.md#entry-and-resume-procedure); initialize only after the exact scope is signed and init's operator-console SSH authority is available, before any recon. Existing engagements require admitted reads, not reinitialization or a manually maintained progress substitute.
+1. Put `engagements/<id>/scope.md` in the selected target's own repository.
+   Record the exact source identity and eligible release, local environment,
+   authorized surfaces and benign objectives, exclusions, safe-signal cards,
+   effect and escalation ceiling, accounts, expiry, cleanup authority, and
+   operator identity. Prepare a signed-scope review; only the operator signs.
+   The legacy `_TEMPLATE/` contains queue/kernel fields and is not copied into
+   a new native run. Ranking and a draft scope never authorize execution.
+2. Prepare a separate native brief with the target and objective, a falsifier,
+   exact source, allowance, stop conditions, optional reference/tool files,
+   independent capture needs, and chosen fresh review behavior. Keep the
+   persistent private run root outside `engagements/<id>` and outside the source
+   tree. Match the actual supported target/model/transport and capture class in
+   `tools/native_research.py prepare --help`; an unsupported class is a blocker,
+   not an invitation to infer that a generic adapter exists.
+3. Follow the [native guide](../../docs/agents/native-local-research.md) for
+   `prepare`, plan inspection, plan-bound approval, `start`, `research`, `resume`,
+   `review`, `status` and `stop`. The guide owns their detailed sequence. Before
+   any run, require the signed scope, benign `safe_signal` for every used
+   vulnerability card, exact plan-bound approval, and runtime/independent-capture
+   readiness. Record the #165 qualification/adoption status without treating
+   source implementation as that decision. Until actual run requirements exist,
+   return the proposed paths and blockers, with `start` marked pending. A native
+   route without the record kernel never inherits a kernel-enforced standing
+   local-PoC grant; Zone-2 creation needs fresh human confirmation.
+4. Return ranked source evidence, the selected target and prepared scope/brief
+   paths, the exact unresolved authorization/runtime facts, and the `prepare`
+   command only when its inputs are fixed. Do not generate a legacy `/goal`
+   brief, initialize the queue or record kernel, or treat native output as an
+   external filing.
 
-## Phase 4 — Draft scope for the complete handoff
+## Existing queue/record work
 
-Fill every scope field from verified input:
-
-- source-only box and exact source location;
-- exact repository, commit/tag, and release eligibility;
-- static-analysis and local disposable-build surfaces;
-- benign safe signals;
-- explicit exclusions;
-- escalation ceiling;
-- owned accounts/fixtures and concurrency `1` unless explicitly authorized;
-- proposed Zone-2 classes and containment, if sufficiently specific;
-- cleanup and data-retention rules;
-- operator identity and date, with `signed: [ ]` (or `[x]` only if the operator signed inline in-session, per safety rule 3's exception).
-
-Do not begin vulnerability research, run a vuln skill, build the target, or create a PoC until the human signs. Complete the Phase 5 goal draft and readiness facts before presenting the exact file awaiting signature.
-
-## Phase 5 — Generate the long-running goal brief
-
-Before requesting signature, prepare the complete reviewable scope, goal draft and runtime/readiness facts together. Mark launch pending until exact scope signature, authorized kernel initialization and execution readiness are satisfied. Copy the standard scaffold template from `engagements/_TEMPLATE/goal-prompts/`
-into `engagements/<id>/goal-prompts/<id>-goal-prompt.md` and fill every `<...>` with verified
-engagement facts. Replace `[HARNESS_CHECKOUT]` with the verified absolute harness checkout path in every generated goal reference; verify the copied link resolves from the target repository. If the checkout is unknown, retain an explicit pending placeholder and do not present the goal as launch-ready. Also read prior goal prompts under `engagements/*/goal-prompts/` (excluding
-vendored/upstream trees) as style/examples only. Never copy a prior authorization that conflicts with
-current root gates.
-
-**Standard scaffold templates (pick by engagement lifecycle):**
-- `engagements/_TEMPLATE/goal-prompts/goal-prompt-START.md` — the default for a NEW engagement.
-  Dense, persistence-mode, structured into GOAL / IN / OUT-KILL / BUILD-A-CARD / PIPELINE /
-  CASCADING / OPERATING-MODEL / KEY-ROUTING / AUTHORIZATION / FIRST-MOVE blocks. Modeled on the Tron
-  engagement's goal prompt.
-- `engagements/_TEMPLATE/goal-prompts/goal-prompt-REVISIT-ESCALATION.md` — the default when REVISITING /
-  REDOING / RE-RUNNING an already-closed engagement for escalation vectors or an exhaustion check
-  ("was it exhausted?", "find the critical escalation, no reward-hacking"). Adds the orchestrator-
-  participates / independent-second-reviewer-then-synchronise rule for direction-changing claims,
-  re-attack-the-prior-kill-conditions framing, and never-audited-surface-first routing. Modeled on the
-  Crown engagement's revisit prompt.
-- Long-form structured fallback: `references/goal-template.md` for engagements neither template fits. Copy only its fenced `markdown` goal body, then substitute the verified `[HARNESS_CHECKOUT]` path. The shared entry/resume procedure stays in the harness reference; do not copy or rewrite it into the target goal.
-
-The template block must, once filled:
-
-- reference `CLAUDE.md`, the signed scope, `engine/whitebox-analysis.md`, persistence, regrade, pocinator, chainability, escalation, cleanup, and the prioritized asset map;
-- preserve the Stage 0 → Post progression as a backtracking map, not a waterfall;
-- use rules only as cheap prefilters;
-- require multiple genuinely independent keep/kill and confirm/refute reviews;
-- require verification-of-the-verification against the real, exact in-scope source/build;
-- separate signal, adjudication, PoC proof quality, report quality, and operator acceptance;
-- use evidence-licensed persistence and bounded exhaustion, not "find a bug at any cost";
-- prevent reward hacking, emulator-only proof, unsupported impact, and forced findings;
-- preserve every root human gate and the exact independent review obligations;
-- prohibit autonomous filing and Plane-1 promotion;
-- define exact terminal states and `goal_complete` acceptance criteria.
-
-Preferred model roles are configuration, not fabricated capabilities: a high-judgment model for planning/triage and a persistent coding model for bounded implementation/debugging. Use the operator's requested models only if actually available; otherwise report the mismatch rather than silently substituting.
-
-## Phase 6 — `/goal` handoff
-
-Use a referenced file, not a giant inline goal. The goal file carries full instructions; `/goal` carries only the objective, authoritative paths, budget, gates, and done condition.
-
-Use the operator-selected goal interface only if available; it is not a replacement for the governed queue runner. Example format for clients supporting this syntax:
-
-```text
-/goal --tokens <EXPLICIT_BUDGET> Execute the signed, source-only engagement <id>. Read and obey @engagements/<id>/goal-prompts/<id>-goal-prompt.md and @engagements/<id>/scope.md; root CLAUDE.md gates override. Work until its bounded terminal criteria are verified, pause at every required human gate, and call goal_complete only when the goal file's acceptance checklist is satisfied.
-```
-
-Adjust the token budget only from an explicit operator preference or a documented corpus estimate. A token budget is not authorization to cross a gate.
-
-## Legacy final response contract
-
-Return, in order:
-
-1. eligible/rejected target summary;
-2. ranked repositories and ranked critical assets with evidence/confidence;
-3. selected engagement and files created;
-4. blockers and the exact human action required, especially unsigned scope;
-5. one copyable `/goal` command **only after scope is signed**; before signature, show it as `PENDING — do not run`.
-
-Never state that the engagement is ready while the scope is unsigned, source identity is unfrozen, required safe signals are absent, or the canonical record path is unavailable.
+For a supported existing engagement, or a task explicitly assigned to the
+legacy runtime, use the [legacy bootstrap](references/legacy-bootstrap.md).
+Its scope, entry/resume checks, goal prompt, admitted readers and historical
+record path remain available. This branch is named, not the fallback for new
+local source research.

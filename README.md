@@ -12,18 +12,20 @@ accumulates what it learns as reusable methodology.
 
 ## Scope fence (read first)
 
-The legacy loop has three zones with structural gates:
+Both local routes use the same scope fence. The legacy kernel enforces its
+record gates; the native entry must check the signed scope and card safe signal
+before a run:
 
 | Zone | What | Gate |
 | --- | --- | --- |
-| ✅ **Default — benign proxy** | system-prompt disclosure, refusal-flip on a *harmless* target, indirect-injection canary, excessive-agency / unsafe-render, cross-user canary propagation | a skill with no benign `safe_signal` **will not load** |
+| ✅ **Default — benign proxy** | system-prompt disclosure, refusal-flip on a *harmless* target, indirect-injection canary, excessive-agency / unsafe-render, cross-user canary propagation | signed scope and a benign `safe_signal` for every used vulnerability card |
 | ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | signed `scope.md` **+** fresh human confirmation or kernel-enforced standing local-PoC grant **+** containment **+** cleanup obligation recorded at creation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
 **Authorization is mandatory.** The legacy loop refuses to run without a filled and
-signed `scope.md`. The native candidate binds scope bytes to its approval, but its
-entry procedure must verify the signature and a card's benign `safe_signal`; the
-native runner does not check either one itself.
+signed `scope.md`. The native runner binds scope bytes to its plan approval, but
+its entry procedure must verify the signature and each used card's benign
+`safe_signal`; the runner does not check either one itself.
 
 ## What it is / isn't
 
@@ -40,7 +42,7 @@ engine/         PLANE 2 — orchestration: loop · persistence · routing · ros
 schemas/        the contracts: attempt · finding · pattern · technique-card
 fixtures/       sanitized oracle-calibration + routing-activation ground truth
 casebooks/      PLANE 1 — scrubbed prior-engagement memory (routing + false-positive discipline)
-engagements/    PLANE 3 — _TEMPLATE copied OUT into each target's own project repo (append-only)
+engagements/    PLANE 3 — legacy _TEMPLATE copied OUT into each target's own project repo
 tools/          conformance checker — the first mechanical gate
 docs/           architecture + decisions + field-notes (cross-engagement methodology log)
 ```
@@ -48,83 +50,26 @@ docs/           architecture + decisions + field-notes (cross-engagement methodo
 **Plane rule:** Plane 1 is read-only knowledge; Plane 3 is write-only memory. The portable harness
 (Plane 1+2) travels; each engagement's Plane 3 wiki lives with its target.
 
-## Native local research candidate
+## New local source research — candidate native default
 
-The [native start/resume/stop route](docs/agents/native-local-research.md) is staged
-for issues #166–170. It becomes the ordinary route only for a class explicitly
-adopted by the operator under #165 after qualification. Existing engagements and
-all work outside that class continue through the legacy commands below. The
-[cutover contract](docs/agents/native-cutover-contract.md) records retained callers
-and the checks still required. This source branch is not an adoption decision.
+The [native entry](docs/agents/native-local-research.md) is the source route for
+new local source research in this candidate branch: prepare a signed target-local
+scope, brief and allowance, then use its persistent run root, review and internal
+result. The [bootstrap skill](skills/source-engagement-bootstrap/SKILL.md) ranks
+source targets and prepares that handoff. Issues #166–170 implement the source
+change; #165 remains open, so this is neither live qualification nor a scoped
+adoption decision. An actual run still needs its signed scope, plan-bound
+approval and supported runtime. The [cutover contract](docs/agents/native-cutover-contract.md)
+records the remaining checks.
 
-## Legacy Decision 0005/0006 record kernel
+## Existing queue and record engagements
 
-Decision 0006 keeps Decision 0005's evidence and authority boundaries while allowing the local
-broker to maintain truthful Notebook records non-interactively. Consequential transitions use
-lane-local digest-bound authority requests; Zone-2 follows the impact-artifact gate above.
-
-Legacy version-3 engagements use `python3 tools/run-engagement.py <subcommand> ...` as their public
-Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown are derived. See
-`docs/decision-0005-implementation-architecture.md`,
-`docs/decision-0005-implementation-report.md`, and
-`docs/decision-0006-agent-autonomous-record-kernel.md` for commands, trust boundaries, migration, telemetry,
-and the precise distinction between conformance, regression parity, and efficacy.
-
-To drain the reducer-owned queue, use `tools/run-work-queue.py run` with absolute canonical paths to
-one target repository and its own `engagements/<id>` directory, plus explicit session-count,
-wall-admission, and per-session timeout bounds. The public CLI requires `--session-backend docker`
-and every Docker resource limit; there is no implicit host-process fallback. Supply an ordered
-reviewer pool by repeating `--reviewer-model`; the driver selects the first model distinct from the
-exact subject origin and required prior reviewer lineage, or pauses once as
-`reviewer_model_unavailable` without launching or retry-spinning.
-
-Before a run may end as `budget_bounded`, freeze the coverage corpus and put the manifest bytes'
-`sha256:...` digest on the exact `Frozen corpus enumeration SHA256` line in `scope.md` before the
-initial scope is signed. A later scope re-attestation cannot introduce or replace this genesis pin.
-After kernel initialization and before the run, register that exact manifest and
-its linked enumeration as engagement artifacts. Pass the registered manifest artifact ID to the
-driver as `--corpus-enumeration-ref <artifact-id>`. The digest in scope binds the permitted bytes;
-the CLI value names the registered artifact carrying those bytes. The option may be omitted for a
-run that will not declare a budget boundary, but if a session or wall ceiling is reached without it
-the driver returns `operator_required` and does not record `budget_bounded`.
-
-The Docker backend currently accepts only non-root Apple Silicon macOS with a local Docker Desktop
-Linux/arm64 engine that exposes the required cgroup-v2, seccomp, memory, swap, and PID controls.
-Unsupported hosts fail before the model starts. The runtime accepts only an already-cached immutable
-`repository@sha256` image and uses `--pull never`; the image must contain the operator-named absolute
-Claude and Python executables.
-
-`max_wall_seconds` is the deadline for admitting another action, not permission to cancel a trusted
-record transaction halfway through. An action admitted before that deadline must quiesce; terminal
-reducer state then takes precedence. The result always reports both total `wall_seconds` and any
-`wall_deadline_overrun_seconds`, so a completed in-flight action cannot hide cleanup or commit time.
-
-The driver mounts the exact target directly at `/workspace`, this harness at `/harness`, and only
-repeated operator-declared regular files at deterministic `/inputs/NNN` paths, all read-only. It
-rejects optional directories and special files and never discovers or mounts target workspaces
-centrally. A PID-1 supervisor owns every descendant, retains
-the per-session broker HMAC key behind a local semantic relay, and installs the authenticated Stop
-backstop. `/scratch` and `/dev/shm` are tmpfs filesystems with separate hard byte and inode limits;
-PID 1 traces the descendant tree and brokers scalar writes through an inherited seccomp listener.
-It uses the exact writer TID plus a thread-scoped pidfd to duplicate one stable descriptor, snapshots
-at most 16 MiB of write data, and never uses notification `CONTINUE`. Only bounded tmpfs regular-file
-`ENOSPC`/`EDQUOT` or a positive short result latches storage failure; ordinary pipe/socket partial
-writes retain their result. The Docker profile names `SYS_PTRACE` only to admit the required broker
-syscalls through the built-in seccomp policy; non-root PID 1 and the model both prove all usable
-capability sets are zero under `no-new-privileges`. Reserved exit 73 maps only to
-`driver_session_storage_exceeded`; broker/setup failure maps to sanitized internal failure.
-Timeout, interrupt, parent death, and normal completion clean the exact container and network IDs,
-not same-uid processes.
-
-The session bridge permits provider egress. Its removal ends the container's credential and network
-authority, but it cannot undo disclosure that occurred before teardown or revoke an upstream token.
-Use scoped, short-lived model credentials. See
-[`docs/agents/docker-work-queue.md`](docs/agents/docker-work-queue.md) for the full host/image
-contract, CLI template, broker/Stop flow, resource limits, and the distinction between real-Docker
-fake-Claude containment evidence and credentialed live-Claude qualification.
-
-The retrospective and A/B tools are offline evaluators only. They do not contact targets, authorize
-Zone-2 work, file reports, promote memory/cards, or prove efficacy.
+The [legacy entry](docs/agents/legacy-local-research.md) retains Decision
+0005/0006, the governed queue, canonical records and historical readers for
+supported existing work. Its [Docker work-queue contract](docs/agents/docker-work-queue.md)
+and [source bootstrap branch](skills/source-engagement-bootstrap/references/legacy-bootstrap.md)
+remain available. New local source research uses the native entry above; this
+source change does not convert, rewrite or grade historical engagements.
 
 ## Conformance (run before promoting any card / casebook change)
 
@@ -163,8 +108,9 @@ agents** and gray-box ground truth held only by the orchestrator.
 
 ## Status
 
-As of 2026-09-05, the repository includes the Decision 0005/0006 record kernel described above;
-the original scaffold label no longer describes the whole implementation. Start with the
+The repository retains the Decision 0005/0006 record kernel for existing work and now
+contains the candidate native source default for new local source research. #165
+qualification/adoption and the final E2E remain open. Start with the
 [decision index](docs/decisions/README.md) for accepted and superseded architecture decisions,
 and the [engineering wiki](docs/wiki/index.md) for the current offline engineering delivery state
 and its verification limits. The benchmark table above records earlier calibrations, not a fresh

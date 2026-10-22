@@ -27,7 +27,9 @@ For the maintained engineering synthesis and implementation evidence, start with
 - [0011 — Depth over provability: partials, primitives, external calibration, and the authorization ceiling](0011-depth-external-calibration-ceiling.md) — **two audits measuring excess rigor, the 12-promotions/0-blocks result, and why the ceiling is scope not judgement**; ledger at [`tools/disposition_ledger.py`](../../tools/disposition_ledger.py)
 - [0012 — Full autonomy as the north star: scope is the only human decision](0012-full-autonomy-north-star.md) — **RECORDED DIRECTION, not accepted**: the intended end state, the six preconditions none of which is met today, and the reframe that a hard gate is removed by BOUNDING the capability rather than by trusting supervision more
 
-The [native local research candidate](../agents/native-local-research.md) proposes
-a scoped supersession of the legacy queue/record procedure. It has no effect on
-accepted decisions or current engagements until #165 records an explicit adopt
-decision for a qualified class.
+The [native local research source route](../agents/native-local-research.md) is
+implemented as the candidate default for new local source research; the
+[legacy entry](../agents/legacy-local-research.md) remains for supported existing
+queue/record work. This source implementation does not revise accepted
+decisions or historical records. #165 remains open: live qualification and a
+scoped adoption decision are separate from these instructions.

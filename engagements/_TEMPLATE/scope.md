@@ -1,5 +1,13 @@
 # scope.md — engagement authorization gate
 
+This is the queue/record template for supported legacy work. For new local
+source research, prepare a target-local scope through
+`skills/source-engagement-bootstrap/SKILL.md` and use the native entry; do not
+copy the kernel, corpus, reviewer-signer or ledger fields below into a native
+run as if they granted it authority. The shared scope, safe-signal, effect,
+cleanup and redaction gates still apply. A native route without the record
+kernel does not inherit its standing local-PoC grant.
+
 **The loop refuses to run until this is filled and signed.** Copy this `_TEMPLATE/` into the
 target's own project repo (Plane 3) per engagement.
 

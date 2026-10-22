@@ -365,8 +365,7 @@ def _filesystem_snapshot(root: Path, plan: dict) -> dict:
                 _fail('research_notebook_oversize')
             notebook = {'present': True, 'sha256': _sha(path), 'bytes': path.stat().st_size}
     return {'kind': 'native-research-host-byte-receipt-v1',
-            'status': 'complete' if store['status'] == 'present' and
-            (notebook is None or notebook['present']) else 'incomplete',
+            'status': 'complete' if store['status'] == 'present' else 'incomplete',
             'researcher_project': project, 'native_store': store,
             **({'research_notebook': notebook} if notebook is not None else {}),
             'targets': targets, 'target_image_id': plan['target_image_id'],
@@ -2260,12 +2259,6 @@ def _research_context(root: Path, continuity: str, *, pool: dict | None = None) 
             _fail('portable_research_requires_new_prepare')
         return None
     plan = _verified_plan(root)
-    try:
-        notebook = _file(root / 'researcher/RESEARCH.md', private=True)
-        if notebook.stat().st_size > 8 * 1024 * 1024:
-            _fail('research_notebook_oversize')
-    except (OSError, NativeResearchError):
-        _fail('research_notebook_unavailable')
     if _unresolved_dispatches(root):
         _fail('prior_dispatch_unknown_effect')
     try:
@@ -2375,8 +2368,9 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                 _write_json(snapshot_path, context, once=True)
                 _write_json(_controls(root) / 'research/RUN.json', context)
                 prompt = (
-                    'Read /research/WORKFLOW.md, /research/BRIEF.md, /research/RUN.json, and '
-                    '/workspace/RESEARCH.md with your tools before another experiment. '
+                    'Read /research/WORKFLOW.md, /research/BRIEF.md and /research/RUN.json '
+                    'with your tools before another experiment. Consult /workspace/RESEARCH.md '
+                    'if present, along with saved scripts and results. '
                     'The run snapshot is advice at this dispatch time, not new authority. '
                     'Keep material hypotheses, observations, scripts/results, unfinished effects, '
                     'review limits and your final internal note in ordinary workspace files. '
@@ -3987,7 +3981,7 @@ def main() -> int:
                 session = args.session
             else:
                 prompt = (_file(Path(args.prompt_file), private=True).read_text() if args.prompt_file else
-                          'Reconstruct the investigation from the saved notebook, scripts, results and current '
+                          'Reconstruct the investigation from saved research notes, scripts, results and current '
                           'run snapshot. Identify missing conditions before choosing the next authorized check.')
                 prompt = ('Use ordinary workspace files without consulting prior native conversations. '
                           'A fresh session alone does not prove that reconstruction succeeded.\n' + prompt)

@@ -1,6 +1,6 @@
 ---
 name: source-engagement-bootstrap
-description: Rank authorized local source targets and prepare a scoped engagement. Read the canonical harness skill before acting. Invoke explicitly with /skill:source-engagement-bootstrap.
+description: Rank authorized local source targets and prepare a native research handoff; existing queue/record work uses the canonical legacy branch. Invoke explicitly with /skill:source-engagement-bootstrap.
 disable-model-invocation: true
 ---
 

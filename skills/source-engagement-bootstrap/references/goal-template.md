@@ -1,15 +1,18 @@
 # Source-only long-running engagement goal template
 
-This is the legacy queue/record route. A class explicitly adopted for native
-local research under #165 uses the [native entry procedure](../../../docs/agents/native-local-research.md)
-instead; existing engagements keep this procedure.
+This is the legacy queue/record route for supported existing engagements and
+tasks explicitly assigned to that runtime. New local source research is
+prepared through the [native entry procedure](../../../docs/agents/native-local-research.md);
+the candidate source default is implemented, while #165 qualification/adoption
+remains open. Actual native execution still needs the signed scope, plan-bound
+approval, supported route and independent evidence.
 
 Replace every bracketed field with verified engagement facts. Delete inapplicable sections; never fill unknowns by guessing.
 
 > **Standard goal-prompt templates (the scaffold's defaults — use these first, this file is the
 > long-form fallback).** The canonical formats live in the scaffold at
 > `engagements/_TEMPLATE/goal-prompts/`:
-> - `goal-prompt-START.md` — **standard format for STARTING a new engagement** (densely structured
+> - `goal-prompt-START.md` — **standard format for STARTING an explicitly legacy engagement** (densely structured
 >   GOAL / IN / OUT / BUILD-A-CARD / PIPELINE / CASCADING / OPERATING-MODEL / KEY-ROUTING /
 >   AUTHORIZATION / FIRST-MOVE blocks; adapted per engagement by the LLM). Modeled on the Tron
 >   engagement's goal prompt.

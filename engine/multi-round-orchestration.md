@@ -1,5 +1,13 @@
 # engine/multi-round-orchestration.md — the portfolio layer over a single asset
 
+> **Retained legacy workflow.** The rounds, registries, queue scheduling and ending
+> rules below govern explicitly selected legacy engagements. New native local
+> source research uses the [native guide](../docs/agents/native-local-research.md)
+> and [portable workflow](native-research-workflow.md). Independent alternatives
+> and adversarial reasoning may be useful; these legacy record/round/closure
+> requirements are not native authority or conditions of stopping. Existing legacy
+> consumers retain every rule below.
+
 > Everything else in `engine/` operates *within one route*: `loop.md` is the ladder for a single card,
 > `routing.md` picks the card, `escalation.md`/`chainability.md` push a confirmed primitive. Missing was
 > the layer that manages the **set of routes across rounds** for a whole asset — so we kept running one

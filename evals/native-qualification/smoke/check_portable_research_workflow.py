@@ -183,7 +183,23 @@ def main():
                       and calls == [] and len(commands) == before)
 
             notebook.unlink()
-            rejects('missing notebook rejects before any native call', 'research_notebook_unavailable')
+            code, without_notebook = cli('resume', '--run-root', str(root),
+                                         '--session', receipt['session_id'],
+                                         '--prompt-file', str(prompt_file))
+            check('missing advisory notebook does not block native resume',
+                  code == 0 and without_notebook['session_id'] == receipt['session_id']
+                  and without_notebook['continuity'] == 'native_history'
+                  and not notebook.exists()
+                  and all(path.read_bytes() == originals[path] for path in (script, result_file)))
+            calls.clear()
+            code, without_notebook = cli('reconstruct', '--run-root', str(root))
+            check('missing advisory notebook does not block or reset reconstruction',
+                  code == 0 and without_notebook['continuity'] == 'fresh_context_from_workspace'
+                  and without_notebook['session_id'] != receipt['session_id']
+                  and calls == [('resume', ('session.create', '--data', '{"title":"workspace reconstruction"}'))]
+                  and not notebook.exists()
+                  and json.loads((host / 'RUN.json').read_text())['allowance']['used_connections'] == 5
+                  and all(path.read_bytes() == originals[path] for path in (script, result_file)))
             notebook.write_bytes(originals[notebook])
             workflow = (host / 'WORKFLOW.md').read_bytes()
             (host / 'WORKFLOW.md').write_text('changed workflow\n')
@@ -244,6 +260,20 @@ def main():
         check('stopped byte collection includes ordinary notebook without contents',
               observed['research_notebook']['sha256'] == sha(notebook)
               and 'H1' not in json.dumps(observed))
+        notebook.unlink()
+        observed = runner._filesystem_snapshot(root, plan)
+        check('missing advisory notebook does not invalidate protected stopped bytes',
+              observed['status'] == 'complete' and observed['native_store']['status'] == 'present'
+              and observed['research_notebook'] == {'present': False})
+        notebook.symlink_to(script)
+        unsafe_rejected = False
+        try:
+            runner._filesystem_snapshot(root, plan)
+        except runner.NativeResearchError as error:
+            unsafe_rejected = str(error) == 'absolute_regular_file_required'
+        check('snapshot never hashes an unsafe advisory notebook path', unsafe_rejected)
+        notebook.unlink()
+        notebook.write_bytes(originals[notebook])
         with notebook.open('wb') as stream:
             stream.truncate(8 * 1024 * 1024 + 1)
         oversized_rejected = False

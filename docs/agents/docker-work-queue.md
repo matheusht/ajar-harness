@@ -1,6 +1,11 @@
-# Docker work-queue backend
+# Legacy Docker work-queue backend
 
-The public work-queue CLI runs every model session in an explicit Docker boundary. It has no
+This is the explicit legacy queue procedure for existing engagements and supported workflows.
+New local source research in this candidate implementation uses `tools/native_research.py` and the
+[native local research procedure](native-local-research.md). Preparing that source route does not
+record a scoped adopt decision or verify the final native E2E.
+
+The legacy public work-queue CLI runs every queue session in an explicit Docker boundary. It has no
 implicit host-process fallback. The parent driver continues to own queue reduction, action
 admission, record writes, and cleanup; the container owns only one bounded model session and its
 descendants.
@@ -100,8 +105,15 @@ nonce/replay state, deadlines, container identity, admission, exact inline files
 the target-local state before it executes anything. A model cannot gain host path authority by
 putting a path in a broker request.
 
-The additional Claude settings register only the top-level `Stop` hook. Inside the container it
-runs:
+Queue sessions opt in through driver-generated `--settings`; repository `.claude/settings.json`
+does not automatically register the queue Stop hook. The native entry route does not need queue
+selection, a queue reviewer-model pool, or queue-draining Stop continuation. Global user and target
+project settings are outside this repository change.
+
+The legacy host compatibility path still uses `load_stop_hook_settings()` and
+`claude-stop-hook.py --print-additional-settings` to generate absolute hook paths. The public
+Docker path uses `_container_stop_hook_settings()` to register only its top-level `Stop` hook:
+inside the container it runs:
 
 ```text
 <docker-python> /harness/tools/container_broker_client.py stop-hook

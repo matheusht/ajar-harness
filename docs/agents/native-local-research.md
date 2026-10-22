@@ -1,11 +1,12 @@
-# Native local research (candidate route)
+# Native local research
 
-This route is staged for issues #166–170. It becomes the ordinary path only
-for the class named in a **scoped adopt** decision on #165, after the cited
-unhinted outcome, review, controls, and historical access pass. Until then,
-follow the [legacy engagement route](../../CLAUDE.md#4-the-runbook-legacy-engagement)
-for supported work. A pilot, repair, no-go, or closed issue without an adopt
-decision does not activate this route.
+This branch implements the native route as the default for new local source research.
+Runtime qualification and adoption remain unverified.
+Actual runs still require permission, a frozen allowance and the enforced effect
+boundary. If native preparation, access or evidence capture is unavailable, retain
+the work as blocked or unfinished; do not initialize a legacy queue or record
+kernel as a fallback. Existing record-backed workflows keep their explicit legacy
+procedure described below.
 
 ## Start and resume
 
@@ -48,12 +49,17 @@ decision does not activate this route.
    still requires live qualification, clean replay and fixed-control evidence;
    review strong-lead dispositions separately when needed. Source and offline
    checks do not qualify a provider or target.
-   After a scoped #165 adopt, any standing permission still needs exact
-   target/model/effect/expiry binding. The runner stages the portable
+   Any standing permission still needs exact target/model/effect/expiry binding.
+   The runner stages the portable
    [research workflow](../../engine/native-research-workflow.md), frozen brief,
    and current host-derived allowance snapshot at read-only `/research`.
-   Keep hypotheses, experiment results, contrary observations, pending conditions,
-   and links to scripts and internal output in `/workspace/RESEARCH.md`.
+   Keep the material interpretation, pending conditions and links to scripts,
+   observations, review and internal output in `/workspace/RESEARCH.md`. Save each
+   experiment or review once in its actual file or captured evidence and link it;
+   do not mirror it into attempt/event pairs or a second record system.
+   The notebook is advisory: its absence does not block native resume or make
+   intact protected byte evidence incomplete. Recover material state from the
+   saved scripts, results and evidence; missing facts remain unknown, not proven.
 4. For continuation, inspect the previous result and unresolved effects, then
    use `resume --help` to continue the exact native session or `reconstruct --help`
    to create a fresh context over the same files and run. Reconstruction is
@@ -69,10 +75,11 @@ decision does not activate this route.
    absent or unreadable records leave the reason unknown. Check cleanup separately.
 
 Research can choose and revise experiments. Budget, user, safety, and blocked
-stops are honest stopping reasons; none implies exhaustive coverage. Native
-work does not require queue admission, manual event pairs, harmless-file
-registration, generated-view repair, signed report acceptance, memory
-disposition, or formal engagement closure.
+stops are honest stopping reasons; none implies exhaustive coverage. The stopping
+reason does not need an empty queue, a frozen corpus denominator or a signed ending
+exception. Native work does not require queue admission, manual event pairs,
+harmless-file registration, generated-view repair, signed internal-review/report
+acceptance, memory disposition or formal engagement closure.
 
 ## Review and result
 
@@ -90,11 +97,25 @@ needs fresh review. A material strong lead may be deprioritized as unfinished;
 calling it disproved or irrelevant requires fresh review of that dismissal.
 
 Write the requested internal result under `/workspace/project` and link it from
-`/workspace/RESEARCH.md`; on the host, these live under `<run-root>/researcher`.
+`/workspace/RESEARCH.md` if maintained; on the host, these live under
+`<run-root>/researcher`.
 Bind each supported effect and condition to observation and review, state negative
-controls and limits plainly, and reconcile the result after material edits. Local output
-is not external delivery or a canonical confirmed finding. External action,
-severity escalation, and Zone-2 artifact creation still follow the current
+controls and limits plainly, and reconcile every affected claim and dependent
+conclusion after material edits. Drafting this ordinary internal file needs no
+separate report-generation or report-acceptance step. A harmless quotation cannot
+block native research, and an unsupported paraphrase cannot establish impact.
+Generated summaries, stale displays or unrelated scratch do not decide whether an
+effect is supported or work can resume. Missing material evidence remains unknown;
+tampered frozen inputs, unsafe paths or corrupted evidence still fail their checks.
+
+Verify actual cleanup and remaining effects independently of the output's wording
+or a saved status. Stop and clean up resources the run created even when no finding
+was made. If there are no effects or owned resources to reconcile, no additional
+cleanup ceremony is needed. Learning is optional and must follow current memory
+and redaction permissions; it is not a condition of ending research.
+
+Local output is not external delivery or a canonical confirmed finding. External
+action, severity escalation, and Zone-2 artifact creation still follow the current
 root policy and signed scope. This route does not run the record kernel, so a
 kernel-enforced standing local-PoC grant does not transfer to it: obtain fresh
 human confirmation before Zone-2 creation until equivalent enforcement is
@@ -103,10 +124,12 @@ personal data from saved evidence.
 
 Existing work that depends on `tools/run-work-queue.py`, `tools/run-engagement.py`,
 `tools/finding_lifecycle.py`, or the historical ledger keeps that
-[legacy entry procedure](../../skills/source-engagement-bootstrap/references/goal-template.md#entry-and-resume-procedure).
-Native research does not convert or
-rewrite those records. The [cutover contract](native-cutover-contract.md)
-lists the retained callers and checks that must pass before adopting the
-default. The [native acceptance inventory](../../evals/native-qualification/NATIVE-ACCEPTANCE-INVENTORY-CHECKS.md)
+[legacy entry procedure](legacy-local-research.md). Native research does not convert
+or rewrite those records. Explicit legacy filing or export keeps its original
+validation, signature and acceptance rules; an ordinary native note is not imported
+as a confirmed finding. Historical hashes, signatures, grades, waivers and frozen
+source/campaign pins retain their original meaning. The
+[native acceptance inventory](../../evals/native-qualification/NATIVE-ACCEPTANCE-INVENTORY-CHECKS.md)
 checks private artifact bytes and receipt relationships after a run; a complete
-inventory is not native qualification or an adoption decision.
+inventory or a stopped-run status is not accepted research output, native
+qualification or an adoption decision.

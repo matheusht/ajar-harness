@@ -30,8 +30,11 @@ decision does not activate this route.
    can supply that permission only if the runner binds its exact target,
    model, effect and expiry pins. Then call `start --run-root
    <absolute-path> --approval-file <file>`. The runner owns the target and
-   research containers, observer capture, runtime limits, and exact resource
-   cleanup. A permission prompt alone does not prove an effect was contained.
+   research containers, runtime limits, and exact resource cleanup. Arrange
+   independent, target-specific capture outside researcher write access and
+   verify the original target effect and relevant controls there. Runner logs
+   or researcher files alone do not prove that effect. A permission prompt
+   alone does not prove an effect was contained.
    Save actual inputs, outputs, observations, and contrary results as ordinary
    research files in the run root.
 4. For continuation, use `resume --run-root <absolute-path> --session
@@ -50,7 +53,9 @@ disposition, or formal engagement closure.
 
 ## Review and result
 
-Freeze a sanitized observer-owned handoff for a fresh independent reviewer.
+The native start path pre-seals reviewer slots, but review is unfinished until
+an explicit public review command is integrated and target-specific observer
+proof exists. Freeze a sanitized observer-owned handoff for a fresh independent reviewer.
 The reviewer must see the exact claim/evidence version, original-target
 effect origin and reachability, contrary evidence, and what remains uncertain.
 A changed material claim or evidence invalidates the affected conclusion and
@@ -62,12 +67,16 @@ effect and condition to observation and review, state negative controls and
 limits plainly, and reconcile the result after material edits. Local output
 is not external delivery or a canonical confirmed finding. External action,
 severity escalation, and Zone-2 artifact creation still follow the current
-root policy and signed scope. Redact credentials, tokens, signed URLs, and
+root policy and signed scope. This route does not run the record kernel, so a
+kernel-enforced standing local-PoC grant does not transfer to it: obtain fresh
+human confirmation before Zone-2 creation until equivalent enforcement is
+explicitly qualified and adopted. Redact credentials, tokens, signed URLs, and
 personal data from saved evidence.
 
 Existing work that depends on `tools/run-work-queue.py`, `tools/run-engagement.py`,
 `tools/finding_lifecycle.py`, or the historical ledger keeps that
-[legacy procedure](docker-work-queue.md). Native research does not convert or
+[legacy entry procedure](../../skills/source-engagement-bootstrap/references/goal-template.md#entry-and-resume-procedure).
+Native research does not convert or
 rewrite those records. The [cutover contract](native-cutover-contract.md)
 lists the retained callers and checks that must pass before adopting the
 default.

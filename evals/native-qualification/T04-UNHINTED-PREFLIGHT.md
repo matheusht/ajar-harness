@@ -1,5 +1,8 @@
 # T04 unhinted first-run preflight — operator and observer only
 
+The [T02 pinned-source pause erratum](T02-SOURCE-PAUSE-ERRATUM-20261022.md)
+records why its older first-test sentence no longer governs this check.
+
 **Preparation only, 19 October 2026; updated for the current #160 pause rule.
 Do not mount or paste this file into the researcher context.**
 [#160](https://github.com/matheusht/redteam-harness/issues/160)

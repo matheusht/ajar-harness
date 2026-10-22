@@ -39,7 +39,7 @@ target's own project repo (Plane 3) per engagement.
   objective — **proposal only**: they never execute on a live target, never judge success, never emit a
   verdict; the broker/oracle stay authoritative. Each proposal must carry a declared payload class,
   containment plan, cleanup plan, and a non-authority attestation. Any Zone-2 artifact or live execution
-  still requires the impact-demo authorization above + a runtime human-confirm.
+  still requires the impact-artifact gate in the root policy.
 
 ## Escalation ceiling
 - self → stored/persistent → cross-user: ceiling = `<rung>`
@@ -52,8 +52,13 @@ target's own project repo (Plane 3) per engagement.
 
 Categories are comma-separated exact identifiers (currently `zone2_artifact_creation`); the ceiling
 must be exactly `artifact_creation`; containment must be specific and non-placeholder. Duplicate or
-unbackticked authorization fields fail closed. Even when all fields authorize the exact category, a live human-confirm displays the digest-bound
-action, scope, environment, expiry, and cleanup binding before any artifact is created.
+unbackticked authorization fields fail closed. These category fields and the standing
+impact-maximization mandate below are not by themselves a standing local-PoC grant.
+Before creation, obtain a fresh human confirmation or an explicit grant in the
+current signed scope that the record kernel enforces; record the artifact and
+cleanup obligation at creation. If the kernel cannot enforce the grant, use a
+fresh confirmation. Effects outside signed containment or cleanup authority
+still require human confirmation.
 
 ## Impact-maximization mandate (standard — the operator's standing answer is `yes`)
 - **standing_impact_maximization_mandate:** `yes`  ← this operator's standing answer, recorded
@@ -131,7 +136,7 @@ closed for this engagement.
 ## Authority lanes
 - Notebook work may continue inside the signed scope while an exact dependent action is `pending_authority`.
 - Approval is digest-, lane-, environment-, executor/session-, and expiry-bound; it is never retrospective.
-- Real-world / Zone-2 creation still requires a fresh live confirmation immediately before bytes/effects.
+- Real-world / Zone-2 creation follows the root impact-artifact gate; a standing local-PoC grant applies only where the record kernel enforces it.
 
 ## Authorization
 - Operator allowed signers file: `<operator-controlled path; private key stays outside agent access>`

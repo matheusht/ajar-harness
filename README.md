@@ -17,7 +17,7 @@ Three zones, enforced structurally (not just documented):
 | Zone | What | Gate |
 | --- | --- | --- |
 | ✅ **Default — benign proxy** | system-prompt disclosure, refusal-flip on a *harmless* target, indirect-injection canary, excessive-agency / unsafe-render, cross-user canary propagation | a skill with no benign `safe_signal` **will not load** |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | `scope.md` authorizes **+** runtime human-confirm **+** contained **+** cleanup-logged |
+| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | signed `scope.md` **+** fresh human confirmation or kernel-enforced standing local-PoC grant **+** containment **+** cleanup obligation recorded at creation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
 **Authorization is mandatory.** No `scope.md` filled and signed → the loop refuses to run.
@@ -58,7 +58,7 @@ and the checks still required. This source branch is not an adoption decision.
 
 Decision 0006 keeps Decision 0005's evidence and authority boundaries while allowing the local
 broker to maintain truthful Notebook records non-interactively. Consequential transitions use
-lane-local digest-bound authority requests; Zone-2 remains freshly confirmed before creation.
+lane-local digest-bound authority requests; Zone-2 follows the impact-artifact gate above.
 
 Legacy version-3 engagements use `python3 tools/run-engagement.py <subcommand> ...` as their public
 Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown are derived. See

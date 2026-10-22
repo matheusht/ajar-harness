@@ -41,8 +41,8 @@ T01_SOURCE_PINS = {
     "app/Api/Procedure/SwimlaneProcedure.php": "0bdaf617b9b26f9ca4bc21766b08ae5989a858bfc4d991d8899f01b24332ac16",
     "app/Api/Authorization/ProjectAuthorization.php": "e05d0f980eaed023e5a8b118c888b67768a4384c8e58203b5131aac13c5b8591",
 }
-T01_BROKER_SHA256 = "84854db4eac14538200852a58d22e1cd0eaffc3f6fdd47603864ea3fa5f893e6"
-T01_COLLECTOR_SHA256 = "21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c"
+T01_BROKER_SHA256 = "11d343c985b06fb49f76a47e99166d40e22d3d8046188faf920ef3bb8be82458"
+T01_COLLECTOR_SHA256 = "fdc0f2fbd16e205fe76d6706d5c5e1861d67b368093de4723ec8e4894a80eaa7"
 TARGET_TO_RESEARCH = {"target": "researcher", "review-target-1": "reviewer-1",
                       "review-target-2": "reviewer-2"}
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")

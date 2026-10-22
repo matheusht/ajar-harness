@@ -46,7 +46,7 @@ CONTROL_SHA = {
     'tools/native_effect_recovery.py': 'a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'a14d3f02a9c2b24a69d344bfdd426026a9a67db1415cb1e3da4f271081e492c2',
+    'evals/native-qualification/kanboard_native_capture.py': 'fdd256cf0a7a289d1fd446af51018ac379607601d701e97045f9c7364dfe0f79',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': '5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5',
     'evals/native-qualification/smoke/kanboard_role_broker.php': '2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d',
@@ -54,9 +54,10 @@ CAPTURE_FILES = {
 CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
 CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
 T01_CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'a14d3f02a9c2b24a69d344bfdd426026a9a67db1415cb1e3da4f271081e492c2',
-    'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '84854db4eac14538200852a58d22e1cd0eaffc3f6fdd47603864ea3fa5f893e6',
-    'evals/native-qualification/smoke/t01_receipt_collector.php': '21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c',
+    'evals/native-qualification/kanboard_native_capture.py': 'fdd256cf0a7a289d1fd446af51018ac379607601d701e97045f9c7364dfe0f79',
+    'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '11d343c985b06fb49f76a47e99166d40e22d3d8046188faf920ef3bb8be82458',
+    'evals/native-qualification/smoke/t01_receipt_collector.php': 'fdc0f2fbd16e205fe76d6706d5c5e1861d67b368093de4723ec8e4894a80eaa7',
+    'tools/t01_semantic_reconcile.py': '2a7385de89b7ad3f112e9c626d096bd510ea66a241026c13f47f07ccd0290ae6',
 }
 T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
 T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'
@@ -517,6 +518,19 @@ def _load_recovery_module(root: Path):
     spec = importlib.util.spec_from_file_location('native_effect_recovery', path)
     if spec is None or spec.loader is None:
         _fail('recovery_helper_unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_t01_semantic_module(root: Path):
+    relative = 'tools/t01_semantic_reconcile.py'
+    path = _controls(root) / relative
+    if _sha(_file(path, private=True)) != T01_CAPTURE_FILES[relative]:
+        _fail('t01_semantic_pin_mismatch')
+    spec = importlib.util.spec_from_file_location('t01_semantic_reconcile', path)
+    if spec is None or spec.loader is None:
+        _fail('t01_semantic_unavailable')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -1940,6 +1954,21 @@ def _origin_close_window(root: Path, target: str, dispatch_id: str) -> Path:
     return path
 
 
+@contextmanager
+def _poststop_read_lock(root: Path):
+    """Exclude an owner without creating or changing a stopped run artifact."""
+    path = _file(_controls(root) / 'owner.lock', private=True)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            _fail('live_owner_present')
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def _native_exec(root: Path, role: str, argv: list[str], timeout_seconds: int,
                  *, origin_dispatch: str | None = None) -> subprocess.CompletedProcess[bytes]:
     if role not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2'):
@@ -3011,6 +3040,206 @@ def reconcile_origin_transport(run_root: Path, dispatch_id: str) -> dict:
             code = str(error) if isinstance(error, NativeResearchError) else 'native_origin_evidence_unavailable'
             return {'status': 'held', 'reason': code, 'dispatch_id': dispatch_id}
 
+def _t01_poststop_rows(root: Path, dispatch_id: str) -> tuple[list[dict], Path, Path, str]:
+    """Validate one frozen target and every closed receipt interval, without a live call."""
+    plan = _verified_plan(root)
+    if 't01_capture' not in plan:
+        _fail('t01_semantic_capture_not_configured')
+    controls = _controls(root)
+    dispatch = _read_json(controls / 'dispatch' / (dispatch_id + '.json'))
+    role = dispatch.get('role')
+    if (dispatch.get('dispatch_id') != dispatch_id or dispatch.get('status') != 'acknowledged'
+            or role not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2')):
+        _fail('t01_semantic_dispatch_unavailable')
+    target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
+    slot = controls / 'observer' / target
+    final = _read_json(controls / 'final.json')
+    if (final.get('status') != 'stopped_complete' or
+            final.get('native_stop', {}).get('status') != 'stopped' or
+            final.get('host_snapshot', {}).get('status') != 'complete' or
+            final.get('capture_stop', {}).get('status') != 'complete' or
+            final.get('cleanup', {}).get('status') != 'complete' or
+            final.get('capture_cleanup', {}).get('status') != 'complete'):
+        _fail('t01_semantic_run_not_stopped_complete')
+    manifest_path = controls / 'producer-manifest.json'
+    revoked_path = controls / 'native-state/REVOKED'
+    manifest = _read_json(manifest_path)
+    run = _read_json(controls / 'native-state/RUN.json')
+    revoked = _read_json(revoked_path)
+    resources = _read_json(controls / 'resources.json')
+    ids = [row.get('id') for row in resources.get('resources', []) if row.get('kind') == 'container']
+    if (len(ids) != 8 or len(set(ids)) != 8 or
+            ids != [row.get('id') for row in manifest.get('producers', [])] or
+            run.get('ids') != ids or revoked.get('ids') != ids or
+            revoked.get('producers_verified_stopped') is not True or
+            run.get('manifest_sha256') != _sha(manifest_path) or
+            revoked.get('manifest_sha256') != _sha(manifest_path)):
+        _fail('t01_semantic_stop_proof_changed')
+    snapshot_path = controls / 'host-snapshot.json'
+    snapshot = _read_json(snapshot_path)
+    if (final['host_snapshot'].get('receipt_path') != str(snapshot_path) or
+            final['host_snapshot'].get('receipt_sha256') != _sha(snapshot_path) or
+            snapshot.get('status') != 'complete' or
+            snapshot.get('plan_sha256') != _sha(root / 'plan.json') or
+            snapshot.get('native_stop', {}).get('manifest_sha256') != _sha(manifest_path) or
+            snapshot.get('native_stop', {}).get('revoked_sha256') != _sha(revoked_path)):
+        _fail('t01_semantic_host_snapshot_changed')
+    target_summary, _, _ = _snapshot_tree(root / target)
+    if target_summary != {key: value for key, value in snapshot.get('targets', {}).get(target, {}).items()
+                          if key in ('files', 'bytes', 'tree_sha256')}:
+        _fail('t01_semantic_target_bytes_changed')
+    topology_path = controls / 'capture-topology.json'
+    activation = _read_json(controls / 'activation.json')
+    topology = _read_json(topology_path).get(target)
+    if (activation.get('capture_topology_sha256') != _sha(topology_path) or
+            not isinstance(topology, dict) or topology.get('target') != target or
+            topology.get('source_manifest_sha256') != T01_SOURCE_SHA or
+            topology.get('status') != 'topology_attested_original_session_origin_held' or
+            topology.get('collector_db') != str(slot / 'receipts/receipts.sqlite') or
+            (role.startswith('reviewer-') and dispatch.get('review_target_id') != topology.get('target_id'))):
+        _fail('t01_semantic_topology_changed')
+    collector = _file(slot / 'receipts/receipts.sqlite', private=True)
+    if any(collector.with_name(collector.name + suffix).exists()
+           for suffix in ('-wal', '-shm', '-journal')):
+        _fail('t01_semantic_collector_sidecar_present')
+    frozen = _read_json(slot / 'frozen.json')
+    if (frozen.get('kind') != 'kanboard-capture-frozen-v1' or
+            frozen.get('target') != target or frozen.get('native_stop_kind') != 'REVOKED' or
+            frozen.get('native_stop_sha256') != _sha(revoked_path) or
+            frozen.get('producer_manifest_sha256') != _sha(manifest_path) or
+            frozen.get('sqlite_sha256') != _sha(collector)):
+        _fail('t01_semantic_collector_freeze_changed')
+    with closing(sqlite3.connect(collector.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+        if db.execute('PRAGMA quick_check').fetchone() != ('ok',):
+            _fail('t01_semantic_collector_invalid')
+        raw = db.execute('SELECT id,peer,payload FROM receipts ORDER BY id').fetchall()
+    if (len(raw) != frozen.get('receipt_count') or not raw or
+            raw[-1][0] != frozen.get('last_receipt_id') or raw[0][0] != 1 or
+            raw[0][1] != topology.get('app_observer_ip')):
+        _fail('t01_semantic_collector_rows_changed')
+    setup = json.loads(raw[0][2])
+    readback = _read_json(slot / 'setup-readback.json')
+    if (setup.get('kind') != 't01-kanboard-setup-v1' or
+            setup.get('source_manifest_sha256') != T01_SOURCE_SHA or
+            setup.get('admin_default_revoked') is not True or
+            setup.get('project_count') != 0 or setup.get('swimlane_count') != 0 or
+            not isinstance(setup.get('actor_ids'), dict) or
+            set(setup['actor_ids']) != {'A', 'B'} or
+            not all(type(value) is int and value > 0 for value in setup['actor_ids'].values()) or
+            setup['actor_ids']['A'] == setup['actor_ids']['B'] or
+            readback != {'kind': 't01-setup-readback-v1',
+                         'receipt_sha256': hashlib.sha256(raw[0][2].encode()).hexdigest(),
+                         'db_sha256': setup.get('db_sha256')}):
+        _fail('t01_semantic_setup_changed')
+    windows = []
+    for path in slot.glob('closed-*.json'):
+        ident = path.stem.removeprefix('closed-')
+        if not re.fullmatch(r'[0-9a-f]{32}', ident):
+            _fail('t01_semantic_closed_window_invalid')
+        closed = _read_json(path)
+        window_path = slot / ('window-' + ident + '.json')
+        window = _read_json(window_path)
+        record = _read_json(controls / 'dispatch' / (ident + '.json'))
+        pre_path = controls / 'dispatch' / (ident + '.pre.json')
+        pre = _read_json(pre_path)
+        if (closed.get('kind') != 'kanboard-t01-window-closed-v1' or
+                closed.get('dispatch_id') != ident or
+                closed.get('window_sha256') != _sha(window_path) or
+                window.get('kind') != 'kanboard-t01-window-v1' or
+                window.get('dispatch_id') != ident or window.get('target') != target or
+                window.get('topology') != topology or
+                window.get('dispatch_sha256') != _sha(pre_path) or
+                record.get('status') != 'acknowledged' or record.get('dispatch_id') != ident or
+                record.get('role') != window.get('role') or
+                record.get('session_id') != window.get('session_id') or
+                pre.get('status') != 'unknown_effect' or pre.get('dispatch_id') != ident or
+                pre.get('role') != record.get('role') or
+                (target == 'target' and record['role'] not in ('researcher', 'resume')) or
+                (target != 'target' and record['role'] != 'reviewer-' + target[-1])):
+            _fail('t01_semantic_window_binding_changed')
+        windows.append((window, closed))
+    windows.sort(key=lambda pair: pair[0].get('collector_count_before', -1))
+    if not windows or not any(row[0]['dispatch_id'] == dispatch_id for row in windows):
+        _fail('t01_semantic_selected_window_missing')
+    selected = []
+    previous = 1
+    seen_ids = set()
+    for window, closed in windows:
+        before = window.get('collector_count_before')
+        after = closed.get('collector_count_after')
+        if (type(before) is not int or type(after) is not int or before != previous or
+                not before <= after <= len(raw) or
+                window.get('collector_max_id_before') != raw[before - 1][0] or
+                window.get('collector_prefix_sha256') != hashlib.sha256(
+                    json.dumps(raw[:before], separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()):
+            _fail('t01_semantic_window_interval_changed')
+        segment = raw[before:after]
+        receipts = []
+        for row_id, peer, payload in segment:
+            receipt = json.loads(payload)
+            if (peer != topology.get('app_observer_ip') or
+                    not isinstance(receipt, dict) or
+                    receipt.get('kind') != 't01-kanboard-jsonrpc-v1' or
+                    receipt.get('peer_ip') != topology.get('native_client_ip') or
+                    not isinstance(receipt.get('request_id'), str) or
+                    not re.fullmatch(r'[0-9a-f]{32}', receipt['request_id']) or
+                    receipt['request_id'] in seen_ids or
+                    receipt.get('actor_user_id') != setup['actor_ids'].get(receipt.get('actor'))):
+                _fail('t01_semantic_receipt_identity_changed')
+            seen_ids.add(receipt['request_id'])
+            receipts.append({'row_id': row_id, 'request_id': receipt['request_id'],
+                             'actor': receipt.get('actor'), 'method': receipt.get('method'),
+                             'result_class': receipt.get('result_class'),
+                             'result_matches_db': receipt.get('result_matches_db')})
+            selected.append({'row_id': row_id, 'dispatch_id': window['dispatch_id'],
+                             'joined': receipt['request_id'] in closed.get('joined_request_ids', []),
+                             'receipt': receipt})
+        response_ids = closed.get('native_response_ids')
+        joined = closed.get('joined_request_ids')
+        if (closed.get('receipt_rows') != receipts or not isinstance(response_ids, list) or
+                not isinstance(joined, list) or response_ids != sorted(set(response_ids)) or
+                joined != sorted(set(response_ids) & {row['request_id'] for row in receipts})):
+            _fail('t01_semantic_window_join_changed')
+        previous = after
+    if previous != len(raw) or _sha(collector) != frozen['sqlite_sha256']:
+        _fail('t01_semantic_collector_changed_during_read')
+    target_db = _file(root / target / 'data/db.sqlite', private=True)
+    if any(target_db.with_name(target_db.name + suffix).exists()
+           for suffix in ('-wal', '-shm', '-journal')):
+        _fail('t01_semantic_target_sidecar_present')
+    return selected, target_db, collector, target
+
+
+def reconcile_t01_semantic(run_root: Path, dispatch_id: str, effect_request_id: str) -> dict:
+    """Assess the original vulnerable arm after stop; origin remains a separate gate."""
+    result = {'status': 'hold_unknown', 'scope': 't01_original_vulnerable_arm',
+              'dispatch_id': dispatch_id, 'effect_request_id': effect_request_id,
+              'retry_original': False, 'native_origin': 'not_assessed',
+              'clean_replay': 'not_assessed', 'fixed_control': 'not_assessed'}
+    if (not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id) or
+            not isinstance(effect_request_id, str) or
+            not re.fullmatch(r'[0-9a-f]{32}', effect_request_id)):
+        return dict(result, reason='t01_selection_invalid')
+    try:
+        root = _private_root(Path(run_root))
+        with _poststop_read_lock(root):
+            rows, target_db, collector, target = _t01_poststop_rows(root, dispatch_id)
+            before_target = _sha(target_db)
+            before_collector = _sha(collector)
+            module = _load_t01_semantic_module(root)
+            with closing(sqlite3.connect(target_db.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+                observed = module.assess_chain(rows, effect_request_id, dispatch_id, db)
+            if _sha(target_db) != before_target or _sha(collector) != before_collector:
+                _fail('t01_semantic_bytes_changed_during_read')
+            return dict(observed, target=target, target_db_sha256=before_target,
+                        collector_sha256=before_collector)
+    except (NativeResearchError, OSError, sqlite3.DatabaseError, TypeError, KeyError,
+            ValueError, IndexError, json.JSONDecodeError) as error:
+        return dict(result, reason=str(error) if isinstance(error, NativeResearchError)
+                    else 't01_semantic_unavailable')
+    except Exception as error:
+        return dict(result, reason=str(error) if error.__class__.__name__ == 'SemanticHold'
+                    else 't01_semantic_unavailable')
 
 def status(run_root: Path) -> dict:
     root = _private_root(Path(run_root))
@@ -3121,6 +3350,11 @@ def _parser() -> argparse.ArgumentParser:
                                      help='post-stop native process/request/app transport join')
     origin_cmd.add_argument('--run-root', required=True)
     origin_cmd.add_argument('--dispatch-id', required=True)
+    t01_cmd = commands.add_parser('reconcile-t01-semantic',
+                                  help='read-only post-stop T01 effect/control assessment')
+    t01_cmd.add_argument('--run-root', required=True)
+    t01_cmd.add_argument('--dispatch-id', required=True)
+    t01_cmd.add_argument('--effect-request-id', required=True)
     research_cmd = commands.add_parser('research', help='one native turn in the original researcher')
     research_cmd.add_argument('--run-root', required=True)
     resume_cmd = commands.add_parser('resume', help='one native turn in the same persistent researcher store')
@@ -3155,6 +3389,9 @@ def main() -> int:
             result = reconcile_role_grant(Path(args.run_root), args.dispatch_id)
         elif args.command == 'reconcile-origin-transport':
             result = reconcile_origin_transport(Path(args.run_root), args.dispatch_id)
+        elif args.command == 'reconcile-t01-semantic':
+            result = reconcile_t01_semantic(Path(args.run_root), args.dispatch_id,
+                                            args.effect_request_id)
         elif args.command in ('research', 'resume'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'

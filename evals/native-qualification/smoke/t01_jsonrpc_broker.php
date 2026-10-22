@@ -219,6 +219,72 @@ function t01_snapshot($db, $method, $params, $actorId)
             'actor_group_role_count' => $groupCount]];
 }
 
+function t01_creation_input($method, $params)
+{
+    if (!is_array($params)) {
+        return null;
+    }
+    if ($method === 'createProject') {
+        $name = array_is_list($params) ? ($params[0] ?? null) : ($params['name'] ?? null);
+        return is_string($name) && $name !== ''
+            ? ['name_sha256' => hash('sha256', $name)] : null;
+    }
+    if ($method === 'addSwimlane') {
+        $projectId = array_is_list($params) ? ($params[0] ?? null) : ($params['project_id'] ?? null);
+        $name = array_is_list($params) ? ($params[1] ?? null) : ($params['name'] ?? null);
+        return is_int($projectId) && $projectId > 0 && is_string($name) && $name !== ''
+            ? ['project_id' => $projectId, 'name_sha256' => hash('sha256', $name)] : null;
+    }
+    return null;
+}
+
+function t01_creation_count($db, $method)
+{
+    return $method === 'createProject' ?
+        (int) $db->query('SELECT COUNT(*) FROM projects')->fetchColumn() :
+        ($method === 'addSwimlane' ?
+         (int) $db->query('SELECT COUNT(*) FROM swimlanes')->fetchColumn() : null);
+}
+
+function t01_creation_receipt($db, $method, $input, $beforeCount, $status, $reply, $actorId)
+{
+    if ($input === null || $beforeCount === null || $status !== 200 ||
+        !is_array($reply) || array_key_exists('error', $reply) ||
+        !is_int($reply['result'] ?? null) || $reply['result'] < 1) {
+        return null;
+    }
+    $id = $reply['result'];
+    $afterCount = t01_creation_count($db, $method);
+    if ($method === 'createProject') {
+        $query = $db->prepare('SELECT id,owner_id,is_private,is_public,name FROM projects WHERE id=?');
+        $query->execute([$id]);
+        $project = $query->fetch();
+        if ($project === false) {
+            return null;
+        }
+        $query = $db->prepare('SELECT role FROM project_has_users WHERE project_id=? AND user_id=?');
+        $query->execute([$id, $actorId]);
+        $role = $query->fetchColumn();
+        return ['kind' => 'project_created', 'result_id' => $id,
+            'input_name_sha256' => $input['name_sha256'],
+            'before_count' => $beforeCount, 'after_count' => $afterCount,
+            'project' => ['id' => (int) $project['id'], 'owner_id' => (int) $project['owner_id'],
+                'is_private' => (int) $project['is_private'],
+                'is_public' => (int) $project['is_public'],
+                'name_sha256' => hash('sha256', $project['name']),
+                'creator_role' => $role ?: null]];
+    }
+    $query = $db->prepare('SELECT id,project_id,name FROM swimlanes WHERE id=?');
+    $query->execute([$id]);
+    $lane = $query->fetch();
+    return $lane === false ? null : ['kind' => 'swimlane_created', 'result_id' => $id,
+        'input_project_id' => $input['project_id'],
+        'input_name_sha256' => $input['name_sha256'],
+        'before_count' => $beforeCount, 'after_count' => $afterCount,
+        'swimlane' => ['id' => (int) $lane['id'], 'project_id' => (int) $lane['project_id'],
+            'name_sha256' => hash('sha256', $lane['name'])]];
+}
+
 function t01_read_request($peer)
 {
     stream_set_timeout($peer, 5);
@@ -335,6 +401,8 @@ function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids,
     $requestId = bin2hex(random_bytes(16));
     $method = $request['method'];
     $params = $request['params'] ?? [];
+    $creationInput = t01_creation_input($method, $params);
+    $creationBefore = t01_creation_count($db, $method);
     $before = t01_snapshot($db, $method, $params, $ids[$actor]);
     [$status, $backendBody] = t01_app_call($port, $username, $secrets[$actor], $body);
     $reply = json_decode($backendBody, true, 32);
@@ -347,6 +415,8 @@ function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids,
         ($matchedId || $nullErrorId), 'backend_json_invalid');
     [$kind, $matches] = t01_result_class($status, $reply, $method, $before);
     $after = t01_snapshot($db, $method, $params, $ids[$actor]);
+    $operation = t01_creation_receipt($db, $method, $creationInput, $creationBefore,
+        $status, $reply, $ids[$actor]);
     $changed = false;
     $delivered = t01_json(t01_scrub_reply($reply, $safeKeys, $redactionKey, $changed));
     $peerName = stream_socket_get_name($peer, true);
@@ -357,7 +427,7 @@ function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids,
         'actor_app_role' => 'app-user', 'identity_control' => true,
         'method' => $method, 'requested_id' => $before['requested_id'] ?? null,
         'backend_status' => $status, 'result_class' => $kind, 'result_matches_db' => $matches,
-        'before' => $before, 'after' => $after,
+        'before' => $before, 'after' => $after, 'operation' => $operation,
         'backend_response_sha256' => hash('sha256', $backendBody),
         'delivered_response_sha256' => hash('sha256', $delivered), 'redacted' => $changed];
     t01_collect($collector, $receipt);

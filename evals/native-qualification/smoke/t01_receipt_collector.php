@@ -31,13 +31,57 @@ function t01_valid_snapshot($value)
         $project['actor_group_role_count'] >= 0);
 }
 
+function t01_valid_operation($value)
+{
+    if ($value === null) {
+        return true;
+    }
+    if (!is_array($value) || !is_int($value['result_id'] ?? null) ||
+        $value['result_id'] < 1 || !is_int($value['before_count'] ?? null) ||
+        !is_int($value['after_count'] ?? null) || $value['before_count'] < 0 ||
+        $value['after_count'] < 0) {
+        return false;
+    }
+    if ($value['kind'] === 'project_created') {
+        $project = $value['project'] ?? null;
+        return array_keys($value) === ['kind', 'result_id', 'input_name_sha256',
+            'before_count', 'after_count', 'project'] &&
+            is_string($value['input_name_sha256']) &&
+            preg_match('/^[0-9a-f]{64}$/D', $value['input_name_sha256']) &&
+            is_array($project) && array_keys($project) === ['id', 'owner_id',
+                'is_private', 'is_public', 'name_sha256', 'creator_role'] &&
+            is_int($project['id']) && $project['id'] > 0 &&
+            is_int($project['owner_id']) && $project['owner_id'] > 0 &&
+            in_array($project['is_private'], [0, 1], true) &&
+            in_array($project['is_public'], [0, 1], true) &&
+            is_string($project['name_sha256']) &&
+            preg_match('/^[0-9a-f]{64}$/D', $project['name_sha256']) &&
+            in_array($project['creator_role'], [null, 'project-manager',
+                'project-member', 'project-viewer'], true);
+    }
+    if ($value['kind'] === 'swimlane_created') {
+        $lane = $value['swimlane'] ?? null;
+        return array_keys($value) === ['kind', 'result_id', 'input_project_id',
+            'input_name_sha256', 'before_count', 'after_count', 'swimlane'] &&
+            is_int($value['input_project_id']) && $value['input_project_id'] > 0 &&
+            is_string($value['input_name_sha256']) &&
+            preg_match('/^[0-9a-f]{64}$/D', $value['input_name_sha256']) &&
+            is_array($lane) && array_keys($lane) === ['id', 'project_id', 'name_sha256'] &&
+            is_int($lane['id']) && $lane['id'] > 0 &&
+            is_int($lane['project_id']) && $lane['project_id'] > 0 &&
+            is_string($lane['name_sha256']) &&
+            preg_match('/^[0-9a-f]{64}$/D', $lane['name_sha256']);
+    }
+    return false;
+}
+
 function t01_valid_receipt($row)
 {
     if (!is_array($row) ||
         array_keys($row) !== ['kind', 'request_id', 'peer_ip', 'actor',
             'actor_user_id', 'actor_app_role', 'identity_control', 'method',
             'requested_id', 'backend_status', 'result_class', 'result_matches_db',
-            'before', 'after', 'backend_response_sha256',
+            'before', 'after', 'operation', 'backend_response_sha256',
             'delivered_response_sha256', 'redacted']) {
         return false;
     }
@@ -57,6 +101,7 @@ function t01_valid_receipt($row)
             'swimlane_result', 'project_result', 'other_result'], true) &&
         is_bool($row['result_matches_db']) &&
         t01_valid_snapshot($row['before']) && t01_valid_snapshot($row['after']) &&
+        t01_valid_operation($row['operation']) &&
         is_string($row['backend_response_sha256']) &&
         preg_match('/^[0-9a-f]{64}$/D', $row['backend_response_sha256']) &&
         is_string($row['delivered_response_sha256']) &&

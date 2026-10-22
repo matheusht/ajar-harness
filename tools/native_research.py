@@ -1680,6 +1680,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             _capture_approved_specs(root, plan,
                                     _validate_target_command(controls / 'target-command.json'),
                                     verify_source=True)
+        if (controls / 'native-state/STOP_REQUEST').exists():
+            _fail('native_stop_before_start')
         ready = native.start()
         if (ready['proxy_info'].get('authority') != AUTHORITY
                 or ready['proxy_info'].get('port') != port
@@ -1744,7 +1746,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             result['capture_stop'] = {'status': 'not_taken'}
         if result['capture_stop']['status'] in ('complete', 'not_configured'):
             try:
-                result['cleanup'] = _cleanup_resources(root)
+                result['cleanup'] = _cleanup_resources(
+                    root, require_created=result['native_stop']['status'] == 'not_started')
             except Exception:
                 result['cleanup'] = {'status': 'unresolved'}
         if result.get('cleanup', {}).get('status') == 'complete':
@@ -1771,10 +1774,11 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
 
 def stop(run_root: Path) -> dict:
     root = _private_root(Path(run_root))
-    if not (_controls(root) / 'native-state/RUN.json').exists():
+    controls = _controls(root)
+    if not (controls / 'native-state/RUN.json').exists() and not (controls / 'resources.json').exists():
         return {'status': 'not_active', 'run_root': str(root)}
     native, _ = _activate_controls(root)
-    native.request_stop(_controls(root) / 'native-state', 'operator_stop')
+    native.request_stop(controls / 'native-state', 'operator_stop')
     return {'status': 'stop_requested', 'run_root': str(root)}
 
 

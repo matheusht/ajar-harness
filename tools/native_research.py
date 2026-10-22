@@ -43,6 +43,14 @@ CONTROL_SHA = {
     'experiments/native-review-qualification/fresh_review.py': 'f92957f55c89c0af3b7e9554c7042e038ed8843f59ceafa6cda8533db555bf11',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
 }
+CAPTURE_FILES = {
+    'evals/native-qualification/kanboard_native_capture.py': '6918e571caf52ed44f4240a37e8beb8f4fe69eeaf82c098221da07d7986c21de',
+    'evals/native-qualification/smoke/kanboard_effect_probe.php': 'f49420150c9dab5b4d228d5a62d70f29b008a4be546d35c641227e14ea0e8feb',
+    'evals/native-qualification/smoke/kanboard_effect_collector.php': '4560f3ed8b01cedc9b3135a9ad4a05e4cf5d3ca9d65c689234bd443fcd511f02',
+}
+CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
+CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
+CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
 MODEL = 'opencode/deepseek-v4.1-flash-free'
 PROVIDER_ROUTE = 'opencode-keyless-free'
 AUTHORITY = 'opencode.ai:443'
@@ -408,13 +416,33 @@ def _validate_target_command(path: Path) -> list[str]:
     return command
 
 
+def _capture_pins() -> dict[str, str]:
+    return {'adapter_sha256': CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py'],
+            'probe_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_probe.php'],
+            'collector_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_collector.php'],
+            'source_manifest_sha256': CAPTURE_SOURCE_SHA,
+            'controller_sha256': CAPTURE_CONTROLLER_SHA}
+
+
+def _load_capture_module(root: Path):
+    path = _controls(root) / 'evals/native-qualification/kanboard_native_capture.py'
+    if _sha(_file(path, private=True)) != CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py']:
+        _fail('capture_adapter_pin_mismatch')
+    spec = importlib.util.spec_from_file_location('native_kanboard_capture', path)
+    if spec is None or spec.loader is None:
+        _fail('capture_adapter_unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def prepare(args: argparse.Namespace) -> dict:
     source = Path(args.source)
     brief = _file(Path(args.brief))
     scope = _file(Path(args.scope_file), private=True)
     relay = _file(Path(args.relay), private=True)
     ca = _file(Path(args.runtime_ca), private=True)
-    _validate_target_command(Path(args.target_command))
+    target_command = _validate_target_command(Path(args.target_command))
     run_root = Path(args.run_root)
     if not source.is_absolute() or source.is_symlink() or not source.is_dir():
         _fail('source_directory_invalid')
@@ -460,6 +488,15 @@ def prepare(args: argparse.Namespace) -> dict:
             or docker_entry.st_mode & 0o022):
         _fail('docker_executable_invalid')
     source_inventory = _inventory(source)
+    capture = bool(getattr(args, 'kanboard_capture', False))
+    if capture:
+        manifest = hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest()
+        if (manifest != CAPTURE_SOURCE_SHA or
+                target_command != ['php', '-S', f'0.0.0.0:{args.target_port}', '-t', '/target']):
+            _fail('kanboard_capture_source_or_command_unqualified')
+        for relative, digest in CAPTURE_FILES.items():
+            if _sha(ROOT / relative) != digest:
+                _fail('capture_code_pin_mismatch')
     try:
         brief_text = brief.read_text()
     except UnicodeError:
@@ -492,11 +529,13 @@ def prepare(args: argparse.Namespace) -> dict:
         controls = _controls(root)
         controls.mkdir(mode=0o700)
         (controls / 'dispatch').mkdir(mode=0o700)
-        for relative in CONTROL_SHA:
+        for relative in (*CONTROL_SHA, *(CAPTURE_FILES if capture else ())):
             destination = controls / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
-            if _sha(destination) != CONTROL_SHA[relative]:
+            if relative in CAPTURE_FILES:
+                destination.chmod(0o600)
+            if _sha(destination) != (CONTROL_SHA | CAPTURE_FILES)[relative]:
                 _fail('archived_control_pin_mismatch')
         for source_path, name in ((relay, 'relay'), (ca, 'runtime-ca.pem'),
                                   (scope, 'scope.md'), (brief, 'BRIEF.md'),
@@ -528,6 +567,8 @@ def prepare(args: argparse.Namespace) -> dict:
             'docker_binary': str(docker_binary), 'docker_sha256': _sha(docker_binary),
             'control_sha256': CONTROL_SHA,
         }
+        if capture:
+            plan['kanboard_capture'] = _capture_pins()
         _write_json(root / 'plan.json', plan, once=True)
         return {'status': 'prepared_provider_free', 'run_root': str(root),
                 'plan_sha256': _sha(root / 'plan.json'), 'source_files': len(source_inventory),
@@ -603,6 +644,14 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     for relative, digest in CONTROL_SHA.items():
         if _sha(controls / relative) != digest:
             _fail('archived_control_pin_mismatch')
+    if 'kanboard_capture' in plan:
+        if plan['kanboard_capture'] != _capture_pins():
+            _fail('capture_plan_pin_mismatch')
+        for relative, digest in CAPTURE_FILES.items():
+            if _sha(_file(controls / relative, private=True)) != digest:
+                _fail('archived_capture_pin_mismatch')
+        if plan.get('source_manifest_sha256') != CAPTURE_SOURCE_SHA:
+            _fail('capture_source_pin_mismatch')
     for name, key in (('relay', 'relay_sha256'), ('runtime-ca.pem', 'runtime_ca_sha256'),
                       ('scope.md', 'scope_sha256'), ('BRIEF.md', 'brief_sha256'),
                       ('target-command.json', 'target_command_sha256'),
@@ -621,7 +670,19 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     return plan
 
 
+def capture_stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dict:
+    root = _private_root(Path(run_root))
+    plan = _verified_plan(root, pristine=True)
+    if 'kanboard_capture' not in plan or (_controls(root) / 'resources.json').exists():
+        _fail('capture_stage_not_prestart')
+    result = _load_capture_module(root).stage(root, target, s=s, q=q, t=t, b=b)
+    result['stage_sha256'] = _sha(_controls(root) / 'observer' / target / 'stage.json')
+    return result
+
+
 def _approval(root: Path, plan: dict, path: Path) -> None:
+    if 'kanboard_capture' in plan:
+        _capture_specs(root, plan, _validate_target_command(_controls(root) / 'target-command.json'))
     approval = _read_json(path)
     expected = {
         'kind': 'native-research-live-approval-v1',
@@ -634,6 +695,10 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         'target_image_id': plan['target_image_id'],
         'limits': plan['limits'],
     }
+    if 'kanboard_capture' in plan:
+        expected['capture_stage_sha256'] = {
+            target: _sha(_controls(root) / 'observer' / target / 'stage.json')
+            for target in CAPTURE_TARGETS}
     if any(approval.get(key) != value for key, value in expected.items()):
         _fail('live_approval_mismatch')
     if (not isinstance(approval.get('approved_by'), str) or not approval['approved_by'].strip()
@@ -847,8 +912,44 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
     }, once=True)
 
 
+def _capture_specs(root: Path, plan: dict, command: list[str]) -> dict[str, tuple[list[str], list[str], list[str]]]:
+    if 'kanboard_capture' not in plan:
+        return {}
+    if command != ['php', '-S', f'0.0.0.0:{plan["target_port"]}', '-t', '/target']:
+        _fail('capture_target_command_changed')
+    specs = {}
+    for target in CAPTURE_TARGETS:
+        slot = _controls(root) / 'observer' / target
+        stage = _read_json(slot / 'stage.json')
+        ids = stage.get('ids')
+        if (stage.get('kind') != 'kanboard-native-capture-stage-v1'
+                or stage.get('target') != target
+                or stage.get('plan_sha256') != _sha(root / 'plan.json')
+                or stage.get('source_manifest_sha256') != CAPTURE_SOURCE_SHA
+                or stage.get('controller_sha256') != CAPTURE_CONTROLLER_SHA
+                or not isinstance(ids, dict) or set(ids) != {'s', 'q', 't', 'b'}
+                or any(type(value) is not int or value <= 0 for value in ids.values())
+                or ids['s'] == ids['q']
+                or stage.get('probe_sha256') != _sha(_file(slot / 'effect.php', private=True))
+                or stage.get('collector_sha256') != _sha(_file(slot / 'receipt.php', private=True))
+                or stage['probe_sha256'] != _capture_pins()['probe_sha256']
+                or stage['collector_sha256'] != _capture_pins()['collector_sha256']):
+            _fail('capture_stage_changed')
+        mounts = [_mount(slot / 'effect.php', '/observer/effect.php', readonly=True)]
+        environment = ['NATIVE_EFFECT_COLLECTOR=http://kanboard-effect-collector:8765/receipt.php',
+                       'NATIVE_EFFECT_SOURCE_DIR=/target', 'DB_FILENAME=/target/data/db.sqlite']
+        environment += ['NATIVE_EFFECT_' + key.upper() + '=' + str(ids[key])
+                        for key in ('s', 'q', 't', 'b')]
+        specs[target] = (mounts, environment,
+                         ['php', '-d', 'auto_prepend_file=/observer/effect.php', *command[1:]])
+    return specs
+
+
 def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
              capability: str) -> dict:
+    target_command = _validate_target_command(_controls(root) / 'target-command.json')
+    capture_specs = _capture_specs(root, plan, target_command)
+    capture = _load_capture_module(root) if capture_specs else None
     external, _, _ = _network(root, nonce, rows, 'external', internal=False)
     research, research_relay_ip, research_target_ip = _network(
         root, nonce, rows, 'research', internal=True)
@@ -871,17 +972,19 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         if (actual.get('IPAddress') != relay_ip
                 and (actual.get('IPAMConfig') or {}).get('IPv4Address') != relay_ip):
             _fail('relay_internal_ip_mismatch')
-    target_command = _validate_target_command(controls / 'target-command.json')
     targets = {}
     for role, item in (('target', (research, research_target_ip)),
                        ('review-target-1', (reviews['reviewer-1'][0], reviews['reviewer-1'][2])),
                        ('review-target-2', (reviews['reviewer-2'][0], reviews['reviewer-2'][2]))):
         network, ip = item
+        extra_mounts, extra_env, command = capture_specs.get(role, ([], [], target_command))
         targets[role] = _create(root, nonce, rows, role, plan['target_image_id'], platform,
-                                network, ip, [_mount(root / role, '/target')],
+                                network, ip, [_mount(root / role, '/target'), *extra_mounts],
                                 ['HOME=/target', 'HTTP_PROXY=', 'HTTPS_PROXY=', 'ALL_PROXY=',
-                                 'http_proxy=', 'https_proxy=', 'all_proxy=', 'NO_PROXY=*', 'no_proxy=*'],
-                                target_command, workdir='/target')
+                                 'http_proxy=', 'https_proxy=', 'all_proxy=', 'NO_PROXY=*', 'no_proxy=*',
+                                 *extra_env], command, workdir='/target')
+        if capture is not None:
+            capture.activate(root, role)
     _write_target_info(root, 'researcher', research_target_ip, plan)
     for slot in ('reviewer-1', 'reviewer-2'):
         _write_target_info(root, slot, reviews[slot][2], plan)
@@ -911,6 +1014,50 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         'review_target_ips': {slot: reviews[slot][2] for slot in reviewers},
         'network_names': network_names,
     }
+
+
+def _capture_stop(root: Path, plan: dict, native_status: str) -> dict:
+    if 'kanboard_capture' not in plan:
+        return {'status': 'not_configured'}
+    module = _load_capture_module(root)
+    results = []
+    for target in CAPTURE_TARGETS:
+        ledger_path = _controls(root) / 'observer' / target / 'resources.json'
+        if not ledger_path.exists():
+            if native_status in ('stopped', 'closed_before_activation'):
+                _fail('capture_ledger_missing_after_native_start')
+            continue
+        ledger = _read_json(ledger_path)
+        if ledger.get('status') in ('aborted', 'removed'):
+            results.append({'target': target, 'status': ledger['status']})
+        elif native_status == 'stopped':
+            results.append(module.freeze(root, target))
+        elif native_status == 'closed_before_activation':
+            results.append(module.close_startup(root, target))
+        elif native_status == 'not_started':
+            results.append(module.abort_activation(root, target))
+        else:
+            _fail('capture_native_stop_unverified')
+    return {'status': 'complete', 'targets': results}
+
+
+def _capture_cleanup(root: Path, plan: dict) -> dict:
+    if 'kanboard_capture' not in plan:
+        return {'status': 'not_configured'}
+    module = _load_capture_module(root)
+    results = []
+    for target in CAPTURE_TARGETS:
+        ledger_path = _controls(root) / 'observer' / target / 'resources.json'
+        if not ledger_path.exists():
+            continue
+        ledger = _read_json(ledger_path)
+        if ledger.get('status') == 'aborted':
+            results.append({'target': target, 'status': 'aborted'})
+        elif ledger.get('status') == 'removed':
+            results.append({'target': target, 'status': 'removed'})
+        else:
+            results.append(module.cleanup(root, target))
+    return {'status': 'complete', 'targets': results}
 
 
 def _cleanup_resources(root: Path, *, require_created: bool = False) -> dict:
@@ -1212,6 +1359,9 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         record['pool_before'] = pool_before
         _write_json(record_path, record, once=True)
         try:
+            if 'kanboard_capture' in _plan(root):
+                target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
+                _load_capture_module(root).bind_dispatch(root, target, dispatch_id)
             if before_dispatch is not None:
                 before_dispatch(root, dispatch_id)
             result = _native_exec(root, role,
@@ -1407,6 +1557,13 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                 or ready['proxy_info'].get('host') != '127.0.0.1'
                 or ready['ids'] != [row['id'] for row in rows if row['kind'] == 'container']):
             _fail('native_authority_readback_mismatch')
+        capture_topology_sha = None
+        if 'kanboard_capture' in plan:
+            capture_module = _load_capture_module(root)
+            topology = {target: capture_module.attest(root, target) for target in CAPTURE_TARGETS}
+            topology_path = controls / 'capture-topology.json'
+            _write_json(topology_path, topology, once=True)
+            capture_topology_sha = _sha(topology_path)
         _probe_target(root, bindings['researcher'], bindings['research_target_ip'], plan['target_port'])
         for role in ('reviewer-1', 'reviewer-2'):
             _probe_target(root, bindings[role], bindings['review_target_ips'][role], plan['target_port'])
@@ -1419,11 +1576,14 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             'provider_route': PROVIDER_ROUTE, 'provider_authority': AUTHORITY,
             'model': MODEL, 'limits': plan['limits'],
             'protected_capture': 'unavailable',
+            'capture_topology_sha256': capture_topology_sha,
             'loaded_surface_sha256': _sha(controls / 'loaded-surface.json'),
         }, once=True)
         result = {'status': 'active', 'run_root': str(root), 'run_identity': allowance_snapshot(root)['run_identity'],
                   'target_url': f'http://{bindings["research_target_ip"]}:{plan["target_port"]}',
                   'protected_capture': 'unavailable',
+                  'capture_topology': ('attested_origin_and_credentials_held' if capture_topology_sha
+                                       else 'not_configured'),
                   'provider_request_count': None, 'monetary_spend': None}
         print(json.dumps(result, sort_keys=True), flush=True)
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
@@ -1447,12 +1607,26 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             result['host_snapshot'] = {'status': 'not_taken'}
         if result['native_stop']['status'] in ('stopped', 'closed_before_activation', 'not_started'):
             try:
+                result['capture_stop'] = _capture_stop(root, plan, result['native_stop']['status'])
+            except Exception as error:
+                result['capture_stop'] = {'status': 'unresolved', 'code': str(error)}
+        else:
+            result['capture_stop'] = {'status': 'not_taken'}
+        if result['capture_stop']['status'] in ('complete', 'not_configured'):
+            try:
                 result['cleanup'] = _cleanup_resources(root)
             except Exception:
                 result['cleanup'] = {'status': 'unresolved'}
+        if result.get('cleanup', {}).get('status') == 'complete':
+            try:
+                result['capture_cleanup'] = _capture_cleanup(root, plan)
+            except Exception as error:
+                result['capture_cleanup'] = {'status': 'unresolved', 'code': str(error)}
         capability_path.unlink(missing_ok=True)
         if (result['native_stop']['status'] in ('unsafe', 'unresolved')
-                or result.get('cleanup', {}).get('status') != 'complete'):
+                or result['capture_stop']['status'] not in ('complete', 'not_configured')
+                or result.get('cleanup', {}).get('status') != 'complete'
+                or result.get('capture_cleanup', {}).get('status') not in ('complete', 'not_configured')):
             result['status'] = 'unsafe_or_unresolved'
         elif (result['native_stop']['status'] == 'stopped'
               and result['host_snapshot']['status'] != 'complete'):
@@ -1478,22 +1652,40 @@ def recover_start(run_root: Path) -> dict:
     """Remove exact stopped preactivation resources after owner loss, never a live run."""
     root = _private_root(Path(run_root))
     with _owner_lock(root):
-        _verified_plan(root)
+        plan = _verified_plan(root)
         controls = _controls(root)
         if not (controls / 'resources.json').exists():
             return {'status': 'no_resources', 'run_root': str(root)}
         state = controls / 'native-state'
-        if (state / 'RUN.json').exists():
-            if (state / 'UNSAFE').exists() or not any((state / name).exists()
-                                                      for name in ('REVOKED', 'STARTUP_CLOSED')):
-                _fail('native_run_not_verified_stopped')
-            require_created = False
+        if (state / 'UNSAFE').exists():
+            _fail('native_run_not_verified_stopped')
+        if (state / 'REVOKED').exists():
+            native_status, require_created = 'stopped', False
+        elif (state / 'STARTUP_CLOSED').exists():
+            native_status, require_created = 'closed_before_activation', False
+        elif (state / 'RUN.json').exists():
+            _fail('native_run_not_verified_stopped')
         else:
-            require_created = True
+            native_status, require_created = 'not_started', True
+        capture_stop = _capture_stop(root, plan, native_status)
+        host_snapshot = {'status': 'not_taken'}
+        if native_status == 'stopped':
+            snapshot_path = controls / 'host-snapshot.json'
+            if snapshot_path.exists():
+                receipt = _read_json(snapshot_path)
+                if (receipt.get('plan_sha256') != _sha(root / 'plan.json')
+                        or receipt.get('native_stop', {}).get('revoked_sha256') != _sha(state / 'REVOKED')):
+                    _fail('recovery_host_snapshot_changed')
+                host_snapshot = {'status': receipt.get('status'), 'receipt_path': str(snapshot_path),
+                                 'receipt_sha256': _sha(snapshot_path)}
+            else:
+                host_snapshot = _stopped_snapshot(root, plan)
         result = _cleanup_resources(root, require_created=require_created)
+        capture_cleanup = _capture_cleanup(root, plan)
         recovery = {'status': 'recovered_exact_resources', 'run_root': str(root),
-                    'native_state': 'not_activated' if require_created else 'verified_stopped',
-                    'cleanup': result}
+                    'native_state': native_status, 'host_snapshot': host_snapshot,
+                    'capture_stop': capture_stop, 'cleanup': result,
+                    'capture_cleanup': capture_cleanup}
         _write_json(controls / 'recovery.json', recovery)
         return recovery
 
@@ -1573,6 +1765,7 @@ def _parser() -> argparse.ArgumentParser:
                  'image-id', 'target-image-id', 'platform'):
         prepare_cmd.add_argument('--' + name, required=True)
     prepare_cmd.add_argument('--target-port', type=int, required=True)
+    prepare_cmd.add_argument('--kanboard-capture', action='store_true')
     prepare_cmd.add_argument('--mutable-path', action='append', default=[])
     prepare_cmd.add_argument('--expected-skill-id', action='append', default=[])
     prepare_cmd.add_argument('--model', default=MODEL)
@@ -1584,6 +1777,11 @@ def _parser() -> argparse.ArgumentParser:
     start_cmd = commands.add_parser('start', help='foreground live owner; requires fresh plan-bound approval')
     start_cmd.add_argument('--run-root', required=True)
     start_cmd.add_argument('--approval', required=True)
+    stage_cmd = commands.add_parser('capture-stage', help='provider-free Kanboard observer staging')
+    stage_cmd.add_argument('--run-root', required=True)
+    stage_cmd.add_argument('--target', choices=CAPTURE_TARGETS, required=True)
+    for name in ('s', 'q', 't', 'b'):
+        stage_cmd.add_argument('--' + name, type=int, required=True)
     for name in ('status', 'stop', 'recover-start'):
         item = commands.add_parser(name)
         item.add_argument('--run-root', required=True)
@@ -1606,6 +1804,8 @@ def main() -> int:
     try:
         if args.command == 'prepare':
             result = prepare(args)
+        elif args.command == 'capture-stage':
+            result = capture_stage(Path(args.run_root), args.target, s=args.s, q=args.q, t=args.t, b=args.b)
         elif args.command == 'start':
             result = start(Path(args.run_root), Path(args.approval))
         elif args.command == 'stop':

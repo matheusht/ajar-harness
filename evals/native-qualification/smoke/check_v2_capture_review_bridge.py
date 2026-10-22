@@ -261,20 +261,11 @@ def main():
             else:
                 raise AssertionError(label)
 
-        secret = root / 'secret-capture'
-        shutil.copytree(capture, secret)
-        hypothesis = json.loads((secret / 'hypothesis.json').read_text())
-        hypothesis['conditions']['Authorization'] = 'Bearer test-only'
-        (secret / 'hypothesis.json').write_bytes(observation['canonical_bytes'](hypothesis))
-        result = json.loads((secret / 'result.json').read_text())
-        result['artifacts']['hypothesis.json'] = sha((secret / 'hypothesis.json').read_bytes())
-        (secret / 'result.json').write_bytes(observation['canonical_bytes'](result))
-        secret_manifest = observation['digest']({p.name: sha(p.read_bytes()) for p in secret.iterdir()})
-        rejected = root / 'reject-secret'
+        # Exercise the publisher's scrubber in memory; no header reaches a file.
         try:
-            publish(rejected, {**expected, 'path': secret, 'manifest_sha256': secret_manifest})
-        except Exception:
-            assert not list(rejected.iterdir())
+            runner.packet_public_bytes('{"Authorization":"Bearer test-only"}', 'local_' + 'a' * 32)
+        except RuntimeError as error:
+            assert str(error) == 'review_packet_sensitive_material'
         else:
             raise AssertionError('secret')
 

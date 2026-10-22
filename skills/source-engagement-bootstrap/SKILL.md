@@ -6,7 +6,19 @@ disable-model-invocation: true
 
 # Source Engagement Bootstrap
 
-Use this skill only when explicitly invoked with `/source-engagement-bootstrap <scope-file> [operator preferences]` (or via the Skill tool). Ported from the Pi-agent version; harness-native (references `CLAUDE.md`, the harness engine docs, and this repo's `engagements/_TEMPLATE/`).
+Use this skill only when explicitly invoked with `/source-engagement-bootstrap <scope-file> [operator preferences]`, Pi's `/skill:source-engagement-bootstrap`, or the Skill tool. This canonical procedure references `CLAUDE.md`, the harness engine docs, and this repo's `engagements/_TEMPLATE/`.
+
+After Phase 2, check the operator's #165 decision. If it explicitly adopts native
+local research for this source/task class, use the [native entry procedure](../../docs/agents/native-local-research.md).
+Prepare a target-local `engagements/<id>/scope.md` with the root-required fields
+and a separate native brief/allowance for the operator to review. The operator
+signs the scope; the agent never does. Do not copy the whole legacy template or
+initialize its queue/record kernel for that native task. Return the ranked
+source evidence, prepared paths, exact pending authorization/runtime blockers,
+and the native `prepare` command only when inputs are fixed; `start` remains
+pending until the plan-bound approval is supplied. If no matching scoped adopt
+decision exists, continue with the legacy Phase 3–6 procedure below. Ranking
+alone never authorizes execution.
 
 ## Non-negotiable authority and safety
 
@@ -41,7 +53,7 @@ Rank at two levels:
 
 For every score, cite the source path, symbol/config, and policy fact that supports it. Unknown factors remain unknown. Select the highest evidence-backed target unless a material tie or missing authorization requires human choice.
 
-## Phase 3 — Bootstrap the engagement
+## Phase 3 — Bootstrap the legacy engagement
 
 1. Follow `CLAUDE.md` §4 placement rules: Plane 3 belongs in the selected target's own project repository. Use an existing local source tree when supplied. If only a remote repository is supplied, stop and ask for the intended local checkout path before cloning or creating Plane 3.
 2. Copy `engagements/_TEMPLATE/` into the target repo as `engagements/<id>/`. Do not overwrite an existing engagement.
@@ -120,7 +132,7 @@ Use the operator-selected goal interface only if available; it is not a replacem
 
 Adjust the token budget only from an explicit operator preference or a documented corpus estimate. A token budget is not authorization to cross a gate.
 
-## Final response contract
+## Legacy final response contract
 
 Return, in order:
 

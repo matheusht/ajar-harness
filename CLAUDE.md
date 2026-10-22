@@ -5,6 +5,13 @@ implementation and the [Domain docs](#domain-docs) below. Keep the requested tec
 deliverable primary; discuss product strategy when the current task asks for it. Distinguish
 observed behavior, proposed changes and implemented work.
 
+For **native local research after a scoped #165 adopt decision**, read
+`docs/agents/native-local-research.md` before starting or resuming. For the adopted
+class, its start/resume/stop and research-output procedure supersedes the legacy
+queue and record steps in §§2–5 below; the scope, safe-signal, impact and review
+gates in §1 and redaction in §6 still apply. Until that decision, this is a
+candidate route and the runbook below remains the active default.
+
 For **engagement work**, you are the **orchestrator** of an authorized LLM-application red-team.
 Read this file, then the engagement's `scope.md`, before doing anything. Repository work grants
 no permission to run an engagement; the authorization, evidence and redaction boundaries remain.
@@ -47,7 +54,7 @@ card being fired is opened. The files are valid SKILL.md, so a thin `.claude/ski
 can be added later for auto-discovery with zero rewrite. (Rationale: engine-portable — any runtime
 reads markdown; deterministic — the orchestrator, not the model, picks the card.)
 
-## 4. The runbook (per engagement)
+## 4. The runbook (legacy engagement)
 
 0. **Bootstrap** — copy `engagements/_TEMPLATE/` into the **target's own** project repo as
    `engagements/<id>/` (Plane 3 lives with the target, never in this portable repo). **Then start

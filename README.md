@@ -45,13 +45,22 @@ docs/           architecture + decisions + field-notes (cross-engagement methodo
 **Plane rule:** Plane 1 is read-only knowledge; Plane 3 is write-only memory. The portable harness
 (Plane 1+2) travels; each engagement's Plane 3 wiki lives with its target.
 
-## Decision 0005/0006 record kernel
+## Native local research candidate
+
+The [native start/resume/stop route](docs/agents/native-local-research.md) is staged
+for issues #166–170. It becomes the ordinary route only for a class explicitly
+adopted by the operator under #165 after qualification. Existing engagements and
+all work outside that class continue through the legacy commands below. The
+[cutover contract](docs/agents/native-cutover-contract.md) records retained callers
+and the checks still required. This source branch is not an adoption decision.
+
+## Legacy Decision 0005/0006 record kernel
 
 Decision 0006 keeps Decision 0005's evidence and authority boundaries while allowing the local
 broker to maintain truthful Notebook records non-interactively. Consequential transitions use
 lane-local digest-bound authority requests; Zone-2 remains freshly confirmed before creation.
 
-New version-3 engagements use `python3 tools/run-engagement.py <subcommand> ...` as the sole public
+Legacy version-3 engagements use `python3 tools/run-engagement.py <subcommand> ...` as their public
 Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown are derived. See
 `docs/decision-0005-implementation-architecture.md`,
 `docs/decision-0005-implementation-report.md`, and

@@ -1,5 +1,9 @@
 # Source-only long-running engagement goal template
 
+This is the legacy queue/record route. A class explicitly adopted for native
+local research under #165 uses the [native entry procedure](../../../docs/agents/native-local-research.md)
+instead; existing engagements keep this procedure.
+
 Replace every bracketed field with verified engagement facts. Delete inapplicable sections; never fill unknowns by guessing.
 
 > **Standard goal-prompt templates (the scaffold's defaults — use these first, this file is the

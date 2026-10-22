@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 PINS = {
     "jsonrpc.php": "fe930f53e4a7c264249f3cb1629788ce4362112b2aef6226a42dfc0197aeff84",
     "app/Api/Middleware/AuthenticationMiddleware.php": "b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f",

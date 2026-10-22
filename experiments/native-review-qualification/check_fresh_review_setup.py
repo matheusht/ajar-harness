@@ -188,6 +188,39 @@ def main():
         require(invocation['assessment']['status'] == 'unfinished', 'no fake qualification')
         require(assess_review(handoff, pin, invocation, '', None)['status'] == 'unfinished',
                 'missing trace remains unfinished')
+        outcome = {'input_id': pin['input_id'], 'decision': 'unfinished',
+                   'checked_link': 'synthetic reviewer proposal only',
+                   'valid_base': ['source branch'], 'missing_transitions': ['app effect'],
+                   'contrary': ['control held'], 'lead_dispositions': [
+                       {'basis_examined': 'source branch', 'uncertain_condition': 'actor state',
+                        'next_check': 'native app effect', 'decision': 'unfinished'}],
+                   'limits': ['synthetic trace'], 'next_check': 'observe exact clean target'}
+        events = [
+            {'sessionID': invocation['session_id'], 'part': {'type': 'tool', 'tool': 'read',
+             'state': {'status': 'completed', 'input': {'filePath': '/handoff/' + name},
+                       'output': 'synthetic read'}}}
+            for name in ('REQUEST.json', *request['files'])]
+        events += [
+            {'sessionID': invocation['session_id'], 'part': {'type': 'tool', 'tool': 'shell',
+             'state': {'status': 'completed', 'input': {'command': 'true'},
+                       'output': 'synthetic tool success'}}},
+            {'sessionID': invocation['session_id'], 'part': {'type': 'text',
+             'text': json.dumps(outcome)}}]
+        synthetic_stdout = ''.join(json.dumps(event) + '\n' for event in events)
+        bound_invocation = dict(invocation, native=dict(invocation['native'],
+                                 stdout_sha256=sha(synthetic_stdout.encode())))
+        checked_invocations = []
+
+        def host_check(tools, checked_request, checked_invocation):
+            require(checked_request['input_id'] == pin['input_id'], 'host check claim binding')
+            require(tools[-1]['tool'] == 'shell', 'host check sees native tool')
+            checked_invocations.append(checked_invocation)
+            return {'status': 'held', 'reason': 'native_credential_route_unavailable'}
+
+        held = assess_review(handoff, pin, bound_invocation, synthetic_stdout, host_check,
+                             public_bytes=validate_public_bytes)
+        require(held['status'] == 'unfinished' and checked_invocations == [bound_invocation],
+                'host callback gets exact invocation and cannot promote held proof')
         require(verify_packet(handoff, pin), 'packet survives turn')
         handoff2 = root / 'handoff' / 'reviewer-2'
         handoff2.mkdir()

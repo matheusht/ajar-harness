@@ -419,7 +419,7 @@ def assess_review(packet_dir, pin, invocation, reviewer_stdout, independent_chec
         return unfinished
     if not callable(independent_check):
         return unfinished
-    checked = independent_check(tools, request)
+    checked = independent_check(tools, request, invocation)
     if (not isinstance(checked, dict) or checked.get('status') != 'observed'
             or checked.get('observer_origin') != 'host_protected'
             or checked.get('native_action_reached_clean_target') is not True

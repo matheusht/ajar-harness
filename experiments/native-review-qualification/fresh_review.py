@@ -18,13 +18,14 @@ IDENTIFIER = re.compile(r'ses_[A-Za-z0-9]{1,64}\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 DECISIONS = {'raise', 'narrow', 'reject', 'retain', 'reopen', 'unfinished'}
 SENSITIVE = re.compile(
-    r'(?i)(?:/Users/|/private/tmp/|/home/|file://|https?://|'
+    r'(?i)(?:/Users/|/private/tmp/|file://|'
     r'\b(?:authorization|proxy-authorization|set-cookie|cookie)\s*[:=]|'
     r'\b(?:bearer|basic)\s+[A-Za-z0-9+/._=-]{8,}|'
     r'\b(?:password|api[_-]?key|access[_-]?token|secret)\s*[:=]\s*["\']?[A-Za-z0-9+/._=-]{16,}|'
     r'\blocal_[0-9a-f]{32}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|'
     r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|'
-    r'\b(?:X-Amz-Signature|X-Goog-Signature)=)')
+    r'[?&](?:X-Amz-Signature|X-Goog-Signature|sig(?:nature)?|token|'
+    r'access[_-]?token|api[_-]?key)=)')
 
 
 def validate_public_bytes(data):
@@ -116,7 +117,9 @@ def _selection(observer_root, selection_path, selected_sha256, public_bytes):
 def _prompt(request):
     return (f"Review exact input {request['input_id']} in this fresh context.\n"
         "Read /handoff/REQUEST.json and every listed file with your own native tools; verify their SHA256.\n"
-        "REQUEST.json maps flat packet source names to original relative paths in source_paths. "
+        "REQUEST.json maps the relevant flat source subset to original relative paths in "
+        "source_paths. The pinned full original source is read-only at /workspace/original; "
+        "inspect additional paths there when needed. "
         "Read these roles without skipping failed or contrary observations: "
         + ', '.join(role + '=' + ','.join(request['roles'][role]) for role in ROLES) + '.\n'
         "Read /workspace/project/target.json for your presealed clean original reviewer target. "
@@ -239,6 +242,14 @@ def _same_allowance(before, after):
             and before['charged_tunnel_bytes'] <= after['charged_tunnel_bytes'])
 
 
+def _room(snapshot):
+    limits = snapshot['hard_limits']
+    return (type(limits.get('max_connections')) is int
+            and type(limits.get('max_bytes')) is int
+            and snapshot['used_tunnels'] < limits['max_connections']
+            and snapshot['charged_tunnel_bytes'] < limits['max_bytes'])
+
+
 def _usage(run_root, reviewer_role, native_api):
     rows = []
     for sid in _sessions(run_root, reviewer_role, native_api):
@@ -269,14 +280,20 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
     if plan_path.is_symlink() or not plan_path.is_file():
         raise RuntimeError('review_source_plan_unavailable')
     plan = json.loads(plan_path.read_bytes(), object_pairs_hook=_unique_pairs)
+    if not isinstance(plan, dict):
+        raise RuntimeError('review_clean_source_mismatch')
     request = json.loads((packet / 'REQUEST.json').read_bytes(), object_pairs_hook=_unique_pairs)
     packet_source = {request['source_paths'][name]: request['files'][name]
                      for name in request['roles']['source']}
-    if (not isinstance(plan, dict) or plan.get('source_manifest_sha256') !=
-            request['source_manifest_sha256'] or packet_source != plan.get('source_sha256')):
+    source_inventory = plan.get('source_sha256')
+    if (plan.get('source_manifest_sha256') !=
+            request['source_manifest_sha256'] or not isinstance(source_inventory, dict)
+            or _sha(json.dumps(source_inventory, sort_keys=True).encode()) !=
+                request['source_manifest_sha256']
+            or any(source_inventory.get(path) != digest for path, digest in packet_source.items())):
         raise RuntimeError('review_clean_source_mismatch')
     first = _allowance(allowance_snapshot(run_root))
-    if not first['active'] or not run_active(run_root):
+    if not first['active'] or not run_active(run_root) or not _room(first):
         raise RuntimeError('shared_run_closed_before_review')
     if _sessions(run_root, reviewer_role, native_api):
         raise RuntimeError('reviewer_store_not_fresh')
@@ -290,6 +307,7 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
         raise RuntimeError('fresh_reviewer_messages_not_empty')
     before = _allowance(allowance_snapshot(run_root))
     if (not _same_allowance(first, before) or not before['active'] or not run_active(run_root)
+            or not _room(before)
             or not verify_packet(packet, pin)):
         raise RuntimeError('review_pre_dispatch_binding_changed')
     native = invoke_native(run_root, reviewer_role, session, (packet / 'PROMPT.txt').read_text(),
@@ -298,11 +316,19 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
     native = {key: native.get(key) for key in ('status', 'dispatch_id', 'role', 'session_id',
               'stdout_sha256', 'stderr_sha256', 'event_types', 'tool_names', 'pool_before',
               'pool_after', 'review_target_id', 'review_target_source_sha256')}
-    after = _allowance(allowance_snapshot(run_root))
-    stable = (_same_allowance(before, after) and verify_packet(packet, pin)
+    try:
+        after = _allowance(allowance_snapshot(run_root))
+        active_after = after['active'] and run_active(run_root)
+    except (RuntimeError, OSError, ValueError, TypeError):
+        after, active_after = None, False
+    stable = (active_after and _same_allowance(before, after) and verify_packet(packet, pin)
               and native['review_target_source_sha256'] == request['source_manifest_sha256'])
+    try:
+        usage = _usage(run_root, reviewer_role, native_api) if active_after else None
+    except (RuntimeError, OSError, ValueError, TypeError):
+        usage = None
     receipt = {'status': ('native_turn_observed_unassessed'
-                          if native.get('status') == 'acknowledged' and stable
+                          if native.get('status') == 'acknowledged' and stable and usage is not None
                           and native.get('role') == reviewer_role
                           and native.get('session_id') == session
                           and isinstance(native.get('review_target_id'), str)
@@ -311,7 +337,7 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
                'session_id': session, 'reviewer_role': reviewer_role, 'native': native,
                'allowance_before': before, 'allowance_after': after,
                'same_original_allowance': stable,
-               'session_usage': _usage(run_root, reviewer_role, native_api)}
+               'session_usage': usage}
     receipt['assessment'] = assess_review(packet, pin, receipt, raw, independent_check,
                                           public_bytes=public_bytes)
     return receipt

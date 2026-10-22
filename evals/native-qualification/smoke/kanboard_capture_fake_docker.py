@@ -25,11 +25,25 @@ def out(value):
 if state.get("mode") == "freeze":
     if args[:2] == ["container", "inspect"] and args[2] in state["containers"]:
         out(json.dumps([state["containers"][args[2]]]))
+    if args[:2] == ["network", "inspect"] and args[2] == state["network_id"] and state.get("network"):
+        out(json.dumps([state["network"]]))
     if args[:2] == ["container", "stop"] and args[-1] == state["collector_id"]:
         collector = state["containers"][state["collector_id"]]
         collector["State"] = {"Status": "exited", "Running": False, "Paused": False}
         state["stop_calls"] = state.get("stop_calls", 0) + 1
         out(state["collector_id"])
+    if args[:2] == ["container", "ls"]:
+        identifier = args[args.index("--filter") + 1].removeprefix("id=")
+        out(identifier if identifier in state["containers"] else "")
+    if args[:2] == ["network", "ls"]:
+        identifier = args[args.index("--filter") + 1].removeprefix("id=")
+        out(identifier if identifier == state["network_id"] and state.get("network") else "")
+    if args[:2] == ["container", "rm"] and args[-1] == state["collector_id"]:
+        state["containers"].pop(state["collector_id"], None)
+        out(state["collector_id"])
+    if args[:2] == ["network", "rm"] and args[-1] == state["network_id"]:
+        state["network"] = None
+        out(state["network_id"])
     sys.exit(2)
 
 if args[:2] == ["container", "inspect"] and args[2] == state["app"]["Id"]:

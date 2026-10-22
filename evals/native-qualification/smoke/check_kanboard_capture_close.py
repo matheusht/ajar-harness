@@ -124,11 +124,15 @@ def main() -> int:
                                    "RestartPolicy": {"Name": "no"}, "CapDrop": ["ALL"],
                                    "SecurityOpt": ["no-new-privileges=true"]}}
             containers[collector_id] = {
-                "Id": collector_id, "Image": plan["target_image_id"],
+                "Id": collector_id, "Name": "/lrh-cap-" + nonce[:12] + "-target-collector",
+                "Image": plan["target_image_id"],
                 "State": {"Status": "running", "Running": True, "Paused": False},
                 "Config": {"Labels": {"io.lrh.kanboard-capture": nonce}},
                 "Mounts": [], "NetworkSettings": {"Networks": {}}}
             state = {"mode": "freeze", "containers": containers, "collector_id": collector_id,
+                     "network_id": network_id,
+                     "network": {"Id": network_id, "Name": "lrh-cap-" + nonce[:12] + "-target-net",
+                                 "Labels": {"io.lrh.kanboard-capture": nonce}},
                      "stop_calls": 0}
             write(fake_state_path, state)
             manifest = {"version": 1, "nonce": nonce,
@@ -194,7 +198,17 @@ def main() -> int:
         if retried != closed or json.loads(fake_state_path.read_text())["stop_calls"] != 1:
             raise RuntimeError("startup_close_retry_changed_result")
         result["checks"]["startup_crash_retry_completed"] = True
+        state = json.loads(fake_state_path.read_text())
+        state["containers"].pop(json.loads(ledger_path.read_text())["app_id"])
+        write(fake_state_path, state)
+        if capture.close_startup(run, "target") != closed:
+            raise RuntimeError("startup_owner_loss_after_app_removal_unrecovered")
+        result["checks"]["startup_frozen_after_app_removal"] = True
         ledger["status"] = "active"
+        write(ledger_path, ledger)
+        expect_hold(lambda: capture.close_startup(run, "target"), capture,
+                    "capture_app_missing_before_freeze")
+        ledger["status"] = "frozen"
         write(ledger_path, ledger)
         frozen["sqlite_sha256"] = "0" * 64
         write(frozen_path, frozen)
@@ -222,6 +236,26 @@ def main() -> int:
         if capture.freeze(run, "target") != closed or json.loads(fake_state_path.read_text())["stop_calls"] != 1:
             raise RuntimeError("revoked_close_retry_changed_result")
         result["checks"]["revoked_crash_retry_completed"] = True
+        state = json.loads(fake_state_path.read_text())
+        state["containers"].pop(json.loads(ledger_path.read_text())["app_id"])
+        write(fake_state_path, state)
+        if capture.freeze(run, "target") != closed:
+            raise RuntimeError("revoked_owner_loss_after_app_removal_unrecovered")
+        ledger = json.loads(ledger_path.read_text())
+        ledger["status"] = "cleanup_unknown"
+        write(ledger_path, ledger)
+        state = json.loads(fake_state_path.read_text())
+        state["containers"].pop(state["collector_id"])
+        write(fake_state_path, state)
+        if capture.freeze(run, "target") != closed:
+            raise RuntimeError("cleanup_unknown_frozen_recheck_failed")
+        removed = capture.cleanup(run, "target")
+        final_state = json.loads(fake_state_path.read_text())
+        if (removed["status"] != "removed" or
+                final_state["collector_id"] in final_state["containers"] or
+                final_state["network"] is not None):
+            raise RuntimeError("observer_cleanup_after_owner_loss_incomplete")
+        result["checks"]["revoked_frozen_after_app_removal_and_observer_cleanup"] = True
         result["status"] = "pass"
         result["source_manifest_sha256"] = manifest_sha
     except Exception as error:

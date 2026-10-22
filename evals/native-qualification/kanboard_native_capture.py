@@ -531,7 +531,8 @@ def _producer_binding(info: dict) -> str:
         raise CaptureHold("capture_startup_manifest_mismatch") from error
 
 
-def _stop_proof(root: Path, ledger: dict, resources: dict, stop_kind: str) -> None:
+def _stop_proof(root: Path, ledger: dict, resources: dict, stop_kind: str,
+                *, inspect_producers: bool) -> None:
     rows = resources.get("resources")
     _need(isinstance(rows, list), "capture_resources_invalid")
     producers = [row for row in rows if isinstance(row, dict) and row.get("kind") == "container"]
@@ -560,6 +561,8 @@ def _stop_proof(root: Path, ledger: dict, resources: dict, stop_kind: str) -> No
           all(isinstance(item, dict) for item in items) and
           [item.get("id") for item in items] == ids,
           "capture_startup_manifest_mismatch")
+    if not inspect_producers:
+        return
     for item in items:
         info = _inspect("container", item["id"])
         running = info.get("State", {})
@@ -583,31 +586,51 @@ def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
     ledger_path = slot / "resources.json"
     ledger = _json(ledger_path, root)
     _need(ledger.get("kind") == "kanboard-capture-resources-v1" and
-          ledger.get("target") == target and ledger.get("status") in ("active", "frozen") and
+          ledger.get("target") == target and ledger.get("status") in
+          ("active", "frozen", "cleanup_unknown") and
           all(isinstance(ledger.get(key), str) and HEX64.fullmatch(ledger[key])
               for key in ("app_id", "collector_id", "network_id")),
           "capture_not_active")
-    app = _inspect("container", ledger["app_id"])
-    collector = _inspect("container", ledger["collector_id"])
     resources = _json(root / "controls/resources.json", root)
     _need(ledger.get("nonce") == resources.get("nonce"), "capture_resource_owner_changed")
-    _stop_proof(root, ledger, resources, stop_kind)
-    state = app.get("State", {})
-    _need(app.get("Id") == ledger["app_id"] and
-          (state.get("Running") is False or state.get("Paused") is True) and
-          app.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == ledger["nonce"] and
-          collector.get("Id") == ledger["collector_id"] and
-          collector.get("Config", {}).get("Labels", {}).get("io.lrh.kanboard-capture") == ledger["nonce"],
-          "capture_producer_not_stopped_or_owner_changed")
+    active = ledger["status"] == "active"
+    if active:
+        _need(_listed("container", ledger["app_id"]), "capture_app_missing_before_freeze")
+    _stop_proof(root, ledger, resources, stop_kind, inspect_producers=active)
+    if active:
+        app = _inspect("container", ledger["app_id"])
+        state = app.get("State", {})
+        _need(app.get("Id") == ledger["app_id"] and
+              (state.get("Running") is False or state.get("Paused") is True) and
+              app.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == ledger["nonce"],
+              "capture_producer_not_stopped_or_owner_changed")
+    collector_present = _listed("container", ledger["collector_id"])
+    if active:
+        _need(collector_present, "capture_collector_stop_unknown")
+    collector = _inspect("container", ledger["collector_id"]) if collector_present else None
+    if collector is not None:
+        _need(collector.get("Id") == ledger["collector_id"] and
+              collector.get("Name") == "/" + ledger["collector_name"] and
+              collector.get("Image") == plan.get("target_image_id") and
+              collector.get("Config", {}).get("Labels", {}).get("io.lrh.kanboard-capture") == ledger["nonce"],
+              "capture_collector_owner_changed")
+    if not active and _listed("network", ledger["network_id"]):
+        network = _inspect("network", ledger["network_id"])
+        _need(network.get("Id") == ledger["network_id"] and
+              network.get("Name") == ledger["network_name"] and
+              network.get("Labels", {}).get("io.lrh.kanboard-capture") == ledger["nonce"],
+              "capture_network_owner_changed")
     frozen_path = slot / "frozen.json"
-    if ledger["status"] == "frozen":
-        _need(frozen_path.exists() and collector.get("State", {}).get("Status") in ("exited", "dead"),
+    if not active:
+        _need(frozen_path.exists() and
+              (collector is None or collector.get("State", {}).get("Status") in ("exited", "dead")),
               "capture_frozen_record_mismatch")
-    if collector.get("State", {}).get("Status") == "running":
+    if collector is not None and collector.get("State", {}).get("Status") == "running":
         _need(not frozen_path.exists(), "capture_frozen_record_mismatch")
         _docker("container", "stop", "--time", "10", ledger["collector_id"])
-    _need(_inspect("container", ledger["collector_id"]).get("State", {}).get("Status") in
-          ("exited", "dead"), "capture_collector_stop_unknown")
+    if active:
+        _need(_inspect("container", ledger["collector_id"]).get("State", {}).get("Status") in
+              ("exited", "dead"), "capture_collector_stop_unknown")
     database = _regular(slot / "receipts/receipts.sqlite", root)
     try:
         with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
@@ -622,13 +645,15 @@ def _freeze(run_root: Path, target: str, stop_kind: str) -> dict:
               "collector_id": ledger["collector_id"], "network_id": ledger["network_id"],
               "sqlite_sha256": _sha(database), "receipt_count": count, "last_receipt_id": maximum,
               "native_stop_kind": stop_kind,
+              "native_stop_sha256": _sha(root / "controls/native-state" / stop_kind),
+              "producer_manifest_sha256": _sha(root / "controls/producer-manifest.json"),
               "native_origin": "unproven", "credential_route": "unavailable"}
     if frozen_path.exists():
         _need(_json(frozen_path, root) == result, "capture_frozen_record_mismatch")
     else:
-        _need(ledger["status"] == "active", "capture_frozen_record_mismatch")
+        _need(active, "capture_frozen_record_mismatch")
         _write_once(frozen_path, result)
-    if ledger["status"] != "frozen":
+    if active:
         ledger["status"] = "frozen"
         _write_replace(ledger_path, ledger)
     return {"status": "startup_frozen_origin_and_credentials_held" if stop_kind == "STARTUP_CLOSED"

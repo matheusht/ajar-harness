@@ -91,6 +91,7 @@ hold, even if app receipts and protected effects match.
 | N09 | Collector/target fails, native stop is uncertain, or cleanup cannot identify exact owned resources | Hold with a fixed reason; leave originals for operator review and never infer success from absence. |
 | N10 | NativeRun exits before `RUN.json`, after a partial producer start | `close_startup` accepts only `STARTUP_CLOSED` with no `RUN.json`/`REVOKED`/`UNSAFE`, the exact eight manifest IDs and owner labels, and all eight producers stopped; then it freezes the collector before producer removal. A missing/false marker, changed binding, or running producer holds. |
 | N11 | Owner dies between writing `frozen.json` and setting observer ledger `frozen` | Retrying the same close must verify the immutable frozen record against the stopped collector DB and complete the ledger transition. A changed DB or record holds; it must not overwrite or silently accept either. The same retry rule applies to normal `REVOKED` freeze. |
+| N12 | Owner dies after producer removal or during observer cleanup | A `frozen` ledger must revalidate its immutable frozen record, native terminal marker, collector owner when present, and SQLite bytes without requiring the already removed app. `cleanup_unknown` may have an already removed collector; validate the frozen record and any remaining observer resource before finishing exact cleanup. An `active` ledger still requires a present stopped app and native stop proof. |
 
 Provider-free checks must exercise valid and mutated manifests, mount/network
 isolation, source drift, stale/mismatched dispatch, unrelated collector rows,
@@ -125,3 +126,7 @@ manifest binding, a running producer, and a changed frozen record. It must
 accept a verified startup close and retry the crash window after the immutable
 record exists. It also retries an ordinary `REVOKED` close. The test uses a
 fake local Docker executable only; it cannot qualify a live run.
+It must also retry from a frozen ledger after the app producer is removed,
+reject changed collector/database evidence, and remove the exact observer
+collector/network after that recovery, including an interrupted cleanup with
+an already removed collector.

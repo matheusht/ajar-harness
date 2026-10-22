@@ -1142,6 +1142,10 @@ def _cleanup_resources(root: Path, *, require_created: bool = False) -> dict:
             _fail('resource_cleanup_identity_mismatch')
         if require_created and kind == 'container' and info.get('State', {}).get('Status') != 'created':
             _fail('prestart_resource_not_created_stopped')
+        if (kind == 'container' and not require_created
+                and info.get('State', {}).get('Running') is True
+                and info.get('State', {}).get('Paused') is not True):
+            _fail('resource_restarted_after_stop')
         command = ('container', 'rm', '-f', identifier) if kind == 'container' else ('network', 'rm', identifier)
         _docker(*command)
         if not absent(kind, identifier):
@@ -1433,6 +1437,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                 before = _file(record_path.with_name(dispatch_id + '.pre.json'), private=True).read_bytes()
                 origin = _load_origin_gate(root).assess(window, before, record, trace_path.read_bytes())
                 _write_json(record_path.with_name(dispatch_id + '.origin.json'), origin, once=True)
+                record['origin_hold'] = origin
             _write_json(record_path, record)
             returned = dict(record)
             if include_raw:
@@ -1698,6 +1703,11 @@ def recover_start(run_root: Path) -> dict:
         plan = _verified_plan(root)
         controls = _controls(root)
         if not (controls / 'resources.json').exists():
+            if (any((controls / 'observer' / target / 'resources.json').exists()
+                    for target in CAPTURE_TARGETS)
+                    or (controls / 'producer-manifest.json').exists()
+                    or (controls / 'native-state/RUN.json').exists()):
+                _fail('resource_record_missing_after_creation')
             return {'status': 'no_resources', 'run_root': str(root)}
         state = controls / 'native-state'
         if (state / 'UNSAFE').exists():
@@ -1713,16 +1723,21 @@ def recover_start(run_root: Path) -> dict:
         capture_stop = _capture_stop(root, plan, native_status)
         host_snapshot = {'status': 'not_taken'}
         if native_status == 'stopped':
-            snapshot_path = controls / 'host-snapshot.json'
-            if snapshot_path.exists():
-                receipt = _read_json(snapshot_path)
-                if (receipt.get('plan_sha256') != _sha(root / 'plan.json')
-                        or receipt.get('native_stop', {}).get('revoked_sha256') != _sha(state / 'REVOKED')):
-                    _fail('recovery_host_snapshot_changed')
-                host_snapshot = {'status': receipt.get('status'), 'receipt_path': str(snapshot_path),
-                                 'receipt_sha256': _sha(snapshot_path)}
-            else:
-                host_snapshot = _stopped_snapshot(root, plan)
+            try:
+                snapshot_path = controls / 'host-snapshot.json'
+                if snapshot_path.exists():
+                    receipt = _read_json(snapshot_path)
+                    if (receipt.get('plan_sha256') != _sha(root / 'plan.json')
+                            or receipt.get('native_stop', {}).get('revoked_sha256') != _sha(state / 'REVOKED')):
+                        _fail('recovery_host_snapshot_changed')
+                    host_snapshot = {'status': receipt.get('status'), 'receipt_path': str(snapshot_path),
+                                     'receipt_sha256': _sha(snapshot_path)}
+                else:
+                    host_snapshot = _stopped_snapshot(root, plan)
+            except NativeResearchError as error:
+                host_snapshot = {'status': 'unavailable', 'code': str(error)}
+            except Exception:
+                host_snapshot = {'status': 'unavailable', 'code': 'host_snapshot_unavailable'}
         result = _cleanup_resources(root, require_created=require_created)
         capture_cleanup = _capture_cleanup(root, plan)
         recovery = {'status': 'recovered_exact_resources', 'run_root': str(root),
@@ -1746,11 +1761,15 @@ def status(run_root: Path) -> dict:
         allowance = None
     dispatches = []
     for path in sorted((controls / 'dispatch').glob('*.json')):
-        if path.name.endswith('.trace.json'):
+        if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
             continue
         row = _read_json(path)
-        dispatches.append({key: row.get(key) for key in
-                           ('dispatch_id', 'role', 'session_id', 'status', 'created_at')})
+        item = {key: row.get(key) for key in
+                ('dispatch_id', 'role', 'session_id', 'status', 'created_at')}
+        origin_path = path.with_name(path.stem + '.origin.json')
+        if origin_path.exists():
+            item['origin_hold'] = _read_json(origin_path)
+        dispatches.append(item)
     return {'status': 'active' if allowance and allowance['active'] else
             'stopped_complete' if final and final.get('status') == 'stopped_complete' else
             'recovered_exact_resources' if recovery and recovery.get('status') == 'recovered_exact_resources' else

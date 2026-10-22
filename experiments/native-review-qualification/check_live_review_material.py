@@ -151,13 +151,14 @@ def main():
                 def active(self, run_root):
                     return True
 
-            def review(stdout, *, reported_digest=None, trace_mode='valid'):
+            def review(stdout, *, reported_digest=None, trace_mode='valid', independent_check=None):
                 native = Native(stdout, reported_digest=reported_digest, trace_mode=trace_mode)
                 return invoke_fresh_review(root, packet, pin, 'reviewer-1',
                                            native_api=native.api, invoke_native=native.invoke,
                                            allowance_snapshot=native.allowance,
                                            run_active=native.active,
-                                           public_bytes=validate_public_bytes)
+                                           public_bytes=validate_public_bytes,
+                                           independent_check=independent_check)
 
             receipt = review(stream())
             material = receipt['material']
@@ -198,6 +199,22 @@ def main():
             held = review(stream(outcome=json.dumps(unsafe)))['material']
             need(held['status'] == 'held' and 'outcome' not in held,
                  'unsafe conclusion omitted', checks)
+            for name, secret in [('short password', 'password: hunter2'),
+                                 ('short API key', 'X-API-Key: shortkey')]:
+                sensitive = dict(conclusion, limits=[secret])
+                sensitive_receipt = review(stream(outcome=json.dumps(sensitive)))
+                need(sensitive_receipt['material']['status'] == 'held'
+                     and secret.encode() not in encoded(sensitive_receipt),
+                     name + ' omitted from durable receipt', checks)
+            named = [b'password: x', b'X-API-Key: x', b'access_token=x', b'secret: x',
+                     b'Bearer x', b'Basic x']
+            rejected = []
+            for value in named:
+                try:
+                    validate_public_bytes(value)
+                except ValueError:
+                    rejected.append(value)
+            need(rejected == named, 'short named credentials rejected at public-byte gate', checks)
             duplicate = '{"input_id":"' + pin['input_id'] + '","input_id":"' + pin['input_id'] + '"}'
             need(review(stream(outcome=duplicate))['material']['status'] == 'held',
                  'duplicate conclusion keys held', checks)
@@ -236,6 +253,23 @@ def main():
                 finite = False
             need(exponent_receipt['material']['status'] == 'held' and finite,
                  'exponent overflow held and receipt remains serializable', checks)
+            deep = '[' * 200000 + '0' + ']' * 200000
+            for name, checker in [('no oracle', None),
+                                  ('future oracle', lambda *args: {'status': 'unobserved'})]:
+                try:
+                    deep_receipt = review(stream(outcome=deep), independent_check=checker)
+                    deep_safe = (deep_receipt['assessment']['status'] == 'unfinished'
+                                 and deep_receipt['material']['status'] == 'held')
+                    json.dumps(deep_receipt, allow_nan=False)
+                except (RecursionError, ValueError):
+                    deep_safe = False
+                need(deep_safe, 'deep reviewer JSON yields serializable ' + name + ' receipt', checks)
+            malformed_receipt = review(stream(outcome='{"input_id":'),
+                                       independent_check=lambda *args: {'status': 'unobserved'})
+            need(malformed_receipt['assessment']['status'] == 'unfinished'
+                 and malformed_receipt['material']['status'] == 'held'
+                 and isinstance(json.dumps(malformed_receipt, allow_nan=False), str),
+                 'malformed reviewer conclusion yields serializable receipt', checks)
         report['status'] = 'pass' if all(item['pass'] for item in checks) else 'fail'
         print(('PASS' if report['status'] == 'pass' else 'FAIL')
               + ': bounded reviewer material projection; provider/Docker/target calls: 0')

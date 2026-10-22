@@ -24,8 +24,8 @@ LEAD_KEYS = {'basis_examined', 'uncertain_condition', 'next_check', 'decision'}
 SENSITIVE = re.compile(
     r'(?i)(?:/Users/|/private/tmp/|file://|'
     r'\b(?:authorization|proxy-authorization|set-cookie|cookie)\s*[:=]|'
-    r'\b(?:bearer|basic)\s+[A-Za-z0-9+/._=-]{8,}|'
-    r'\b(?:password|api[_-]?key|access[_-]?token|secret)\s*[:=]\s*["\']?[A-Za-z0-9+/._=-]{16,}|'
+    r'\b(?:bearer|basic)\s+[A-Za-z0-9+/._=-]+|'
+    r'\b(?:password|api[_-]?key|access[_-]?token|secret)\s*[:=]|'
     r'\blocal_[0-9a-f]{32}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|'
     r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|'
     r'[?&](?:X-Amz-Signature|X-Goog-Signature|sig(?:nature)?|token|'
@@ -438,7 +438,8 @@ def project_review_material(run_root, packet_dir, pin, invocation, reviewer_stdo
                 or len(_json(value)) > 1024 * 1024):
             return held('review_material_unsafe_or_oversize')
         return value
-    except (OSError, UnicodeError, ValueError, TypeError, KeyError, RuntimeError):
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, RuntimeError,
+            RecursionError, OverflowError):
         return held('review_material_unavailable')
 
 
@@ -531,13 +532,15 @@ def assess_review(packet_dir, pin, invocation, reviewer_stdout, independent_chec
             or not isinstance(reviewer_stdout, str)
             or _sha(reviewer_stdout.encode()) != invocation.get('native', {}).get('stdout_sha256')):
         return unfinished
+    if not callable(independent_check):
+        return unfinished
     request = json.loads((Path(packet_dir) / 'REQUEST.json').read_text())
     session = invocation['session_id']
     tools, texts = [], []
     for line_number, line in enumerate(reviewer_stdout.splitlines(), 1):
         try:
             event = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             return unfinished
         if not isinstance(event, dict) or event.get('sessionID') != session:
             continue
@@ -581,7 +584,7 @@ def assess_review(packet_dir, pin, invocation, reviewer_stdout, independent_chec
         return unfinished
     try:
         outcome = json.loads(''.join(texts))
-    except ValueError:
+    except (ValueError, RecursionError):
         return unfinished
     if (not isinstance(outcome, dict) or outcome.get('input_id') != pin['input_id']
             or outcome.get('decision') not in DECISIONS
@@ -595,9 +598,10 @@ def assess_review(packet_dir, pin, invocation, reviewer_stdout, independent_chec
             for key in ('basis_examined', 'uncertain_condition', 'next_check', 'decision'))
             for lead in outcome['lead_dispositions']):
         return unfinished
-    if not callable(independent_check):
+    try:
+        checked = independent_check(tools, request, invocation)
+    except (OSError, ValueError, TypeError, RuntimeError, RecursionError):
         return unfinished
-    checked = independent_check(tools, request, invocation)
     if (not isinstance(checked, dict) or checked.get('status') != 'observed'
             or checked.get('observer_origin') != 'host_protected'
             or checked.get('native_action_reached_clean_target') is not True
@@ -618,15 +622,17 @@ def assess_review(packet_dir, pin, invocation, reviewer_stdout, independent_chec
     if not selected or _sha(selected[0]['input']['command'].encode()) != checked.get('command_sha256'):
         return unfinished
     try:
-        if (public_bytes(_json(outcome)) != _json(outcome)
-                or public_bytes(_json(checked)) != _json(checked)):
+        outcome_bytes, checked_bytes = _json(outcome), _json(checked)
+        effect_bytes, control_bytes = _json(checked['effect']), _json(checked['control'])
+        if (public_bytes(outcome_bytes) != outcome_bytes
+                or public_bytes(checked_bytes) != checked_bytes):
             return unfinished
-    except (ValueError, RuntimeError):
+    except (ValueError, TypeError, RuntimeError, RecursionError, OverflowError):
         return unfinished
     return {'status': 'candidate_for_operator_review', 'decision': outcome['decision'],
             'input_id': pin['input_id'], 'session_id': session,
-            'conclusion_sha256': _sha(_json(outcome)), 'material_tool_line': selected[0]['line'],
-            'effect_sha256': _sha(_json(checked['effect'])),
-            'control_sha256': _sha(_json(checked['control'])),
+            'conclusion_sha256': _sha(outcome_bytes), 'material_tool_line': selected[0]['line'],
+            'effect_sha256': _sha(effect_bytes),
+            'control_sha256': _sha(control_bytes),
             'outcome': outcome, 'independent_check': checked,
             'filing_or_escalation_authorized': False}

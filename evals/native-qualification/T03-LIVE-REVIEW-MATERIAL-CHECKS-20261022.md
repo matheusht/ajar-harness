@@ -17,6 +17,8 @@ stdout, shell command, shell output, target body, or native store.
 | The reviewer adds `raw_tool_output` or another extra conclusion field, nested lead field, non-string list item, or oversized text/list | Return a held projection. Only the fixed conclusion schema may be retained. |
 | The dispatch reports a plausible trace digest but the protected trace file is absent, changed, or its completed shell row hashes disagree | Return a held projection. A digest supplied by the caller alone is not evidence. |
 | A JSON number such as `1e999` becomes infinity inside a conclusion or tool input | Return a held projection that can still be serialized with `allow_nan=False`; the review receipt write must not fail after the turn. |
+| A short named credential such as `password: hunter2` or `X-API-Key: shortkey` appears in reviewer text | Reject the projection regardless of credential length; the durable receipt must omit the value. |
+| Reviewer JSON is deeply nested or malformed after a native turn | Keep assessment unfinished and material held; return a serializable receipt even when a future independent oracle is supplied. |
 | Stop occurs before independent target effect, control, or process-origin proof | Preserve the original `assessment.status=unfinished`; the projection is evidence only. |
 
 Provider-free check: `PYTHONDONTWRITEBYTECODE=1 python3 experiments/native-review-qualification/check_live_review_material.py --output /absolute/new/private-output`. Expected `PASS`, one `result.json`, and no Docker, provider, or target call. The check uses synthetic packet and native-event bytes. A fresh live reviewer and later successor assessment remain separate work.

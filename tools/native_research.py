@@ -46,7 +46,7 @@ CONTROL_SHA = {
     'tools/native_effect_recovery.py': 'a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'c706ab0762d2819a7bd7e618e992551a206a6d98d31f4033bdff41da81d1d366',
+    'evals/native-qualification/kanboard_native_capture.py': 'a14d3f02a9c2b24a69d344bfdd426026a9a67db1415cb1e3da4f271081e492c2',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': '5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5',
     'evals/native-qualification/smoke/kanboard_role_broker.php': '2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d',
@@ -54,7 +54,7 @@ CAPTURE_FILES = {
 CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
 CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
 T01_CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': 'c706ab0762d2819a7bd7e618e992551a206a6d98d31f4033bdff41da81d1d366',
+    'evals/native-qualification/kanboard_native_capture.py': 'a14d3f02a9c2b24a69d344bfdd426026a9a67db1415cb1e3da4f271081e492c2',
     'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '84854db4eac14538200852a58d22e1cd0eaffc3f6fdd47603864ea3fa5f893e6',
     'evals/native-qualification/smoke/t01_receipt_collector.php': '21b96ab11307045001c50c1cc5a5043467fdb4ee381e782ee45d2b6989e42e2c',
 }

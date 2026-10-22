@@ -10,32 +10,55 @@ function t01_need($condition, $code)
     }
 }
 
-function t01_scrub($value, &$changed = false)
+function t01_safe_keys($db)
+{
+    // Only names from the application's fresh, pinned schema may survive as
+    // response object keys. Dynamic names are keyed digests, not raw strings.
+    $safe = array_fill_keys(['jsonrpc', 'id', 'result', 'error', 'code', 'message'], true);
+    foreach ($db->query("SELECT name FROM sqlite_master WHERE type='table'")
+             ->fetchAll(PDO::FETCH_COLUMN) as $table) {
+        t01_need(is_string($table) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $table),
+            'schema_name_invalid');
+        foreach ($db->query('PRAGMA table_info("'.$table.'")')->fetchAll() as $column) {
+            $name = $column['name'] ?? null;
+            t01_need(is_string($name) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name),
+                'schema_name_invalid');
+            $safe[$name] = true;
+        }
+    }
+    return $safe;
+}
+
+function t01_scrub($value, $safeKeys, $redactionKey, &$changed)
 {
     if (is_array($value)) {
+        $clean = [];
         foreach ($value as $key => $entry) {
-            if (is_string($key) && preg_match('/(?:password|passwd|secret|token|credential|auth|cookie|session|(?:^|_)key|signature|signed[_-]?url)/i', $key)) {
-                $value[$key] = '[REDACTED]';
+            if (is_string($key) && !isset($safeKeys[$key])) {
+                $key = 'field_'.substr(hash_hmac('sha256', $key, $redactionKey), 0, 24);
                 $changed = true;
-            } else {
-                $value[$key] = t01_scrub($entry, $changed);
             }
+            t01_need(!array_key_exists($key, $clean), 'redaction_key_collision');
+            $clean[$key] = t01_scrub($entry, $safeKeys, $redactionKey, $changed);
         }
-        return $value;
+        return $clean;
     }
     if (is_string($value)) {
-        $safe = preg_replace(
-            ['/(?i)\b(?:Basic|Bearer)\s+[A-Za-z0-9+\/._=-]{8,}/',
-             '/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/',
-             '/(?i)([?&](?:token|signature|api[_-]?key|access[_-]?key)=)[^&\s]+/'],
-            ['[REDACTED]', '[REDACTED]', '$1[REDACTED]'], $value);
-        t01_need(is_string($safe), 'redaction_failed');
-        if ($safe !== $value) {
-            $changed = true;
-        }
-        return $safe;
+        $changed = true;
+        return '[REDACTED]';
     }
     return $value;
+}
+
+function t01_scrub_reply($reply, $safeKeys, $redactionKey, &$changed)
+{
+    t01_need(is_array($reply) && !array_is_list($reply) &&
+        ($reply['jsonrpc'] ?? null) === '2.0' &&
+        isset($reply['id']) && is_int($reply['id']) && count($reply) === 3 &&
+        (array_key_exists('result', $reply) !== array_key_exists('error', $reply)),
+        'backend_json_invalid');
+    unset($reply['jsonrpc']);
+    return ['jsonrpc' => '2.0'] + t01_scrub($reply, $safeKeys, $redactionKey, $changed);
 }
 
 function t01_json($value)
@@ -236,8 +259,7 @@ function t01_read_request($peer)
         ($request['jsonrpc'] ?? null) === '2.0' &&
         is_string($request['method'] ?? null) &&
         preg_match('/^[A-Za-z][A-Za-z0-9]{0,79}$/D', $request['method']) &&
-        isset($request['id']) && (is_int($request['id']) ||
-            (is_string($request['id']) && strlen($request['id']) <= 80)) &&
+        isset($request['id']) && is_int($request['id']) && $request['id'] >= 0 &&
         (!isset($request['params']) || is_array($request['params'])),
         'jsonrpc_invalid');
     return [$headers['x-native-actor'], $request, $body];
@@ -294,7 +316,8 @@ function t01_send($peer, $status, $body, $requestId = null)
     @fwrite($peer, $header.'Content-Length: '.strlen($body)."\r\n\r\n".$body);
 }
 
-function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids)
+function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids,
+    $safeKeys, $redactionKey)
 {
     [$actor, $request, $body] = t01_read_request($peer);
     $username = $users[$actor];
@@ -312,11 +335,12 @@ function t01_handle($peer, $port, $collector, $db, $users, $secrets, $ids)
     $before = t01_snapshot($db, $method, $params, $ids[$actor]);
     [$status, $backendBody] = t01_app_call($port, $username, $secrets[$actor], $body);
     $reply = json_decode($backendBody, true, 32);
-    t01_need(is_array($reply) && !array_is_list($reply), 'backend_json_invalid');
+    t01_need(is_array($reply) && !array_is_list($reply) &&
+        ($reply['id'] ?? null) === $request['id'], 'backend_json_invalid');
     [$kind, $matches] = t01_result_class($status, $reply, $method, $before);
     $after = t01_snapshot($db, $method, $params, $ids[$actor]);
     $changed = false;
-    $delivered = t01_json(t01_scrub($reply, $changed));
+    $delivered = t01_json(t01_scrub_reply($reply, $safeKeys, $redactionKey, $changed));
     $peerName = stream_socket_get_name($peer, true);
     t01_need(is_string($peerName) && preg_match('/^([0-9.]+):[0-9]+$/D', $peerName, $match) &&
         filter_var($match[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4), 'peer_invalid');
@@ -375,6 +399,8 @@ function t01_main($argv)
         }
         t01_need($ready, 'backend_not_ready');
         [$db, $users, $secrets, $ids] = t01_bootstrap($backendPort, $source);
+        $safeKeys = t01_safe_keys($db);
+        $redactionKey = random_bytes(32);
         t01_collect($argv[3], ['kind' => 't01-kanboard-setup-v1',
             'request_id' => bin2hex(random_bytes(16)),
             'source_manifest_sha256' => '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884',
@@ -385,7 +411,8 @@ function t01_main($argv)
         t01_need(is_resource($listener), 'broker_bind_failed');
         while (($peer = @stream_socket_accept($listener, -1)) !== false) {
             try {
-                t01_handle($peer, $backendPort, $argv[3], $db, $users, $secrets, $ids);
+                t01_handle($peer, $backendPort, $argv[3], $db, $users, $secrets, $ids,
+                    $safeKeys, $redactionKey);
             } catch (Throwable $error) {
                 // The app may already have handled a request. A missing receipt
                 // is unknown effect, never evidence of denial.
@@ -408,7 +435,7 @@ if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) 
         t01_main($argv);
     } catch (Throwable $error) {
         // No request bodies, response bodies, credentials or DB values in logs.
-        error_log('T01_BROKER_STOP '.preg_replace('/[^a-z_]/', '', $error->getMessage()));
+        error_log('T01_BROKER_STOP');
         exit(1);
     }
 }

@@ -158,6 +158,83 @@ def dispatches(root, plan):
     return records, bool(traces_ok), bool(allowance_ok)
 
 
+def research_continuity(root, plan, records):
+    """Validate declared continuation without treating reconstruction as restored history."""
+    portable = 'research_workflow_sha256' in plan
+    limits = plan.get('limits')
+    if portable:
+        if (not isinstance(limits, dict)
+                or set(limits) != {'max_connections', 'max_bytes', 'duration_seconds'}
+                or any(type(value) is not int or value <= 0 for value in limits.values())):
+            return None
+        for name, key in (('WORKFLOW.md', 'research_workflow_sha256'), ('BRIEF.md', 'brief_sha256')):
+            path = relative_file(root, 'controls/research/' + name)
+            if path is None or sha(path) != plan.get(key):
+                return None
+    modes, seen = set(), set()
+    current, previous_time = None, None
+    for row in records:
+        session, role = row.get('session_id'), row.get('role')
+        if not isinstance(session, str) or not session:
+            return None
+        if role in ('researcher', 'resume'):
+            mode = row.get('continuity')
+            if not portable:
+                if 'continuity' in row or 'research_snapshot_sha256' in row:
+                    return None
+                mode = 'fresh_research' if role == 'researcher' else 'native_history'
+            else:
+                snapshot_path = relative_file(root, 'controls/research-snapshots/' +
+                                              str(row.get('dispatch_id')) + '.json')
+                snapshot = read_json(snapshot_path) if snapshot_path else None
+                pool = row.get('pool_before')
+                if (not SHA.fullmatch(str(plan.get('research_workflow_sha256', '')))
+                        or snapshot is None or not isinstance(pool, dict)
+                        or sha(snapshot_path) != row.get('research_snapshot_sha256')):
+                    return None
+                expected = {'kind': 'portable-research-run-snapshot-v1',
+                            'dispatch_id': row.get('dispatch_id'), 'continuity': mode,
+                            'plan_sha256': sha(root / 'plan.json'),
+                            'workspace': 'researcher', 'notebook': '/workspace/RESEARCH.md',
+                            'source_manifest_sha256': plan.get('source_manifest_sha256'),
+                            'scope_sha256': plan.get('scope_sha256'),
+                            'brief_sha256': plan.get('brief_sha256'),
+                            'workflow_sha256': plan['research_workflow_sha256'],
+                            'run_identity': pool.get('run_identity')}
+                allowance = snapshot.get('allowance')
+                used = (pool.get('used_tunnels'), pool.get('charged_tunnel_bytes'))
+                if (any(snapshot.get(key) != value for key, value in expected.items())
+                        or not isinstance(allowance, dict)
+                        or any(type(value) is not int for value in used)):
+                    return None
+                expected_allowance = dict(limits, used_connections=used[0], used_bytes=used[1],
+                                          remaining_connections=max(0, limits['max_connections'] - used[0]),
+                                          remaining_bytes=max(0, limits['max_bytes'] - used[1]))
+                if any(allowance.get(key) != value for key, value in expected_allowance.items()):
+                    return None
+            created = row.get('created_at')
+            if not isinstance(created, str) or not created or (previous_time and created <= previous_time):
+                return None
+            if role == 'researcher':
+                if mode != 'fresh_research' or current is not None or session in seen:
+                    return None
+            elif current is None:
+                return None
+            elif mode == 'native_history':
+                if session != current:
+                    return None
+                modes.add(mode)
+            elif mode == 'fresh_context_from_workspace':
+                if session in seen:
+                    return None
+                modes.add(mode)
+            else:
+                return None
+            current, previous_time = session, created
+        seen.add(session)
+    return sorted(modes)
+
+
 def poststop_review_candidate(root, records, researcher_sessions, plan):
     if 't01_capture' not in plan or not isinstance(plan.get('native_origin'), dict):
         return None
@@ -652,10 +729,9 @@ def audit(run, observer, manifest_path):
     research = [row for row in records if row.get('role') == 'researcher']
     resumed = [row for row in records if row.get('role') == 'resume']
     sessions = {row.get('session_id') for row in research + resumed}
-    check('research_resume_same_session', manifest is not None and (
-          bool(research and resumed and len(sessions) == 1 and
-               research[0].get('created_at', '') < resumed[0].get('created_at', ''))
-          if manifest.get('scenario') == 'T04' else True))
+    continuation_modes = research_continuity(run, plan, records)
+    check('research_continuity', manifest is not None and continuation_modes is not None
+          and (bool(continuation_modes) if manifest.get('scenario') == 'T04' else True))
     review_candidate = poststop_review_candidate(run, records, sessions, plan)
     check('fresh_review_candidate', review_candidate is not None)
     final = read_json(run / 'controls/final.json')
@@ -673,6 +749,7 @@ def audit(run, observer, manifest_path):
     return {'status': 'inventory_complete_for_operator_review' if not failed else 'incomplete',
             'scenario': manifest.get('scenario') if manifest else None,
             'checks': checks, 'failed_checks': failed,
+            'continuation_modes': continuation_modes,
             'review_candidate': review_candidate,
             'native_qualification': 'not_assessed',
             'limits': ['file hashes and CLI receipts do not prove original effect, pause state, '

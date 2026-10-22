@@ -10,7 +10,8 @@ Before code, the failure inventory and expected checks are:
 | --- | --- |
 | A prepared plan, brief, or loaded tool/context surface changes after launch; a copied source is not the pinned original | Verify plan, activation/loaded-surface receipt, source manifest, frozen brief and original source bytes against their hashes. Reject missing or changed files. |
 | A synthetic or old receipt is counted as a native turn | Require actual `controls/dispatch/*.json` records with acknowledged status, exact trace hash/session binding, and a matching native review receipt. Synthetic self-check results never qualify. |
-| Resume starts a different researcher session, or review reuses it | For T04 require acknowledged research and resume turns on one session. Require the review turn's distinct fresh session. A shared session ID alone does not prove material state restoration. |
+| Native resume changes sessions, or a reconstruction reuses a previous session | For T04 require an initial research turn followed by native-history continuation or an explicitly declared fresh-context reconstruction. Native history keeps the current researcher session; reconstruction uses a never-before-used session under the same run and workspace. Keep these modes distinct in the report. A session label alone does not prove material state restoration. |
+| A first research turn is mislabeled as reconstruction, an unlabeled session switch is accepted, or a later resume returns to a superseded session | Check the ordered researcher/resume transitions. Historical records without continuity labels retain only the original same-session behavior. New portable records require the pinned workflow and their matching host run snapshot; missing, changed or mismatched snapshots fail. |
 | Reviewer spend or resumed work resets the allowance | Compare the run identity, hard limits, and monotonic charged tunnel counters across all actual turns. Keep provider request/monetary accounting `unverified` when the runner reports `null`; a tunnel count is not a charge bound. |
 | A reviewer label, agreeable prose, or unfinished `review()` assessment stands in for an independent check | Admit a T01 partial only from `controls/poststop-review-<role>.json`, binding its reviewer dispatch/session, review packet, material, native trace, effect dispatch/request IDs, and the exact `reviewer_material_check: t01_effect_and_controls_observed`. Require `qualification: partial`, unassessed replay/control, unfinished lead dispositions, and explicit limits. Keep non-T01 review status held. The operator still examines raw bytes and judgment. |
 | A printed success, stale source/claim, wrong actor/build/resource/time, introduced defect, injected state, disabled protection, or premature lead dismissal is accepted | For each separate T06 challenge, pin the challenged claim, raw/contrary evidence, original source, clean replay and control, actual reviewer input/output, updated claim and final output. Missing a row result leaves #162 incomplete. |
@@ -42,3 +43,38 @@ python3 evals/native-qualification/smoke/check_native_acceptance_inventory.py \
 The command returns a JSON check report. `inventory_complete_for_operator_review` means only that the listed bytes and CLI receipt relationships exist. A T01 poststop candidate remains partial: replay, fixed controls, lead dispositions, reviewer judgment, and full native qualification remain unassessed or unfinished. The operator must still examine original effect provenance, clean replay/control, material pause state, native review reasoning, cost/help, redaction, and independent cleanup readback before assigning #160/#162 pass/fail. An incomplete run returns exit 2 and a list of failed checks. The provider-free self-check uses synthetic private files and expects the old T04 assessment to remain held, a valid T01 partial poststop candidate to be inventoried, mismatched or missing candidate identity to fail, and missing or changed origin source/lifecycle/ledger/window/registration/proof bytes to fail. No provider, Docker service, or target is called.
 
 Run the synthetic CLI smoke from the repository root with `PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_native_acceptance_inventory_test.py`. Expected output starts `PASS:` and ends `provider_calls=0 target_calls=0`. This confirms only the inventory checker's fail-closed behavior; its synthetic fixtures are never native qualification evidence.
+
+## Portable continuation failure checks (before implementation, 22 October)
+
+Extend that same synthetic CLI smoke, before changing the checker. A T04 run may
+continue through native history or declared workspace reconstruction; the latter
+does not claim native-history restoration. Check the following on disposable
+files, with no provider, target or Docker calls:
+
+- Preserve the historical unlabeled same-session pass and changed-session denial.
+- Accept explicit `fresh_research` then `native_history` on that session.
+- Accept `fresh_context_from_workspace` on a new session, followed by native
+  history on that new session; report the observed modes separately.
+- Reject a missing/unknown label on a portable plan, a first-turn reconstruction,
+  a second fresh-research turn, a reconstruction reusing any previous session
+  (including a reviewer), and native resume switching or returning to an old session.
+- Reject absent, altered or mismatched pinned host snapshots, including dispatch,
+  continuity, source/scope/brief/workflow or original-run identity mismatches.
+- Reject an empty, missing-key, extra-key, zero, negative, boolean or non-integer
+  hard-limit map with structured `incomplete` JSON rather than an exception.
+- Require the actual private regular `controls/research/WORKFLOW.md` and
+  `controls/research/BRIEF.md` bytes to match the portable plan. A matching hash
+  string in a snapshot alone cannot establish retention. Missing, changed or
+  symlinked frozen inputs must fail even if other evidence stays consistent.
+- Across research, reconstruction, resume and review, reject changed run identity,
+  changed hard limits, or decreasing tunnel/byte consumption. A fresh context is
+  never a new allowance. Unknown dispatches remain inadmissible.
+- Keep `native_qualification: not_assessed`, required internal-output artifacts,
+  independent effect/review checks, and all historical receipt checks unchanged.
+
+Ordinary notebooks, scripts and saved results must carry the material research
+state; protected trace hashes and retained native history can corroborate it.
+The inventory does not establish that reconstruction actually recovered a
+hypothesis or that a file's final claim is sound. Missing claim-material evidence
+or a missing requested result remains unfinished for live acceptance; do not
+add blanket raw stdout export or a report-writing service to satisfy this check.

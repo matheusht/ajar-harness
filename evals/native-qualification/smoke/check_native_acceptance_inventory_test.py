@@ -381,6 +381,182 @@ def plan_source_names(run):
     return plan['native_origin']['source_sha256']
 
 
+def check_portable_continuity(run, observer, plan, dispatch_ids):
+    """Challenge the public inventory on disposable continuation records."""
+    originals = {path: path.read_bytes() for root in (run, observer)
+                 for path in root.rglob('*') if path.is_file()}
+    workflow_sha = put(run / 'controls/research/WORKFLOW.md', 'synthetic portable workflow\n')
+    put(run / 'controls/research/BRIEF.md', 'ordinary unhinted brief\n')
+    plan = dict(plan, research_workflow_sha256=workflow_sha, scope_sha256='e' * 64)
+    plan_sha = put(run / 'plan.json', plan)
+    activation_path = run / 'controls/activation.json'
+    put(activation_path, dict(json.loads(activation_path.read_text()), plan_sha256=plan_sha))
+    snapshot_path = run / 'controls/host-snapshot.json'
+    snapshot_sha = put(snapshot_path, dict(json.loads(snapshot_path.read_text()), plan_sha256=plan_sha))
+    final = json.loads((run / 'controls/final.json').read_text())
+    final['host_snapshot']['receipt_sha256'] = snapshot_sha
+    put(run / 'controls/final.json', final)
+    manifest = json.loads((observer / 'manifest.json').read_text())
+    manifest.update(plan_sha256=plan_sha, run_receipts=run_receipts(run, BASE_RECEIPTS))
+    put(observer / 'manifest.json', manifest)
+    rows = [json.loads((run / f'controls/dispatch/{ident}.json').read_text())
+            for ident in dispatch_ids]
+
+    def save(row, mode, session=None):
+        row = dict(row)
+        if session is not None:
+            row['session_id'] = session
+        row['continuity'] = mode
+        ident = row['dispatch_id']
+        trace_path = run / f'controls/dispatch/{ident}.trace.json'
+        trace = json.loads(trace_path.read_text()) if trace_path.exists() else {
+            'kind': 'protected-native-event-trace-v1', 'events': []}
+        trace['session_id'] = row['session_id']
+        row['native_trace_sha256'] = put(trace_path, trace)
+        before = row['pool_before']
+        limits = before['hard_limits']
+        snapshot = {'kind': 'portable-research-run-snapshot-v1', 'dispatch_id': ident,
+                    'continuity': mode, 'plan_sha256': plan_sha,
+                    'workspace': 'researcher', 'notebook': '/workspace/RESEARCH.md',
+                    'source_manifest_sha256': plan['source_manifest_sha256'],
+                    'scope_sha256': plan['scope_sha256'], 'brief_sha256': plan['brief_sha256'],
+                    'workflow_sha256': plan['research_workflow_sha256'],
+                    'run_identity': before['run_identity'],
+                    'allowance': dict(limits, used_connections=before['used_tunnels'],
+                                      remaining_connections=limits['max_connections'] - before['used_tunnels'],
+                                      used_bytes=before['charged_tunnel_bytes'],
+                                      remaining_bytes=limits['max_bytes'] - before['charged_tunnel_bytes'])}
+        row['research_snapshot_sha256'] = put(
+            run / f'controls/research-snapshots/{ident}.json', snapshot)
+        put(run / f'controls/dispatch/{ident}.json', row)
+        return row
+
+    def observed(modes):
+        _, report = invoke(run, observer)
+        assert report['checks'].get('research_continuity',
+                                    report['checks'].get('research_resume_same_session')) is True, report
+        if modes != ['native_history'] or 'continuation_modes' in report:
+            assert report['continuation_modes'] == modes, report
+        assert report['checks']['single_monotonic_allowance'] is True, report
+        assert report['native_qualification'] == 'not_assessed', report
+
+    try:
+        save(rows[0], 'fresh_research')
+        save(rows[1], 'native_history')
+        observed(['native_history'])
+        failures = []
+        bad_limits = [{}, {key: value for key, value in plan['limits'].items()
+                          if key != 'max_connections'},
+                      dict(plan['limits'], extra=1),
+                      *(dict(plan['limits'], max_connections=value) for value in (0, -1, True, 1.0))]
+        for limits in bad_limits:
+            plan_sha = put(run / 'plan.json', dict(plan, limits=limits))
+            save(rows[0], 'fresh_research')
+            save(rows[1], 'native_history')
+            try:
+                reject(run, observer, 'research_continuity')
+            except (AssertionError, ValueError) as error:
+                failures.append(('malformed_limits', limits, type(error).__name__))
+        plan_sha = put(run / 'plan.json', plan)
+        save(rows[0], 'fresh_research')
+        save(rows[1], 'native_history')
+        for name in ('WORKFLOW.md', 'BRIEF.md'):
+            path = run / 'controls/research' / name
+            original = path.read_bytes()
+            for change in ('missing', 'changed', 'symlink'):
+                path.unlink()
+                if change == 'changed':
+                    put(path, 'changed frozen input\n')
+                elif change == 'symlink':
+                    path.symlink_to(run / 'controls/BRIEF.md')
+                try:
+                    reject(run, observer, 'research_continuity')
+                except AssertionError:
+                    failures.append(('frozen_input', name, change))
+                if path.is_symlink() or path.exists():
+                    path.unlink()
+                path.write_bytes(original)
+                path.chmod(0o600)
+        assert not failures, failures
+        rebuilt = save(rows[1], 'fresh_context_from_workspace', 'ses_Rebuilt1')
+        observed(['fresh_context_from_workspace'])
+
+        for mode, session in (('native_history', 'ses_Rebuilt1'),
+                              ('fresh_context_from_workspace', 'ses_Research1'),
+                              ('unknown', 'ses_Rebuilt1'), ('fresh_research', 'ses_Rebuilt1')):
+            save(rows[1], mode, session)
+            reject(run, observer, 'research_continuity')
+        save(rows[1], 'fresh_context_from_workspace', 'ses_Rebuilt1')
+        for mode in ('native_history', 'fresh_context_from_workspace', 'unknown'):
+            save(rows[0], mode)
+            reject(run, observer, 'research_continuity')
+        save(rows[0], 'fresh_research')
+
+        resume_path = run / f'controls/dispatch/{dispatch_ids[1]}.json'
+        changed = dict(rebuilt)
+        changed.pop('continuity')
+        put(resume_path, changed)
+        reject(run, observer, 'research_continuity')
+        put(resume_path, rebuilt)
+        snapshot_path = run / f'controls/research-snapshots/{dispatch_ids[1]}.json'
+        snapshot = json.loads(snapshot_path.read_text())
+        snapshot_path.unlink()
+        reject(run, observer, 'research_continuity')
+        put(snapshot_path, snapshot)
+        snapshot_path.write_bytes(snapshot_path.read_bytes() + b' ')
+        reject(run, observer, 'research_continuity')
+        put(snapshot_path, snapshot)
+        for field, bad in (('dispatch_id', dispatch_ids[0]), ('continuity', 'native_history'),
+                           ('plan_sha256', '0' * 64), ('workspace', 'another-workspace'),
+                           ('source_manifest_sha256', '0' * 64), ('scope_sha256', '0' * 64),
+                           ('brief_sha256', '0' * 64), ('workflow_sha256', '0' * 64),
+                           ('run_identity', {'nonce': 'changed'}),
+                           ('allowance', dict(snapshot['allowance'], used_bytes=0)),
+                           ('allowance', dict(snapshot['allowance'], remaining_bytes=8192))):
+            digest = put(snapshot_path, dict(snapshot, **{field: bad}))
+            put(resume_path, dict(rebuilt, research_snapshot_sha256=digest))
+            reject(run, observer, 'research_continuity')
+        put(snapshot_path, snapshot)
+        put(resume_path, rebuilt)
+
+        for field, bad in (('run_identity', {'nonce': 'new-run'}),
+                           ('hard_limits', dict(plan['limits'], max_bytes=16384)),
+                           ('used_tunnels', 0), ('charged_tunnel_bytes', 0)):
+            changed = dict(rebuilt, pool_before=dict(rebuilt['pool_before'], **{field: bad}))
+            save(changed, 'fresh_context_from_workspace')
+            reject(run, observer, 'single_monotonic_allowance')
+        save(rows[1], 'fresh_context_from_workspace', 'ses_Rebuilt1')
+        put(resume_path, dict(rebuilt, status='unknown_effect'))
+        reject(run, observer, 'native_dispatch_traces')
+        put(resume_path, rebuilt)
+
+        extra = dict(rows[1], dispatch_id='4' * 32, created_at='2026-10-22T00:00:03Z',
+                     pool_before=rows[2]['pool_after'], pool_after=rows[2]['pool_after'])
+        save(extra, 'native_history', 'ses_Rebuilt1')
+        observed(['fresh_context_from_workspace', 'native_history'])
+        for mode, session in (('native_history', 'ses_Research1'),
+                              ('fresh_context_from_workspace', 'ses_Review1'),
+                              ('fresh_context_from_workspace', 'ses_Rebuilt1')):
+            save(extra, mode, session)
+            reject(run, observer, 'research_continuity')
+        save(extra, 'fresh_context_from_workspace', 'ses_Rebuilt2')
+        observed(['fresh_context_from_workspace'])
+        role_row = rows[2]
+        path = run / f"controls/dispatch/{role_row['dispatch_id']}.json"
+        changed = dict(role_row, pool_after=dict(role_row['pool_after'], charged_tunnel_bytes=0))
+        put(path, changed)
+        reject(run, observer, 'single_monotonic_allowance')
+        put(path, role_row)
+    finally:
+        for root in (run, observer):
+            for path in root.rglob('*'):
+                if path.is_file() and path not in originals:
+                    path.unlink()
+        for path, data in originals.items():
+            path.write_bytes(data)
+            path.chmod(0o600)
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='native-acceptance-synthetic-') as tmp:
         parent = Path(tmp)
@@ -466,6 +642,8 @@ def main():
         assert code == 2 and 'fresh_review_candidate' in report['failed_checks'], report
         assert report['native_qualification'] == 'not_assessed', report
         assert report['checks']['capture_not_configured'] is True, report
+        check_portable_continuity(run, observer, plan, dispatch_ids)
+        assert report['checks']['research_continuity'] is True, report
 
         snapshot_path = run / 'controls/host-snapshot.json'
         snapshot = snapshot_path.read_bytes()
@@ -515,7 +693,7 @@ def main():
         value['session_id'] = 'ses_Different1'
         put(resume, value)
         code, report = invoke(run, observer)
-        assert code == 2 and 'research_resume_same_session' in report['failed_checks'], report
+        assert code == 2 and 'research_continuity' in report['failed_checks'], report
         value['session_id'] = 'ses_Research1'
         put(resume, value)
 

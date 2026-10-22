@@ -4,7 +4,29 @@ This records the operator's 21 October requirements for the new research route:
 model, provider and agent runtime are replaceable execution choices; OpenCode is
 the current qualification integration. Adaptation means observations changing the
 investigation within a run. These checks supplement the native qualification
-issues before adoption; they do not claim implementation or authorize a target.
+issues before adoption; they do not establish qualification or authorize a target.
+
+## Implemented entry path
+
+The shared [research workflow](../../engine/native-research-workflow.md) uses an
+ordinary notebook, scripts and results. A filesystem-capable agent can follow it
+with a task brief and an independently enforced run boundary; no native session
+ID is needed to express the investigation. This is a portable method, not proof
+that another runtime's tools or effect limits work.
+
+The current OpenCode integration is `tools/native_research.py`. `prepare` freezes
+the workflow and brief and seeds `/workspace/RESEARCH.md`. Research and continuation
+receive those files through read-only `/research`, including a host-derived
+`RUN.json` snapshot before each turn. The snapshot reports the shared allowance
+at that instant; it does not grant effects, reset spend, or replace the host's
+enforcement. Use `resume --help` for the existing native session, or
+`reconstruct --help` for a fresh session using the same workspace and run. Both
+retain the run's allowance and refuse unresolved prior dispatches. Keep material
+observations and the final internal result in ordinary files: a transcript or a
+successful dispatch alone cannot establish that those records are complete.
+
+The [provider-free workflow checks](PORTABLE-RESEARCH-WORKFLOW-CHECKS.md) exercise
+this plumbing. The observable research behaviors below still need native runs.
 
 ## Keep the research state portable
 

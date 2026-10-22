@@ -18,6 +18,7 @@ import hashlib
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -35,6 +36,7 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
+RESEARCH_WORKFLOW = ROOT / 'engine/native-research-workflow.md'
 CONTROL_SHA = {
     'experiments/native-network-preflight/v2_connect.py': '7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3',
     'experiments/native-network-preflight/v2-effect-windows/native_run.py': '759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f',
@@ -352,9 +354,20 @@ def _filesystem_snapshot(root: Path, plan: dict) -> dict:
                                        if _mutable(name, mutable_paths))
         targets[role] = summary
     store = _snapshot_store(root)
+    notebook = None
+    if 'research_workflow_sha256' in plan:
+        path = root / 'researcher/RESEARCH.md'
+        notebook = {'present': False}
+        if path.exists() or path.is_symlink():
+            path = _file(path, private=True)
+            if path.stat().st_size > 8 * 1024 * 1024:
+                _fail('research_notebook_oversize')
+            notebook = {'present': True, 'sha256': _sha(path), 'bytes': path.stat().st_size}
     return {'kind': 'native-research-host-byte-receipt-v1',
-            'status': 'complete' if store['status'] == 'present' else 'incomplete',
+            'status': 'complete' if store['status'] == 'present' and
+            (notebook is None or notebook['present']) else 'incomplete',
             'researcher_project': project, 'native_store': store,
+            **({'research_notebook': notebook} if notebook is not None else {}),
             'targets': targets, 'target_image_id': plan['target_image_id'],
             'plan_sha256': _sha(root / 'plan.json')}
 
@@ -777,6 +790,21 @@ def prepare(args: argparse.Namespace) -> dict:
             destination.chmod(0o700 if name == 'relay' else 0o600)
         shutil.copy2(controls / 'BRIEF.md', root / 'researcher/brief/BRIEF.md')
         (root / 'researcher/brief/BRIEF.md').chmod(0o600)
+        (controls / 'research').mkdir(mode=0o700)
+        (controls / 'research-snapshots').mkdir(mode=0o700)
+        for input_path, name in ((RESEARCH_WORKFLOW, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
+            shutil.copy2(input_path, controls / 'research' / name)
+            (controls / 'research' / name).chmod(0o600)
+        notebook = root / 'researcher/RESEARCH.md'
+        notebook.write_text(
+            '# Research notebook\n\n'
+            'Read /research/BRIEF.md, /research/WORKFLOW.md, and the current /research/RUN.json.\n'
+            'This editable notebook records research, not authority or independent proof.\n\n'
+            '## Hypotheses, experiments, and observations\n\nNot started. Link scripts and results.\n\n'
+            '## Unfinished conditions and possible effects\n\nNo tests dispatched yet.\n\n'
+            '## Review and internal result\n\nUnreviewed; no supported conclusion yet.\n\n'
+            '## Cleanup\n\nOperator verification pending.\n')
+        notebook.chmod(0o600)
         _write_json(controls / 'opencode.json', CONFIG, once=True)
         for name in ('researcher', 'reviewer-1', 'reviewer-2'):
             (root / name / 'config/opencode/opencode.json').touch(mode=0o600)
@@ -791,6 +819,7 @@ def prepare(args: argparse.Namespace) -> dict:
             'expected_skill_ids': sorted(expected_skill_ids),
             'source_manifest_sha256': hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest(),
             'brief_sha256': _sha(controls / 'BRIEF.md'),
+            'research_workflow_sha256': _sha(controls / 'research/WORKFLOW.md'),
             'scope_sha256': _sha(controls / 'scope.md'),
             'relay_sha256': _sha(controls / 'relay'),
             'runtime_ca_sha256': _sha(controls / 'runtime-ca.pem'),
@@ -912,6 +941,11 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
         _fail('run_config_mismatch')
     if _sha(root / 'researcher/brief/BRIEF.md') != plan.get('brief_sha256'):
         _fail('run_brief_changed')
+    if 'research_workflow_sha256' in plan:
+        for name, key in (('WORKFLOW.md', 'research_workflow_sha256'), ('BRIEF.md', 'brief_sha256')):
+            path = _file(controls / 'research' / name, private=True)
+            if not HEX_RE.fullmatch(str(plan.get(key))) or _sha(path) != plan[key]:
+                _fail('research_workflow_changed')
     _verify_inventory(root / 'original', plan['source_sha256'])
     if pristine:
         _verify_inventory(root / 'researcher/project', plan['source_sha256'])
@@ -1457,6 +1491,8 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         mounts = [_mount(base, '/workspace'),
                   _mount(controls / 'opencode.json', '/workspace/config/opencode/opencode.json', readonly=True),
                   _mount(controls / 'runtime-ca.pem', '/runtime-ca.pem', readonly=True)]
+        if role in ('researcher', 'resume') and 'research_workflow_sha256' in plan:
+            mounts.append(_mount(controls / 'research', '/research', readonly=True))
         if _origin_enabled(plan):
             mounts.extend([_mount(_origin_binary(root, plan), '/origin/bin/native-origin', readonly=True),
                            _mount(controls / 'origin/socket' / role, '/origin/socket', readonly=True)])
@@ -1840,6 +1876,7 @@ def allowance_snapshot(run_root: Path) -> dict:
                             'max_bytes': config['max_bytes'], 'duration_seconds': config['duration']},
             'used_tunnels': pool['used_tunnels'],
             'charged_tunnel_bytes': pool['charged_tunnel_bytes'],
+            'provider_deadline_unix': pool['created'] + config['duration'],
             'active': native.active(_controls(root) / 'native-state'),
             'provider_request_count': None, 'monetary_spend': None}
 
@@ -2195,9 +2232,81 @@ def _unresolved_dispatches(root: Path) -> list[str]:
     return sorted(unresolved)
 
 
+def _research_context(root: Path, continuity: str, *, pool: dict | None = None) -> dict | None:
+    """Project current authority into advice; never treat notes as authority."""
+    plan = _plan(root)
+    if 'research_workflow_sha256' not in plan:
+        if continuity == 'fresh_context_from_workspace':
+            _fail('portable_research_requires_new_prepare')
+        return None
+    plan = _verified_plan(root)
+    try:
+        notebook = _file(root / 'researcher/RESEARCH.md', private=True)
+        if notebook.stat().st_size > 8 * 1024 * 1024:
+            _fail('research_notebook_oversize')
+    except (OSError, NativeResearchError):
+        _fail('research_notebook_unavailable')
+    if _unresolved_dispatches(root):
+        _fail('prior_dispatch_unknown_effect')
+    try:
+        if not run_active(root):
+            _fail('research_allowance_inactive')
+        pool = allowance_snapshot(root) if pool is None else pool
+        if pool.get('active') is not True:
+            _fail('research_allowance_inactive')
+        identity, limits = pool['run_identity'], pool['hard_limits']
+        used_connections, used_bytes = pool['used_tunnels'], pool['charged_tunnel_bytes']
+        now = time.monotonic()
+        provider_now, provider_deadline = time.time(), pool['provider_deadline_unix']
+        numbers = (identity['created_monotonic'], identity['deadline_monotonic'], now,
+                   limits['duration_seconds'], limits['max_connections'], limits['max_bytes'],
+                   used_connections, used_bytes, provider_now, provider_deadline)
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in numbers):
+            _fail('research_allowance_unavailable')
+        remaining = {'remaining_connections': max(0, limits['max_connections'] - used_connections),
+                     'remaining_bytes': max(0, limits['max_bytes'] - used_bytes),
+                     'remaining_seconds': max(0, min(identity['deadline_monotonic'] - now,
+                                                     provider_deadline - provider_now))}
+        if any(value <= 0 for value in remaining.values()):
+            _fail('research_allowance_exhausted')
+    except (KeyError, TypeError, ValueError, OverflowError, OSError, sqlite3.Error):
+        _fail('research_allowance_unavailable')
+    except NativeResearchError as error:
+        if str(error) not in ('research_allowance_inactive', 'research_allowance_exhausted'):
+            _fail('research_allowance_unavailable')
+        raise
+    dispatches = sorted((_controls(root) / 'dispatch').glob('*.json'))
+    if len(dispatches) > 4096:
+        _fail('research_dispatch_inventory_limit')
+    prior = []
+    for path in dispatches:
+        if not re.fullmatch(r'[0-9a-f]{32}\.json', path.name):
+            continue
+        row = _read_json(path)
+        if (row.get('dispatch_id') != path.stem or row.get('status') != 'acknowledged'
+                or row.get('role') not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2')):
+            _fail('research_dispatch_inventory_invalid')
+        prior.append({key: row[key] for key in ('dispatch_id', 'role', 'status')})
+    return {'kind': 'portable-research-run-snapshot-v1', 'continuity': continuity,
+            'authority': 'Advisory snapshot at dispatch time only; host controls remain authoritative.',
+            'captured_monotonic': now, 'captured_unix': provider_now,
+            'plan_sha256': _sha(root / 'plan.json'),
+            'source_manifest_sha256': plan['source_manifest_sha256'],
+            'scope_sha256': plan['scope_sha256'], 'brief_sha256': plan['brief_sha256'],
+            'workflow_sha256': plan['research_workflow_sha256'],
+            'workspace': 'researcher', 'notebook': '/workspace/RESEARCH.md',
+            'run_identity': identity,
+            'allowance': {**limits, 'used_connections': used_connections, 'used_bytes': used_bytes,
+                          'spent_seconds': max(0, now - identity['created_monotonic']), **remaining,
+                          'provider_deadline_unix': provider_deadline,
+                          'provider_request_count': None, 'monetary_spend': None},
+            'prior_dispatches': prior, 'review': None, 'cleanup': None,
+            'review_and_cleanup_status': 'unassessed; consult the operator, not this snapshot'}
+
+
 def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                   include_raw: bool = False, before_dispatch=None,
-                  kanboard_role_grant: bool = False) -> dict:
+                  kanboard_role_grant: bool = False, continuity: str | None = None) -> dict:
     root = _private_root(Path(run_root))
     if (role not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2')
             or not SESSION_RE.fullmatch(session_id) or not isinstance(prompt, str)
@@ -2209,6 +2318,10 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         _fail('native_observer_hook_invalid')
     if kanboard_role_grant and role != 'resume':
         _fail('kanboard_recovery_turn_unqualified')
+    if continuity is not None and continuity not in (
+            ('fresh_research',) if role == 'researcher' else
+            ('native_history', 'fresh_context_from_workspace') if role == 'resume' else ()):
+        _fail('research_continuity_invalid')
     if role.startswith('reviewer-'):
         target = 'review-target-' + role[-1]
         plan = _plan(root)
@@ -2233,6 +2346,26 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         if not run_active(root):
             _fail('native_run_closed_before_dispatch')
         pool_before = allowance_snapshot(root)
+        if role in ('researcher', 'resume'):
+            continuity = continuity or ('fresh_research' if role == 'researcher' else 'native_history')
+            context = _research_context(root, continuity, pool=pool_before)
+            if context is not None:
+                context['dispatch_id'] = dispatch_id
+                snapshot_path = _controls(root) / 'research-snapshots' / (dispatch_id + '.json')
+                _write_json(snapshot_path, context, once=True)
+                _write_json(_controls(root) / 'research/RUN.json', context)
+                prompt = (
+                    'Read /research/WORKFLOW.md, /research/BRIEF.md, /research/RUN.json, and '
+                    '/workspace/RESEARCH.md with your tools before another experiment. '
+                    'The run snapshot is advice at this dispatch time, not new authority. '
+                    'Keep material hypotheses, observations, scripts/results, unfinished effects, '
+                    'review limits and your final internal note in ordinary workspace files. '
+                    'Native history is optional; do not reset allowance or repeat an uncertain effect.\n'
+                    f'Continuation mode: {continuity}.\n\n{prompt}')
+                if len(prompt.encode()) > 128 * 1024:
+                    _fail('native_turn_input_invalid')
+                record.update({'continuity': continuity, 'research_snapshot_sha256': _sha(snapshot_path),
+                               'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()})
         record['pool_before'] = pool_before
         _write_json(record_path, record, once=True)
         _write_json(record_path.with_name(dispatch_id + '.pre.json'), record, once=True)
@@ -3709,6 +3842,9 @@ def _parser() -> argparse.ArgumentParser:
     resume_cmd.add_argument('--prompt-file', required=True)
     resume_cmd.add_argument('--session', required=True)
     resume_cmd.add_argument('--observe-kanboard-role-grant', action='store_true')
+    reconstruct_cmd = commands.add_parser('reconstruct', help='new context from ordinary files in the same active run')
+    reconstruct_cmd.add_argument('--run-root', required=True)
+    reconstruct_cmd.add_argument('--prompt-file')
     review_cmd = commands.add_parser('review', help='one fresh bounded reviewer on a frozen public packet')
     for name in ('run-root', 'observer-root', 'selection', 'selection-sha256'):
         review_cmd.add_argument('--' + name, required=True)
@@ -3743,9 +3879,12 @@ def main() -> int:
             result = assess_poststop_review(Path(args.run_root), args.role, args.dispatch_id,
                                             args.effect_dispatch_id, args.effect_request_id,
                                             args.review_effect_request_id)
-        elif args.command in ('research', 'resume'):
+        elif args.command in ('research', 'resume', 'reconstruct'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'
+            continuity = {'research': 'fresh_research', 'resume': 'native_history',
+                          'reconstruct': 'fresh_context_from_workspace'}[args.command]
+            _research_context(_private_root(root), continuity)
             if args.command == 'research':
                 prompt = _file(_controls(root) / 'BRIEF.md', private=True).read_text()
                 sessions = native_api(root, role, 'session.list', '--param', 'limit=100',
@@ -3755,18 +3894,28 @@ def main() -> int:
                 created = native_api(root, role, 'session.create', '--data',
                                      '{"title":"native bounded research"}')
                 session = (created.get('data') or {}).get('id')
-            else:
+            elif args.command == 'resume':
                 prompt = _file(Path(args.prompt_file), private=True).read_text()
                 session = args.session
+            else:
+                prompt = (_file(Path(args.prompt_file), private=True).read_text() if args.prompt_file else
+                          'Reconstruct the investigation from the saved notebook, scripts, results and current '
+                          'run snapshot. Identify missing conditions before choosing the next authorized check.')
+                prompt = ('Use ordinary workspace files without consulting prior native conversations. '
+                          'A fresh session alone does not prove that reconstruction succeeded.\n' + prompt)
+                created = native_api(root, role, 'session.create', '--data',
+                                     '{"title":"workspace reconstruction"}')
+                session = (created.get('data') or {}).get('id')
             if not isinstance(session, str) or not SESSION_RE.fullmatch(session):
                 _fail('native_session_id_invalid')
-            if role == 'resume':
+            if args.command == 'resume':
                 existing = native_api(root, role, 'session.get', '--param', 'sessionID=' + session)
                 if (existing.get('data') or {}).get('id') != session:
                     _fail('resume_session_not_in_researcher_store')
             result = invoke_native(root, role, session, prompt,
                                    kanboard_role_grant=(args.observe_kanboard_role_grant
-                                                        if role == 'resume' else False))
+                                                        if args.command == 'resume' else False),
+                                   continuity=continuity)
         elif args.command == 'review':
             result = review(Path(args.run_root), Path(args.observer_root), Path(args.selection),
                             args.selection_sha256, args.role)

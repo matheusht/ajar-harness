@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import stat
 
 
@@ -19,6 +20,9 @@ ARTIFACTS = {
     'T06': {'challenge_input', 'host_trace', 'contrary_and_controls', 'native_review',
             'updated_claim_and_output', 'cost_and_cleanup'},
 }
+CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
+BASE_RECEIPTS = {'controls/final.json', 'controls/host-snapshot.json',
+                 'controls/native-state/REVOKED', 'controls/producer-manifest.json'}
 
 
 def sha(path):
@@ -105,7 +109,8 @@ def dispatches(root, plan):
     folder = root / 'controls/dispatch'
     if not folder.is_dir() or folder.is_symlink():
         return [], False, False
-    paths = sorted(path for path in folder.glob('*.json') if not path.name.endswith('.trace.json'))
+    paths = sorted(path for path in folder.glob('*.json')
+                   if not path.name.endswith(('.trace.json', '.pre.json', '.origin.json')))
     records = []
     traces_ok = bool(paths)
     allowance_ok = bool(paths)
@@ -199,6 +204,181 @@ def artifact_matches(observer, manifest):
     return len(set(names)) == len(names)
 
 
+def capture_target(role):
+    return ('target' if role in ('researcher', 'resume') else
+            'review-target-' + role[-1] if role in ('reviewer-1', 'reviewer-2') else None)
+
+
+def required_run_receipts(plan, records):
+    names = set(BASE_RECEIPTS)
+    if 'kanboard_capture' not in plan:
+        return names
+    names.update(('controls/evals/native-qualification/kanboard_native_capture.py',
+                  'controls/capture-topology.json'))
+    for target in CAPTURE_TARGETS:
+        names.update(f'controls/observer/{target}/{name}' for name in
+                     ('effect.php', 'receipt.php', 'stage.json', 'frozen.json',
+                      'resources.json', 'receipts/receipts.sqlite'))
+    for record in records:
+        dispatch_id, target = record.get('dispatch_id'), capture_target(record.get('role'))
+        if not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id) or not target:
+            return None
+        names.update((f'controls/dispatch/{dispatch_id}.pre.json',
+                      f'controls/dispatch/{dispatch_id}.origin.json',
+                      f'controls/observer/{target}/window-{dispatch_id}.json'))
+    return names
+
+
+def run_receipts_match(root, manifest, needed):
+    recorded = manifest.get('run_receipts') if isinstance(manifest, dict) else None
+    if needed is None or not isinstance(recorded, dict) or set(recorded) != needed:
+        return False
+    return all(isinstance(digest, str) and SHA.fullmatch(digest) and
+               (path := relative_file(root, name)) is not None and sha(path) == digest
+               for name, digest in recorded.items())
+
+
+def host_snapshot_matches(root, plan_hash, final):
+    snapshot_path = root / 'controls/host-snapshot.json'
+    snapshot = read_json(snapshot_path)
+    revoked_path = root / 'controls/native-state/REVOKED'
+    revoked = read_json(revoked_path)
+    manifest_path = root / 'controls/producer-manifest.json'
+    producer_manifest = read_json(manifest_path)
+    if not all(isinstance(value, dict) for value in
+               (snapshot, revoked, producer_manifest, final)):
+        return False
+    stop = snapshot.get('native_stop')
+    final_snapshot = final.get('host_snapshot')
+    return bool(isinstance(stop, dict) and isinstance(final_snapshot, dict)
+                and snapshot.get('kind') == 'native-research-host-byte-receipt-v1'
+                and snapshot.get('status') == 'complete'
+                and snapshot.get('plan_sha256') == plan_hash
+                and revoked.get('producers_verified_stopped') is True
+                and stop.get('revoked_sha256') == sha(revoked_path)
+                and stop.get('manifest_sha256') == sha(manifest_path)
+                and revoked.get('manifest_sha256') == sha(manifest_path)
+                and final.get('native_stop', {}).get('status') == 'stopped'
+                and final_snapshot.get('status') == 'complete'
+                and final_snapshot.get('receipt_path') == str(snapshot_path)
+                and final_snapshot.get('receipt_sha256') == sha(snapshot_path))
+
+
+def capture_matches(root, plan, plan_hash, activation, final, records):
+    if 'kanboard_capture' not in plan:
+        return bool(final and final.get('capture_stop', {}).get('status') == 'not_configured'
+                    and final.get('capture_cleanup', {}).get('status') == 'not_configured'
+                    and activation and activation.get('capture_topology_sha256') is None)
+    pins = plan.get('kanboard_capture')
+    if not isinstance(pins, dict) or not isinstance(activation, dict) or not isinstance(final, dict):
+        return False
+    adapter = root / 'controls/evals/native-qualification/kanboard_native_capture.py'
+    topology_path = root / 'controls/capture-topology.json'
+    topology = read_json(topology_path)
+    if (not regular(adapter) or not isinstance(topology, dict) or set(topology) != set(CAPTURE_TARGETS)
+            or sha(adapter) != pins.get('adapter_sha256')
+            or activation.get('capture_topology_sha256') != sha(topology_path)
+            or pins.get('source_manifest_sha256') != plan.get('source_manifest_sha256')
+            or pins.get('controller_sha256') != plan.get('source_sha256', {}).get(
+                'app/Controller/ProjectPermissionController.php')):
+        return False
+    stopped = final.get('capture_stop')
+    cleaned = final.get('capture_cleanup')
+    if (not isinstance(stopped, dict) or stopped.get('status') != 'complete'
+            or not isinstance(cleaned, dict) or cleaned.get('status') != 'complete'):
+        return False
+    stop_rows, cleanup_rows = stopped.get('targets'), cleaned.get('targets')
+    if (not isinstance(stop_rows, list) or not isinstance(cleanup_rows, list)
+            or len(stop_rows) != len(CAPTURE_TARGETS)
+            or len(cleanup_rows) != len(CAPTURE_TARGETS)
+            or not all(isinstance(row, dict) for row in stop_rows + cleanup_rows)):
+        return False
+    stops = {row.get('target'): row for row in stop_rows}
+    cleanups = {row.get('target'): row for row in cleanup_rows}
+    if set(stops) != set(CAPTURE_TARGETS) or set(cleanups) != set(CAPTURE_TARGETS):
+        return False
+    frozen_by_target = {}
+    for target in CAPTURE_TARGETS:
+        slot = root / 'controls/observer' / target
+        stage, frozen, ledger = (read_json(slot / name) for name in
+                                 ('stage.json', 'frozen.json', 'resources.json'))
+        topo = topology[target]
+        if not all(isinstance(row, dict) for row in (stage, frozen, ledger, topo)):
+            return False
+        db_path = relative_file(root, f'controls/observer/{target}/receipts/receipts.sqlite')
+        effect = relative_file(root, f'controls/observer/{target}/effect.php')
+        collector = relative_file(root, f'controls/observer/{target}/receipt.php')
+        if not all((db_path, effect, collector)):
+            return False
+        try:
+            with sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True) as db:
+                if db.execute('PRAGMA quick_check').fetchone() != ('ok',):
+                    return False
+                count, last_id = db.execute('SELECT COUNT(*), COALESCE(MAX(id), 0) FROM receipts').fetchone()
+        except sqlite3.DatabaseError:
+            return False
+        if (stage.get('kind') != 'kanboard-native-capture-stage-v1'
+                or stage.get('target') != target or stage.get('plan_sha256') != plan_hash
+                or stage.get('source_manifest_sha256') != pins['source_manifest_sha256']
+                or stage.get('controller_sha256') != pins['controller_sha256']
+                or stage.get('image_id') != plan.get('target_image_id')
+                or stage.get('probe_sha256') != sha(effect)
+                or sha(effect) != pins.get('probe_sha256')
+                or stage.get('collector_sha256') != sha(collector)
+                or sha(collector) != pins.get('collector_sha256')
+                or topo.get('target') != target
+                or topo.get('source_manifest_sha256') != pins['source_manifest_sha256']
+                or frozen.get('kind') != 'kanboard-capture-frozen-v1'
+                or frozen.get('target') != target or frozen.get('native_stop_kind') != 'REVOKED'
+                or frozen.get('sqlite_sha256') != sha(db_path)
+                or type(count) is not int or type(last_id) is not int
+                or frozen.get('receipt_count') != count or frozen.get('last_receipt_id') != last_id
+                or frozen.get('collector_id') != topo.get('collector_id')
+                or frozen.get('network_id') != topo.get('observer_network_id')
+                or ledger.get('kind') != 'kanboard-capture-resources-v1'
+                or ledger.get('target') != target or ledger.get('status') != 'removed'
+                or ledger.get('nonce') != activation.get('nonce')
+                or ledger.get('collector_id') != frozen.get('collector_id')
+                or ledger.get('network_id') != frozen.get('network_id')
+                or ledger.get('app_id') != topo.get('target_id')
+                or stops[target].get('status') != 'frozen_origin_and_credentials_held'
+                or stops[target].get('sqlite_sha256') != frozen['sqlite_sha256']
+                or stops[target].get('receipt_count') != count
+                or cleanups[target].get('status') != 'removed'
+                or cleanups[target].get('collector_absent') is not True
+                or cleanups[target].get('network_absent') is not True):
+            return False
+        frozen_by_target[target] = frozen
+    for record in records:
+        dispatch_id, role = record.get('dispatch_id'), record.get('role')
+        target = capture_target(role)
+        if not target or not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id):
+            return False
+        pre_path = root / 'controls/dispatch' / (dispatch_id + '.pre.json')
+        origin = read_json(root / 'controls/dispatch' / (dispatch_id + '.origin.json'))
+        window = read_json(root / 'controls/observer' / target / ('window-' + dispatch_id + '.json'))
+        pre = read_json(pre_path)
+        if not all(isinstance(item, dict) for item in (window, pre, origin)):
+            return False
+        if (window.get('kind') != 'kanboard-native-window-v1'
+                or window.get('dispatch_id') != dispatch_id
+                or window.get('role') != role or window.get('session_id') != record.get('session_id')
+                or window.get('target') != target or window.get('topology') != topology[target]
+                or window.get('dispatch_sha256') != sha(pre_path)
+                or pre.get('kind') != 'native-dispatch-v1' or pre.get('status') != 'unknown_effect'
+                or pre.get('dispatch_id') != dispatch_id or pre.get('role') != role
+                or pre.get('session_id') != record.get('session_id')
+                or pre.get('pool_before') != record.get('pool_before')
+                or pre.get('created_at') != record.get('created_at')
+                or pre.get('prompt_sha256') != record.get('prompt_sha256')
+                or origin.get('dispatch_id') != dispatch_id
+                or origin != record.get('origin_hold')
+                or type(window.get('collector_count_before')) is not int
+                or not 0 <= window['collector_count_before'] <= frozen_by_target[target]['receipt_count']):
+            return False
+    return True
+
+
 def audit(run, observer, manifest_path):
     checks = {}
 
@@ -258,6 +438,11 @@ def audit(run, observer, manifest_path):
     final = read_json(run / 'controls/final.json')
     check('verified_stop_and_cleanup', final is not None and final.get('status') == 'stopped_complete'
           and isinstance(final.get('cleanup'), dict) and final['cleanup'].get('status') == 'complete')
+    check('run_receipts_bound', run_receipts_match(run, manifest,
+          required_run_receipts(plan, records)))
+    check('host_snapshot_bound', host_snapshot_matches(run, plan_hash, final))
+    check('capture_receipts_bound' if 'kanboard_capture' in plan else 'capture_not_configured',
+          capture_matches(run, plan, plan_hash, activation, final, records))
     check('observer_artifacts_pinned', manifest is not None and artifact_matches(observer, manifest))
     failed = [name for name, passed in checks.items() if not passed]
     return {'status': 'inventory_complete_for_operator_review' if not failed else 'incomplete',

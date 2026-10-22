@@ -102,6 +102,9 @@ def main():
             if code or staged.get('status') != 'staged_origin_and_credentials_held':
                 raise RuntimeError('public_capture_stage_failed:' + str(staged))
             stages[target] = staged['stage_sha256']
+            db = run / target / 'data/db.sqlite'
+            db.parent.mkdir(mode=0o700, exist_ok=True)
+            db.write_bytes(b'provider-free synthetic seed')
         receipt['checks']['three_public_stages_pinned'] = all(
             stages[target] == sha(run / 'controls/observer' / target / 'stage.json') for target in stages)
         now = datetime.now(timezone.utc)
@@ -114,7 +117,9 @@ def main():
             'limits': plan['limits'], 'approved_by': 'provider-free-fixture',
             'approved_at': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
             'expires_at': (now + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'capture_stage_sha256': {'target': '0' * 64, **{k: v for k, v in stages.items() if k != 'target'}}}))
+            'capture_stage_sha256': {'target': '0' * 64, **{k: v for k, v in stages.items() if k != 'target'}},
+            'capture_target_db_sha256': {target: sha(run / target / 'data/db.sqlite')
+                                         for target in stages}}))
         code, rejected = call(environment, 'start', '--run-root', str(run), '--approval', str(approval))
         receipt['checks']['wrong_stage_approval_rejected_before_docker'] = (
             code == 2 and rejected.get('code') == 'live_approval_mismatch'

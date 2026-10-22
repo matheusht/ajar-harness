@@ -167,8 +167,15 @@ def _read_json(path: Path) -> dict:
     path = _file(path, private=True)
     if path.stat().st_size > 1024 * 1024:
         _fail('control_file_oversize')
+    def unique_pairs(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate key')
+            value[key] = item
+        return value
     try:
-        value = json.loads(path.read_bytes())
+        value = json.loads(path.read_bytes(), object_pairs_hook=unique_pairs)
     except (UnicodeError, ValueError):
         _fail('control_file_invalid')
     if not isinstance(value, dict):
@@ -680,6 +687,11 @@ def capture_stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int
     return result
 
 
+def _capture_db_pins(root: Path) -> dict[str, str]:
+    return {target: _sha(_file(root / target / 'data/db.sqlite', private=True))
+            for target in CAPTURE_TARGETS}
+
+
 def _approval(root: Path, plan: dict, path: Path) -> None:
     if 'kanboard_capture' in plan:
         _capture_specs(root, plan, _validate_target_command(_controls(root) / 'target-command.json'))
@@ -699,8 +711,11 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         expected['capture_stage_sha256'] = {
             target: _sha(_controls(root) / 'observer' / target / 'stage.json')
             for target in CAPTURE_TARGETS}
+        expected['capture_target_db_sha256'] = _capture_db_pins(root)
     if any(approval.get(key) != value for key, value in expected.items()):
         _fail('live_approval_mismatch')
+    if set(approval) != set(expected) | {'approved_by', 'approved_at', 'expires_at'}:
+        _fail('live_approval_unknown_field')
     if (not isinstance(approval.get('approved_by'), str) or not approval['approved_by'].strip()
             or not isinstance(approval.get('approved_at'), str)
             or not isinstance(approval.get('expires_at'), str)
@@ -715,6 +730,12 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
     age = (datetime.now(timezone.utc) - approved).total_seconds()
     if not 0 <= age <= 24 * 3600 or not approved < expires <= approved + timedelta(hours=24) or datetime.now(timezone.utc) >= expires:
         _fail('live_approval_stale_or_future')
+    archived = _controls(root) / 'approval.json'
+    if archived.exists():
+        if _read_json(archived) != approval:
+            _fail('live_approval_archive_changed')
+    else:
+        _write_json(archived, approval, once=True)
 
 
 def _activate_controls(root: Path):
@@ -1313,7 +1334,7 @@ def _protected_trace(stdout: str, session_id: str) -> dict:
 def _unresolved_dispatches(root: Path) -> list[str]:
     unresolved = []
     for path in (_controls(root) / 'dispatch').glob('*.json'):
-        if path.name.endswith('.trace.json'):
+        if path.name.endswith(('.trace.json', '.pre.json')):
             continue
         record = _read_json(path)
         if record.get('status') == 'unknown_effect':
@@ -1358,6 +1379,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         pool_before = allowance_snapshot(root)
         record['pool_before'] = pool_before
         _write_json(record_path, record, once=True)
+        _write_json(record_path.with_name(dispatch_id + '.pre.json'), record, once=True)
         try:
             if 'kanboard_capture' in _plan(root):
                 target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
@@ -1518,10 +1540,10 @@ def start(run_root: Path, approval_path: Path) -> dict:
 def _start_owned(run_root: Path, approval_path: Path) -> dict:
     root = _private_root(Path(run_root))
     plan = _verified_plan(root, pristine=True)
-    _approval(root, plan, Path(approval_path))
     controls = _controls(root)
     if (controls / 'resources.json').exists() or (controls / 'native-state/RUN.json').exists():
         _fail('run_already_started_or_ambiguous')
+    _approval(root, plan, Path(approval_path))
     _image(plan['image_id'], plan['platform'], official=True)
     _image(plan['target_image_id'], plan['platform'])
     nonce = uuid.uuid4().hex
@@ -1572,6 +1594,7 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         _write_json(controls / 'activation.json', {
             'kind': 'native-research-activation-v1', 'nonce': nonce,
             'plan_sha256': _sha(root / 'plan.json'), 'manifest_sha256': _sha(manifest),
+            'approval_sha256': _sha(controls / 'approval.json'),
             'watcher_pid': ready['watcher_pid'], 'started_at': datetime.now(timezone.utc).isoformat(),
             'provider_route': PROVIDER_ROUTE, 'provider_authority': AUTHORITY,
             'model': MODEL, 'limits': plan['limits'],

@@ -450,9 +450,17 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
         if row.get("kind") != "container" or row.get("role") == app_role:
             continue
         info = _inspect("container", row.get("id"))
-        _need(observer_name not in info.get("NetworkSettings", {}).get("Networks", {}) and
-              all(not str(mount.get("Source", "")).startswith(observer_path + os.sep)
-                  for mount in info.get("Mounts", [])), "capture_producer_observer_access")
+        _need(observer_name not in info.get("NetworkSettings", {}).get("Networks", {}),
+              "capture_producer_observer_access")
+        for mount in info.get("Mounts", []):
+            source = str(mount.get("Source", ""))
+            if source.startswith(observer_path + os.sep):
+                other = row.get("role")
+                _need(other in TARGET_TO_RESEARCH and
+                      source == str(root / "controls/observer" / other / "effect.php") and
+                      mount.get("Destination") == "/observer/effect.php" and
+                      mount.get("RW") is False,
+                      "capture_producer_observer_access")
     env = dict(item.split("=", 1) for item in app.get("Config", {}).get("Env", []) if "=" in item)
     expected = {"NATIVE_EFFECT_COLLECTOR": "http://kanboard-effect-collector:8765/receipt.php",
                 "NATIVE_EFFECT_SOURCE_DIR": "/target", "NATIVE_EFFECT_S": str(stage_record["ids"]["s"]),

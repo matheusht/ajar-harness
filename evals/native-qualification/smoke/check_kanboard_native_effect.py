@@ -15,6 +15,7 @@ candidate, not independent native agent attribution or #158 clearance.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -52,8 +53,9 @@ def require(ok: bool, reason: str) -> None:
         raise CheckFailed(reason)
 
 
-def run(*args: str, check: bool = True, timeout: int = 45) -> subprocess.CompletedProcess:
-    result = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+def run(*args: str, check: bool = True, timeout: int = 45,
+        input_data: str | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(args, text=True, capture_output=True, timeout=timeout, input=input_data)
     if check and result.returncode:
         raise CheckFailed("owned_command_failed")
     return result
@@ -237,8 +239,14 @@ def verify_original(rows: list[dict], result: dict, baseline: dict, final: dict,
     if not (before_read["status"] == 403 and not before_read["marker_present"] and
             before_read["app_role"] == after_read["app_role"] == "app-user" and
             before_read["effective_project_role"] == "" and
+            before_read["task_id"] == seed_input["T"] and
             invalid["before"] == invalid["after"] and
             invalid["app_role"] == decisive["app_role"] == "app-user" and
+            invalid["route_project_id"] == decisive["route_project_id"] == seed_input["S"] and
+            invalid["body_project_id"] == decisive["body_project_id"] == seed_input["Q"] and
+            invalid["body_user_id"] == decisive["body_user_id"] == seed_input["users"]["B"]["id"] and
+            invalid["status"] == result["invalid_csrf_status"] and
+            decisive["status"] == result["write_status"] and
             decisive["before"]["b_q_role"] is None and
             decisive["after"]["b_q_role"] == "project-manager" and
             invalid["actor_id"] == decisive["actor_id"] == seed_input["users"]["A"]["id"] and
@@ -351,8 +359,12 @@ def main() -> int:
             report["pins"]["app_source_tree_sha256"] = source_hash
             nonce = owner_nonce[:12]
 
-            def docker(*parts: str, check: bool = True) -> subprocess.CompletedProcess:
-                return run("docker", *parts, check=check)
+            def docker(*parts: str, check: bool = True,
+                       input_data: str | None = None) -> subprocess.CompletedProcess:
+                return run("docker", *parts, check=check, input_data=input_data)
+
+            client_input = json.dumps({key: seed_input[key] for key in ("S", "Q", "T", "marker")}
+                                      | {"users": {name: seed_input["users"][name] for name in ("A", "B")}})
 
             def phase(label: str, observed: bool) -> tuple[dict, dict, list[dict], dict]:
                 research_net = f"kb-ne-r-{nonce}-{label}"
@@ -364,8 +376,12 @@ def main() -> int:
                 shutil.copytree(work / "seed-data", data)
                 input_dir = work / f"{label}-input"
                 input_dir.mkdir(mode=0o700)
-                (input_dir / "seed.json").write_text(json.dumps(seed_input))
                 shutil.copyfile(CLIENT, input_dir / "client.php")
+                require(all(identity["password"].encode() not in file.read_bytes()
+                            for identity in seed_input["users"].values()
+                            for file in input_dir.iterdir() if file.is_file()),
+                        "client_mount_contains_password")
+                report["checks"]["client_mount_has_no_password"] = True
                 receipt_dir = work / f"{label}-receipts"
                 receipt_dir.mkdir(mode=0o700)
                 probe_dir = work / "probe"
@@ -440,6 +456,19 @@ def main() -> int:
                     direct = json.loads(docker("exec", client_name, "php", "/input/client.php", "collector-reach").stdout)
                     require(direct == {"collector_reachable": False}, "researcher reached collector")
                     report["checks"]["collector_unreachable_from_researcher"] = True
+                    docker("network", "connect", observer_net_id, client_id)
+                    try:
+                        joined = json.loads(docker("exec", client_id, "php", "/input/client.php",
+                                                  "collector-reach").stdout)
+                        require(joined == {"collector_reachable": True},
+                                "reachable_collector_reported_unreachable")
+                    finally:
+                        docker("network", "disconnect", observer_net_id, client_id, check=False)
+                    detached = json.loads(docker("exec", client_id, "php", "/input/client.php",
+                                                 "collector-reach").stdout)
+                    require(detached == {"collector_reachable": False},
+                            "collector_network_remained_reachable")
+                    report["checks"]["collector_reach_negative_detected"] = True
                 scratch = json.loads(docker("exec", client_name, "php", "/input/client.php", "scratch").stdout)
                 require(scratch == {"host_mounts_absent": True, "scratch_executed": True},
                         "researcher scratch crossed host-owned mounts")
@@ -455,7 +484,8 @@ def main() -> int:
                         "researcher attached collector network")
                 require(all(mount["Destination"] == "/input" for mount in client_info["Mounts"]),
                         "researcher has unexpected mount")
-                result = json.loads(docker("exec", client_name, "php", "/input/client.php", "positive").stdout)
+                result = json.loads(docker("exec", "-i", client_name, "php", "/input/client.php", "positive",
+                                           input_data=client_input).stdout)
                 final = protected_state(s10, data, seed_input)
                 rows = collector_rows(receipt_dir / "receipts.sqlite") if observed else []
                 if observed:
@@ -486,6 +516,20 @@ def main() -> int:
                     require(verify_original(rows, result, baseline, final, seed_input, client_ip, app_observer_ip,
                                             positive_count), "original protected effect receipt failed")
                     report["checks"]["same_request_actor_and_effect"] = True
+                    for mutation_label, index, key, value in (
+                        ("denied_task", 2, "task_id", seed_input["T"] + 999),
+                        ("invalid_route", 6, "route_project_id", seed_input["Q"]),
+                        ("invalid_project", 6, "body_project_id", seed_input["S"]),
+                        ("invalid_user", 6, "body_user_id", seed_input["users"]["A"]["id"]),
+                        ("invalid_status", 6, "status", 500),
+                        ("decisive_status", 7, "status", 500),
+                    ):
+                        changed_rows = copy.deepcopy(rows)
+                        changed_rows[index]["payload"][key] = value
+                        require(not verify_original(changed_rows, result, baseline, final, seed_input,
+                                                    client_ip, app_observer_ip, positive_count),
+                                "verifier_accepted_mutated_" + mutation_label)
+                    report["checks"]["receipt_mutations_rejected"] = True
                     second_name = f"kb-ne-second-{nonce}-{label}"
                     second_id = register_owned("container", second_name, docker(
                         "run", "-d", "--name", second_name, "--log-driver=none",
@@ -496,7 +540,8 @@ def main() -> int:
                         IMAGE_ID, "-c", "sleep 90"))
                     second_ip = network_ip(inspect_container(second_name), research_net)
                     require(second_ip != client_ip, "second client shared researcher IP")
-                    second_result = json.loads(docker("exec", second_name, "php", "/input/client.php", "second").stdout)
+                    second_result = json.loads(docker("exec", "-i", second_name, "php", "/input/client.php", "second",
+                                                      input_data=client_input).stdout)
                     require(second_result["second_read"]["status"] == 200, "second client did not reach app")
                     second_rows = collector_rows(receipt_dir / "receipts.sqlite")
                     require(len(second_rows) == positive_count + 3 and
@@ -522,7 +567,8 @@ def main() -> int:
                     collector_resource = next(item for item in owned_resources if item["id"] == collector_id)
                     clean_owned_resource(collector_resource, owner_nonce)
                     require(collector_resource["absent"], "collector_cleanup_failed")
-                    missing = json.loads(docker("exec", client_name, "php", "/input/client.php", "second").stdout)
+                    missing = json.loads(docker("exec", "-i", client_name, "php", "/input/client.php", "second",
+                                                input_data=client_input).stdout)
                     missing_rows = collector_rows(receipt_dir / "receipts.sqlite")
                     require(missing["second_read"]["status"] == 200 and len(missing_rows) == len(batch_rows),
                             "missing collector changed target or fabricated receipt")

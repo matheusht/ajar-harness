@@ -40,11 +40,17 @@ This inventory is a deletion boundary, not evidence that the native route is qua
 Historical ledgers, hashes, signatures, waivers, frozen campaign pins, and active
 engagements remain unchanged. Other blind behavioral and GEPA adapters stay separate.
 
+Two unused pieces are removed before cutover: the uncalled
+`engagement_records.summarize_errors` formatter and the duplicate local
+`queue_command_payload` import in `driver_action_admission`. The shared import
+and every action-selection check remain. These deletions do not retire a queue,
+record writer, or historical reader; those still have the callers listed above.
+
 ## Intended public interface
 
-The candidate native route uses `tools/native_research.py prepare`, `research`,
-`resume`, `review`, `status`, `stop`, and `recover-start` on a persistent
-run root; consult each command's `--help` for current arguments. For the pinned
+The candidate native route uses `tools/native_research.py prepare`, `start`,
+`research`, `resume`, `reconstruct`, `review`, `status`, `stop`, and `recover-start`
+on a persistent run root; consult each command's `--help` for current arguments. For the pinned
 Kanboard T01 protected API route, `prepare` opts into `--t01-capture
 --origin-ingress`; select the exact workspace or historical API-only brief
 as described in the [native guide](native-local-research.md#start-and-resume).

@@ -64,7 +64,9 @@ decision does not activate this route.
    and `status --help` to stop the run and inspect actual cleanup and remaining
    effects. After owner loss, use `recover-start --help` only for the runner's
    exact verified-stopped resources. An unknown dispatched effect stays
-   unknown until reconciled from stopped-run evidence.
+   unknown until reconciled from stopped-run evidence. `stop_reason` in status,
+   final receipts, and recovery reports the first recorded stop trigger;
+   absent or unreadable records leave the reason unknown. Check cleanup separately.
 
 Research can choose and revise experiments. Budget, user, safety, and blocked
 stops are honest stopping reasons; none implies exhaustive coverage. Native
@@ -87,9 +89,10 @@ A changed material claim or evidence invalidates the affected conclusion and
 needs fresh review. A material strong lead may be deprioritized as unfinished;
 calling it disproved or irrelevant requires fresh review of that dismissal.
 
-Write the requested internal result in the run root. Bind each supported
-effect and condition to observation and review, state negative controls and
-limits plainly, and reconcile the result after material edits. Local output
+Write the requested internal result under `/workspace/project` and link it from
+`/workspace/RESEARCH.md`; on the host, these live under `<run-root>/researcher`.
+Bind each supported effect and condition to observation and review, state negative
+controls and limits plainly, and reconcile the result after material edits. Local output
 is not external delivery or a canonical confirmed finding. External action,
 severity escalation, and Zone-2 artifact creation still follow the current
 root policy and signed scope. This route does not run the record kernel, so a

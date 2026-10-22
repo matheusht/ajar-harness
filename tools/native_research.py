@@ -3311,6 +3311,298 @@ def review(run_root: Path, observer_root: Path, selection: Path,
             'independent_host_check': 'unavailable'}
 
 
+def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch_id: str,
+                                 effect_request_id: str, review: dict, material: dict,
+                                 request: dict, trace: dict, reviewer_origin: dict,
+                                 semantic: dict | None, effect_origins: dict) -> dict:
+    """Compose semantic controls with exact reviewer and effect process origins."""
+    hold = lambda reason: {'status': 'held', 'reason': reason}
+    if (role not in ('reviewer-1', 'reviewer-2')
+            or not re.fullmatch(r'[0-9a-f]{32}', str(dispatch_id))
+            or not re.fullmatch(r'[0-9a-f]{32}', str(effect_dispatch_id))
+            or not re.fullmatch(r'[0-9a-f]{32}', str(effect_request_id))
+            or dispatch_id == effect_dispatch_id):
+        return hold('poststop_review_identity_invalid')
+    if not isinstance(review, dict):
+        return hold('poststop_review_receipt_invalid')
+    native = review.get('native')
+    if (review.get('status') != 'native_turn_observed_unassessed'
+            or review.get('reviewer_role') != role
+            or not isinstance(native, dict) or native.get('dispatch_id') != dispatch_id
+            or native.get('role') != role or native.get('session_id') != review.get('session_id')
+            or review.get('same_original_allowance') is not True):
+        return hold('poststop_review_receipt_invalid')
+    if (not isinstance(request, dict) or not isinstance(material, dict)
+            or material.get('kind') != 'native-review-material-v1'
+            or material.get('status') != 'captured'
+            or material.get('dispatch_id') != dispatch_id
+            or material.get('session_id') != review.get('session_id')
+            or material.get('input_id') != request.get('input_id')
+            or material.get('packet_request_sha256') != review.get('packet_request_sha256')
+            or request.get('source_manifest_sha256') != native.get('review_target_source_sha256')
+            or not HEX_RE.fullmatch(str(material.get('packet_request_sha256', '')))
+            or not HEX_RE.fullmatch(str(request.get('selection_sha256', '')))):
+        return hold('poststop_review_material_binding_invalid')
+    if (not isinstance(trace, dict) or trace.get('kind') != 'protected-native-event-trace-v1'
+            or trace.get('session_id') != review.get('session_id')
+            or native.get('native_trace_sha256') != material.get('native_trace_sha256')
+            or not isinstance(material.get('shell_actions'), list)
+            or not material['shell_actions']):
+        return hold('poststop_review_trace_binding_invalid')
+    if (not isinstance(reviewer_origin, dict)
+            or reviewer_origin.get('kind') != 'native-origin-transport-proof-v1'
+            or reviewer_origin.get('status') != 'process_request_attributed'
+            or reviewer_origin.get('dispatch_id') != dispatch_id
+            or reviewer_origin.get('role') != role
+            or reviewer_origin.get('target') != 'review-target-' + role[-1]
+            or reviewer_origin.get('native_trace_sha256') != material.get('native_trace_sha256')
+            or reviewer_origin.get('source_manifest_sha256') != request.get('source_manifest_sha256')):
+        return hold('poststop_reviewer_origin_unavailable')
+    events = {row.get('line'): row for row in trace.get('events', []) if isinstance(row, dict)}
+    claims = reviewer_origin.get('native_tool_claims')
+    if not isinstance(claims, list) or not isinstance(reviewer_origin.get('broker_request_ids'), list):
+        return hold('poststop_reviewer_origin_claims_invalid')
+    claimed_ids = []
+    claimed_action_lines = set()
+    for claim in claims:
+        if not isinstance(claim, dict) or not isinstance(claim.get('request_ids'), list):
+            return hold('poststop_reviewer_origin_claims_invalid')
+        line = claim.get('line')
+        event = events.get(line)
+        ids = claim['request_ids']
+        if (not isinstance(line, int) or isinstance(line, bool) or not ids
+                or not isinstance(event, dict) or claim.get('tool') != 'shell'
+                or event.get('part_type') != 'tool' or event.get('tool') != 'shell'
+                or event.get('status') != 'completed'
+                or event.get('session_matches') is not True
+                or claim.get('input_sha256') != event.get('input_sha256')
+                or claim.get('output_sha256') != event.get('output_sha256')
+                or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value) for value in ids)):
+            return hold('poststop_reviewer_origin_claims_invalid')
+        claimed_ids.extend(ids)
+        claimed_action_lines.add(line)
+    if (len(claimed_ids) != len(set(claimed_ids))
+            or set(claimed_ids) != set(reviewer_origin['broker_request_ids'])):
+        return hold('poststop_reviewer_origin_ids_disagree')
+    action_lines = set()
+    for action in material['shell_actions']:
+        if (not isinstance(action, dict) or type(action.get('line')) is not int
+                or not all(HEX_RE.fullmatch(str(action.get(key, ''))) for key in
+                           ('command_sha256', 'input_sha256', 'output_sha256'))):
+            return hold('poststop_review_action_invalid')
+        action_lines.add(action['line'])
+    if not action_lines.intersection(claimed_action_lines):
+        return hold('poststop_reviewer_action_not_attributed')
+    if (not isinstance(semantic, dict)
+            or semantic.get('status') != 'effect_and_controls_observed'
+            or semantic.get('scope') != 't01_original_vulnerable_arm'
+            or semantic.get('effect_dispatch_id') != effect_dispatch_id
+            or semantic.get('effect_request_id') != effect_request_id):
+        reason = semantic.get('reason') if isinstance(semantic, dict) else None
+        if isinstance(reason, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,100}', reason):
+            return hold('poststop_' + reason)
+        return hold('poststop_semantic_verifier_unavailable_or_mismatched')
+    creation = semantic.get('creation_request_ids')
+    ordinary = semantic.get('ordinary_request_ids')
+    denial = semantic.get('denial_request_id')
+    if (not isinstance(creation, list) or len(creation) != 2
+            or not isinstance(ordinary, list) or len(ordinary) != 2
+            or not isinstance(denial, str)
+            or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)
+                   for value in [*creation, *ordinary, denial, effect_request_id])):
+        return hold('poststop_semantic_request_set_invalid')
+    decisive = [*creation, *ordinary, denial, effect_request_id]
+    if len(decisive) != len(set(decisive)):
+        return hold('poststop_semantic_request_set_invalid')
+    if not isinstance(effect_origins, dict):
+        return hold('poststop_effect_origin_unavailable')
+    seen = {request_id: 0 for request_id in decisive}
+    proof_hashes = {}
+    for origin_dispatch, proof in effect_origins.items():
+        if (not isinstance(proof, dict) or proof.get('kind') != 'native-origin-transport-proof-v1'
+                or proof.get('status') != 'process_request_attributed'
+                or proof.get('dispatch_id') != origin_dispatch
+                or proof.get('role') not in ('researcher', 'resume')
+                or proof.get('target') != 'target'
+                or not isinstance(proof.get('broker_request_ids'), list)):
+            continue
+        ids = proof['broker_request_ids']
+        if any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value) for value in ids):
+            return hold('poststop_effect_origin_invalid')
+        for request_id in decisive:
+            if request_id in ids:
+                seen[request_id] += 1
+                proof_hashes[origin_dispatch] = hashlib.sha256(
+                    (json.dumps(proof, sort_keys=True, separators=(',', ':'), allow_nan=False)).encode()
+                ).hexdigest()
+    if any(count != 1 for count in seen.values()):
+        return hold('poststop_decisive_origin_missing_or_ambiguous')
+    effect_proof = effect_origins.get(effect_dispatch_id)
+    if (not isinstance(effect_proof, dict) or effect_proof.get('dispatch_id') != effect_dispatch_id
+            or effect_proof.get('kind') != 'native-origin-transport-proof-v1'
+            or effect_proof.get('status') != 'process_request_attributed'
+            or effect_proof.get('role') not in ('researcher', 'resume')
+            or effect_proof.get('target') != 'target'
+            or not isinstance(effect_proof.get('broker_request_ids'), list)
+            or effect_request_id not in effect_proof['broker_request_ids']):
+        return hold('poststop_effect_origin_dispatch_mismatch')
+    return {'status': 'candidate_for_operator_review', 'scope': semantic['scope'],
+            'reviewer_role': role, 'review_dispatch_id': dispatch_id,
+            'effect_dispatch_id': effect_dispatch_id, 'effect_request_id': effect_request_id,
+            'qualification': 'partial', 'clean_replay': 'not_assessed',
+            'fixed_control': 'not_assessed', 'lead_dispositions': 'unfinished_unassessed',
+            'limits': ['does not establish full #159 qualification',
+                       'does not independently assess strong-lead dismissal',
+                       'model lead_dispositions remain untrusted review material'],
+            'selection_sha256': request['selection_sha256'],
+            'decisive_request_ids': sorted(decisive),
+            'reviewer_action_lines': sorted(action_lines.intersection(claimed_action_lines)),
+            'effect_origin_proof_sha256': proof_hashes}
+
+
+def assess_poststop_review(run_root: Path, role: str, dispatch_id: str,
+                           effect_dispatch_id: str, effect_request_id: str) -> dict:
+    """Write one immutable assessment after exact native stop and origin reconciliation."""
+    held = {'status': 'held', 'reviewer_role': role, 'review_dispatch_id': dispatch_id,
+            'effect_dispatch_id': effect_dispatch_id, 'effect_request_id': effect_request_id}
+    freeze = None
+    if (role not in ('reviewer-1', 'reviewer-2')
+            or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)
+                   for value in (dispatch_id, effect_dispatch_id, effect_request_id))):
+        return dict(held, reason='poststop_review_identity_invalid')
+    try:
+        root = _private_root(Path(run_root))
+        semantic_fn = globals().get('reconcile_t01_semantic')
+        semantic = semantic_fn(root, effect_dispatch_id, effect_request_id) if callable(semantic_fn) else None
+        with _owner_lock(root):
+            plan = _verified_plan(root)
+            controls = _controls(root)
+            final_path, recovery_path = controls / 'final.json', controls / 'recovery.json'
+            if final_path.exists():
+                terminal = _read_json(final_path)
+                stopped = terminal.get('status') == 'stopped_complete'
+            elif recovery_path.exists():
+                terminal = _read_json(recovery_path)
+                stopped = (terminal.get('status') == 'recovered_exact_resources'
+                           and terminal.get('native_state') == 'stopped')
+            else:
+                stopped = False
+                terminal = {}
+            if (not stopped or terminal.get('host_snapshot', {}).get('status') != 'complete'
+                    or terminal.get('capture_stop', {}).get('status') != 'complete'
+                    or terminal.get('capture_cleanup', {}).get('status') != 'complete'
+                    or terminal.get('cleanup', {}).get('status') != 'complete'
+                    or terminal.get('origin_stop', {}).get('status') != 'complete'
+                    or terminal.get('origin_cleanup', {}).get('status') != 'complete'
+                    or _unresolved_dispatches(root)):
+                return dict(held, reason='poststop_run_not_fully_stopped')
+            destination = controls / ('poststop-review-' + role + '.json')
+
+            def freeze(value):
+                if destination.exists():
+                    existing = _read_json(destination)
+                    return existing if existing == value else dict(
+                        held, reason='poststop_assessment_already_frozen')
+                _write_json(destination, value, once=True)
+                return value
+
+            if not _origin_enabled(plan) or 't01_capture' not in plan:
+                return freeze(dict(held, reason='poststop_semantic_verifier_unavailable_for_profile'))
+            dispatch_path = controls / 'dispatch' / (dispatch_id + '.json')
+            dispatch = _read_json(dispatch_path)
+            if (dispatch.get('kind') != 'native-dispatch-v1'
+                    or dispatch.get('status') != 'acknowledged'
+                    or dispatch.get('dispatch_id') != dispatch_id or dispatch.get('role') != role):
+                return freeze(dict(held, reason='poststop_reviewer_dispatch_invalid'))
+            receipt_path = controls / ('review-' + role + '.json')
+            receipt = _read_json(receipt_path)
+            material = receipt.get('material')
+            receipt_native = receipt.get('native')
+            if (receipt.get('reviewer_role') != role or not isinstance(receipt_native, dict)
+                    or receipt_native.get('dispatch_id') != dispatch_id
+                    or receipt_native.get('native_trace_sha256') != dispatch.get('native_trace_sha256')):
+                return freeze(dict(held, reason='poststop_review_receipt_changed'))
+            packet_dir = root / 'handoff' / role
+            module = _load_review_module(root)
+            pin = material.get('packet_pin') if isinstance(material, dict) else None
+            if (not isinstance(pin, dict) or not module.verify_packet(packet_dir, pin)
+                    or not isinstance(pin.get('files'), dict)
+                    or pin['files'].get('REQUEST.json') != material.get('packet_request_sha256')):
+                return freeze(dict(held, reason='poststop_review_packet_changed'))
+            request_path = packet_dir / 'REQUEST.json'
+            request = _read_json(request_path)
+            module.validate_public_bytes(request_path.read_bytes())
+            module.validate_public_bytes(json.dumps(material, sort_keys=True,
+                                                     allow_nan=False).encode())
+            selection = {key: request.get(key) for key in
+                         ('claim_id', 'claim_version', 'source_manifest_sha256',
+                          'source_paths', 'roles', 'files')}
+            selected_id = hashlib.sha256((json.dumps(selection, indent=2, sort_keys=True,
+                                                       allow_nan=False) + '\n').encode()).hexdigest()
+            if (request.get('input_id') != selected_id
+                    or request.get('source_manifest_sha256') != plan.get('source_manifest_sha256')
+                    or receipt.get('input_id') != selected_id
+                    or material.get('input_id') != selected_id
+                    or material.get('packet_request_sha256') != _sha(request_path)
+                    or request.get('source_revision') != hashlib.sha256((json.dumps({
+                        'source': {request['source_paths'][name]: request['files'][name]
+                                   for name in request['roles']['source']},
+                        'conditions': {name: request['files'][name]
+                                       for name in request['roles']['conditions']}
+                    }, indent=2, sort_keys=True, allow_nan=False) + '\n').encode()).hexdigest()
+                    or request.get('evidence_revision') != hashlib.sha256((json.dumps({
+                        name: request['files'][name] for role_name in
+                        ('claim', 'raw', 'contrary', 'unfinished')
+                        for name in request['roles'][role_name]
+                    }, indent=2, sort_keys=True, allow_nan=False) + '\n').encode()).hexdigest()):
+                return freeze(dict(held, reason='poststop_review_selection_or_source_changed'))
+            _verify_inventory(root / 'original', plan['source_sha256'])
+            for name in request['roles']['source']:
+                source_path = request['source_paths'][name]
+                if (not _valid_relative_path(source_path)
+                        or plan['source_sha256'].get(source_path) != request['files'].get(name)
+                        or _sha(root / 'original' / source_path) != request['files'][name]):
+                    return freeze(dict(held, reason='poststop_review_source_bytes_changed'))
+            trace_path = controls / 'dispatch' / (dispatch_id + '.trace.json')
+            trace = _read_json(trace_path)
+            if (_sha(trace_path) != material.get('native_trace_sha256')
+                    or dispatch.get('native_trace_sha256') != _sha(trace_path)):
+                return freeze(dict(held, reason='poststop_review_trace_changed'))
+            reviewer_origin = _origin_transport_proof(root, dispatch_id)
+            effect_origins = {}
+            for path in sorted((controls / 'dispatch').glob('*.json')):
+                if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
+                    continue
+                try:
+                    row = _read_json(path)
+                    if row.get('role') in ('researcher', 'resume') and row.get('status') == 'acknowledged':
+                        proof = _origin_transport_proof(root, row['dispatch_id'])
+                        effect_origins[row['dispatch_id']] = proof
+                except (NativeResearchError, OSError, ValueError, KeyError, TypeError,
+                        sqlite3.DatabaseError):
+                    continue
+            result = _poststop_review_disposition(
+                role=role, dispatch_id=dispatch_id, effect_dispatch_id=effect_dispatch_id,
+                effect_request_id=effect_request_id, review=receipt, material=material,
+                request=request, trace=trace, reviewer_origin=reviewer_origin,
+                semantic=semantic, effect_origins=effect_origins)
+            result.update({'review_receipt_sha256': _sha(receipt_path),
+                           'review_packet_request_sha256': _sha(request_path),
+                           'review_trace_sha256': _sha(trace_path),
+                           'semantic_receipt_sha256': hashlib.sha256(json.dumps(
+                               semantic, sort_keys=True, separators=(',', ':'),
+                               allow_nan=False).encode()).hexdigest(),
+                           'reviewer_origin_proof_sha256': hashlib.sha256(json.dumps(
+                               reviewer_origin, sort_keys=True, separators=(',', ':'),
+                               allow_nan=False).encode()).hexdigest()})
+            return freeze(result)
+    except (NativeResearchError, OSError, ValueError, KeyError, TypeError,
+            sqlite3.DatabaseError) as error:
+        reason = str(error) if isinstance(error, NativeResearchError) else 'poststop_assessment_unavailable'
+        value = dict(held, reason=reason)
+        return freeze(value) if callable(freeze) else value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -3355,6 +3647,13 @@ def _parser() -> argparse.ArgumentParser:
     t01_cmd.add_argument('--run-root', required=True)
     t01_cmd.add_argument('--dispatch-id', required=True)
     t01_cmd.add_argument('--effect-request-id', required=True)
+    poststop_cmd = commands.add_parser('assess-poststop-review',
+                                       help='bind a stopped native review to semantic and origin evidence')
+    poststop_cmd.add_argument('--run-root', required=True)
+    poststop_cmd.add_argument('--role', choices=('reviewer-1', 'reviewer-2'), required=True)
+    poststop_cmd.add_argument('--dispatch-id', required=True)
+    poststop_cmd.add_argument('--effect-dispatch-id', required=True)
+    poststop_cmd.add_argument('--effect-request-id', required=True)
     research_cmd = commands.add_parser('research', help='one native turn in the original researcher')
     research_cmd.add_argument('--run-root', required=True)
     resume_cmd = commands.add_parser('resume', help='one native turn in the same persistent researcher store')
@@ -3392,6 +3691,9 @@ def main() -> int:
         elif args.command == 'reconcile-t01-semantic':
             result = reconcile_t01_semantic(Path(args.run_root), args.dispatch_id,
                                             args.effect_request_id)
+        elif args.command == 'assess-poststop-review':
+            result = assess_poststop_review(Path(args.run_root), args.role, args.dispatch_id,
+                                            args.effect_dispatch_id, args.effect_request_id)
         elif args.command in ('research', 'resume'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'
@@ -3422,7 +3724,7 @@ def main() -> int:
         else:
             _fail('command_invalid')
         print(json.dumps(result, sort_keys=True, allow_nan=False))
-        return 0 if (result.get('status') not in ('unknown_effect', 'hold_unknown', 'unfinished', 'start_incomplete',
+        return 0 if (result.get('status') not in ('unknown_effect', 'hold_unknown', 'held', 'unfinished', 'start_incomplete',
                                                 'unsafe_or_unresolved', 'stopped_evidence_incomplete')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:

@@ -28,9 +28,17 @@
       "pass": true
     },
     {
-      "name": "live start rejects missing approval before resource creation",
+      "name": "declared mutable target state survives preflight; missing approval still rejects",
       "observed": {
         "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "pass": true
+    },
+    {
+      "name": "immutable target source drift rejects before approval or Docker",
+      "observed": {
+        "code": "target_source_or_state_changed",
         "exit": 2
       },
       "pass": true

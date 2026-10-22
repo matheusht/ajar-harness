@@ -97,13 +97,25 @@ def main():
               status_code == 0 and status.get('status') == 'prepared'
               and status.get('allowance') is None,
               {'exit': status_code, 'status': status.get('status')})
+        for target in ('target', 'review-target-1', 'review-target-2'):
+            data = run_root / target / 'data'
+            data.mkdir()
+            (data / 'db.sqlite').write_bytes(b'host-seeded disposable state')
         missing_code, missing = call('start', '--run-root', str(run_root),
                                      '--approval', str(root / 'missing-approval.json'))
-        check('live start rejects missing approval before resource creation',
-              missing_code == 2 and missing.get('status') == 'rejected'
+        check('declared mutable target state survives preflight; missing approval still rejects',
+              missing_code == 2 and missing.get('code') == 'regular_file_unavailable'
               and not (run_root / 'controls/resources.json').exists()
               and not (run_root / 'controls/provider/tunnel.sqlite3').exists(),
               {'exit': missing_code, 'code': missing.get('code')})
+        (run_root / 'target/hello.php').write_text('changed source\n')
+        immutable_code, immutable = call('start', '--run-root', str(run_root),
+                                          '--approval', str(root / 'missing-approval.json'))
+        check('immutable target source drift rejects before approval or Docker',
+              immutable_code == 2 and immutable.get('code') == 'target_source_or_state_changed'
+              and not (run_root / 'controls/resources.json').exists(),
+              {'exit': immutable_code, 'code': immutable.get('code')})
+        shutil.copy2(source / 'hello.php', run_root / 'target/hello.php')
         recovery_code, recovery = call('recover-start', '--run-root', str(run_root))
         check('preactivation recovery is a no-op without resources',
               recovery_code == 0 and recovery.get('status') == 'no_resources',

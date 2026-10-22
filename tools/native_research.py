@@ -467,8 +467,9 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
         _fail('run_brief_changed')
     _verify_inventory(root / 'original', plan['source_sha256'])
     if pristine:
-        for name in ('target', 'review-target-1', 'review-target-2', 'researcher/project'):
-            _verify_inventory(root / name, plan['source_sha256'])
+        _verify_inventory(root / 'researcher/project', plan['source_sha256'])
+        for name in ('target', 'review-target-1', 'review-target-2'):
+            _verify_target_state(root / name, plan['source_sha256'], plan['mutable_paths'])
     return plan
 
 

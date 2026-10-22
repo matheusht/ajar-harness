@@ -5,6 +5,7 @@ This module performs no target, provider, container, filing or external action b
 """
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,9 @@ NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
 IDENTIFIER = re.compile(r'ses_[A-Za-z0-9]{1,64}\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 DECISIONS = {'raise', 'narrow', 'reject', 'retain', 'reopen', 'unfinished'}
+OUTCOME_KEYS = {'input_id', 'decision', 'checked_link', 'valid_base',
+                'missing_transitions', 'contrary', 'lead_dispositions', 'limits', 'next_check'}
+LEAD_KEYS = {'basis_examined', 'uncertain_condition', 'next_check', 'decision'}
 SENSITIVE = re.compile(
     r'(?i)(?:/Users/|/private/tmp/|file://|'
     r'\b(?:authorization|proxy-authorization|set-cookie|cookie)\s*[:=]|'
@@ -46,7 +50,7 @@ def _sha(data):
 
 
 def _json(value):
-    return (json.dumps(value, indent=2, sort_keys=True) + '\n').encode()
+    return (json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n').encode()
 
 
 def _unique_pairs(pairs):
@@ -266,7 +270,7 @@ def _usage(run_root, reviewer_role, native_api):
     return rows
 
 
-def project_review_material(packet_dir, pin, invocation, reviewer_stdout, *, public_bytes):
+def project_review_material(run_root, packet_dir, pin, invocation, reviewer_stdout, *, public_bytes):
     """Keep bounded reviewer evidence while transient native stdout still exists."""
     held = lambda reason: {'kind': 'native-review-material-v1', 'status': 'held',
                            'reason': reason, 'input_id': pin['input_id']}
@@ -295,16 +299,21 @@ def project_review_material(packet_dir, pin, invocation, reviewer_stdout, *, pub
             return held('review_material_packet_binding_invalid')
         session = invocation['session_id']
         required = {'REQUEST.json', *request['files']}
-        reads, hashes, texts, actions = set(), set(), [], []
+        reads, hashes, texts, actions, text_hashes = set(), set(), [], [], {}
         text_bytes = 0
         lines = reviewer_stdout.splitlines()
         if len(lines) > 10000:
             return held('review_material_event_limit')
         def reject_nonfinite(value):
             raise ValueError('nonfinite_number')
+        def finite_float(value):
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError('nonfinite_number')
+            return number
         for number, line in enumerate(lines, 1):
             event = json.loads(line, object_pairs_hook=_unique_pairs,
-                               parse_constant=reject_nonfinite)
+                               parse_constant=reject_nonfinite, parse_float=finite_float)
             if not isinstance(event, dict) or event.get('sessionID') != session:
                 continue
             part = event.get('part')
@@ -312,6 +321,7 @@ def project_review_material(packet_dir, pin, invocation, reviewer_stdout, *, pub
                 continue
             if part.get('type') == 'text' and isinstance(part.get('text'), str):
                 texts.append(part['text'])
+                text_hashes[number] = _sha(part['text'].encode())
                 text_bytes += len(part['text'].encode())
                 if text_bytes > 128 * 1024:
                     return held('review_material_conclusion_limit')
@@ -356,20 +366,64 @@ def project_review_material(packet_dir, pin, invocation, reviewer_stdout, *, pub
         if (not texts or not actions or reads != required and hashes != required):
             return held('review_material_check_unavailable')
         outcome = json.loads(''.join(texts), object_pairs_hook=_unique_pairs,
-                             parse_constant=reject_nonfinite)
-        if (not isinstance(outcome, dict) or outcome.get('input_id') != pin['input_id']
+                             parse_constant=reject_nonfinite, parse_float=finite_float)
+        def bounded_text(value):
+            return isinstance(value, str) and bool(value.strip()) and len(value.encode()) <= 2048
+        def bounded_list(value):
+            return (isinstance(value, list) and len(value) <= 32
+                    and all(bounded_text(item) for item in value))
+        if (not isinstance(outcome, dict) or set(outcome) != OUTCOME_KEYS
+                or outcome.get('input_id') != pin['input_id']
                 or outcome.get('decision') not in DECISIONS
-                or not isinstance(outcome.get('checked_link'), str)
-                or not outcome['checked_link'].strip()
-                or any(not isinstance(outcome.get(key), list) for key in
+                or not bounded_text(outcome.get('checked_link'))
+                or not bounded_text(outcome.get('next_check'))
+                or any(not bounded_list(outcome.get(key)) for key in
                        ('valid_base', 'missing_transitions', 'contrary',
-                        'lead_dispositions', 'limits'))
-                or not isinstance(outcome.get('next_check'), str)
-                or any(not isinstance(lead, dict) or any(
-                    not isinstance(lead.get(key), str) or not lead[key].strip()
-                    for key in ('basis_examined', 'uncertain_condition', 'next_check', 'decision'))
-                    for lead in outcome['lead_dispositions'])):
+                        'limits'))
+                or not isinstance(outcome.get('lead_dispositions'), list)
+                or len(outcome['lead_dispositions']) > 32
+                or any(not isinstance(lead, dict) or set(lead) != LEAD_KEYS
+                       or any(not bounded_text(lead.get(key)) for key in LEAD_KEYS)
+                       for lead in outcome['lead_dispositions'])):
             return held('review_material_conclusion_invalid')
+        root = Path(run_root)
+        trace_path = root / 'controls/dispatch' / (native['dispatch_id'] + '.trace.json')
+        for directory in (root, root / 'controls', trace_path.parent):
+            info = directory.stat(follow_symlinks=False)
+            if (directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                    or info.st_uid != os.getuid() or info.st_mode & 0o077):
+                return held('review_material_trace_untrusted')
+        info = trace_path.stat(follow_symlinks=False)
+        if (trace_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or not 0 < info.st_size <= 16 * 1024 * 1024):
+            return held('review_material_trace_untrusted')
+        trace_bytes = trace_path.read_bytes()
+        if len(trace_bytes) != info.st_size or _sha(trace_bytes) != native['native_trace_sha256']:
+            return held('review_material_trace_changed')
+        trace = json.loads(trace_bytes, object_pairs_hook=_unique_pairs,
+                           parse_constant=reject_nonfinite, parse_float=finite_float)
+        rows = trace.get('events') if isinstance(trace, dict) else None
+        if (not isinstance(trace, dict)
+                or trace.get('kind') != 'protected-native-event-trace-v1'
+                or trace.get('session_id') != session
+                or trace.get('stdout_sha256') != native['stdout_sha256']
+                or not isinstance(rows, list) or len(rows) != len(lines)
+                or any(not isinstance(row, dict) or row.get('line') != index
+                       for index, row in enumerate(rows, 1))):
+            return held('review_material_trace_changed')
+        if (any(rows[number - 1].get('part_type') != 'text'
+                or rows[number - 1].get('session_matches') is not True
+                or rows[number - 1].get('text_sha256') != digest
+                for number, digest in text_hashes.items())
+                or any(rows[action['line'] - 1].get('part_type') != 'tool'
+                       or rows[action['line'] - 1].get('tool') != 'shell'
+                       or rows[action['line'] - 1].get('status') != 'completed'
+                       or rows[action['line'] - 1].get('session_matches') is not True
+                       or rows[action['line'] - 1].get('input_sha256') != action['input_sha256']
+                       or rows[action['line'] - 1].get('output_sha256') != action['output_sha256']
+                       for action in actions)):
+            return held('review_material_trace_action_changed')
         value = {'kind': 'native-review-material-v1', 'status': 'captured',
                  'input_id': pin['input_id'], 'packet_pin': pin,
                  'packet_request_sha256': pin['files']['REQUEST.json'],
@@ -462,7 +516,7 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
                'session_usage': usage}
     receipt['assessment'] = assess_review(packet, pin, receipt, raw, independent_check,
                                           public_bytes=public_bytes)
-    receipt['material'] = project_review_material(packet, pin, receipt, raw,
+    receipt['material'] = project_review_material(run_root, packet, pin, receipt, raw,
                                                   public_bytes=public_bytes)
     return receipt
 

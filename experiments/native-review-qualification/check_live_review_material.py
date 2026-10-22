@@ -5,8 +5,11 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.native_research import _protected_trace
 from fresh_review import invoke_fresh_review, prepare_packet, validate_public_bytes
 
 
@@ -20,8 +23,6 @@ def encoded(value):
 
 def need(value, name, checks):
     checks.append({'name': name, 'pass': bool(value)})
-    if not value:
-        raise AssertionError(name)
 
 
 def main():
@@ -93,9 +94,10 @@ def main():
                 return ''.join(json.dumps(row) + '\n' for row in rows)
 
             class Native:
-                def __init__(self, stdout, *, reported_digest=None):
+                def __init__(self, stdout, *, reported_digest=None, trace_mode='valid'):
                     self.stdout = stdout
                     self.reported_digest = reported_digest or sha(stdout.encode())
+                    self.trace_mode = trace_mode
                     self.sessions = []
                     self.tunnels = 1
 
@@ -116,10 +118,26 @@ def main():
                     assert run_root == root and role == 'reviewer-1' and include_raw
                     assert session == 'ses_Fresh1' and '/handoff/REQUEST.json' in prompt
                     self.tunnels += 1
+                    trace_path = root / 'controls/dispatch' / ('d' * 32 + '.trace.json')
+                    trace_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                    (root / 'controls').chmod(0o700)
+                    trace_path.parent.chmod(0o700)
+                    trace = _protected_trace(self.stdout, session)
+                    if self.trace_mode == 'wrong_action':
+                        row = next(item for item in trace['events'] if item.get('tool') == 'shell')
+                        row['input_sha256'] = '0' * 64
+                    if self.trace_mode == 'missing':
+                        trace_path.unlink(missing_ok=True)
+                    else:
+                        trace_path.write_bytes(encoded(trace))
+                        trace_path.chmod(0o600)
+                    trace_digest = (sha(trace_path.read_bytes()) if trace_path.exists() else 'e' * 64)
+                    if self.trace_mode == 'fake_digest':
+                        trace_digest = 'e' * 64
                     return {'status': 'acknowledged', 'dispatch_id': 'd' * 32,
                             'role': role, 'session_id': session,
                             'stdout_sha256': self.reported_digest,
-                            'native_trace_sha256': 'e' * 64,
+                            'native_trace_sha256': trace_digest,
                             'review_target_id': 'f' * 64,
                             'review_target_source_sha256': source_digest,
                             '_raw_stdout': self.stdout}
@@ -133,8 +151,8 @@ def main():
                 def active(self, run_root):
                     return True
 
-            def review(stdout, *, reported_digest=None):
-                native = Native(stdout, reported_digest=reported_digest)
+            def review(stdout, *, reported_digest=None, trace_mode='valid'):
+                native = Native(stdout, reported_digest=reported_digest, trace_mode=trace_mode)
                 return invoke_fresh_review(root, packet, pin, 'reviewer-1',
                                            native_api=native.api, invoke_native=native.invoke,
                                            allowance_snapshot=native.allowance,
@@ -154,7 +172,8 @@ def main():
                  and material['evidence_revision'] == request['evidence_revision']
                  and material['dispatch_id'] == 'd' * 32
                  and material['session_id'] == 'ses_Fresh1'
-                 and material['native_trace_sha256'] == 'e' * 64,
+                 and material['native_trace_sha256'] == sha((root / 'controls/dispatch' /
+                     ('d' * 32 + '.trace.json')).read_bytes()),
                  'packet dispatch session and trace bound', checks)
             action = material['shell_actions'][0]
             need(len(material['shell_actions']) == 1 and action['line'] > 0
@@ -184,8 +203,44 @@ def main():
                  'duplicate conclusion keys held', checks)
             need(review(stream(outcome='{"value":NaN}'))['material']['status'] == 'held',
                  'nonfinite conclusion held', checks)
-        report['status'] = 'pass'
-        print('PASS: bounded reviewer material projection; provider/Docker/target calls: 0')
+            extra = dict(conclusion, raw_tool_output='raw private target response')
+            extra_receipt = review(stream(outcome=json.dumps(extra)))
+            need(extra_receipt['material']['status'] == 'held'
+                 and b'raw private target response' not in encoded(extra_receipt),
+                 'extra raw output field cannot persist', checks)
+            nested = dict(conclusion, lead_dispositions=[dict(conclusion['lead_dispositions'][0],
+                                                              raw_tool_output='private')])
+            need(review(stream(outcome=json.dumps(nested)))['material']['status'] == 'held',
+                 'extra nested lead field held', checks)
+            nonstring = dict(conclusion, limits=['synthetic only', {'raw': 'private'}])
+            need(review(stream(outcome=json.dumps(nonstring)))['material']['status'] == 'held',
+                 'non-string conclusion list item held', checks)
+            long_text = dict(conclusion, checked_link='x' * 2049)
+            need(review(stream(outcome=json.dumps(long_text)))['material']['status'] == 'held',
+                 'oversized conclusion text held', checks)
+            long_list = dict(conclusion, limits=['synthetic'] * 33)
+            need(review(stream(outcome=json.dumps(long_list)))['material']['status'] == 'held',
+                 'oversized conclusion list held', checks)
+            need(review(stream(), trace_mode='missing')['material']['status'] == 'held',
+                 'missing host trace held', checks)
+            need(review(stream(), trace_mode='fake_digest')['material']['status'] == 'held',
+                 'false host trace digest held', checks)
+            need(review(stream(), trace_mode='wrong_action')['material']['status'] == 'held',
+                 'changed host shell action held', checks)
+            exponent = json.dumps(conclusion).replace('"synthetic only"', '1e999')
+            exponent_receipt = review(stream(outcome=exponent))
+            try:
+                json.dumps(exponent_receipt, allow_nan=False)
+                finite = True
+            except ValueError:
+                finite = False
+            need(exponent_receipt['material']['status'] == 'held' and finite,
+                 'exponent overflow held and receipt remains serializable', checks)
+        report['status'] = 'pass' if all(item['pass'] for item in checks) else 'fail'
+        print(('PASS' if report['status'] == 'pass' else 'FAIL')
+              + ': bounded reviewer material projection; provider/Docker/target calls: 0')
+        if report['status'] != 'pass':
+            raise AssertionError('review_material_checks_failed')
     finally:
         (output / 'result.json').write_bytes(encoded(report))
 

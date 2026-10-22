@@ -27,7 +27,11 @@ ordinary synthetic users, Alice and Bob, may be prepared.
 Provider-free checks: `php -l` both PHP files; `python3
 evals/native-qualification/smoke/check_t01_capture_offline.py --source
 <retained-v1.2.49-source>` validates exact source pins, runner mode separation,
-and token redaction. These are source/protocol checks, not application or native
+and token redaction. `python3
+evals/native-qualification/smoke/check_t01_capture_stage.py --source
+<retained-v1.2.49-source> --output <fresh-private-output>` exercises public
+prepare and stage, then saves `result.json` with wrong-mode and source-drift
+rejections. These are source/protocol and CLI checks, not application or native
 behavior. The held final E2E must run the original owned app through the native
 bridge, inspect raw receipts and controls, verify cleanup, and prove actor/effect
 origin and unhinted researcher behavior. A fresh independent observer arm on

@@ -1,0 +1,37 @@
+# Native acceptance inventory: checks before implementation
+
+This is a provider-free evidence admission check for [#160](https://github.com/matheusht/redteam-harness/issues/160) and [#162](https://github.com/matheusht/redteam-harness/issues/162). It does not score a flaw, review decision, or issue completion. The current issues require a stateful pause after material workspace and target state exist; the older first-hypothesis-test trigger in `T04-UNHINTED-PREFLIGHT.md` is superseded. Keep this file and all expected challenge outcomes outside the researcher and reviewer contexts.
+
+Decision: reuse `tools/native_research.py` and its sealed run directory. A separate benchmark runner would duplicate launch, allowance, stop, and cleanup control. The small checker only inventories immutable inputs and actual CLI receipts. The serious alternative is a prose-only checklist; it cannot catch a changed plan, stale review, different session, or missing raw trace automatically. The acceptance falsifier is any such mismatch or absent independent effect/control/review evidence.
+
+Before code, the failure inventory and expected checks are:
+
+| Failure | Required check |
+| --- | --- |
+| A prepared plan, brief, or loaded tool/context surface changes after launch; a copied source is not the pinned original | Verify plan, activation/loaded-surface receipt, source manifest, frozen brief and original source bytes against their hashes. Reject missing or changed files. |
+| A synthetic or old receipt is counted as a native turn | Require actual `controls/dispatch/*.json` records with acknowledged status, exact trace hash/session binding, and a matching native review receipt. Synthetic self-check results never qualify. |
+| Resume starts a different researcher session, or review reuses it | For T04 require acknowledged research and resume turns on one session. Require the review turn's distinct fresh session. A shared session ID alone does not prove material state restoration. |
+| Reviewer spend or resumed work resets the allowance | Compare the run identity, hard limits, and monotonic charged tunnel counters across all actual turns. Keep provider request/monetary accounting `unverified` when the runner reports `null`; a tunnel count is not a charge bound. |
+| A reviewer label or agreeable prose stands in for an independent check | Require a bound receipt whose assessment is `candidate_for_operator_review`, with a host-protected independent check and effect/control references. The operator still examines its raw bytes and judgment. |
+| A printed success, stale source/claim, wrong actor/build/resource/time, introduced defect, injected state, disabled protection, or premature lead dismissal is accepted | For each separate T06 challenge, pin the challenged claim, raw/contrary evidence, original source, clean replay and control, actual reviewer input/output, updated claim and final output. Missing a row result leaves #162 incomplete. |
+| A historical case receipt is mistaken for this run's effect | Pin the observer's fresh preflight and host trace separately. For T04, require clean original effect/replay, ordinary and causal controls, material pause/continuation, workspace diff, costs/help, and exact cleanup. A file hash proves retention, not observer origin or causal validity. |
+| Run stops with unknown effects or uncertain resources | Reject any `unknown_effect` dispatch and require a stopped-complete final receipt with complete exact-resource cleanup. An in-flight settlement/overrun must still be reported by the operator. |
+| Observer evidence is agent-writable, missing, stale, or symlinked | Accept only regular, privately held files under a separate private observer root, with a recorded SHA-256. Do not print raw evidence or secrets. A path/hash is not proof of collector isolation; inspect that separately. |
+
+The checker accepts `--run-root`, `--observer-root`, and an observer-private `--manifest`. The manifest has `schema_version: 1`, `scenario: "T04"` or one T06 ID, `plan_sha256`, `source_manifest_sha256`, and `artifacts` mapping required names to `{ "path": "relative/name", "sha256": "64 hex" }`. T04 names: `case_preflight`, `host_trace`, `pause_resume`, `clean_replay_and_controls`, `native_review`, `workspace_diff`, `cost_and_help`, `final_output`, `cleanup`. T06 names: `challenge_input`, `host_trace`, `contrary_and_controls`, `native_review`, `updated_claim_and_output`, `cost_and_cleanup`. These are private file inventories, not a new research lifecycle or a result schema.
+
+T06 IDs follow the prewritten #162 inventory: F01 printed success without effect; F02 unreachable precondition; F03 introduced defect; F04 injected impact-bearing state; F05 disabled protection; F06 extra privilege or actor mismatch; F07 stale claim/review; F08a–d incompatible actors, builds, resources, and timing; L01 refuted A with distinct open B; L02 legitimately refuted lead; L03 stop with an unreviewed lead. The prior detailed matrix and its fixture inputs are untracked in the source checkout at this branch point, so this checker does not claim they are available here. Freeze each challenge's exact inputs and expected bounded disposition before its live execution; use a separate run/manifest for each row. F06's real OS-privilege dimension needs independently qualified evidence beyond a synthetic actor label.
+
+After a qualified live run, save a private repeatable inventory command and output:
+
+```sh
+umask 077
+python3 evals/native-qualification/smoke/check_native_acceptance_inventory.py \
+  --run-root "$RUN_ROOT" --observer-root "$OBSERVER_ROOT" \
+  --manifest "$OBSERVER_ROOT/manifest.json" \
+  > "$OBSERVER_ROOT/inventory-report.json"
+```
+
+The command returns a JSON check report. `inventory_complete_for_operator_review` means only that the listed bytes and CLI receipt relationships exist. The operator must still examine original effect provenance, the clean replay/control, material pause state, native review reasoning, cost/help, redaction, and cleanup before assigning #160/#162 pass/fail. An incomplete run returns exit 2 and a list of failed checks. The only provider-free self-check uses synthetic private files and expects missing evidence, a stale artifact, a different resume session, and an unassessed reviewer to fail. No provider, Docker service, or target is called.
+
+Run the synthetic CLI smoke from the repository root with `PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_native_acceptance_inventory_test.py`. Expected output starts `PASS:` and ends `provider_calls=0 target_calls=0`. This confirms only the inventory checker's fail-closed behavior; its synthetic fixtures are never native qualification evidence.

@@ -45,7 +45,7 @@ CONTROL_SHA = {
     'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': '150ea1019ea2c68e908f4e5306ef89cd315591e6d5c859cf6812e02c29b70be6',
+    'evals/native-qualification/kanboard_native_capture.py': '07f05b23ba56a58cb5c475cec5f10942fd443041135c0c1987ac2768838c6d8c',
     'evals/native-qualification/smoke/kanboard_effect_probe.php': 'f49420150c9dab5b4d228d5a62d70f29b008a4be546d35c641227e14ea0e8feb',
     'evals/native-qualification/smoke/kanboard_effect_collector.php': '4560f3ed8b01cedc9b3135a9ad4a05e4cf5d3ca9d65c689234bd443fcd511f02',
 }

@@ -1,0 +1,19 @@
+# T03 live reviewer material: checks before implementation
+
+This change preserves material from one already authorized native reviewer turn
+for a later, separate post-stop assessment. It does not grant review credit.
+The existing `review-<role>.json` remains a single immutable write. The new
+`material` member is a projection of the transient native stdout, not the raw
+stdout, shell command, shell output, target body, or native store.
+
+| Failure | Required check |
+| --- | --- |
+| Missing/changed packet, wrong reviewer session, dispatch, stdout digest, or trace digest | Return a held projection with no conclusion or action. |
+| Reviewer did not read all packet files or verify their hashes, returned malformed JSON, or omitted required conclusion fields | Return a held projection. The existing assessment remains unfinished. |
+| Reviewer shell action failed, has empty output, is in another session, or merely appears in model prose | Do not record it as a completed shell action; no eligible action means held. |
+| Tool command/output contains a secret or a large raw body | Save only action line and hashes; never save command or output text. |
+| Conclusion contains credential-like text, private host path, or exceeds the bounded projection | Return a held projection with no conclusion. Do not write the unsafe text. |
+| Native stdout is oversized, has too many events/actions, duplicate JSON fields, or nonfinite JSON values | Return a held projection and avoid unbounded parsing or output. |
+| Stop occurs before independent target effect, control, or process-origin proof | Preserve the original `assessment.status=unfinished`; the projection is evidence only. |
+
+Provider-free check: `PYTHONDONTWRITEBYTECODE=1 python3 experiments/native-review-qualification/check_live_review_material.py --output /absolute/new/private-output`. Expected `PASS`, one `result.json`, and no Docker, provider, or target call. The check uses synthetic packet and native-event bytes. A fresh live reviewer and later successor assessment remain separate work.

@@ -40,7 +40,7 @@ CONTROL_SHA = {
     'experiments/native-network-preflight/v2-effect-windows/native_run.py': '759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f',
     'experiments/native-network-preflight/v2-effect-windows/_native_stop_owner.py': 'dca06e8f2472dda294f6551dc16a31791338552a318ee26a1d05146ef148f175',
     'experiments/native-network-preflight/v2-effect-windows/producer_stop.py': '94d7d3db11c1215ac6c4adbcf2a7fa6758e078faa5681ed442230835198a6cdd',
-    'experiments/native-review-qualification/fresh_review.py': 'ee5875bb5585aa80bf4a30291a1c7b5a4cfe0d317bebb774e4aee1e9e4763e42',
+    'experiments/native-review-qualification/fresh_review.py': '2947620402f611c9944118386efd1f46dbaf25c6235d699ad260b9ff99bbd3d5',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
     'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
     'tools/native_effect_recovery.py': 'a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c',

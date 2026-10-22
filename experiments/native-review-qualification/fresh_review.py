@@ -266,6 +266,128 @@ def _usage(run_root, reviewer_role, native_api):
     return rows
 
 
+def project_review_material(packet_dir, pin, invocation, reviewer_stdout, *, public_bytes):
+    """Keep bounded reviewer evidence while transient native stdout still exists."""
+    held = lambda reason: {'kind': 'native-review-material-v1', 'status': 'held',
+                           'reason': reason, 'input_id': pin['input_id']}
+    native = invocation.get('native')
+    if (not verify_packet(packet_dir, pin)
+            or invocation.get('status') != 'native_turn_observed_unassessed'
+            or not isinstance(native, dict) or not isinstance(reviewer_stdout, str)
+            or not callable(public_bytes)):
+        return held('review_material_input_unavailable')
+    raw = reviewer_stdout.encode()
+    if (not 0 < len(raw) <= 16 * 1024 * 1024
+            or _sha(raw) != native.get('stdout_sha256')
+            or not isinstance(native.get('dispatch_id'), str)
+            or not re.fullmatch(r'[0-9a-f]{32}', native['dispatch_id'])
+            or not isinstance(native.get('native_trace_sha256'), str)
+            or not SHA256.fullmatch(native['native_trace_sha256'])
+            or invocation.get('session_id') != native.get('session_id')
+            or invocation.get('reviewer_role') != native.get('role')):
+        return held('review_material_native_binding_invalid')
+    try:
+        request = json.loads((Path(packet_dir) / 'REQUEST.json').read_bytes(),
+                             object_pairs_hook=_unique_pairs)
+        if (request.get('input_id') != pin['input_id']
+                or request.get('source_manifest_sha256') !=
+                    native.get('review_target_source_sha256')):
+            return held('review_material_packet_binding_invalid')
+        session = invocation['session_id']
+        required = {'REQUEST.json', *request['files']}
+        reads, hashes, texts, actions = set(), set(), [], []
+        text_bytes = 0
+        lines = reviewer_stdout.splitlines()
+        if len(lines) > 10000:
+            return held('review_material_event_limit')
+        def reject_nonfinite(value):
+            raise ValueError('nonfinite_number')
+        for number, line in enumerate(lines, 1):
+            event = json.loads(line, object_pairs_hook=_unique_pairs,
+                               parse_constant=reject_nonfinite)
+            if not isinstance(event, dict) or event.get('sessionID') != session:
+                continue
+            part = event.get('part')
+            if not isinstance(part, dict):
+                continue
+            if part.get('type') == 'text' and isinstance(part.get('text'), str):
+                texts.append(part['text'])
+                text_bytes += len(part['text'].encode())
+                if text_bytes > 128 * 1024:
+                    return held('review_material_conclusion_limit')
+                continue
+            if part.get('type') != 'tool' or not isinstance(part.get('state'), dict):
+                continue
+            state = part['state']
+            if state.get('status') != 'completed' or state.get('error'):
+                continue
+            tool_input, tool_output = state.get('input'), state.get('output')
+            if (part.get('tool') == 'read' and isinstance(tool_input, dict)
+                    and isinstance(tool_output, str) and tool_output):
+                path = tool_input.get('filePath', tool_input.get('path'))
+                if isinstance(path, str) and path.startswith('/handoff/'):
+                    name = path[len('/handoff/'):]
+                    if name in required:
+                        reads.add(name)
+            if (part.get('tool') != 'shell' or not isinstance(tool_input, dict)
+                    or not isinstance(tool_input.get('command'), str)
+                    or not tool_input['command'] or not isinstance(tool_output, str)
+                    or not tool_output):
+                continue
+            command = tool_input['command']
+            try:
+                words = shlex.split(command)
+            except ValueError:
+                words = []
+            if words in (['sha256sum', '/handoff/*'],
+                         ['sha256sum', *('/handoff/' + name for name in sorted(required))]):
+                expected = {pin['files'][name] + '  /handoff/' + name for name in required}
+                rows = tool_output.splitlines()
+                if set(rows) == expected and len(rows) == len(expected):
+                    hashes = required
+            actions.append({'line': number,
+                            'command_sha256': _sha(command.encode()),
+                            'input_sha256': _sha(json.dumps(tool_input, sort_keys=True,
+                                                             default=str).encode()),
+                            'output_sha256': _sha(json.dumps(tool_output, sort_keys=True,
+                                                              default=str).encode())})
+            if len(actions) > 100:
+                return held('review_material_action_limit')
+        if (not texts or not actions or reads != required and hashes != required):
+            return held('review_material_check_unavailable')
+        outcome = json.loads(''.join(texts), object_pairs_hook=_unique_pairs,
+                             parse_constant=reject_nonfinite)
+        if (not isinstance(outcome, dict) or outcome.get('input_id') != pin['input_id']
+                or outcome.get('decision') not in DECISIONS
+                or not isinstance(outcome.get('checked_link'), str)
+                or not outcome['checked_link'].strip()
+                or any(not isinstance(outcome.get(key), list) for key in
+                       ('valid_base', 'missing_transitions', 'contrary',
+                        'lead_dispositions', 'limits'))
+                or not isinstance(outcome.get('next_check'), str)
+                or any(not isinstance(lead, dict) or any(
+                    not isinstance(lead.get(key), str) or not lead[key].strip()
+                    for key in ('basis_examined', 'uncertain_condition', 'next_check', 'decision'))
+                    for lead in outcome['lead_dispositions'])):
+            return held('review_material_conclusion_invalid')
+        value = {'kind': 'native-review-material-v1', 'status': 'captured',
+                 'input_id': pin['input_id'], 'packet_pin': pin,
+                 'packet_request_sha256': pin['files']['REQUEST.json'],
+                 'source_revision': request['source_revision'],
+                 'evidence_revision': request['evidence_revision'],
+                 'dispatch_id': native['dispatch_id'], 'session_id': session,
+                 'stdout_sha256': native['stdout_sha256'],
+                 'native_trace_sha256': native['native_trace_sha256'],
+                 'outcome': outcome, 'outcome_sha256': _sha(_json(outcome)),
+                 'shell_actions': actions}
+        if (public_bytes(_json(value)) != _json(value)
+                or len(_json(value)) > 1024 * 1024):
+            return held('review_material_unsafe_or_oversize')
+        return value
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, RuntimeError):
+        return held('review_material_unavailable')
+
+
 def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api, invoke_native,
                         allowance_snapshot, run_active, public_bytes,
                         independent_check=None):
@@ -314,7 +436,7 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
                            include_raw=True)
     raw = native.get('_raw_stdout')
     native = {key: native.get(key) for key in ('status', 'dispatch_id', 'role', 'session_id',
-              'stdout_sha256', 'stderr_sha256', 'event_types', 'tool_names', 'pool_before',
+              'stdout_sha256', 'stderr_sha256', 'native_trace_sha256', 'event_types', 'tool_names', 'pool_before',
               'pool_after', 'review_target_id', 'review_target_source_sha256')}
     try:
         after = _allowance(allowance_snapshot(run_root))
@@ -340,6 +462,8 @@ def invoke_fresh_review(run_root, packet_dir, pin, reviewer_role, *, native_api,
                'session_usage': usage}
     receipt['assessment'] = assess_review(packet, pin, receipt, raw, independent_check,
                                           public_bytes=public_bytes)
+    receipt['material'] = project_review_material(packet, pin, receipt, raw,
+                                                  public_bytes=public_bytes)
     return receipt
 
 

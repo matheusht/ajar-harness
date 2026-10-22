@@ -44,19 +44,23 @@ engagements remain unchanged. Other blind behavioral and GEPA adapters stay sepa
 
 The candidate native route uses `tools/native_research.py prepare`, `research`,
 `resume`, `review`, `status`, `stop`, and `recover-start` on a persistent
-`--run-root`. `prepare` binds
-explicit source, brief, scope digest, target runtime, image, model and pinned
-relay/CA inputs. The pinned Kanboard case also stages observer hooks and three
-target copies with `capture-stage`; current qualification `start --approval`
-requires a human-authored approval bound to the plan, stage files, and seeded
-database bytes, and owns the bounded native session. A future
-standing grant needs exact target/model/effect/expiry binding. `resume` names the exact session and
-prompt; `stop` requests exact owned-resource shutdown. Research files live in
-the run root, with observer capture and sanitized reviewer handoff.
-The review command takes the frozen handoff and creates a fresh, separate review,
-but its independent host check remains unavailable. The observer receipts
-also hold credential route and native request origin as unproven.
-The native route has no dependency on a legacy queue or record kernel.
+run root; consult each command's `--help` for current arguments. For the pinned
+Kanboard T01 API-only route, `prepare` opts into `--t01-capture
+--origin-ingress`; `--kanboard-capture` selects the separate UI capture route.
+`capture-stage` binds each private target copy, and the qualification approval
+binds the frozen plan and target state. A future standing grant needs exact
+target/model/effect/expiry binding. After stop, `reconcile-origin-transport`
+assesses process-bound transport origin, while `reconcile-t01-semantic`
+separately assesses the selected API effect and controls from frozen receipts
+and target state. Neither establishes clean replay or fixed-control
+qualification. `assess-poststop-review` composes the reviewer turn with
+reviewer-target origin and semantic evidence; its reviewer-target material-link
+repair is still in flight, so a candidate result must not be promised until
+that repair lands and the live workflow qualifies. Offline checks exercise
+source and synthetic evidence only; they do not qualify a provider or target.
+Research files live in the run root, with observer capture and sanitized
+reviewer handoff. The route preserves the legacy queue and record path for
+existing work and has no dependency on either.
 
 ## Public-workflow checks to execute after the last edit
 

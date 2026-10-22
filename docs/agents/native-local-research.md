@@ -22,40 +22,31 @@ decision does not activate this route.
    ambient home, Git history, plugins, MCP, or external mounts. Use a
    persistent run root outside `engagements/<id>`; never initialize the legacy
    queue or record kernel for this native task.
-3. Use `python3 tools/native_research.py prepare --help` for the current
-   source/brief/scope, target-runtime, image, model, and pinned relay/CA
-   inputs. Inspect its frozen plan. For the pinned Kanboard case, pass
-   `--kanboard-capture --mutable-path data` and point `--target-command` at a
-   JSON file containing `["php","-S","0.0.0.0:<target-port>","-t","/target"]`,
-   with the same port passed to `--target-port`. Seed each of the three private
-   target `data/db.sqlite` copies, and call `capture-stage` once per target
-   (`target`, `review-target-1`, `review-target-2`) with that copy's S/Q/T/B
-   IDs. The private, human-authored approval JSON has exactly `kind` set to
-   `native-research-live-approval-v1`, `plan_sha256`, `scope_sha256`,
-   `provider_route`, `provider_authority`, `model`, `image_id`,
-   `target_image_id`, `limits`, `approved_by`, `approved_at`, and `expires_at`.
-   For Kanboard it also has `capture_stage_sha256` and
-   `capture_target_db_sha256`, each mapping all three target names to their
-   SHA-256 digests. Copy the frozen plan values exactly; use UTC timestamps
-   formatted `YYYY-MM-DDTHH:MM:SSZ` and an expiry within 24 hours. After a
-   scoped #165 adopt, standing permission still needs exact
-   target/model/effect/expiry binding.
-   Call `start --run-root <absolute-path> --approval <file>` in a foreground
-   owner terminal. Then call `research --run-root <absolute-path>` for the
-   frozen brief's first native session. The runner owns the target and
-   research containers and separate capture collectors. Its app receipts
-   currently hold credential route and native request origin as unproven;
-   they are not positive original-observation proof. Save observations and
-   contrary results as ordinary research files in the run root.
-4. For continuation, use `resume --run-root <absolute-path> --session
-   <exact-native-session> --prompt-file <file>` after inspecting the previous
-   result and unresolved effects. Keep a material strong lead as unfinished
-   when time or access stops work. For stop, use `stop --run-root
-   <absolute-path>` and inspect `status --run-root <absolute-path>` with the
-   runner's actual cleanup and any remaining effects. After owner loss, use
-   `recover-start --run-root <absolute-path>` only for the runner's exact
-   verified-stopped resources. An unknown dispatched effect stays unknown
-   until reconciled.
+3. Use `python3 tools/native_research.py prepare --help` as the source for
+   current preparation inputs and inspect the frozen plan. For the pinned
+   Kanboard T01 API-only route, opt into both `--t01-capture` and
+   `--origin-ingress`; `--kanboard-capture` is the separate UI capture route.
+   Use `capture-stage --help` for staging each private target copy. Read the
+   current `start`, `research`, `resume`, and `stop` help before invoking them;
+   keep the human-authored approval bound to the frozen plan and exact target
+   state. After the exact run has stopped, use the relevant `reconcile-*`
+   command help and reconcile the selected dispatch. Transport attribution
+   from `reconcile-origin-transport` is not semantic effect proof;
+   `reconcile-t01-semantic` separately checks the frozen T01 API receipts and
+   stopped target state. `assess-poststop-review` still requires reviewer
+   target and material-link proof. That repair is in flight, so do not treat
+   its output as a review candidate until the repair and live qualification
+   pass. These source and offline checks do not qualify a provider or target.
+   After a scoped #165 adopt, any standing permission still needs exact
+   target/model/effect/expiry binding. Save observations and contrary results
+   as ordinary research files in the run root.
+4. For continuation, inspect the previous result and unresolved effects, then
+   use `resume --help` to continue the exact native session. Keep a material
+   strong lead as unfinished when time or access stops work. Use `stop --help`
+   and `status --help` to stop the run and inspect actual cleanup and remaining
+   effects. After owner loss, use `recover-start --help` only for the runner's
+   exact verified-stopped resources. An unknown dispatched effect stays
+   unknown until reconciled from stopped-run evidence.
 
 Research can choose and revise experiments. Budget, user, safety, and blocked
 stops are honest stopping reasons; none implies exhaustive coverage. Native
@@ -66,9 +57,9 @@ disposition, or formal engagement closure.
 ## Review and result
 
 The public `review` command takes an observer-selected frozen packet and a fresh
-reviewer slot. It remains unfinished while the independent host effect check is
-unavailable, even if OpenCode returns a review. Freeze a sanitized observer-owned
-handoff for each fresh independent reviewer.
+reviewer slot. A returned review remains unfinished until the independent
+reviewer-target and material-link proof is repaired and qualified. Freeze a
+sanitized observer-owned handoff for each fresh independent reviewer.
 The reviewer must see the exact claim/evidence version, original-target
 effect origin and reachability, contrary evidence, and what remains uncertain.
 A changed material claim or evidence invalidates the affected conclusion and

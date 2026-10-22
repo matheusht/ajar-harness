@@ -44,7 +44,44 @@ this checkout. It creates disposable private SQLite databases with the actual
 Kanboard table/receipt shapes, calls the helper, checks the positive and representative failure branches above, and
 saves no durable target data. A pass is an offline helper check only: no PHP
 application, Docker, model, provider, native producer, or live target is run.
-Actual #161 acceptance still needs a bound native tool/host-exec window, PR187
-collector integration, exact producer freeze, and a real application recovery
-exercise at the pinned source/image. Other Kanboard operations and arbitrary
-research prompts remain `unknown_effect`.
+Actual #161 acceptance still needs a live single-POST interruption, exact
+producer freeze, and real-application recovery at the pinned source/image.
+Other Kanboard operations and arbitrary research prompts remain
+`unknown_effect`.
+
+## Runner integration failure checks (written before implementation)
+
+The normal `resume` CLI may explicitly select this one S10 operation after a
+prior unselected turn prepared the broker's A session and CSRF token.
+The selected turn must bind the already sealed native dispatch window, staged
+S/Q/T/B IDs, unique active A manager in S, attested researcher and observer IPs,
+and private collector DB before `opencode run`. Missing capture, changed stage,
+wrong role/target, ambiguous A, missing or changed window/topology, or any helper
+arming failure must leave the durable dispatch `unknown_effect` and must not call
+the native turn. An unselected turn must retain its existing behavior and create
+no recovery sidecar.
+
+Reconciliation is an explicit post-stop read. A live run, absent or incomplete
+final/recovery record, missing exact REVOKED/manifest/host snapshot proof, missing
+or changed frozen collector digest, acknowledged dispatch, or an unarmed turn
+must return `hold_unknown`. It must never retry the original call, resume the
+run, or rewrite the dispatch. A valid stopped record delegates only the one
+declared S10 effect to the helper. The broker's backend TCP source is loopback;
+the helper must check the broker-recorded peer against the attested researcher
+IP, broker handle A, and broker request ID, while continuing to hold native
+process-origin confirmation separately. A direct or malformed receipt holds.
+
+Provider-free checks should exercise selected arming, unselected behavior,
+fail-before-native paths, post-stop refusal, and the broker receipt's positive
+and negative shapes. Passing checks show local wiring only; live interruption,
+recovery, and exact native process origin remain unproven.
+
+Run `python3 evals/native-qualification/smoke/check_native_role_grant_integration.py`
+from this checkout for the selected-turn and post-stop fixture checks. In the
+real workflow, first use an unselected turn to prepare A's broker session and
+CSRF token, then select exactly one planned S10 POST with
+`resume --observe-kanboard-role-grant`. After the owner exits with
+`stopped_complete`, use `reconcile-role-grant --run-root ... --dispatch-id ...`.
+Any extra request in that selected window produces `hold_unknown`; it is not a
+no-effect verdict. The result never permits retrying the original dispatch or
+resuming the stopped run.

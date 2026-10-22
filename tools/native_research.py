@@ -43,6 +43,7 @@ CONTROL_SHA = {
     'experiments/native-review-qualification/fresh_review.py': 'ee5875bb5585aa80bf4a30291a1c7b5a4cfe0d317bebb774e4aee1e9e4763e42',
     'tools/docker_session_runtime.py': '9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651',
     'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
+    'tools/native_effect_recovery.py': '789b8fe02f67251a2a9bca4c60f40a779e79d2f8917be7d0efea3093d27f592e',
 }
 CAPTURE_FILES = {
     'evals/native-qualification/kanboard_native_capture.py': '4f596f91f787364376c80a24774861e8f26b98033363db93fa31bd749f351cbd',
@@ -456,6 +457,78 @@ def _load_origin_gate(root: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_recovery_module(root: Path):
+    path = _controls(root) / 'tools/native_effect_recovery.py'
+    if _sha(_file(path)) != CONTROL_SHA['tools/native_effect_recovery.py']:
+        _fail('recovery_helper_pin_mismatch')
+    spec = importlib.util.spec_from_file_location('native_effect_recovery', path)
+    if spec is None or spec.loader is None:
+        _fail('recovery_helper_unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _kanboard_recovery_window(root: Path, dispatch_id: str, role: str) -> tuple[dict, dict, dict]:
+    if role != 'resume' or 'kanboard_capture' not in _plan(root):
+        _fail('kanboard_recovery_turn_unqualified')
+    slot = _controls(root) / 'observer/target'
+    stage = _read_json(slot / 'stage.json')
+    dispatch = _read_json(_controls(root) / 'dispatch' / (dispatch_id + '.json'))
+    window = _read_json(slot / ('window-' + dispatch_id + '.json'))
+    ids = stage.get('ids')
+    topology = window.get('topology')
+    if (stage.get('kind') != 'kanboard-native-capture-stage-v1'
+            or stage.get('target') != 'target'
+            or stage.get('plan_sha256') != _sha(root / 'plan.json')
+            or stage.get('source_manifest_sha256') != CAPTURE_SOURCE_SHA
+            or stage.get('controller_sha256') != _sha(_file(
+                root / 'target/app/Controller/ProjectPermissionController.php'))
+            or not isinstance(ids, dict) or set(ids) != {'s', 'q', 't', 'b'}
+            or any(type(value) is not int or value < 1 for value in ids.values())
+            or ids['s'] == ids['q']
+            or window.get('kind') != 'kanboard-native-window-v1'
+            or window.get('dispatch_id') != dispatch_id or window.get('target') != 'target'
+            or window.get('role') != role or window.get('session_id') != dispatch.get('session_id')
+            or window.get('dispatch_sha256') != _sha(_controls(root) / 'dispatch' / (dispatch_id + '.json'))
+            or dispatch.get('status') != 'unknown_effect' or dispatch.get('role') != role
+            or not isinstance(topology, dict)
+            or topology.get('status') != 'topology_attested_origin_and_credentials_held'
+            or topology.get('target') != 'target'
+            or topology.get('collector_db') != str(slot / 'receipts/receipts.sqlite')
+            or not isinstance(topology.get('native_client_ip'), str)
+            or not isinstance(topology.get('app_observer_ip'), str)):
+        _fail('kanboard_recovery_window_changed')
+    return stage, window, topology
+
+
+def _arm_kanboard_role_grant(root: Path, dispatch_id: str, role: str) -> dict:
+    stage, window, topology = _kanboard_recovery_window(root, dispatch_id, role)
+    ids = stage['ids']
+    db_path = _file(root / 'target/data/db.sqlite', private=True)
+    try:
+        with closing(sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True)) as db:
+            managers = db.execute(
+                'SELECT pu.user_id FROM project_has_users pu JOIN users u ON u.id=pu.user_id '
+                "WHERE pu.project_id=? AND pu.role='project-manager' "
+                "AND u.role='app-user' AND u.is_active=1", (ids['s'],)).fetchmany(2)
+    except sqlite3.DatabaseError:
+        _fail('kanboard_recovery_actor_unavailable')
+    if len(managers) != 1 or type(managers[0][0]) is not int:
+        _fail('kanboard_recovery_actor_ambiguous')
+    module = _load_recovery_module(root)
+    result = module.arm_kanboard_role_grant(
+        root, dispatch_id, s=ids['s'], q=ids['q'], t=ids['t'], actor_a=managers[0][0],
+        subject_b=ids['b'], researcher_ip=topology['native_client_ip'],
+        app_ip=topology['app_observer_ip'], collector_db=Path(topology['collector_db']))
+    sidecar = _read_json(_controls(root) / 'recovery' / (dispatch_id + '.json'))
+    if (sidecar.get('collector_max_id') != window.get('collector_max_id_before')
+            or sidecar.get('collector_prefix_count') != window.get('collector_count_before')
+            or sidecar.get('collector_prefix_sha256') != window.get('collector_prefix_sha256')):
+        _fail('kanboard_recovery_window_advanced')
+    return result
 
 
 def prepare(args: argparse.Namespace) -> dict:
@@ -1494,7 +1567,8 @@ def _unresolved_dispatches(root: Path) -> list[str]:
 
 
 def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
-                  include_raw: bool = False, before_dispatch=None) -> dict:
+                  include_raw: bool = False, before_dispatch=None,
+                  kanboard_role_grant: bool = False) -> dict:
     root = _private_root(Path(run_root))
     if (role not in ('researcher', 'resume', 'reviewer-1', 'reviewer-2')
             or not SESSION_RE.fullmatch(session_id) or not isinstance(prompt, str)
@@ -1504,6 +1578,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         _fail('native_prompt_credential_like')
     if before_dispatch is not None and not callable(before_dispatch):
         _fail('native_observer_hook_invalid')
+    if kanboard_role_grant and role != 'resume':
+        _fail('kanboard_recovery_turn_unqualified')
     if role.startswith('reviewer-'):
         target = 'review-target-' + role[-1]
         plan = _plan(root)
@@ -1535,6 +1611,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             if 'kanboard_capture' in _plan(root):
                 target = 'target' if role in ('researcher', 'resume') else 'review-target-' + role[-1]
                 _load_capture_module(root).bind_dispatch(root, target, dispatch_id)
+            if kanboard_role_grant:
+                _arm_kanboard_role_grant(root, dispatch_id, role)
             if before_dispatch is not None:
                 before_dispatch(root, dispatch_id)
             result = _native_exec(root, role,
@@ -1890,6 +1968,93 @@ def recover_start(run_root: Path) -> dict:
         return recovery
 
 
+def _poststop_role_grant_boundary(root: Path, dispatch_id: str) -> Path:
+    plan = _verified_plan(root)
+    if 'kanboard_capture' not in plan:
+        _fail('kanboard_recovery_not_configured')
+    controls = _controls(root)
+    dispatch = _read_json(controls / 'dispatch' / (dispatch_id + '.json'))
+    if dispatch.get('dispatch_id') != dispatch_id or dispatch.get('status') != 'unknown_effect':
+        _fail('kanboard_recovery_dispatch_not_unknown')
+    _, _, topology = _kanboard_recovery_window(root, dispatch_id, dispatch.get('role'))
+    final_path = controls / 'final.json'
+    recovery_path = controls / 'recovery.json'
+    if final_path.exists():
+        terminal = _read_json(final_path)
+        stopped = terminal.get('status') == 'stopped_complete' and terminal.get('native_stop', {}).get('status') == 'stopped'
+    elif recovery_path.exists():
+        terminal = _read_json(recovery_path)
+        stopped = terminal.get('status') == 'recovered_exact_resources' and terminal.get('native_state') == 'stopped'
+    else:
+        _fail('kanboard_recovery_run_not_stopped')
+    if (not stopped or terminal.get('host_snapshot', {}).get('status') != 'complete'
+            or terminal.get('capture_stop', {}).get('status') != 'complete'
+            or terminal.get('cleanup', {}).get('status') != 'complete'
+            or terminal.get('capture_cleanup', {}).get('status') != 'complete'):
+        _fail('kanboard_recovery_run_not_stopped')
+    manifest_path = controls / 'producer-manifest.json'
+    manifest = _read_json(manifest_path)
+    resources = _read_json(controls / 'resources.json')
+    run = _read_json(controls / 'native-state/RUN.json')
+    revoked_path = controls / 'native-state/REVOKED'
+    revoked = _read_json(revoked_path)
+    ids = [row.get('id') for row in resources.get('resources', []) if row.get('kind') == 'container']
+    manifest_ids = [row.get('id') for row in manifest.get('producers', [])]
+    manifest_sha = _sha(manifest_path)
+    revoked_sha = _sha(revoked_path)
+    if (len(ids) != 8 or len(set(ids)) != 8 or not all(isinstance(value, str) and HEX_RE.fullmatch(value) for value in ids)
+            or ids != manifest_ids or run.get('ids') != ids or revoked.get('ids') != ids
+            or run.get('manifest_sha256') != manifest_sha
+            or revoked.get('manifest_sha256') != manifest_sha
+            or revoked.get('producers_verified_stopped') is not True):
+        _fail('kanboard_recovery_stop_proof_changed')
+    snapshot_path = controls / 'host-snapshot.json'
+    snapshot = _read_json(snapshot_path)
+    if (terminal['host_snapshot'].get('receipt_path') != str(snapshot_path)
+            or terminal['host_snapshot'].get('receipt_sha256') != _sha(snapshot_path)
+            or snapshot.get('status') != 'complete'
+            or snapshot.get('plan_sha256') != _sha(root / 'plan.json')
+            or snapshot.get('native_stop', {}).get('manifest_sha256') != manifest_sha
+            or snapshot.get('native_stop', {}).get('revoked_sha256') != revoked_sha):
+        _fail('kanboard_recovery_snapshot_changed')
+    collector = _file(Path(topology['collector_db']), private=True)
+    frozen = _read_json(controls / 'observer/target/frozen.json')
+    try:
+        with closing(sqlite3.connect(collector.as_uri() + '?mode=ro', uri=True)) as db:
+            count, maximum = db.execute('SELECT COUNT(*),COALESCE(MAX(id),0) FROM receipts').fetchone()
+    except sqlite3.DatabaseError:
+        _fail('kanboard_recovery_collector_unavailable')
+    if (frozen.get('kind') != 'kanboard-capture-frozen-v1' or frozen.get('target') != 'target'
+            or frozen.get('native_stop_kind') != 'REVOKED'
+            or frozen.get('native_stop_sha256') != revoked_sha
+            or frozen.get('producer_manifest_sha256') != manifest_sha
+            or frozen.get('sqlite_sha256') != _sha(collector)
+            or frozen.get('receipt_count') != count or frozen.get('last_receipt_id') != maximum):
+        _fail('kanboard_recovery_frozen_collector_changed')
+    return collector
+
+
+def reconcile_role_grant(run_root: Path, dispatch_id: str) -> dict:
+    """Observe one declared S10 effect only after exact owned stop and capture freeze."""
+    result = {'status': 'hold_unknown', 'dispatch_id': dispatch_id,
+              'scope': 'kanboard_b_q_role_grant_v1', 'retry_original': False,
+              'run_resume_allowed': False}
+    if not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id):
+        return dict(result, reason='dispatch_id_invalid')
+    try:
+        root = _private_root(Path(run_root))
+        with _owner_lock(root):
+            collector = _poststop_role_grant_boundary(root, dispatch_id)
+            before = _sha(collector)
+            observed = _load_recovery_module(root).reconcile_kanboard_role_grant(root, dispatch_id)
+            if _sha(collector) != before:
+                _fail('kanboard_recovery_collector_changed_during_read')
+            return observed
+    except (NativeResearchError, OSError, sqlite3.DatabaseError, TypeError, KeyError, ValueError) as error:
+        return dict(result, reason=str(error) if isinstance(error, NativeResearchError)
+                    else 'kanboard_recovery_unavailable')
+
+
 def status(run_root: Path) -> dict:
     root = _private_root(Path(run_root))
     plan = _plan(root)
@@ -1989,12 +2154,16 @@ def _parser() -> argparse.ArgumentParser:
     for name in ('status', 'stop', 'recover-start'):
         item = commands.add_parser(name)
         item.add_argument('--run-root', required=True)
+    reconcile_cmd = commands.add_parser('reconcile-role-grant', help='post-stop S10 uncertain-effect observation')
+    reconcile_cmd.add_argument('--run-root', required=True)
+    reconcile_cmd.add_argument('--dispatch-id', required=True)
     research_cmd = commands.add_parser('research', help='one native turn in the original researcher')
     research_cmd.add_argument('--run-root', required=True)
     resume_cmd = commands.add_parser('resume', help='one native turn in the same persistent researcher store')
     resume_cmd.add_argument('--run-root', required=True)
     resume_cmd.add_argument('--prompt-file', required=True)
     resume_cmd.add_argument('--session', required=True)
+    resume_cmd.add_argument('--observe-kanboard-role-grant', action='store_true')
     review_cmd = commands.add_parser('review', help='one fresh bounded reviewer on a frozen public packet')
     for name in ('run-root', 'observer-root', 'selection', 'selection-sha256'):
         review_cmd.add_argument('--' + name, required=True)
@@ -2018,6 +2187,8 @@ def main() -> int:
             result = recover_start(Path(args.run_root))
         elif args.command == 'status':
             result = status(Path(args.run_root))
+        elif args.command == 'reconcile-role-grant':
+            result = reconcile_role_grant(Path(args.run_root), args.dispatch_id)
         elif args.command in ('research', 'resume'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'
@@ -2039,14 +2210,16 @@ def main() -> int:
                 existing = native_api(root, role, 'session.get', '--param', 'sessionID=' + session)
                 if (existing.get('data') or {}).get('id') != session:
                     _fail('resume_session_not_in_researcher_store')
-            result = invoke_native(root, role, session, prompt)
+            result = invoke_native(root, role, session, prompt,
+                                   kanboard_role_grant=(args.observe_kanboard_role_grant
+                                                        if role == 'resume' else False))
         elif args.command == 'review':
             result = review(Path(args.run_root), Path(args.observer_root), Path(args.selection),
                             args.selection_sha256, args.role)
         else:
             _fail('command_invalid')
         print(json.dumps(result, sort_keys=True, allow_nan=False))
-        return 0 if (result.get('status') not in ('unknown_effect', 'unfinished', 'start_incomplete',
+        return 0 if (result.get('status') not in ('unknown_effect', 'hold_unknown', 'unfinished', 'start_incomplete',
                                                 'unsafe_or_unresolved', 'stopped_evidence_incomplete')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:

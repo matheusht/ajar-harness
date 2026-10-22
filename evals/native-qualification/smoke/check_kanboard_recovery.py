@@ -66,12 +66,14 @@ def projection(role=None):
             'b_q_group_role_count': 0}
 
 
-def effect(db_path, collector, *, actor=2, source='172.30.0.8', request_id='b' * 24,
+def effect(db_path, collector, *, actor=2, source='127.0.0.1', request_id='b' * 24,
            before=None, after=None, duplicate=False, **changes):
     with closing(sqlite3.connect(db_path)) as db, db:
         db.execute("INSERT INTO project_has_users VALUES (2,3,'project-manager')")
     row = {'kind': 'web_add', 'request_id': request_id, 'method': 'POST',
-           'remote_addr': source, 'php_pid': 123, 'controller_sha256': 'c' * 64,
+           'remote_addr': source, 'broker_peer_ip': '172.30.0.8',
+           'broker_handle': 'A', 'broker_request_id': 'f' * 32,
+           'php_pid': 123, 'controller_sha256': 'c' * 64,
            'actor_id': actor, 'app_role': 'app-user', 'effective_project_role': 'project-manager',
            'route_project_id': 1, 'body_project_id': 2, 'body_user_id': 3,
            'task_id': 0, 'status': 302, 'marker_present': False,
@@ -116,7 +118,10 @@ def main():
     one_case('target state without receipt', target_only)
     one_case('duplicate app write', lambda r, d, p, c, x: effect(p, c, duplicate=True))
     one_case('wrong actor', lambda r, d, p, c, x: effect(p, c, actor=3))
-    one_case('wrong source IP', lambda r, d, p, c, x: effect(p, c, source='172.30.0.9'))
+    one_case('wrong backend source IP', lambda r, d, p, c, x: effect(p, c, source='172.30.0.9'))
+    one_case('wrong broker peer IP', lambda r, d, p, c, x: effect(p, c, broker_peer_ip='172.30.0.9'))
+    one_case('wrong broker handle', lambda r, d, p, c, x: effect(p, c, broker_handle='B'))
+    one_case('missing broker request ID', lambda r, d, p, c, x: effect(p, c, broker_request_id=''))
     one_case('stale prestate', lambda r, d, p, c, x: effect(p, c, before=projection('project-viewer')))
     one_case('wrong route', lambda r, d, p, c, x: effect(p, c, route_project_id=2))
     one_case('wrong status', lambda r, d, p, c, x: effect(p, c, status=403))
@@ -147,7 +152,7 @@ def main():
             raise AssertionError('preexisting B-Q role accepted')
         assert not (root / 'controls/recovery' / (dispatch_id + '.json')).exists()
         print('PASS preexisting role rejects before dispatch')
-    print('PASS 17 offline checks; zero model, provider, Docker or application calls')
+    print('PASS 20 offline checks; zero model, provider, Docker or application calls')
 
 
 if __name__ == '__main__':

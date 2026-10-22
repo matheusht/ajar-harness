@@ -28,6 +28,7 @@ KIND = 'kanboard_b_q_role_grant_v1'
 CONTROLLER = Path('app/Controller/ProjectPermissionController.php')
 HEX64 = re.compile(r'[0-9a-f]{64}\Z')
 HEX24 = re.compile(r'[0-9a-f]{24}\Z')
+HEX32 = re.compile(r'[0-9a-f]{32}\Z')
 MAX_RECEIPTS = 5000
 
 
@@ -346,7 +347,11 @@ def _reconcile(root: Path, dispatch_id: str) -> dict:
             or state != expected or type(rowid) is not int or rowid < 1
             or new[0][1] != sidecar.get('app_ip')
             or receipt.get('kind') != 'web_add' or receipt.get('method') != 'POST'
-            or receipt.get('remote_addr') != sidecar.get('researcher_ip')
+            or receipt.get('remote_addr') != '127.0.0.1'
+            or receipt.get('broker_peer_ip') != sidecar.get('researcher_ip')
+            or receipt.get('broker_handle') != 'A'
+            or not isinstance(receipt.get('broker_request_id'), str)
+            or not HEX32.fullmatch(receipt['broker_request_id'])
             or receipt.get('actor_id') != ids['actor_a'] or type(receipt.get('actor_id')) is not int
             or receipt.get('app_role') != 'app-user'
             or receipt.get('effective_project_role') != 'project-manager'
@@ -365,7 +370,8 @@ def _reconcile(root: Path, dispatch_id: str) -> dict:
         _fail('observation_changed_during_read')
     return {'status': 'effect_observed', 'dispatch_id': dispatch_id, 'scope': KIND,
             'effect_id': {'project_id': ids['q'], 'user_id': ids['subject_b'], 'rowid': rowid},
-            'request_id': receipt['request_id'], 'retry_original': False,
+            'request_id': receipt['request_id'],
+            'broker_request_id': receipt['broker_request_id'], 'retry_original': False,
             'run_resume_allowed': False}
 
 

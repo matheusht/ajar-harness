@@ -3312,15 +3312,18 @@ def review(run_root: Path, observer_root: Path, selection: Path,
 
 
 def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch_id: str,
-                                 effect_request_id: str, review: dict, material: dict,
+                                 effect_request_id: str, review_effect_request_id: str,
+                                 review: dict, material: dict,
                                  request: dict, trace: dict, reviewer_origin: dict,
-                                 semantic: dict | None, effect_origins: dict) -> dict:
+                                 semantic: dict | None, review_semantic: dict | None,
+                                 effect_origins: dict) -> dict:
     """Compose semantic controls with exact reviewer and effect process origins."""
     hold = lambda reason: {'status': 'held', 'reason': reason}
     if (role not in ('reviewer-1', 'reviewer-2')
             or not re.fullmatch(r'[0-9a-f]{32}', str(dispatch_id))
             or not re.fullmatch(r'[0-9a-f]{32}', str(effect_dispatch_id))
             or not re.fullmatch(r'[0-9a-f]{32}', str(effect_request_id))
+            or not re.fullmatch(r'[0-9a-f]{32}', str(review_effect_request_id))
             or dispatch_id == effect_dispatch_id):
         return hold('poststop_review_identity_invalid')
     if not isinstance(review, dict):
@@ -3364,6 +3367,7 @@ def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch
         return hold('poststop_reviewer_origin_claims_invalid')
     claimed_ids = []
     claimed_action_lines = set()
+    claim_lines_by_id = {}
     for claim in claims:
         if not isinstance(claim, dict) or not isinstance(claim.get('request_ids'), list):
             return hold('poststop_reviewer_origin_claims_invalid')
@@ -3381,6 +3385,8 @@ def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch
             return hold('poststop_reviewer_origin_claims_invalid')
         claimed_ids.extend(ids)
         claimed_action_lines.add(line)
+        for request_id in ids:
+            claim_lines_by_id[request_id] = line
     if (len(claimed_ids) != len(set(claimed_ids))
             or set(claimed_ids) != set(reviewer_origin['broker_request_ids'])):
         return hold('poststop_reviewer_origin_ids_disagree')
@@ -3393,6 +3399,33 @@ def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch
         action_lines.add(action['line'])
     if not action_lines.intersection(claimed_action_lines):
         return hold('poststop_reviewer_action_not_attributed')
+    if (not isinstance(review_semantic, dict)
+            or review_semantic.get('status') != 'effect_and_controls_observed'
+            or review_semantic.get('scope') != 't01_original_vulnerable_arm'
+            or review_semantic.get('effect_dispatch_id') != dispatch_id
+            or review_semantic.get('effect_request_id') != review_effect_request_id
+            or review_semantic.get('target') != 'review-target-' + role[-1]):
+        reason = review_semantic.get('reason') if isinstance(review_semantic, dict) else None
+        if isinstance(reason, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,100}', reason):
+            return hold('poststop_reviewer_' + reason)
+        return hold('poststop_reviewer_semantic_unavailable_or_mismatched')
+    review_creation = review_semantic.get('creation_request_ids')
+    review_ordinary = review_semantic.get('ordinary_request_ids')
+    review_denial = review_semantic.get('denial_request_id')
+    if (not isinstance(review_creation, list) or len(review_creation) != 2
+            or not isinstance(review_ordinary, list) or len(review_ordinary) != 2
+            or not isinstance(review_denial, str)
+            or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)
+                   for value in [*review_creation, *review_ordinary, review_denial,
+                                 review_effect_request_id])):
+        return hold('poststop_reviewer_semantic_request_set_invalid')
+    reviewer_decisive = [*review_creation, *review_ordinary, review_denial,
+                         review_effect_request_id]
+    if (len(reviewer_decisive) != len(set(reviewer_decisive))
+            or any(reviewer_origin['broker_request_ids'].count(request_id) != 1
+                   or claim_lines_by_id.get(request_id) not in action_lines
+                   for request_id in reviewer_decisive)):
+        return hold('poststop_reviewer_semantic_origin_missing_or_ambiguous')
     if (not isinstance(semantic, dict)
             or semantic.get('status') != 'effect_and_controls_observed'
             or semantic.get('scope') != 't01_original_vulnerable_arm'
@@ -3449,6 +3482,9 @@ def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch
     return {'status': 'candidate_for_operator_review', 'scope': semantic['scope'],
             'reviewer_role': role, 'review_dispatch_id': dispatch_id,
             'effect_dispatch_id': effect_dispatch_id, 'effect_request_id': effect_request_id,
+            'review_effect_request_id': review_effect_request_id,
+            'reviewer_material_check': 't01_effect_and_controls_observed',
+            'reviewer_decisive_request_ids': sorted(reviewer_decisive),
             'qualification': 'partial', 'clean_replay': 'not_assessed',
             'fixed_control': 'not_assessed', 'lead_dispositions': 'unfinished_unassessed',
             'limits': ['does not establish full #159 qualification',
@@ -3461,19 +3497,24 @@ def _poststop_review_disposition(*, role: str, dispatch_id: str, effect_dispatch
 
 
 def assess_poststop_review(run_root: Path, role: str, dispatch_id: str,
-                           effect_dispatch_id: str, effect_request_id: str) -> dict:
+                           effect_dispatch_id: str, effect_request_id: str,
+                           review_effect_request_id: str) -> dict:
     """Write one immutable assessment after exact native stop and origin reconciliation."""
     held = {'status': 'held', 'reviewer_role': role, 'review_dispatch_id': dispatch_id,
-            'effect_dispatch_id': effect_dispatch_id, 'effect_request_id': effect_request_id}
+            'effect_dispatch_id': effect_dispatch_id, 'effect_request_id': effect_request_id,
+            'review_effect_request_id': review_effect_request_id}
     freeze = None
     if (role not in ('reviewer-1', 'reviewer-2')
             or any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)
-                   for value in (dispatch_id, effect_dispatch_id, effect_request_id))):
+                   for value in (dispatch_id, effect_dispatch_id, effect_request_id,
+                                 review_effect_request_id))):
         return dict(held, reason='poststop_review_identity_invalid')
     try:
         root = _private_root(Path(run_root))
         semantic_fn = globals().get('reconcile_t01_semantic')
         semantic = semantic_fn(root, effect_dispatch_id, effect_request_id) if callable(semantic_fn) else None
+        review_semantic = (semantic_fn(root, dispatch_id, review_effect_request_id)
+                           if callable(semantic_fn) else None)
         with _owner_lock(root):
             plan = _verified_plan(root)
             controls = _controls(root)
@@ -3583,14 +3624,20 @@ def assess_poststop_review(run_root: Path, role: str, dispatch_id: str,
                     continue
             result = _poststop_review_disposition(
                 role=role, dispatch_id=dispatch_id, effect_dispatch_id=effect_dispatch_id,
-                effect_request_id=effect_request_id, review=receipt, material=material,
+                effect_request_id=effect_request_id,
+                review_effect_request_id=review_effect_request_id,
+                review=receipt, material=material,
                 request=request, trace=trace, reviewer_origin=reviewer_origin,
-                semantic=semantic, effect_origins=effect_origins)
+                semantic=semantic, review_semantic=review_semantic,
+                effect_origins=effect_origins)
             result.update({'review_receipt_sha256': _sha(receipt_path),
                            'review_packet_request_sha256': _sha(request_path),
                            'review_trace_sha256': _sha(trace_path),
                            'semantic_receipt_sha256': hashlib.sha256(json.dumps(
                                semantic, sort_keys=True, separators=(',', ':'),
+                               allow_nan=False).encode()).hexdigest(),
+                           'review_semantic_receipt_sha256': hashlib.sha256(json.dumps(
+                               review_semantic, sort_keys=True, separators=(',', ':'),
                                allow_nan=False).encode()).hexdigest(),
                            'reviewer_origin_proof_sha256': hashlib.sha256(json.dumps(
                                reviewer_origin, sort_keys=True, separators=(',', ':'),
@@ -3654,6 +3701,7 @@ def _parser() -> argparse.ArgumentParser:
     poststop_cmd.add_argument('--dispatch-id', required=True)
     poststop_cmd.add_argument('--effect-dispatch-id', required=True)
     poststop_cmd.add_argument('--effect-request-id', required=True)
+    poststop_cmd.add_argument('--review-effect-request-id', required=True)
     research_cmd = commands.add_parser('research', help='one native turn in the original researcher')
     research_cmd.add_argument('--run-root', required=True)
     resume_cmd = commands.add_parser('resume', help='one native turn in the same persistent researcher store')
@@ -3693,7 +3741,8 @@ def main() -> int:
                                             args.effect_request_id)
         elif args.command == 'assess-poststop-review':
             result = assess_poststop_review(Path(args.run_root), args.role, args.dispatch_id,
-                                            args.effect_dispatch_id, args.effect_request_id)
+                                            args.effect_dispatch_id, args.effect_request_id,
+                                            args.review_effect_request_id)
         elif args.command in ('research', 'resume'):
             root = Path(args.run_root)
             role = 'researcher' if args.command == 'research' else 'resume'

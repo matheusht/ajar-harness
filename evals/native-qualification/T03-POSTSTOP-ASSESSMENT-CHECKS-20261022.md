@@ -15,6 +15,7 @@ review the underlying bytes and judgment.
 | T01 semantic verifier is unavailable, does not report `effect_and_controls_observed`, or selects a different effect | Hold. S10 remains held without its own semantic verifier. |
 | A decisive creation, ordinary, denial, or effect request has no unique process-origin proof on the original target | Hold. Origin transport alone is not semantic proof. |
 | Reviewer origin proof lacks a decisive action's exact native tool line, or origin IDs do not match semantic IDs | Hold. |
+| Reviewer has an unrelated attributed request but no independently observed effect/control chain on its isolated target | Hold. Require a second T01 semantic reconciliation keyed to the reviewer dispatch and review-effect request; every selected creation, ordinary, denial, and effect request must appear exactly once in that reviewer's origin proof and on a captured completed shell action line. |
 | A secret or unsafe reviewer material would enter the durable receipt | Hold without persisting the unsafe projection. |
 | Assessment is run twice or an existing receipt differs | Preserve the first immutable receipt and fail closed. |
 

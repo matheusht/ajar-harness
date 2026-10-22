@@ -27,9 +27,13 @@ def main():
     ordinary_ids = ['4' * 32, '5' * 32]
     denial_id, reviewer_dispatch, effect_dispatch = '6' * 32, '7' * 32, '8' * 32
     role, session = 'reviewer-1', 'ses_Poststop1'
-    action_line = 9
-    action = {'line': action_line, 'command_sha256': sha(b'run bounded check'),
-              'input_sha256': sha(b'input'), 'output_sha256': sha(b'output')}
+    action_lines = list(range(9, 15))
+    reviewer_ids = ['a' * 32, 'b' * 32, 'c' * 32, 'd' * 32, 'e' * 32, 'f' * 32]
+    reviewer_effect_request = reviewer_ids[-1]
+    actions = [{'line': line, 'command_sha256': sha(f'run bounded check {i}'.encode()),
+                'input_sha256': sha(f'input {i}'.encode()),
+                'output_sha256': sha(f'output {i}'.encode())}
+               for i, line in enumerate(action_lines)]
     request = {'input_id': 'a' * 64, 'selection_sha256': 'b' * 64,
                'source_manifest_sha256': 'c' * 64}
     review = {'status': 'native_turn_observed_unassessed', 'reviewer_role': role,
@@ -42,23 +46,32 @@ def main():
                 'input_id': request['input_id'], 'dispatch_id': reviewer_dispatch,
                 'session_id': session, 'packet_request_sha256': 'e' * 64,
                 'native_trace_sha256': 'd' * 64,
-                'source_revision': 'f' * 64, 'evidence_revision': '0' * 64,
-                'shell_actions': [action]}
+                'source_revision': '1' * 64, 'evidence_revision': '0' * 64,
+                'shell_actions': actions}
     trace = {'kind': 'protected-native-event-trace-v1', 'session_id': session,
-             'events': [{'line': action_line, 'part_type': 'tool', 'tool': 'shell',
+             'events': [{'line': action['line'], 'part_type': 'tool', 'tool': 'shell',
                          'status': 'completed', 'session_matches': True,
                          'input_sha256': action['input_sha256'],
-                         'output_sha256': action['output_sha256']}]}
+                         'output_sha256': action['output_sha256']} for action in actions]}
     reviewer_origin = {'kind': 'native-origin-transport-proof-v1',
                        'status': 'process_request_attributed', 'dispatch_id': reviewer_dispatch,
                        'role': role, 'target': 'review-target-1',
                        'source_manifest_sha256': request['source_manifest_sha256'],
                        'native_trace_sha256': 'd' * 64,
-                       'native_tool_claims': [{'line': action_line, 'tool': 'shell',
+                       'native_tool_claims': [{'line': action['line'], 'tool': 'shell',
                            'input_sha256': action['input_sha256'],
                            'output_sha256': action['output_sha256'],
-                           'request_ids': ['9' * 32]}],
-                       'broker_request_ids': ['9' * 32]}
+                           'request_ids': [request_id]}
+                           for action, request_id in zip(actions, reviewer_ids)],
+                       'broker_request_ids': reviewer_ids}
+    reviewer_semantic = {'status': 'effect_and_controls_observed',
+                         'scope': 't01_original_vulnerable_arm',
+                         'creation_request_ids': reviewer_ids[:2],
+                         'ordinary_request_ids': reviewer_ids[2:4],
+                         'denial_request_id': reviewer_ids[4],
+                         'effect_request_id': reviewer_effect_request,
+                         'effect_dispatch_id': reviewer_dispatch,
+                         'target': 'review-target-1'}
     semantic = {'status': 'effect_and_controls_observed',
                 'scope': 't01_original_vulnerable_arm',
                 'creation_request_ids': creation_ids, 'ordinary_request_ids': ordinary_ids,
@@ -76,8 +89,10 @@ def main():
     def decide(**overrides):
         inputs = {'role': role, 'dispatch_id': reviewer_dispatch,
                   'effect_dispatch_id': effect_dispatch, 'effect_request_id': request_id,
+                  'review_effect_request_id': reviewer_effect_request,
                   'review': review, 'material': material, 'request': request, 'trace': trace,
                   'reviewer_origin': reviewer_origin, 'semantic': semantic,
+                  'review_semantic': reviewer_semantic,
                   'effect_origins': effect_origins}
         inputs.update(overrides)
         return _poststop_review_disposition(**inputs)
@@ -93,8 +108,24 @@ def main():
           and positive.get('lead_dispositions') == 'unfinished_unassessed'
           and positive.get('clean_replay') == positive.get('fixed_control') == 'not_assessed',
           'candidate preserves unfinished leads and incomplete #159 limits')
+    check(positive.get('reviewer_material_check') == 't01_effect_and_controls_observed'
+          and positive.get('reviewer_decisive_request_ids') == sorted(reviewer_ids),
+          'candidate records the complete reviewer-side semantic evidence')
     check(decide(semantic=None).get('status') == 'held',
           'missing semantic verifier holds')
+    unrelated = dict(reviewer_origin, broker_request_ids=['9' * 32],
+                     native_tool_claims=[{'line': actions[0]['line'], 'tool': 'shell',
+                         'input_sha256': actions[0]['input_sha256'],
+                         'output_sha256': actions[0]['output_sha256'], 'request_ids': ['9' * 32]}])
+    check(decide(reviewer_origin=unrelated).get('status') == 'held',
+          'unrelated reviewer request without reviewer effect/control chain holds')
+    check(decide(review_semantic=dict(reviewer_semantic,
+                                      effect_request_id='9' * 32)).get('status') == 'held',
+          'reviewer semantic effect request mismatch holds')
+    duplicate_semantic = dict(reviewer_semantic,
+                              ordinary_request_ids=[reviewer_ids[0], reviewer_ids[3]])
+    check(decide(review_semantic=duplicate_semantic).get('status') == 'held',
+          'duplicate reviewer semantic request ID holds')
     check(decide(effect_origins={effect_dispatch: effect_origins[effect_dispatch]}).get('status') == 'held',
           'missing decisive control origin holds')
     altered = dict(reviewer_origin, role='reviewer-2')

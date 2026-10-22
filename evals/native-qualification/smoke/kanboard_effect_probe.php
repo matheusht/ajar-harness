@@ -81,6 +81,11 @@ register_shutdown_function(function () use ($s, $q, $t, $b, $dbPath, $method, $k
     $receipt = [
         'kind' => $kind,
         'request_id' => bin2hex(random_bytes(12)),
+        'broker_request_id' => preg_match('/^[0-9a-f]{32}$/D', $_SERVER['HTTP_X_LRH_REQUEST_ID'] ?? '') ?
+            $_SERVER['HTTP_X_LRH_REQUEST_ID'] : '',
+        'broker_handle' => in_array($_SERVER['HTTP_X_LRH_HANDLE'] ?? '', ['A', 'B', 'C'], true) ?
+            $_SERVER['HTTP_X_LRH_HANDLE'] : '',
+        'broker_peer_ip' => filter_var($_SERVER['HTTP_X_LRH_PEER'] ?? '', FILTER_VALIDATE_IP) ?: '',
         'method' => in_array($method, ['GET', 'POST'], true) ? $method : 'other',
         'remote_addr' => filter_var($_SERVER['REMOTE_ADDR'] ?? '', FILTER_VALIDATE_IP) ?: '',
         'php_pid' => getmypid(),

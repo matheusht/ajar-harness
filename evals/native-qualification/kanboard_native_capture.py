@@ -24,8 +24,10 @@ import uuid
 HERE = Path(__file__).resolve().parent
 PROBE = HERE / "smoke/kanboard_effect_probe.php"
 COLLECTOR = HERE / "smoke/kanboard_effect_collector.php"
-PROBE_SHA256 = "f49420150c9dab5b4d228d5a62d70f29b008a4be546d35c641227e14ea0e8feb"
-COLLECTOR_SHA256 = "4560f3ed8b01cedc9b3135a9ad4a05e4cf5d3ca9d65c689234bd443fcd511f02"
+BROKER = HERE / "smoke/kanboard_role_broker.php"
+PROBE_SHA256 = "5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d"
+COLLECTOR_SHA256 = "991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5"
+BROKER_SHA256 = "2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d"
 SOURCE_MANIFEST_SHA256 = "056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839"
 CONTROLLER_SHA256 = "6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6"
 CONTROLLER = Path("app/Controller/ProjectPermissionController.php")
@@ -154,10 +156,11 @@ def _source(root: Path, plan: dict, target: str) -> None:
 
 def _approved_capture(plan: dict) -> None:
     expected = {"adapter_sha256": _sha(Path(__file__)), "probe_sha256": PROBE_SHA256,
-                "collector_sha256": COLLECTOR_SHA256,
+                "collector_sha256": COLLECTOR_SHA256, "broker_sha256": BROKER_SHA256,
                 "source_manifest_sha256": SOURCE_MANIFEST_SHA256,
                 "controller_sha256": CONTROLLER_SHA256}
     _need(_sha(PROBE) == PROBE_SHA256 and _sha(COLLECTOR) == COLLECTOR_SHA256 and
+          _sha(BROKER) == BROKER_SHA256 and
           plan.get("kanboard_capture") == expected,
           "capture_code_not_bound_to_plan")
 
@@ -184,7 +187,8 @@ def stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dic
     try:
         receipts = slot / "receipts"
         receipts.mkdir(mode=0o700)
-        for original, name in ((PROBE, "effect.php"), (COLLECTOR, "receipt.php")):
+        for original, name in ((PROBE, "effect.php"), (COLLECTOR, "receipt.php"),
+                               (BROKER, "broker.php")):
             destination = slot / name
             shutil.copyfile(original, destination)
             destination.chmod(0o600)
@@ -199,7 +203,8 @@ def stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int) -> dic
                   "controller_sha256": CONTROLLER_SHA256, "image_id": plan.get("target_image_id"),
                   "plan_sha256": _sha(root / "plan.json"),
                   "probe_sha256": _sha(slot / "effect.php"),
-                  "collector_sha256": _sha(slot / "receipt.php")}
+                  "collector_sha256": _sha(slot / "receipt.php"),
+                  "broker_sha256": _sha(slot / "broker.php")}
         _write_once(slot / "stage.json", record)
     except Exception:
         shutil.rmtree(slot)
@@ -279,7 +284,9 @@ def activate(run_root: Path, target: str) -> dict:
     _need(app.get("Id") == app_id and app.get("State", {}).get("Status") == "created" and
           app.get("Config", {}).get("Labels", {}).get("io.lrh.native-research") == resources.get("nonce") and
           app.get("Image") == plan.get("target_image_id") and
-          (str(slot / "effect.php"), "/observer/effect.php", False) in _mounts(app),
+          {(str(slot / "effect.php"), "/observer/effect.php", False),
+           (str(slot / "broker.php"), "/observer/broker.php", False),
+           (str(slot / "actors.json"), "/observer/actors.json", False)} <= _mounts(app),
           "capture_target_create_mismatch")
     nonce = resources["nonce"]
     _need(isinstance(nonce, str) and re.fullmatch(r"[0-9a-f]{24,64}", nonce),
@@ -372,8 +379,17 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
     stage_record = _json(slot / "stage.json", root)
     _need(stage_record.get("target") == target and stage_record.get("plan_sha256") == _sha(root / "plan.json")
           and stage_record.get("probe_sha256") == _sha(slot / "effect.php")
-          and stage_record.get("collector_sha256") == _sha(slot / "receipt.php"),
+          and stage_record.get("collector_sha256") == _sha(slot / "receipt.php")
+          and stage_record.get("broker_sha256") == _sha(slot / "broker.php"),
           "capture_stage_changed")
+    actor_route = _json(slot / "actor-route.json", root)
+    approval = _json(root / "controls/approval.json", root)
+    _need(actor_route.get("kind") == "kanboard-native-actor-route-v1" and
+          actor_route.get("target") == target and
+          actor_route.get("map_sha256") == _sha(slot / "actors.json") and
+          actor_route.get("baseline_db_sha256") ==
+          (approval.get("capture_target_db_sha256") or {}).get(target),
+          "capture_actor_route_changed")
     _source(root, plan, target)
     resources = _json(root / "controls/resources.json", root)
     rows = resources.get("resources")
@@ -441,7 +457,9 @@ def attest(run_root: Path, target: str, native_role: str | None = None) -> dict:
     _need(app_ip == observer_resources.get("app_ip"), "capture_app_ip_changed")
     source_mount = (str(root / target), "/target", True)
     probe_mount = (str(slot / "effect.php"), "/observer/effect.php", False)
-    _need(_mounts(app) == {source_mount, probe_mount} and
+    broker_mount = (str(slot / "broker.php"), "/observer/broker.php", False)
+    actors_mount = (str(slot / "actors.json"), "/observer/actors.json", False)
+    _need(_mounts(app) == {source_mount, probe_mount, broker_mount, actors_mount} and
           _mounts(collector) == {(str(slot / "receipt.php"), "/collector/receipt.php", False),
                                  (str(slot / "receipts"), "/receipts", True)},
           "capture_mounts_invalid")

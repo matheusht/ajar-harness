@@ -49,14 +49,17 @@ def seed_db(path, *, s, q, t, b):
                                    is_private INTEGER, is_public INTEGER, token TEXT, is_active INTEGER);
             CREATE TABLE tasks (id INTEGER PRIMARY KEY, project_id INTEGER,
                                 title TEXT, is_active INTEGER);
-            CREATE TABLE users (id INTEGER PRIMARY KEY, role TEXT, is_active INTEGER);
+            CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE,
+                                role TEXT, is_active INTEGER);
             CREATE TABLE project_has_users (project_id INTEGER, user_id INTEGER, role TEXT);
             CREATE TABLE project_has_groups (project_id INTEGER, group_id INTEGER, role TEXT);
             CREATE TABLE group_has_users (group_id INTEGER, user_id INTEGER);
         ''')
-        db.executemany('INSERT INTO users VALUES (?,?,?)',
-                       ((1, 'app-admin', 1), (2, 'app-user', 1),
-                        (3, 'app-user', 1), (b, 'app-user', 1)))
+        db.executemany('INSERT INTO users VALUES (?,?,?,?)',
+                       ((1, 'synthetic_admin', 'app-admin', 1),
+                        (2, 'synthetic_a', 'app-user', 1),
+                        (3, 'synthetic_c', 'app-user', 1),
+                        (b, 'synthetic_b', 'app-user', 1)))
         db.executemany('INSERT INTO projects VALUES (?,?,?,?,?,?)',
                        ((s, 1, 0, 0, None, 1), (q, 3, 1, 0, None, 1)))
         db.execute('INSERT INTO tasks VALUES (?,?,?,?)', (t, q, 'NATIVE-EFFECT-SYNTHETIC', 1))

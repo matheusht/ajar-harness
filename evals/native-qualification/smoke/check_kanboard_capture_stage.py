@@ -72,6 +72,7 @@ def main() -> int:
                     (ROOT / "evals/native-qualification/kanboard_native_capture.py").read_bytes()).hexdigest(),
                     "probe_sha256": capture.PROBE_SHA256,
                     "collector_sha256": capture.COLLECTOR_SHA256,
+                    "broker_sha256": capture.BROKER_SHA256,
                     "source_manifest_sha256": capture.SOURCE_MANIFEST_SHA256,
                     "controller_sha256": capture.CONTROLLER_SHA256}}
         (run / "plan.json").write_text(json.dumps(plan, sort_keys=True))
@@ -85,6 +86,10 @@ def main() -> int:
         result["checks"]["host_only_stage_and_hold"] = True
         result["checks"]["observer_outside_target_mount"] = True
         hook = run / "controls/observer/target/effect.php"
+        broker = run / "controls/observer/target/broker.php"
+        actors = run / "controls/observer/target/actors.json"
+        actors.write_text(json.dumps({"A": "synthetic_a", "B": "synthetic_b", "C": "synthetic_c"}))
+        actors.chmod(0o600)
         if hashlib.sha256(hook.read_bytes()).hexdigest() != hashlib.sha256(capture.PROBE.read_bytes()).hexdigest():
             raise RuntimeError("hook_copy_mismatch")
         result["checks"]["hook_hash_pinned"] = True
@@ -99,7 +104,9 @@ def main() -> int:
             "Id": app_id, "Image": plan["target_image_id"],
             "State": {"Status": "created"},
             "Config": {"Labels": {"io.lrh.native-research": nonce}},
-            "Mounts": [{"Source": str(hook), "Destination": "/observer/effect.php", "RW": False}],
+            "Mounts": [{"Source": str(hook), "Destination": "/observer/effect.php", "RW": False},
+                       {"Source": str(broker), "Destination": "/observer/broker.php", "RW": False},
+                       {"Source": str(actors), "Destination": "/observer/actors.json", "RW": False}],
             "NetworkSettings": {"Networks": {"research": {"IPAddress": "172.29.0.11"}}}}}))
         try:
             capture.activate(run, "target")

@@ -16,7 +16,8 @@ if (!is_string($raw) || strlen($raw) > 8192) {
 
 try {
     $record = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
-    $allowed = ['kind', 'request_id', 'method', 'remote_addr', 'php_pid', 'controller_sha256',
+    $allowed = ['kind', 'request_id', 'broker_request_id', 'broker_handle', 'broker_peer_ip', 'method',
+        'remote_addr', 'php_pid', 'controller_sha256',
         'actor_id', 'app_role', 'effective_project_role', 'route_project_id',
         'body_project_id', 'body_user_id', 'task_id', 'status', 'marker_present',
         'response_sha256', 'before', 'after', 'probe_error'];
@@ -28,6 +29,13 @@ try {
         throw new RuntimeException('invalid_route');
     }
     if (!preg_match('/^[0-9a-f]{24}$/', $record['request_id']) ||
+        ($record['broker_request_id'] !== '' &&
+         !preg_match('/^[0-9a-f]{32}$/D', $record['broker_request_id'])) ||
+        !in_array($record['broker_handle'], ['', 'A', 'B', 'C'], true) ||
+        (($record['broker_request_id'] === '') !== ($record['broker_handle'] === '')) ||
+        (($record['broker_request_id'] === '') !== ($record['broker_peer_ip'] === '')) ||
+        ($record['broker_peer_ip'] !== '' &&
+         filter_var($record['broker_peer_ip'], FILTER_VALIDATE_IP) === false) ||
         filter_var($record['remote_addr'], FILTER_VALIDATE_IP) === false ||
         !preg_match('/^[0-9a-f]{64}$/', $record['controller_sha256']) ||
         !preg_match('/^[0-9a-f]{64}$/', $record['response_sha256'])) {

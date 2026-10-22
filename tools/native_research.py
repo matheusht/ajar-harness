@@ -45,9 +45,10 @@ CONTROL_SHA = {
     'tools/native_kanboard_origin_gate.py': 'bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e',
 }
 CAPTURE_FILES = {
-    'evals/native-qualification/kanboard_native_capture.py': '07f05b23ba56a58cb5c475cec5f10942fd443041135c0c1987ac2768838c6d8c',
-    'evals/native-qualification/smoke/kanboard_effect_probe.php': 'f49420150c9dab5b4d228d5a62d70f29b008a4be546d35c641227e14ea0e8feb',
-    'evals/native-qualification/smoke/kanboard_effect_collector.php': '4560f3ed8b01cedc9b3135a9ad4a05e4cf5d3ca9d65c689234bd443fcd511f02',
+    'evals/native-qualification/kanboard_native_capture.py': '4f596f91f787364376c80a24774861e8f26b98033363db93fa31bd749f351cbd',
+    'evals/native-qualification/smoke/kanboard_effect_probe.php': '5484f9ac40a710ea5eb5492bc13b712211e5f1cbcde934e2548e946c8fa0379d',
+    'evals/native-qualification/smoke/kanboard_effect_collector.php': '991d727e36b0c1fedc9898f4a773282ce7f062f8f00de4ae5dd05d2256b9e3b5',
+    'evals/native-qualification/smoke/kanboard_role_broker.php': '2ee3d3806825f210071b73f53ade076e471f97237b81a0a66cc00632e6e97c8d',
 }
 CAPTURE_SOURCE_SHA = '056280086b353347075f0352b5826bd20ef7328854e7283e4c5cd71d7e57f839'
 CAPTURE_CONTROLLER_SHA = '6df47c20fe6b1963bd14a86bc3cbd554fbcea9f622a23f67af115a854811aad6'
@@ -428,6 +429,7 @@ def _capture_pins() -> dict[str, str]:
     return {'adapter_sha256': CAPTURE_FILES['evals/native-qualification/kanboard_native_capture.py'],
             'probe_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_probe.php'],
             'collector_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_effect_collector.php'],
+            'broker_sha256': CAPTURE_FILES['evals/native-qualification/smoke/kanboard_role_broker.php'],
             'source_manifest_sha256': CAPTURE_SOURCE_SHA,
             'controller_sha256': CAPTURE_CONTROLLER_SHA}
 
@@ -936,11 +938,18 @@ def _research_environment(root: Path, base: str, relay_ip: str, target_ip: str,
 
 
 def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> None:
-    _write_json(root / role / 'project/target.json', {
+    info = {
         'url': f'http://{target_ip}:{plan["target_port"]}',
         'source_manifest_sha256': plan['source_manifest_sha256'],
         'role': role,
-    }, once=True)
+    }
+    if 'kanboard_capture' in plan:
+        info['synthetic_actor_route'] = {
+            'header': 'X-Native-Actor', 'handles': ['A', 'B', 'C'],
+            'form_csrf_placeholder': 'broker-managed',
+            'backend_identity_and_session': 'target-owned',
+        }
+    _write_json(root / role / 'project/target.json', info, once=True)
 
 
 def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
@@ -992,7 +1001,7 @@ def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
                 and task is not None and task[0] == ids['q'] and isinstance(task[1], str)
                 and bool(task[1]) and task[2] == 1
                 and b == ('app-user', 1)
-                and bool(managers) and q_owner not in managers
+                and len(managers) == 1 and q_owner not in managers
                 and all(no_project_role(ids['q'], manager) for manager in managers)
                 and no_project_role(ids['s'], ids['b']) and no_project_role(ids['q'], ids['b'])
             )
@@ -1005,7 +1014,7 @@ def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
         _fail('capture_seed_baseline_invalid')
 
 
-def _capture_specs(root: Path, plan: dict, command: list[str]) -> tuple[
+def _capture_specs(root: Path, plan: dict, command: list[str], *, materialize: bool = False) -> tuple[
         dict[str, tuple[list[str], list[str], list[str]]], dict[str, str]]:
     if 'kanboard_capture' not in plan:
         return {}, {}
@@ -1027,34 +1036,81 @@ def _capture_specs(root: Path, plan: dict, command: list[str]) -> tuple[
                 or ids['s'] == ids['q']
                 or stage.get('probe_sha256') != _sha(_file(slot / 'effect.php', private=True))
                 or stage.get('collector_sha256') != _sha(_file(slot / 'receipt.php', private=True))
+                or stage.get('broker_sha256') != _sha(_file(slot / 'broker.php', private=True))
                 or stage['probe_sha256'] != _capture_pins()['probe_sha256']
-                or stage['collector_sha256'] != _capture_pins()['collector_sha256']):
+                or stage['collector_sha256'] != _capture_pins()['collector_sha256']
+                or stage['broker_sha256'] != _capture_pins()['broker_sha256']):
             _fail('capture_stage_changed')
         db_pins[target] = _capture_seed_baseline(root, target, ids)
-        mounts = [_mount(slot / 'effect.php', '/observer/effect.php', readonly=True)]
+        with closing(sqlite3.connect((root / target / 'data/db.sqlite').as_uri() + '?mode=ro&immutable=1',
+                                     uri=True)) as db:
+            a = db.execute('SELECT u.username FROM project_has_users pu JOIN users u ON u.id=pu.user_id '
+                           "WHERE pu.project_id=? AND pu.role='project-manager' "
+                           "AND u.role='app-user' AND u.is_active=1", (ids['s'],)).fetchall()
+            c = db.execute('SELECT u.username FROM projects p JOIN users u ON u.id=p.owner_id '
+                           "WHERE p.id=? AND u.role='app-user' AND u.is_active=1", (ids['q'],)).fetchall()
+            b = db.execute('SELECT username FROM users WHERE id=? AND role=? AND is_active=1',
+                           (ids['b'], 'app-user')).fetchall()
+        if not len(a) == len(b) == len(c) == 1:
+            _fail('capture_actor_map_ambiguous')
+        expected_actors = {'A': a[0][0], 'B': b[0][0], 'C': c[0][0]}
+        if (len(set(expected_actors.values())) != 3
+                or any(not isinstance(user, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', user)
+                       for user in expected_actors.values())):
+            _fail('capture_actor_map_changed')
+        if not materialize:
+            continue
+        actor_map_path = slot / 'actors.json'
+        if actor_map_path.exists():
+            if _read_json(actor_map_path) != expected_actors:
+                _fail('capture_actor_map_changed')
+        else:
+            _write_json(actor_map_path, expected_actors, once=True)
+        route_path = slot / 'actor-route.json'
+        route = {'kind': 'kanboard-native-actor-route-v1', 'target': target,
+                 'map_sha256': _sha(actor_map_path), 'baseline_db_sha256': db_pins[target]}
+        if route_path.exists():
+            if _read_json(route_path) != route:
+                _fail('capture_actor_map_changed')
+        else:
+            _write_json(route_path, route, once=True)
+        mounts = [_mount(slot / 'effect.php', '/observer/effect.php', readonly=True),
+                  _mount(slot / 'broker.php', '/observer/broker.php', readonly=True),
+                  _mount(slot / 'actors.json', '/observer/actors.json', readonly=True)]
         environment = ['NATIVE_EFFECT_COLLECTOR=http://kanboard-effect-collector:8765/receipt.php',
-                       'NATIVE_EFFECT_SOURCE_DIR=/target', 'DB_FILENAME=/target/data/db.sqlite']
+                       'NATIVE_EFFECT_SOURCE_DIR=/target', 'DB_FILENAME=/target/data/db.sqlite',
+                       'REVERSE_PROXY_AUTH=true', 'REVERSE_PROXY_USER_HEADER=HTTP_X_LRH_ACTOR']
         environment += ['NATIVE_EFFECT_' + key.upper() + '=' + str(ids[key])
                         for key in ('s', 'q', 't', 'b')]
-        specs[target] = (mounts, environment,
-                         ['php', '-d', 'auto_prepend_file=/observer/effect.php', *command[1:]])
+        listen_port = plan['target_port']
+        if listen_port == 18081:
+            _fail('capture_target_port_conflict')
+        app_command = ('php -d auto_prepend_file=/observer/effect.php -S 127.0.0.1:18081 '
+                       '-t /target >/dev/null 2>&1 & '
+                       'exec php /observer/broker.php 0.0.0.0:' + str(listen_port) +
+                       ' /observer/actors.json 127.0.0.1:18081')
+        specs[target] = (mounts, environment, ['sh', '-c', app_command])
     return specs, db_pins
 
 
 def _capture_approved_specs(root: Path, plan: dict, command: list[str], *,
                             verify_source: bool = False) -> dict[str, tuple[list[str], list[str], list[str]]]:
-    specs, db_pins = _capture_specs(root, plan, command)
-    if specs:
+    _, db_pins = _capture_specs(root, plan, command)
+    if db_pins:
         approval = _read_json(_controls(root) / 'approval.json')
         if (approval.get('capture_target_db_sha256') != db_pins
                 or approval.get('capture_stage_sha256') != {
                     target: _sha(_controls(root) / 'observer' / target / 'stage.json')
                     for target in CAPTURE_TARGETS}):
             _fail('capture_seed_baseline_changed')
+        specs, materialized_pins = _capture_specs(root, plan, command, materialize=True)
+        if materialized_pins != db_pins:
+            _fail('capture_seed_baseline_changed')
         if verify_source:
             for target in CAPTURE_TARGETS:
                 _verify_target_state(root / target, plan['source_sha256'], plan['mutable_paths'])
-    return specs
+        return specs
+    return {}
 
 
 def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,

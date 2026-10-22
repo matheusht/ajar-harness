@@ -96,6 +96,7 @@ def main() -> int:
                         (ROOT / "evals/native-qualification/kanboard_native_capture.py").read_bytes()).hexdigest(),
                         "probe_sha256": capture.PROBE_SHA256,
                         "collector_sha256": capture.COLLECTOR_SHA256,
+                        "broker_sha256": capture.BROKER_SHA256,
                         "source_manifest_sha256": capture.SOURCE_MANIFEST_SHA256,
                         "controller_sha256": capture.CONTROLLER_SHA256}}
             write(run / "plan.json", plan)

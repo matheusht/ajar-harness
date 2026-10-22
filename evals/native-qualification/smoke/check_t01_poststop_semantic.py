@@ -96,6 +96,30 @@ def main() -> int:
             return False
 
     checks["original_chain"] = observed(rows)
+
+    def with_repeat(source: list[dict], control_index: int) -> tuple[list[dict], dict]:
+        repeated = copy.deepcopy(source)
+        first = repeated[control_index]
+        extra = copy.deepcopy(first)
+        extra["receipt"]["request_id"] = f"{40 + control_index:032x}"
+        extra["row_id"] = first["row_id"] + 1
+        for item in repeated:
+            if item["row_id"] >= extra["row_id"]:
+                item["row_id"] += 1
+        repeated.append(extra)
+        repeated.sort(key=lambda item: item["row_id"])
+        return repeated, extra
+
+    repeated_a, extra_a = with_repeat(rows, 2)
+    checks["repeated_valid_project_control"] = observed(repeated_a)
+    repeated_a_bad, extra_a_bad = with_repeat(rows, 2)
+    extra_a_bad["receipt"]["result_matches_db"] = False
+    checks["repeated_invalid_project_control_rejected"] = not observed(repeated_a_bad)
+    repeated_b_bad, extra_b_bad = with_repeat(rows, 4)
+    extra_b_bad["receipt"]["backend_status"] = 200
+    extra_b_bad["receipt"]["result_class"] = "project_result"
+    extra_b_bad["receipt"]["result_matches_db"] = True
+    checks["contradictory_b_project_control_rejected"] = not observed(repeated_b_bad)
     project_control_early = copy.deepcopy(rows)
     project_control_early[1]["row_id"] = 4
     project_control_early[2]["row_id"] = 3

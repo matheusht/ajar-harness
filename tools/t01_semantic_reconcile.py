@@ -161,11 +161,20 @@ def assess_chain(rows: list[dict], effect_request_id: str,
 
     def read(pool: list[dict], method: str, actor: str, requested_id: int,
              result: str, status: int) -> dict:
-        selected = _one(pool, lambda r: r.get("method") == method and
-                        r.get("actor") == actor and r.get("requested_id") == requested_id and
-                        r.get("backend_status") == status and r.get("result_class") == result,
-                        "t01_" + method + "_" + actor + "_control_missing_or_duplicated")
-        return selected["receipt"]
+        matches = [row for row in pool if row["receipt"].get("method") == method and
+                   row["receipt"].get("actor") == actor and
+                   row["receipt"].get("requested_id") == requested_id]
+        code = "t01_" + method + "_" + actor + "_control_missing_or_conflicting"
+        _need(bool(matches) and all(row["joined"] is True for row in matches), code)
+        selected = matches[-1]["receipt"]
+        _need(all(row["receipt"].get("backend_status") == status and
+                  row["receipt"].get("result_class") == result and
+                  row["receipt"].get("result_matches_db") is (status == 200) and
+                  row["receipt"].get("actor_user_id") == selected.get("actor_user_id") and
+                  row["receipt"].get("before") == selected.get("before") and
+                  row["receipt"].get("after") == selected.get("after")
+                  for row in matches), code)
+        return selected
 
     a_project = read(after_project, "getProjectById", "A", project_id, "project_result", 200)
     a_lane = read(after_lane, "getSwimlane", "A", lane_id, "swimlane_result", 200)

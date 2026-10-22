@@ -57,7 +57,7 @@ T01_CAPTURE_FILES = {
     'evals/native-qualification/kanboard_native_capture.py': 'fdd256cf0a7a289d1fd446af51018ac379607601d701e97045f9c7364dfe0f79',
     'evals/native-qualification/smoke/t01_jsonrpc_broker.php': '11d343c985b06fb49f76a47e99166d40e22d3d8046188faf920ef3bb8be82458',
     'evals/native-qualification/smoke/t01_receipt_collector.php': 'fdc0f2fbd16e205fe76d6706d5c5e1861d67b368093de4723ec8e4894a80eaa7',
-    'tools/t01_semantic_reconcile.py': '1e2c4b749d759ae424365fcbc9e5c00d5ebe408b5c732594ee8e564d391e54e1',
+    'tools/t01_semantic_reconcile.py': 'efbfa97dbc9d9f1e6acdd74f40c66e5cd98e343baf8bf713760198c8f84a613a',
 }
 T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
 T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'

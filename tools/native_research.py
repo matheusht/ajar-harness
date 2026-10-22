@@ -2796,6 +2796,7 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             result['status'] = 'stopped_complete'
         else:
             result['status'] = 'start_incomplete'
+        result['stop_reason'] = _recorded_stop_reason(root)
         _write_json(controls / 'final.json', result)
     return result
 
@@ -2823,7 +2824,8 @@ def recover_start(run_root: Path) -> dict:
                     or (controls / 'producer-manifest.json').exists()
                     or (controls / 'native-state/RUN.json').exists()):
                 _fail('resource_record_missing_after_creation')
-            return {'status': 'no_resources', 'run_root': str(root)}
+            return {'status': 'no_resources', 'run_root': str(root),
+                    'stop_reason': _recorded_stop_reason(root)}
         state = controls / 'native-state'
         if (state / 'UNSAFE').exists():
             _fail('native_run_not_verified_stopped')
@@ -2864,6 +2866,7 @@ def recover_start(run_root: Path) -> dict:
         recovery = {'status': ('recovered_exact_resources' if origin_stop['status'] != 'partial'
                                else 'unsafe_or_unresolved'), 'run_root': str(root),
                     'native_state': native_status, 'host_snapshot': host_snapshot,
+                    'stop_reason': _recorded_stop_reason(root),
                     'origin_stop': origin_stop, 'origin_cleanup': origin_cleanup,
                     'capture_stop': capture_stop, 'cleanup': result,
                     'capture_cleanup': capture_cleanup}
@@ -3431,6 +3434,33 @@ def reconcile_t01_semantic(run_root: Path, dispatch_id: str, effect_request_id: 
         return dict(result, reason=str(error) if error.__class__.__name__ == 'SemanticHold'
                     else 't01_semantic_unavailable')
 
+def _recorded_stop_reason(root: Path) -> str | None:
+    """Expose the first recorded trigger, without inferring why the run ended."""
+    path = _controls(root) / 'native-state/STOP_REQUEST'
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return 'stop_reason_unavailable'
+    try:
+        if _file(path, private=True).stat().st_size > 32768:
+            return 'stop_reason_unavailable'
+        value = _read_json(path)
+        if (set(value) != {'reason', 'monotonic'}
+                or not isinstance(value['reason'], str) or not 1 <= len(value['reason']) <= 128
+                or type(value['monotonic']) not in (int, float)
+                or not math.isfinite(value['monotonic']) or value['monotonic'] < 0):
+            return 'stop_reason_unavailable'
+        return value['reason'] if value['reason'] in (
+            'operator_stop', 'monotonic_timeout', 'owner_close', 'connect_exited',
+            'startup_failure', 'owner_lost', 'stop_owner_lost', 'provider_authority_ended',
+            'child_exited_without_stop', 'child_exited_before_prepare',
+        ) else 'stop_reason_unrecognized'
+    except (OSError, NativeResearchError, OverflowError, RecursionError):
+        return 'stop_reason_unavailable'
+
+
 def status(run_root: Path) -> dict:
     root = _private_root(Path(run_root))
     plan = _plan(root)
@@ -3460,6 +3490,7 @@ def status(run_root: Path) -> dict:
             else 'inactive_or_unresolved',
             'run_root': str(root), 'model': plan['model'], 'limits': plan['limits'],
             'allowance': allowance, 'dispatches': dispatches, 'final': final, 'recovery': recovery,
+            'stop_reason': _recorded_stop_reason(root),
             'protected_capture': 'unavailable',
             'provider_request_count': None, 'monetary_spend': None}
 

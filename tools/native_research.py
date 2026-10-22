@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
@@ -700,14 +700,11 @@ def capture_stage(run_root: Path, target: str, *, s: int, q: int, t: int, b: int
     return result
 
 
-def _capture_db_pins(root: Path) -> dict[str, str]:
-    return {target: _sha(_file(root / target / 'data/db.sqlite', private=True))
-            for target in CAPTURE_TARGETS}
-
-
 def _approval(root: Path, plan: dict, path: Path) -> None:
+    capture_db_pins = {}
     if 'kanboard_capture' in plan:
-        _capture_specs(root, plan, _validate_target_command(_controls(root) / 'target-command.json'))
+        _, capture_db_pins = _capture_specs(
+            root, plan, _validate_target_command(_controls(root) / 'target-command.json'))
     approval = _read_json(path)
     expected = {
         'kind': 'native-research-live-approval-v1',
@@ -724,7 +721,7 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         expected['capture_stage_sha256'] = {
             target: _sha(_controls(root) / 'observer' / target / 'stage.json')
             for target in CAPTURE_TARGETS}
-        expected['capture_target_db_sha256'] = _capture_db_pins(root)
+        expected['capture_target_db_sha256'] = capture_db_pins
     if any(approval.get(key) != value for key, value in expected.items()):
         _fail('live_approval_mismatch')
     if set(approval) != set(expected) | {'approved_by', 'approved_at', 'expires_at'}:
@@ -946,12 +943,76 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
     }, once=True)
 
 
-def _capture_specs(root: Path, plan: dict, command: list[str]) -> dict[str, tuple[list[str], list[str], list[str]]]:
+def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
+    """Check the staged private Kanboard state, then bind the checked DB bytes."""
+    path = root / target / 'data/db.sqlite'
+    try:
+        path = _file(path, private=True)
+        if any(sidecar.exists() or sidecar.is_symlink()
+               for sidecar in (path.with_name('db.sqlite-wal'), path.with_name('db.sqlite-shm'),
+                               path.with_name('db.sqlite-journal'))):
+            _fail('capture_seed_baseline_invalid')
+        before = _sha(path)
+        with closing(sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+            db.execute('PRAGMA query_only=ON')
+            if db.execute('PRAGMA quick_check').fetchone() != ('ok',):
+                _fail('capture_seed_baseline_invalid')
+            s = db.execute('SELECT is_private,is_active FROM projects WHERE id=?',
+                           (ids['s'],)).fetchone()
+            q = db.execute('SELECT owner_id,is_private,is_public,token,is_active '
+                           'FROM projects WHERE id=?', (ids['q'],)).fetchone()
+            task = db.execute('SELECT project_id,title,is_active FROM tasks WHERE id=?',
+                              (ids['t'],)).fetchone()
+            b = db.execute('SELECT role,is_active FROM users WHERE id=?', (ids['b'],)).fetchone()
+
+            def no_project_role(project_id: int, user_id: int) -> bool:
+                direct = db.execute('SELECT 1 FROM project_has_users WHERE project_id=? AND user_id=?',
+                                    (project_id, user_id)).fetchone()
+                group = db.execute(
+                    'SELECT 1 FROM project_has_groups pg JOIN group_has_users gu '
+                    'ON gu.group_id=pg.group_id WHERE pg.project_id=? AND gu.user_id=?',
+                    (project_id, user_id)).fetchone()
+                return direct is None and group is None
+
+            managers = [row[0] for row in db.execute(
+                'SELECT u.id FROM project_has_users pu JOIN users u ON u.id=pu.user_id '
+                "WHERE pu.project_id=? AND pu.role='project-manager' "
+                "AND u.role='app-user' AND u.is_active=1", (ids['s'],))]
+            q_owner = None if q is None else q[0]
+            owner = None if q_owner is None else db.execute(
+                'SELECT role,is_active FROM users WHERE id=?', (q_owner,)).fetchone()
+            owner_role = None if q_owner is None else db.execute(
+                'SELECT role FROM project_has_users WHERE project_id=? AND user_id=?',
+                (ids['q'], q_owner)).fetchone()
+            valid = (
+                s == (0, 1)
+                and q is not None and q[1] == 1 and q[2] == 0 and q[3] in (None, '')
+                and q[4] == 1 and q_owner != ids['b']
+                and owner == ('app-user', 1) and owner_role == ('project-manager',)
+                and task is not None and task[0] == ids['q'] and isinstance(task[1], str)
+                and bool(task[1]) and task[2] == 1
+                and b == ('app-user', 1)
+                and bool(managers) and q_owner not in managers
+                and all(no_project_role(ids['q'], manager) for manager in managers)
+                and no_project_role(ids['s'], ids['b']) and no_project_role(ids['q'], ids['b'])
+            )
+            if not valid:
+                _fail('capture_seed_baseline_invalid')
+        if _sha(path) != before:
+            _fail('capture_seed_baseline_invalid')
+        return before
+    except (OSError, sqlite3.Error, NativeResearchError, TypeError, ValueError):
+        _fail('capture_seed_baseline_invalid')
+
+
+def _capture_specs(root: Path, plan: dict, command: list[str]) -> tuple[
+        dict[str, tuple[list[str], list[str], list[str]]], dict[str, str]]:
     if 'kanboard_capture' not in plan:
-        return {}
+        return {}, {}
     if command != ['php', '-S', f'0.0.0.0:{plan["target_port"]}', '-t', '/target']:
         _fail('capture_target_command_changed')
     specs = {}
+    db_pins = {}
     for target in CAPTURE_TARGETS:
         slot = _controls(root) / 'observer' / target
         stage = _read_json(slot / 'stage.json')
@@ -969,6 +1030,7 @@ def _capture_specs(root: Path, plan: dict, command: list[str]) -> dict[str, tupl
                 or stage['probe_sha256'] != _capture_pins()['probe_sha256']
                 or stage['collector_sha256'] != _capture_pins()['collector_sha256']):
             _fail('capture_stage_changed')
+        db_pins[target] = _capture_seed_baseline(root, target, ids)
         mounts = [_mount(slot / 'effect.php', '/observer/effect.php', readonly=True)]
         environment = ['NATIVE_EFFECT_COLLECTOR=http://kanboard-effect-collector:8765/receipt.php',
                        'NATIVE_EFFECT_SOURCE_DIR=/target', 'DB_FILENAME=/target/data/db.sqlite']
@@ -976,13 +1038,29 @@ def _capture_specs(root: Path, plan: dict, command: list[str]) -> dict[str, tupl
                         for key in ('s', 'q', 't', 'b')]
         specs[target] = (mounts, environment,
                          ['php', '-d', 'auto_prepend_file=/observer/effect.php', *command[1:]])
+    return specs, db_pins
+
+
+def _capture_approved_specs(root: Path, plan: dict, command: list[str], *,
+                            verify_source: bool = False) -> dict[str, tuple[list[str], list[str], list[str]]]:
+    specs, db_pins = _capture_specs(root, plan, command)
+    if specs:
+        approval = _read_json(_controls(root) / 'approval.json')
+        if (approval.get('capture_target_db_sha256') != db_pins
+                or approval.get('capture_stage_sha256') != {
+                    target: _sha(_controls(root) / 'observer' / target / 'stage.json')
+                    for target in CAPTURE_TARGETS}):
+            _fail('capture_seed_baseline_changed')
+        if verify_source:
+            for target in CAPTURE_TARGETS:
+                _verify_target_state(root / target, plan['source_sha256'], plan['mutable_paths'])
     return specs
 
 
 def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
              capability: str) -> dict:
     target_command = _validate_target_command(_controls(root) / 'target-command.json')
-    capture_specs = _capture_specs(root, plan, target_command)
+    capture_specs = _capture_approved_specs(root, plan, target_command)
     capture = _load_capture_module(root) if capture_specs else None
     external, _, _ = _network(root, nonce, rows, 'external', internal=False)
     research, research_relay_ip, research_target_ip = _network(
@@ -1598,6 +1676,10 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                       '--duration', str(plan['limits']['duration_seconds']), '--port', str(port)]
         native = native_module.NativeRun(manifest, controls / 'native-state',
                                          plan['limits']['duration_seconds'], proxy_args)
+        if 'kanboard_capture' in plan:
+            _capture_approved_specs(root, plan,
+                                    _validate_target_command(controls / 'target-command.json'),
+                                    verify_source=True)
         ready = native.start()
         if (ready['proxy_info'].get('authority') != AUTHORITY
                 or ready['proxy_info'].get('port') != port

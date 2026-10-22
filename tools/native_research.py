@@ -60,6 +60,7 @@ T01_CAPTURE_FILES = {
 }
 T01_SOURCE_SHA = '5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884'
 T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153bdd3c4f'
+T01_BRIEF_SHA = 'cfa72ecb1279d292cd915c4c8b7c9405095405e422d1bf96e211db809b139c95'
 CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
 MODEL = 'opencode/deepseek-v4.1-flash-free'
 PROVIDER_ROUTE = 'opencode-keyless-free'
@@ -628,6 +629,8 @@ def prepare(args: argparse.Namespace) -> dict:
         _fail('brief_encoding_invalid')
     if not brief_text.strip() or CREDENTIAL_TEXT.search(brief_text):
         _fail('brief_empty_or_credential_like')
+    if t01_capture and _sha(brief) != T01_BRIEF_SHA:
+        _fail('t01_capture_brief_pin_mismatch')
     mutable_paths = list(args.mutable_path or [])
     if (len(mutable_paths) != len(set(mutable_paths))
             or any(not _valid_relative_path(item) or item == '.git' or item.startswith('.git/')
@@ -783,6 +786,8 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     if 't01_capture' in plan:
         if _capture_mode(plan) != 't01' or plan['t01_capture'] != _capture_pins('t01'):
             _fail('t01_capture_plan_pin_mismatch')
+        if plan.get('brief_sha256') != T01_BRIEF_SHA:
+            _fail('t01_capture_brief_pin_mismatch')
         for relative, digest in T01_CAPTURE_FILES.items():
             if _sha(_file(controls / relative, private=True)) != digest:
                 _fail('archived_t01_capture_pin_mismatch')

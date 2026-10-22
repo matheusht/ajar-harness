@@ -25,6 +25,7 @@ ordinary synthetic users, Alice and Bob, may be prepared.
 | Receipt is replayed, forged, or attributed after stop | Unpredictable response request ID, peer/IP and Docker-ID topology attestation, monotonic collector row IDs, dispatch open/close and native stop verification | Hold origin if no exact same-window joined receipt; deny post-stop attribution |
 | Backend setup/request/collector errors are treated as negative security evidence | Explicit broker/collector error categories with no raw body | Mark unavailable, never held control or refutation |
 | Researcher sees observer answer or another run | Separate private observer mount/network; sanitized brief and clean source pin | Stop on exposure |
+| T01 capture starts with the historical web-or-API brief or an improvised brief that hides the broker limits | Prepare must require the exact reviewed `RESEARCHER-BRIEF-T01-API.md` SHA-256; the provider-free CLI rehearsal submits both a wrong brief and the reviewed one | Reject wrong brief before run-root creation; archive the reviewed brief in a successful prepared run |
 
 Provider-free checks: `php -l` both PHP files; `python3
 evals/native-qualification/smoke/check_t01_capture_offline.py --source

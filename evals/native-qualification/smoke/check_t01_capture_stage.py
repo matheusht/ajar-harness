@@ -56,8 +56,7 @@ def main():
         environment = dict(os.environ)
         environment["PATH"] = str(output) + os.pathsep + environment["PATH"]
         environment["NATIVE_FAKE_DOCKER_LOG"] = str(output / "docker-calls")
-        brief = output / "BRIEF.md"
-        brief.write_text("Inspect the bounded Kanboard case and report observed behavior.\n")
+        brief = ROOT / "evals/native-qualification/RESEARCHER-BRIEF-T01-API.md"
         scope = output / "scope.md"
         scope.write_text("Provider-free staging rehearsal; no live target authority.\n")
         relay = output / "relay"
@@ -88,12 +87,24 @@ def main():
             code == 2 and rejected.get("code") ==
             "kanboard_capture_source_or_command_unqualified" and
             not (output / "wrong-mode").exists())
+        wrong_brief = output / "wrong-brief.md"
+        wrong_brief.write_text("Inspect this application.\n")
+        wrong_brief_run = output / "wrong-brief-run"
+        wrong_brief_base = list(base)
+        wrong_brief_base[wrong_brief_base.index("--run-root") + 1] = str(wrong_brief_run)
+        wrong_brief_base[wrong_brief_base.index("--brief") + 1] = str(wrong_brief)
+        code, rejected = call(environment, *wrong_brief_base, "--t01-capture")
+        result["checks"]["t01_wrong_brief_rejected"] = (
+            code == 2 and rejected.get("code") == "t01_capture_brief_pin_mismatch" and
+            not wrong_brief_run.exists())
         code, prepared = call(environment, *base, "--t01-capture")
         if code or prepared.get("status") != "prepared_provider_free":
             raise RuntimeError("t01_prepare_failed:" + str(prepared))
         plan = json.loads((run / "plan.json").read_text())
         result["checks"]["public_prepare_pins_t01"] = (
             "t01_capture" in plan and "kanboard_capture" not in plan and
+            plan["brief_sha256"] == sha(brief) and
+            sha(run / "controls/BRIEF.md") == sha(brief) and
             plan["source_manifest_sha256"] ==
             "5d49c3f485f555f3118b0afb983997e29a5ddaad4b0ed6f9cf19d855c2e4f884")
         code, rejected = call(environment, "capture-stage", "--run-root", str(run),

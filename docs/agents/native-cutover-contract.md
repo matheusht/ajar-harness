@@ -42,15 +42,20 @@ engagements remain unchanged. Other blind behavioral and GEPA adapters stay sepa
 
 ## Intended public interface
 
-The candidate native route uses `tools/native_research.py prepare`, `start`,
-`resume`, `status`, and `stop` on a persistent `--run-root`. `prepare` binds
+The candidate native route uses `tools/native_research.py prepare`, `research`,
+`resume`, `review`, `status`, `stop`, and `recover-start` on a persistent
+`--run-root`. `prepare` binds
 explicit source, brief, scope digest, target runtime, image, model and pinned
-relay/CA inputs; current qualification `start` requires a human-authored
-approval file bound to that plan and owns the bounded native session. A future
+relay/CA inputs. The pinned Kanboard case also stages observer hooks and three
+target copies with `capture-stage`; current qualification `start --approval`
+requires a human-authored approval bound to the plan, stage files, and seeded
+database bytes, and owns the bounded native session. A future
 standing grant needs exact target/model/effect/expiry binding. `resume` names the exact session and
 prompt; `stop` requests exact owned-resource shutdown. Research files live in
 the run root, with observer capture and sanitized reviewer handoff.
-The review command takes the frozen handoff and creates a fresh, separate review.
+The review command takes the frozen handoff and creates a fresh, separate review,
+but its independent host check remains unavailable. The observer receipts
+also hold credential route and native request origin as unproven.
 The native route has no dependency on a legacy queue or record kernel.
 
 ## Public-workflow checks to execute after the last edit

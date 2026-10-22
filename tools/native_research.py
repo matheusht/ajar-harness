@@ -1290,11 +1290,13 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             except Exception:
                 result['cleanup'] = {'status': 'unresolved'}
         capability_path.unlink(missing_ok=True)
-        result['status'] = ('stopped_complete' if result.get('status') == 'active'
-                            and result['native_stop']['status'] == 'stopped'
-                            and result.get('cleanup', {}).get('status') == 'complete' else
-                            'start_incomplete' if result.get('status') == 'start_incomplete' else
-                            'unsafe_or_unresolved')
+        if (result['native_stop']['status'] in ('unsafe', 'unresolved')
+                or result.get('cleanup', {}).get('status') != 'complete'):
+            result['status'] = 'unsafe_or_unresolved'
+        elif result.get('status') == 'active' and result['native_stop']['status'] == 'stopped':
+            result['status'] = 'stopped_complete'
+        else:
+            result['status'] = 'start_incomplete'
         _write_json(controls / 'final.json', result)
     return result
 
@@ -1479,11 +1481,23 @@ def main() -> int:
         return 0 if (result.get('status') not in ('unknown_effect', 'unfinished', 'start_incomplete',
                                                 'unsafe_or_unresolved')
                      and result.get('independent_host_check') != 'unavailable') else 2
-    except (NativeResearchError, OSError, ValueError, KeyError, sqlite3.Error) as error:
+    except KeyboardInterrupt:
+        print(json.dumps({'status': 'interrupted', 'run_root': getattr(args, 'run_root', None)},
+                         sort_keys=True))
+        return 130
+    except Exception as error:
         code = str(error)
         if not re.fullmatch(r'[a-z][a-z0-9_]{0,100}', code):
             code = 'native_research_unavailable'
-        print(json.dumps({'status': 'rejected', 'code': code}, sort_keys=True))
+        terminal = 'rejected'
+        if args.command == 'start':
+            try:
+                final = _read_json(Path(args.run_root) / 'controls/final.json')
+                if final.get('status') == 'unsafe_or_unresolved':
+                    terminal = 'unsafe_or_unresolved'
+            except Exception:
+                pass
+        print(json.dumps({'status': terminal, 'code': code}, sort_keys=True))
         return 2
 
 

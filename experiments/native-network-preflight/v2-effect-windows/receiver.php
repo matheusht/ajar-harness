@@ -22,7 +22,7 @@ if (fwrite($ledger, $row) !== strlen($row) || !fflush($ledger) || !fsync($ledger
 flock($ledger, LOCK_UN);
 fclose($ledger);
 if ($case === 'post-effect') {
-    $deadline = hrtime(true) + 15000000000;
+    $deadline = hrtime(true) + 60000000000;
     while (!file_exists('/state/release-post-effect') && hrtime(true) < $deadline) {
         usleep(50000);
     }

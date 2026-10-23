@@ -149,6 +149,13 @@ def main():
             else:
                 check('managed readback accepts exact run freeze without provider event ordering',
                       proof['run_verified'] and proof['exact_producers_stopped'])
+                if args.effect_before_ack:
+                    (receiver_state/'release-post-effect').touch();d['response_release_monotonic']=time.monotonic()
+                    response_marker=receiver_state/'response-attempted'
+                    check('receiver attempted held response after freeze',wait(lambda:response_marker.exists() and response_marker.read_text()=='after-release'))
+                    check('client still has no acknowledgement after freeze',not (workspace/'ACK').exists())
+                    d['after_response_release']={'receiver_marker':response_marker.read_text(),
+                                                 'client_ack_present':(workspace/'ACK').exists(),'receiver_rows':rows()}
                 with sqlite3.connect(out/'provider/tunnel.sqlite3') as db:
                     provider_frozen=db.execute("SELECT count(*) FROM events WHERE kind='producer_set_frozen'").fetchone()[0]
                 d['provider_frozen_event_count']=provider_frozen
@@ -183,14 +190,7 @@ def main():
                 check('managed readback keeps provider closure separate',
                       stop_proof(provider_path=provider_copy)['run_verified'] and
                       not stop_proof(provider_path=provider_copy)['provider_admission_closed'])
-            if args.effect_before_ack:
-                (receiver_state/'release-post-effect').touch();d['response_release_monotonic']=time.monotonic()
-                response_marker=receiver_state/'response-attempted'
-                check('receiver attempted held response after freeze',wait(lambda:response_marker.exists() and response_marker.read_text()=='after-release'))
-                check('client still has no acknowledgement after freeze',not (workspace/'ACK').exists())
-                d['after_response_release']={'receiver_marker':response_marker.read_text(),
-                                             'client_ack_present':(workspace/'ACK').exists(),'receiver_rows':rows()}
-            else:
+            if not args.effect_before_ack:
                 (workspace/'RELEASE').touch();d['gate_release_monotonic']=time.monotonic()
                 wait(lambda:any(r['case']=='pre-dispatch' for r in rows()),seconds=2)
             fresh=subprocess.run(['docker','exec',second if args.stop_failure else producer,'/bin/busybox','wget','-Y','off','-qO-','--post-data=',effect+'pre-ack'],capture_output=True,text=True,timeout=5)

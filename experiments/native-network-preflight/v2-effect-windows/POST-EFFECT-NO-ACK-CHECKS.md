@@ -17,7 +17,9 @@ model, target, or live route.
 2. Open the producer gate for `post-effect`. The receiver must append and sync
    exactly one `post-effect` row while withholding its response. The producer's
    ACK file and the receiver's `response-attempted` marker must both be absent.
-   If the effect row is absent, the crash window was not reached.
+   If the effect row is absent, the crash window was not reached. The receiver
+   holds the response for at most 60 seconds. The E2E releases it after the
+   managed stop proof and before the tamper checks.
 3. SIGSTOP and SIGKILL both exact host processes. Require a bounded terminal
    stop result, exact producer freeze, and a valid managed run-stop proof bound
    to the sealed manifest. An UNSAFE marker, a runnable exact producer, or a

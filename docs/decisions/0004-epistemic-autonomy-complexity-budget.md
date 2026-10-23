@@ -7,6 +7,12 @@ Decision 0002 for GEPA scope and capability history\
 **Related:** `AGENTS.md`, `docs/ROADMAP.md`, `docs/autoresearch-evaluation-rfc.html`,
 `docs/gepa-autoresearch-implementation-plan.md`
 
+**Reading scope:** implementation counts and “current” observations below are from
+27 June 2026. They are retained history. For later product choices and the native
+candidate, use [the maintained direction](../wiki/product-and-engineering-direction.md)
+and [dated status](../wiki/native-research-status.md). This accepted autonomy,
+complexity, and evaluator-integrity policy remains authoritative.
+
 ## Context
 
 The harness is at an inflection point. It has enough evaluation machinery to begin learning, but each

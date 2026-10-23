@@ -3,6 +3,11 @@
 Full brainstorm + decision history: `harness-merged-architecture-v1.html` (kept with the originating
 engagement wiki). This is the original conceptual summary, retained as history.
 
+For current product choices and the native/legacy boundary, start with
+[product and engineering direction](wiki/product-and-engineering-direction.md) and
+[native research status](wiki/native-research-status.md). The mechanisms and deferred
+phases below describe the original architecture; they are not the native task procedure.
+
 For the implemented record and review model, read the
 [record-kernel architecture](decision-0005-implementation-architecture.md). Follow the
 [decision index](decisions/README.md) for later decisions and supersession status; the three record

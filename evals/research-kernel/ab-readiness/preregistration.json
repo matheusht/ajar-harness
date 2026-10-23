@@ -154,11 +154,11 @@
     "files": [
       {
         "path": "AGENTS.md",
-        "sha256": "sha256:c8c90c600c4d230f06d61d9c803aa14240eb487a93a1e349c62d57dc1e135edb"
+        "sha256": "sha256:ee9c28e03cdf809681ca1e97775a0021aeffa6ef97bd04ae41e68d4e67ff5694"
       },
       {
         "path": "engagements/_TEMPLATE/scope.md",
-        "sha256": "sha256:7f3afb348dce50e4062c6607dca3dbc802f7b555562223f500d3e11e0e7186fb"
+        "sha256": "sha256:3779efbe87771d9e80d3c58906b321492fb67ad9f7ad8d218e313f2e11058971"
       },
       {
         "path": "engine/gates.md",

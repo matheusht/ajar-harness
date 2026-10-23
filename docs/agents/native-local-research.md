@@ -1,7 +1,9 @@
 # Native local research
 
-This branch implements the native route as the default for new local source research.
+The candidate native route is the default for new local source research.
 Runtime qualification and adoption remain unverified.
+Read [product direction](../wiki/product-and-engineering-direction.md) for design
+choices and [dated status](../wiki/native-research-status.md) for capability claims.
 Actual runs still require permission, a frozen allowance and the enforced effect
 boundary. If native preparation, access or evidence capture is unavailable, retain
 the work as blocked or unfinished; do not initialize a legacy queue or record
@@ -86,17 +88,19 @@ available; live qualification is still pending.
    final receipts, and recovery reports the first recorded stop trigger;
    absent or unreadable records leave the reason unknown. Check cleanup separately.
 
-The current owner keeps an authorized run available. `continue` is the first durable
+The current owner keeps an authorized run available. `continue` is the candidate durable
 controller: it reads `controls/continuation/state.json` and `researcher/NEXT.json`,
 holds one loop lease, and calls `research`, `resume`, or `reconstruct` one bounded
 turn at a time. It writes a pending-dispatch marker before each turn and keeps an
-append-only journal. A missing receipt stops with `reconciliation_required` instead
-of retrying. It never creates a new run, renews approval, or resets spend.
+append-only journal. A lost or invalid receipt can first return `invocation_failed`
+while retaining the pending marker; the next continuation requires reconciliation
+instead of retrying. It reuses the existing run and approval. Its allowance counters do
+not add monetary accounting or reconciled provider billing.
 
 `NEXT.json` is the checkpoint-level handoff. It records one of `supported`,
 `refuted`, `blocked`, or `inconclusive`, what the result rules out, useful
-capabilities and coverage, and the next brief or a stop proposal. A stop proposal,
-negative conclusion, or a `strong_lead` change from true to false produces
+capabilities and coverage, and the next brief or a stop proposal. An explicit stop
+proposal or a `strong_lead` change from true to false produces
 `closure_review_required`; a fresh reviewer or operator writes
 `controls/continuation/closure-review.json` with mode `0600`:
 
@@ -113,7 +117,10 @@ review's `test` is recorded in the closure review, and the researcher must put t
 concrete next test in `NEXT.json` before the reopen continues. Budget or operator
 stop is immediate and bypasses review. A refutation can close a lead; a blocked
 surface remains unresolved. Coverage is a map with explicit limits, not proof that
-no effect exists.
+no effect exists. The controller checks declared checkpoint markers; it does not
+infer every negative conclusion from prose or prove reviewer independence. A
+`refuted` result alone is not a final-closure marker. Fresh independent checking
+remains the operator's procedural obligation.
 
 If the controller returns `reconciliation_required`, inspect the exact dispatch
 with the existing `status` and `reconcile-*` commands. Write a private operator

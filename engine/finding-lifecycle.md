@@ -200,6 +200,11 @@ can answer yes or no in one reading. A ceiling nobody asked about is a finding w
 It does not decide whether a vulnerability is real. It decides whether the package's own claims
 survive mechanical checking, which is the same boundary `tools/score_finding.py` draws.
 
+A bounded negative research result (`record-negative`, `docs/research-lifecycle.md`) is not a
+finding revision: it is a notebook event citing attempts, limits and residual candidates. Filing a
+`refuted` or `contaminated` claim still requires the independently reviewed, operator-approved
+revision described above; recording a negative result neither files a finding nor demotes one.
+
 Novelty, reportability, and attribution stay at Stage 5.25. Zone-2 artifacts and the operator's
 review before submission are unchanged and are not gates in this file
 (`engine/autonomy.md` §2 — those two do not graduate).

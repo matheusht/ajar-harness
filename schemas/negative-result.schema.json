@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-redteam-harness.local/schemas/negative-result.schema.json",
+  "title": "Bounded negative result",
+  "allOf": [
+    {
+      "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/negative_result"
+    }
+  ]
+}

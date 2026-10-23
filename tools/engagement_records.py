@@ -65,6 +65,8 @@ NEW_SCHEMA_FILES = (
     "migration-artifact-review.schema.json",
     "flow-telemetry.schema.json",
     "work-queue-driver.schema.json",
+    "research-lifecycle.schema.json",
+    "negative-result.schema.json",
 )
 SECRET_PATTERNS = {
     "authorization_header": re.compile(rb"authorization\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
@@ -111,6 +113,7 @@ RECORD_SCHEMA_FILES = {
     "migration-artifact-review": "migration-artifact-review.schema.json",
     "flow-telemetry": "flow-telemetry.schema.json",
     "work-queue-driver": "work-queue-driver.schema.json",
+    "negative-result": "negative-result.schema.json",
     "finding-v2-legacy": "finding.schema.json",
 }
 
@@ -472,6 +475,8 @@ def infer_schema_name(record: Any) -> str | None:
         return "finding-v2-legacy"
     if "attempt_id" in record and version == 2:
         return "attempt-v2"
+    if "negative_result_id" in record:
+        return "negative-result"
     if "artifact_id" in record and version == 1:
         return "artifact"
     if "review_id" in record and "inventory_hash" in record and "redaction_attested" in record and version == 1:
@@ -709,7 +714,14 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
         "attempt-v2": [
             (("environment_ref",), {"environment"}), (("escalation_confirmation_event_ref",), {"event"}),
             (("hypothesis_ref",), {"hypothesis"}), (("experiment_ref",), {"event", "experiment"}),
+            (("start_ref",), {"event"}),
             (("evidence_refs",), {"artifact"}), (("control_of",), {"attempt"}),
+        ],
+        "negative-result": [
+            (("hypothesis_refs",), {"hypothesis"}), (("attempt_refs",), {"attempt"}),
+            (("evidence_bundle_ref",), {"artifact"}), (("coverage_ref",), {"event"}),
+            (("provenance_ref",), {"event"}), (("reproducibility_ref",), {"event"}),
+            (("review_ref",), {"review"}),
         ],
         "artifact": [
             (("target_refs",), {"target"}), (("environment_ref",), {"environment"}),
@@ -783,6 +795,22 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             (("payload", "conflicting_evidence_refs"), payload.get("conflicting_evidence_refs", []), {"attempt", "artifact"}),
             (("payload", "resolves_review_refs"), payload.get("resolves_review_refs", []), {"event"}),
         ])
+        negative = payload.get("negative_result")
+        if isinstance(negative, dict):
+            for field, allowed in (
+                ("hypothesis_refs", {"hypothesis"}),
+                ("attempt_refs", {"attempt"}),
+                ("evidence_bundle_ref", {"artifact"}),
+                ("coverage_ref", {"event"}),
+                ("provenance_ref", {"event"}),
+                ("reproducibility_ref", {"event"}),
+                ("review_ref", {"review"}),
+            ):
+                dynamic_specs.append((("payload", "negative_result", field), negative.get(field), allowed))
+        started = payload.get("attempt")
+        if isinstance(started, dict):
+            dynamic_specs.append((("payload", "attempt", "hypothesis_ref"), started.get("hypothesis_ref"), {"hypothesis"}))
+            dynamic_specs.append((("payload", "attempt", "environment_ref"), started.get("environment_ref"), {"environment"}))
 
     errors: list[dict[str, Any]] = []
     combined = [(path, _at(record, path), allowed) for path, allowed in specs.get(schema_name, [])] + dynamic_specs
@@ -794,7 +822,7 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             if ref == engagement_id and "engagement" in allowed:
                 continue
             candidates = index.get(ref, [])
-            same = [item for item in candidates if item.get("engagement_id") == engagement_id]
+            same = [item for item in candidates if engagement_id is None or item.get("engagement_id") == engagement_id]
             if not candidates:
                 code, message = "unresolved_record_ref", f"reference does not exist: {ref}"
             elif not same:

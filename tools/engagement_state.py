@@ -494,6 +494,93 @@ def revise_finding_target_is_current(state: dict[str, Any], request: dict[str, A
     )
 
 
+def require_original_filing_observations(finding):
+    """Hold new positive filings until a qualified target-side observation producer exists."""
+    if finding.get("claim_state") in {"supported", "confirmed"}:
+        raise RecordError("filing_original_observation_unavailable",
+                          "new positive filing blocked: no qualified collector for original target privilege and impact-state origin/reachability")
+
+
+def validate_filing_contract(finding, *, engagement, state, index, seen_events, attempts, artifacts):
+    """Retained gates for contract v1; historical records without it are replay-only."""
+    from finding_lifecycle import PRIVILEGE_RANK
+    from score_finding import CVSS_RE, cvss31_base
+    from adjudication_audit import audit
+
+    def require(ok, gate):
+        if not ok:
+            raise RecordError("filing_" + gate + "_invalid", finding.get("finding_id", "unknown"))
+
+    contract = finding.get("filing_contract", {})
+    require(contract.get("version") == 1 and not finding.get("legacy_import"), "contract")
+    positive = finding["claim_state"] in {"supported", "confirmed"}
+    require(finding["claim_state"] in FILEABLE_CLAIM_STATES, "claim_state")
+    require(state.get("active_environment_ref") is not None and finding["scope_provenance"]["scope_hash"] == state["scope_hash"] and finding["scope_provenance"]["environment_ref"] == state["active_environment_ref"], "GK")
+    require(not validate_record(finding, "finding-v3") and not validate_record_references(finding, "finding-v3", index), "G0")
+    review_id = finding["adjudication"]["review_ref"]
+    review_entry = _index_entry(index, review_id, "review", state["engagement_id"])
+    review = load_json(engagement / review_entry["path"]) if review_entry else {}
+    require(review.get("finding_digest") == sha256_bytes(canonical_json_bytes(finding)), "G4_digest")
+    commits = {e["payload"]["record_id"]: e for e in seen_events.values() if e["event_type"] == "record.committed"}
+    require(review_id in commits, "G4_commit")
+    scope_bytes = read_governed_file(engagement / f"scope-attestations/{state['scope_hash'].removeprefix('sha256:')}.md")
+    verify_embedded_operator_signature(proof=commits[review_id]["payload"].get("review_signature"), scope_bytes=scope_bytes,
+        operator_id=review.get("independence", {}).get("reviewer_id"), challenge_bytes=canonical_json_bytes(review),
+        namespace="llm-redteam-harness-review-v1", signer_kind="Reviewer")
+    corpus = [load_json(engagement / e["payload"]["record_path"]) for e in commits.values() if e["payload"]["record_type"] == "review"]
+    corpus = [r for r in corpus if r.get("review_type") == "claim_adjudication"]
+    require(audit(corpus)[0] != "synthetic", "G4_heuristic")
+
+    attempt_by_id = {a["attempt_id"]: a for a in attempts}
+    artifact_by_id = {a["artifact_id"]: a for a in artifacts}
+    proof = finding["proof"]
+    evidence = set(_iter_internal_refs(finding)) & (set(attempt_by_id) | set(artifact_by_id))
+    require(evidence <= set(review["input_refs"]) | set(review["evidence_refs"]), "G4_inputs")
+    for ref in evidence:
+        if ref in artifact_by_id:
+            item = artifact_by_id[ref]
+            require(item.get("environment_ref") == state["active_environment_ref"] and sha256_bytes(read_governed_file(engagement / item["relative_path"])) == item["sha256"], "G0_artifact")
+        else:
+            item = attempt_by_id[ref]
+            require(item["scope_hash"] == state["scope_hash"] and item["environment_ref"] == state["active_environment_ref"], "G1_provenance")
+            require(not positive or item["contamination"]["status"] == "none_observed", "G1_contamination")
+    require(bool(evidence), "G0_evidence")
+    if positive:
+        require(proof["contamination_disposition"] == "ruled_out" and bool(proof["fresh_state_properties"]), "G2_freshness")
+        require(proof["control_applicability"]["negative"] == "required" and proof["control_applicability"]["replay"] == "required", "G2_applicability")
+        for field in ("negative_control_refs", "replay_refs"):
+            require(bool(proof[field]), "G2_required")
+        for ref in proof["negative_control_refs"]:
+            require(any(row.get("attempt_ref") == ref and row.get("applicable") is True for row in review.get("control_applicability", [])), "G2_review_control")
+        for ref in proof["replay_refs"]:
+            require(any(row.get("attempt_ref") == ref and row.get("fresh") is True for row in review.get("replay_freshness", [])), "G2_review_replay")
+        pc = contract["privilege_context"]
+        require(pc["claimed"] in PRIVILEGE_RANK and pc["proven"] in PRIVILEGE_RANK and PRIVILEGE_RANK[pc["proven"]] <= PRIVILEGE_RANK[pc["claimed"]], "G3")
+        sp = contract["state_provenance"]
+        require(sp["mode"] in {"real-path", "none-required"}, "G6")
+        for gate, refs in [("G3", pc["evidence_refs"]), ("G6", sp["evidence_refs"])]:
+            require(bool(refs), gate + "_evidence")
+            for ref in refs:
+                a = attempt_by_id.get(ref, {})
+                require(ref in evidence and ref in set(proof["primary_attempt_refs"] + proof["replay_refs"]) and a.get("kind") in {"primary", "replay"} and a.get("assessment") == "suspected_signal" and a.get("observation", {}).get("source") != "model_report", gate + "_evidence")
+        for setup in sp["synthesized_setup"]:
+            require(bool(setup["reachability_basis"].strip()) and set(setup["evidence_refs"]) <= evidence, "G6_setup")
+    else:
+        require(all(c["status"] == "not_demonstrated" for c in finding["claims"]["impact_claims"]), "negative_impact")
+        require(finding["claim_state"] != "contaminated" or proof["contamination_disposition"] in {"present", "unresolved"}, "negative_contamination")
+
+    severity = finding["classification"]["severity"]
+    if severity["system"] == "none":
+        require(severity["label"] == "informational" and severity.get("vector") is None and severity.get("score") is None, "G5")
+    else:
+        vector = severity.get("vector")
+        match = CVSS_RE.fullmatch(vector) if isinstance(vector, str) else None
+        require(severity["system"] == "CVSS:3.1" and bool(match) and vector.startswith("CVSS:3.1/"), "G5_vector")
+        score = cvss31_base(*match.groups())
+        label = "informational" if score == 0 else "low" if score < 4 else "medium" if score < 7 else "high" if score < 9 else "critical"
+        require(severity.get("score") == score and severity["label"] == label and positive, "G5_score")
+
+
 def _validate_revise_finding_v2_action(
     action: dict[str, Any],
     *,
@@ -565,6 +652,11 @@ def _validate_revise_finding_v2_action(
     expected_provider = review.get("provenance", {}).get("provider")
     if review_entry is None or target["adjudication_review_ref"] not in committed_entity_ids or review.get("review_type") != "claim_adjudication" or review.get("proposed_finding_id") != finding_id or review.get("entity_ref") != finding_id or review.get("finding_revision") != expected_supersedes or review.get("verdict") != target.get("claim_state") or proposal_provenance.get("actor") != {"role": "reviewer", "id": review_independence.get("reviewer_id")} or proposal_provenance.get("session_id") != review_independence.get("reviewer_session_id") or proposal_provenance.get("model") != review_independence.get("reviewer_model") or proposal_provenance.get("provider") != expected_provider:
         raise RecordError("revise_finding_v2_review_binding_invalid", context)
+
+    if "filing_contract" in proposal:
+        validate_filing_contract(proposal, engagement=engagement, state=state, index=index, seen_events=seen_events, attempts=attempts, artifacts=artifacts)
+        if proposal["claim_state"] in {"refuted", "contaminated"}:
+            return copy.deepcopy(target)
 
     attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
     artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
@@ -1585,7 +1677,16 @@ def materialize_ledger_record(kind: str, proposal: dict[str, Any], records: list
     return record
 
 
-def append_ledger_record(engagement: Path, kind: str, proposal: dict[str, Any], *, lock_held: bool = False) -> dict[str, Any]:
+_FILING_ADMISSION = object()
+
+
+def append_ledger_record(engagement: Path, kind: str, proposal: dict[str, Any], *, lock_held: bool = False, _filing_admission: Any = None) -> dict[str, Any]:
+    if kind == "event" and (
+        proposal.get("event_type") == "finding.revised"
+        or (proposal.get("event_type") == "record.committed" and proposal.get("payload", {}).get("record_type") == "finding-v3")
+        or (proposal.get("event_type") == "authority.requested" and proposal.get("payload", {}).get("action_kind") == "revise-finding")
+    ) and _filing_admission is not _FILING_ADMISSION:
+        raise RecordError("canonical_filing_boundary_required", str(proposal.get("event_id")))
     relative, _, _ = LEDGERS[kind]
     with _engagement_transaction(engagement, lock_held) as engagement:
         require_not_quarantined(engagement)
@@ -2501,9 +2602,11 @@ def _initial_snapshot(engagement_id: str, scope_hash: str) -> dict[str, Any]:
     }
 
 
-def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
+def _reduce_engagement_unchecked(engagement: Path, *, proposed_event: dict[str, Any] | None = None, allowed_record_orphans: set[str] | None = None, allowed_artifact_orphans: set[str] | None = None, allow_scope_drift: bool = False) -> dict[str, Any]:
     engagement = engagement.absolute()
     events = read_ledger(engagement, "event")
+    if proposed_event is not None:
+        events.append(materialize_ledger_record("event", proposed_event, events))
     if not events or events[0]["event_type"] != "scope.attested":
         raise RecordError("scope_attestation_missing", "first event must be scope.attested")
     scope_hash = events[0]["payload"]["scope_hash"]
@@ -2818,6 +2921,13 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             request = state["authority_requests"].get(payload["request_id"])
             if request is None or request["status"] != "pending_authority" or request["request_event_ref"] != payload.get("request_event_ref") or request["action_digest"] != payload.get("action_digest"):
                 raise RecordError("authority_resolution_binding_invalid", event["event_id"])
+            action = load_json(engagement / request["action_path"]) if request.get("action_path") else {}
+            if "operator_signature" in payload or action.get("proposal", {}).get("filing_contract", {}).get("version") == 1:
+                scope_bytes = read_governed_file(engagement / f"scope-attestations/{state['scope_hash'].removeprefix('sha256:')}.md")
+                verify_embedded_operator_signature(proof=payload.get("operator_signature"), scope_bytes=scope_bytes,
+                    operator_id=active_scope_operator, challenge_bytes=operator_challenge_bytes(engagement_id=engagement_id,
+                    scope_hash=state["scope_hash"], ledger_hash=event["previous_hash"], operator_id=active_scope_operator,
+                    operation=f"resolve-authority:{payload['request_id']}:{request['action_digest']}:{payload['resolution']}:{event['recorded_at']}"))
             expired_at_resolution = request["expires_at"] is not None and datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00")) > datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))
             if payload["resolution"] == "approved" and expired_at_resolution:
                 raise RecordError("authority_approval_expired", event["event_id"])
@@ -3016,39 +3126,51 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             finding = load_json(engagement / finding_entry["path"])
             if finding.get("revision") != revision or finding.get("supersedes_revision") != expected_supersedes or finding.get("claim_state") != payload["status"] or finding.get("change_reason") != payload["change_reason"] or finding.get("adjudication", {}).get("review_ref") != payload["adjudication_review_ref"] or finding.get("scope_provenance", {}).get("scope_hash") != state["scope_hash"] or finding.get("scope_provenance", {}).get("environment_ref") != state["active_environment_ref"] or _governed_sha256_file(engagement / finding_entry["path"]) != payload["finding_digest"]:
                 raise RecordError("finding_revision_record_mismatch", event["event_id"], [{"finding_revision": finding.get("revision"), "event_revision": revision, "finding_supersedes": finding.get("supersedes_revision"), "expected_supersedes": expected_supersedes, "finding_state": finding.get("claim_state"), "event_state": payload.get("status"), "finding_change_reason": finding.get("change_reason"), "event_change_reason": payload.get("change_reason"), "finding_review_ref": finding.get("adjudication", {}).get("review_ref"), "event_review_ref": payload.get("adjudication_review_ref"), "finding_scope_hash": finding.get("scope_provenance", {}).get("scope_hash"), "active_scope_hash": state.get("scope_hash"), "finding_environment_ref": finding.get("scope_provenance", {}).get("environment_ref"), "active_environment_ref": state.get("active_environment_ref"), "file_digest_matches": _governed_sha256_file(engagement / finding_entry["path"]) == payload.get("finding_digest")}])
-            attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
-            artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
-            proof = finding["proof"]
-            primary_ids = set(proof["primary_attempt_refs"]); negative_ids = set(proof["negative_control_refs"]); positive_ids = set(proof["positive_control_refs"]); replay_ids = set(proof["replay_refs"])
-            primary_attempts = [attempt_by_id[reference] for reference in primary_ids]
-            claim_evidence_refs = set(finding["claims"]["mechanism"]["evidence_refs"]) | set(finding["claims"]["reachability"]["evidence_refs"]) | {reference for impact in finding["claims"]["impact_claims"] for reference in impact["evidence_refs"]}
-            proof_attempt_ids = primary_ids | negative_ids | positive_ids | replay_ids | {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in attempt_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["attempt_refs"] + mapping["control_refs"] + mapping["replay_refs"]}
-            if not primary_attempts or any(item["kind"] != "primary" or item["assessment"] != "suspected_signal" for item in primary_attempts) or all(item["observation"]["source"] == "model_report" for item in primary_attempts):
-                raise RecordError("primary_proof_invalid", event["event_id"])
-            if any(attempt_by_id[reference]["scope_hash"] != state["scope_hash"] or attempt_by_id[reference]["environment_ref"] != state["active_environment_ref"] or attempt_by_id[reference]["contamination"]["status"] != "none_observed" for reference in proof_attempt_ids):
-                raise RecordError("proof_provenance_or_contamination_invalid", event["event_id"])
-            proof_artifact_ids = {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in artifact_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["artifact_refs"]}
-            if any(artifact_by_id[reference].get("environment_ref") != state["active_environment_ref"] for reference in proof_artifact_ids):
-                raise RecordError("proof_artifact_environment_mismatch", event["event_id"])
-            applicability = proof["control_applicability"]
-            control_expectations = (("negative", negative_ids, "negative_control", {"no_signal", "held"}), ("positive", positive_ids, "positive_control", {"suspected_signal"}), ("replay", replay_ids, "replay", {"suspected_signal"}))
-            for policy, references, expected_kind, assessments in control_expectations:
-                if applicability[policy] == "required" and not references:
-                    raise RecordError("required_proof_stage_missing", f"{event['event_id']}:{policy}")
-                for reference in references:
-                    item = attempt_by_id[reference]
-                    if item["kind"] != expected_kind or item["assessment"] not in assessments or not primary_ids.intersection(item["control_of"]):
-                        raise RecordError("proof_stage_linkage_invalid", f"{event['event_id']}:{reference}")
-            required_controls = (negative_ids if applicability["negative"] == "required" else set()) | (positive_ids if applicability["positive"] == "required" else set())
-            required_replays = replay_ids if applicability["replay"] == "required" else set()
-            for mapping in proof["claim_proofs"]:
-                mapping_attempts = set(mapping["attempt_refs"]); mapping_controls = set(mapping["control_refs"]); mapping_replays = set(mapping["replay_refs"])
-                if not mapping_attempts or not mapping_attempts.issubset(primary_ids) or any(attempt_by_id[reference]["kind"] != "primary" for reference in mapping_attempts) or all(attempt_by_id[reference]["observation"]["source"] == "model_report" for reference in mapping_attempts):
-                    raise RecordError("atomic_claim_model_report_only", f"{event['event_id']}:{mapping['claim_id']}")
-                if mapping_controls != required_controls or mapping_replays != required_replays:
-                    raise RecordError("atomic_claim_proof_stage_missing", f"{event['event_id']}:{mapping['claim_id']}")
-                if any(not mapping_attempts.intersection(attempt_by_id[reference]["control_of"]) for reference in mapping_controls | mapping_replays):
-                    raise RecordError("atomic_claim_control_linkage_invalid", f"{event['event_id']}:{mapping['claim_id']}")
+            if payload.get("filing_contract_version") == 1 or "filing_contract" in finding:
+                if finding.get("filing_contract", {}).get("version") != 1:
+                    raise RecordError("canonical_filing_contract_required", event["event_id"])
+                if payload.get("filing_contract_version") != 1 or not isinstance(v2_target, dict) or not broker_authorized or finding_action.get("proposal") != finding:
+                    raise RecordError("canonical_filing_authority_required", event["event_id"])
+                resolution_event = seen_events.get(request.get("resolution_event_ref"), {})
+                if not resolution_event.get("payload", {}).get("operator_signature"):
+                    raise RecordError("canonical_filing_signature_required", event["event_id"])
+                if proposed_event is not None and event["event_id"] == proposed_event["event_id"]:
+                    require_original_filing_observations(finding)
+                validate_filing_contract(finding, engagement=engagement, state=state, index=index, seen_events=seen_events, attempts=attempts, artifacts=artifacts)
+            if "filing_contract" not in finding or finding["claim_state"] in {"supported", "confirmed"}:
+                attempt_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+                artifact_by_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
+                proof = finding["proof"]
+                primary_ids = set(proof["primary_attempt_refs"]); negative_ids = set(proof["negative_control_refs"]); positive_ids = set(proof["positive_control_refs"]); replay_ids = set(proof["replay_refs"])
+                primary_attempts = [attempt_by_id[reference] for reference in primary_ids]
+                claim_evidence_refs = set(finding["claims"]["mechanism"]["evidence_refs"]) | set(finding["claims"]["reachability"]["evidence_refs"]) | {reference for impact in finding["claims"]["impact_claims"] for reference in impact["evidence_refs"]}
+                proof_attempt_ids = primary_ids | negative_ids | positive_ids | replay_ids | {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in attempt_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["attempt_refs"] + mapping["control_refs"] + mapping["replay_refs"]}
+                if not primary_attempts or any(item["kind"] != "primary" or item["assessment"] != "suspected_signal" for item in primary_attempts) or all(item["observation"]["source"] == "model_report" for item in primary_attempts):
+                    raise RecordError("primary_proof_invalid", event["event_id"])
+                if any(attempt_by_id[reference]["scope_hash"] != state["scope_hash"] or attempt_by_id[reference]["environment_ref"] != state["active_environment_ref"] or attempt_by_id[reference]["contamination"]["status"] != "none_observed" for reference in proof_attempt_ids):
+                    raise RecordError("proof_provenance_or_contamination_invalid", event["event_id"])
+                proof_artifact_ids = {reference for reference in set(proof["evidence_refs"]) | claim_evidence_refs if reference in artifact_by_id} | {reference for mapping in proof["claim_proofs"] for reference in mapping["artifact_refs"]}
+                if any(artifact_by_id[reference].get("environment_ref") != state["active_environment_ref"] for reference in proof_artifact_ids):
+                    raise RecordError("proof_artifact_environment_mismatch", event["event_id"])
+                applicability = proof["control_applicability"]
+                control_expectations = (("negative", negative_ids, "negative_control", {"no_signal", "held"}), ("positive", positive_ids, "positive_control", {"suspected_signal"}), ("replay", replay_ids, "replay", {"suspected_signal"}))
+                for policy, references, expected_kind, assessments in control_expectations:
+                    if applicability[policy] == "required" and not references:
+                        raise RecordError("required_proof_stage_missing", f"{event['event_id']}:{policy}")
+                    for reference in references:
+                        item = attempt_by_id[reference]
+                        if item["kind"] != expected_kind or item["assessment"] not in assessments or not primary_ids.intersection(item["control_of"]):
+                            raise RecordError("proof_stage_linkage_invalid", f"{event['event_id']}:{reference}")
+                required_controls = (negative_ids if applicability["negative"] == "required" else set()) | (positive_ids if applicability["positive"] == "required" else set())
+                required_replays = replay_ids if applicability["replay"] == "required" else set()
+                for mapping in proof["claim_proofs"]:
+                    mapping_attempts = set(mapping["attempt_refs"]); mapping_controls = set(mapping["control_refs"]); mapping_replays = set(mapping["replay_refs"])
+                    if not mapping_attempts or not mapping_attempts.issubset(primary_ids) or any(attempt_by_id[reference]["kind"] != "primary" for reference in mapping_attempts) or all(attempt_by_id[reference]["observation"]["source"] == "model_report" for reference in mapping_attempts):
+                        raise RecordError("atomic_claim_model_report_only", f"{event['event_id']}:{mapping['claim_id']}")
+                    if mapping_controls != required_controls or mapping_replays != required_replays:
+                        raise RecordError("atomic_claim_proof_stage_missing", f"{event['event_id']}:{mapping['claim_id']}")
+                    if any(not mapping_attempts.intersection(attempt_by_id[reference]["control_of"]) for reference in mapping_controls | mapping_replays):
+                        raise RecordError("atomic_claim_control_linkage_invalid", f"{event['event_id']}:{mapping['claim_id']}")
             if adjudication_event is None or adjudication_event["event_type"] != "claim.adjudicated" or adjudication_event["payload"].get("entity_id") != finding_id or adjudication_event["payload"].get("status") != payload["status"] or adjudication_event["payload"].get("review_ref") != payload["adjudication_review_ref"]:
                 raise RecordError("finding_adjudication_event_mismatch", event["event_id"])
             review_entry = _index_entry(index, payload["adjudication_review_ref"], "review", engagement_id)
@@ -3610,6 +3732,21 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
             if payload.get("scope_snapshot_path") not in (None, expected_snapshot):
                 raise RecordError("scope_snapshot_path_mismatch", proposal["event_id"])
             payload["scope_snapshot_path"] = persist_scope_snapshot(engagement, metadata["scope_hash"])
+        event_type = proposal.get("event_type")
+        payload = proposal.get("payload", {})
+        if event_type == "authority.requested" and payload.get("action_kind") == "revise-finding":
+            action_path = payload.get("action_path")
+            action = load_json(engagement / action_path) if isinstance(action_path, str) and action_path else {}
+            if action.get("action_version") != 2 or action.get("proposal", {}).get("filing_contract", {}).get("version") != 1:
+                raise RecordError("canonical_filing_contract_required", proposal["event_id"])
+            require_original_filing_observations(action["proposal"])
+        if event_type == "finding.revised" and payload.get("filing_contract_version") != 1:
+            raise RecordError("canonical_filing_contract_required", proposal["event_id"])
+        if event_type == "record.committed" and payload.get("record_type") == "finding-v3":
+            finding = load_json(engagement / payload["record_path"])
+            if not finding.get("legacy_import") and finding.get("filing_contract", {}).get("version") != 1:
+                raise RecordError("canonical_filing_contract_required", proposal["event_id"])
+            require_original_filing_observations(finding)
         preview = materialize_ledger_record("event", proposal, current_events)
         validate_event_semantics(preview)
         reference_errors = validate_record_references(preview, "engagement-event", build_reference_index(engagement))
@@ -3634,7 +3771,9 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
             validate_transition(states, change, event_type=proposal.get("event_type"))
         ledger_path = engagement / LEDGERS["event"][0]
         verified_boundary = len(read_governed_file(ledger_path))
-        record = append_ledger_record(engagement, "event", proposal, lock_held=True)
+        if event_type in {"finding.revised", "authority.requested", "authority.resolved"} or (event_type == "record.committed" and payload.get("record_type") == "finding-v3"):
+            _reduce_engagement_unchecked(engagement, proposed_event=proposal)
+        record = append_ledger_record(engagement, "event", proposal, lock_held=True, _filing_admission=_FILING_ADMISSION)
         try:
             snapshot = reduce_engagement(engagement)
         except Exception:

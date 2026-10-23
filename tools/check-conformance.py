@@ -1111,6 +1111,44 @@ def check_finding_lifecycle():
                    "lifecycle-governed CLI: explicit --engagement retains corpus semantics",
                    explicit_cli.stdout + explicit_cli.stderr)
 
+            # Kernel finding revisions and lifecycle gate packages are separate contracts.
+            # `revise-finding` writes rev-N.json under findings/, but location alone must not
+            # manufacture a proven status or let the empty gate package clear G0.
+            filed_pkg = os.path.join(governed, "findings", "F-FILED")
+            os.makedirs(filed_pkg)
+            with open(os.path.join(filed_pkg, "rev-1.json"), "w", encoding="utf-8") as handle:
+                json.dump({"finding_id": "F-FILED", "revision": 1}, handle)
+            filed_gates_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "gates", filed_pkg,
+                 "--engagement", governed, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            filed_status_cli = subprocess.run(
+                [sys.executable, lifecycle_tool, "status", "--engagement", governed, "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            try:
+                filed_gates_payload = json.loads(filed_gates_cli.stdout)
+                filed_status_payload = json.loads(filed_status_cli.stdout)
+            except json.JSONDecodeError:
+                filed_gates_payload = filed_status_payload = {}
+            filed_g0 = next(
+                (row for row in filed_gates_payload.get("gates", [])
+                 if row.get("gate") == "G0"),
+                {},
+            )
+            record(filed_gates_cli.returncode == 1
+                   and filed_gates_payload.get("decision") == "blocked"
+                   and filed_g0.get("ok") is False
+                   and "filed revision store" in filed_g0.get("detail", ""),
+                   "lifecycle-kernel-revision: revision-only package blocks G0",
+                   filed_gates_cli.stdout + filed_gates_cli.stderr)
+            record(filed_status_cli.returncode == 1
+                   and filed_status_payload.get("status") == "quarantined"
+                   and filed_status_payload.get("findings") == [],
+                   "lifecycle-kernel-revision: invalid fixture kernel cannot attest storage",
+                   filed_status_cli.stdout + filed_status_cli.stderr)
+
     # G2 regression: a declaration cannot turn a replay into a negative control. These cases vary
     # only the ref used in proof.negative_control_refs and exercise the production G2 function
     # against a synthetic attempt ledger.

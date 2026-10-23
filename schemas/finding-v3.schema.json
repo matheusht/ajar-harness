@@ -112,6 +112,14 @@
             "rationale": {
               "type": "string",
               "minLength": 1
+            },
+            "score": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 10
             }
           }
         }
@@ -451,6 +459,126 @@
           }
         }
       }
+    },
+    "filing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "privilege_context",
+        "state_provenance"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "privilege_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claimed",
+            "proven",
+            "evidence_refs"
+          ],
+          "properties": {
+            "claimed": {
+              "enum": [
+                "unauthenticated",
+                "anonymous",
+                "pre-auth",
+                "remote-unauthenticated",
+                "authenticated-user",
+                "low-privilege-user",
+                "standard-user",
+                "co-tenant",
+                "authenticated",
+                "user",
+                "privileged-user",
+                "admin",
+                "administrator",
+                "operator",
+                "system",
+                "root",
+                "kernel",
+                "superuser",
+                "not-established"
+              ]
+            },
+            "proven": {
+              "enum": [
+                "unauthenticated",
+                "anonymous",
+                "pre-auth",
+                "remote-unauthenticated",
+                "authenticated-user",
+                "low-privilege-user",
+                "standard-user",
+                "co-tenant",
+                "authenticated",
+                "user",
+                "privileged-user",
+                "admin",
+                "administrator",
+                "operator",
+                "system",
+                "root",
+                "kernel",
+                "superuser",
+                "not-established"
+              ]
+            },
+            "evidence_refs": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
+            }
+          }
+        },
+        "state_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "evidence_refs",
+            "synthesized_setup"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "real-path",
+                "none-required",
+                "synthesized",
+                "not-established"
+              ]
+            },
+            "evidence_refs": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs"
+            },
+            "synthesized_setup": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "element",
+                  "reachability_basis",
+                  "evidence_refs"
+                ],
+                "properties": {
+                  "element": {
+                    "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/non_empty"
+                  },
+                  "reachability_basis": {
+                    "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/non_empty"
+                  },
+                  "evidence_refs": {
+                    "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id_refs",
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -501,25 +629,6 @@
               "provenance"
             ]
           },
-          "proof": {
-            "properties": {
-              "primary_attempt_refs": {
-                "minItems": 1
-              },
-              "negative_control_refs": {
-                "minItems": 1
-              },
-              "replay_refs": {
-                "minItems": 1
-              },
-              "evidence_refs": {
-                "minItems": 1
-              },
-              "claim_proofs": {
-                "minItems": 1
-              }
-            }
-          },
           "adjudication": {
             "required": [
               "review_ref",
@@ -552,6 +661,63 @@
           "supersedes_revision": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "legacy_import"
+              ]
+            }
+          },
+          {
+            "not": {
+              "allOf": [
+                {
+                  "required": [
+                    "filing_contract"
+                  ]
+                },
+                {
+                  "properties": {
+                    "claim_state": {
+                      "enum": [
+                        "refuted",
+                        "contaminated"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "proof": {
+            "properties": {
+              "primary_attempt_refs": {
+                "minItems": 1
+              },
+              "negative_control_refs": {
+                "minItems": 1
+              },
+              "replay_refs": {
+                "minItems": 1
+              },
+              "evidence_refs": {
+                "minItems": 1
+              },
+              "claim_proofs": {
+                "minItems": 1
+              }
+            }
           }
         }
       }

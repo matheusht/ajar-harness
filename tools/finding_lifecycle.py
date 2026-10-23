@@ -1,66 +1,17 @@
 #!/usr/bin/env python3
-"""Findings start unproven. Promotion is an act that must pass gates.
+"""Historical package inspection and any-role legacy safety demotion.
 
-Why this exists
----------------
-Until now a finding was created directly in `findings/` and carried its own status field. The run
-that produced the finding also set the field. On 2026-08-09 a script set `claim_state: supported` on
-seven findings in spotify-backstage-2026-07 and nothing objected, because nothing had to.
+New filings use the canonical signed kernel contract in run-engagement.py:
+request-authority -> resolve-authority -> settle-approved-revision (or revise-finding).
+The legacy promote command always refuses; package gates are advisory only.
+Status derives canonical claim states from committed activation, never directory names.
+Demote can move legacy packages, but cannot move immutable kernel revision stores.
 
-That is a default-accept pipeline. Every check that does not run is a silent pass, so a broken
-unattended run produces confident garbage and looks productive.
-
-This inverts it. A finding is written to `unproven/`. It has no status. It has a LOCATION, and the
-location changes only by running `promote`, which runs gates that can each say no. A broken
-unattended run now produces nothing, which is visible and harmless.
-
-Ownership (CLAUDE.md section 2)
--------------------------------
-Hunters write into `unproven/` and may not move anything. Only the orchestrator runs `promote`.
-`demote` is open to any role and needs only a reason: a wrong demote costs a re-review, a wrong
-promote reaches a vendor, so the asymmetry matches the cost.
-
-The gates
----------
-  G0 existence      every path the package cites exists                    computable
-  G1 real-path      the primary attempt resolves to a real execution      computable + attestable
-                    that SIGNALLED, and is attested
-  G2 control        a distinct negative-control attempt resolves to a      computable + attestable
-                    held/no-signal outcome AND is attested
-  G3 privilege      the proven execution context is no more privileged
-                    than the claimed attacker position                     computable
-  G4 adjudication   a review exists and is not synthetic                   computable
-  G5 severity       a claimed severity carries a CVSS vector that
-                    recomputes to its stated score                         computable
-  G6 state          the world state the proof depends on was REACHED
-                    through the real path, not written directly, and the
-                    attempt cited as reaching it resolves                   computable + attestable
-
-G3 is the gate this harness did not have. It cannot decide whether a proof really ran as a low
-privilege user. It can decide that the package DECLARES both positions and that they agree. That
-catches the failure ZSec documented: a named pipe that looked exploitable from SYSTEM and was
-unreachable as a standard user.
-
-G6 is the gate the obyte run bought. G3 asks WHO the attacker was; G6 asks whether the situation
-they attacked can occur at all. obyte-2026-08-004 answered G3 honestly and still promoted a false
-impact, because its PoC wrote itself into a state the real network cannot reach. Added 2026-08-11.
-
-Package layout
---------------
-  unproven/<FINDING_ID>/
-    finding.json      the finding record (v1 flat or v3 nested; both are read)
-    attest.json       the attestations the attestable gates require
-    REPORT.md         the writeup
-    reviews/*.json    claim_adjudication reviews, if any
-
-Usage
------
-  finding_lifecycle.py gates   PACKAGE_DIR [--json]
-  finding_lifecycle.py promote PACKAGE_DIR --engagement DIR --actor ID [--json]
-  finding_lifecycle.py demote  FINDING_ID  --engagement DIR --actor ID --reason TEXT
-  finding_lifecycle.py status  --engagement DIR [--json]
-
-Exit 0 = clear or moved, 1 = blocked.
+Usage:
+  finding_lifecycle.py gates PACKAGE_DIR [--engagement DIR] [--json]
+  finding_lifecycle.py status --engagement DIR [--json]
+  finding_lifecycle.py demote FINDING_ID --engagement DIR --actor ID --reason TEXT
+  finding_lifecycle.py preflight --engagement DIR
 """
 
 import argparse
@@ -271,6 +222,17 @@ class Gates:
 
 def g0_existence(pkg, g, docs=None, package_files=None):
     from score_finding import check_existence, load_package, Result
+    if package_files is None:
+        try:
+            package_files = set(os.listdir(pkg))
+        except OSError:
+            package_files = set()
+    root_files = {name for name in package_files if "/" not in name and "\\" not in name}
+    revisions = {name for name in root_files if re.fullmatch(r"rev-[1-9][0-9]*\.json", name)}
+    if revisions and not {"finding.json", "attest.json"} <= root_files:
+        g.add("G0", False, "every cited path exists",
+              "filed revision store lacks canonical finding.json and attest.json")
+        return
     if docs is not None:
         from score_finding import PATH_RE
         files = set(package_files or docs)
@@ -527,11 +489,27 @@ def g4_adjudication(pkg, engagement, g, snapshot=None, package_relative=None):
     Found 2026-08-10 by running the gates over the eleven spotify findings: G4 passed on all eleven
     while the engagement's 15-review corpus audited `synthetic`."""
     from adjudication_audit import audit, load_reviews
+    # The package arm used to read ONLY <pkg>/reviews/. record-review writes committed reviews to
+    # <engagement>/reviews/<review_id>.json -- the path is hardcoded -- and a copy in the package
+    # directory raises duplicate_record_id while an uncommitted one raises orphan_immutable_record.
+    # So for any review recorded through the kernel this arm reported "no review found" and G4 could
+    # never pass, regardless of review quality. Measured all three routes, chia-2026-08/clvm_rs R27.
+    # Fix: fall back to the engagement's committed review set, filtered to THIS finding. The corpus
+    # arm below already reads engagement-level reviews by recursive walk; the two arms now agree.
+    finding_id = os.path.basename(os.path.normpath(package_relative or pkg))
     if snapshot is None:
         rdir = os.path.join(pkg, "reviews")
         reviews = load_reviews(rdir) if os.path.isdir(rdir) else []
+        if not reviews and engagement:
+            committed = os.path.join(engagement, "reviews")
+            if os.path.isdir(committed):
+                reviews = [r for r in load_reviews(committed)
+                           if r.get("proposed_finding_id") == finding_id]
     else:
         reviews = _snapshot_reviews(snapshot, f"{package_relative}/reviews")
+        if not reviews:
+            reviews = [r for r in _snapshot_reviews(snapshot, "reviews")
+                       if r.get("proposed_finding_id") == finding_id]
     if not reviews:
         g.add("G4", False, "an independent adjudication review exists",
               "no claim_adjudication review found under reviews/")
@@ -989,7 +967,29 @@ def _bound_finding_rows(engagement):
                 except OSError:
                     continue
                 if stat.S_ISDIR(entry.st_mode) and not stat.S_ISLNK(entry.st_mode):
-                    rows.append({"finding_id": name, "state": state_name})
+                    state = state_name
+                    if state_name == PROVEN:
+                        try:
+                            package_fd = os.open(name, flags, dir_fd=directory_fd)
+                            try:
+                                package_names = os.listdir(package_fd)
+                                regular = set()
+                                for child in package_names:
+                                    try:
+                                        child_stat = os.stat(child, dir_fd=package_fd, follow_symlinks=False)
+                                    except OSError:
+                                        continue
+                                    if stat.S_ISREG(child_stat.st_mode):
+                                        regular.add(child)
+                                revisions = {child for child in regular
+                                             if re.fullmatch(r"rev-[1-9][0-9]*\.json", child)}
+                                if revisions and not {"finding.json", "attest.json"} <= regular:
+                                    state = "filed"
+                            finally:
+                                os.close(package_fd)
+                        except OSError:
+                            continue
+                    rows.append({"finding_id": name, "state": state})
         finally:
             os.close(directory_fd)
     return rows
@@ -1113,46 +1113,11 @@ def cmd_preflight(args):
 
 
 def cmd_promote(args):
-    original = Path(args.engagement).absolute()
-    try:
-        package_relative = Path(args.package).absolute().relative_to(original)
-    except ValueError:
-        g = Gates(); g.add("source", False, f"the package is promoted out of {UNPROVEN}/", "package is outside the engagement")
-        report(args, g, args.package, moved=False)
-        return 1
-    with engagement_lock(original) as engagement:
-        return _cmd_promote_unlocked(args, engagement, package_relative)
+    raise RecordError("legacy_filing_retired", "use run-engagement.py request-authority, resolve-authority and settle-approved-revision with filing contract v1")
 
 
 def _cmd_promote_unlocked(args, engagement, package_relative):
-    pkg = os.path.abspath(args.package)
-    fid = package_relative.name
-    snapshot = _snapshot_engagement(engagement)
-    g, _ = run_gates(pkg, engagement, snapshot, package_relative.as_posix())
-    # Promotion must be a MOVE OUT OF unproven/, not a blessing applied wherever the package sits.
-    # Version 1 moved any path it was handed, so the default-reject design rested entirely on the
-    # operating agent's discipline: a package created straight in findings/ was never promoted and
-    # so never gated. Measured on obyte-ocore-2026-08 (2026-08-11): the flow was followed, but
-    # nothing enforced it.
-    want_parent = os.path.abspath(os.path.join(args.engagement, UNPROVEN))
-    if package_relative.parts != (UNPROVEN, fid):
-        g.add("source", False, f"the package is promoted out of {UNPROVEN}/",
-              f"package sits at {pkg}, expected a child of {want_parent} — a finding that was never "
-              f"in {UNPROVEN}/ was never gated on its way in")
-    dest = os.path.join(args.engagement, PROVEN, fid)
-    moved = False
-    if not g.blocked:
-        if not _bound_move(engagement, UNPROVEN, PROVEN, fid):
-            g.add("move", False, "destination is free", f"{dest} already exists")
-        else:
-            moved = True
-    _append_log_bound(engagement, {
-        "recorded_at": now(), "action": "promote", "finding_id": fid, "actor": args.actor,
-        "result": "promoted" if moved else "blocked",
-        "gates": [{"gate": r["gate"], "ok": r["ok"]} for r in g.rows],
-        "blocked_by": [r["gate"] for r in g.blocked]})
-    report(args, g, pkg, moved=moved, dest=dest if moved else None)
-    return 0 if moved else 1
+    return cmd_promote(args)
 
 
 def cmd_demote(args):
@@ -1161,6 +1126,17 @@ def cmd_demote(args):
 
 
 def _cmd_demote_unlocked(args, engagement):
+    # Any role may remove a legacy package from the promoted location. Immutable kernel
+    # revisions require a signed disposition; moving them would corrupt historical replay.
+    from engagement_state import read_ledger, reduce_engagement
+    prefix = f"findings/{args.finding_id}/"
+    commitments = [event["payload"] for event in read_ledger(engagement, "event")
+                   if event["event_type"] == "record.committed"
+                   and event["payload"].get("record_type") == "finding-v3"
+                   and event["payload"].get("record_path", "").startswith(prefix)]
+    if commitments:
+        reduce_engagement(engagement)
+        raise RecordError("canonical_revision_is_immutable", "request independent claim review; do not move signed revision history")
     src = os.path.join(args.engagement, PROVEN, args.finding_id)
     dest = os.path.join(args.engagement, UNPROVEN, args.finding_id)
     root_fd = _bound_root_fd(engagement)
@@ -1192,6 +1168,17 @@ def cmd_status(args):
     try:
         with bound_engagement_source(original) as engagement:
             rows = _bound_finding_rows(engagement)
+            active = {}
+            try: events = read_governed_file(engagement / "events.jsonl")
+            except FileNotFoundError: events = b""
+            if events:
+                from engagement_state import reduce_engagement
+                active = reduce_engagement(engagement)["findings"]
+            for row in rows:
+                if row["state"] != UNPROVEN:
+                    current = active.get(row["finding_id"])
+                    row["state"] = current["status"] if current else "stored-unverified"
+                    if current: row["revision"] = current["revision"]
             _require_bound_package_current(original, engagement, portable=False)
             if args.json:
                 json.dump({"engagement": args.engagement, "findings": rows}, sys.stdout, indent=2)
@@ -1200,9 +1187,9 @@ def cmd_status(args):
                 if not rows:
                     print("no findings")
                 for r in rows:
-                    mark = "PROVEN  " if r["state"] == PROVEN else "unproven"
+                    mark = r["state"]
                     print(f"  {mark} {r['finding_id']}")
-                print(f"\n{sum(1 for r in rows if r['state']==PROVEN)} proven, "
+                print(f"\n{len(active)} active canonical records, "
                       f"{sum(1 for r in rows if r['state']==UNPROVEN)} unproven")
             return 0
     except (OSError, RecordError, ValueError):
@@ -1217,7 +1204,7 @@ def cmd_status(args):
 def report(args, g, pkg, moved, dest=None):
     quarantined = any(row.get("gate") == "GQ" for row in g.rows)
     if getattr(args, "json", False):
-        payload = {"decision": "blocked" if g.blocked else "clear", "gates": g.rows}
+        payload = {"advisory_only": True, "decision": "blocked" if g.blocked else "clear", "gates": g.rows}
         if not quarantined:
             payload.update({"package": pkg, "moved_to": dest})
         json.dump(payload, sys.stdout, indent=2)
@@ -1250,21 +1237,21 @@ def main():
     p.add_argument("--engagement", required=True)
     p.set_defaults(fn=cmd_preflight)
 
-    p = sub.add_parser("gates", help="run the gates without moving anything")
+    p = sub.add_parser("gates", help="advisory historical package inspection; never authorizes filing")
     p.add_argument("package")
     p.add_argument("--engagement", default=None,
                    help="also audit this engagement's whole review corpus for G4")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_gates)
 
-    p = sub.add_parser("promote", help="orchestrator only — run gates and move to findings/")
+    p = sub.add_parser("promote", help="retired: always refuses; use the canonical signed kernel activation")
     p.add_argument("package")
     p.add_argument("--engagement", required=True)
     p.add_argument("--actor", required=True)
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_promote)
 
-    p = sub.add_parser("demote", help="any role — move back to unproven/")
+    p = sub.add_parser("demote", help="any role may demote a legacy package; immutable kernel revisions use claim review")
     p.add_argument("finding_id")
     p.add_argument("--engagement", required=True)
     p.add_argument("--actor", required=True)
@@ -1280,6 +1267,13 @@ def main():
     try:
         return args.fn(args)
     except RecordError as exc:
+        if exc.code in {"legacy_filing_retired", "canonical_revision_is_immutable"}:
+            if getattr(args, "json", False):
+                json.dump({"decision":"blocked","advisory_only":True,"error":exc.as_dict()},sys.stdout)
+                sys.stdout.write("\n")
+            else:
+                print(f"{exc.code}: {exc.message}")
+            return 1
         if exc.code != "engagement_quarantined":
             raise
         if args.cmd == "status" and args.json:

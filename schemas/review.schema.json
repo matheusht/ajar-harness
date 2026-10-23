@@ -27,6 +27,7 @@
     "schema_version": {
       "const": 1
     },
+    "finding_digest": {"$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"},
     "review_id": {
       "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/id"
     },

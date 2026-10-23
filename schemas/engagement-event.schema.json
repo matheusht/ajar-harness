@@ -592,6 +592,35 @@
             }
           }
         },
+        "filing_contract_version": {
+          "const": 1
+        },
+        "review_signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_digest",
+            "signature_base64",
+            "allowed_signers_base64",
+            "signer_fingerprint"
+          ],
+          "properties": {
+            "challenge_digest": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            },
+            "signature_base64": {
+              "type": "string",
+              "minLength": 1
+            },
+            "allowed_signers_base64": {
+              "type": "string",
+              "minLength": 1
+            },
+            "signer_fingerprint": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            }
+          }
+        },
         "operator_signature": {
           "type": "object",
           "additionalProperties": false,

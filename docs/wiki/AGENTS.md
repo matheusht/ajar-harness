@@ -26,4 +26,7 @@ The index, ordinary Markdown links, `rg` and Git cover the current need. Add no 
 
 At the end of a meaningful work slice, check that changed pages are reachable, their source links resolve, dates/statuses agree and missing evidence remains explicit. This is a bounded content check, not a repository-wide ingestion campaign.
 
-Implementation workers follow the model/effort and permission limits in the [implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md). Wiki editing never grants additional execution authority.
+Workers implementing the September 5 package follow that package's
+[implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md).
+Its model/effort and permission choices are scoped to that task. Other work follows
+its current assignment and actual authority; wiki editing grants no execution authority.

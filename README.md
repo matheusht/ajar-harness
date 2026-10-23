@@ -1,14 +1,19 @@
 # llm-redteam-harness
 
-A **target-agnostic, portable** harness for **authorized** red-teaming of LLM / agentic
-applications. It drives a target through a validated, OWASP-LLM-aligned checklist of
-application-layer weaknesses, proves each finding against a ground-truth **oracle**, and
-accumulates what it learns as reusable methodology.
+A **domain-neutral, portable** harness for **authorized security research**. A capable
+researcher uses source, tools, experiments and runtime feedback inside an explicit
+authority and evidence boundary. LLM application security is one domain.
 
 > **Prime directive.** A red-team harness's product is **rigor, not findings**. It is engineered to
-> **default to disbelief** and to **disprove itself before it is allowed to believe**. Success is not
-> "found lots of issues" — it is being *more conservative than the operator's own intuition* about
-> what counts as real.
+> **default to disbelief** when confirming a claim. Discovery preserves plausible
+> leads; confirmation requires faithful evidence; reporting stays within supported
+> conditions. A supported effect and unfinished deeper work can coexist.
+
+Read [product and engineering direction](docs/wiki/product-and-engineering-direction.md)
+for the north stars and design choices, and [native research status](docs/wiki/native-research-status.md)
+for the dated implementation and qualification boundary. The product is intended to
+be model/provider independent; the current native integration supports a narrower,
+explicit set of runtimes and model routes.
 
 ## Scope fence (read first)
 
@@ -27,28 +32,29 @@ signed `scope.md`. The native runner binds scope bytes to its plan approval, but
 its entry procedure must verify the signature and each used card's benign
 `safe_signal`; the runner does not check either one itself.
 
-## What it is / isn't
+## Research model
 
-- It **is** a knowledge base of composable cards (vulns × techniques × oracles, plus **patterns** that
-  route recon to the right cards) + one adaptive loop that reads them, driven by a single orchestrator
-  with on-demand hunters, and **casebooks** of scrubbed prior engagements it learns from.
-- It **isn't** a universal jailbreak generator, a payload arsenal, or a self-rewriting memory.
+A research workflow combines reusable cards, tools, oracles, patterns and scrubbed
+casebooks. The researcher chooses and revises the investigation; the harness
+preserves authority, evidence, continuity and review obligations.
 
 ## Layout
 
 ```
 skills/         PLANE 1 — methodology (read-only): vulns/ · techniques/ · oracles/ · patterns/
-engine/         PLANE 2 — orchestration: loop · persistence · routing · roster · gates
+engine/         PLANE 2 — native research method + retained legacy orchestration
 schemas/        the contracts: attempt · finding · pattern · technique-card
 fixtures/       sanitized oracle-calibration + routing-activation ground truth
 casebooks/      PLANE 1 — scrubbed prior-engagement memory (routing + false-positive discipline)
 engagements/    PLANE 3 — legacy _TEMPLATE copied OUT into each target's own project repo
-tools/          conformance checker — the first mechanical gate
+tools/          native runner + candidate continuation · retained legacy tools · conformance
 docs/           architecture + decisions + field-notes (cross-engagement methodology log)
 ```
 
-**Plane rule:** Plane 1 is read-only knowledge; Plane 3 is write-only memory. The portable harness
-(Plane 1+2) travels; each engagement's Plane 3 wiki lives with its target.
+The portable methodology/runtime travels; target state and evidence stay with the
+target. Legacy records retain their append-only and immutable-history rules.
+Native research uses ordinary working files in its persistent run root and keeps
+protected host evidence separate. Use the selected route's actual record contract.
 
 ## New local source research — candidate native default
 
@@ -92,7 +98,7 @@ run is required before a pattern/vuln/casebook change is promoted** (also enforc
 - **Before any external sharing**, run a pre-publish pass that replaces engagement labels with abstract
   handles. Until then, labels stay internal.
 
-## Benchmark calibrations
+## Earlier benchmark calibrations
 
 The harness has been calibrated against public security/CTF benchmarks as a **capability + rigor
 signal** (its own records are published under `engagements/`; the vendored third-party challenge
@@ -112,6 +118,7 @@ The repository retains the Decision 0005/0006 record kernel for existing work an
 contains the candidate native source default for new local source research. #165
 qualification/adoption and the final E2E remain open. Start with the
 [decision index](docs/decisions/README.md) for accepted and superseded architecture decisions,
-and the [engineering wiki](docs/wiki/index.md) for the current offline engineering delivery state
-and its verification limits. The benchmark table above records earlier calibrations, not a fresh
-execution result or authorization.
+the [engineering wiki](docs/wiki/index.md) for topic navigation, and
+[native research status](docs/wiki/native-research-status.md) for the dated capability
+assessment. September delivery and earlier benchmark records retain their original
+scope; they are not fresh execution results or authorization.

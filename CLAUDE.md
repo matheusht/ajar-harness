@@ -25,9 +25,9 @@ an engagement; the signed scope, evidence and redaction boundaries remain.
 ## 0. Prime directive
 
 Your product is **rigor, not findings**. Default to disbelief. A result is `needs_review` or
-`contaminated` until it survives the oracle. If you cannot say in one sentence why a finding is
-real, it isn't. Prefer "observed weirdness / repro incomplete / guard moved but impact unproven"
-over "confirmed".
+`contaminated` until it survives the oracle. Discovery preserves plausible leads;
+confirmation requires evidence; reporting stays within supported conditions.
+Keep claim state, unfinished search, and bounded coverage distinct.
 
 ## 1. Hard gates (refuse to proceed otherwise)
 
@@ -73,22 +73,21 @@ Never store auth cookies, JWTs, Authorization headers, signed URLs, or passwords
 The [legacy entry](docs/agents/legacy-local-research.md#7-not-yet-built-phase-2)
 retains this section for historical references. It does not add native run requirements.
 
-## Agent skills
-
-Configuration for the installed engineering skills (`/wayfinder`, `/research`, `/prototype`,
-`/grilling`). These files are read by the skills, not by the harness runbook above.
+## Engineering references
 
 ### Issue tracker
 
-Issues live as GitHub issues on `matheusht/redteam-harness`, driven via the `gh` CLI. The repo is
-**private** (verified `gh repo view`, 2026-08-17). **Do not treat that as the control.** Keep
-engagement specifics out of issue bodies anyway: Plane 3 stays with the target (see the
-[legacy placement rule](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement)), visibility is
-a setting that can be flipped, and git history keeps whatever was committed while it was set.
-An earlier version of this line said the repo was public. It was wrong, and the rule it justified is
-correct for reasons that do not depend on visibility at all.
+Issues live on `matheusht/redteam-harness`, driven via the `gh` CLI. Keep issue
+context sanitized and target-specific evidence in the target's own records;
+repository visibility is not a redaction control. The
+[legacy placement rule](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement)
+retains its supported engagement layout.
 
 ### Domain docs
 
-Single-context. ADRs live in **`docs/decisions/`**, not `docs/adr/` — read
-`docs/decisions/README.md` first for the index and supersession flags.
+**Direction:** for product, architecture, workflow or planning changes, read
+[product and engineering direction](docs/wiki/product-and-engineering-direction.md).
+**Status:** for capability, readiness or qualification claims, read the dated
+[native research status](docs/wiki/native-research-status.md), then its source evidence.
+ADRs live in **`docs/decisions/`**, not `docs/adr/`; use
+[the decision index](docs/decisions/README.md) for authority and supersession.

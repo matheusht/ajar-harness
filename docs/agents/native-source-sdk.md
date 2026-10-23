@@ -7,7 +7,9 @@ Go is an optional preset. Other runtimes use the same execution and review path.
 The paid provider route, credential containment and native reviewer are **not
 qualified** by the local checks. Synthetic Docker execution passed; it does not
 qualify a real target. Complete [SOURCE-SDK-CHECKS](../../evals/native-qualification/SOURCE-SDK-CHECKS.md)
-before using it as live target authorization.
+before claiming live source-mode qualification. Signed target-local authority
+remains a separate requirement; checks cannot grant it. The
+[dated status](../wiki/native-research-status.md) records the broader evidence boundary.
 
 ## Prepare the environment
 
@@ -201,7 +203,8 @@ Stop with the normal `stop` command and inspect the final stop/cleanup receipt.
 
 ## Verification status
 
-The four earlier offline contracts still pass. The new failure-first check covers
+The saved receipts record the earlier offline contract results at their exact
+source hashes. The source-mode check covers
 runtime input, reviewer check/control input, and preservation of original files.
 A synthetic local Docker scenario runs two batches on the same three executors,
 checks that old output remains intact, executes a frozen reviewer script, rejects
@@ -216,7 +219,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 tools/check_native_source_mode.py --docker sha
 ```
 
 The [saved source-mode receipt](../../evals/native-qualification/SOURCE-MODE-LOCAL-CHECKS.json)
-records the image, command, checked source hashes and output. The earlier
+records the image, command, checked source hashes and output; it is not a fresh
+result for later runner or check-script revisions. The earlier
 [SOURCE-SDK-LOCAL-CHECKS.json](../../evals/native-qualification/SOURCE-SDK-LOCAL-CHECKS.json)
 records the initial adapter checks at their older source hashes. Full native
 review, TLS streaming, stop/owner-loss behavior and real-target E2E remain unverified.

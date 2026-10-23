@@ -70,9 +70,10 @@ boundary, not a claim that every deletion candidate became unused.
 
 ## Intended public interface
 
-The candidate native route uses `tools/native_research.py prepare`, `start`,
-`research`, `resume`, `reconstruct`, `review`, `status`, `stop`, and `recover-start`
-on a persistent run root; consult each command's `--help` for current arguments. For the pinned
+The candidate native route uses `tools/native_research.py` on a persistent run
+root; its `--help` and each command's help own the current interface. Later source
+work adds source execution and candidate continuation; see the
+[dated status](../wiki/native-research-status.md). For the pinned
 Kanboard T01 protected API route, `prepare` opts into `--t01-capture
 --origin-ingress`; select the exact workspace or historical API-only brief
 as described in the [native guide](native-local-research.md#start-and-resume).
@@ -114,8 +115,9 @@ existing work and has no dependency on either.
   remain readable. Compare the exact changed paths and decision revision before
   any default switch.
 
-All runtime checks above remain pending on the integrated source. The operator
-will run the full E2E workflow after implementation. This change is reviewed by
-source/caller inspection and syntax/diff checks only; no tests, CLI execution,
-provider sessions, Docker workloads or target runs are part of this implementation
-pass. Earlier check results apply only to their recorded revisions.
+At the 22 October #166–170 integration pass, the runtime checks above were deferred
+to the operator's final E2E. That pass used source/caller inspection and syntax/diff
+checks; it included no tests, CLI execution, provider sessions, Docker workloads or
+target runs. Subsequent source-mode and continuation work added bounded local
+checks, described in [current status](../wiki/native-research-status.md). They do
+not qualify the final integrated workflow or change earlier receipts' revision scope.

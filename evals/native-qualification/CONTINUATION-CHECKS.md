@@ -1,7 +1,10 @@
 # Continuation controller checks
 
-Status: controller implemented; no native model, provider, target, comparative or
-multi-day run has used it. These checks are offline contracts, not qualification.
+Status: controller implemented; the retained evidence establishes no native model,
+provider, target, comparative or multi-day qualification. These checks are offline contracts.
+The inventory was added after candidate implementation. The smoke calls the
+controller function with a synthetic child-runner CLI; it does not cover the
+public `native_research.py continue` entrypoint.
 
 ## Failure inventory
 
@@ -22,11 +25,11 @@ multi-day run has used it. These checks are offline contracts, not qualification
 | Stale checkpoint or changed plan | Reject; no dispatch | `test_stale_checkpoint_is_rejected` |
 | Operator stop | Durable stop; no new invocation | `test_operator_stop_blocks_invocation` |
 | Invocation bound | Stop at the declared maximum | `test_max_invocations_and_journal` |
-| Proposed final closure | Stop for fresh closure review | `test_accept_closes`; smoke check |
+| Proposed final closure | Stop for a request-bound review artifact; reviewer independence remains procedural | `test_accept_closes`; smoke check |
 | Reviewer reopens | Require a concrete next brief, then continue | `test_reopen_requires_next_and_resumes` |
 | Stale closure review | Reject a review bound to a different request | `test_stale_closure_review_is_rejected` |
 | Malformed closure review | Reject wrong kind, decision, or missing reason | code path; not separately tested |
-| Expired approval / exhausted allowance | Child rejects before dispatch; controller stops | child checks; `test_previous_stop_requires_explicit_resume` |
+| Expired approval / exhausted allowance | Child must reject before dispatch; controller must stop | Synthetic expired-child rejection is covered; actual child approval/allowance checks through the controller remain unrun |
 | Repeated identical next brief | Not implemented; requires an observed failure and a decision | not covered |
 
 ## Contract

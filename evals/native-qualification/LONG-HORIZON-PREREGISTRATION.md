@@ -2,6 +2,10 @@
 
 Recorded before the continuation implementation or any comparative run on 22 October 2026.
 This is a test specification, not a result or permission to run a target.
+Candidate-contract details were added on 23 October. The documentation review
+later that day corrected source/test descriptions below without changing the
+comparison outcomes or decision rule. Freeze the exact document revision before
+any scored comparison.
 
 ## Hypothesis and comparison
 
@@ -44,15 +48,16 @@ quality or full autonomy.
 
 ## Implementation constraints (added 23 October 2026, before any comparative run)
 
-The controller is implemented; no provider, target, comparative, or multi-day run has
-used it. These constraints are part of the frozen test specification.
+The controller is implemented. The retained evidence establishes no provider,
+target, comparative, or multi-day qualification. These constraints describe the
+candidate contract to check, not results of the comparison.
 
 - **One run lease.** The controller holds a non-blocking process lock for the whole
   loop. A second loop is rejected; a crashed loop releases the lock and the durable
   checkpoint remains.
 - **Durable spend and stop state.** `controls/continuation/state.json` holds the
-  invocation count, session hint, last pool and next brief hash. An append-only
-  `events.jsonl` records dispatch start, invocation, next brief, closure request and
+  invocation count, session hint and last pool. An append-only
+  `events.jsonl` records dispatch start, invocation, the next brief hash, closure request and
   stop. A pending-dispatch marker is written before every child invocation. If the
   controller loses the receipt, the next run stops with `reconciliation_required`;
   it does not dispatch again.
@@ -66,12 +71,16 @@ used it. These constraints are part of the frozen test specification.
   at meaningful checkpoints, not after every tool call. Coverage is not proof of
   absence; the final statement is "not found under these conditions, with this
   remaining uncertainty."
-- **Consequential stop review.** A proposed stop, final closure, negative
-  conclusion, or abandonment of a strong lead (`strong_lead` true to false) produces
+- **Consequential stop review.** An explicit checkpoint stop proposal or
+  abandonment of a strong lead (`strong_lead` true to false) produces
   a closure request. The controller stops with `closure_review_required`. A fresh
   reviewer or operator writes a bounded `closure-review.json`; reopening requires a
   concrete condition, observation, or discriminating test plus a valid next brief.
-  An accept closes; budget or operator stop never waits for review.
+  An accept closes; budget or operator stop never waits for review. The controller
+  validates request binding and required fields. It does not infer every negative
+  conclusion from prose or establish that the reviewer is fresh and independent;
+  those remain procedural review requirements. A `refuted` result alone does not
+  trigger final-closure review.
 - **Runtime-neutral checkpoint.** The native session id is a hint. The durable
   state is the workspace, `RESEARCH.md`, `NEXT.json`, `state.json`, and the journal.
   Exact resume is preferred; a missing session is reconstructed and recorded. The
@@ -87,11 +96,13 @@ timeout is insufficient.
 
 `tools/test_native_continuation.py` covers the controller contract without a model,
 provider, Docker, or target. `evals/native-qualification/smoke/check_native_continuation.py`
-exercises the public controller CLI with a synthetic child runner. The checks cover
+calls the controller function with a synthetic child-runner CLI. It does not
+exercise the public `native_research.py continue` entrypoint. The checks cover
 the lease, a concurrent loop, a missing session and reconstruction, a closure
 request and accept/reopen, operator stop, max invocations, invalid and stale
 checkpoints, an inactive run, an unknown effect, missing spend, and a controller
-crash between dispatch and receipt. They do not qualify native behavior.
+crash between dispatch and receipt. These checks were added after implementation;
+they are not failure-first provenance and do not qualify native behavior.
 
 ## Not yet established
 

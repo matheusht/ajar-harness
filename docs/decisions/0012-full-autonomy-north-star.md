@@ -9,6 +9,13 @@ Supersedes nothing.\
 **Related:** `engine/autonomy.md`, `docs/decisions/0004-epistemic-autonomy-complexity-budget.md`,
 `docs/decisions/0010-promotion-gates-and-fail-open.md`
 
+**Reading scope:** “today,” counts, and unmet-precondition observations below refer
+to 16 August 2026. They are not a live capability assessment. Later operator choices
+and the separate implementation/qualification boundary are recorded in
+[product direction](../wiki/product-and-engineering-direction.md) and
+[current status](../wiki/native-research-status.md). This record's direction-only
+status and current authorization gates are unchanged.
+
 ## The direction, as stated by the operator (2026-08-16)
 
 > Once our product evolves more, we will make it fully autonomous, and for that we have to think and
@@ -71,7 +78,8 @@ checks, which is exactly what two audits in August 2026 concluded. Candidates th
 
 ## Preconditions — what must be true before any hard gate moves
 
-None of these is satisfied today. Each is measurable, which is the point of writing them down.
+None of these was established at the 16 August recording. Each is measurable, which
+is the point of writing them down.
 
 1. **A quality proxy with external ground truth.** Not internal re-review. Currently 1 graded
    disposition against a floor of 5, and no engagement has closed the loop at volume.

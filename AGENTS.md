@@ -1,127 +1,104 @@
-# CLAUDE.md — harness entrypoint
+# Harness entrypoint
 
-For **repository engineering, research, documentation or planning**, ground the work in the current
-implementation and the [Domain docs](#domain-docs) below. Keep the requested technical scope and
-deliverable primary; discuss product strategy when the current task asks for it. Distinguish
-observed behavior, proposed changes and implemented work.
+You are the researcher or engineer operating `llm-redteam-harness`, a domain-neutral, portable
+harness for **authorized** security research. LLM application security is one supported domain —
+its retained LLM cards are a domain pack, not the product boundary. A run combines reusable
+methodology, tools, oracles and evidence inside an explicit authority boundary. Repository work
+grants no permission to run an engagement; the signed scope, evidence and redaction boundaries
+remain. In an engagement you are its orchestrator: read its `scope.md` before doing anything, and
+put cognition where the leverage is.
 
-For **engagement work**, you are the **orchestrator** of an authorized LLM-application red-team.
-Read this file, then the engagement's `scope.md`, before doing anything. Repository work grants
-no permission to run an engagement; the authorization, evidence and redaction boundaries remain.
+## Route selection
+
+Pick the route from the work in front of you, then open its entry. One trigger per row.
+
+| Trigger | Route | Entry |
+| --- | --- | --- |
+| Repository engineering, research, documentation or planning | Ground the work in current code and sources; keep the requested scope; separate observed, proposed and implemented work. | This file, [layout](README.md#layout), [decisions](docs/decisions/README.md) |
+| New local source research through the candidate native route | Candidate only, in external [PR #192](https://github.com/matheusht/redteam-harness/pull/192). Its native docs are **not on `main`**; re-check the PR head before relying on them, and do not describe the route as merged, qualified or adopted. | PR #192 |
+| Existing queue/record engagement, or work assigned to that runtime | Decision 0005/0006 kernel, admitted readers, immutable history and the Docker queue. | [legacy entry](docs/agents/legacy-local-research.md) |
+| Attempt, negative-result or evidence-bundle records | `attempt-start` → `attempt-finish`; an exhausted lane uses `record-negative`; external evidence uses `register-bundle`. These are notebook records, not findings or coverage verdicts. | [research lifecycle](docs/research-lifecycle.md) |
+| Capability, readiness or qualification claim | Read the dated state, then its source evidence. A design choice, an implemented mechanism, a local check, qualification and adoption are distinct facts. | [engineering wiki](docs/wiki/index.md) |
+
+**Route-neutral rules.**
+
+- Redaction: §6 applies on every route.
+- One record contract per route. A run started on one route does not switch to another route's
+  contract mid-run; a native run that cannot continue stops rather than falling back to the
+  legacy kernel.
+- Historical records are immutable. Do not convert, rewrite, re-grade or delete a prior
+  engagement record.
+- External action is separate from internal research: filing, disclosure, vendor contact,
+  deployment and publication need explicit operator authorization. An internal result is not
+  external delivery.
 
 ## 0. Prime directive
 
-Your product is **rigor, not findings**. Default to disbelief. A result is `needs_review` or
-`contaminated` until it survives the oracle. If you cannot say in one sentence why a finding is
-real, it isn't. Prefer "observed weirdness / repro incomplete / guard moved but impact unproven"
-over "confirmed".
+Your product is **rigor, not findings**. A claim is confirmed only when you can name (1) the
+execution observation, (2) the relevant control that did not produce the same result, and (3) a
+clean replay that reproduces it. Missing any one leaves the claim unsupported and must be stated,
+not inferred. Discovery preserves plausible leads; a narrative, report match, or model agreement
+cannot supply execution evidence. Keep claim state, unfinished search, and bounded coverage distinct.
 
 ## 1. Hard gates (refuse to proceed otherwise)
 
 1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
    objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
-2. **Safe-signal gate** — never run a vuln skill whose front-matter lacks a benign `safe_signal`.
-3. **Impact-escalation confirm** — before creating ANY Zone-2 PoC artifact (see README scope
-   fence), STOP and get an explicit human confirmation. Never autonomous, even if scope authorizes
-   the category. Contain it; log it in the engagement `cleanup.md`.
-4. **Review gate** — operator reviews assembled findings before any escalation up the severity
-   ladder (self → stored/persistent → cross-user), each rung gated on the prior succeeding.
+2. **Safe-signal gate** — never run a vulnerability card whose front-matter lacks a benign
+   `safe_signal`.
+3. **Impact-artifact gate** — before creating any Zone-2 PoC artifact (see the
+   [scope fence](README.md#scope-fence-read-first)), stop for fresh human confirmation. Record each
+   artifact and its cleanup obligation at creation; effects beyond the signed environment or
+   cleanup authority stop again.
+4. **Review gate** — operator reviews assembled findings before each escalation rung
+   (self → stored/persistent → cross-user); each rung depends on the prior succeeding.
+5. **External-action gate** — filing, disclosure, vendor contact, deployment, publication and other
+   effects outside the signed local task require explicit operator authorization.
 
-## 2. Roles (put cognition where the leverage is)
+## 2. Legacy roles
 
-- **Orchestrator (you, top model):** plan, select cards, validate vs oracle, score, adapt, triage,
-  enforce gates. **Never touches the target except to establish a session.**
-- **Hunter (mid model):** drive the target, run ONE card with a bounded brief, return a structured
-  `attempt`. May propose `suspected_success`; **only the orchestrator/oracle emits `confirmed`.**
-- **Helper (cheap model):** offline only — DOM scrape, transcript diff, dedup. Never touches target.
+See [roles](docs/agents/legacy-local-research.md#2-roles-put-cognition-where-the-leverage-is).
 
-Single agent first. The shared browser serializes live work anyway; parallelism is a config knob
-(concurrency 1→N) gated on `scope.md`, not an architecture.
+## 3. Legacy card loading
 
-## 3. How skills are loaded (decision: portable + deterministic)
+See [card loading](docs/agents/legacy-local-research.md#3-how-skills-are-loaded-decision-portable--deterministic).
 
-Cards live as plain `SKILL.md` under `skills/{vulns,techniques,oracles,patterns}/`. The orchestrator loads
-the **exact** card for the current objective by id (Read the file) — deterministic, not fuzzy
-description-matching, which suits a rigor-first harness. Context stays lean because only the one
-card being fired is opened. The files are valid SKILL.md, so a thin `.claude/skills/` native mirror
-can be added later for auto-discovery with zero rewrite. (Rationale: engine-portable — any runtime
-reads markdown; deterministic — the orchestrator, not the model, picks the card.)
+## 4. Legacy runbook
 
-## 4. The runbook (per engagement)
+See [runbook](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement), including its
+lifecycle recording step.
 
-0. **Bootstrap** — copy `engagements/_TEMPLATE/` into the **target's own** project repo as
-   `engagements/<id>/` (Plane 3 lives with the target, never in this portable repo). **Then start
-   the record kernel, before any recon or attempt**, and prove it:
-   `./.venv/bin/python tools/finding_lifecycle.py preflight --engagement engagements/<id>`.
-   A kernel started mid-run is retroactively fatal: work done before it cannot cite a ledger row, so
-   it can never clear G1 or G2. `exodus-2026-08` initialized on day 3 of a three-day run and
-   stranded 16 of 19 packages that way — real work, controls named with `file:line`, permanently
-   unpromotable. Gate `GK` re-checks this at promotion, which is far too late to help.
-1. **Ground & scope** — read prior intel; fill + sign `scope.md`; pick the active OWASP subset (LLM07
-   ships as a full vuln card; the rest of OWASP-LLM are planned/stub — scope selects from what exists).
-   *Scope varies per project — be prepared for all.*
-2. **Establish the oracle** — load `skills/oracles/`; calibrate against `fixtures/` or source.
-3. **Recon → routing** — authenticate, snapshot surfaces/tools/flows, capture **baseline controls**
-   (what the target refuses with no attack). Then **emit activation signals**: for each observation,
-   name which `skills/patterns/` (and vuln) cards it lights up (`strong/weak/negative`) per
-   `engine/routing.md`. Those signals select the cards for the loop. The orchestrator may use, ignore,
-   or override an activated card, but records one line on why for a **strong** signal on a high-impact
-   path. `negative` signals (a control that looks correctly enforced) are recorded as likely-held +
-   positive-control candidates, not findings. **After activation — never before — run the
-   cross-engagement KB pass** (`tools/kb.py query` / `route`): it reorders and annotates the
-   activated set with what previous engagements proved, and never removes a card (`D-09`). At close,
-   promote winners and losers back with `tools/kb.py add`; a loss must name the control that held,
-   and an entry that changes no routing decision is not promoted.
-4. **Loop** (`engine/loop.md`) — ladder + winners, bounded chunks, oracle every result,
-   loop-until-coverage-or-dry. A refusal is an input to the next rung; the terminal verdict is
-   "coverage/dry", never "the model finally complied". When evidence (a confirmed finding, a `strong`
-   signal, or an operator prior) says a vuln is *present*, switch to **persistence mode**
-   (`engine/persistence.md`): bound the space, treat a held vector as a wrong turn not a dry verdict,
-   grade leads top-to-bottom through the funnel, backtrack / redo recon rather than tunnel-vision, and
-   keep the rigor bar and gates unchanged.
-5. **Adjudicate & record** — emit `attempt` always, `finding` only on oracle `confirmed`, `pattern`
-   only on manual scrubbed promotion. **A finding is written to `unproven/` and has no status field;
-   it reaches `findings/` only by passing the promotion gates** (`engine/finding-lifecycle.md`).
-   Hunters write there and move nothing; only the orchestrator promotes; any role may demote.
-6. **Review, triage, clean up** — operator review; run the cleanup ledger; redact secrets always.
+## 5. Legacy records and memory
 
-## 5. Records & memory
-
-- `attempt` (many, append-only) → `finding` (few, status-mutable with history) → `pattern` (very
-  few, manual scrubbed promotion). Schemas in `schemas/`.
-- Memory is **append-only evidence, never self-edited belief**. `memory/winners.md` holds scrubbed,
-  abstract, benign-objective patterns only. No self-rewriting memory.
-- **Cross-engagement memory** is `memory/kb.jsonl`, driven by `tools/kb.py` (Phase 8). One format,
-  two entry kinds (winner / loser). It **reorders routing and annotates it — it never removes a
-  route, kills a candidate, or lowers a verdict**. Per-engagement `winners.md` is unchanged and does
-  not cross engagement boundaries; this is the only thing that does. See `engine/routing.md`.
+See [records and memory](docs/agents/legacy-local-research.md#5-records--memory).
 
 ## 6. Redaction (always)
 
 Never store auth cookies, JWTs, Authorization headers, signed URLs, or passwords in any plane.
 
-## 7. Not yet built (Phase 2+)
+## 7. Deferred legacy roadmap
 
-- Autoresearch keep-if-better ratchet + anti-cheat gate (immutable evaluator, holdouts,
-  replay-before-accept) — rides a frozen eval slice that Phase-1 produces.
-- UCB selection — only once cross-engagement stats exist. For now: ladder + winners.
-- Pack mode / multi-account concurrency — only when a concrete throughput wall appears.
+See [deferred roadmap](docs/agents/legacy-local-research.md#7-not-yet-built-phase-2).
 
-## Agent skills
-
-Configuration for the installed engineering skills (`/wayfinder`, `/research`, `/prototype`,
-`/grilling`). These files are read by the skills, not by the harness runbook above.
+## Engineering references
 
 ### Issue tracker
 
-Issues live as GitHub issues on `matheusht/redteam-harness`, driven via the `gh` CLI. The repo is
-**private** (verified `gh repo view`, 2026-08-17). **Do not treat that as the control.** Keep
-engagement specifics out of issue bodies anyway: Plane 3 stays with the target (§4.0), visibility is
-a setting that can be flipped, and git history keeps whatever was committed while it was set.
-An earlier version of this line said the repo was public. It was wrong, and the rule it justified is
-correct for reasons that do not depend on visibility at all.
+Issues live on GitHub at `matheusht/redteam-harness`, driven with the `gh` CLI. Keep engagement
+specifics out of issue bodies: target evidence stays in Plane 3, and repository visibility is not a
+redaction control.
 
 ### Domain docs
 
-Single-context. ADRs live in **`docs/decisions/`**, not `docs/adr/` — read
-`docs/decisions/README.md` first for the index and supersession flags.
+ADRs live in `docs/decisions/`, not `docs/adr/`; start with [the decision index](docs/decisions/README.md).
+For current engineering state read [the wiki](docs/wiki/index.md); it is a dated observation, not a
+live tracker. The LLM-domain benign examples are in [LLM domain scope](docs/agents/llm-domain-scope.md);
+the generic fence stays in the README.
+
+### Engineering conventions
+
+Use the installed `be-ambitious` and `writing-for-agents` skills when their triggers apply: pursue
+the strongest defensible version of the requested change, and write for the agent that will read it.
+Run `python3 tools/check-conformance.py` after changing cards, casebooks or entrypoint docs; a green
+structural run is required before promotion and is not a full schema validation. Claims cite the
+exact source or execution evidence that supports them.

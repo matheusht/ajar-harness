@@ -16,7 +16,7 @@ engagement
   -> Stage 4.25   technique ladder     direct(=control) -> decomposition -> task-reframing -> persona-pressure
   -> Stage 4.5    oracle every result  signal-oracle + adjudication-oracle; rule out contamination; replay
   -> Stage 4.75   coverage-or-dry      refusal -> input to the next rung; terminal verdict is "dry", never "complied"
-  -> Stage 5      adjudicate           attempt (always)  ->  finding (ONLY on oracle 'confirmed')
+  -> Stage 5      adjudicate           attempt (always)  ->  unproven/ package (promote gates decide findings)
   -> Stage 5.25   impact escalation    self -> stored/persistent -> cross-user      [review gate per rung]
   -> Stage 5.5    promotion            pattern (manual, scrubbed) -> memory/winners.md
   -> /goal        operator review      human reviews assembled findings + authorizes escalation
@@ -33,12 +33,14 @@ for THIS target (foothold → reframe → bounded continuation), don't run each 
 
 ```
 attempt   (many, append-only)      every fire, win or lose          <- Stage 4..5
-  -> finding   (few, status-mutable)   ONLY on oracle 'confirmed'       <- Stage 5
+  -> finding   (few, starts unproven)  promote gates decide membership   <- Stage 5
        -> pattern   (very few, manual)     scrubbed promotion              <- Stage 5.5
 ```
 
 Default verdict is **disbelief**: a result is `needs_review` / `contaminated` until it survives the
 oracle. Hunters may propose `suspected_success`; **only the orchestrator/oracle emits `confirmed`.**
+A confirmed result still enters `unproven/` with no status field, and reaches `findings/` only by
+passing every promotion gate ([finding lifecycle](../engine/finding-lifecycle.md)).
 
 ## Gates (human-in-the-loop; the loop runs between them)
 

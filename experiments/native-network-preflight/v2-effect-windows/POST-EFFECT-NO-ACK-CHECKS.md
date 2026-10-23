@@ -1,4 +1,4 @@
-# #161 owned effect-before-ack check — failure conditions before code
+# #161 owned effect-before-ack check: failure conditions before code
 
 Decision: use the existing inert receiver's `post-effect` gate to distinguish a
 completed effect from a missing client acknowledgement when the launcher and

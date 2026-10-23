@@ -2367,9 +2367,27 @@ def validate_cross_ledger_causality(events: list[dict[str, Any]], attempts: list
         active_scope = next((scope_hash for timestamp, scope_hash in reversed(scope_timeline) if timestamp <= attempt_time), None)
         if active_scope is None or attempt["scope_hash"] != active_scope:
             raise RecordError("attempt_scope_not_active", attempt["attempt_id"])
-        hypothesis_time = hypothesis_times.get(attempt["hypothesis_ref"])
-        if hypothesis_time is None or hypothesis_time > attempt_time:
-            raise RecordError("attempt_precedes_hypothesis", attempt["attempt_id"])
+        hypothesis_ref = attempt.get("hypothesis_ref")
+        if hypothesis_ref is None:
+            if attempt.get("kind") not in {"source_trace", "environment_check"}:
+                raise RecordError("attempt_hypothesis_required", attempt["attempt_id"])
+        else:
+            hypothesis_time = hypothesis_times.get(hypothesis_ref)
+            if hypothesis_time is None or hypothesis_time > attempt_time:
+                raise RecordError("attempt_precedes_hypothesis", attempt["attempt_id"])
+        start_ref = attempt.get("start_ref")
+        if start_ref is not None:
+            start_event = event_by_id.get(start_ref)
+            start_payload = start_event.get("payload", {}).get("attempt", {}) if start_event else {}
+            if (
+                start_event is None
+                or start_event["event_type"] != "attempt.started"
+                or start_payload.get("attempt_id") != attempt["attempt_id"]
+                or start_payload.get("hypothesis_ref") != attempt.get("hypothesis_ref")
+                or start_payload.get("environment_ref") != attempt.get("environment_ref")
+                or event_times[start_ref] > attempt_time
+            ):
+                raise RecordError("attempt_start_binding_invalid", attempt["attempt_id"])
         experiment_time = event_times.get(attempt["experiment_ref"])
         if experiment_time is not None and experiment_time > attempt_time:
             raise RecordError("attempt_precedes_experiment", attempt["attempt_id"])
@@ -2576,6 +2594,14 @@ def _reduce_engagement_unchecked(engagement: Path, *, allowed_record_orphans: se
             }
             if not required_corpus_refs.issubset(set(event.get("evidence_refs", []))):
                 raise RecordError("frozen_corpus_evidence_refs_missing", event["event_id"])
+        if event["event_type"] == "attempt.started":
+            start_attempt = payload.get("attempt", {})
+            if payload.get("entity_id") != start_attempt.get("attempt_id") or payload.get("status") != "started":
+                raise RecordError("attempt_start_payload_mismatch", event["event_id"])
+        if event["event_type"] == "negative_result.recorded":
+            negative = payload.get("negative_result", {})
+            if payload.get("entity_id") != negative.get("negative_result_id") or payload.get("status") != negative.get("status") or negative.get("scope_hash") != state["scope_hash"]:
+                raise RecordError("negative_result_payload_mismatch", event["event_id"])
         if event["event_type"] == "record.committed":
             validate_committed_record_precedence(engagement, event, index, committed_entity_ids)
             if payload["record_type"] == "migration-manifest":

@@ -767,7 +767,7 @@ def command_append_event(args: argparse.Namespace) -> int:
     actor = proposal.get("actor", {})
     if capability["tier"] != "notebook":
         raise RecordError("canonical_authority_command_required", proposal.get("event_type", "unknown"))
-    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "authority.expired", "coverage.reopened"}:
+    if proposal.get("event_type") in {"environment.preflight_recorded", "artifact.classified", "scope.amendment_proposed", "authority.requested", "authority.expired", "coverage.reopened", "attempt.started", "negative_result.recorded"}:
         raise RecordError("canonical_notebook_command_required", proposal.get("event_type", "unknown"))
     if proposal.get("event_type") == "coverage.status_changed" and proposal.get("payload", {}).get("status") == "budget_bounded":
         raise RecordError("external_driver_budget_boundary_required", "budget_bounded")
@@ -1813,6 +1813,10 @@ def command_register_artifact(args: argparse.Namespace) -> int:
 
 def command_append_attempt(args: argparse.Namespace) -> int:
     proposal = _command_json(args, "file")
+    if not proposal.get("start_ref"):
+        raise RecordError("attempt_start_ref_required", proposal.get("attempt_id", "unknown"))
+    if proposal.get("cost_status") not in {"measured", "estimated", "unavailable"}:
+        raise RecordError("attempt_cost_status_required", proposal.get("attempt_id", "unknown"))
     capability = classify_command("append-attempt")
     actor = proposal.get("provenance", {}).get("actor", {})
     _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"append-attempt:{proposal.get('attempt_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
@@ -1821,6 +1825,269 @@ def command_append_attempt(args: argparse.Namespace) -> int:
     session_id = _require_session(proposal.get("provenance", {}), "append-attempt"); _require_local_provenance(str(actor.get("role", "")), str(actor.get("id", "")), session_id)
     record = append_attempt(args.engagement.absolute(), proposal)
     emit({"ok": True, "attempt_id": record["attempt_id"], "sequence": record["sequence"], "record_hash": record["record_hash"]})
+    return 0
+
+
+def command_attempt_start(args: argparse.Namespace) -> int:
+    """Record the pre-action half of an attempt before any target contact."""
+    capability = classify_command("attempt-start")
+    _require_local_provenance(args.actor_role, args.actor_id, args.session_id)
+    _enforce_mutation(capability, args.engagement, args.actor_role, args.actor_id, f"attempt-start:{args.attempt_id}")
+    engagement = args.engagement.absolute()
+    state = reduce_engagement(engagement)
+    if args.environment_ref != state.get("active_environment_ref"):
+        raise RecordError("attempt_start_environment_not_active", args.attempt_id)
+    if args.hypothesis_ref is not None and args.hypothesis_ref not in state.get("hypotheses", {}):
+        raise RecordError("attempt_start_hypothesis_missing", args.attempt_id)
+    if any(item.get("attempt_id") == args.attempt_id for item in read_ledger(engagement, "attempt")):
+        raise RecordError("attempt_start_already_finished", args.attempt_id)
+    start_event_id = f"event-{args.attempt_id}-start"
+    events = read_ledger(engagement, "event")
+    if any(event.get("event_id") == start_event_id for event in events):
+        raise RecordError("attempt_start_already_recorded", args.attempt_id)
+    started = datetime.fromisoformat(args.started_at.replace("Z", "+00:00"))
+    recorded = datetime.fromisoformat((args.recorded_at or args.started_at).replace("Z", "+00:00"))
+    if recorded < started:
+        raise RecordError("attempt_start_time_order_invalid", args.attempt_id)
+    attempt = {
+        "attempt_id": args.attempt_id,
+        "hypothesis_ref": args.hypothesis_ref,
+        "environment_ref": args.environment_ref,
+        "surface": args.surface,
+        "plan": args.plan,
+        "started_at": args.started_at,
+        "expected_evidence": args.expected_evidence,
+        "stop_conditions": args.stop_condition,
+    }
+    event = _base_event(
+        event_id=start_event_id,
+        engagement_id=state["engagement_id"],
+        recorded_at=args.recorded_at or args.started_at,
+        actor_role=args.actor_role,
+        actor_id=args.actor_id,
+        event_type="attempt.started",
+        rationale=args.rationale or "Start a bounded attempt before any target contact.",
+        payload={"entity_id": args.attempt_id, "status": "started", "attempt": attempt},
+        entity_refs=[args.environment_ref] + ([args.hypothesis_ref] if args.hypothesis_ref else []),
+        session_id=args.session_id,
+        operation_class="notebook",
+    )
+    record = append_event(engagement, event)
+    emit({"ok": True, "attempt_id": args.attempt_id, "start_ref": record["event_id"], "sequence": record["sequence"], "record_hash": record["record_hash"]})
+    return 0
+
+
+def command_attempt_finish(args: argparse.Namespace) -> int:
+    """Finish a pre-started attempt and enforce its start binding."""
+    proposal = _command_json(args, "file")
+    capability = classify_command("attempt-finish")
+    actor = proposal.get("provenance", {}).get("actor", {})
+    _enforce_mutation(capability, args.engagement, actor.get("role", ""), actor.get("id", ""), f"attempt-finish:{proposal.get('attempt_id','unknown')}:{sha256_bytes(canonical_json_bytes(proposal))}")
+    if proposal.get("operation_class") != "notebook" or proposal.get("actor") != actor:
+        raise RecordError("attempt_provenance_invalid", proposal.get("attempt_id", "unknown"))
+    session_id = _require_session(proposal.get("provenance", {}), "attempt-finish")
+    _require_local_provenance(str(actor.get("role", "")), str(actor.get("id", "")), session_id)
+    if proposal.get("cost_status") not in {"measured", "estimated", "unavailable"}:
+        raise RecordError("attempt_cost_status_required", proposal.get("attempt_id", "unknown"))
+    engagement = args.engagement.absolute()
+    events = {event["event_id"]: event for event in read_ledger(engagement, "event")}
+    start = events.get(args.start_ref)
+    start_attempt = start.get("payload", {}).get("attempt", {}) if start else {}
+    if start is None or start.get("event_type") != "attempt.started":
+        raise RecordError("attempt_start_missing", proposal.get("attempt_id", "unknown"))
+    if start_attempt.get("attempt_id") != proposal.get("attempt_id") or start_attempt.get("hypothesis_ref") != proposal.get("hypothesis_ref") or start_attempt.get("environment_ref") != proposal.get("environment_ref"):
+        raise RecordError("attempt_start_binding_invalid", proposal.get("attempt_id", "unknown"))
+    if datetime.fromisoformat(proposal["recorded_at"].replace("Z", "+00:00")) < datetime.fromisoformat(start["recorded_at"].replace("Z", "+00:00")):
+        raise RecordError("attempt_start_precedes_attempt", proposal.get("attempt_id", "unknown"))
+    if any(item.get("attempt_id") == proposal.get("attempt_id") for item in read_ledger(engagement, "attempt")):
+        raise RecordError("attempt_already_finished", proposal.get("attempt_id", "unknown"))
+    if proposal.get("start_ref") not in (None, args.start_ref):
+        raise RecordError("attempt_start_ref_mismatch", proposal.get("attempt_id", "unknown"))
+    proposal["start_ref"] = args.start_ref
+    record = append_attempt(engagement, proposal)
+    emit({"ok": True, "attempt_id": record["attempt_id"], "start_ref": args.start_ref, "sequence": record["sequence"], "record_hash": record["record_hash"]})
+    return 0
+
+
+def command_record_negative(args: argparse.Namespace) -> int:
+    """Record a reviewed bounded negative without creating a finding."""
+    proposal = _command_json(args, "file")
+    capability = classify_command("record-negative")
+    _require_local_provenance(args.actor_role, args.actor_id, args.session_id)
+    _enforce_mutation(capability, args.engagement, args.actor_role, args.actor_id, f"record-negative:{proposal.get('negative_result_id','unknown')}")
+    if proposal.get("operator_signoff") is not None:
+        proposal["operator_signoff"] = re.sub(r"[^A-Za-z0-9._:-]+", "-", str(proposal["operator_signoff"])).strip("-") or "operator"
+    errors = validate_record(proposal, "negative-result")
+    if errors:
+        raise RecordError("negative_result_invalid", "negative result failed schema validation", errors)
+    if detect_secret_classes(canonical_json_bytes(proposal)):
+        raise RecordError("secret_shaped_negative_result", "negative result contains a forbidden secret shape")
+    engagement = args.engagement.absolute()
+    state = reduce_engagement(engagement)
+    if proposal.get("scope_hash") != state.get("scope_hash"):
+        raise RecordError("negative_result_scope_mismatch", proposal.get("negative_result_id", "unknown"))
+    if proposal.get("status") != "bounded":
+        raise RecordError("negative_result_status_invalid", proposal.get("negative_result_id", "unknown"))
+    attempts = {item["attempt_id"]: item for item in read_ledger(engagement, "attempt")}
+    if not proposal.get("attempt_refs") or any(ref not in attempts for ref in proposal["attempt_refs"]):
+        raise RecordError("negative_result_attempt_ref_invalid", proposal.get("negative_result_id", "unknown"))
+    if any(ref not in state.get("hypotheses", {}) for ref in proposal.get("hypothesis_refs", [])):
+        raise RecordError("negative_result_hypothesis_ref_invalid", proposal.get("negative_result_id", "unknown"))
+    artifacts = {item["artifact_id"] for item in read_ledger(engagement, "artifact")}
+    bundle = proposal.get("evidence_bundle_ref")
+    if bundle is not None and bundle not in artifacts:
+        raise RecordError("negative_result_evidence_bundle_invalid", proposal.get("negative_result_id", "unknown"))
+    events = {event["event_id"]: event for event in read_ledger(engagement, "event")}
+    for key, expected in (("coverage_ref", "coverage.lane_recorded"), ("provenance_ref", "provenance.recorded"), ("reproducibility_ref", "reproducibility.recorded")):
+        ref = proposal.get(key)
+        if ref is not None and (ref not in events or events[ref].get("event_type") != expected):
+            raise RecordError("negative_result_lifecycle_ref_invalid", proposal.get("negative_result_id", "unknown"))
+    if proposal.get("review_ref") is not None:
+        review_ref = proposal["review_ref"]
+        review_entries = [entry for entry in build_reference_index(engagement).get(review_ref, []) if entry.get("type") == "review"]
+        review_committed = any(
+            event.get("event_type") == "record.committed"
+            and event.get("payload", {}).get("record_id") == review_ref
+            for event in events.values()
+        )
+        if not review_entries or not review_committed:
+            raise RecordError("negative_result_review_ref_invalid", proposal.get("negative_result_id", "unknown"))
+    signoff = proposal.get("operator_signoff")
+    if signoff is not None:
+        scope_operator = re.sub(r"[^A-Za-z0-9._:-]+", "-", str(_scope_metadata(engagement / "scope.md").get("operator"))).strip("-") or "operator"
+        if signoff != scope_operator:
+            raise RecordError("negative_result_operator_signoff_mismatch", proposal.get("negative_result_id", "unknown"))
+    event = _base_event(
+        event_id=f"event-{proposal['negative_result_id']}-recorded",
+        engagement_id=state["engagement_id"],
+        recorded_at=proposal["recorded_at"],
+        actor_role=args.actor_role,
+        actor_id=args.actor_id,
+        event_type="negative_result.recorded",
+        rationale=proposal["rationale"],
+        payload={"entity_id": proposal["negative_result_id"], "status": "bounded", "negative_result": proposal},
+        entity_refs=list(dict.fromkeys([*proposal["attempt_refs"], *proposal["hypothesis_refs"], *([bundle] if bundle else []), *([proposal.get("coverage_ref")] if proposal.get("coverage_ref") else []), *([proposal.get("provenance_ref")] if proposal.get("provenance_ref") else []), *([proposal.get("reproducibility_ref")] if proposal.get("reproducibility_ref") else []), *([proposal.get("review_ref")] if proposal.get("review_ref") else [])])),
+        evidence_refs=[bundle] if bundle else [],
+        session_id=args.session_id,
+        operation_class="notebook",
+    )
+    record = append_event(engagement, event)
+    emit({"ok": True, "negative_result_id": proposal["negative_result_id"], "event_id": record["event_id"], "sequence": record["sequence"], "record_hash": record["record_hash"]})
+    return 0
+
+
+def command_register_bundle(args: argparse.Namespace) -> int:
+    """Register a content-addressed manifest for an external evidence bundle."""
+    capability = classify_command("register-bundle")
+    _require_local_provenance(args.actor_role, args.actor_id, args.session_id)
+    _enforce_mutation(capability, args.engagement, args.actor_role, args.actor_id, f"register-bundle:{args.artifact_id}")
+    source_dir = args.source_dir.resolve(strict=True)
+    if source_dir.is_symlink() or not source_dir.is_dir():
+        raise RecordError("bundle_source_invalid", str(args.source_dir))
+    files: list[dict[str, object]] = []
+    total_bytes = 0
+    for path in sorted(source_dir.rglob("*")):
+        if path.is_symlink():
+            raise RecordError("bundle_source_symlink", path.relative_to(source_dir).as_posix())
+        if not path.is_file():
+            continue
+        classes = scan_file_secret_classes(path)
+        if classes:
+            raise RecordError("bundle_secret_content", f"{path.relative_to(source_dir).as_posix()}:{','.join(classes)}")
+        size = path.stat().st_size
+        total_bytes += size
+        files.append({
+            "path": path.relative_to(source_dir).as_posix(),
+            "sha256": sha256_file(path),
+            "size": size,
+            "mode": stat.S_IMODE(path.stat().st_mode),
+        })
+    if not files:
+        raise RecordError("bundle_source_empty", str(args.source_dir))
+    manifest = {
+        "schema_version": 1,
+        "bundle_id": args.artifact_id,
+        "source_root": str(source_dir),
+        "created_at": args.created_at,
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "files": files,
+        "redaction_scan": {"files_scanned": len(files), "secret_classes": []},
+    }
+    engagement = args.engagement.absolute()
+    state = reduce_engagement(engagement)
+    relative = args.relative_path.as_posix()
+    if args.relative_path.is_absolute() or ".." in args.relative_path.parts or not relative.startswith("evidence/"):
+        raise RecordError("artifact_path_not_contained", relative)
+    destination = engagement / relative
+    if destination.exists():
+        raise RecordError("artifact_bytes_precede_classification", relative)
+    governed_root, governed_parts = _governed_root(destination)
+    if governed_root != engagement or tuple(governed_parts) != tuple(args.relative_path.parts):
+        raise RecordError("artifact_path_not_contained", relative)
+    try:
+        parent_fd, _ = _open_parent_fd(governed_root, governed_parts, create=True)
+        os.close(parent_fd)
+    except OSError as exc:
+        raise RecordError("artifact_path_not_contained", relative) from exc
+    metadata = {
+        "schema_version": 1,
+        "artifact_id": args.artifact_id,
+        "engagement_id": state["engagement_id"],
+        "media_type": "application/json",
+        "created_at": args.created_at,
+        "producer": {"role": args.actor_role, "id": args.actor_id},
+        "producer_session_id": args.session_id,
+        "acquisition_method": "source_inspection",
+        "target_refs": [],
+        "environment_ref": state["active_environment_ref"],
+        "sensitivity": "internal",
+        "redaction_status": "redacted",
+        "contains_executable_capability": False,
+        "advisory_zone": "clear_local",
+        "escalation_confirmation_event_ref": None,
+        "cleanup_obligation_ref": None,
+        "supersedes_artifact_id": None,
+        "operation_class": "notebook",
+    }
+    with tempfile.TemporaryDirectory(prefix="bundle-register-") as tmp:
+        tmpdir = Path(tmp)
+        metadata_path = tmpdir / "metadata.json"
+        manifest_path = tmpdir / "manifest.json"
+        permit_path = tmpdir / "permit.json"
+        write_canonical_json(metadata_path, metadata)
+        manifest_path.write_bytes(canonical_json_bytes(manifest))
+        classify_args = argparse.Namespace(
+            engagement=engagement, metadata=metadata_path, source=manifest_path,
+            planned_sha256=None, planned_size=None, relative_path=args.relative_path,
+            recorded_at=args.recorded_at, actor_role=args.actor_role, actor_id=args.actor_id,
+            session_id=args.session_id, model=None, provider=None, tool_version=[],
+            output=permit_path,
+        )
+        token = _EMIT_BUFFER.set(bytearray())
+        try:
+            command_classify_artifact(classify_args)
+            atomic_write(destination, canonical_json_bytes(manifest))
+            register_args = argparse.Namespace(
+                engagement=engagement, file=destination, metadata=metadata_path,
+                classification=permit_path,
+            )
+            command_register_artifact(register_args)
+        except Exception:
+            if destination.exists() and not any(
+                item.get("artifact_id") == args.artifact_id for item in read_ledger(engagement, "artifact")
+            ):
+                try:
+                    _unlink_governed_file(destination)
+                except FileNotFoundError:
+                    pass
+            raise
+        finally:
+            _EMIT_BUFFER.reset(token)
+    record = next((item for item in reversed(read_ledger(engagement, "artifact")) if item.get("artifact_id") == args.artifact_id), None)
+    if record is None:
+        raise RecordError("bundle_registration_missing", args.artifact_id)
+    emit({"ok": True, "artifact_id": record["artifact_id"], "sha256": record["sha256"], "file_count": len(files), "total_bytes": total_bytes, "relative_path": record["relative_path"]})
     return 0
 
 
@@ -5663,7 +5930,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--self-test", action="store_true", help="run hermetic schema/record tests")
     subcommands = result.add_subparsers(dest="command")
     validate = subcommands.add_parser("validate", help="validate schemas, records, fixtures, or a read-only legacy inventory")
-    validate.add_argument("--schema", choices=["finding-v3", "attempt-v2", "artifact", "review", "engagement-event", "state-snapshot", "environment-preflight", "environment-preflight-v2", "report-manifest", "memory-disposition", "migration-manifest", "migration-artifact-review", "research-telemetry", "historical-case-manifest", "retrospective-evaluation", "ab-preregistration", "ab-study-evidence", "ab-readiness-report", "finding-v2-legacy"])
+    validate.add_argument("--schema", choices=["finding-v3", "attempt-v2", "artifact", "review", "engagement-event", "state-snapshot", "environment-preflight", "environment-preflight-v2", "report-manifest", "memory-disposition", "migration-manifest", "migration-artifact-review", "research-telemetry", "historical-case-manifest", "retrospective-evaluation", "ab-preregistration", "ab-study-evidence", "ab-readiness-report", "finding-v2-legacy", "negative-result"])
     validate.add_argument("--file", type=Path)
     validate.add_argument("--engagement", type=Path, help="engagement root used to resolve record references")
     validate.add_argument("--schema-only", action="store_true", help="fixture/schema work only; skip engagement reference resolution")
@@ -5690,6 +5957,41 @@ def parser() -> argparse.ArgumentParser:
         command = subcommands.add_parser(name, help=f"trusted {name} operation")
         command.add_argument("--engagement", type=Path, required=True)
         command.add_argument("--file", type=Path, required=True)
+    attempt_start = subcommands.add_parser("attempt-start", help="record the pre-action start of one bounded attempt")
+    attempt_start.add_argument("--engagement", type=Path, required=True)
+    attempt_start.add_argument("--attempt-id", required=True)
+    attempt_start.add_argument("--hypothesis-ref")
+    attempt_start.add_argument("--environment-ref", required=True)
+    attempt_start.add_argument("--surface", required=True)
+    attempt_start.add_argument("--plan", required=True)
+    attempt_start.add_argument("--started-at", required=True)
+    attempt_start.add_argument("--recorded-at")
+    attempt_start.add_argument("--expected-evidence", action="append", default=[])
+    attempt_start.add_argument("--stop-condition", action="append", default=[])
+    attempt_start.add_argument("--rationale")
+    attempt_start.add_argument("--actor-role", choices=["broker"], required=True)
+    attempt_start.add_argument("--actor-id", required=True)
+    attempt_start.add_argument("--session-id", required=True)
+    attempt_finish = subcommands.add_parser("attempt-finish", help="finish a pre-started attempt and bind its result")
+    attempt_finish.add_argument("--engagement", type=Path, required=True)
+    attempt_finish.add_argument("--file", type=Path, required=True)
+    attempt_finish.add_argument("--start-ref", required=True)
+    record_negative = subcommands.add_parser("record-negative", help="record a reviewed bounded negative without creating a finding")
+    record_negative.add_argument("--engagement", type=Path, required=True)
+    record_negative.add_argument("--file", type=Path, required=True)
+    record_negative.add_argument("--actor-role", choices=["broker"], required=True)
+    record_negative.add_argument("--actor-id", required=True)
+    record_negative.add_argument("--session-id", required=True)
+    register_bundle = subcommands.add_parser("register-bundle", help="register a content-addressed manifest for an external evidence bundle")
+    register_bundle.add_argument("--engagement", type=Path, required=True)
+    register_bundle.add_argument("--source-dir", type=Path, required=True)
+    register_bundle.add_argument("--artifact-id", required=True)
+    register_bundle.add_argument("--relative-path", type=Path, required=True)
+    register_bundle.add_argument("--created-at", required=True)
+    register_bundle.add_argument("--recorded-at", required=True)
+    register_bundle.add_argument("--actor-role", choices=["broker"], required=True)
+    register_bundle.add_argument("--actor-id", required=True)
+    register_bundle.add_argument("--session-id", required=True)
     reopen_coverage = subcommands.add_parser("reopen-coverage", help="reopen terminal coverage for a recorded orchestrator reason")
     reopen_coverage.add_argument("--engagement", type=Path, required=True)
     reopen_coverage.add_argument("--recorded-at", required=True)
@@ -5821,6 +6123,10 @@ def _command_handlers() -> dict[str, object]:
             "clear-ledger-quarantine": command_clear_ledger_quarantine,
             "append-event": command_append_event,
             "append-attempt": command_append_attempt,
+            "attempt-start": command_attempt_start,
+            "attempt-finish": command_attempt_finish,
+            "record-negative": command_record_negative,
+            "register-bundle": command_register_bundle,
             "classify-artifact": command_classify_artifact,
             "create-artifact": command_create_artifact,
             "propose-scope": command_propose_scope,

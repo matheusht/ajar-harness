@@ -710,6 +710,8 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             (("proof", "evidence_refs"), {"attempt", "artifact"}), (("claims", "conflicting_evidence"), {"attempt", "artifact"}),
             (("adjudication", "review_ref"), {"review"}), (("search_linkage", "candidate_refs"), {"candidate"}),
             (("search_linkage", "hypothesis_refs"), {"hypothesis"}),
+            (("filing_contract", "privilege_context", "evidence_refs"), {"attempt"}),
+            (("filing_contract", "state_provenance", "evidence_refs"), {"attempt"}),
         ],
         "attempt-v2": [
             (("environment_ref",), {"environment"}), (("escalation_confirmation_event_ref",), {"event"}),
@@ -752,6 +754,8 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
         for index_number, mapping in enumerate(record.get("proof", {}).get("claim_proofs", [])):
             for field, allowed in (("attempt_refs", {"attempt"}), ("artifact_refs", {"artifact"}), ("control_refs", {"attempt"}), ("replay_refs", {"attempt"})):
                 dynamic_specs.append((("proof", "claim_proofs", str(index_number), field), mapping.get(field, []), allowed))
+        for number, setup in enumerate(record.get("filing_contract", {}).get("state_provenance", {}).get("synthesized_setup", [])):
+            dynamic_specs.append((("filing_contract", "state_provenance", "synthesized_setup", str(number), "evidence_refs"), setup.get("evidence_refs", []), {"attempt", "artifact"}))
         legacy = record.get("legacy_import")
         if isinstance(legacy, dict):
             dynamic_specs.append((("legacy_import", "source_artifact_ref"), legacy.get("source_artifact_ref"), {"artifact"}))

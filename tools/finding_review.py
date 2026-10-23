@@ -23,6 +23,8 @@ def claim_tuple_hash(finding: dict[str, Any]) -> str:
             "target_refs": finding["scope_provenance"]["target_refs"],
         },
     }
+    if "filing_contract" in finding:
+        value["filing_contract"] = finding["filing_contract"]
     return sha256_bytes(canonical_json_bytes(value))
 
 

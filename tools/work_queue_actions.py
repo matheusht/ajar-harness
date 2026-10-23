@@ -195,7 +195,7 @@ def _request_revision_action(engagement: Path, finding_id: str) -> dict[str, Any
         ],
         [
             _required_input("request_id", "string", "<request-id>", "new engagement-unique request id"),
-            _required_input("action_file", "path", "<revise-finding-v2-action-json>", "canonical action_version 2 proposal", f"binds exact latest adjudication and current revision for finding {finding_id}", "resolves the exact reducer-computed filing-ready review set"),
+            _required_input("action_file", "path", "<revise-finding-v2-action-json>", "canonical action_version 2 proposal with filing_contract.version 1", "adjudication review finding_digest equals exact canonical proposal bytes", f"binds exact latest adjudication and current revision for finding {finding_id}", "resolves the exact reducer-computed filing-ready review set"),
             _required_input("lane_id", "string", "<code-owned-lane-id>", "equals finding_revision_lane_id for the exact target"),
             _required_input("broker_id", "string", "<broker-id>", "current runtime-identity broker actor id"),
             _required_input("broker_session_id", "string", "<broker-session-id>", "current runtime-identity broker session id and action principal"),
@@ -360,6 +360,7 @@ def _claim_action(
             if len(required_statuses) != 1:
                 raise RecordError("work_queue_review_claim_status_conflict", finding_id)
             requirements.append(f"verdict is exactly {next(iter(required_statuses))}")
+    requirements.append("for a filing-ready verdict, review.finding_digest binds the exact canonical contract-v1 proposal (including provenance, privilege/state and severity)")
     return _review_action("record_claim_adjudication", engagement, review_type="claim_adjudication", entity_type="finding", entity_id=finding_id, requirements=requirements, effect=effect)
 
 

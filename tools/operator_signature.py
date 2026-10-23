@@ -69,9 +69,9 @@ def ending_override_action(
     }
 
 
-def _scope_signer_pin(scope_bytes: bytes) -> str:
+def _scope_signer_pin(scope_bytes: bytes, signer_kind: str = "Operator") -> str:
     matches = re.findall(
-        rb"^\s*-\s*Operator allowed signers SHA256:\s*(sha256:[0-9a-f]{64})\s*$",
+        rb"^\s*-\s*" + signer_kind.encode("ascii") + rb" allowed signers SHA256:\s*(sha256:[0-9a-f]{64})\s*$",
         scope_bytes,
         re.MULTILINE,
     )
@@ -88,6 +88,8 @@ def verify_operator_signature_bytes(
     signature_bytes: bytes,
     allowed_signers_bytes: bytes,
     timeout_seconds: float = SSH_VERIFY_TIMEOUT_SECONDS,
+    namespace: str = OPERATOR_NAMESPACE,
+    signer_kind: str = "Operator",
 ) -> str:
     """Verify exact bytes and return the signing key fingerprint as a hex SHA-256."""
 
@@ -105,7 +107,7 @@ def verify_operator_signature_bytes(
         or not isinstance(timeout_seconds, (int, float))
         or isinstance(timeout_seconds, bool)
         or timeout_seconds <= 0
-        or sha256_bytes(allowed_signers_bytes) != _scope_signer_pin(scope_bytes)
+        or sha256_bytes(allowed_signers_bytes) != _scope_signer_pin(scope_bytes, signer_kind)
     ):
         raise RecordError("operator_signature_invalid", sha256_bytes(challenge_bytes))
     with tempfile.TemporaryDirectory(prefix="operator-signature-proof-") as temporary:
@@ -125,7 +127,7 @@ def verify_operator_signature_bytes(
                     "-I",
                     operator_id,
                     "-n",
-                    OPERATOR_NAMESPACE,
+                    namespace,
                     "-s",
                     str(signature),
                 ],
@@ -176,6 +178,8 @@ def verify_embedded_operator_signature(
     scope_bytes: bytes,
     operator_id: str,
     challenge_bytes: bytes,
+    namespace: str = OPERATOR_NAMESPACE,
+    signer_kind: str = "Operator",
 ) -> str:
     if not isinstance(proof, dict) or set(proof) != {
         "challenge_digest",
@@ -197,6 +201,8 @@ def verify_embedded_operator_signature(
         challenge_bytes=challenge_bytes,
         signature_bytes=signature_bytes,
         allowed_signers_bytes=allowed_signers_bytes,
+        namespace=namespace,
+        signer_kind=signer_kind,
     )
     if proof.get("signer_fingerprint") != fingerprint:
         raise RecordError("operator_signature_identity_mismatch", operator_id)

@@ -90,6 +90,7 @@ from engagement_state import (
     quarantine_control_lock,
     require_not_quarantined,
     require_approved_authority,
+    require_original_filing_observations,
     require_repair_authority_from_intact_prefix,
     require_scope_zone2_authorized,
     revise_finding_target_is_current,
@@ -1519,6 +1520,8 @@ def command_request_authority(args: argparse.Namespace) -> int:
     engagement = args.engagement.absolute(); action_bytes = canonical_json_bytes(action); digest = sha256_bytes(action_bytes); action_relative = f"authority/requests/{args.request_id}.action.json"
     with engagement_lock(engagement) as bound_engagement:
         state = reduce_engagement(bound_engagement)
+        if action.get("action_kind") == "revise-finding" and (action.get("action_version") != 2 or action.get("proposal", {}).get("filing_contract", {}).get("version") != 1):
+            raise RecordError("canonical_filing_contract_required", args.request_id)
         if action.get("action_kind") == "revise-finding" and action.get("action_version") == 2 and isinstance(action.get("target"), dict):
             locked_events = read_ledger(bound_engagement, "event")
             signed_operator = next(
@@ -1550,6 +1553,7 @@ def command_request_authority(args: argparse.Namespace) -> int:
                 requested_at=args.recorded_at,
                 context=f"event-authority-request-{args.request_id}",
             )
+            require_original_filing_observations(action["proposal"])
             target = action["target"]
             generation = (target.get("id"), target.get("expected_revision"), target.get("adjudication_event_ref"), target.get("adjudication_review_ref"))
             duplicate = next((request for request in state["authority_requests"].values() if request.get("status") in {"pending_authority", "approved"} and isinstance(request.get("target"), dict) and (request.get("lane_id") == args.lane_id or (request["target"].get("id"), request["target"].get("expected_revision"), request["target"].get("adjudication_event_ref"), request["target"].get("adjudication_review_ref")) == generation)), None)
@@ -1566,23 +1570,25 @@ def command_request_authority(args: argparse.Namespace) -> int:
 
 
 def command_resolve_authority(args: argparse.Namespace) -> int:
-    capability = classify_command("resolve-authority"); _require_local_session(args.session_id)
-    pending_state = reduce_engagement(args.engagement.absolute()); pending_request = pending_state["authority_requests"].get(args.request_id); action_path = args.engagement.absolute() / str((pending_request or {}).get("action_path", ""))
-    try: action_bytes=read_governed_file(action_path)
-    except (OSError,RecordError): action_bytes=b""
-    if pending_request is None or sha256_bytes(action_bytes) != pending_request["action_digest"]: raise RecordError("authority_action_record_invalid", args.request_id)
-    try: action_text=action_bytes.decode("utf-8")
-    except UnicodeDecodeError: raise RecordError("authority_action_record_invalid",args.request_id)
-    sys.stderr.write("Exact proposed action for operator review:\n" + action_text); sys.stderr.flush()
-    _enforce_mutation(capability, args.engagement, "operator", args.operator_id, f"resolve-authority:{args.request_id}:{pending_request['action_digest']}:{args.resolution}:{args.recorded_at}")
-    now = datetime.now(timezone.utc); recorded = datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00"))
-    if abs((recorded - now).total_seconds()) > 60: raise RecordError("authority_resolution_time_not_current", args.request_id)
-    state = reduce_engagement(args.engagement.absolute()); request = state["authority_requests"].get(args.request_id)
-    if request is None or request["status"] != "pending_authority":
-        raise RecordError("authority_request_not_pending", args.request_id)
-    event = base_event(event_id=f"event-authority-resolution-{args.request_id}-{args.resolution}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="operator", actor_id=args.operator_id, event_type="authority.resolved", rationale=args.reason, payload={"request_id": args.request_id, "request_event_ref": request["request_event_ref"], "action_digest": request["action_digest"], "resolution": args.resolution, "resolved_at": args.recorded_at}, entity_refs=[request["request_event_ref"]], session_id=args.session_id, operation_class="authority")
-    record = _append_kernel_event(args.engagement.absolute(), event)
-    emit({"ok": True, "request_id": args.request_id, "resolution": args.resolution, "resolution_event_ref": record["event_id"]})
+    require_actor(classify_command("resolve-authority"), "operator")
+    _require_local_session(args.session_id)
+    with engagement_lock(args.engagement.absolute()) as engagement:
+        state = reduce_engagement(engagement)
+        request = state["authority_requests"].get(args.request_id)
+        if request is None or request["status"] != "pending_authority":
+            raise RecordError("authority_request_not_pending", args.request_id)
+        action_bytes = read_governed_file(engagement / str(request.get("action_path", "")))
+        if sha256_bytes(action_bytes) != request["action_digest"]:
+            raise RecordError("authority_action_record_invalid", args.request_id)
+        sys.stderr.write("Exact proposed action for operator review:\n" + action_bytes.decode("utf-8"))
+        operation = f"resolve-authority:{args.request_id}:{request['action_digest']}:{args.resolution}:{args.recorded_at}"
+        proof = _require_operator_console(engagement, args.operator_id, operation, include_proof=True)
+        now = datetime.now(timezone.utc)
+        if abs((datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")) - now).total_seconds()) > 60:
+            raise RecordError("authority_resolution_time_not_current", args.request_id)
+        event = base_event(event_id=f"event-authority-resolution-{args.request_id}-{args.resolution}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="operator", actor_id=args.operator_id, event_type="authority.resolved", rationale=args.reason, payload={"request_id":args.request_id,"request_event_ref":request["request_event_ref"],"action_digest":request["action_digest"],"resolution":args.resolution,"resolved_at":args.recorded_at,"operator_signature":proof}, entity_refs=[request["request_event_ref"]],session_id=args.session_id,operation_class="authority")
+        record = _append_kernel_event(engagement, event, lock_held=True)
+    emit({"ok":True,"request_id":args.request_id,"resolution":args.resolution,"resolution_event_ref":record["event_id"]})
     return 0
 
 
@@ -1602,7 +1608,15 @@ def command_settle_approved_revision(args: argparse.Namespace) -> int:
         now = datetime.now(timezone.utc)
         if recorded.tzinfo is None or abs((recorded - now).total_seconds()) > 60:
             raise RecordError("authority_settlement_time_not_current", args.authority_request_id)
-        state = reduce_engagement(bound_engagement)
+        finding = _command_json(args, "file")
+        errors = validate_record(finding, "finding-v3")
+        if errors: raise RecordError("finding_revision_invalid", "proposal", errors)
+        relative = f"findings/{finding['finding_id']}/rev-{finding['revision']}.json"
+        state = reduce_engagement(bound_engagement, allowed_record_orphans={relative})
+        if state.get("findings", {}).get(finding["finding_id"], {}).get("digest") == sha256_bytes(canonical_json_bytes(finding)):
+            result = _apply_finding_revision(argparse.Namespace(**{**vars(args), "engagement":bound_engagement}), lock_held=True, evaluated_at=now)
+            emit({**result,"request_id":args.authority_request_id,"status":"applied"})
+            return 0
         request = state["authority_requests"].get(args.authority_request_id)
         application = request.get("application") if isinstance(request, dict) else None
         if (
@@ -2810,6 +2824,10 @@ def command_record_review(args: argparse.Namespace) -> int:
         if proposed_signer_fingerprint is not None and proposed_signer_fingerprint != verified_signer_fingerprint:
             raise RecordError("reviewer_signature_identity_mismatch", str(reviewer_id or "unknown"))
         commit = base_event(event_id=f"event-{review['review_id']}-commit", engagement_id=state["engagement_id"], recorded_at=event["recorded_at"], actor_role="broker", actor_id=args.actor_id, event_type="record.committed", rationale="Commit immutable externally-produced independent review.", payload={"record_path": relative, "record_digest": sha256_bytes(data), "record_type": "review", "record_id": review["review_id"], "record_revision": None}, session_id=args.session_id, operation_class="notebook")
+        if review.get("finding_digest") is not None:
+            commit["payload"]["review_signature"] = encode_operator_signature_proof(
+                challenge_bytes=data, signature_bytes=signature_bytes, allowed_signers_bytes=allowed_signers_bytes,
+                signer_fingerprint=verified_signer_fingerprint)
         engagement_id = str(state["engagement_id"])
         if Path(engagement_id).name != engagement_id or engagement_id in {"", ".", ".."}:
             raise RecordError("record_review_staging_engagement_id_invalid", engagement_id)
@@ -3013,35 +3031,50 @@ def command_migrate(args: argparse.Namespace) -> int:
 
 
 def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False, evaluated_at: datetime | None = None) -> dict[str, object]:
-    finding = _command_json(args, "file"); raw_digest = sha256_bytes(_command_bytes(args, "file")); canonical_digest = sha256_bytes(canonical_json_bytes(finding)); engagement = args.engagement.absolute()
-    pre_state = reduce_engagement(engagement); request = pre_state["authority_requests"].get(args.authority_request_id); target = request.get("target") if request else None
-    explicit_resolutions = getattr(args, "resolve_review", None)
-    if isinstance(target, dict):
-        digest = canonical_digest
-        if not revise_finding_target_is_current(pre_state, request, finding): raise RecordError("finding_revision_authority_stale", finding.get("finding_id", "unknown"))
-        resolutions = target["resolves_review_refs"]
-        if explicit_resolutions is not None and (explicit_resolutions != sorted(set(explicit_resolutions)) or explicit_resolutions != resolutions): raise RecordError("finding_revision_resolution_set_mismatch", finding.get("finding_id", "unknown"))
-        stored_action_path = request.get("action_path") if isinstance(request, dict) else None
-        stored_action = load_json(engagement / stored_action_path) if isinstance(stored_action_path, str) and stored_action_path else {}
-        if (
-            not isinstance(stored_action, dict)
-            or stored_action.get("action_kind") != "revise-finding"
-            or stored_action.get("action_version") != 2
-            or stored_action.get("lane_id") != args.lane_id
-            or stored_action.get("operator_id") != args.operator_id
-            or stored_action.get("file_digest") != digest
-            or stored_action.get("target") != target
-            or stored_action.get("proposal") != finding
-        ):
-            raise RecordError("approved_revision_action_record_invalid", str(args.authority_request_id))
-        action = stored_action
-    else:
-        digest = raw_digest
-        if explicit_resolutions: raise RecordError("legacy_finding_authority_cannot_bind_resolutions", finding.get("finding_id", "unknown"))
-        resolutions = []
-        action = _authority_action("revise-finding", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, file_digest=digest, operator_id=args.operator_id, recorded_at=args.recorded_at)
     if not lock_held:
-        _require_async_authority(args, action, args.recorded_at)
+        with engagement_lock(args.engagement.absolute()) as engagement:
+            return _apply_finding_revision(argparse.Namespace(**{**vars(args), "engagement":engagement}), lock_held=True, evaluated_at=evaluated_at)
+    _require_decision6_kernel(args.engagement)
+    _require_local_provenance("broker", args.executor_id, args.session_id)
+    if abs((datetime.fromisoformat(args.recorded_at.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()) > 60:
+        raise RecordError("authority_application_time_not_current", "revise-finding")
+    finding = _command_json(args, "file"); canonical_digest = sha256_bytes(canonical_json_bytes(finding)); engagement = args.engagement.absolute()
+    errors = validate_record(finding, "finding-v3")
+    if errors: raise RecordError("finding_revision_invalid", "proposal", errors)
+    if finding.get("filing_contract", {}).get("version") != 1:
+        raise RecordError("canonical_filing_contract_required", finding["finding_id"])
+    relative = f"findings/{finding['finding_id']}/rev-{finding['revision']}.json"
+    pre_state = reduce_engagement(engagement, allowed_record_orphans={relative})
+    request = pre_state["authority_requests"].get(args.authority_request_id)
+    target = request.get("target") if request else None
+    if not isinstance(target, dict): raise RecordError("canonical_filing_contract_required", finding["finding_id"])
+    existing = next((e for e in read_ledger(engagement,"event") if e["event_type"] == "finding.revised" and e["payload"].get("finding_id") == finding["finding_id"] and e["payload"].get("finding_revision") == finding["revision"]),None)
+    if existing is not None:
+        if existing["payload"].get("authority_request_ref") != args.authority_request_id or existing["payload"].get("finding_digest") != canonical_digest or existing["actor"]["id"] != args.executor_id or existing["provenance"].get("session_id") != args.session_id or existing["payload"].get("operator_id") != args.operator_id or request.get("lane_id") != args.lane_id:
+            raise RecordError("finding_revision_collision", finding["finding_id"])
+        write_snapshot(engagement, pre_state); write_views(engagement, pre_state)
+        return {"valid":True,"finding_id":finding["finding_id"],"revision":finding["revision"],"event_id":existing["event_id"],"replayed":True}
+
+    require_original_filing_observations(finding)
+    explicit_resolutions = getattr(args, "resolve_review", None)
+    digest = canonical_digest
+    if not revise_finding_target_is_current(pre_state, request, finding): raise RecordError("finding_revision_authority_stale", finding.get("finding_id", "unknown"))
+    resolutions = target["resolves_review_refs"]
+    if explicit_resolutions is not None and (explicit_resolutions != sorted(set(explicit_resolutions)) or explicit_resolutions != resolutions): raise RecordError("finding_revision_resolution_set_mismatch", finding.get("finding_id", "unknown"))
+    stored_action_path = request.get("action_path") if isinstance(request, dict) else None
+    stored_action = load_json(engagement / stored_action_path) if isinstance(stored_action_path, str) and stored_action_path else {}
+    if (
+        not isinstance(stored_action, dict)
+        or stored_action.get("action_kind") != "revise-finding"
+        or stored_action.get("action_version") != 2
+        or stored_action.get("lane_id") != args.lane_id
+        or stored_action.get("operator_id") != args.operator_id
+        or stored_action.get("file_digest") != digest
+        or stored_action.get("target") != target
+        or stored_action.get("proposal") != finding
+    ):
+        raise RecordError("approved_revision_action_record_invalid", str(args.authority_request_id))
+    action = stored_action
     errors = validate_record_with_references(finding, "finding-v3", args.engagement)
     if errors: raise RecordError("finding_revision_invalid", finding.get("finding_id", "unknown"), errors)
     finding_id = finding["finding_id"]; revision = finding["revision"]; relative = f"findings/{finding_id}/rev-{revision}.json"; review_id = finding["adjudication"]["review_ref"]
@@ -3110,6 +3143,7 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
                 event_type="finding.revised",
                 rationale=finding["change_reason"],
                 payload={
+                    "filing_contract_version": 1,
                     "finding_id": finding_id,
                     "finding_revision": revision,
                     "status": finding["claim_state"],
@@ -3141,8 +3175,6 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
             event["provenance"]["provider"] = activation_provider
             return event
         data = canonical_json_bytes(finding)
-        existing_commit = next((c for c in read_ledger(bound_engagement, "event")
-                                if c.get("event_id") == f"event-{finding_id}-r{revision}-commit"), None)
         activated = any(e.get("event_type") == "finding.revised"
                         and e.get("payload", {}).get("finding_id") == finding_id
                         and e.get("payload", {}).get("finding_revision") == revision
@@ -3150,16 +3182,10 @@ def _apply_finding_revision(args: argparse.Namespace, *, lock_held: bool = False
         prior_bytes = _governed_regular_bytes_or_none(destination)
         if prior_bytes is not None and prior_bytes != data and activated:
             raise RecordError("finding_revision_collision", f"{finding_id}:{revision}")
-        repaired_commit_id = None
-        if prior_bytes is not None and prior_bytes != data and not activated and existing_commit is not None:
-            # Repair an un-activated partial commit: the revision was committed but never activated
-            # (no finding.revised event). Overwrite with the corrected bytes and append a NEW commit
-            # event under a distinct id recording the corrected digest. The old commit event stays as
-            # a historical record of the aborted attempt; the file now matches the repair commit.
-            atomic_write(destination, data)
-            repaired_commit_id = f"event-{finding_id}-r{revision}-repair-{int(__import__('time').time())}"
+        if prior_bytes is not None and prior_bytes != data:
+            raise RecordError("finding_revision_collision", f"{finding_id}:{revision}")
         if prior_bytes is None: atomic_write(destination, data)
-        commit_id = repaired_commit_id or f"event-{finding_id}-r{revision}-commit"
+        commit_id = f"event-{finding_id}-r{revision}-commit"
         commit = base_event(event_id=commit_id, engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="record.committed", rationale="Commit immutable operator-authorized finding revision.", payload={"record_path": relative, "record_digest": digest, "record_type": "finding-v3", "record_id": finding_id, "record_revision": revision, "authority_request_ref": args.authority_request_id}, session_id=args.session_id, operation_class="authority")
         commit_events = [c for c in read_ledger(bound_engagement, "event") if c.get("event_id") == commit["event_id"]]
         if commit_events and commit_events[0].get("payload", {}).get("record_digest") == digest:
@@ -5926,7 +5952,7 @@ def self_test() -> int:
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description=__doc__)
+    result = argparse.ArgumentParser(description=__doc__, epilog='Filing contract v1 is an incomplete #85 draft: new supported/confirmed filings are unavailable because no qualified original target privilege/state observer exists; signed negative filing and historical replay remain available.')
     result.add_argument("--self-test", action="store_true", help="run hermetic schema/record tests")
     subcommands = result.add_subparsers(dest="command")
     validate = subcommands.add_parser("validate", help="validate schemas, records, fixtures, or a read-only legacy inventory")
@@ -6054,7 +6080,7 @@ def parser() -> argparse.ArgumentParser:
     request_authority.add_argument("--engagement", type=Path, required=True); request_authority.add_argument("--request-id", required=True); request_authority.add_argument("--action-kind", required=True); request_authority.add_argument("--action-file", type=Path, required=True); request_authority.add_argument("--lane-id", required=True); request_authority.add_argument("--actor-role", choices=["broker"], required=True); request_authority.add_argument("--actor-id", required=True); request_authority.add_argument("--session-id", required=True); request_authority.add_argument("--recorded-at", required=True); request_authority.add_argument("--expires-at", required=True); request_authority.add_argument("--reason", required=True)
     resolve_authority = subcommands.add_parser("resolve-authority", help="operator-resolve one exact pending authority request")
     resolve_authority.add_argument("--engagement", type=Path, required=True); resolve_authority.add_argument("--request-id", required=True); resolve_authority.add_argument("--resolution", choices=["approved", "rejected", "expired", "superseded"], required=True); resolve_authority.add_argument("--operator-id", required=True); resolve_authority.add_argument("--session-id", required=True); resolve_authority.add_argument("--recorded-at", required=True); resolve_authority.add_argument("--reason", required=True)
-    settle_revision = subcommands.add_parser("settle-approved-revision", help="atomically apply one live approved finding revision or record its objective expiry")
+    settle_revision = subcommands.add_parser("settle-approved-revision", help="apply signed negative filing or recovery; new positive filing unavailable", description='Filing contract v1 is an incomplete #85 draft: new supported/confirmed filings are unavailable because no qualified original target privilege/state observer exists; signed negative filing and historical replay remain available.')
     settle_revision.add_argument("--engagement", type=Path, required=True); settle_revision.add_argument("--file", type=Path, required=True); settle_revision.add_argument("--resolve-review", action="append"); settle_revision.add_argument("--operator-id", required=True); settle_revision.add_argument("--recorded-at", required=True); settle_revision.add_argument("--authority-request-id", required=True); settle_revision.add_argument("--lane-id", required=True); settle_revision.add_argument("--executor-id", required=True); settle_revision.add_argument("--session-id", required=True)
     confirm_zone2 = subcommands.add_parser("confirm-zone2", help="record one fresh operator confirmation before one Zone-2 artifact is created")
     confirm_zone2.add_argument("--engagement", type=Path, required=True)
@@ -6091,7 +6117,7 @@ def parser() -> argparse.ArgumentParser:
     preflight.add_argument("--engagement", type=Path, required=True); preflight.add_argument("--preflight-id", required=True); preflight.add_argument("--mode", choices=["git", "package", "local_runtime"], required=True); preflight.add_argument("--target", type=Path, required=True); preflight.add_argument("--expected-identity", required=True); preflight.add_argument("--runtime", type=Path, required=True); preflight.add_argument("--reproduction-argv", required=True, help="JSON array; recorded but never executed by preflight"); preflight.add_argument("--actor-role", choices=["broker"], required=True); preflight.add_argument("--actor-id", required=True); preflight.add_argument("--session-id", required=True); preflight.add_argument("--model"); preflight.add_argument("--provider"); preflight.add_argument("--tool-version", action="append", default=[]); preflight.add_argument("--recorded-at", required=True); preflight.add_argument("--advisory-zone", choices=["clear_local", "review_required", "unknown"], default="clear_local"); preflight.add_argument("--credentials-present", action="store_true"); preflight.add_argument("--account-label", action="append", default=[]); preflight.add_argument("--configuration-file", type=Path, action="append", default=[]); preflight.add_argument("--endpoint-identity"); preflight.add_argument("--account-role"); preflight.add_argument("--feature-flag", action="append", default=[])
     migrate = subcommands.add_parser("migrate", help="read-only legacy inventory or signed-operator migration proposal")
     migrate.add_argument("--root", type=Path, default=Path(".")); migrate.add_argument("--output", type=Path); migrate.add_argument("--propose-engagement"); migrate.add_argument("--dry-run-engagement"); migrate.add_argument("--migration-dir",type=Path); migrate.add_argument("--apply-proposal", type=Path); migrate.add_argument("--destination", type=Path); migrate.add_argument("--artifact-review",type=Path); migrate.add_argument("--operator-id"); migrate.add_argument("--recorded-at"); migrate.add_argument("--authority-engagement", type=Path); migrate.add_argument("--authority-request-id"); migrate.add_argument("--lane-id"); migrate.add_argument("--executor-id"); migrate.add_argument("--session-id")
-    revise = subcommands.add_parser("revise-finding", help="commit one contiguous operator-authorized finding revision")
+    revise = subcommands.add_parser("revise-finding", help="contract-v1 canonical activation: commit one contiguous operator-authorized finding revision", description='Filing contract v1 is an incomplete #85 draft: new supported/confirmed filings are unavailable because no qualified original target privilege/state observer exists; signed negative filing and historical replay remain available.')
     revise.add_argument("--engagement", type=Path, required=True); revise.add_argument("--file", type=Path, required=True); revise.add_argument("--resolve-review", action="append", default=None); revise.add_argument("--operator-id", required=True); revise.add_argument("--recorded-at", required=True); revise.add_argument("--authority-request-id", required=True); revise.add_argument("--lane-id", required=True); revise.add_argument("--executor-id", required=True); revise.add_argument("--session-id", required=True)
 
     accept = subcommands.add_parser("accept-report", help="operator review and acceptance of a current revision-bound report")

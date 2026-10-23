@@ -537,3 +537,17 @@ Verification for this documentation slice:
 
 This entry records documentation and source inspection. It does not adopt a runtime,
 authorize an engagement, update target readiness, merge a branch, or close an issue.
+
+### Correction pass (same day)
+
+The review pass separated the root's generic three-boundary fence from the
+LLM-application domain examples, which now live in
+[LLM domain scope](../agents/llm-domain-scope.md). It removed the target-specific
+standing-grant exception from portable root and bootstrap instructions; a
+target-specific grant now belongs only in that target's signed scope. It restored a
+concrete evidence test to the root prime directive, restored the installed
+engineering-skills pointer, clarified explicit bootstrap invocation, aligned
+repository-visibility wording, and replaced branch-specific language with the stable
+candidate-route name. The attempt/negative/bundle lifecycle is recorded as a forward
+pointer to PR #193 until `docs/research-lifecycle.md` lands. The direction page now
+labels itself as a maintained synthesis rather than an accepted ADR.

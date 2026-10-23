@@ -1,13 +1,17 @@
 # llm-redteam-harness
 
-A **domain-neutral, portable** harness for **authorized security research**. A capable
-researcher uses source, tools, experiments and runtime feedback inside an explicit
-authority and evidence boundary. LLM application security is one domain.
+The harness is being developed as a **domain-neutral, portable** system for
+**authorized security research**. A capable researcher uses source, tools,
+experiments and runtime feedback inside an explicit authority and evidence
+boundary. LLM application security is one domain; the retained LLM cards are a
+domain pack, not the whole product. The repository name is historical.
 
 > **Prime directive.** A red-team harness's product is **rigor, not findings**. It is engineered to
-> **default to disbelief** when confirming a claim. Discovery preserves plausible
-> leads; confirmation requires faithful evidence; reporting stays within supported
-> conditions. A supported effect and unfinished deeper work can coexist.
+> **default to disbelief** when confirming a claim. A claim stays unconfirmed until it has an
+> execution observation, a relevant control, and a clean replay. A narrative, report match, or
+> model agreement cannot supply missing execution evidence. Discovery preserves plausible leads;
+> reporting stays within supported conditions. A supported effect and unfinished deeper work can
+> coexist.
 
 Read [product and engineering direction](docs/wiki/product-and-engineering-direction.md)
 for the north stars and design choices, and [native research status](docs/wiki/native-research-status.md)
@@ -17,14 +21,15 @@ explicit set of runtimes and model routes.
 
 ## Scope fence (read first)
 
-Both local routes use the same scope fence. The legacy kernel enforces its
-record gates; the native entry must check the signed scope and card safe signal
-before a run:
+Both local routes use the same three authority boundaries. Each route and domain
+supplies its own benign objective set and safe-signal cards. The LLM-application
+examples are in [LLM domain scope](docs/agents/llm-domain-scope.md); source
+research uses the [source engagement bootstrap](skills/source-engagement-bootstrap/SKILL.md).
 
-| Zone | What | Gate |
+| Boundary | What | Gate |
 | --- | --- | --- |
-| ✅ **Default — benign proxy** | system-prompt disclosure, refusal-flip on a *harmless* target, indirect-injection canary, excessive-agency / unsafe-render, cross-user canary propagation | signed scope and a benign `safe_signal` for every used vulnerability card |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | signed `scope.md` **+** fresh human confirmation or kernel-enforced standing local-PoC grant **+** containment **+** cleanup obligation recorded at creation |
+| ✅ **Authorized local research** | a benign objective set declared in the signed target-local scope, run only inside the declared local environment | signed scope + the route's benign `safe_signal` for every used card + effect, containment and cleanup ceiling |
+| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. contained worm/exfil chain) | signed `scope.md` **+** fresh human confirmation or a target-local standing local-PoC grant recorded in that signed scope (kernel-enforced where the route uses the kernel) **+** containment **+** cleanup obligation recorded at creation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
 **Authorization is mandatory.** The legacy loop refuses to run without a filled and
@@ -41,7 +46,7 @@ preserves authority, evidence, continuity and review obligations.
 ## Layout
 
 ```
-skills/         PLANE 1 — methodology (read-only): vulns/ · techniques/ · oracles/ · patterns/
+skills/         PLANE 1 — methodology (read-only): LLM-domain cards + source bootstrap; shared patterns/oracles
 engine/         PLANE 2 — native research method + retained legacy orchestration
 schemas/        the contracts: attempt · finding · pattern · technique-card
 fixtures/       sanitized oracle-calibration + routing-activation ground truth
@@ -58,10 +63,9 @@ protected host evidence separate. Use the selected route's actual record contrac
 
 ## New local source research — candidate native default
 
-The [native entry](docs/agents/native-local-research.md) is the source route for
-new local source research in this candidate branch: prepare a signed target-local
-scope, brief and allowance, then use its persistent run root, review and internal
-result. The [bootstrap skill](skills/source-engagement-bootstrap/SKILL.md) ranks
+The [native entry](docs/agents/native-local-research.md) is the candidate source
+route for new local source research: prepare a signed target-local scope, brief
+and allowance, then use its persistent run root, review and internal result. The [bootstrap skill](skills/source-engagement-bootstrap/SKILL.md) ranks
 source targets and prepares that handoff. Issues #166–170 implement the source
 change; #165 remains open, so this is neither live qualification nor a scoped
 adoption decision. An actual run still needs its signed scope, plan-bound
@@ -76,6 +80,11 @@ supported existing work. Its [Docker work-queue contract](docs/agents/docker-wor
 and [source bootstrap branch](skills/source-engagement-bootstrap/references/legacy-bootstrap.md)
 remain available. New local source research uses the native entry above; this
 source change does not convert, rewrite or grade historical engagements.
+
+The record lifecycle layer (attempt start/finish, bounded negative results and
+evidence-bundle manifests) is landing with
+[PR #193](https://github.com/matheusht/redteam-harness/pull/193); use
+`docs/research-lifecycle.md` when that change lands.
 
 ## Conformance (run before promoting any card / casebook change)
 
@@ -94,7 +103,7 @@ run is required before a pattern/vuln/casebook change is promoted** (also enforc
   no live ids/tokens/URLs. Enforced by the schema rule + the conformance secret scan.
 - **Plane-1 methodology files** (field-notes, fixtures, vuln-card lessons) MAY keep an operator-internal
   engagement label as *provenance* (it makes a lesson credible), but **never a secret** — the redaction
-  rule still applies. This repo is private / operator-internal.
+  rule still applies. Keep internal labels internal; repository visibility is not a redaction control.
 - **Before any external sharing**, run a pre-publish pass that replaces engagement labels with abstract
   handles. Until then, labels stay internal.
 

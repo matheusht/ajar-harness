@@ -45,6 +45,7 @@ This status is a dated observation, not a live tracker. Recheck the source commi
 | [October discussion record](../research/research-direction-discussion-2026-10.md) | Recorded operator choices, evolving mechanisms, dated research lessons and unfinished reading leads. |
 | [Retained October source review](../research/native-session-source-review-2026-10.md) | Detailed external claim checks, counterarguments and original design proposals, with later-choice pointers. |
 | [Native cutover contract](../agents/native-cutover-contract.md) | Source routing, retained callers and the qualification boundary; implementation permission is distinct from adoption. |
+| [LLM domain scope](../agents/llm-domain-scope.md) | Concrete LLM-application benign-proxy and impact examples; the generic authority boundary is in the root README. |
 | [Earlier engineering notes](../engineering/README.md) | Dated engineering evidence and decisions. Preserve their historical context. |
 | [September 5 research index](../research/harness-engineering-2026-09-05/README.md) | Full evaluation, reconstruction, instruction, recovery and communication investigations. |
 | [Approved specification and publication record](../research/harness-engineering-2026-09-05/handoff.md) | Accepted scope, native issue dependencies, exact published material and execution limits. |

@@ -1,6 +1,6 @@
 # Native local research
 
-This branch implements the native route as the default for new local source research.
+The candidate native route is the default for new local source research.
 Runtime qualification and adoption remain unverified.
 Read [product direction](../wiki/product-and-engineering-direction.md) for design
 choices and [dated status](../wiki/native-research-status.md) for capability claims.

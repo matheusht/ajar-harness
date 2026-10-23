@@ -8,12 +8,17 @@ later operator choices and separates them from proposals. The
 [implementation status](native-research-status.md) owns the dated capability and
 qualification picture. A direction, implementation, and successful run are distinct facts.
 
+**Authority status:** this page is a maintained synthesis of operator choices, not an
+accepted ADR. It does not create or change a gate. A durable gate change needs a
+decision record in [`docs/decisions/`](../decisions/README.md).
+
 ## Product and north stars
 
-The harness is a domain-neutral security research system: capable researchers use
-source, tools, experiments, and runtime feedback inside an explicit authority and
-evidence boundary. LLM application security is one domain. A native session means a
-coding agent with a usable environment, rather than a prompt alone.
+The harness is being developed as a domain-neutral security research system: capable
+researchers use source, tools, experiments, and runtime feedback inside an explicit
+authority and evidence boundary. LLM application security is one domain; the retained
+LLM cards are a domain pack, not the whole product. A native session means a coding
+agent with a usable environment, rather than a prompt alone.
 
 The product should make deep research possible with less operator steering. Useful
 results include independently supported effects, corrected explanations, faithful

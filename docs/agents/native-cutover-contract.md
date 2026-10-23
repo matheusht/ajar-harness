@@ -1,6 +1,6 @@
 # Native local research cutover contract (candidate)
 
-This branch implements the source changes for issues #166–170. On 2026-10-22 the
+The candidate native source route implements the source changes for issues #166–170. On 2026-10-22 the
 operator authorized implementation of all five tickets and deferred testing to one
 full E2E run after integration. New local source work follows the native entry;
 existing queue/record engagements use the named legacy entry. This source change

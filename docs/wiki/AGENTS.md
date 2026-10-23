@@ -20,6 +20,8 @@ This directory is the maintained synthesis of engineering decisions, evidence an
 
 Use this process when a source is ingested, an engineering decision changes, a slice is implemented/tested, or a reusable answer adds evidence. Do not manufacture an update for every tool call. A question with no new durable information can be answered with citations to the existing page.
 
+For agent-facing instructions, use the installed `writing-for-agents` skill: keep context pointers sharp, make completion criteria checkable, and separate steps from disclosed reference.
+
 ## Lightweight operation
 
 The index, ordinary Markdown links, `rg` and Git cover the current need. Add no database, search service, embeddings, generated dashboard, background job or wiki-specific test framework without a demonstrated problem.

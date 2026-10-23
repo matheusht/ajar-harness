@@ -7,11 +7,12 @@ For substantial changes, state the decision, inspect raw source and execution ev
 the simplest serious alternative, and define a falsifiable acceptance check before implementation.
 After the last edit, verify that claims still match their evidence and review.
 
-For **new local source research**, use [source engagement bootstrap](skills/source-engagement-bootstrap/SKILL.md)
+For **new local source research**, when the operator explicitly invokes the
+[source engagement bootstrap](skills/source-engagement-bootstrap/SKILL.md), use it
 for target selection and [native local research](docs/agents/native-local-research.md) as the
-single prepare/start/resume/stop and internal-output procedure. This branch implements the
-candidate source default for #166–170; #165 has no scoped adopt decision and live qualification
-remains unverified. Before any actual run, read the signed target-local
+single prepare/start/resume/stop and internal-output procedure. The candidate native route
+implements the source default for #166–170; #165 has no scoped adopt decision and live
+qualification remains unverified. Before any actual run, read the signed target-local
 `engagements/<id>/scope.md`, verify every used vulnerability card has a benign `safe_signal`,
 and obtain the native runner's exact plan-bound approval. The runner itself does not verify the
 scope signature or safe signal. A native task does not initialize or write the legacy queue or
@@ -24,23 +25,28 @@ an engagement; the signed scope, evidence and redaction boundaries remain.
 
 ## 0. Prime directive
 
-Your product is **rigor, not findings**. Default to disbelief. A result is `needs_review` or
-`contaminated` until it survives the oracle. Discovery preserves plausible leads;
-confirmation requires evidence; reporting stays within supported conditions.
-Keep claim state, unfinished search, and bounded coverage distinct.
+Your product is **rigor, not findings**. Default to disbelief. A result stays unconfirmed
+until it survives the route's independent evidence and review gate. If you cannot
+name the execution observation, relevant control, and clean replay that make the
+claim real, it is not confirmed. Discovery preserves plausible leads; confirmation
+requires execution evidence; a narrative, report match, or model agreement cannot
+supply it. Keep claim state, unfinished search, and bounded coverage distinct.
 
 ## 1. Hard gates (refuse to proceed otherwise)
 
 1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
    objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
-2. **Safe-signal gate** — never run a vuln skill whose front-matter lacks a benign `safe_signal`.
+2. **Safe-signal gate** — never run a vulnerability/source card whose front-matter lacks a
+   benign `safe_signal`. The LLM-application example set is in
+   [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the
+   bootstrap's source-only gate.
 3. **Impact-artifact gate** — before creating a Zone-2 PoC artifact (see README scope fence),
-   require either a fresh human confirmation or an explicit standing local-PoC grant in the current
-   signed scope that the record kernel enforces. The `chia-blockchain` child engagement may use that
-   grant for contained local PoCs and necessary local experiments without per-artifact confirmation.
-   Record each artifact and cleanup obligation at creation. Effects beyond the signed environment,
-   containment, or cleanup authority still stop for human confirmation. A native route without the
-   record kernel does not inherit a kernel-enforced grant.
+   require either a fresh human confirmation or an explicit target-local standing local-PoC
+   grant in the current signed scope. A target-specific grant is valid only inside that
+   target's signed scope; it is not a portable exception. Record each artifact and cleanup
+   obligation at creation. Effects beyond the signed environment, containment, or cleanup
+   authority still stop for human confirmation. A native route without the record kernel does
+   not inherit a kernel-enforced grant.
 4. **Review gate** — operator reviews assembled findings before any escalation up the severity
    ladder (self → stored/persistent → cross-user), each rung gated on the prior succeeding.
 5. **External-action gate** — filing, disclosure, vendor contact, deployment, publication and
@@ -91,3 +97,19 @@ retains its supported engagement layout.
 [native research status](docs/wiki/native-research-status.md), then its source evidence.
 ADRs live in **`docs/decisions/`**, not `docs/adr/`; use
 [the decision index](docs/decisions/README.md) for authority and supersession.
+
+**Domain examples:** the LLM-application benign-proxy and impact set is in
+[LLM domain scope](docs/agents/llm-domain-scope.md). Source research uses the
+bootstrap route and its source-only gate.
+
+**Record lifecycle:** attempt start/finish, bounded negative results, and
+evidence-bundle manifests are being added in
+[PR #193](https://github.com/matheusht/redteam-harness/pull/193). Use
+`docs/research-lifecycle.md` when that change lands; until then, the selected
+route's existing record contract applies.
+
+### Engineering skills
+
+For engineering planning, documentation, and review, use the installed
+`wayfinder`, `grilling`, and `writing-for-agents` skills when their triggers
+apply. They are workflow aids; they do not grant runtime or engagement authority.

@@ -12,8 +12,11 @@ engagement state, persistence, findings, memory, and calibration.\
 **Reading scope:** the product/evidence principles remain canonical. Record,
 mandatory-disposition, and closure mechanisms below describe the governed
 engagement lifecycle retained by the [legacy entry](../agents/legacy-local-research.md).
-The separately authorized native candidate uses its own ordinary-file
+The separately implemented native candidate uses its own ordinary-file
 [procedure](../agents/native-local-research.md); it does not append legacy records.
+The attempt-start/finish, bounded-negative, and evidence-bundle extension is being
+documented with [PR #193](https://github.com/matheusht/redteam-harness/pull/193);
+these evidence principles are unchanged.
 See [current direction](../wiki/product-and-engineering-direction.md) and
 [dated status](../wiki/native-research-status.md) for that implementation boundary.
 This note changes no historical claim or qualification result.

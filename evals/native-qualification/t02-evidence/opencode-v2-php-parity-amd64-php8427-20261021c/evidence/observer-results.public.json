@@ -1,0 +1,75 @@
+{
+  "case": "Kanboard local observer preflight",
+  "status": "pass",
+  "arms": [
+    {
+      "release": "vulnerable",
+      "loopback": true,
+      "php": "PHP 8.4.27 (cli) (built: Oct 21 2026 16:38:20) (NTS)",
+      "runtime": "sha256:241dd8f788c62d5c9ef87bdab07ce1f05aca7db0199d532a68b5910c7397f7de",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "result": {
+          "id": 2,
+          "project_id": 1,
+          "name": "Observer Swimlane"
+        }
+      },
+      "cleanup": {
+        "container_id": "[REDACTED]",
+        "host_pid": null,
+        "loopback_port": "[REDACTED]",
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir": "<private-output>/vulnerable-run",
+        "run_dir_absent": true,
+        "db_path": "<private-output>/vulnerable-run/app/data/db.sqlite",
+        "db_absent": true
+      },
+      "commit": "f0f7d27007f5a788f14416c548421efd740b7bce",
+      "archive_sha256": "3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf"
+    },
+    {
+      "release": "fixed",
+      "loopback": true,
+      "php": "PHP 8.4.27 (cli) (built: Oct 21 2026 16:38:20) (NTS)",
+      "runtime": "sha256:241dd8f788c62d5c9ef87bdab07ce1f05aca7db0199d532a68b5910c7397f7de",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "denial": {
+          "code": 403,
+          "message": "Forbidden"
+        }
+      },
+      "cleanup": {
+        "container_id": "[REDACTED]",
+        "host_pid": null,
+        "loopback_port": "[REDACTED]",
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir": "<private-output>/fixed-run",
+        "run_dir_absent": true,
+        "db_path": "<private-output>/fixed-run/app/data/db.sqlite",
+        "db_absent": true
+      },
+      "commit": "a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3",
+      "archive_sha256": "44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56"
+    }
+  ]
+}

@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "kind": "t02-cloud-amd64-kanboard-fresh-candidate-public-verification",
+  "status": "pass",
+  "checks_passed": 65,
+  "checks_total": 65,
+  "network_required": false,
+  "docker_required": false,
+  "checks": [
+    {
+      "name": "inputs top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "result top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "derivation schema exact",
+      "pass": true
+    },
+    {
+      "name": "result provenance schema exact",
+      "pass": true
+    },
+    {
+      "name": "docker schema exact",
+      "pass": true
+    },
+    {
+      "name": "dockerfile schema exact",
+      "pass": true
+    },
+    {
+      "name": "base images schema exact",
+      "pass": true
+    },
+    {
+      "name": "managed ca schema exact",
+      "pass": true
+    },
+    {
+      "name": "input candidate schema exact",
+      "pass": true
+    },
+    {
+      "name": "pre-build baseline schema exact",
+      "pass": true
+    },
+    {
+      "name": "constraints schema exact",
+      "pass": true
+    },
+    {
+      "name": "failure schema exact",
+      "pass": true
+    },
+    {
+      "name": "result candidate schema exact",
+      "pass": true
+    },
+    {
+      "name": "execution schema exact",
+      "pass": true
+    },
+    {
+      "name": "cleanup schema exact",
+      "pass": true
+    },
+    {
+      "name": "archive labels exact",
+      "pass": true
+    },
+    {
+      "name": "network entry schemas exact",
+      "pass": true
+    },
+    {
+      "name": "qualification base and platform exact",
+      "pass": true
+    },
+    {
+      "name": "derived input provenance exact",
+      "pass": true
+    },
+    {
+      "name": "result provenance exact",
+      "pass": true
+    },
+    {
+      "name": "dockerfile and bases exact",
+      "pass": true
+    },
+    {
+      "name": "managed ca provenance exact",
+      "pass": true
+    },
+    {
+      "name": "candidate intent exact",
+      "pass": true
+    },
+    {
+      "name": "outer baseline exact",
+      "pass": true
+    },
+    {
+      "name": "archives remained unretrieved",
+      "pass": true
+    },
+    {
+      "name": "constraints remained zero",
+      "pass": true
+    },
+    {
+      "name": "build blocker exact",
+      "pass": true
+    },
+    {
+      "name": "candidate never registered",
+      "pass": true
+    },
+    {
+      "name": "zero dependent execution",
+      "pass": true
+    },
+    {
+      "name": "cleanup exact",
+      "pass": true
+    },
+    {
+      "name": "follow-up defects retained",
+      "pass": true
+    },
+    {
+      "name": "full failed command bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "readme states honest blocked scope",
+      "pass": true
+    },
+    {
+      "name": "cleanup observations pinned",
+      "pass": true
+    },
+    {
+      "name": "no raw secret or private task material",
+      "pass": true
+    },
+    {
+      "name": "complete inputs bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete result bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete readme bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete command bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "complete cleanup observations bytes pinned",
+      "pass": true
+    },
+    {
+      "name": "source pin manifest exact",
+      "pass": true
+    },
+    {
+      "name": "source pin Dockerfile.opencode-kanboard-runtime",
+      "pass": true
+    },
+    {
+      "name": "source pin observer_case.py",
+      "pass": true
+    },
+    {
+      "name": "source pin observer-evidence-final/observer-results.json",
+      "pass": true
+    },
+    {
+      "name": "source pin RESEARCHER-BRIEF.md",
+      "pass": true
+    },
+    {
+      "name": "source pin T01-AMD64-KANBOARD-FRESH-CANDIDATE-CHECKS-20261021.md",
+      "pass": true
+    },
+    {
+      "name": "source pin smoke/check_v2_php_parity_amd64.py",
+      "pass": true
+    },
+    {
+      "name": "source pin smoke/check_v2_php_parity_amd64_test.py",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/README.md",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/inputs.json",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/result.json",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/run-command.txt",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/verification.json",
+      "pass": true
+    },
+    {
+      "name": "source pin t02-evidence/opencode-v2-php-parity-amd64-20261021a/verify.py",
+      "pass": true
+    },
+    {
+      "name": "self-test reject false pass status",
+      "pass": true
+    },
+    {
+      "name": "self-test reject hidden arm execution",
+      "pass": true
+    },
+    {
+      "name": "self-test reject incomplete cache cleanup",
+      "pass": true
+    },
+    {
+      "name": "self-test reject false archive state",
+      "pass": true
+    },
+    {
+      "name": "self-test reject extra receipt key",
+      "pass": true
+    },
+    {
+      "name": "self-test reject false-branch command mutation",
+      "pass": true
+    },
+    {
+      "name": "self-test reject quoted Authorization value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject quoted api_key value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject any complete inputs mutation",
+      "pass": true
+    },
+    {
+      "name": "self-test reject any complete result mutation",
+      "pass": true
+    },
+    {
+      "name": "self-test reject newline-normalized inputs bytes",
+      "pass": true
+    }
+  ]
+}

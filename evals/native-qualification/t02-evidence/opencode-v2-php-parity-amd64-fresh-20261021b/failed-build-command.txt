@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euC
+umask 077
+
+# Redacted historical shape of the failed one-time candidate build. This is
+# separate from any future candidate replay and contains no parity runner.
+: "${PARITY_PRIVATE_ROOT:?set PARITY_PRIVATE_ROOT to a new private directory}"
+CANDIDATE_TAG='t02-kanboard-runtime:amd64-parity-20261021b'
+EFFECTIVE_BASE='ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319'
+MANAGED_CA='/etc/ssl/certs/ca-certificates.crt'
+DOCKERFILE='evals/native-qualification/Dockerfile.opencode-kanboard-runtime'
+EXPECTED_DOCKERFILE_SHA256='7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b'
+EXPECTED_CA_SHA256='43e169bf3454bc74c12d3df8c1403f0b4e7da135bf5959f8ab31eb634896bf73'
+
+if docker image inspect "${CANDIDATE_TAG}" >/dev/null 2>&1; then
+  printf 'refusing to overwrite existing candidate tag: %s\n' \
+    "${CANDIDATE_TAG}" >&2
+  exit 41
+fi
+
+case "${PARITY_PRIVATE_ROOT}" in
+  /*) ;;
+  *) printf 'PARITY_PRIVATE_ROOT must be absolute\n' >&2; exit 42 ;;
+esac
+if [ "${PARITY_PRIVATE_ROOT}" = / ] || [ -e "${PARITY_PRIVATE_ROOT}" ]; then
+  printf 'PARITY_PRIVATE_ROOT must be a new non-root path\n' >&2
+  exit 42
+fi
+if [ "$(sha256sum "${DOCKERFILE}" | awk '{print $1}')" != "${EXPECTED_DOCKERFILE_SHA256}" ] \
+    || [ "$(sha256sum "${MANAGED_CA}" | awk '{print $1}')" != "${EXPECTED_CA_SHA256}" ]; then
+  printf 'Dockerfile or managed CA SHA-256 mismatch\n' >&2
+  exit 43
+fi
+mkdir -m 700 -- "${PARITY_PRIVATE_ROOT}"
+if [ "$(stat -c '%u:%a' "${PARITY_PRIVATE_ROOT}")" != "$(id -u):700" ]; then
+  printf 'private output ownership or mode mismatch\n' >&2
+  exit 44
+fi
+
+docker buildx build --platform linux/amd64 --load \
+  --build-arg "OPENCODE_BASE=${EFFECTIVE_BASE}" \
+  --secret "id=proxy_ca,type=file,src=${MANAGED_CA}" \
+  --metadata-file "${PARITY_PRIVATE_ROOT}/build-metadata.json" \
+  -f "${DOCKERFILE}" \
+  -t "${CANDIDATE_TAG}" \
+  evals/native-qualification \
+  >"${PARITY_PRIVATE_ROOT}/build.log" 2>&1
+
+# Recorded 2026-10-21 outcome: buildx returned 1 because apk returned 11;
+# no image was loaded, registered, inspected as a candidate, or executed.

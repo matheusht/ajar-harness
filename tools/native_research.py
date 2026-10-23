@@ -1133,6 +1133,30 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         _write_json(archived, approval, once=True)
 
 
+def _approval_active(root: Path) -> None:
+    plan = _plan(root)
+    plan_sha = _sha(root / 'plan.json')
+    approval_path = _controls(root) / 'approval.json'
+    approval = _read_json(approval_path)
+    activation = _read_json(_controls(root) / 'activation.json')
+    if (activation.get('kind') != 'native-research-activation-v1'
+            or activation.get('plan_sha256') != plan_sha
+            or activation.get('approval_sha256') != _sha(approval_path)
+            or approval.get('kind') != 'native-research-live-approval-v1'
+            or approval.get('plan_sha256') != plan_sha
+            or approval.get('scope_sha256') != plan['scope_sha256']
+            or approval.get('provider_route') != plan['provider_route']
+            or approval.get('model') != plan['model']
+            or approval.get('limits') != plan['limits']):
+        _fail('research_approval_changed')
+    try:
+        expires = datetime.strptime(approval['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        _fail('research_approval_changed')
+    if datetime.now(timezone.utc) >= expires:
+        _fail('research_approval_expired')
+
+
 def _activate_controls(root: Path):
     controls = _controls(root)
     paths = {
@@ -2257,6 +2281,9 @@ def native_api(run_root: Path, role: str, *parts: str) -> dict:
             or len(parts) > 12 or any(not isinstance(part, str) or len(part) > 4096 for part in parts)):
         _fail('native_api_call_not_allowed')
     with _turn_lock(root):
+        _approval_active(root)
+        if not run_active(root):
+            _fail('native_run_closed_before_dispatch')
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')
         result = _native_exec(root, role, ['api', '--standalone', *parts], 90)
@@ -2395,6 +2422,7 @@ def _research_context(root: Path, continuity: str, *, pool: dict | None = None) 
             _fail('portable_research_requires_new_prepare')
         return None
     plan = _verified_plan(root)
+    _approval_active(root)
     if _unresolved_dispatches(root):
         _fail('prior_dispatch_unknown_effect')
     try:
@@ -2493,6 +2521,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
               'review_target_id': target_id,
               'review_target_source_sha256': source_digest}
     with _turn_lock(root):
+        _approval_active(root)
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')
         if not run_active(root):
@@ -4004,6 +4033,25 @@ def _source_evidence_read(raw: str, session: str, digest: str) -> bool:
     return read and hashed
 
 
+def _source_output_summary(before: dict[str, str], after: dict[str, str]) -> dict:
+    return {'file_count': len(after),
+            'changed_files': {name: digest for name, digest in after.items()
+                              if before.get(name) != digest},
+            'missing_files': sorted(set(before) - set(after))}
+
+
+def _publish_source_manifest(path: Path, manifest: dict[str, str], public_bytes) -> str:
+    data = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+    if public_bytes(data) != data:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    _write_json(path, manifest, once=True)
+    path.chmod(0o444)
+    digest = _sha(path)
+    if digest != hashlib.sha256(data).hexdigest():
+        _fail('source_review_output_changed')
+    return digest
+
+
 def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> dict:
     plan = _verified_plan(root)
     _verify_inventory(root / role / 'project', plan['source_sha256'])
@@ -4053,6 +4101,8 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
                 'input_manifest_sha256': _sha(destination / 'input-manifest.json'),
                 'preparation_dispatch_id': first['native']['dispatch_id'], 'cases': {}}
     execution_paths = {}
+    manifest_paths = {}
+    evidence_dir = _controls(root) / 'source-evidence' / role
     for name in ('effect', 'control'):
         command = destination / (name + '.json')
         _write_json(command, check[name], once=True)
@@ -4063,15 +4113,27 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         if (executed['status'] != 'captured' or _sha(path) != executed['receipt_sha256']
                 or captured['input_manifest_sha256'] != evidence['input_manifest_sha256']
                 or captured['plan_sha256'] != result['plan_sha256'] or captured['owner_role'] != role
-                or captured['command'] != check[name] or len(captured['runs']) != 3):
+                or captured['command'] != check[name]
+                or not isinstance(captured['runs'], list) or len(captured['runs']) != 3
+                or any(not isinstance(row, dict) for row in captured['runs'])
+                or {row.get('role') for row in captured['runs']} != set(CAPTURE_TARGETS)):
             _fail('source_review_execution_binding_changed')
         outputs = {}
         for row in captured['runs']:
             folder = path.parent / row['role']
-            outputs[row['role']] = {'files': _read_json(folder / 'files.json')}
+            output_inventory = _read_json(folder / 'files.json')
             if _sha(folder / 'files.json') != row['output_manifest_sha256']:
                 _fail('source_review_output_changed')
-            _verify_inventory(folder / 'files', outputs[row['role']]['files'])
+            _verify_inventory(folder / 'files', output_inventory)
+            manifest_path = evidence_dir / ('manifest-' + name + '-' + row['role'] + '.json')
+            manifest_digest = _publish_source_manifest(manifest_path, output_inventory,
+                                                       module.validate_public_bytes)
+            if manifest_digest != row['output_manifest_sha256']:
+                _fail('source_review_output_changed')
+            manifest_paths[manifest_path] = manifest_digest
+            outputs[row['role']] = {**_source_output_summary(inventory, output_inventory),
+                                    'manifest_path': '/source-evidence/' + manifest_path.name,
+                                    'manifest_sha256': manifest_digest}
             for stream in ('stdout', 'stderr'):
                 output = folder / (stream + '.txt')
                 if row.get(stream + '_redacted') or not output.exists():
@@ -4093,6 +4155,8 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         'Read /handoff/REQUEST.json and every listed file again. Read '
         '/source-evidence/RESULTS.json with the read tool, then run exactly '
         '`sha256sum /source-evidence/RESULTS.json` with the shell tool. '
+        'Full output manifests are at the read-only paths listed in RESULTS; inspect them '
+        'when assessing a changed or missing file. '
         'Compare the host effect and control results and the three replays. Nonzero exits are '
         'observations, not proof of a security defect. Explain limitations and any weak control. '
         'Return the same review JSON schema required by /handoff/PROMPT.txt. '
@@ -4102,7 +4166,9 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
     after = allowance_snapshot(root)
     stable = (run_active(root) and module._same_allowance(first['allowance_before'], before)
               and module._same_allowance(before, after) and module.verify_packet(packet, pin)
-              and _sha(evidence_path) == evidence_digest and _sha(root / 'plan.json') == result['plan_sha256'])
+              and _sha(evidence_path) == evidence_digest
+              and all(_sha(path) == digest for path, digest in manifest_paths.items())
+              and _sha(root / 'plan.json') == result['plan_sha256'])
     _verify_inventory(root / 'original', plan['source_sha256'])
     _verify_inventory(destination / 'input', inventory)
     if (_sha(destination / 'source-check.json') != evidence['check_sha256']

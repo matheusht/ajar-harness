@@ -182,8 +182,12 @@ The runner requests this file; no target-specific runner code is needed.
 The host freezes the review scripts and definition together. It rejects changed
 or deleted original files. It executes the effect and control on three clean
 copies each and compares original file bytes after each command. Results include
-exit codes, streams, manifests and receipt hashes. Nonzero exit codes remain
-observations. The reviewer then reads and hashes `/source-evidence/RESULTS.json`
+exit codes, streams, and receipt hashes. The reviewer receives file counts and
+changed or missing paths with hashes in the small summary. The full manifests
+remain in protected host receipts and are also available as separately hashed,
+read-only reviewer files. This keeps unchanged source files from filling the
+summary. Nonzero exit codes remain observations. The reviewer then reads and hashes
+`/source-evidence/RESULTS.json`
 and returns its conclusion in the same native session. The final receipt binds
 that conclusion to the packet, source, scripts, executions and native trace.
 There are two fresh reviewer slots per run, as in service mode.

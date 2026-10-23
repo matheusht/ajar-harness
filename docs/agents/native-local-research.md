@@ -55,6 +55,10 @@ available; live qualification is still pending.
    review strong-lead dispositions separately when needed. Source and offline
    checks do not qualify a provider or target.
    Any standing permission still needs exact target/model/effect/expiry binding.
+   Session setup and each native turn recheck the archived approval bytes and
+   expiry; a rejected turn does not renew approval or shared allowance. An
+   already-running turn can end after the approval expires, so review its
+   effects before further work.
    The runner stages the portable
    [research workflow](../../engine/native-research-workflow.md), frozen brief,
    and current host-derived allowance snapshot at read-only `/research`.
@@ -78,6 +82,13 @@ available; live qualification is still pending.
    unknown until reconciled from stopped-run evidence. `stop_reason` in status,
    final receipts, and recovery reports the first recorded stop trigger;
    absent or unreadable records leave the reason unknown. Check cleanup separately.
+
+The current owner keeps an authorized run available, but it does not dispatch the
+next research turn. Each `research`, `resume`, or `reconstruct` call returns after
+one native invocation. A longer allowance is a ceiling, not evidence of sustained
+work. Long-horizon continuation and its comparison are unqualified; the
+[evaluation plan](../../evals/native-qualification/LONG-HORIZON-PREREGISTRATION.md)
+records the checks required before making that claim.
 
 Research can choose and revise experiments. Budget, user, safety, and blocked
 stops are honest stopping reasons; none implies exhaustive coverage. The stopping

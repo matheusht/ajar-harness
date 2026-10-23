@@ -872,6 +872,7 @@ def prepare(args: argparse.Namespace) -> dict:
         (root / 'researcher/brief/BRIEF.md').chmod(0o600)
         (controls / 'research').mkdir(mode=0o700)
         (controls / 'research-snapshots').mkdir(mode=0o700)
+        (controls / 'continuation').mkdir(mode=0o700)
         for input_path, name in ((RESEARCH_WORKFLOW, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
             shutil.copy2(input_path, controls / 'research' / name)
             (controls / 'research' / name).chmod(0o600)
@@ -882,9 +883,19 @@ def prepare(args: argparse.Namespace) -> dict:
             'This editable notebook records research, not authority or independent proof.\n\n'
             '## Hypotheses, experiments, and observations\n\nNot started. Link scripts and results.\n\n'
             '## Unfinished conditions and possible effects\n\nNo tests dispatched yet.\n\n'
+            '## Continuation\n\n'
+            'After each experiment, update NEXT.json with the result state (supported, refuted, '
+            'blocked, or inconclusive), what it rules out, useful capabilities and coverage, and '
+            'the next brief. If you propose to stop, set proposed_stop true and omit next.\n\n'
             '## Review and internal result\n\nUnreviewed; no supported conclusion yet.\n\n'
             '## Cleanup\n\nOperator verification pending.\n')
         notebook.chmod(0o600)
+        next_template = root / 'researcher/NEXT.json'
+        next_template.write_text(json.dumps({
+            'kind': 'native-continuation-next-v1', 'last_result': None,
+            'capabilities': [], 'coverage': [], 'next': None,
+            'proposed_stop': False, 'strong_lead': False}, indent=2, sort_keys=True) + '\n')
+        next_template.chmod(0o600)
         _write_json(controls / 'opencode.json', model_config, once=True)
         for name in ('researcher', 'reviewer-1', 'reviewer-2'):
             (root / name / 'config/opencode/opencode.json').touch(mode=0o600)
@@ -2542,6 +2553,10 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                     'The run snapshot is advice at this dispatch time, not new authority. '
                     'Keep material hypotheses, observations, scripts/results, unfinished effects, '
                     'review limits and your final internal note in ordinary workspace files. '
+                    'After the experiment, update /workspace/NEXT.json with last_result.state '
+                    '(supported, refuted, blocked, or inconclusive), what it rules out, useful '
+                    'capabilities and coverage, and the next brief or an explicit stop proposal. '
+                    'Do not invent a branch after a refutation. '
                     'Native history is optional; do not reset allowance or repeat an uncertain effect.\n'
                     f'Continuation mode: {continuity}.\n\n{prompt}')
                 if len(prompt.encode()) > 128 * 1024:
@@ -3298,6 +3313,11 @@ def stop(run_root: Path) -> dict:
     controls = _controls(root)
     if not (controls / 'native-state/RUN.json').exists() and not (controls / 'resources.json').exists():
         return {'status': 'not_active', 'run_root': str(root)}
+    cont = controls / 'continuation'
+    cont.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _write_json(cont / 'STOP', {
+        'kind': 'native-continuation-stop-v1', 'reason': 'operator_stop',
+        'at': datetime.now(timezone.utc).isoformat()})
     native, _ = _activate_controls(root)
     native.request_stop(controls / 'native-state', 'operator_stop')
     return {'status': 'stop_requested', 'run_root': str(root)}
@@ -4637,6 +4657,14 @@ def _parser() -> argparse.ArgumentParser:
     reconstruct_cmd = commands.add_parser('reconstruct', help='new context from ordinary files in the same active run')
     reconstruct_cmd.add_argument('--run-root', required=True)
     reconstruct_cmd.add_argument('--prompt-file')
+    continue_cmd = commands.add_parser('continue', help='durable bounded continuation over one active run')
+    continue_cmd.add_argument('--run-root', required=True)
+    continue_cmd.add_argument('--max-invocations', type=int, default=24)
+    continue_cmd.add_argument('--invocation-timeout', type=int, default=3700)
+    continue_cmd.add_argument('--resume-after-stop', action='store_true')
+    continue_cmd.add_argument('--reconcile-dispatch-id')
+    continue_cmd.add_argument('--reconcile-decision', choices=('no_effect', 'effect_observed'))
+    continue_cmd.add_argument('--reconcile-evidence')
     review_cmd = commands.add_parser('review', help='one fresh bounded reviewer on a frozen public packet')
     for name in ('run-root', 'observer-root', 'selection', 'selection-sha256'):
         review_cmd.add_argument('--' + name, required=True)
@@ -4712,6 +4740,19 @@ def main() -> int:
                                    kanboard_role_grant=(args.observe_kanboard_role_grant
                                                         if args.command == 'resume' else False),
                                    continuity=continuity)
+        elif args.command == 'continue':
+            from native_continuation import continue_run, reconcile
+            if args.reconcile_dispatch_id:
+                if not args.reconcile_decision or not args.reconcile_evidence:
+                    _fail('continuation_reconcile_input_missing')
+                result = reconcile(Path(args.run_root),
+                                   dispatch_id=args.reconcile_dispatch_id,
+                                   decision=args.reconcile_decision,
+                                   evidence_file=Path(args.reconcile_evidence))
+            else:
+                result = continue_run(Path(args.run_root), max_invocations=args.max_invocations,
+                                      invocation_timeout=args.invocation_timeout,
+                                      resume_after_stop=args.resume_after_stop)
         elif args.command == 'review':
             result = review(Path(args.run_root), Path(args.observer_root), Path(args.selection),
                             args.selection_sha256, args.role)
@@ -4719,7 +4760,12 @@ def main() -> int:
             _fail('command_invalid')
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0 if (result.get('status') not in ('unknown_effect', 'hold_unknown', 'held', 'unfinished', 'start_incomplete',
-                                                'unsafe_or_unresolved', 'stopped_evidence_incomplete')
+                                                'unsafe_or_unresolved', 'stopped_evidence_incomplete',
+                                                'rejected', 'continuation_already_running', 'inactive',
+                                                'invocation_failed', 'spend_unavailable',
+                                                'closure_review_required', 'next_brief_missing',
+                                                'reconciliation_required', 'previous_stop',
+                                                'spend_reset_detected', 'effect_observed')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:
         print(json.dumps({'status': 'interrupted', 'run_root': getattr(args, 'run_root', None)},

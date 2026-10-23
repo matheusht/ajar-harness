@@ -42,16 +42,79 @@ invocations, extended authority, or a weaker target to declare B better. A small
 case can show a mechanism works or fails; it cannot establish general research
 quality or full autonomy.
 
-## First bounded scenarios
+## Implementation constraints (added 23 October 2026, before any comparative run)
 
-Before implementation, the integration check must exercise a stopped owner, a
+The controller is implemented; no provider, target, comparative, or multi-day run has
+used it. These constraints are part of the frozen test specification.
+
+- **One run lease.** The controller holds a non-blocking process lock for the whole
+  loop. A second loop is rejected; a crashed loop releases the lock and the durable
+  checkpoint remains.
+- **Durable spend and stop state.** `controls/continuation/state.json` holds the
+  invocation count, session hint, last pool and next brief hash. An append-only
+  `events.jsonl` records dispatch start, invocation, next brief, closure request and
+  stop. A pending-dispatch marker is written before every child invocation. If the
+  controller loses the receipt, the next run stops with `reconciliation_required`;
+  it does not dispatch again.
+- **Four result states.** `NEXT.json.last_result.state` is `supported`, `refuted`,
+  `blocked`, or `inconclusive`. A refutation may close a lead; a blocked surface
+  remains unresolved; an inconclusive result needs a discriminating test or stays
+  open. A missing next test without an explicit stop proposal is invalid.
+- **Checkpoint-level coverage and capabilities.** `NEXT.json` may carry coverage
+  notes (`tested`, `blocked`, `out_of_scope`, `untested`) and observed capabilities
+  (what they enable, what remains required, the next interface). These are updated
+  at meaningful checkpoints, not after every tool call. Coverage is not proof of
+  absence; the final statement is "not found under these conditions, with this
+  remaining uncertainty."
+- **Consequential stop review.** A proposed stop, final closure, negative
+  conclusion, or abandonment of a strong lead (`strong_lead` true to false) produces
+  a closure request. The controller stops with `closure_review_required`. A fresh
+  reviewer or operator writes a bounded `closure-review.json`; reopening requires a
+  concrete condition, observation, or discriminating test plus a valid next brief.
+  An accept closes; budget or operator stop never waits for review.
+- **Runtime-neutral checkpoint.** The native session id is a hint. The durable
+  state is the workspace, `RESEARCH.md`, `NEXT.json`, `state.json`, and the journal.
+  Exact resume is preferred; a missing session is reconstructed and recorded. The
+  controller never creates a new run or resets the shared allowance.
+
+The current 24-hour run ceiling is not raised by this controller. The runner rejects
+`duration_seconds` above 86400 and approval expiry more than 24 hours after
+`approved_at`. A wall-clock multi-day investigation therefore needs both a new frozen
+plan and approval and a reviewed change to those validators; changing only the
+timeout is insufficient.
+
+## Implemented offline checks
+
+`tools/test_native_continuation.py` covers the controller contract without a model,
+provider, Docker, or target. `evals/native-qualification/smoke/check_native_continuation.py`
+exercises the public controller CLI with a synthetic child runner. The checks cover
+the lease, a concurrent loop, a missing session and reconstruction, a closure
+request and accept/reopen, operator stop, max invocations, invalid and stale
+checkpoints, an inactive run, an unknown effect, missing spend, and a controller
+crash between dispatch and receipt. They do not qualify native behavior.
+
+## Not yet established
+
+- Actual native model turns, provider cost, target effects, independent replay, and
+  fresh review on a hidden chain.
+- The A/B comparison in this document.
+- A genuine multi-day wall-clock run; a fast recovery test cannot establish it.
+- Stopped-owner behavior, expired approval and exhausted allowance through the
+  controller (the child runner checks these before dispatch), repeated no-progress
+  turns, and a real operator-assisted run.
+
+
+## First bounded scenarios before a comparative run
+
+Before a comparative run, the integration check must exercise a stopped owner, a
 concurrent loop, a crash between native dispatch and controller receipt, an
 unresolved effect, expired approval, exhausted allowance, operator stop, stale
 checkpoint, missing native history, a supported partial chain, a refuted lead,
 blocked and inconclusive work, repeated no-progress turns, an unsupported final
-closure, and a concrete reviewer reopen. It must leave verifiable run inputs,
-command, receipt, and expected outcome. No synthetic dispatch qualifies model
-adaptation or a target finding.
+closure, and a concrete reviewer reopen. The implemented offline checks cover the
+controller-only portions; the native/provider/target portions remain unrun. It
+must leave verifiable run inputs, command, receipt, and expected outcome. No
+synthetic dispatch qualifies model adaptation or a target finding.
 
 For the approval boundary specifically, verify that an intact, unexpired approval
 bound to the frozen plan permits an authorized turn; an expired, changed, missing,

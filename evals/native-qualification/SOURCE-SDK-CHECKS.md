@@ -66,3 +66,27 @@ existing authorization; this change grants neither.
   sha256:<local-image>` for synthetic executor integration. It must preserve the
   first batch after the second and reject changed originals and unknown effects.
   This is not a native/provider or engagement E2E test.
+
+## Continuation controller (offline checks added after implementation; no native/provider/target run)
+
+The durable controller is implemented but has no native/provider/target result.
+Its failure matrix and remaining gaps are in
+[`CONTINUATION-CHECKS.md`](CONTINUATION-CHECKS.md).
+
+- One loop lease; a second loop is rejected. A pending-dispatch marker is written
+  before every turn, so a controller crash or missing receipt stops with
+  `reconciliation_required` instead of redispatching.
+- `NEXT.json` records `supported`, `refuted`, `blocked` or `inconclusive`, what the
+  result rules out, capabilities/coverage, and either a next brief or a stop proposal.
+  A missing next brief is a stop, not an invitation to speculate.
+- A proposed final closure or strong-lead abandonment produces a closure request.
+  A fresh reviewer/operator can accept or reopen with a concrete test. Budget or
+  operator stop is immediate.
+- The native 24-hour run ceiling remains; the runner hard-rejects
+  `duration_seconds > 86400` and approval expiry more than 24 hours after
+  `approved_at`. A wall-clock multi-day run needs a new plan/approval and a reviewed
+  validator change. The controller does not renew authority or reset spend.
+
+Run `PYTHONPATH=tools python3 -m unittest tools/test_native_continuation.py` and
+`python3 evals/native-qualification/smoke/check_native_continuation.py`. Both are
+offline; they do not qualify a model, provider, target or multi-day reliability.

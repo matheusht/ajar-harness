@@ -2,6 +2,7 @@
 """Public portable-workspace workflow; native/provider boundaries are substituted."""
 from contextlib import redirect_stdout
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -79,6 +80,26 @@ def main():
         check('frozen brief matches and source remains pristine',
               sha(host / 'BRIEF.md') == sha(brief)
               and list((root / 'researcher/project').iterdir()) == [root / 'researcher/project/hello.php'])
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        approval_input = base / 'approval-input.json'
+        approval = {
+            'kind': 'native-research-live-approval-v1',
+            'plan_sha256': sha(plan_path), 'scope_sha256': plan['scope_sha256'],
+            'provider_route': plan['provider_route'], 'provider_authority': runner.AUTHORITY,
+            'model': plan['model'], 'image_id': plan['image_id'],
+            'target_image_id': plan['target_image_id'], 'limits': plan['limits'],
+            'approved_by': 'fixture-operator',
+            'approved_at': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'expires_at': (now + timedelta(hours=4)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }
+        approval_input.write_text(json.dumps(approval))
+        runner._approval(root, plan, approval_input)
+        approval_path = root / 'controls/approval.json'
+        activation_path = root / 'controls/activation.json'
+        runner._write_json(activation_path, {
+            'kind': 'native-research-activation-v1',
+            'plan_sha256': sha(plan_path), 'approval_sha256': sha(approval_path),
+        }, once=True)
 
         notebook.write_text('# Research\nHypothesis H1 contradicted by result R1; H2 unfinished.\n'
                             'Unknown effect E1 must be reconciled before retry.\n')
@@ -117,6 +138,7 @@ def main():
                        'part': {'type': 'text', 'text': 'Synthetic native response only.'}}
             return subprocess.CompletedProcess(argv, 0, (json.dumps(payload) + '\n').encode(), b'')
 
+        real_native_api = runner.native_api
         with patch.object(runner, 'native_api', side_effect=native_api), \
              patch.object(runner, '_native_exec', side_effect=native_exec), \
              patch.object(runner, 'run_active', return_value=True), \
@@ -181,6 +203,58 @@ def main():
                 code, rejected = cli('reconstruct', '--run-root', str(root))
                 check(name, code == 2 and rejected.get('code') == expected
                       and calls == [] and len(commands) == before)
+
+            def api_rejects(name, expected):
+                before = len(commands)
+                try:
+                    real_native_api(root, 'resume', 'session.get', '--param',
+                                    'sessionID=ses_fixture')
+                except runner.NativeResearchError as error:
+                    check(name, str(error) == expected and len(commands) == before)
+                else:
+                    check(name, False)
+
+            before = len(commands)
+            check('intact approval permits native session setup',
+                  real_native_api(root, 'resume', 'session.get', '--param',
+                                  'sessionID=ses_fixture')['data']['id'] == 'ses_fixture'
+                  and len(commands) == before + 1)
+            original_approval = approval_path.read_bytes()
+            original_activation = activation_path.read_bytes()
+            changed = json.loads(original_approval)
+            changed['approved_by'] = 'changed-after-activation'
+            approval_path.write_text(json.dumps(changed))
+            rejects('changed archived approval blocks native turn', 'research_approval_changed')
+            api_rejects('changed archived approval blocks session setup', 'research_approval_changed')
+            approval_path.write_bytes(original_approval)
+            changed = json.loads(original_approval)
+            changed['plan_sha256'] = '0' * 64
+            approval_path.write_text(json.dumps(changed))
+            activation_path.write_text(json.dumps({
+                'kind': 'native-research-activation-v1',
+                'plan_sha256': sha(plan_path), 'approval_sha256': sha(approval_path),
+            }))
+            rejects('plan-mismatched approval blocks native turn', 'research_approval_changed')
+            api_rejects('plan-mismatched approval blocks session setup', 'research_approval_changed')
+            approval_path.write_bytes(original_approval)
+            activation_path.write_bytes(original_activation)
+            activation_path.unlink()
+            rejects('missing activation blocks native turn', 'regular_file_unavailable')
+            api_rejects('missing activation blocks session setup', 'regular_file_unavailable')
+            activation_path.write_bytes(original_activation)
+            approval_path.unlink()
+            rejects('missing approval blocks native turn', 'regular_file_unavailable')
+            api_rejects('missing approval blocks session setup', 'regular_file_unavailable')
+            approval_path.write_bytes(original_approval)
+
+            class AfterExpiry(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return datetime.now(tz) + timedelta(hours=5)
+
+            with patch.object(runner, 'datetime', AfterExpiry):
+                rejects('expired approval blocks native turn', 'research_approval_expired')
+                api_rejects('expired approval blocks session setup', 'research_approval_expired')
 
             notebook.unlink()
             code, without_notebook = cli('resume', '--run-root', str(root),

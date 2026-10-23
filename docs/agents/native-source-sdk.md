@@ -1,0 +1,222 @@
+# Native source research
+
+This is shared source-mode code. It is not a separate adapter for each target.
+Target inputs are source, runtime images, prepared dependencies, and commands.
+Go is an optional preset. Other runtimes use the same execution and review path.
+
+The paid provider route, credential containment and native reviewer are **not
+qualified** by the local checks. Synthetic Docker execution passed; it does not
+qualify a real target. Complete [SOURCE-SDK-CHECKS](../../evals/native-qualification/SOURCE-SDK-CHECKS.md)
+before using it as live target authorization.
+
+## Prepare the environment
+
+Use a new harness worktree and a new run root. Keep the existing prepared source
+and earlier engagement records unchanged until their replacements have new pins.
+For the Go preset, source mode needs:
+
+- A regular-file source export, a brief and a signed scope. The scope must permit
+  the selected source commands and any effects. Do not import ambient Git or home
+  state. `.native-source` is reserved for executor state.
+- A complete, extracted Go module cache, including module metadata. A cache with
+  only `.info` or `.lock` files is insufficient. The runner never fetches modules.
+  Prepare required `go.sum` files separately. If this changes the source export,
+  record the new manifest and bind the scope and plan to that manifest.
+- Locally available image IDs for the native agent and offline executor. Both
+  need the exact Go version. The agent image also needs the pinned OpenCode
+  version. The same combined image can serve both roles. Go must be on the
+  existing image PATH; keep the native image's required environment unchanged.
+- The same exact Go version on the host, used only to inspect frozen binary
+  metadata with `go version -m`. Preparation pins its path and file hash.
+- A relay binary for the selected Linux architecture and a pinned public TLS
+  trust file. Build images, obtain dependencies and prepare credentials only
+  under their applicable authorization.
+
+For a combined image, copy `/usr/local/go` from an already obtained, digest-pinned
+Go image into the pinned OpenCode image, then link `/usr/local/bin/go` to
+`/usr/local/go/bin/go`. Build without network access and record the resulting
+image ID. Do not add secrets or change PATH. This guide does not pull or build an
+image for you.
+
+The executor uses Docker network `none`, a read-only root, one CPU, 1 GiB RAM,
+64 PIDs and writable private source/cache directories. Go uses `GOTOOLCHAIN=local`,
+`GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `GOENV=off`, `-mod=readonly` and
+`CGO_ENABLED=0`. The module cache is mounted read-only. Startup checks the exact
+Go version and rejects module graph entries without an extracted directory.
+Commands must still establish that their package and test dependencies work.
+
+## Prepare the source profile
+
+Put the build or test command in a JSON argv array, for example
+`["go", "test", "./..."]`. This is an input file, not a command to run during
+preparation. A source script can run a batch of experiments and controls.
+
+Use the common `prepare --help` inputs for the run root, source, brief, scope,
+relay, trust file, images and platform. Add these arguments instead of
+`--target-command` and `--target-port`:
+
+```text
+--source-only
+--build-command /absolute/private/build-command.json
+--go-toolchain go1.26.4
+--module-cache /absolute/private/prepared-module-cache
+--model opencode-go/deepseek-v4.1-flash
+--provider-route opencode-go
+--provider-authority opencode.ai:443
+--max-connections 64
+--max-bytes 67108864
+--duration-seconds 28800
+```
+
+Preparation copies and pins inputs. It starts no container or model session.
+Source mode has no listener, target URL or TCP readiness probe. The existing
+service profile retains its target command and port.
+
+## Other runtimes
+
+Use `--source-runtime /absolute/private/runtime.json` instead of `--go-toolchain`.
+The JSON file has exactly these fields (use the installed version):
+
+```json
+{
+  "version_command": ["python3", "--version"],
+  "version_stdout": "Python 3.13.0",
+  "dependency_command": ["python3", "-c", "import required_package"]
+}
+```
+
+Keep this file private (`chmod 600`). The version command must exit zero and its
+trimmed stdout must equal `version_stdout`. The dependency command must exit zero
+with empty stdout. If no dependencies are needed, use `["true"]`. Both commands
+run in the source directory at startup. Choose probes that do not change source.
+The runtime must exist in both the native-agent image and executor image.
+Preparation does not install it. No host Go installation is needed for this form.
+
+`--module-cache` is optional for a custom runtime. If supplied, the runner copies
+and pins the directory and mounts it read-only at `/modules`. The build/test argv
+must select that offline dependency location as needed. This mode does not apply
+Go environment variables. For example, an argv may start with `env` to set a
+language-specific cache path. The executor has no network access. Do not put
+credentials in command arguments, dependencies or runtime configuration.
+
+## Paid provider boundary
+
+The paid route accepts only `opencode-go/deepseek-v4.1-flash`. It has no free-model
+fallback. Startup reads back the loaded model, provider policy and endpoint.
+The fixed endpoint comes from OpenCode's local provider metadata; the provider
+configuration shape follows the [official schema](https://opencode.ai/config.json).
+This establishes the intended configuration, not live provider compatibility.
+
+The native process receives a non-secret placeholder. A host-only TLS gateway
+replaces it with the real key for `POST
+/inference/go/openai/v1/chat/completions`, with exactly the selected model.
+The gateway sits behind the existing metered CONNECT transport. It rejects other
+paths, models, methods, redirects and ambiguous request framing. It does not log
+request/response bodies or upstream error text. The shared connection, byte and
+wall-time limits still apply; they are not a monetary budget or request counter.
+
+For this route, the pinned `--runtime-ca` file must contain the public certificate
+chain used by the host gateway, with a valid `opencode.ai` TLS server identity.
+Prepare its matching private key outside all source, engagement and run trees.
+Keep the provider key in a separate private host file outside those trees. Neither
+private file is copied or mounted. The gateway uses system trust to verify the
+real upstream service. Do not reuse these files as target input or place them in
+a review packet.
+
+After the environment and route have been qualified and the new plan has fresh
+approval, keep the owner in the foreground:
+
+```sh
+python3 tools/native_research.py start \
+  --run-root /absolute/private/run \
+  --approval /absolute/private/live-approval.json \
+  --provider-key-file /absolute/host-private/provider-key \
+  --provider-tls-key /absolute/host-private/gateway-key.pem
+```
+
+Use the existing approval schema with the **new** plan digest, scope digest,
+paid model/route, exact image IDs, limits and expiry. Old approvals cannot be
+reused. The keyless service route needs neither private file.
+
+## Research, capture and review
+
+Use the normal `research`, `resume` and `reconstruct` commands. The researcher can
+read and edit its source copy, use its configured runtime, and keep scripts and results in ordinary
+files. `/workspace/SOURCE.json` describes this profile. Native tool output is
+research evidence, not an independently verified result.
+
+When the research batch is ready, run `source-execute --run-root RUN` on the host.
+Its optional `--command-file` selects a different bounded argv array, within the
+same signed scope. It freezes both workspace writers, captures the actual current
+source, then releases them. It runs the captured command in three separate
+offline executors: the initial execution and two replays. Each executor is paused
+before final output bytes are saved. The Go preset also collects binary metadata. A nonzero exit still
+produces a receipt. A timeout, lost acknowledgement or excessive output stops the
+run and retains an unknown execution; no retry is automatic.
+
+Multiple batches can use the same run. Before each execution, the host stops the
+old executor processes, restores original source, clears private caches, and
+starts the same sealed container ID under the existing run authority. It then
+copies the new captured input. Earlier inputs, output bytes and receipts remain
+in their own evidence directories. Do not reset or unpause executors manually.
+Each command has at most the original run duration; the shared deadline can end
+it earlier. Each
+stdout/stderr stream is limited to 1 MiB. Credential-like output is withheld,
+with its hash retained.
+
+Evidence lives under `controls/source-executions/<id>/`: the captured input tree,
+input manifest, receipt, separate output trees and manifests, stdout/stderr and binary
+metadata. The receipt binds the plan, original source, actual captured input,
+dependency closure, command, environment, image, platform, runtime, exact executor
+IDs, exit codes and output hashes. Matching replay output is a reproducibility
+observation. It does not prove a security claim. Verify the causal link and a
+counterexample/control separately.
+
+Use the normal frozen-packet `review` flow. Include the exact claim, relevant
+receipts, original source, changed inputs, controls, failures and limits. A fresh
+reviewer receives the pinned packet and a clean source copy. It adds scripts and
+writes `/workspace/source-check.json` with `kind: native-source-check-v1`, the
+packet `input_id`, separate `effect` and `control` argv arrays, and a `rationale`.
+The runner requests this file; no target-specific runner code is needed.
+
+The host freezes the review scripts and definition together. It rejects changed
+or deleted original files. It executes the effect and control on three clean
+copies each and compares original file bytes after each command. Results include
+exit codes, streams, and receipt hashes. The reviewer receives file counts and
+changed or missing paths with hashes in the small summary. The full manifests
+remain in protected host receipts and are also available as separately hashed,
+read-only reviewer files. This keeps unchanged source files from filling the
+summary. Nonzero exit codes remain observations. The reviewer then reads and hashes
+`/source-evidence/RESULTS.json`
+and returns its conclusion in the same native session. The final receipt binds
+that conclusion to the packet, source, scripts, executions and native trace.
+There are two fresh reviewer slots per run, as in service mode.
+
+The result can be `candidate_for_operator_review`. It does not emit `confirmed`
+or open filing. The original-file checks establish the starting and ending bytes;
+they cannot exclude temporary source changes made by a script. The operator must
+inspect the scripts and causal control. Host execution is labeled as such; it is
+not claimed as a native tool action directly observed on a target service.
+Stop with the normal `stop` command and inspect the final stop/cleanup receipt.
+
+## Verification status
+
+The four earlier offline contracts still pass. The new failure-first check covers
+runtime input, reviewer check/control input, and preservation of original files.
+A synthetic local Docker scenario runs two batches on the same three executors,
+checks that old output remains intact, executes a frozen reviewer script, rejects
+changed originals, and blocks a new batch after an unknown effect. Its local test
+owner replaces the normal authority checks. It does not test live owner loss,
+provider access, native review, or engagement behavior.
+
+Repeat it with an existing local image that has `sh`:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tools/check_native_source_mode.py --docker sha256:LOCAL_IMAGE_ID
+```
+
+The [saved source-mode receipt](../../evals/native-qualification/SOURCE-MODE-LOCAL-CHECKS.json)
+records the image, command, checked source hashes and output. The earlier
+[SOURCE-SDK-LOCAL-CHECKS.json](../../evals/native-qualification/SOURCE-SDK-LOCAL-CHECKS.json)
+records the initial adapter checks at their older source hashes. Full native
+review, TLS streaming, stop/owner-loss behavior and real-target E2E remain unverified.

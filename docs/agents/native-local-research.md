@@ -10,6 +10,11 @@ procedure described below.
 
 ## Start and resume
 
+For source with no application listener, use
+[source mode](native-source-sdk.md). Its environment and paid-provider
+requirements differ from the service profile below. Source implementation is
+available; live qualification is still pending.
+
 1. Read root `AGENTS.md`/`CLAUDE.md`, the actual task permission, effect and
    escalation ceiling, target/source identity, exclusions, stop conditions,
    allowance, and cleanup authority. Verify the target-local signed
@@ -50,6 +55,11 @@ procedure described below.
    review strong-lead dispositions separately when needed. Source and offline
    checks do not qualify a provider or target.
    Any standing permission still needs exact target/model/effect/expiry binding.
+   Session setup and each native turn recheck the archived approval bytes and
+   expiry. A source-mode `source-execute` call does the same before a new batch;
+   a rejected call does not renew approval or shared allowance. An
+   already-running turn can end after the approval expires, so review its
+   effects before further work.
    The runner stages the portable
    [research workflow](../../engine/native-research-workflow.md), frozen brief,
    and current host-derived allowance snapshot at read-only `/research`.
@@ -60,8 +70,10 @@ procedure described below.
    The notebook is advisory: its absence does not block native resume or make
    intact protected byte evidence incomplete. Recover material state from the
    saved scripts, results and evidence; missing facts remain unknown, not proven.
-4. For continuation, inspect the previous result and unresolved effects, then
-   use `resume --help` to continue the exact native session or `reconstruct --help`
+4. For continuation, inspect the previous result and unresolved effects. Use
+   `continue --help` for repeated bounded turns over one active run; the controller
+   reads the saved `NEXT.json` and stops rather than inventing the next experiment.
+   Use `resume --help` to continue the exact native session or `reconstruct --help`
    to create a fresh context over the same files and run. Reconstruction is
    distinct from restoring native history; it cannot restore spent allowance or
    authorize retry of an unknown effect. The per-turn run snapshot is an observation
@@ -73,6 +85,62 @@ procedure described below.
    unknown until reconciled from stopped-run evidence. `stop_reason` in status,
    final receipts, and recovery reports the first recorded stop trigger;
    absent or unreadable records leave the reason unknown. Check cleanup separately.
+
+The current owner keeps an authorized run available. `continue` is the first durable
+controller: it reads `controls/continuation/state.json` and `researcher/NEXT.json`,
+holds one loop lease, and calls `research`, `resume`, or `reconstruct` one bounded
+turn at a time. It writes a pending-dispatch marker before each turn and keeps an
+append-only journal. A missing receipt stops with `reconciliation_required` instead
+of retrying. It never creates a new run, renews approval, or resets spend.
+
+`NEXT.json` is the checkpoint-level handoff. It records one of `supported`,
+`refuted`, `blocked`, or `inconclusive`, what the result rules out, useful
+capabilities and coverage, and the next brief or a stop proposal. A stop proposal,
+negative conclusion, or a `strong_lead` change from true to false produces
+`closure_review_required`; a fresh reviewer or operator writes
+`controls/continuation/closure-review.json` with mode `0600`:
+
+```json
+{"kind": "native-continuation-closure-review-v1",
+ "request_sha256": "<sha256 of closure-request.json>",
+ "decision": "accept",
+ "reason": "what the review checked",
+ "test": "required when decision is reopen; the concrete discriminating test"}
+```
+
+A reopen also requires a concrete next brief in `researcher/NEXT.json`; the
+review's `test` is recorded in the closure review, and the researcher must put the
+concrete next test in `NEXT.json` before the reopen continues. Budget or operator
+stop is immediate and bypasses review. A refutation can close a lead; a blocked
+surface remains unresolved. Coverage is a map with explicit limits, not proof that
+no effect exists.
+
+If the controller returns `reconciliation_required`, inspect the exact dispatch
+with the existing `status` and `reconcile-*` commands. Write a private operator
+observation file, then run:
+
+```sh
+python3 tools/native_research.py continue --run-root <root> \
+  --reconcile-dispatch-id <dispatch-id> \
+  --reconcile-decision no_effect \
+  --reconcile-evidence <private-observation-file>
+```
+
+`no_effect` clears the pending marker; `effect_observed` clears pending but keeps
+the stop and records the observation. The dispatch ID must identify a real dispatch
+record. The evidence file must be an absolute regular file with mode `0600` (for
+example, write it under `umask 077`). Do not delete `state.json` to bypass the
+marker. An `acknowledged` dispatch is a completed turn, not an unknown effect; the
+controller refuses to reconcile it as pending. Inspect its receipt and stop state
+instead of clearing it.
+
+The 24-hour run ceiling is unchanged. The runner rejects `duration_seconds` above
+86400 and approval expiry more than 24 hours after `approved_at`. A wall-clock
+multi-day run therefore needs both a new frozen plan/approval and a reviewed change
+to those validators; raising one timeout is insufficient. Long-horizon continuation
+and its comparison remain unqualified; the
+[evaluation plan](../../evals/native-qualification/LONG-HORIZON-PREREGISTRATION.md)
+records the checks required before making that claim.
 
 Research can choose and revise experiments. Budget, user, safety, and blocked
 stops are honest stopping reasons; none implies exhaustive coverage. The stopping

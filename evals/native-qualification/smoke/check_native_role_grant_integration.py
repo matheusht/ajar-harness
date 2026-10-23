@@ -44,7 +44,8 @@ def fixture(base):
     archive.parent.mkdir(mode=0o700)
     shutil.copy2(ROOT / 'tools/native_effect_recovery.py', archive)
     put(root / 'plan.json', {'kind': 'native-research-plan-v1'})
-    plan = {'kanboard_capture': {}, 'limits': {'duration_seconds': 300},
+    plan = {'kanboard_capture': {}, 'model': runner.MODEL,
+            'limits': {'duration_seconds': 300},
             'source_manifest_sha256': runner.CAPTURE_SOURCE_SHA}
     put(slot / 'stage.json', {'kind': 'kanboard-native-capture-stage-v1', 'target': 'target',
                             'ids': {'s': 1, 'q': 2, 't': 1, 'b': 3},
@@ -78,6 +79,7 @@ def invoke(root, plan, selected):
         raise runner.NativeResearchError('synthetic_interruption')
 
     with patch.object(runner, '_plan', return_value=plan), \
+         patch.object(runner, '_approval_active'), \
          patch.object(runner, 'run_active', return_value=True), \
          patch.object(runner, 'allowance_snapshot', return_value={'active': True}), \
          patch.object(runner, '_native_exec', side_effect=fake_native), \

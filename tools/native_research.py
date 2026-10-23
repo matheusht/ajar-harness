@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Direct, bounded OpenCode research run over one owned local application service.
+"""Direct, bounded OpenCode research over owned source or an application service.
 
 `prepare` is provider-free. `start` is a foreground owner; a human-supplied,
 run-bound approval is required before it can create a live route. `resume` and
@@ -75,6 +75,8 @@ ORIGIN_SOURCE_FILES = {
 ORIGIN_GO_VERSION = 'go1.26.4'
 MODEL = 'opencode/deepseek-v4.1-flash-free'
 PROVIDER_ROUTE = 'opencode-keyless-free'
+PAID_MODEL = 'opencode-go/deepseek-v4.1-flash'
+PAID_ROUTE = 'opencode-go'
 AUTHORITY = 'opencode.ai:443'
 VERSION = 'opencode v2.0.32'
 OFFICIAL_IMAGE_ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
@@ -113,6 +115,21 @@ CONFIG = {
 
 class NativeResearchError(RuntimeError):
     pass
+
+
+def _model_config(plan: dict) -> dict:
+    if (plan.get('provider_authority') != AUTHORITY or
+            (plan.get('model'), plan.get('provider_route')) not in
+            ((MODEL, PROVIDER_ROUTE), (PAID_MODEL, PAID_ROUTE))):
+        _fail('provider_or_model_unqualified')
+    config = json.loads(json.dumps(CONFIG))
+    if plan['model'] == PAID_MODEL:
+        config['model'] = PAID_MODEL
+        config['policies'][-1]['resource'] = PAID_ROUTE
+        config['providers'] = {PAID_ROUTE: {'settings': {
+            'apiKey': 'native-host-injection',
+            'baseURL': 'https://opencode.ai/inference/go/openai/v1'}}}
+    return config
 
 
 def _fail(code: str) -> None:
@@ -445,6 +462,10 @@ def _validate_target_command(path: Path) -> list[str]:
         command = json.loads(path.read_text())
     except (UnicodeError, ValueError):
         _fail('target_command_invalid')
+    return _validate_argv(command)
+
+
+def _validate_argv(command: object) -> list[str]:
     if (not isinstance(command, list) or not 1 <= len(command) <= 64
             or any(not isinstance(item, str) or not item or '\x00' in item or len(item) > 4096
                    for item in command)):
@@ -611,27 +632,68 @@ def _arm_kanboard_role_grant(root: Path, dispatch_id: str, role: str) -> dict:
 
 
 def prepare(args: argparse.Namespace) -> dict:
+    for name in ('build_command', 'go_toolchain', 'module_cache', 'source_runtime'):
+        if not hasattr(args, name):
+            setattr(args, name, None)
     source = Path(args.source)
     brief = _file(Path(args.brief))
     scope = _file(Path(args.scope_file), private=True)
     relay = _file(Path(args.relay), private=True)
     ca = _file(Path(args.runtime_ca), private=True)
-    target_command = _validate_target_command(Path(args.target_command))
+    source_only = bool(getattr(args, 'source_only', False))
+    source_modules = None
+    module_inventory = {}
+    source_profile = {}
+    if source_only:
+        if (args.target_command or args.target_port is not None or not args.build_command
+                or args.kanboard_capture or args.t01_capture or args.origin_ingress
+                or bool(args.go_toolchain) == bool(args.source_runtime)):
+            _fail('source_profile_invalid')
+        command_path = Path(args.build_command)
+        if args.module_cache:
+            source_modules = Path(args.module_cache)
+            if not source_modules.is_absolute() or source_modules.resolve() != source_modules:
+                _fail('source_module_cache_invalid')
+            module_inventory = _inventory(source_modules)
+        if args.source_runtime:
+            source_profile['runtime'] = _validate_source_runtime(_read_json(_file(Path(args.source_runtime))))
+        else:
+            if not source_modules or not re.fullmatch(r'go1\.[0-9]+\.[0-9]+', args.go_toolchain):
+                _fail('source_profile_invalid')
+            found = shutil.which('go')
+            if not found:
+                _fail('source_metadata_go_unavailable')
+            metadata_go = Path(found).resolve(strict=True)
+            if metadata_go.stat().st_mode & 0o022:
+                _fail('source_metadata_go_writable')
+            version = subprocess.run([str(metadata_go), 'version'], stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                                     env={'PATH': '/usr/bin:/bin', 'GOTOOLCHAIN': 'local'}, check=False)
+            if version.returncode or not version.stdout.decode(errors='replace').startswith(
+                    'go version ' + args.go_toolchain + ' '):
+                _fail('source_metadata_go_version_mismatch')
+            source_profile.update({'go_toolchain': args.go_toolchain,
+                                   'metadata_go': str(metadata_go), 'metadata_go_sha256': _sha(metadata_go)})
+    else:
+        if (not args.target_command or args.target_port is None or args.build_command
+                or args.module_cache or args.go_toolchain or args.source_runtime):
+            _fail('service_profile_invalid')
+        command_path = Path(args.target_command)
+    target_command = _validate_target_command(command_path)
     run_root = Path(args.run_root)
     if not source.is_absolute() or source.is_symlink() or not source.is_dir():
         _fail('source_directory_invalid')
     source = source.resolve(strict=True)
     if not run_root.is_absolute() or run_root.is_relative_to(source) or source.is_relative_to(run_root):
         _fail('source_run_root_overlap')
-    if args.model != MODEL or args.provider_route != PROVIDER_ROUTE or args.provider_authority != AUTHORITY:
-        _fail('provider_or_model_unqualified')
+    model_config = _model_config(vars(args))
     limits = {'max_connections': args.max_connections, 'max_bytes': args.max_bytes,
               'duration_seconds': args.duration_seconds}
     if not _valid_limits(limits):
         _fail('allowance_invalid')
     if (not IMAGE_RE.fullmatch(args.image_id) or not IMAGE_RE.fullmatch(args.target_image_id)
             or args.platform not in ('linux/arm64', 'linux/amd64')
-            or not 1 <= args.target_port <= 65535):
+            or (not source_only and not 1 <= args.target_port <= 65535)):
         _fail('runtime_or_target_pin_invalid')
     for path, expected in ((scope, args.scope_sha256), (relay, args.relay_sha256),
                            (ca, args.runtime_ca_sha256)):
@@ -662,6 +724,9 @@ def prepare(args: argparse.Namespace) -> dict:
             or docker_entry.st_mode & 0o022):
         _fail('docker_executable_invalid')
     source_inventory = _inventory(source)
+    if source_only and any(name == '.native-source' or name.startswith('.native-source/')
+                           for name in source_inventory):
+        _fail('source_reserved_execution_path')
     capture = bool(getattr(args, 'kanboard_capture', False))
     t01_capture = bool(getattr(args, 't01_capture', False))
     origin_ingress = bool(getattr(args, 'origin_ingress', False))
@@ -730,12 +795,27 @@ def prepare(args: argparse.Namespace) -> dict:
             for sub in ('home', 'config/opencode', 'data', 'cache', 'state', 'tmp', 'brief'):
                 (base / sub).mkdir(parents=True, mode=0o700, exist_ok=True)
         for name in ('reviewer-1', 'reviewer-2'):
-            (root / name / 'project').mkdir(mode=0o700)
+            if source_only:
+                shutil.copytree(source, root / name / 'project')
+            else:
+                (root / name / 'project').mkdir(mode=0o700)
         (root / 'handoff').mkdir(mode=0o700)
         for name in ('reviewer-1', 'reviewer-2'):
             (root / 'handoff' / name).mkdir(mode=0o700)
         controls = _controls(root)
         controls.mkdir(mode=0o700)
+        if args.model == PAID_MODEL:
+            shutil.copy2(ROOT / 'tools/native_provider_gateway.py', controls / 'provider-gateway.py')
+            (controls / 'provider-gateway.py').chmod(0o600)
+        if source_only:
+            if source_modules:
+                shutil.copytree(source_modules, controls / 'source-modules')
+                _verify_inventory(controls / 'source-modules', module_inventory)
+            else:
+                (controls / 'source-modules').mkdir(mode=0o700)
+            for role in ('reviewer-1', 'reviewer-2'):
+                (controls / 'source-evidence' / role).mkdir(parents=True, mode=0o700)
+            (controls / 'source-executions').mkdir(mode=0o700)
         (controls / 'dispatch').mkdir(mode=0o700)
         capture_files = CAPTURE_FILES if capture else (T01_CAPTURE_FILES if t01_capture else {})
         for relative in (*CONTROL_SHA, *capture_files, *(ORIGIN_SOURCE_FILES if origin_ingress else {})):
@@ -784,7 +864,7 @@ def prepare(args: argparse.Namespace) -> dict:
                             'binary_sha256': _sha(binary)}
         for source_path, name in ((relay, 'relay'), (ca, 'runtime-ca.pem'),
                                   (scope, 'scope.md'), (brief, 'BRIEF.md'),
-                                  (Path(args.target_command), 'target-command.json')):
+                                  (command_path, 'target-command.json')):
             destination = controls / name
             shutil.copy2(source_path, destination)
             destination.chmod(0o700 if name == 'relay' else 0o600)
@@ -792,6 +872,7 @@ def prepare(args: argparse.Namespace) -> dict:
         (root / 'researcher/brief/BRIEF.md').chmod(0o600)
         (controls / 'research').mkdir(mode=0o700)
         (controls / 'research-snapshots').mkdir(mode=0o700)
+        (controls / 'continuation').mkdir(mode=0o700)
         for input_path, name in ((RESEARCH_WORKFLOW, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
             shutil.copy2(input_path, controls / 'research' / name)
             (controls / 'research' / name).chmod(0o600)
@@ -802,14 +883,24 @@ def prepare(args: argparse.Namespace) -> dict:
             'This editable notebook records research, not authority or independent proof.\n\n'
             '## Hypotheses, experiments, and observations\n\nNot started. Link scripts and results.\n\n'
             '## Unfinished conditions and possible effects\n\nNo tests dispatched yet.\n\n'
+            '## Continuation\n\n'
+            'After each experiment, update NEXT.json with the result state (supported, refuted, '
+            'blocked, or inconclusive), what it rules out, useful capabilities and coverage, and '
+            'the next brief. If you propose to stop, set proposed_stop true and omit next.\n\n'
             '## Review and internal result\n\nUnreviewed; no supported conclusion yet.\n\n'
             '## Cleanup\n\nOperator verification pending.\n')
         notebook.chmod(0o600)
-        _write_json(controls / 'opencode.json', CONFIG, once=True)
+        next_template = root / 'researcher/NEXT.json'
+        next_template.write_text(json.dumps({
+            'kind': 'native-continuation-next-v1', 'last_result': None,
+            'capabilities': [], 'coverage': [], 'next': None,
+            'proposed_stop': False, 'strong_lead': False}, indent=2, sort_keys=True) + '\n')
+        next_template.chmod(0o600)
+        _write_json(controls / 'opencode.json', model_config, once=True)
         for name in ('researcher', 'reviewer-1', 'reviewer-2'):
             (root / name / 'config/opencode/opencode.json').touch(mode=0o600)
         plan = {
-            'kind': 'native-research-plan-v1', 'provider_route': PROVIDER_ROUTE,
+            'kind': 'native-research-plan-v1', 'provider_route': args.provider_route,
             'provider_authority': AUTHORITY, 'model': args.model,
             'image_id': args.image_id, 'target_image_id': args.target_image_id,
             'platform': args.platform, 'target_port': args.target_port,
@@ -828,6 +919,12 @@ def prepare(args: argparse.Namespace) -> dict:
             'docker_binary': str(docker_binary), 'docker_sha256': _sha(docker_binary),
             'control_sha256': CONTROL_SHA,
         }
+        if source_only:
+            plan['source_only'] = dict(source_profile,
+                module_cache_sha256=hashlib.sha256(json.dumps(module_inventory, sort_keys=True).encode()).hexdigest(),
+                build_command=target_command)
+        if args.model == PAID_MODEL:
+            plan['provider_gateway_sha256'] = _sha(controls / 'provider-gateway.py')
         if capture:
             plan['kanboard_capture'] = _capture_pins()
         if t01_capture:
@@ -897,8 +994,14 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
     if ('t01_research_mode' in plan and
             (plan['t01_research_mode'] != 'workspace_research' or 't01_capture' not in plan)):
         _fail('t01_capture_research_mode_invalid')
-    if (plan.get('provider_route') != PROVIDER_ROUTE or plan.get('provider_authority') != AUTHORITY
-            or plan.get('model') != MODEL or plan.get('opencode_version') != VERSION
+    config = _model_config(plan)
+    if plan.get('model') == PAID_MODEL:
+        digest = plan.get('provider_gateway_sha256')
+        if (not isinstance(digest, str) or not HEX_RE.fullmatch(digest)
+                or _sha(_file(controls / 'provider-gateway.py', private=True)) != digest
+                or _sha(ROOT / 'tools/native_provider_gateway.py') != digest):
+            _fail('provider_gateway_pin_mismatch')
+    if (plan.get('opencode_version') != VERSION
             or plan.get('control_sha256') != CONTROL_SHA
             or not IMAGE_RE.fullmatch(str(plan.get('image_id')))
             or not IMAGE_RE.fullmatch(str(plan.get('target_image_id')))):
@@ -943,8 +1046,29 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
                       ('opencode.json', 'config_sha256')):
         if _sha(controls / name) != plan.get(key):
             _fail('run_input_pin_mismatch')
-    if _read_json(controls / 'opencode.json') != CONFIG:
+    if _read_json(controls / 'opencode.json') != config:
         _fail('run_config_mismatch')
+    if 'source_only' in plan:
+        source = plan['source_only']
+        common = {'module_cache_sha256', 'build_command'}
+        if (not isinstance(source, dict) or plan.get('target_port') is not None or _capture_mode(plan)
+                or source.get('build_command') != _validate_target_command(controls / 'target-command.json')):
+            _fail('source_profile_invalid')
+        if 'runtime' in source:
+            if set(source) != common | {'runtime'}:
+                _fail('source_profile_invalid')
+            _validate_source_runtime(source['runtime'])
+        else:
+            if (set(source) != common | {'go_toolchain', 'metadata_go', 'metadata_go_sha256'}
+                    or not re.fullmatch(r'go1\.[0-9]+\.[0-9]+', str(source.get('go_toolchain')))):
+                _fail('source_profile_invalid')
+            if _sha(_file(Path(source['metadata_go']))) != source['metadata_go_sha256']:
+                _fail('source_metadata_go_changed')
+        modules = controls / 'source-modules'
+        inventory = _inventory(modules) if any(modules.iterdir()) else {}
+        module_digest = hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
+        if module_digest != source['module_cache_sha256']:
+            _fail('source_module_cache_changed')
     if _sha(root / 'researcher/brief/BRIEF.md') != plan.get('brief_sha256'):
         _fail('run_brief_changed')
     if 'research_workflow_sha256' in plan:
@@ -981,9 +1105,9 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
         'kind': 'native-research-live-approval-v1',
         'plan_sha256': _sha(root / 'plan.json'),
         'scope_sha256': plan['scope_sha256'],
-        'provider_route': PROVIDER_ROUTE,
+        'provider_route': plan['provider_route'],
         'provider_authority': AUTHORITY,
-        'model': MODEL,
+        'model': plan['model'],
         'image_id': plan['image_id'],
         'target_image_id': plan['target_image_id'],
         'limits': plan['limits'],
@@ -1018,6 +1142,30 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
             _fail('live_approval_archive_changed')
     else:
         _write_json(archived, approval, once=True)
+
+
+def _approval_active(root: Path) -> None:
+    plan = _plan(root)
+    plan_sha = _sha(root / 'plan.json')
+    approval_path = _controls(root) / 'approval.json'
+    approval = _read_json(approval_path)
+    activation = _read_json(_controls(root) / 'activation.json')
+    if (activation.get('kind') != 'native-research-activation-v1'
+            or activation.get('plan_sha256') != plan_sha
+            or activation.get('approval_sha256') != _sha(approval_path)
+            or approval.get('kind') != 'native-research-live-approval-v1'
+            or approval.get('plan_sha256') != plan_sha
+            or approval.get('scope_sha256') != plan['scope_sha256']
+            or approval.get('provider_route') != plan['provider_route']
+            or approval.get('model') != plan['model']
+            or approval.get('limits') != plan['limits']):
+        _fail('research_approval_changed')
+    try:
+        expires = datetime.strptime(approval['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        _fail('research_approval_changed')
+    if datetime.now(timezone.utc) >= expires:
+        _fail('research_approval_expired')
 
 
 def _activate_controls(root: Path):
@@ -1214,6 +1362,12 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
         'source_manifest_sha256': plan['source_manifest_sha256'],
         'role': role,
     }
+    if 'source_only' in plan:
+        info.pop('url')
+        info.update({'kind': 'source_only', 'source': '/workspace/project',
+                     'runtime': _source_runtime(plan),
+                     'build_command': plan['source_only']['build_command'],
+                     'execution_evidence': 'Host source-execute receipts required; tool output is unreviewed.'})
     if _origin_enabled(plan):
         info['native_origin_route'] = {
             'binary': '/origin/bin/native-origin',
@@ -1255,7 +1409,8 @@ def _write_target_info(root: Path, role: str, target_ip: str, plan: dict) -> Non
                     'entry_paths': ['web', 'JSON-RPC'],
                     'setup': 'researcher-controlled; separate from the supplied protected API copy',
                 }
-    _write_json(root / role / 'project/target.json', info, once=True)
+    destination = 'SOURCE.json' if 'source_only' in plan else 'project/target.json'
+    _write_json(root / role / destination, info, once=True)
 
 
 def _capture_seed_baseline(root: Path, target: str, ids: dict[str, int]) -> str:
@@ -1493,12 +1648,19 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
                        ('review-target-2', (reviews['reviewer-2'][0], reviews['reviewer-2'][2]))):
         network, ip = item
         extra_mounts, extra_env, command = capture_specs.get(role, ([], [], target_command))
+        if 'source_only' in plan:
+            network, ip = 'none', None
+            command = ['sh', '-c', 'while :; do sleep 3600; done']
+            extra_mounts = [_mount(controls / 'source-modules', '/modules', readonly=True)]
+            for sub in ('tmp', 'go-build-cache'):
+                (root / role / '.native-source' / sub).mkdir(parents=True, mode=0o700)
+            extra_env = _source_environment('/target/.native-source', plan)
         targets[role] = _create(root, nonce, rows, role, plan['target_image_id'], platform,
                                 network, ip, [_mount(root / role, '/target'), *extra_mounts],
                                 ['HOME=/target', 'HTTP_PROXY=', 'HTTPS_PROXY=', 'ALL_PROXY=',
                                  'http_proxy=', 'https_proxy=', 'all_proxy=', 'NO_PROXY=*', 'no_proxy=*',
                                  *extra_env], command, workdir='/target',
-                                dns_isolated=not bool(capture_specs))
+                                dns_isolated=not bool(capture_specs) and 'source_only' not in plan)
         if capture is not None:
             capture.activate(root, role)
     _write_target_info(root, 'researcher', research_target_ip, plan)
@@ -1518,8 +1680,14 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         if role in ('reviewer-1', 'reviewer-2'):
             mounts.append(_mount(root / 'handoff' / role, '/handoff', readonly=True))
             mounts.append(_mount(root / 'original', '/workspace/original', readonly=True))
+        environment = _research_environment(root, role, relay_ip, target_ip, capability)
+        if 'source_only' in plan:
+            mounts.append(_mount(controls / 'source-modules', '/modules', readonly=True))
+            environment.extend(_source_environment('/workspace', plan))
+            if role in ('reviewer-1', 'reviewer-2'):
+                mounts.append(_mount(controls / 'source-evidence' / role, '/source-evidence', readonly=True))
         return _create(root, nonce, rows, role, plan['image_id'], platform, network,
-                       None, mounts, _research_environment(root, role, relay_ip, target_ip, capability),
+                       None, mounts, environment,
                        ['sh', '-c', 'while :; do sleep 3600; done'])
 
     researcher = create_research('researcher', research, research_relay_ip, research_target_ip)
@@ -2124,6 +2292,9 @@ def native_api(run_root: Path, role: str, *parts: str) -> dict:
             or len(parts) > 12 or any(not isinstance(part, str) or len(part) > 4096 for part in parts)):
         _fail('native_api_call_not_allowed')
     with _turn_lock(root):
+        _approval_active(root)
+        if not run_active(root):
+            _fail('native_run_closed_before_dispatch')
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')
         result = _native_exec(root, role, ['api', '--standalone', *parts], 90)
@@ -2248,6 +2419,9 @@ def _unresolved_dispatches(root: Path) -> list[str]:
         record = _read_json(path)
         if record.get('status') == 'unknown_effect':
             unresolved.append(record.get('dispatch_id', path.stem))
+    for path in (_controls(root) / 'source-executions').glob('*/receipt.json'):
+        if _read_json(path).get('status') == 'unknown_effect':
+            unresolved.append(path.parent.name)
     return sorted(unresolved)
 
 
@@ -2259,6 +2433,7 @@ def _research_context(root: Path, continuity: str, *, pool: dict | None = None) 
             _fail('portable_research_requires_new_prepare')
         return None
     plan = _verified_plan(root)
+    _approval_active(root)
     if _unresolved_dispatches(root):
         _fail('prior_dispatch_unknown_effect')
     try:
@@ -2338,7 +2513,10 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
     if role.startswith('reviewer-'):
         target = 'review-target-' + role[-1]
         plan = _plan(root)
-        _verify_target_state(root / target, plan['source_sha256'], plan['mutable_paths'])
+        if 'source_only' in plan:
+            _verify_inventory(root / 'original', plan['source_sha256'])
+        else:
+            _verify_target_state(root / target, plan['source_sha256'], plan['mutable_paths'])
         target_id = _resources(root)[target]
         source_digest = plan['source_manifest_sha256']
     else:
@@ -2354,6 +2532,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
               'review_target_id': target_id,
               'review_target_source_sha256': source_digest}
     with _turn_lock(root):
+        _approval_active(root)
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')
         if not run_active(root):
@@ -2374,6 +2553,10 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                     'The run snapshot is advice at this dispatch time, not new authority. '
                     'Keep material hypotheses, observations, scripts/results, unfinished effects, '
                     'review limits and your final internal note in ordinary workspace files. '
+                    'After the experiment, update /workspace/NEXT.json with last_result.state '
+                    '(supported, refuted, blocked, or inconclusive), what it rules out, useful '
+                    'capabilities and coverage, and the next brief or an explicit stop proposal. '
+                    'Do not invent a branch after a refutation. '
                     'Native history is optional; do not reset allowance or repeat an uncertain effect.\n'
                     f'Continuation mode: {continuity}.\n\n{prompt}')
                 if len(prompt.encode()) > 128 * 1024:
@@ -2392,7 +2575,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             if before_dispatch is not None:
                 before_dispatch(root, dispatch_id)
             result = _native_exec(root, role,
-                                  ['run', '--standalone', '--agent', 'build', '--model', MODEL,
+                                  ['run', '--standalone', '--agent', 'build', '--model', _plan(root)['model'],
                                    '--format', 'json', '--session', session_id, prompt],
                                   min(3600, max(30, _plan(root)['limits']['duration_seconds'])),
                                   origin_dispatch=dispatch_id if _origin_enabled(_plan(root)) else None)
@@ -2498,7 +2681,285 @@ def _probe_origin_route(root: Path, plan: dict, bindings: dict) -> None:
             _fail('native_origin_direct_tcp_bypass')
 
 
+def _validate_source_runtime(value: object) -> dict:
+    if (not isinstance(value, dict) or set(value) !=
+            {'version_command', 'version_stdout', 'dependency_command'}
+            or not isinstance(value['version_stdout'], str)
+            or not 1 <= len(value['version_stdout'].encode()) <= 4096
+            or CREDENTIAL_TEXT.search(value['version_stdout'])):
+        _fail('source_runtime_invalid')
+    _validate_argv(value['version_command'])
+    _validate_argv(value['dependency_command'])
+    return value
+
+
+def _source_runtime(plan: dict) -> dict:
+    source = plan['source_only']
+    return source.get('runtime') or {
+        'version_command': ['go', 'version'],
+        'version_stdout': 'go version ' + source['go_toolchain'] + ' ' + plan['platform'],
+        'dependency_command': ['go', 'list', '-m', '-f', '{{if not .Dir}}{{.Path}}{{end}}', 'all']}
+
+
+def _source_environment(base: str, plan: dict) -> list[str]:
+    if 'runtime' in plan['source_only']:
+        return []
+    return ['GOTOOLCHAIN=local', 'GOPROXY=off', 'GOSUMDB=off', 'GOWORK=off',
+            'GOENV=off', 'GOFLAGS=-mod=readonly', 'GOMODCACHE=/modules',
+            'GOCACHE=' + base + '/go-build-cache', 'GOTMPDIR=' + base + '/tmp', 'CGO_ENABLED=0']
+
+
+def _source_probe(root: Path, container_id: str) -> dict:
+    plan = _plan(root)
+    profile = _source_runtime(plan)
+    info = _inspect('container', container_id)
+    executor = info['Config']['WorkingDir'] == '/target'
+    base = '/target/.native-source' if executor else '/workspace'
+    workdir = '/target' if executor else '/workspace/project'
+    environment = ['PATH=' + OFFICIAL_IMAGE_ENV['PATH'], 'HOME=/tmp', *_source_environment(base, plan)]
+    result = _docker('container', 'exec', '-w', workdir, container_id, 'env', '-i',
+                     *environment, *profile['version_command'], timeout=10, allow_failure=True)
+    if result.returncode or result.stdout.decode(errors='replace').strip() != profile['version_stdout']:
+        _fail('source_runtime_version_unavailable')
+    closure = _docker('container', 'exec', '-w', workdir, container_id, 'env', '-i',
+                      *environment, *profile['dependency_command'], timeout=60, allow_failure=True)
+    if closure.returncode or closure.stdout.strip():
+        _fail('source_offline_dependency_closure_unavailable')
+    return {'runtime_version': profile['version_stdout'], 'image_id': info['Image']}
+
+
+def _source_command(root: Path, identifier: str, workdir: str, argv: list[str],
+                    destination: Path, timeout: float) -> dict:
+    """Bound output while reading it; loss of acknowledgement stops every producer."""
+    native, _ = _activate_controls(root)
+    plan = _plan(root)
+    environment = ['PATH=' + OFFICIAL_IMAGE_ENV['PATH'], 'HOME=/tmp',
+                   'TMPDIR=/target/.native-source/tmp', *_source_environment('/target/.native-source', plan)]
+    command = [str(DOCKER_BINARY), 'container', 'exec', '-w', workdir, identifier,
+               'env', '-i', *environment, *argv]
+    child = None
+    buffers = [bytearray(), bytearray()]
+    try:
+        with native.dispatch_guard(_controls(root) / 'native-state'):
+            child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     env={key: value for key, value in os.environ.items()
+                                          if key in ('HOME', 'PATH', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')})
+        streams = {child.stdout: 0, child.stderr: 1}
+        deadline = time.monotonic() + timeout
+        while streams:
+            if time.monotonic() >= deadline or not run_active(root):
+                _fail('source_execution_timeout_or_stopped')
+            for stream in select.select(list(streams), [], [], .2)[0]:
+                chunk = os.read(stream.fileno(), 65536)
+                if not chunk:
+                    del streams[stream]
+                    continue
+                buffer = buffers[streams[stream]]
+                if len(buffer) + len(chunk) > 1024 * 1024:
+                    _fail('source_execution_output_oversize')
+                buffer.extend(chunk)
+        code = child.wait(timeout=max(.1, deadline - time.monotonic()))
+        outputs = {}
+        for name, value in zip(('stdout', 'stderr'), buffers):
+            raw = bytes(value)
+            outputs[name + '_sha256'] = hashlib.sha256(raw).hexdigest()
+            if CREDENTIAL_TEXT.search(raw.decode(errors='replace')):
+                outputs[name + '_redacted'] = True
+            else:
+                path = destination / (name + '.txt')
+                path.write_bytes(raw)
+                path.chmod(0o600)
+        return {'exit_code': code, 'environment': environment, **outputs}
+    except Exception:
+        stop(root)
+        raise
+    finally:
+        if child is not None:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+            child.stdout.close()
+            child.stderr.close()
+
+
+def _verify_source_original(original: dict, current: dict) -> None:
+    # shortcut: endpoint hashes miss temporary edits; inspect scripts before accepting causal claims.
+    if any(current.get(name) != digest for name, digest in original.items()):
+        _fail('source_review_original_changed')
+
+
+def _freeze_source_input(root: Path, destination: Path, role: str) -> dict:
+    if role not in ('researcher', 'reviewer-1', 'reviewer-2'):
+        _fail('source_owner_invalid')
+    source = root / role / 'project'
+    native, _ = _activate_controls(root)
+    writers = [_resources(root)[name] for name in (('researcher', 'resume') if role == 'researcher' else (role,))]
+    try:
+        with native.dispatch_guard(_controls(root) / 'native-state'):
+            if not run_active(root):
+                _fail('source_execution_unavailable')
+            for identifier in writers:
+                _docker('container', 'pause', identifier)
+                if _inspect('container', identifier).get('State', {}).get('Paused') is not True:
+                    _fail('source_writer_freeze_unavailable')
+        inventory = _inventory(source)
+        shutil.copytree(source, destination, symlinks=True)
+        _verify_inventory(destination, inventory)
+        _verify_inventory(source, inventory)
+        # A review definition is outside the project and must freeze with its scripts.
+        if role.startswith('reviewer-'):
+            check = root / role / 'source-check.json'
+            if check.exists():
+                shutil.copy2(_file(check), destination.parent / 'source-check.json')
+                (destination.parent / 'source-check.json').chmod(0o600)
+        with native.dispatch_guard(_controls(root) / 'native-state'):
+            if not run_active(root):
+                _fail('source_execution_unavailable')
+            for identifier in writers:
+                _docker('container', 'unpause', identifier)
+        return inventory
+    except Exception:
+        stop(root)
+        raise
+
+
+def _reset_source_executor(root: Path, role: str, identifier: str, plan: dict) -> None:
+    native, _ = _activate_controls(root)
+    with native.dispatch_guard(_controls(root) / 'native-state'):
+        if not run_active(root):
+            _fail('source_execution_unavailable')
+        info = _inspect('container', identifier)
+        if (info.get('Image') != plan['target_image_id'] or
+                info.get('HostConfig', {}).get('NetworkMode') != 'none' or
+                info.get('State', {}).get('Running') is not True or
+                info.get('Config', {}).get('Labels', {}).get(LABEL) !=
+                _read_json(_controls(root) / 'resources.json')['nonce'] or
+                not any(m.get('Destination') == '/target' and m.get('Source') == str(root / role)
+                        for m in info.get('Mounts', []))):
+            _fail('source_executor_identity_mismatch')
+        if info['State'].get('Paused'):
+            _docker('container', 'unpause', identifier)
+        _docker('container', 'kill', identifier)
+        if _inspect('container', identifier)['State'].get('Running') is not False:
+            _fail('source_executor_stop_unavailable')
+        base = root / role
+        for child in base.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        shutil.copytree(root / 'original', base, dirs_exist_ok=True)
+        _verify_inventory(base, plan['source_sha256'])
+        for name in ('tmp', 'go-build-cache'):
+            (base / '.native-source' / name).mkdir(parents=True, mode=0o700)
+        if not run_active(root):
+            _fail('source_execution_unavailable')
+        _docker('container', 'start', identifier)
+        if _inspect('container', identifier)['State'].get('Running') is not True:
+            _fail('source_executor_restart_unavailable')
+
+
+def source_execute(run_root: Path, command_file: Path | None = None, *,
+                   source_snapshot: Path | None = None, owner_role: str = 'researcher') -> dict:
+    root = _private_root(run_root)
+    with _turn_lock(root):
+        plan = _verified_plan(root)
+        if 'source_only' not in plan or not run_active(root) or _unresolved_dispatches(root):
+            _fail('source_execution_unavailable')
+        _approval_active(root)
+        if owner_role not in ('researcher', 'reviewer-1', 'reviewer-2'):
+            _fail('source_owner_invalid')
+        command = _validate_target_command(command_file or _controls(root) / 'target-command.json')
+        if source_snapshot is not None:
+            inventory = _inventory(source_snapshot)
+            if owner_role.startswith('reviewer-'):
+                _verify_source_original(plan['source_sha256'], inventory)
+        identity = uuid.uuid4().hex
+        directory = _controls(root) / 'source-executions' / identity
+        directory.mkdir(mode=0o700)
+        path = directory / 'receipt.json'
+        receipt = {'kind': 'native-source-execution-v1', 'status': 'unknown_effect',
+                   'execution_id': identity, 'owner_role': owner_role,
+                   'plan_sha256': _sha(root / 'plan.json'),
+                   'original_source_manifest_sha256': plan['source_manifest_sha256'],
+                   'module_cache_sha256': plan['source_only']['module_cache_sha256'],
+                   'command': command, 'image_id': plan['target_image_id'],
+                   'platform': plan['platform'], 'runtime': _source_runtime(plan),
+                   'network': 'none', 'runs': [], 'assessment': 'needs_review'}
+        _write_json(path, receipt, once=True)
+        try:
+            if source_snapshot is None:
+                inventory = _freeze_source_input(root, directory / 'input', owner_role)
+            else:
+                shutil.copytree(source_snapshot, directory / 'input', symlinks=True)
+                _verify_inventory(directory / 'input', inventory)
+            if owner_role.startswith('reviewer-'):
+                _verify_source_original(plan['source_sha256'], inventory)
+            _write_json(directory / 'input-manifest.json', inventory, once=True)
+            receipt['input_manifest_sha256'] = _sha(directory / 'input-manifest.json')
+            _write_json(path, receipt)
+            for role in CAPTURE_TARGETS:
+                identifier = _resources(root)[role]
+                _reset_source_executor(root, role, identifier, plan)
+                output = directory / role
+                output.mkdir(mode=0o700)
+                relative = '.native-source/run'
+                work = root / role / relative
+                shutil.copytree(directory / 'input', work)
+                _verify_inventory(work, inventory)
+                execution = _source_command(root, identifier, '/target/' + relative, command, output,
+                                            plan['limits']['duration_seconds'])
+                _docker('container', 'pause', identifier)
+                if _inspect('container', identifier).get('State', {}).get('Paused') is not True:
+                    _fail('source_executor_freeze_unavailable')
+                output_inventory = _inventory(work)
+                if owner_role.startswith('reviewer-'):
+                    _verify_source_original(plan['source_sha256'], output_inventory)
+                shutil.copytree(work, output / 'files', symlinks=True)
+                _verify_inventory(output / 'files', output_inventory)
+                _write_json(output / 'files.json', output_inventory, once=True)
+                execution.update({'role': role, 'container_id': identifier, 'producer_paused': True,
+                                  'output_manifest_sha256': _sha(output / 'files.json')})
+                binaries = {}
+                if 'metadata_go' in plan['source_only']:
+                    for name in output_inventory:
+                        binary = output / 'files' / name
+                        with binary.open('rb') as stream:
+                            is_elf = stream.read(4) == b'\x7fELF'
+                        if not is_elf:
+                            continue
+                        metadata = subprocess.run([plan['source_only']['metadata_go'], 'version', '-m', str(binary)],
+                                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                                  stderr=subprocess.PIPE, timeout=10, check=False,
+                                                  env={'PATH': '/usr/bin:/bin', 'GOTOOLCHAIN': 'local'})
+                        if len(metadata.stdout) > 1024 * 1024:
+                            _fail('source_binary_metadata_oversize')
+                        text = metadata.stdout.decode(errors='replace')
+                        metadata_path = output / ('binary-' + str(len(binaries)) + '.json')
+                        _write_json(metadata_path, {'go_version_m_exit': metadata.returncode,
+                                    'go_version_m': '[redacted]' if CREDENTIAL_TEXT.search(text) else text}, once=True)
+                        binaries[name] = {'sha256': _sha(binary), 'metadata_sha256': _sha(metadata_path)}
+                execution['binaries'] = binaries
+                receipt['runs'].append(execution)
+                _write_json(path, receipt)
+            if not run_active(root):
+                _fail('source_execution_unavailable')
+            signatures = {(row['exit_code'], row['stdout_sha256'], row['stderr_sha256']) for row in receipt['runs']}
+            receipt.update({'status': 'captured', 'replay_output_equal': len(signatures) == 1,
+                            'all_commands_succeeded': all(row['exit_code'] == 0 for row in receipt['runs'])})
+            _write_json(path, receipt)
+            return {'status': 'captured', 'assessment': 'needs_review', 'receipt_path': str(path),
+                    'receipt_sha256': _sha(path), 'replay_output_equal': receipt['replay_output_equal'],
+                    'all_commands_succeeded': receipt['all_commands_succeeded']}
+        except Exception:
+            stop(root)
+            raise
+
+
 def _workspace_runtime_probe(root: Path, container_id: str) -> dict | None:
+    if 'source_only' in _plan(root):
+        return _source_probe(root, container_id)
     if _plan(root).get('t01_research_mode') != 'workspace_research':
         return None
     extensions = ['pdo_sqlite', 'gd', 'mbstring', 'hash', 'openssl', 'json',
@@ -2533,6 +2994,8 @@ def _workspace_runtime_probe(root: Path, container_id: str) -> dict | None:
 
 
 def _surface_probe(root: Path, container_id: str) -> dict:
+    plan = _plan(root)
+    config = _model_config(plan)
     workspace_runtime = _workspace_runtime_probe(root, container_id)
     version = _docker('container', 'exec', container_id, '/usr/local/bin/opencode', '--version')
     if version.stdout.decode(errors='replace').strip() != VERSION:
@@ -2601,13 +3064,21 @@ def _surface_probe(root: Path, container_id: str) -> dict:
         }
         if workspace_runtime is not None:
             inventory['workspace_runtime'] = workspace_runtime
+        if plan['model'] == PAID_MODEL:
+            loaded = document.get('providers', {}).get(PAID_ROUTE, {}).get('settings', {})
+            expected = config['providers'][PAID_ROUTE]['settings']
+            if any(loaded.get(key) != value for key, value in expected.items()):
+                _fail('paid_provider_surface_mismatch')
+            inventory['paid_provider'] = {'id': PAID_ROUTE, 'base_url': expected['baseURL'],
+                                           'credential_location': 'host_gateway_only'}
         effective = inventory['effective_config']
-        if (effective['model'] != {'providerID': 'opencode', 'model': 'deepseek-v4.1-flash-free'}
+        provider, model = plan['model'].split('/', 1)
+        if (effective['model'] != {'providerID': provider, 'model': model}
                 or effective['fallback'] is not None
-                or effective['permissions'] != CONFIG['permissions']
-                or effective['policies'] != CONFIG['policies']
+                or effective['permissions'] != config['permissions']
+                or effective['policies'] != config['policies']
                 or effective['plugins'] != [] or effective['websearch'] is not False
-                or effective['mcp'] != CONFIG['mcp']
+                or effective['mcp'] != config['mcp']
                 or inventory['mcp_count'] != 0
                 or inventory['skill_ids'] != _plan(root)['expected_skill_ids']
                 or not {'edit', 'write', 'shell'} <= set(tools)
@@ -2629,16 +3100,29 @@ def _surface_probe(root: Path, container_id: str) -> dict:
         server.stdout.close()
 
 
-def start(run_root: Path, approval_path: Path) -> dict:
+def start(run_root: Path, approval_path: Path, *, provider_key_file: Path | None = None,
+          provider_tls_key: Path | None = None) -> dict:
     root = _private_root(Path(run_root))
     with _owner_lock(root):
-        return _start_owned(root, Path(approval_path))
+        return _start_owned(root, Path(approval_path), provider_key_file=provider_key_file,
+                            provider_tls_key=provider_tls_key)
 
 
-def _start_owned(run_root: Path, approval_path: Path) -> dict:
+def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path | None = None,
+                 provider_tls_key: Path | None = None) -> dict:
     root = _private_root(Path(run_root))
     plan = _verified_plan(root, pristine=True)
     controls = _controls(root)
+    paid = plan['model'] == PAID_MODEL
+    if paid:
+        if provider_key_file is None or provider_tls_key is None:
+            _fail('host_provider_credentials_required')
+        for path in (provider_key_file, provider_tls_key):
+            path = _file(path, private=True)
+            if path.is_relative_to(root) or path.is_relative_to(ROOT) or path.stat().st_size > 16384:
+                _fail('host_credential_location_invalid')
+    elif provider_key_file is not None or provider_tls_key is not None:
+        _fail('unexpected_provider_credentials')
     if (controls / 'resources.json').exists() or (controls / 'native-state/RUN.json').exists():
         _fail('run_already_started_or_ambiguous')
     _approval(root, plan, Path(approval_path))
@@ -2658,6 +3142,7 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
     rows: list[dict] = []
     _save_resources(root, nonce, rows)
     native = None
+    gateway = None
     result = {'status': 'start_incomplete', 'run_root': str(root)}
     try:
         bindings = _preseal(root, plan, nonce, rows, port, capability)
@@ -2669,6 +3154,16 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                       '--max-connections', str(plan['limits']['max_connections']),
                       '--max-bytes', str(plan['limits']['max_bytes']),
                       '--duration', str(plan['limits']['duration_seconds']), '--port', str(port)]
+        if paid:
+            spec = importlib.util.spec_from_file_location('native_paid_gateway', controls / 'provider-gateway.py')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            gateway_capability = uuid.uuid4().hex
+            gateway = module.Gateway(provider_key_file.read_text().strip(),
+                                     controls / 'runtime-ca.pem', provider_tls_key,
+                                     gateway_capability, lambda: native_module.active(controls / 'native-state'),
+                                     lambda: native_module.dispatch_guard(controls / 'native-state'))
+            proxy_args += ['--upstream-proxy-env', 'HTTPS_PROXY']
         native = native_module.NativeRun(manifest, controls / 'native-state',
                                          plan['limits']['duration_seconds'], proxy_args)
         if _capture_mode(plan):
@@ -2677,7 +3172,16 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
                                     verify_source=True)
         if (controls / 'native-state/STOP_REQUEST').exists():
             _fail('native_stop_before_start')
-        ready = native.start()
+        old_proxy = os.environ.get('HTTPS_PROXY')
+        try:
+            if gateway is not None:
+                os.environ['HTTPS_PROXY'] = 'http://host:' + gateway_capability + '@127.0.0.1:' + str(gateway.port)
+            ready = native.start()
+        finally:
+            if old_proxy is None:
+                os.environ.pop('HTTPS_PROXY', None)
+            else:
+                os.environ['HTTPS_PROXY'] = old_proxy
         if (ready['proxy_info'].get('authority') != AUTHORITY
                 or ready['proxy_info'].get('port') != port
                 or ready['proxy_info'].get('host') != '127.0.0.1'
@@ -2693,7 +3197,13 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             topology_path = controls / 'capture-topology.json'
             _write_json(topology_path, topology, once=True)
             capture_topology_sha = _sha(topology_path)
-        if _origin_enabled(plan):
+        if 'source_only' in plan:
+            for role in CAPTURE_TARGETS:
+                info = _inspect('container', bindings[role])
+                if info['HostConfig']['NetworkMode'] != 'none':
+                    _fail('source_executor_network_not_none')
+                _source_probe(root, bindings[role])
+        elif _origin_enabled(plan):
             _probe_origin_route(root, plan, bindings)
         else:
             _probe_target(root, bindings['researcher'], bindings['research_target_ip'], plan['target_port'])
@@ -2706,8 +3216,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
             'plan_sha256': _sha(root / 'plan.json'), 'manifest_sha256': _sha(manifest),
             'approval_sha256': _sha(controls / 'approval.json'),
             'watcher_pid': ready['watcher_pid'], 'started_at': datetime.now(timezone.utc).isoformat(),
-            'provider_route': PROVIDER_ROUTE, 'provider_authority': AUTHORITY,
-            'model': MODEL, 'limits': plan['limits'],
+            'provider_route': plan['provider_route'], 'provider_authority': AUTHORITY,
+            'model': plan['model'], 'limits': plan['limits'],
             'protected_capture': 'unavailable',
             'capture_topology_sha256': capture_topology_sha,
             'loaded_surface_sha256': _sha(controls / 'loaded-surface.json'),
@@ -2715,7 +3225,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         result = {'status': 'active', 'run_root': str(root),
                   'origin_start': result['origin_start'],
                   'run_identity': allowance_snapshot(root)['run_identity'],
-                  'target_url': ('unix:///origin/socket/ingress.sock' if _origin_enabled(plan) else
+                  'target_url': (None if 'source_only' in plan else
+                                 'unix:///origin/socket/ingress.sock' if _origin_enabled(plan) else
                                  f'http://{bindings["research_target_ip"]}:{plan["target_port"]}'),
                   'protected_capture': 'unavailable',
                   'capture_topology': (('attested_original_session_origin_held' if 't01_capture' in plan
@@ -2726,6 +3237,8 @@ def _start_owned(run_root: Path, approval_path: Path) -> dict:
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
             time.sleep(.2)
     finally:
+        if gateway is not None:
+            gateway.close()
         if native is not None:
             try:
                 result['native_stop'] = native.close()
@@ -2800,6 +3313,11 @@ def stop(run_root: Path) -> dict:
     controls = _controls(root)
     if not (controls / 'native-state/RUN.json').exists() and not (controls / 'resources.json').exists():
         return {'status': 'not_active', 'run_root': str(root)}
+    cont = controls / 'continuation'
+    cont.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _write_json(cont / 'STOP', {
+        'kind': 'native-continuation-stop-v1', 'reason': 'operator_stop',
+        'at': datetime.now(timezone.utc).isoformat()})
     native, _ = _activate_controls(root)
     native.request_stop(controls / 'native-state', 'operator_stop')
     return {'status': 'stop_requested', 'run_root': str(root)}
@@ -3501,6 +4019,202 @@ def _load_review_module(root: Path):
     return module
 
 
+def _validate_source_check(value: object, input_id: str) -> dict:
+    if (not isinstance(value, dict) or set(value) !=
+            {'kind', 'input_id', 'effect', 'control', 'rationale'}
+            or value['kind'] != 'native-source-check-v1' or value['input_id'] != input_id
+            or not isinstance(value['rationale'], str) or not value['rationale'].strip()
+            or len(value['rationale'].encode()) > 4096 or CREDENTIAL_TEXT.search(value['rationale'])):
+        _fail('source_review_check_invalid')
+    _validate_argv(value['effect'])
+    _validate_argv(value['control'])
+    if value['effect'] == value['control']:
+        _fail('source_review_control_missing')
+    return value
+
+
+def _source_evidence_read(raw: str, session: str, digest: str) -> bool:
+    read, hashed = False, False
+    for line in raw.splitlines():
+        event = json.loads(line)
+        if not isinstance(event, dict) or event.get('sessionID') != session:
+            continue
+        part = event.get('part') or {}
+        state = part.get('state') or {}
+        args = state.get('input') or {}
+        output = state.get('output')
+        if (part.get('type') != 'tool' or state.get('status') != 'completed'
+                or state.get('error') or not isinstance(args, dict) or not isinstance(output, str)):
+            continue
+        if part.get('tool') == 'read' and args.get('filePath', args.get('path')) == '/source-evidence/RESULTS.json' and output:
+            read = True
+        if (part.get('tool') == 'shell' and args.get('command') == 'sha256sum /source-evidence/RESULTS.json'
+                and output.strip() == digest + '  /source-evidence/RESULTS.json'):
+            hashed = True
+    return read and hashed
+
+
+def _source_output_summary(before: dict[str, str], after: dict[str, str]) -> dict:
+    return {'file_count': len(after),
+            'changed_files': {name: digest for name, digest in after.items()
+                              if before.get(name) != digest},
+            'missing_files': sorted(set(before) - set(after))}
+
+
+def _publish_source_manifest(path: Path, manifest: dict[str, str], public_bytes) -> str:
+    data = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+    if public_bytes(data) != data:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    _write_json(path, manifest, once=True)
+    path.chmod(0o444)
+    digest = _sha(path)
+    if digest != hashlib.sha256(data).hexdigest():
+        _fail('source_review_output_changed')
+    return digest
+
+
+def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> dict:
+    plan = _verified_plan(root)
+    _verify_inventory(root / role / 'project', plan['source_sha256'])
+    destination = _controls(root) / ('source-review-' + role)
+    destination.mkdir(mode=0o700)
+    receipt_path = _controls(root) / ('review-' + role + '.json')
+    result = {'kind': 'native-source-review-v1', 'status': 'unfinished',
+              'assessment': {'status': 'unfinished'}, 'input_id': pin['input_id'],
+              'reviewer_role': role, 'plan_sha256': _sha(root / 'plan.json'),
+              'packet_pin': pin, 'filing_or_escalation_authorized': False}
+    _write_json(receipt_path, result, once=True)
+    prompt = (packet / 'PROMPT.txt').read_text()
+    begin = prompt.index('Read /workspace/project/target.json')
+    end = prompt.index('Examine each proposed', begin)
+    prompt = prompt[:begin] + (
+        'This is source review. Read /workspace/SOURCE.json. The project is a clean copy of the '
+        'original source. Add scripts without changing or deleting any original file. '
+        'Write /workspace/source-check.json with exactly kind="native-source-check-v1", '
+        'input_id from REQUEST.json, effect (argv array), control (different argv array), '
+        'and rationale (why this control tests the causal claim). Both commands must terminate. '
+        'The host will freeze your scripts and run each command on three clean offline copies. '
+        'Do not modify original files during execution. The host compares original file bytes '
+        'before and after each command; this does not rule out temporary changes. '
+        'Use /modules for prepared dependencies. Return decision unfinished until you have read '
+        'the host results. Do not treat your workspace output as host evidence.\n') + prompt[end:]
+
+    def invoke_initial(run_root, reviewer_role, session, unused_prompt, **kwargs):
+        return invoke_native(run_root, reviewer_role, session, prompt, **kwargs)
+
+    first = module.invoke_fresh_review(root, packet, pin, role, native_api=native_api,
+        invoke_native=invoke_initial, allowance_snapshot=allowance_snapshot, run_active=run_active,
+        public_bytes=module.validate_public_bytes, independent_check=None)
+    result['preparation'] = first
+    _write_json(receipt_path, result)
+    if first['status'] != 'native_turn_observed_unassessed':
+        return result
+    with _turn_lock(root):
+        if not run_active(root) or _unresolved_dispatches(root):
+            _fail('source_review_unavailable')
+        inventory = _freeze_source_input(root, destination / 'input', role)
+        _verify_source_original(plan['source_sha256'], inventory)
+        check = _validate_source_check(_read_json(destination / 'source-check.json'), pin['input_id'])
+        _write_json(destination / 'input-manifest.json', inventory, once=True)
+    evidence = {'kind': 'native-source-review-evidence-v1', 'input_id': pin['input_id'],
+                'plan_sha256': result['plan_sha256'], 'check': check,
+                'check_sha256': _sha(destination / 'source-check.json'),
+                'input_manifest_sha256': _sha(destination / 'input-manifest.json'),
+                'preparation_dispatch_id': first['native']['dispatch_id'], 'cases': {}}
+    execution_paths = {}
+    manifest_paths = {}
+    evidence_dir = _controls(root) / 'source-evidence' / role
+    for name in ('effect', 'control'):
+        command = destination / (name + '.json')
+        _write_json(command, check[name], once=True)
+        executed = source_execute(root, command, source_snapshot=destination / 'input', owner_role=role)
+        path = Path(executed['receipt_path'])
+        execution_paths[name] = path
+        captured = _read_json(path)
+        if (executed['status'] != 'captured' or _sha(path) != executed['receipt_sha256']
+                or captured['input_manifest_sha256'] != evidence['input_manifest_sha256']
+                or captured['plan_sha256'] != result['plan_sha256'] or captured['owner_role'] != role
+                or captured['command'] != check[name]
+                or not isinstance(captured['runs'], list) or len(captured['runs']) != 3
+                or any(not isinstance(row, dict) for row in captured['runs'])
+                or {row.get('role') for row in captured['runs']} != set(CAPTURE_TARGETS)):
+            _fail('source_review_execution_binding_changed')
+        outputs = {}
+        for row in captured['runs']:
+            folder = path.parent / row['role']
+            output_inventory = _read_json(folder / 'files.json')
+            if _sha(folder / 'files.json') != row['output_manifest_sha256']:
+                _fail('source_review_output_changed')
+            _verify_inventory(folder / 'files', output_inventory)
+            manifest_path = evidence_dir / ('manifest-' + name + '-' + row['role'] + '.json')
+            manifest_digest = _publish_source_manifest(manifest_path, output_inventory,
+                                                       module.validate_public_bytes)
+            if manifest_digest != row['output_manifest_sha256']:
+                _fail('source_review_output_changed')
+            manifest_paths[manifest_path] = manifest_digest
+            outputs[row['role']] = {**_source_output_summary(inventory, output_inventory),
+                                    'manifest_path': '/source-evidence/' + manifest_path.name,
+                                    'manifest_sha256': manifest_digest}
+            for stream in ('stdout', 'stderr'):
+                output = folder / (stream + '.txt')
+                if row.get(stream + '_redacted') or not output.exists():
+                    _fail('source_review_output_redacted')
+                if _sha(output) != row[stream + '_sha256']:
+                    _fail('source_review_output_changed')
+                outputs[row['role']][stream] = output.read_text()
+        evidence['cases'][name] = {'receipt': captured, 'receipt_sha256': executed['receipt_sha256'],
+                                   'outputs': outputs}
+    evidence_path = _controls(root) / 'source-evidence' / role / 'RESULTS.json'
+    public = (json.dumps(evidence, sort_keys=True, indent=2) + '\n').encode()
+    if len(public) > 1024 * 1024 or module.validate_public_bytes(public) != public:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    _write_json(evidence_path, evidence, once=True)
+    evidence_path.chmod(0o444)
+    evidence_digest = _sha(evidence_path)
+    before = allowance_snapshot(root)
+    final = invoke_native(root, role, first['session_id'],
+        'Read /handoff/REQUEST.json and every listed file again. Read '
+        '/source-evidence/RESULTS.json with the read tool, then run exactly '
+        '`sha256sum /source-evidence/RESULTS.json` with the shell tool. '
+        'Full output manifests are at the read-only paths listed in RESULTS; inspect them '
+        'when assessing a changed or missing file. '
+        'Compare the host effect and control results and the three replays. Nonzero exits are '
+        'observations, not proof of a security defect. Explain limitations and any weak control. '
+        'Return the same review JSON schema required by /handoff/PROMPT.txt. '
+        'Include source-evidence-sha256:' + evidence_digest + ' in checked_link. '
+        'The executed scripts were yours; execution was by the host. No filing is authorized.', include_raw=True)
+    raw = final.pop('_raw_stdout', '')
+    after = allowance_snapshot(root)
+    stable = (run_active(root) and module._same_allowance(first['allowance_before'], before)
+              and module._same_allowance(before, after) and module.verify_packet(packet, pin)
+              and _sha(evidence_path) == evidence_digest
+              and all(_sha(path) == digest for path, digest in manifest_paths.items())
+              and _sha(root / 'plan.json') == result['plan_sha256'])
+    _verify_inventory(root / 'original', plan['source_sha256'])
+    _verify_inventory(destination / 'input', inventory)
+    if (_sha(destination / 'source-check.json') != evidence['check_sha256']
+            or any(_sha(path) != evidence['cases'][name]['receipt_sha256']
+                   for name, path in execution_paths.items())):
+        _fail('source_review_evidence_changed')
+    invocation = {'status': 'native_turn_observed_unassessed' if stable and final['status'] == 'acknowledged' else 'unfinished',
+                  'session_id': first['session_id'], 'reviewer_role': role, 'native': final}
+    material = module.project_review_material(root, packet, pin, invocation, raw,
+                                             public_bytes=module.validate_public_bytes)
+    result.update({'final': final, 'material': material, 'same_original_allowance': stable,
+                   'evidence_sha256': evidence_digest, 'evidence_path': str(evidence_path)})
+    if (material.get('status') == 'captured' and _source_evidence_read(raw, first['session_id'], evidence_digest)
+            and 'source-evidence-sha256:' + evidence_digest in material['outcome']['checked_link']):
+        result['status'] = 'reviewed'
+        result['assessment'] = {'status': 'candidate_for_operator_review',
+                                'decision': material['outcome']['decision'],
+                                'input_id': pin['input_id'], 'outcome': material['outcome'],
+                                'evidence_sha256': evidence_digest,
+                                'execution_origin': 'host_executed_reviewer_scripts',
+                                'filing_or_escalation_authorized': False}
+    _write_json(receipt_path, result)
+    return result
+
+
 def review(run_root: Path, observer_root: Path, selection: Path,
            selection_sha256: str, role: str) -> dict:
     root = _private_root(Path(run_root))
@@ -3513,6 +4227,11 @@ def review(run_root: Path, observer_root: Path, selection: Path,
     packet_dir = root / 'handoff' / role
     pin = module.prepare_packet(observer_root, selection, selection_sha256, packet_dir,
                                 public_bytes=module.validate_public_bytes)
+    if 'source_only' in _plan(root):
+        receipt = _source_review(root, packet_dir, pin, role, module)
+        return {'status': receipt['status'], 'assessment': receipt['assessment'],
+                'reviewer_role': role, 'receipt_path': str(_controls(root) / ('review-' + role + '.json')),
+                'independent_host_check': 'source_effect_and_control' if receipt['status'] == 'reviewed' else 'unfinished'}
     receipt = module.invoke_fresh_review(root, packet_dir, pin, role,
                                          native_api=native_api, invoke_native=invoke_native,
                                          allowance_snapshot=allowance_snapshot,
@@ -3870,10 +4589,16 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest='command', required=True)
     prepare_cmd = commands.add_parser('prepare', help='provider-free sealed run preparation')
     for name in ('run-root', 'source', 'brief', 'scope-file', 'scope-sha256', 'relay',
-                 'relay-sha256', 'runtime-ca', 'runtime-ca-sha256', 'target-command',
+                 'relay-sha256', 'runtime-ca', 'runtime-ca-sha256',
                  'image-id', 'target-image-id', 'platform'):
         prepare_cmd.add_argument('--' + name, required=True)
-    prepare_cmd.add_argument('--target-port', type=int, required=True)
+    prepare_cmd.add_argument('--target-port', type=int)
+    prepare_cmd.add_argument('--target-command')
+    prepare_cmd.add_argument('--source-only', action='store_true')
+    prepare_cmd.add_argument('--source-runtime', help='runtime probe JSON; replaces the optional Go preset')
+    prepare_cmd.add_argument('--build-command', help='absolute path to a JSON argv array')
+    prepare_cmd.add_argument('--go-toolchain', help='exact Go version, for example go1.26.4')
+    prepare_cmd.add_argument('--module-cache', help='prepared offline module closure; never fetched here')
     prepare_cmd.add_argument('--kanboard-capture', action='store_true')
     prepare_cmd.add_argument('--t01-capture', action='store_true')
     prepare_cmd.add_argument('--origin-ingress', action='store_true',
@@ -3889,6 +4614,11 @@ def _parser() -> argparse.ArgumentParser:
     start_cmd = commands.add_parser('start', help='foreground live owner; requires fresh plan-bound approval')
     start_cmd.add_argument('--run-root', required=True)
     start_cmd.add_argument('--approval', required=True)
+    start_cmd.add_argument('--provider-key-file', help='private external host file; never copied into the run')
+    start_cmd.add_argument('--provider-tls-key', help='private external key for the pinned runtime CA certificate')
+    source_cmd = commands.add_parser('source-execute', help='offline source execution and two clean replays')
+    source_cmd.add_argument('--run-root', required=True)
+    source_cmd.add_argument('--command-file', help='optional experiment argv; default is the pinned build command')
     stage_cmd = commands.add_parser('capture-stage', help='provider-free Kanboard observer staging')
     stage_cmd.add_argument('--run-root', required=True)
     stage_cmd.add_argument('--target', choices=CAPTURE_TARGETS, required=True)
@@ -3927,6 +4657,14 @@ def _parser() -> argparse.ArgumentParser:
     reconstruct_cmd = commands.add_parser('reconstruct', help='new context from ordinary files in the same active run')
     reconstruct_cmd.add_argument('--run-root', required=True)
     reconstruct_cmd.add_argument('--prompt-file')
+    continue_cmd = commands.add_parser('continue', help='durable bounded continuation over one active run')
+    continue_cmd.add_argument('--run-root', required=True)
+    continue_cmd.add_argument('--max-invocations', type=int, default=24)
+    continue_cmd.add_argument('--invocation-timeout', type=int, default=3700)
+    continue_cmd.add_argument('--resume-after-stop', action='store_true')
+    continue_cmd.add_argument('--reconcile-dispatch-id')
+    continue_cmd.add_argument('--reconcile-decision', choices=('no_effect', 'effect_observed'))
+    continue_cmd.add_argument('--reconcile-evidence')
     review_cmd = commands.add_parser('review', help='one fresh bounded reviewer on a frozen public packet')
     for name in ('run-root', 'observer-root', 'selection', 'selection-sha256'):
         review_cmd.add_argument('--' + name, required=True)
@@ -3943,7 +4681,11 @@ def main() -> int:
         elif args.command == 'capture-stage':
             result = capture_stage(Path(args.run_root), args.target, s=args.s, q=args.q, t=args.t, b=args.b)
         elif args.command == 'start':
-            result = start(Path(args.run_root), Path(args.approval))
+            result = start(Path(args.run_root), Path(args.approval),
+                           provider_key_file=Path(args.provider_key_file) if args.provider_key_file else None,
+                           provider_tls_key=Path(args.provider_tls_key) if args.provider_tls_key else None)
+        elif args.command == 'source-execute':
+            result = source_execute(Path(args.run_root), Path(args.command_file) if args.command_file else None)
         elif args.command == 'stop':
             result = stop(Path(args.run_root))
         elif args.command == 'recover-start':
@@ -3998,6 +4740,19 @@ def main() -> int:
                                    kanboard_role_grant=(args.observe_kanboard_role_grant
                                                         if args.command == 'resume' else False),
                                    continuity=continuity)
+        elif args.command == 'continue':
+            from native_continuation import continue_run, reconcile
+            if args.reconcile_dispatch_id:
+                if not args.reconcile_decision or not args.reconcile_evidence:
+                    _fail('continuation_reconcile_input_missing')
+                result = reconcile(Path(args.run_root),
+                                   dispatch_id=args.reconcile_dispatch_id,
+                                   decision=args.reconcile_decision,
+                                   evidence_file=Path(args.reconcile_evidence))
+            else:
+                result = continue_run(Path(args.run_root), max_invocations=args.max_invocations,
+                                      invocation_timeout=args.invocation_timeout,
+                                      resume_after_stop=args.resume_after_stop)
         elif args.command == 'review':
             result = review(Path(args.run_root), Path(args.observer_root), Path(args.selection),
                             args.selection_sha256, args.role)
@@ -4005,7 +4760,12 @@ def main() -> int:
             _fail('command_invalid')
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0 if (result.get('status') not in ('unknown_effect', 'hold_unknown', 'held', 'unfinished', 'start_incomplete',
-                                                'unsafe_or_unresolved', 'stopped_evidence_incomplete')
+                                                'unsafe_or_unresolved', 'stopped_evidence_incomplete',
+                                                'rejected', 'continuation_already_running', 'inactive',
+                                                'invocation_failed', 'spend_unavailable',
+                                                'closure_review_required', 'next_brief_missing',
+                                                'reconciliation_required', 'previous_stop',
+                                                'spend_reset_detected', 'effect_observed')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:
         print(json.dumps({'status': 'interrupted', 'run_root': getattr(args, 'run_root', None)},

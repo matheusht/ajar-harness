@@ -45,6 +45,46 @@ files under its own workspace root and must supply its own enforced run limits.
    does not settle another. Recheck dependent impact claims when source, roles,
    resources, or target state change. Label operator-induced changes separately
    from agent-discovered effects. A correct first result needs no invented failure.
+   Record the result in `/workspace/NEXT.json` as `supported`, `refuted`,
+   `blocked`, or `inconclusive`; state what it rules out, the useful capabilities
+   and coverage, and the next discriminating test or an explicit stop proposal.
+   A refutation may close the lead; do not add a branch merely because a test
+   failed. Keep coverage as a changing map with its limits, not proof of absence.
+   The exact handoff shape is:
+
+   ```json
+   {
+     "kind": "native-continuation-next-v1",
+     "last_result": {
+       "state": "supported",
+       "rules_out": "what the result excludes",
+       "unresolved": "what remains unknown"
+     },
+     "capabilities": [
+       {"capability": "observed effect", "enables": "next reachable state",
+        "interface": "optional concrete interface", "evidence": "optional evidence link"}
+     ],
+     "coverage": [
+       {"surface": "named entry", "status": "tested",
+        "limit": "optional limit"}
+     ],
+     "next": {
+       "question": "the next question",
+       "test": "the next discriminating test",
+       "prediction": "what this test predicts",
+       "disconfirming": "what result would count against it",
+       "authority": "existing authority for the test",
+       "expected_cost": "optional cost estimate"
+     },
+     "proposed_stop": false,
+     "strong_lead": true
+   }
+   ```
+
+   Set `next` to `null` only with `"proposed_stop": true`. Coverage status is one
+   of `tested`, `blocked`, `out_of_scope`, or `untested`. Changing a strong lead
+   from `true` to `false` is an abandonment decision and needs fresh review.
+
 
 5. **Follow real connections.** When one step appears to enable another, record
    the actual output or state produced, the next step that consumed it, and the
@@ -65,8 +105,8 @@ files under its own workspace root and must supply its own enforced run limits.
    evidence and fresh review.
 
 7. **Resume from evidence.** In a new context, read the saved research notes,
-   scripts and results, and the current operator run snapshot before dispatching
-   another effect. Reconstruct the active hypotheses, failed tests, unfinished conditions,
+   `/workspace/NEXT.json`, scripts and results, and the current operator run snapshot
+   before dispatching another effect. Reconstruct the active hypotheses, failed tests, unfinished conditions,
    source and service state, pending effects, prior review, and remaining shared
    allowance. Native conversation history may help, but does not replace material
    evidence. A stale generated summary or unrelated scratch does not define this
@@ -86,7 +126,10 @@ files under its own workspace root and must supply its own enforced run limits.
    does not block work and an unsupported paraphrase is not accepted impact.
    Record what allowance, user instruction, safety or a blocker stopped. No empty
    queue, signed ending, memory/no-lesson record or formal closure is required.
-   Have the operator verify actual cleanup and remaining effects; a saved status
+   A proposed final closure, negative conclusion, or abandonment of a strong lead
+   needs a fresh review with a concrete reason; budget or operator stop is immediate
+   and bypasses that review. State the remaining uncertainty, not a claim that no
+   effect exists. Have the operator verify actual cleanup and remaining effects; a saved status
    cannot perform cleanup. If no effects or owned resources remain, no extra
    ceremony is needed. Learning remains optional under current memory permissions.
    A local result is not external delivery or a legacy accepted finding; those

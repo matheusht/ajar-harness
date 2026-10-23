@@ -511,7 +511,16 @@ def decorate_work_queue_item(item: dict[str, Any], state: dict[str, Any], engage
     detail = entity.get("detail")
     engagement = engagement.absolute()
 
-    if item_class in {"hypothesis_ran_unadjudicated", "hypothesis_running_unattempted", "hypothesis_unrouted", "hypothesis_open_route", "hypothesis_unresolved_question"}:
+    if item_class == "source_unobserved":
+        intake = state["intake"]
+        action = _event_action("record_source_observation", engagement, "<source-observation-event-json>", ["read the signed target-local source before drafting this event", f"source_path is {intake['source_path']}", f"source_hash is {intake['source_hash']}", f"source_size is {intake['source_size']}", "entity_type is source_intake; status is recorded", "record only what the source actually shows; no finding claim"], effect="advances_item")
+    elif item_class == "source_unrouted":
+        intake = state["intake"]
+        action = _event_action("route_source_observation", engagement, "<source-routing-event-json>", [f"source_observation_ref is {intake['observation_ref']}", f"choose only applicable cards from {intake['card_ids']}", "record strong, weak, or negative with a nonempty card set and status assessed; if no card is justified, record activation_strength none, empty card_ids, and status deferred", "a deferred no-route decision remains blocking until new evidence or a signed scope change", "bind exact signed source, scope, and observation environment"], effect="advances_item")
+    elif item_class == "source_unhypothesized":
+        intake = state["intake"]
+        action = _event_action("create_source_hypothesis", engagement, "<source-hypothesis-event-json>", [f"origin_ref is source observation {intake['observation_ref']}", f"routing_review_ref is exact route {intake['routing_ref']}", "origin_type is target_model; status is queued", "state a bounded local experiment and decisive falsifier; do not claim impact"], effect="advances_item")
+    elif item_class in {"hypothesis_ran_unadjudicated", "hypothesis_running_unattempted", "hypothesis_unrouted", "hypothesis_open_route", "hypothesis_unresolved_question"}:
         action = _hypothesis_action(item_class, engagement, entity_id, detail, state)
     elif item_class == "claim_unadjudicated":
         action = _claim_action(engagement, entity_id, state, review_rows=_filing_rows(state, entity_id))

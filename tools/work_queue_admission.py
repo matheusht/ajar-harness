@@ -351,6 +351,45 @@ def build_action_admission(
         raise RecordError("work_queue_admission_context_invalid", str(action_id))
     entity_id = str(entity.get("id"))
 
+    if action_id in {"record_source_observation", "route_source_observation", "create_source_hypothesis"}:
+        intake = state.get("intake")
+        if not isinstance(intake, dict):
+            raise RecordError("work_queue_admission_intake_missing", entity_id)
+        source = [
+            _constraint("proposal", ["payload", "source_hash"], "equals", intake["source_hash"]),
+            _constraint("proposal", ["payload", "scope_hash"], "equals", state["scope_hash"]),
+            _constraint("proposal", ["payload", "environment_ref"], "equals", intake["environment_ref"] if intake["observation_ref"] else state["active_environment_ref"]),
+        ]
+        if action_id == "record_source_observation":
+            return _event(
+                _constraint("proposal", ["payload", "entity_type"], "equals", "source_intake"),
+                _constraint("proposal", ["payload", "status"], "equals", "recorded"),
+                _constraint("proposal", ["payload", "source_path"], "equals", intake["source_path"]),
+                _constraint("proposal", ["payload", "source_size"], "equals", intake["source_size"]),
+                *source,
+                event_type="observation.recorded",
+            )
+        if action_id == "route_source_observation":
+            return _event(
+                _constraint("proposal", ["payload", "source_observation_ref"], "equals", intake["observation_ref"]),
+                _constraint("proposal", ["payload", "source_path"], "equals", intake["source_path"]),
+                _constraint("proposal", ["payload", "source_size"], "equals", intake["source_size"]),
+                _constraint("proposal", ["payload", "card_ids"], "subset_of", intake["card_ids"]),
+                _constraint("proposal", ["payload", "activation_strength"], "one_of", ["strong", "weak", "negative", "none"]),
+                _constraint("proposal", ["payload", "status"], "one_of", ["assessed", "deferred"]),
+                *source,
+                event_type="routing.assessed",
+            )
+        return _event(
+            _constraint("proposal", ["payload", "origin_type"], "equals", "target_model"),
+            _constraint("proposal", ["payload", "origin_ref"], "equals", intake["observation_ref"]),
+            _constraint("proposal", ["payload", "routing_review_ref"], "equals", intake["routing_ref"]),
+            _constraint("proposal", ["payload", "card_ids"], "nonempty_subset_of", intake["card_ids"]),
+            _constraint("proposal", ["payload", "status"], "equals", "queued"),
+            *source,
+            event_type="hypothesis.created",
+        )
+
     if action_id in {"record_hypothesis_disposition", "requeue_unattempted_hypothesis"}:
         return _hypothesis_disposition(item, state, engagement, entity_id)
     if action_id == "route_review_obligation":

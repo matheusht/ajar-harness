@@ -1503,8 +1503,10 @@ def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
     jwt_raw = dict(raw)
     # Split the fixture so the repository secret scan does not treat this negative
     # test vector as a leaked live token.
-    jwt = (b'eyJ' + b'hbGciOiJIUzI1NiJ9.' + b'eyJ' + b'zdWIiOiJvd25lZCJ9.'
-           + b'c2lnbmF0dXJlMQ')
+    jwt = b''.join((
+        b'eyJ', b'hbGciOiJIUzI1NiJ9.', b'eyJ', b'zdWIiOiJvd25lZCJ9.',
+        b'c2lnbmF0dXJlMQ',
+    ))
     jwt_raw['README.md'] += b'\n' + jwt + b'\n'
     tests['reject raw JWT value'] = not public_material_checks(
         jwt_raw, parsed)['raw jwt values absent']

@@ -778,6 +778,8 @@ def validate_record_references(record: Any, schema_name: str, index: dict[str, l
             ])
     elif schema_name == "engagement-event":
         payload = record.get("payload", {})
+        if isinstance(payload.get("higher_impact_route"), dict):
+            dynamic_specs.append((("payload", "higher_impact_route", "evidence_refs"), payload["higher_impact_route"].get("evidence_refs", []), {"event", "attempt", "artifact"}))
         dynamic_specs.extend([
             (("payload", "environment_ref"), payload.get("environment_ref"), {"environment"}),
             (("payload", "source_observation_ref"), payload.get("source_observation_ref"), {"event", "attempt"}),

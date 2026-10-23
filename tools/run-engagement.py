@@ -2760,7 +2760,7 @@ def _require_record_review_prewrite_time(deadline: float, detail: str) -> None:
 def command_record_review(args: argparse.Namespace) -> int:
     _require_decision6_kernel(args.engagement)
     _require_local_provenance("broker", args.actor_id, args.session_id); review = _command_json(args, "file"); event = _command_json(args, "event")
-    mapping = {"claim_adjudication": "claim.adjudicated", "coverage": "review.coverage_completed", "regrade": "review.regrade_completed", "pocinator": "review.pocinator_completed"}
+    mapping = {"claim_adjudication": "claim.adjudicated", "coverage": "review.coverage_completed", "regrade": "review.regrade_completed", "pocinator": "review.pocinator_completed", "higher_impact_route": "review.higher_impact_route_completed"}
     expected_event = mapping.get(review.get("review_type")); reviewer_id = review.get("independence", {}).get("reviewer_id"); reviewer_session = review.get("independence", {}).get("reviewer_session_id")
     if not isinstance(reviewer_session, str) or not reviewer_session: raise RecordError("reviewer_session_unbound", str(reviewer_id or "unknown"))
     authenticated_runtime = getattr(args, "_driver_authenticated_runtime", None)

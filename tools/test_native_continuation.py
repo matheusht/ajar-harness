@@ -94,7 +94,10 @@ class ContinuationContract(unittest.TestCase):
             self.assertEqual(request['reason'], 'proposed_stop')
             state = json.loads((f.controls / 'continuation/state.json').read_text())
             self.assertIsNone(state['pending'])
-            self.assertEqual(state['last_result_state'], 'refuted')
+            events = [json.loads(line) for line in
+                      (f.controls / 'continuation/events.jsonl').read_text().splitlines()]
+            self.assertTrue(any(row.get('event') == 'next'
+                                and row.get('result_state') == 'refuted' for row in events))
             self.assertEqual(state['last_pool']['used_tunnels'], 1)
 
     def test_accept_closes(self):
@@ -527,6 +530,31 @@ class ContinuationContract(unittest.TestCase):
             self.assertEqual(f.run(lambda *args: (0, result()))['status'], 'previous_stop')
             with self.assertRaises(continuation.ContinuationError):
                 f.run(lambda *args: (0, result()), resume_after_stop=True)
+
+    def test_reconcile_refuses_acknowledged_dispatch(self):
+        with tempfile.TemporaryDirectory(prefix='continuation-') as temp:
+            f = Fixture(temp)
+
+            def crash(command, session, prompt):
+                f.calls.append((command, session, prompt))
+                raise RuntimeError('controller crashed after dispatch')
+
+            with self.assertRaises(RuntimeError):
+                f.run(crash)
+            dispatch_id = 'b' * 32
+            (f.controls / 'dispatch').mkdir(mode=0o700)
+            runner._write_json(f.controls / 'dispatch' / (dispatch_id + '.json'), {
+                'kind': 'native-dispatch-v1', 'dispatch_id': dispatch_id,
+                'role': 'researcher', 'status': 'acknowledged'})
+            evidence = (f.root.parent / 'observation.md').resolve()
+            evidence.write_text('The turn completed and its receipt is acknowledged.\n')
+            evidence.chmod(0o600)
+            with self.assertRaises(continuation.ContinuationError) as caught:
+                continuation.reconcile(f.root, dispatch_id=dispatch_id,
+                                       decision='no_effect', evidence_file=evidence)
+            self.assertEqual(str(caught.exception), 'continuation_dispatch_already_acknowledged')
+            state = json.loads((f.controls / 'continuation/state.json').read_text())
+            self.assertIsNotNone(state['pending'])
 
     def test_stop_writes_durable_continuation_stop(self):
         with tempfile.TemporaryDirectory(prefix='continuation-') as temp:

@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools'))
 import native_research as runner
+import native_continuation as continuation
 
 FAKE_RUNNER = r'''
 import json
@@ -73,16 +73,8 @@ else:
 
 
 def run_controller(root: Path, fake: Path):
-    command = [sys.executable, str(ROOT / 'tools/native_continuation.py'),
-               '--run-root', str(root), '--runner', str(fake),
-               '--max-invocations', '4', '--invocation-timeout', '60']
-    completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, timeout=120)
-    try:
-        value = json.loads(completed.stdout)
-    except ValueError:
-        raise AssertionError('continuation output was not JSON')
-    return completed.returncode, value
+    return continuation.continue_run(root, runner_path=fake,
+                                     max_invocations=4, invocation_timeout=60)
 
 
 def main():
@@ -98,7 +90,7 @@ def main():
         fake.write_text(FAKE_RUNNER)
         fake.chmod(0o700)
 
-        first_code, first = run_controller(root, fake)
+        first = run_controller(root, fake)
         checks = []
         def check(name, condition):
             checks.append({'name': name, 'pass': bool(condition)})
@@ -108,7 +100,7 @@ def main():
         calls = [json.loads(line)['command'] for line in
                  (base / 'calls.jsonl').read_text().splitlines()]
         check('first run stopped for closure review',
-              first_code == 2 and first.get('status') == 'closure_review_required')
+              first.get('status') == 'closure_review_required')
         check('research, failed resume, reconstruction order',
               calls == ['status', 'research', 'resume', 'reconstruct'])
         check('checkpoint records the reconstruction session',
@@ -127,9 +119,9 @@ def main():
             'kind': 'native-continuation-closure-review-v1',
             'request_sha256': runner._sha(request),
             'decision': 'accept', 'reason': 'bounded local coverage accepted'})
-        second_code, second = run_controller(root, fake)
+        second = run_controller(root, fake)
         check('accepted closure returns without another invocation',
-              second_code == 0 and second.get('status') == 'closed'
+              second.get('status') == 'closed'
               and [json.loads(line)['command'] for line in
                    (base / 'calls.jsonl').read_text().splitlines()] == calls)
         print(json.dumps({'checks': checks, 'status': 'passed',

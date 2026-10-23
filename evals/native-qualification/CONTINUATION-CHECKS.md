@@ -10,14 +10,14 @@ multi-day run has used it. These checks are offline contracts, not qualification
 | Two loops on one run | One lease; the second loop is rejected | `test_lease_blocks_second_loop` |
 | Controller crash after dispatch | Pending marker survives; next loop refuses to redispatch | `test_pending_dispatch_is_not_retried` |
 | Missing receipt reconciliation | `no_effect` clears pending; `effect_observed` clears pending and keeps the stop; acknowledged receipt is refused | `test_reconcile_no_effect_clears_pending`; `test_reconcile_effect_observed_stops` |
-| Acknowledged dispatch in reconcile | Refuse as already completed; do not drop its receipt | code path; not separately tested |
+| Acknowledged dispatch in reconcile | Refuse as already completed; do not drop its receipt | `test_reconcile_refuses_acknowledged_dispatch` |
 | Strong-lead abandonment | True-to-false transition produces a closure request | `test_strong_lead_abandonment_requires_review` |
 | Spend reset | Decreasing shared spend stops the loop | `test_spend_reset_is_detected` |
 | Previous terminal stop | Requires explicit `--resume-after-stop`; no silent retry | `test_previous_stop_requires_explicit_resume` |
 | Child reports unknown effect | Stop; preserve pending; require reconciliation | `test_unknown_effect_preserves_pending` |
 | Child success without spend evidence | Stop; preserve pending; do not reset or retry | `test_spend_unavailable_preserves_pending` |
 | Missing native session | Reconstruct from workspace; record the reconstruction | `test_context_loss_reconstructs`; smoke check |
-| Missing or invalid next brief | Stop; do not invent an experiment | `test_invalid_next_is_rejected` |
+| Missing or invalid next brief | Stop; do not invent an experiment | `test_missing_next_brief_stops`; `test_invalid_next_is_rejected` |
 | Inactive or stopped run | No new invocation | `test_inactive_run_blocks_invocation` |
 | Stale checkpoint or changed plan | Reject; no dispatch | `test_stale_checkpoint_is_rejected` |
 | Operator stop | Durable stop; no new invocation | `test_operator_stop_blocks_invocation` |

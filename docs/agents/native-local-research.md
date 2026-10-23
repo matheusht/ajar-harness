@@ -109,7 +109,8 @@ negative conclusion, or a `strong_lead` change from true to false produces
 ```
 
 A reopen also requires a concrete next brief in `researcher/NEXT.json`; the
-review's `test` is advisory and is passed into the next prompt. Budget or operator
+review's `test` is recorded in the closure review, and the researcher must put the
+concrete next test in `NEXT.json` before the reopen continues. Budget or operator
 stop is immediate and bypasses review. A refutation can close a lead; a blocked
 surface remains unresolved. Coverage is a map with explicit limits, not proof that
 no effect exists.
@@ -120,17 +121,18 @@ observation file, then run:
 
 ```sh
 python3 tools/native_research.py continue --run-root <root> \
-  --reconcile-dispatch-id <dispatch-id|none> \
+  --reconcile-dispatch-id <dispatch-id> \
   --reconcile-decision no_effect \
   --reconcile-evidence <private-observation-file>
 ```
 
 `no_effect` clears the pending marker; `effect_observed` clears pending but keeps
-the stop and records the observation. The evidence file must be an absolute regular
-file with mode `0600` (for example, write it under `umask 077`). Do not delete
-`state.json` to bypass the marker. An `acknowledged` dispatch is a completed turn,
-not an unknown effect; the controller refuses to reconcile it as pending. Inspect
-its receipt and stop state instead of clearing it.
+the stop and records the observation. The dispatch ID must identify a real dispatch
+record. The evidence file must be an absolute regular file with mode `0600` (for
+example, write it under `umask 077`). Do not delete `state.json` to bypass the
+marker. An `acknowledged` dispatch is a completed turn, not an unknown effect; the
+controller refuses to reconcile it as pending. Inspect its receipt and stop state
+instead of clearing it.
 
 The 24-hour run ceiling is unchanged. The runner rejects `duration_seconds` above
 86400 and approval expiry more than 24 hours after `approved_at`. A wall-clock

@@ -1175,11 +1175,23 @@ def command_checks(raw: dict[str, bytes]) -> dict[str, bool]:
 def executable_wrong_id_negative() -> bool:
     with tempfile.TemporaryDirectory(prefix='php8427-command-negative-') as temp:
         root = Path(temp)
+        docker_marker = root / 'docker-called'
         marker = root / 'python-called'
+        fake_sha256sum = root / 'sha256sum'
         fake_docker = root / 'docker'
         fake_python = root / 'python3'
+        fake_sha256sum.write_text(
+            '#!/bin/sh\n'
+            'case "$1" in\n'
+            f"  *candidate.json) digest='{CANDIDATE_SHA256}' ;;\n"
+            f"  *runtime-admission.json) digest='{RUNTIME_SHA256}' ;;\n"
+            f"  *check_v2_php_parity_amd64_php8427.py) digest='{ADAPTER_SHA256}' ;;\n"
+            "  *) digest='0000000000000000000000000000000000000000000000000000000000000000' ;;\n"
+            'esac\n'
+            'printf "%s  %s\\n" "$digest" "$1"\n')
         fake_docker.write_text(
             '#!/bin/sh\n'
+            'printf called > "$DOCKER_MARKER"\n'
             'if [ "$1 $2" = "image inspect" ]; then\n'
             "  printf '%s\\n' 'sha256:0000000000000000000000000000000000000000000000000000000000000000 linux/amd64'\n"
             '  exit 0\n'
@@ -1187,18 +1199,20 @@ def executable_wrong_id_negative() -> bool:
             'exit 97\n')
         fake_python.write_text(
             '#!/bin/sh\nprintf called > "$PYTHON_MARKER"\n')
-        fake_docker.chmod(0o700)
-        fake_python.chmod(0o700)
+        for path in (fake_sha256sum, fake_docker, fake_python):
+            path.chmod(0o700)
         env = os.environ.copy()
         env.update({
             'PATH': f'{root}:/usr/bin:/bin',
             'PHP8427_OUTPUT': str(root / 'output'),
+            'DOCKER_MARKER': str(docker_marker),
             'PYTHON_MARKER': str(marker),
         })
         run = subprocess.run(
             ['bash', str(HERE / 'run-command.txt')], cwd=ROOT, env=env,
             capture_output=True, text=True)
-        return run.returncode != 0 and not marker.exists()
+        return (run.returncode != 0 and docker_marker.exists()
+                and not marker.exists())
 
 
 def executable_changed_adapter_negative() -> bool:
@@ -1487,8 +1501,11 @@ def self_tests(raw: dict[str, bytes], inputs: dict, candidate: dict,
         api_raw, parsed)['json header and plaintext secret values absent']
 
     jwt_raw = dict(raw)
-    jwt_raw['README.md'] += (
-        b'\neyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvd25lZCJ9.c2lnbmF0dXJlMQ\n')
+    # Split the fixture so the repository secret scan does not treat this negative
+    # test vector as a leaked live token.
+    jwt = (b'eyJ' + b'hbGciOiJIUzI1NiJ9.' + b'eyJ' + b'zdWIiOiJvd25lZCJ9.'
+           + b'c2lnbmF0dXJlMQ')
+    jwt_raw['README.md'] += b'\n' + jwt + b'\n'
     tests['reject raw JWT value'] = not public_material_checks(
         jwt_raw, parsed)['raw jwt values absent']
 

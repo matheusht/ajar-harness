@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import os
 import re
+import stat
 from typing import Any
 
 from engagement_records import (
@@ -13,7 +15,7 @@ from engagement_records import (
 )
 from engagement_state import (
     _scope_metadata, _append_kernel_event as append_event, atomic_write, base_event, engagement_lock,
-    read_governed_file, read_ledger, reduce_engagement,
+    _open_absolute_directory, enforce_current_terminal_work_admission, read_governed_file, read_ledger, reduce_engagement, scoped_cleanup_root, scoped_cleanup_root_identity,
 )
 from completion_claims import assert_completion_claims_clear_bound
 
@@ -97,22 +99,59 @@ def record_memory_disposition(engagement: Path, proposal_path: Path, operator_id
         return proposal
 
 
-def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_at: str, authority_request_ref: str | None = None, executor_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+def _assert_scoped_effects_absent(engagement: Path, events: list[dict[str, Any]]) -> None:
+    """Freshly check every signed scoped obligation before any normal close append."""
+    scoped_openings = [event for event in events if event["event_type"] == "cleanup.updated" and event["payload"].get("status") == "open" and event["payload"].get("scoped_cleanup") is not None]
+    for opening in scoped_openings:
+        payload = opening["payload"]
+        root = scoped_cleanup_root(engagement, payload["scope_hash"])
+        name = payload["scoped_cleanup"]["effect_name"]
+        try:
+            directory_fd = _open_absolute_directory(root)
+        except OSError as exc:
+            raise RecordError("scoped_cleanup_root_unavailable", str(root)) from exc
+        try:
+            metadata = os.fstat(directory_fd)
+            if metadata.st_uid != os.getuid() or metadata.st_mode & 0o022:
+                raise RecordError("scoped_cleanup_root_unsafe", str(root))
+            scoped = payload["scoped_cleanup"]
+            identity = (metadata.st_dev, metadata.st_ino)
+            if identity != (scoped["root_dev"], scoped["root_ino"]) or scoped_cleanup_root_identity(root) != identity:
+                raise RecordError("scoped_cleanup_root_changed", str(root))
+            try:
+                os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise RecordError("scoped_effect_remaining", name)
+        finally:
+            os.close(directory_fd)
+
+
+def close_engagement(engagement: Path, operator_id: str, reason: str, recorded_at: str, authority_request_ref: str | None = None, executor_id: str | None = None, session_id: str | None = None, *, scoped: bool = False) -> dict[str, Any]:
     engagement = engagement.absolute(); operator_id = _operator(operator_id)
     with engagement_lock(engagement) as engagement:
         state = reduce_engagement(engagement); scope = _scope_metadata(engagement / "scope.md")
         if _operator(scope["operator"]) != operator_id: raise RecordError("engagement_closure_authority_invalid", operator_id)
+        if scoped:
+            scoped_cleanup_root(engagement, state["scope_hash"])
+            if authority_request_ref or not executor_id or not session_id:
+                raise RecordError("scoped_closure_provenance_invalid", state["engagement_id"])
         memory = state["memory_disposition"]
         if memory is None: raise RecordError("engagement_closure_memory_missing", state["engagement_id"])
         prior = "active"
-        for event in read_ledger(engagement, "event"):
+        events = read_ledger(engagement, "event")
+        for event in events:
             for change in event["state_changes"]:
                 if change["dimension"] == "engagement" and change["entity_id"] == state["engagement_id"]: prior = change["current"]
         if prior == "closed": raise RecordError("engagement_already_closed", state["engagement_id"])
         # This is deliberately the final admission before irreversible closure append.
         admission = assert_completion_claims_clear_bound(engagement)
         state = admission.state
-        event = base_event(event_id=f"event-{state['engagement_id']}-closed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker" if authority_request_ref else "operator", actor_id=executor_id if authority_request_ref else operator_id, event_type="engagement.closed", rationale=reason, payload={"entity_id": state["engagement_id"], "status": "closed", "scope_hash": state["scope_hash"], "operator_id": operator_id, "disposition_ref": memory["disposition_ref"], "disposition_digest": memory["disposition_digest"], **({"authority_request_ref": authority_request_ref} if authority_request_ref else {})}, entity_refs=[memory["disposition_ref"]], state_changes=[{"dimension": "engagement", "entity_id": state["engagement_id"], "previous": prior, "current": "closed"}], session_id=session_id, operation_class="authority" if authority_request_ref else None)
+        broker = scoped or authority_request_ref is not None
+        event = base_event(event_id=f"event-{state['engagement_id']}-closed", engagement_id=state["engagement_id"], recorded_at=recorded_at, actor_role="broker" if broker else "operator", actor_id=executor_id if broker else operator_id, event_type="engagement.closed", rationale=reason, payload={"entity_id": state["engagement_id"], "status": "closed", "scope_hash": state["scope_hash"], "operator_id": operator_id, "disposition_ref": memory["disposition_ref"], "disposition_digest": memory["disposition_digest"], **({"authority_request_ref": authority_request_ref} if authority_request_ref else {}), **({"scoped_closure": True} if scoped else {})}, entity_refs=[memory["disposition_ref"]], state_changes=[{"dimension": "engagement", "entity_id": state["engagement_id"], "previous": prior, "current": "closed"}], session_id=session_id, operation_class="authority" if broker else None)
+        enforce_current_terminal_work_admission(state, read_ledger(engagement, "attempt"), event)
+        _assert_scoped_effects_absent(engagement, events)
         # The private append revalidates this under its transaction before any possible write.
         append_event(engagement, event, lock_held=True, completion_claims_token=admission.token)
         return reduce_engagement(engagement)

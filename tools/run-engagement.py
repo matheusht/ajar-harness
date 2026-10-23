@@ -61,6 +61,10 @@ from engagement_state import (
     _governed_optional_regular_digest,
     _governed_sha256_file,
     _open_parent_fd,
+    _open_absolute_directory,
+    SCOPED_EFFECT_BYTES,
+    scoped_cleanup_root,
+    scoped_cleanup_root_identity,
     atomic_write,
     append_ledger_record,
     assert_resume_current,
@@ -71,6 +75,7 @@ from engagement_state import (
     compute_record_hash,
     compute_review_input_hash,
     engagement_may_end,
+    enforce_current_terminal_work_admission,
     finding_revision_lane_id,
     hypothesis_dispositions_hash,
     bound_engagement_lock,
@@ -763,6 +768,8 @@ def _enforce_mutation(capability: dict[str, object], engagement: Path, actor_rol
 
 def command_append_event(args: argparse.Namespace) -> int:
     proposal = _command_json(args, "file")
+    if proposal.get("event_type") == "observation.recorded" and (proposal.get("payload", {}).get("scoped_effect") is not None or proposal.get("payload", {}).get("entity_type") == "scoped_local_effect"):
+        raise RecordError("canonical_notebook_command_required", "create-scoped-effect")
     capability = classify_event(proposal.get("event_type", ""), proposal.get("payload", {}))
     actor = proposal.get("actor", {})
     if capability["tier"] != "notebook":
@@ -1119,6 +1126,8 @@ def _report_draft_relpaths(engagement: Path) -> set[str]:
 
 
 def command_record_cleanup(args: argparse.Namespace) -> int:
+    if getattr(args, "scoped", False):
+        return command_record_scoped_cleanup(args)
     _require_local_provenance("broker", args.executor_id, args.session_id); engagement = args.engagement.absolute(); state = reduce_engagement(engagement); proposal = load_json(args.file)
     required = {"entity_id", "status", "cleanup_obligations"}
     if set(proposal) != required: raise RecordError("cleanup_proposal_fields_invalid", f"expected {sorted(required)}")
@@ -1126,6 +1135,262 @@ def command_record_cleanup(args: argparse.Namespace) -> int:
     previous = next((item["status"] for item in state["cleanup"]["obligations"] if item["obligation_id"] == proposal["entity_id"]), None)
     payload = {**proposal, "scope_hash": state["scope_hash"], "operator_id": args.operator_id, "updated_at": args.recorded_at, "authority_request_ref": args.authority_request_id, "executor_id": args.executor_id}
     event = base_event(event_id=f"event-cleanup-{args.authority_request_id}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="cleanup.updated", rationale=args.reason, payload=payload, state_changes=[{"dimension": "cleanup", "entity_id": proposal["entity_id"], "previous": previous, "current": proposal["status"]}], session_id=args.session_id, operation_class="authority"); applied = _append_kernel_event_idempotent(engagement, event); emit({"valid": True, "event_id": applied["event_id"]}); return 0
+
+
+def _scoped_effect_name(name: str) -> str:
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
+        raise RecordError("scoped_effect_name_invalid", str(name))
+    return name
+
+
+def _scoped_effect_directory(root: Path) -> int:
+    try:
+        fd = _open_absolute_directory(root)
+    except OSError as exc:
+        raise RecordError("scoped_cleanup_root_unavailable", str(root)) from exc
+    metadata = os.fstat(fd)
+    if metadata.st_uid != os.getuid() or metadata.st_mode & 0o022:
+        os.close(fd)
+        raise RecordError("scoped_cleanup_root_unsafe", str(root))
+    return fd
+
+
+def _require_scoped_directory_identity(directory_fd: int, expected: dict[str, object], root: Path) -> tuple[int, int]:
+    metadata = os.fstat(directory_fd)
+    identity = (metadata.st_dev, metadata.st_ino)
+    if identity != (expected["root_dev"], expected["root_ino"]) or scoped_cleanup_root_identity(root) != identity:
+        raise RecordError("scoped_cleanup_root_changed", str(root))
+    return identity
+
+
+def _scoped_effect_digest(directory_fd: int, name: str) -> str | None:
+    try:
+        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RecordError("scoped_effect_unreadable", name) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > len(SCOPED_EFFECT_BYTES):
+            raise RecordError("scoped_effect_changed", name)
+        content = os.read(fd, len(SCOPED_EFFECT_BYTES) + 1)
+        return sha256_bytes(content)
+    finally:
+        os.close(fd)
+
+
+def _remove_own_scoped_effect(directory_fd: int, name: str, identity: tuple[int, int]) -> bool:
+    try:
+        named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    if (named.st_dev, named.st_ino) == identity and stat.S_ISREG(named.st_mode):
+        os.unlink(name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+        return True
+    return False
+
+
+def _scoped_cleanup_events(events: list[dict[str, object]], obligation_id: str) -> tuple[dict | None, dict | None]:
+    opening = next((event for event in events if event["event_type"] == "cleanup.updated" and event["payload"].get("scoped_cleanup") is not None and event["payload"].get("status") == "open" and event["payload"].get("entity_id") == obligation_id), None)
+    creation = next((event for event in events if event["event_type"] == "observation.recorded" and event["payload"].get("scoped_effect", {}).get("cleanup_obligation_ref") == opening["event_id"]), None) if opening else None
+    return opening, creation
+
+
+def _scoped_engagement_closed(events: list[dict[str, object]], engagement_id: str) -> bool:
+    return next((change["current"] == "closed" for event in reversed(events) for change in event["state_changes"] if change["dimension"] == "engagement" and change["entity_id"] == engagement_id), False)
+
+
+def command_create_scoped_effect(args: argparse.Namespace) -> int:
+    _require_local_provenance("broker", args.executor_id, args.session_id)
+    _require_decision6_kernel(args.engagement)
+    name = _scoped_effect_name(args.effect_name)
+    engagement = args.engagement.absolute()
+    with engagement_lock(engagement) as engagement:
+        state = reduce_engagement(engagement)
+        root = scoped_cleanup_root(engagement, state["scope_hash"])
+        events = read_ledger(engagement, "event")
+        if _scoped_engagement_closed(events, state["engagement_id"]):
+            raise RecordError("scoped_effect_after_closure", state["engagement_id"])
+        opening, creation = _scoped_cleanup_events(events, args.obligation_id)
+        if opening is not None and scoped_cleanup_root(engagement, opening["payload"]["scope_hash"]) != root:
+            raise RecordError("scoped_cleanup_root_changed", args.obligation_id)
+        obligation = next((item for item in state["cleanup"]["obligations"] if item["obligation_id"] == args.obligation_id), None)
+        digest = sha256_bytes(SCOPED_EFFECT_BYTES)
+        opening_item = opening["payload"]["cleanup_obligations"][0] if opening else None
+        if opening is None or obligation is None or obligation["status"] != "open" or opening_item.get("kind") != "scoped_local_file" or (opening_item.get("effect_name"), opening_item.get("effect_sha256")) != (name, digest):
+            raise RecordError("scoped_effect_obligation_missing", args.obligation_id)
+        directory_fd = _scoped_effect_directory(root)
+        try:
+            root_dev, root_ino = _require_scoped_directory_identity(directory_fd, opening["payload"]["scoped_cleanup"], root)
+            event = base_event(event_id=f"event-scoped-effect-{args.obligation_id}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="observation.recorded", rationale="Verified exact inert local effect under the prior cleanup obligation.", payload={"entity_id": f"effect-{args.obligation_id}", "entity_type": "scoped_local_effect", "status": "created", "scoped_effect": {"effect_name": name, "effect_sha256": digest, "root_dev": root_dev, "root_ino": root_ino, "cleanup_obligation_ref": opening["event_id"]}}, entity_refs=[opening["event_id"]], session_id=args.session_id, operation_class="notebook")
+            existing = _scoped_effect_digest(directory_fd, name)
+            if existing is not None and existing != digest:
+                raise RecordError("scoped_effect_changed", name)
+            if creation is not None:
+                if existing is None:
+                    raise RecordError("scoped_effect_missing_after_creation", name)
+                strip_chain = lambda value: {key: item for key, item in value.items() if key not in {"sequence", "previous_hash", "record_hash"}}
+                if canonical_json_bytes(strip_chain(creation)) != canonical_json_bytes(event):
+                    raise RecordError("event_id_collision", creation["event_id"])
+                emit({"valid": True, "event_id": creation["event_id"], "effect_name": name, "sha256": digest})
+                return 0
+            if existing is not None:
+                raise RecordError("scoped_effect_preexisting", name)
+            errors = validate_record(materialize_ledger_record("event", event, events), "engagement-event")
+            if errors:
+                raise RecordError("scoped_effect_event_invalid", args.obligation_id, errors)
+            try:
+                fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
+            except FileExistsError as exc:
+                raise RecordError("scoped_effect_preexisting", name) from exc
+            created = os.fstat(fd)
+            identity = (created.st_dev, created.st_ino)
+            try:
+                remaining = memoryview(SCOPED_EFFECT_BYTES)
+                while remaining:
+                    written = os.write(fd, remaining)
+                    if written <= 0:
+                        raise OSError("short write")
+                    remaining = remaining[written:]
+                os.fsync(fd)
+                os.fsync(directory_fd)
+            except OSError as exc:
+                _remove_own_scoped_effect(directory_fd, name, identity)
+                raise RecordError("scoped_effect_create_failed", name) from exc
+            finally:
+                os.close(fd)
+            if _scoped_effect_digest(directory_fd, name) != digest:
+                _remove_own_scoped_effect(directory_fd, name, identity)
+                raise RecordError("scoped_effect_changed", name)
+            try:
+                _require_scoped_directory_identity(directory_fd, opening["payload"]["scoped_cleanup"], root)
+                applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+            except Exception as exc:
+                # An append can fail before commit or after the ledger row was written.
+                # Only roll back our exact inode when the authoritative ledger is readable
+                # and proves the creation row absent. Otherwise preserve the effect.
+                try:
+                    committed = next((row for row in read_ledger(engagement, "event") if row["event_id"] == event["event_id"]), None)
+                except Exception as ledger_exc:
+                    raise RecordError("scoped_effect_commit_uncertain", name) from ledger_exc
+                if committed is None:
+                    try:
+                        removed = _remove_own_scoped_effect(directory_fd, name, identity)
+                    except OSError as cleanup_exc:
+                        raise RecordError("scoped_effect_rollback_incomplete", name) from cleanup_exc
+                    if not removed:
+                        raise RecordError("scoped_effect_rollback_incomplete", name) from exc
+                raise
+            emit({"valid": True, "event_id": applied["event_id"], "effect_name": name, "sha256": digest})
+            return 0
+        finally:
+            os.close(directory_fd)
+
+
+def command_record_scoped_cleanup(args: argparse.Namespace) -> int:
+    _require_local_provenance("broker", args.executor_id, args.session_id)
+    _require_decision6_kernel(args.engagement)
+    if args.operator_id or args.authority_request_id or args.lane_id:
+        raise RecordError("scoped_cleanup_authority_conflict", "scoped cleanup uses only the signed local grant")
+    engagement = args.engagement.absolute()
+    proposal = load_json(args.file)
+    if (not isinstance(proposal, dict) or set(proposal) != {"entity_id", "status", "cleanup_obligations"}
+        or not isinstance(proposal["cleanup_obligations"], list) or len(proposal["cleanup_obligations"]) != 1
+        or not isinstance(proposal["cleanup_obligations"][0], dict) or proposal["status"] not in {"open", "completed", "blocked", "not_applicable"}
+        or not isinstance(proposal["entity_id"], str)):
+        raise RecordError("scoped_cleanup_proposal_invalid", str(args.file))
+    item = proposal["cleanup_obligations"][0]
+    name = _scoped_effect_name(item.get("effect_name", ""))
+    digest = sha256_bytes(SCOPED_EFFECT_BYTES)
+    if (item.get("obligation_id") != proposal["entity_id"] or item.get("status") != proposal["status"]
+        or item.get("kind") != "scoped_local_file" or item.get("effect_sha256") != digest
+        or item.get("artifact_refs") != [] or item.get("closed_at") != (None if proposal["status"] == "open" else args.recorded_at)):
+        raise RecordError("scoped_cleanup_proposal_invalid", proposal["entity_id"])
+    with engagement_lock(engagement) as engagement:
+        state = reduce_engagement(engagement)
+        root = scoped_cleanup_root(engagement, state["scope_hash"])
+        operator = _scope_metadata(engagement / "scope.md")["operator"]
+        events = read_ledger(engagement, "event")
+        committed_id = f"event-scoped-cleanup-{proposal['status']}-{proposal['entity_id']}"
+        prior = next((event for event in events if event["event_id"] == committed_id), None)
+        if prior is not None:
+            exact = (prior["event_type"] == "cleanup.updated" and prior["actor"] == {"role": "broker", "id": args.executor_id}
+                     and prior["provenance"].get("session_id") == args.session_id
+                     and prior["recorded_at"] == args.recorded_at and prior["rationale"] == args.reason
+                     and prior["payload"].get("scope_hash") == state["scope_hash"]
+                     and prior["payload"].get("operator_id") == operator
+                     and all(prior["payload"].get(key) == proposal[key] for key in ("entity_id", "status", "cleanup_obligations"))
+                     and prior["payload"].get("scoped_cleanup", {}).get("effect_name") == name
+                     and prior["payload"].get("scoped_cleanup", {}).get("effect_sha256") == digest)
+            if not exact:
+                raise RecordError("event_id_collision", committed_id)
+            directory_fd = _scoped_effect_directory(root)
+            try:
+                _require_scoped_directory_identity(directory_fd, prior["payload"]["scoped_cleanup"], root)
+                if proposal["status"] == "completed":
+                    if _scoped_effect_digest(directory_fd, name) is not None:
+                        raise RecordError("scoped_effect_reappeared", name)
+            finally:
+                os.close(directory_fd)
+            emit({"valid": True, "event_id": committed_id, "status": proposal["status"], "replayed": True})
+            return 0
+        if _scoped_engagement_closed(events, state["engagement_id"]):
+            raise RecordError("scoped_cleanup_after_closure", state["engagement_id"])
+        opening, creation = _scoped_cleanup_events(events, proposal["entity_id"])
+        if opening is not None and scoped_cleanup_root(engagement, opening["payload"]["scope_hash"]) != root:
+            raise RecordError("scoped_cleanup_root_changed", proposal["entity_id"])
+        current = next((row for row in state["cleanup"]["obligations"] if row["obligation_id"] == proposal["entity_id"]), None)
+        status = proposal["status"]
+        if status == "open":
+            if current is not None:
+                raise RecordError("scoped_cleanup_already_open", proposal["entity_id"])
+        elif opening is None or current is None or current["status"] not in {"open", "blocked"} or (opening["payload"]["cleanup_obligations"][0].get("effect_name"), opening["payload"]["cleanup_obligations"][0].get("effect_sha256")) != (name, digest):
+            raise RecordError("scoped_cleanup_obligation_missing", proposal["entity_id"])
+        directory_fd = _scoped_effect_directory(root)
+        try:
+            root_metadata = os.fstat(directory_fd)
+            if scoped_cleanup_root_identity(root) != (root_metadata.st_dev, root_metadata.st_ino):
+                raise RecordError("scoped_cleanup_root_changed", str(root))
+            if opening is not None:
+                _require_scoped_directory_identity(directory_fd, opening["payload"]["scoped_cleanup"], root)
+            observed = _scoped_effect_digest(directory_fd, name)
+            if status == "open" and observed is not None:
+                raise RecordError("scoped_effect_already_exists", name)
+            if status == "completed":
+                if creation is None:
+                    raise RecordError("scoped_cleanup_creation_missing", proposal["entity_id"])
+                if observed is not None and observed != digest:
+                    raise RecordError("scoped_effect_changed", name)
+                if observed is not None:
+                    named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if not stat.S_ISREG(named.st_mode) or named.st_nlink != 1:
+                        raise RecordError("scoped_effect_changed", name)
+            elif status == "blocked" and observed is None:
+                raise RecordError("scoped_cleanup_blocked_without_effect", name)
+            elif status == "not_applicable" and (creation is not None or observed is not None):
+                raise RecordError("scoped_cleanup_cancel_not_absent", name)
+            scoped = {"effect_name": name, "effect_sha256": digest, "root_dev": root_metadata.st_dev, "root_ino": root_metadata.st_ino, "open_event_ref": opening["event_id"] if opening else None, "create_event_ref": creation["event_id"] if creation else None, "observed_sha256": observed, "checked_absent": observed is None if status != "completed" else True}
+            event = base_event(event_id=f"event-scoped-cleanup-{status}-{proposal['entity_id']}", engagement_id=state["engagement_id"], recorded_at=args.recorded_at, actor_role="broker", actor_id=args.executor_id, event_type="cleanup.updated", rationale=args.reason, payload={**proposal, "scope_hash": state["scope_hash"], "operator_id": operator, "updated_at": args.recorded_at, "scoped_cleanup": scoped}, entity_refs=[ref for ref in (scoped["open_event_ref"], scoped["create_event_ref"]) if ref], state_changes=[{"dimension": "cleanup", "entity_id": proposal["entity_id"], "previous": current["status"] if current else None, "current": status}], session_id=args.session_id, operation_class="authority")
+            errors = validate_record(materialize_ledger_record("event", event, events), "engagement-event")
+            if errors:
+                raise RecordError("scoped_cleanup_proposal_invalid", proposal["entity_id"], errors)
+            if status == "completed":
+                _require_scoped_directory_identity(directory_fd, scoped, root)
+                if observed is not None:
+                    os.unlink(name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
+                # A fresh directory read is the postcondition. A retry after an interrupted
+                # append may record absence, but never claims to have observed the old bytes.
+                if _scoped_effect_digest(directory_fd, name) is not None:
+                    raise RecordError("scoped_cleanup_postcheck_failed", name)
+            _require_scoped_directory_identity(directory_fd, scoped, root)
+            applied = _append_kernel_event_idempotent(engagement, event, lock_held=True)
+            emit({"valid": True, "event_id": applied["event_id"], "status": status, "checked_absent": scoped["checked_absent"]})
+            return 0
+        finally:
+            os.close(directory_fd)
 
 
 def command_record_operator_prior(args: argparse.Namespace) -> int:
@@ -2325,6 +2590,15 @@ def command_record_memory(args: argparse.Namespace) -> int:
 
 
 def command_close(args: argparse.Namespace) -> int:
+    if getattr(args, "scoped", False):
+        _require_local_provenance("broker", args.executor_id, args.session_id)
+        _require_decision6_kernel(args.engagement)
+        if args.authority_request_id or args.lane_id or args.operator_id:
+            raise RecordError("scoped_closure_authority_conflict", "scoped closure uses only the signed local grant")
+        operator = _scope_metadata(args.engagement / "scope.md")["operator"]
+        snapshot = close_engagement(args.engagement, operator, args.reason, args.recorded_at, executor_id=args.executor_id, session_id=args.session_id, scoped=True)
+        emit({"valid": True, "engagement_id": snapshot["engagement_id"], "closed": True, "memory_disposition": snapshot["memory_disposition"]})
+        return 0
     action = _authority_action("close", lane_id=args.lane_id, executor_id=args.executor_id, session_id=args.session_id, operator_id=args.operator_id, reason=args.reason, recorded_at=args.recorded_at); _require_async_authority(args, action, args.recorded_at)
     snapshot = close_engagement(args.engagement, args.operator_id, args.reason, args.recorded_at, args.authority_request_id, args.executor_id, args.session_id)
     emit({"valid": True, "engagement_id": snapshot["engagement_id"], "closed": True, "memory_disposition": snapshot["memory_disposition"]})
@@ -3956,6 +4230,19 @@ def state_self_test() -> list[tuple[str, bool, str]]:
         pending_keys = stage_classes(pending_filing)
         past_deadline_pending = copy.deepcopy(pending_filing); past_deadline_pending["authority_requests"]["request-v2-pending"]["expires_at"] = "2000-01-01T00:00:00Z"
         checks.append(("current v2 pending authority suppresses its exact filing-ready rows and expiry remains explicit record state", pending_keys == [("awaiting_operator", "request-v2-pending")] and stage_classes(past_deadline_pending) == pending_keys, str(pending_keys)))
+        pending_terminal = {**pending_filing, "coverage": "coverage_dry", "cleanup": {"recorded": True, "obligations": []}}
+        close_proposal = {"event_type": "engagement.closed", "event_id": "event-pending-filing-close", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": []}
+        coverage_proposal = {"event_type": "coverage.status_changed", "event_id": "event-pending-filing-coverage", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "coverage_dry"}]}
+        budget_proposal = {"event_type": "coverage.status_changed", "event_id": "event-pending-filing-budget", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "budget_bounded"}]}
+        blocked_proposal = {"event_type": "engagement.blocked", "event_id": "event-pending-filing-blocked", "recorded_at": "2026-07-10T00:00:11Z", "payload": {}, "state_changes": [{"dimension": "coverage", "current": "blocked"}]}
+        def terminal_admission_error(snapshot: dict, proposal: dict) -> str | None:
+            try:
+                enforce_current_terminal_work_admission(snapshot, [], proposal)
+            except RecordError as exc:
+                return exc.code
+            return None
+        reflected_terminal = {**pending_terminal, "findings": reflected_confirmed["findings"], "proof_reviews": {"finding-current:r2": {"terminal_status": "verified"}}, "outstanding_reviews": [], "authority_requests": {"request-ordinary": {"request_id": "request-ordinary", "status": "pending_authority"}}}
+        checks.append(("pending finding authority cannot hide an unreflected fileable adjudication from new completion admission", terminal_admission_error(pending_terminal, close_proposal) == "engagement_closure_work_remaining" and terminal_admission_error(pending_terminal, coverage_proposal) == "coverage_terminal_work_remaining" and terminal_admission_error(pending_terminal, budget_proposal) == "coverage_terminal_work_remaining" and terminal_admission_error(pending_terminal, blocked_proposal) is None and terminal_admission_error(reflected_terminal, close_proposal) is None and stage_classes(pending_terminal) == [("awaiting_operator", "request-v2-pending")], str({"close": terminal_admission_error(pending_terminal, close_proposal), "coverage": terminal_admission_error(pending_terminal, coverage_proposal), "budget": terminal_admission_error(pending_terminal, budget_proposal), "blocked": terminal_admission_error(pending_terminal, blocked_proposal), "reflected": terminal_admission_error(reflected_terminal, close_proposal)})))
         blocked_poc_filing = {**pending_filing, "outstanding_reviews": [*eligible_reviews, *ineligible_reviews]}
         blocked_poc_keys = stage_classes(blocked_poc_filing)
         checks.append(("blocked pocinator debt prevents filing suppression and remains ahead of revision work", ("finding_revision_pending", "finding-current") in blocked_poc_keys and ("review_obligation_open", "review-blocked") in blocked_poc_keys and blocked_poc_keys.index(("review_obligation_open", "review-blocked")) < blocked_poc_keys.index(("finding_revision_pending", "finding-current")), str(blocked_poc_keys)))
@@ -6038,6 +6325,13 @@ def parser() -> argparse.ArgumentParser:
     create_artifact.add_argument("--classification", type=Path, required=True)
     create_artifact.add_argument("--actor-id", required=True)
     create_artifact.add_argument("--session-id", required=True)
+    create_scoped_effect = subcommands.add_parser("create-scoped-effect", help="create one inert local file after a signed-scope cleanup obligation is open")
+    create_scoped_effect.add_argument("--engagement", type=Path, required=True)
+    create_scoped_effect.add_argument("--obligation-id", required=True)
+    create_scoped_effect.add_argument("--effect-name", required=True)
+    create_scoped_effect.add_argument("--recorded-at", required=True)
+    create_scoped_effect.add_argument("--executor-id", required=True)
+    create_scoped_effect.add_argument("--session-id", required=True)
     propose_scope = subcommands.add_parser("propose-scope", help="preserve an unattested scope amendment draft without changing authority")
     propose_scope.add_argument("--engagement", type=Path, required=True); propose_scope.add_argument("--draft", type=Path, required=True); propose_scope.add_argument("--actor-id", required=True); propose_scope.add_argument("--session-id", required=True); propose_scope.add_argument("--recorded-at", required=True); propose_scope.add_argument("--reason", required=True)
     reattest_scope = subcommands.add_parser("reattest-scope", help="activate one signed scope draft through exact async authority")
@@ -6045,7 +6339,7 @@ def parser() -> argparse.ArgumentParser:
     migrate_kernel = subcommands.add_parser("migrate-kernel", help="upgrade a decision-0005 engagement to decision-0006 in place (operator-console-signed, reconciles orphans)")
     migrate_kernel.add_argument("--engagement", type=Path, required=True); migrate_kernel.add_argument("--draft", type=Path, required=True); migrate_kernel.add_argument("--operator-id", required=True); migrate_kernel.add_argument("--recorded-at", required=True); migrate_kernel.add_argument("--reason", required=True); migrate_kernel.add_argument("--executor-id", required=True); migrate_kernel.add_argument("--session-id", required=True); migrate_kernel.add_argument("--attest-synthetic", action="store_true", help="operator-confirm that secret-flagged evidence files are synthetic test references and register them")
     record_cleanup = subcommands.add_parser("record-cleanup", help="apply one exact operator-approved cleanup transition")
-    record_cleanup.add_argument("--engagement", type=Path, required=True); record_cleanup.add_argument("--file", type=Path, required=True); record_cleanup.add_argument("--operator-id", required=True); record_cleanup.add_argument("--recorded-at", required=True); record_cleanup.add_argument("--reason", required=True); record_cleanup.add_argument("--authority-request-id", required=True); record_cleanup.add_argument("--lane-id", required=True); record_cleanup.add_argument("--executor-id", required=True); record_cleanup.add_argument("--session-id", required=True)
+    record_cleanup.add_argument("--engagement", type=Path, required=True); record_cleanup.add_argument("--file", type=Path, required=True); record_cleanup.add_argument("--operator-id"); record_cleanup.add_argument("--recorded-at", required=True); record_cleanup.add_argument("--reason", required=True); record_cleanup.add_argument("--authority-request-id"); record_cleanup.add_argument("--lane-id"); record_cleanup.add_argument("--executor-id", required=True); record_cleanup.add_argument("--session-id", required=True); record_cleanup.add_argument("--scoped", action="store_true", help="use only the signed local inert-effect grant")
     record_prior = subcommands.add_parser("record-operator-prior", help="apply one exact operator-approved prior without establishing truth")
     record_prior.add_argument("--engagement", type=Path, required=True); record_prior.add_argument("--prior-id", required=True); record_prior.add_argument("--prior-statement", required=True); record_prior.add_argument("--strength", choices=["weak", "strong"], required=True); record_prior.add_argument("--operator-id", required=True); record_prior.add_argument("--recorded-at", required=True); record_prior.add_argument("--reason", required=True); record_prior.add_argument("--authority-request-id", required=True); record_prior.add_argument("--lane-id", required=True); record_prior.add_argument("--executor-id", required=True); record_prior.add_argument("--session-id", required=True)
     reopen = subcommands.add_parser("reopen", help="apply one exact operator-approved engagement reopening")
@@ -6080,7 +6374,7 @@ def parser() -> argparse.ArgumentParser:
     memory = subcommands.add_parser("record-memory", help="operator-review and commit one terminal memory disposition without modifying Plane-1")
     memory.add_argument("--engagement", type=Path, required=True); memory.add_argument("--file", type=Path, required=True); memory.add_argument("--operator-id", required=True); memory.add_argument("--authority-request-id", required=True); memory.add_argument("--lane-id", required=True); memory.add_argument("--executor-id", required=True); memory.add_argument("--session-id", required=True)
     close = subcommands.add_parser("close", help="operator-only cleanup, coverage, report, and memory closure gate")
-    close.add_argument("--engagement", type=Path, required=True); close.add_argument("--operator-id", required=True); close.add_argument("--reason", required=True); close.add_argument("--recorded-at", required=True); close.add_argument("--authority-request-id", required=True); close.add_argument("--lane-id", required=True); close.add_argument("--executor-id", required=True); close.add_argument("--session-id", required=True)
+    close.add_argument("--engagement", type=Path, required=True); close.add_argument("--operator-id"); close.add_argument("--reason", required=True); close.add_argument("--recorded-at", required=True); close.add_argument("--authority-request-id"); close.add_argument("--lane-id"); close.add_argument("--executor-id", required=True); close.add_argument("--session-id", required=True); close.add_argument("--scoped", action="store_true", help="use only the signed local inert-effect grant")
     record_review_parser = subcommands.add_parser("record-review", help="atomically commit one independent review and its typed notebook event")
     record_review_parser.add_argument("--engagement", type=Path, required=True); record_review_parser.add_argument("--file", type=Path, required=True); record_review_parser.add_argument("--event", type=Path, required=True); record_review_parser.add_argument("--actor-id", required=True); record_review_parser.add_argument("--session-id", required=True); record_review_parser.add_argument("--signature", type=Path, required=True); record_review_parser.add_argument("--allowed-signers", type=Path, required=True); record_review_parser.add_argument("--attest-synthetic", action="store_true", help="operator-confirm that secret-flagged review input references are synthetic test names and record the review")
 
@@ -6129,6 +6423,7 @@ def _command_handlers() -> dict[str, object]:
             "register-bundle": command_register_bundle,
             "classify-artifact": command_classify_artifact,
             "create-artifact": command_create_artifact,
+            "create-scoped-effect": command_create_scoped_effect,
             "propose-scope": command_propose_scope,
             "reattest-scope": command_reattest_scope,
             "record-cleanup": command_record_cleanup,

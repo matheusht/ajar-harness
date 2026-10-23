@@ -56,7 +56,8 @@ available; live qualification is still pending.
    checks do not qualify a provider or target.
    Any standing permission still needs exact target/model/effect/expiry binding.
    Session setup and each native turn recheck the archived approval bytes and
-   expiry; a rejected turn does not renew approval or shared allowance. An
+   expiry. A source-mode `source-execute` call does the same before a new batch;
+   a rejected call does not renew approval or shared allowance. An
    already-running turn can end after the approval expires, so review its
    effects before further work.
    The runner stages the portable

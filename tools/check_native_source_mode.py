@@ -48,7 +48,36 @@ def contracts():
             pass
         else:
             raise AssertionError('changed original accepted')
-    return ['runtime_schema', 'check_and_control_binding', 'original_source_preserved']
+    with tempfile.TemporaryDirectory(prefix='native-source-approval-') as temp:
+        root = Path(temp).resolve()
+        controls = root / 'controls'
+        controls.mkdir(mode=0o700)
+        plan = {'source_only': {}, 'scope_sha256': 'a' * 64,
+                'provider_route': 'fixture', 'model': 'fixture', 'limits': {}}
+        runner._write_json(root / 'plan.json', plan, once=True)
+        plan_sha = runner._sha(root / 'plan.json')
+        approval = {'kind': 'native-research-live-approval-v1',
+                    'plan_sha256': plan_sha, 'scope_sha256': plan['scope_sha256'],
+                    'provider_route': plan['provider_route'], 'model': plan['model'],
+                    'limits': plan['limits'],
+                    'expires_at': '2000-01-01T00:00:00Z'}
+        runner._write_json(controls / 'approval.json', approval, once=True)
+        runner._write_json(controls / 'activation.json', {
+            'kind': 'native-research-activation-v1', 'plan_sha256': plan_sha,
+            'approval_sha256': runner._sha(controls / 'approval.json')}, once=True)
+        with patch.object(runner, '_verified_plan', return_value=plan), \
+             patch.object(runner, '_plan', return_value=plan), \
+             patch.object(runner, 'run_active', return_value=True), \
+             patch.object(runner, '_unresolved_dispatches', return_value=False):
+            try:
+                runner.source_execute(root)
+            except runner.NativeResearchError as error:
+                assert str(error) == 'research_approval_expired'
+            else:
+                raise AssertionError('expired approval allowed source dispatch')
+        assert not (controls / 'source-executions').exists()
+    return ['runtime_schema', 'check_and_control_binding', 'original_source_preserved',
+            'expired_approval_blocks_source_dispatch']
 
 
 def docker_scenario(image):
@@ -95,6 +124,7 @@ def docker_scenario(image):
                 for name, value in (('_verified_plan', lambda *a, **k: plan),
                                     ('_plan', lambda _: plan),
                                     ('_resources', lambda _: bindings), ('run_active', lambda _: True),
+                                    ('_approval_active', lambda _: None),
                                     ('_activate_controls', lambda _: (native, None)),
                                     ('stop', lambda _: None)):
                     stack.enter_context(patch.object(runner, name, value))

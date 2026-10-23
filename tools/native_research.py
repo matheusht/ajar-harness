@@ -2852,6 +2852,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
         plan = _verified_plan(root)
         if 'source_only' not in plan or not run_active(root) or _unresolved_dispatches(root):
             _fail('source_execution_unavailable')
+        _approval_active(root)
         if owner_role not in ('researcher', 'reviewer-1', 'reviewer-2'):
             _fail('source_owner_invalid')
         command = _validate_target_command(command_file or _controls(root) / 'target-command.json')

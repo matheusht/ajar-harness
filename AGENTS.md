@@ -103,10 +103,9 @@ ADRs live in **`docs/decisions/`**, not `docs/adr/`; use
 bootstrap route and its source-only gate.
 
 **Record lifecycle:** attempt start/finish, bounded negative results, and
-evidence-bundle manifests are being added in
-[PR #193](https://github.com/matheusht/redteam-harness/pull/193). Use
-`docs/research-lifecycle.md` when that change lands; until then, the selected
-route's existing record contract applies.
+evidence-bundle manifests are recorded in
+[research lifecycle](docs/research-lifecycle.md). The selected route's record
+boundary still applies where the lifecycle does not.
 
 ### Engineering skills
 

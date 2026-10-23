@@ -551,3 +551,18 @@ repository-visibility wording, and replaced branch-specific language with the st
 candidate-route name. The attempt/negative/bundle lifecycle is recorded as a forward
 pointer to PR #193 until `docs/research-lifecycle.md` lands. The direction page now
 labels itself as a maintained synthesis rather than an accepted ADR.
+
+## [2026-10-23] correct | Live research-lifecycle citations and overlay pins
+
+PR #193 landed on main. The forward pointer is now the local
+[research lifecycle](../research-lifecycle.md) link in the README, both root mirrors
+and Decision 0005. This stacked branch carries the landed lifecycle document so its
+links resolve before the stack reaches main. Refreshed the draft AB-readiness overlay
+pins after the root guidance edit, and split the synthetic bearer sentinel in the
+native T02 verifier so the repository secret scan does not mistake a negative test
+for a leaked credential.
+
+Verification: `check-conformance.py` reports 898 checks, 0 failing;
+`--engineering-guidance` reports 12/12; changed-document local links and anchors
+resolve; `git diff --check` is clean. No application, controller, provider, target or
+hosted-CI run is part of this correction.

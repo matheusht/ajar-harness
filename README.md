@@ -82,9 +82,8 @@ remain available. New local source research uses the native entry above; this
 source change does not convert, rewrite or grade historical engagements.
 
 The record lifecycle layer (attempt start/finish, bounded negative results and
-evidence-bundle manifests) is landing with
-[PR #193](https://github.com/matheusht/redteam-harness/pull/193); use
-`docs/research-lifecycle.md` when that change lands.
+evidence-bundle manifests) is recorded in
+[research lifecycle](docs/research-lifecycle.md).
 
 ## Conformance (run before promoting any card / casebook change)
 

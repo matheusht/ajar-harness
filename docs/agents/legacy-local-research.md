@@ -28,8 +28,7 @@ Single agent first. The shared browser serializes live work anyway; parallelism 
 Cards live as plain `SKILL.md` under `skills/{vulns,techniques,oracles,patterns}/`. The orchestrator loads
 the **exact** card for the current objective by id (Read the file) — deterministic, not fuzzy
 description-matching, which suits a rigor-first harness. Context stays lean because only the one
-card being fired is opened. The files are valid SKILL.md, so a thin `.claude/skills/` native mirror
-can be added later for auto-discovery with zero rewrite. (Rationale: engine-portable — any runtime
+card being fired is opened. (Rationale: engine-portable — any runtime
 reads markdown; deterministic — the orchestrator, not the model, picks the card.)
 
 ## 4. The runbook (legacy engagement)
@@ -68,8 +67,8 @@ reads markdown; deterministic — the orchestrator, not the model, picks the car
    oracle, finish it with `attempt-finish` and a `cost_status`; an exhausted lane gets
    `record-negative`, never an implied finding. These are notebook records: they grant no authority
    and change no coverage or closure verdict. See [research lifecycle](../research-lifecycle.md).
-6. **Adjudicate & record** — emit `attempt` always, `finding` only when the package warrants a
-   promotion attempt, `pattern` only on manual scrubbed promotion. **A finding is written to
+6. **Adjudicate & record** — after `attempt-finish`, write a finding package only when it warrants a
+   promotion attempt; `pattern` only on manual scrubbed promotion. **A finding is written to
    `unproven/` and has no status field; it reaches `findings/` only by passing the promotion gates**
    (`engine/finding-lifecycle.md`). Hunters write there and move nothing; only the orchestrator
    promotes; any role may demote. Every gate can say no, and a partial package stays in `unproven/`
@@ -99,42 +98,16 @@ Plane-3 authority. Append-only ledgers are authoritative; snapshots and Markdown
 [the implementation architecture](../decision-0005-implementation-architecture.md), its
 [implementation report](../decision-0005-implementation-report.md), and
 [Decision 0006](../decision-0006-agent-autonomous-record-kernel.md) for commands, trust boundaries,
-migration, telemetry, and the precise distinction between conformance, regression parity, and
-efficacy.
+migration, telemetry, and the distinction between conformance, regression parity, and efficacy.
 
-To drain the reducer-owned queue, use `tools/run-work-queue.py run` with absolute canonical paths to
-one target repository and its own `engagements/<id>` directory, plus explicit session-count,
-wall-admission, and per-session timeout bounds. The public CLI requires `--session-backend docker`
-and every Docker resource limit; there is no implicit host-process fallback. Supply an ordered
-reviewer pool by repeating `--reviewer-model`; the driver selects the first model distinct from the
-exact subject origin and required prior reviewer lineage, or pauses once as
-`reviewer_model_unavailable` without launching or retry-spinning.
-
-Before a run may end as `budget_bounded`, freeze the coverage corpus and put the manifest bytes'
-`sha256:...` digest on the exact `Frozen corpus enumeration SHA256` line in `scope.md` before the
-initial scope is signed. A later scope re-attestation cannot introduce or replace this genesis pin.
-After kernel initialization and before the run, register that exact manifest and its linked
-enumeration as engagement artifacts. Pass the registered manifest artifact ID to the driver as
-`--corpus-enumeration-ref <artifact-id>`. Without that value a run that reaches a session or wall
-ceiling returns `operator_required` and does not record `budget_bounded`.
-
-`max_wall_seconds` is the deadline for admitting another action, not permission to cancel a trusted
-record transaction halfway through. An action admitted before that deadline must quiesce; terminal
-reducer state then takes precedence. The result always reports both total `wall_seconds` and any
-`wall_deadline_overrun_seconds`, so a completed in-flight action cannot hide cleanup or commit time.
-
-The driver mounts the exact target at `/workspace`, this harness at `/harness`, and only repeated
-operator-declared regular files at deterministic `/inputs/NNN` paths, all read-only. A PID-1
-supervisor owns every descendant, retains the per-session broker HMAC key behind a local semantic
-relay, and installs the authenticated Stop backstop. The session bridge permits provider egress;
-its removal ends the container's credential and network authority, but cannot undo disclosure that
-occurred before teardown or revoke an upstream token. Use scoped, short-lived model credentials.
-Check the exact host/image, aggregate storage, broker/Stop and CLI contract in the
-[Docker work-queue doc](docker-work-queue.md) and the
-[session-end backstop](session-end-backstop.md); unsupported hosts fail before the model starts.
-
-The retrospective and A/B tools are offline evaluators only. They do not contact targets, authorize
-Zone-2 work, file reports, promote memory/cards, or prove efficacy.
+Queue draining uses `tools/run-work-queue.py run` with canonical target/engagement paths and
+explicit session, wall and timeout bounds. The public CLI requires `--session-backend docker` and
+every Docker resource limit. Before a `budget_bounded` ending, freeze and register the coverage
+corpus and pass its `--corpus-enumeration-ref`; a missing denominator returns `operator_required`.
+`max_wall_seconds` bounds admission, not an already-admitted record transaction, and status reports
+both total wall time and any overrun. The full host/image, broker/Stop, storage, mount and CLI
+contract is in the [Docker work-queue doc](docker-work-queue.md) and the
+[session-end backstop](session-end-backstop.md). Retrospective and A/B tools are offline only.
 
 ## 7. Not yet built (Phase 2+)
 

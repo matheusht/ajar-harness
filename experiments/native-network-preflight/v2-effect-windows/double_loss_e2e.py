@@ -27,15 +27,16 @@ PHP='php@sha256:0d6ec82fde85307fd9c672527017fccf9bac55f254756f035e542f8c566b63c9
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--fault',choices=('both','parent','child'),default='both');ap.add_argument('--stop-failure',action='store_true');ap.add_argument('--log-failure',action='store_true');args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--fault',choices=('both','parent','child'),default='both');ap.add_argument('--stop-failure',action='store_true');ap.add_argument('--log-failure',action='store_true');ap.add_argument('--effect-before-ack',action='store_true');args=ap.parse_args()
     if (args.stop_failure or args.log_failure) and args.fault!='both':ap.error('failure arms require dual loss')
     if args.stop_failure and args.log_failure:ap.error('one failure arm at a time')
+    if args.effect_before_ack and (args.fault!='both' or args.stop_failure or args.log_failure):ap.error('effect-before-ack requires plain dual loss')
     out=args.output.resolve();out.mkdir(mode=0o700,parents=True,exist_ok=False)
     managed=HERE.parents[2]/'evals/native-qualification/smoke/opencode_v2_managed_owned.py'
-    files=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE/'receiver.php',HERE.parent/'v2_connect.py',managed]
+    files=[Path(__file__).resolve(),HERE/'DUAL-LOSS-STOP-OWNER-CHECKS.md',HERE/'POST-EFFECT-NO-ACK-CHECKS.md',HERE/'native_run.py',HERE/'_native_stop_owner.py',HERE/'producer_stop.py',HERE/'receiver.php',HERE.parent/'v2_connect.py',managed]
     sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-    d={'classification':'owned launcher/CONNECT loss E2E; partial T05',
-       'fault':args.fault,'stop_failure':args.stop_failure,'log_failure':args.log_failure,'provider_calls':0,'native_calls':0,'model_inference_requested':False,'checks':[],'resources':[],'cleanup':[],
+    d={'classification':'owned effect-before-ack E2E; partial #161' if args.effect_before_ack else 'owned launcher/CONNECT loss E2E; partial T05',
+       'fault':args.fault,'stop_failure':args.stop_failure,'log_failure':args.log_failure,'effect_before_ack':args.effect_before_ack,'provider_calls':0,'native_calls':0,'model_inference_requested':False,'checks':[],'resources':[],'cleanup':[],
        'source_sha256':{p.name:sha(p) for p in files},'target_boundary_acceptance':False}
     (out/'source').mkdir()
     for p in files:shutil.copyfile(p,out/'source'/p.name)
@@ -83,7 +84,10 @@ def main():
             check('receiver address assigned',wait(lambda:bool(receiver_ip())))
             ip=receiver_ip()
             effect=f'http://{ip}:8080/effect/'
-            command='touch /workspace/PENDING; while test ! -e /workspace/RELEASE; do sleep .02; done; /bin/busybox wget -Y off -qO- --post-data= '+effect+'pre-dispatch > /workspace/ACK; exec sleep 120'
+            effect_case='post-effect' if args.effect_before_ack else 'pre-dispatch'
+            request='/bin/busybox wget -Y off -qO- --post-data= '+effect+effect_case
+            acknowledgement=' > /workspace/ACK.tmp && mv /workspace/ACK.tmp /workspace/ACK' if args.effect_before_ack else ' > /workspace/ACK'
+            command='touch /workspace/PENDING; while test ! -e /workspace/RELEASE; do sleep .02; done; '+request+acknowledgement+'; exec sleep 120'
             producer=run('docker','container','create',*common,
                 '--label','io.llm-redteam-harness.runtime=docker-session-v1','--label','io.llm-redteam-harness.session-nonce='+nonce,
                 '--mount',f'type=bind,src={workspace},dst=/workspace','--entrypoint','sh',IMAGE,'-c',command)
@@ -113,6 +117,13 @@ def main():
                 p=receiver_state/'effects.jsonl';return [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []
             positive=run('docker','exec',producer,'/bin/busybox','wget','-Y','off','-qO-','--post-data=',effect+'positive')
             check('independent receiver positive before loss',positive=='ACK:positive' and rows()==[{'case':'positive','effect':'inert_append'}])
+            if args.effect_before_ack:
+                (workspace/'RELEASE').touch()
+                check('independent effect committed before host loss',wait(lambda:rows()==[
+                    {'case':'positive','effect':'inert_append'}, {'case':'post-effect','effect':'inert_append'}]))
+                check('effect reached before acknowledgement',not (workspace/'ACK').exists() and not (receiver_state/'response-attempted').exists())
+                d['effect_before_fault']={'receiver_rows':rows(),'client_ack_present':(workspace/'ACK').exists(),
+                                          'receiver_response_attempted':(receiver_state/'response-attempted').exists()}
             if args.log_failure:(state/'stop-owner.jsonl').chmod(0o000)
             d['fault_monotonic']=time.monotonic()
             if args.fault=='both':
@@ -138,6 +149,13 @@ def main():
             else:
                 check('managed readback accepts exact run freeze without provider event ordering',
                       proof['run_verified'] and proof['exact_producers_stopped'])
+                if args.effect_before_ack:
+                    (receiver_state/'release-post-effect').touch();d['response_release_monotonic']=time.monotonic()
+                    response_marker=receiver_state/'response-attempted'
+                    check('receiver attempted held response after freeze',wait(lambda:response_marker.exists() and response_marker.read_text()=='after-release'))
+                    check('client still has no acknowledgement after freeze',not (workspace/'ACK').exists())
+                    d['after_response_release']={'receiver_marker':response_marker.read_text(),
+                                                 'client_ack_present':(workspace/'ACK').exists(),'receiver_rows':rows()}
                 with sqlite3.connect(out/'provider/tunnel.sqlite3') as db:
                     provider_frozen=db.execute("SELECT count(*) FROM events WHERE kind='producer_set_frozen'").fetchone()[0]
                 d['provider_frozen_event_count']=provider_frozen
@@ -172,25 +190,31 @@ def main():
                 check('managed readback keeps provider closure separate',
                       stop_proof(provider_path=provider_copy)['run_verified'] and
                       not stop_proof(provider_path=provider_copy)['provider_admission_closed'])
-            (workspace/'RELEASE').touch();d['gate_release_monotonic']=time.monotonic()
-            wait(lambda:any(r['case']=='pre-dispatch' for r in rows()),seconds=2)
+            if not args.effect_before_ack:
+                (workspace/'RELEASE').touch();d['gate_release_monotonic']=time.monotonic()
+                wait(lambda:any(r['case']=='pre-dispatch' for r in rows()),seconds=2)
             fresh=subprocess.run(['docker','exec',second if args.stop_failure else producer,'/bin/busybox','wget','-Y','off','-qO-','--post-data=',effect+'pre-ack'],capture_output=True,text=True,timeout=5)
             d['fresh_attempt']={'returncode':fresh.returncode,'stdout':fresh.stdout,'stderr':fresh.stderr}
             d['receiver_rows']=rows();check('receiver survives dual loss',inspect('container',receiver)['State']['Running'])
             before=d['before_gate_release'];safe=all(not s['Running'] or s['Paused'] for s in before['producer_states'].values())
             revoked=json.loads((state/'REVOKED').read_text()) if before['markers']['REVOKED'] else {}
             stopping=json.loads((state/'STOPPING').read_text()) if before['markers']['STOPPING'] else {}
-            d['target_boundary_acceptance']=safe and before['markers']['STOP_REQUEST'] and before['markers']['STOPPING'] and before['markers']['REVOKED'] and not before['markers']['UNSAFE'] and revoked.get('producers_verified_stopped') is True and stopping.get('monotonic',float('inf'))<=revoked.get('monotonic',float('-inf')) and all(r['case']=='positive' for r in rows()) and fresh.returncode!=0
+            expected_rows=[{'case':'positive','effect':'inert_append'}]
+            if args.effect_before_ack:expected_rows.append({'case':'post-effect','effect':'inert_append'})
+            d['target_boundary_acceptance']=safe and before['markers']['STOP_REQUEST'] and before['markers']['STOPPING'] and before['markers']['REVOKED'] and not before['markers']['UNSAFE'] and revoked.get('producers_verified_stopped') is True and stopping.get('monotonic',float('inf'))<=revoked.get('monotonic',float('-inf')) and rows()==expected_rows and fresh.returncode!=0
             if args.stop_failure:
                 check('stop failure remains unsafe without false revocation',before['markers']['STOPPING'] and before['markers']['UNSAFE'] and not before['markers']['REVOKED'] and not safe and fresh.returncode==0 and any(r['case']=='pre-ack' for r in rows()))
             elif args.log_failure:
                 check('log failure still freezes but keeps unsafe',safe and before['markers']['STOPPING'] and before['markers']['UNSAFE'] and
                       not before['markers']['REVOKED'] and all(r['case']=='positive' for r in rows()) and fresh.returncode!=0)
+            elif args.effect_before_ack:
+                check('verified stop preserves observed effect without ACK or duplicate',d['target_boundary_acceptance'] and not (workspace/'ACK').exists())
             else:check('verified exact stop blocks pending and fresh effects',d['target_boundary_acceptance'])
             check('stop owner exits after CONNECT loss',wait(lambda:absent(stop_owner),seconds=5))
             check('research retained unchanged',sha(research)==research_hash);shutil.copyfile(research,out/'research.txt')
             if (receiver_state/'effects.jsonl').exists():shutil.copyfile(receiver_state/'effects.jsonl',out/'effects.jsonl')
-            d['status']='dual_loss_stop_failure_unsafe_partial_T05' if args.stop_failure else ('dual_loss_log_failure_unsafe_partial_T05' if args.log_failure else args.fault+'_loss_boundary_pass_partial_T05')
+            if args.effect_before_ack:shutil.copyfile(receiver_state/'response-attempted',out/'response-attempted')
+            d['status']='dual_loss_stop_failure_unsafe_partial_T05' if args.stop_failure else ('dual_loss_log_failure_unsafe_partial_T05' if args.log_failure else ('effect_before_ack_boundary_pass_partial_issue_161' if args.effect_before_ack else args.fault+'_loss_boundary_pass_partial_T05'))
     except Exception as error:d['status']='failed_or_unavailable';d['error']=type(error).__name__+': '+str(error)
     finally:
         if 'state' in locals() and (state/'stop-owner.jsonl').exists():(state/'stop-owner.jsonl').chmod(0o600)

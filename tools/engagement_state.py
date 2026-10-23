@@ -3735,7 +3735,8 @@ def _append_kernel_event(engagement: Path, proposal: dict[str, Any], *, lock_hel
         event_type = proposal.get("event_type")
         payload = proposal.get("payload", {})
         if event_type == "authority.requested" and payload.get("action_kind") == "revise-finding":
-            action = load_json(engagement / str(payload.get("action_path", "")))
+            action_path = payload.get("action_path")
+            action = load_json(engagement / action_path) if isinstance(action_path, str) and action_path else {}
             if action.get("action_version") != 2 or action.get("proposal", {}).get("filing_contract", {}).get("version") != 1:
                 raise RecordError("canonical_filing_contract_required", proposal["event_id"])
             require_original_filing_observations(action["proposal"])

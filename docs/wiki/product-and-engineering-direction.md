@@ -74,10 +74,10 @@ proves neither superiority nor inferiority.
 | Concern | What must change | Evidence needed |
 | --- | --- | --- |
 | Continuation and recovery | Work resumes with the correct material state, authority, remaining allowance, and unresolved effects. | Actual interruption/recovery evidence. Repeated dispatch proves only that dispatch continued. |
-| Adaptation within a run | Observations change the explanation or next useful test when warranted. | Adaptive test selection needs a prediction, observation, and executed discriminating follow-up. A causal-revision claim additionally needs a changed explanation supported by that follow-up. A changed condition or successful retry alone does not prove causal revision. |
+| Adaptation within a run | Observations change the explanation or next useful test when warranted. | Adaptive test selection needs a prediction, observation, and executed discriminating follow-up. A causal-revision claim also needs a changed explanation supported by that follow-up. A changed condition or successful retry alone does not prove causal revision. |
 | Harness improvement across runs | A methodology, tool, model, or implementation change improves results. | Protected evaluation, a justified baseline, full costs, retained negative results, and independent validation. This remains separate from ordinary research. |
 
-The October discussion's use of “hill climbing” primarily concerned adaptation
+The October discussion's use of "hill climbing" primarily concerned adaptation
 within an investigation. It did not approve self-editing evaluators, training,
 automatic methodology promotion, or a new harness-optimization service.
 [Decision 0004](../decisions/0004-epistemic-autonomy-complexity-budget.md) continues to
@@ -122,7 +122,7 @@ settles its tested conditions. A blocked environment supplies no security verdic
 An unfinished strong lead stays visible. A supported primitive does not establish
 an unsupported larger claim, and it does not require abandoning that larger question.
 
-“Exhaust all surfaces” expresses a depth aspiration. On an open-world target,
+"Exhaust all surfaces" expresses a depth aspiration. On an open-world target,
 report the surfaces and conditions actually examined, decisive controls, access
 limits, and remaining uncertainty. A time allowance is a ceiling. Neither a long
 run nor a no-finding ending proves absence of vulnerabilities.

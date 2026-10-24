@@ -1,18 +1,58 @@
 # engine/finding-lifecycle.md — findings start unproven
 
-## 1. The rule
+## 1. The local filing-boundary draft
 
-A finding is written to `unproven/`. It has no status field. It has a **location**.
+**Current operational hold:** no qualified original-observation producer exists.
+New `supported`/`confirmed` authority requests, revision commits and activations
+are refused with `filing_original_observation_unavailable`, even if the positive
+claim is legitimate and its review/operator signatures are valid. Signed refuted/
+contaminated filings and historical replay remain available. This prevents the
+known contradictions from becoming new active positives; it does not implement
+an accepting truthful-positive path or qualify #85 for production use.
 
-The location changes only by running `promote`, which runs gates. Any gate can say no. A finding
-that does not pass stays where it is.
+The original limitation motivating that hold is recorded below.
 
-```
-engagements/<id>/
-  unproven/<FINDING_ID>/     every finding starts here
-  findings/<FINDING_ID>/     a finding arrives here only through promote
-  lifecycle.jsonl            append-only record of every promote and demote
-```
+**#85 remains incomplete; this patch is for independent review.** G3/G6 use
+signed finding declarations bound to attempt references. Existing attempts contain
+no original typed execution-privilege or impact-state-origin observation. A review
+can therefore sign `proven: authenticated-user` or `mode: real-path` even when a raw
+artifact describes root execution or injected impact state, and the previous draft could not
+mechanically detect that contradiction. Current admission therefore refuses all
+new positive filings instead of trusting that declaration. Free-text `reachability_basis` does not
+establish background-state reachability. These are signed-review assertions, not
+full retained-gate equivalence or adoption/retirement qualification.
+
+The runtime behavior of the draft follows.
+
+New filings use finding-v3 with `filing_contract.version: 1`. The operator approves
+an exact v2 `revise-finding` action through `request-authority` and signed
+`resolve-authority`; `settle-approved-revision` or `revise-finding` applies it.
+Both commands share `_apply_finding_revision`; the kernel append boundary and
+reducer enforce the same versioned contract. An old action version cannot authorize
+a new activation. Historical signed revisions replay with their original semantics.
+
+`findings/<id>/rev-N.json` is immutable storage. Active membership comes only from
+its `record.committed` plus validated `finding.revised` event, with matching bytes,
+current scope/environment, lane, principal/session, exact adjudication and unconsumed
+operator approval. The approval retains an SSH proof over its action digest and
+ledger prefix. A directory name, package gate result or unsigned `attest.json` is
+never activation. Legacy `promote` always refuses, including with environment/file
+waivers. Package `gates` is explicitly advisory historical inspection.
+
+Filing records the actual claim state. `supported` remains nonterminal; inferred or
+unproven impact remains labelled and uncertainty is retained. `refuted` and
+`contaminated` can retain negative evidence without successful exploit proof. These
+states require the same exact independent review and signed authority. `needs_review`
+remains notebook/unproven work or a signed legacy import, not a newly fileable state.
+
+The writer holds the existing identity-bound engagement lock. It writes and fsyncs
+immutable revision bytes, commits the record, then appends the activation. All gates
+are validated before append. Staging without activation is inert; only the exact
+expected orphan path is admitted during recovery. Identical retries complete a
+missing commit/activation or rebuild projections after activation, without overwriting
+bytes or consuming authority twice. Conflicting bytes fail closed. A torn ledger
+append fails closed and uses the existing signed tail-repair workflow. Process-kill
+checks are local process-crash evidence, not physical power-loss qualification.
 
 ## 2. Why the default matters
 
@@ -34,33 +74,39 @@ does not run is a silent block, so a broken run produces nothing. Choose the fai
 written straight into `findings/` with `claim_state: supported` set by the script that created them.
 Nothing objected, because nothing had to. See `fixtures/preregistration/spotify-phase2-OUTCOME.md`.
 
-## 3. Who may move a finding
+## 3. Proposal, filing and safety demotion
 
-| action | role | why |
-|---|---|---|
-| write to `unproven/` | hunter, orchestrator | a hunter may propose, never confirm (`docs/agents/legacy-local-research.md` §2) |
-| `promote` | **orchestrator only** | this is decision selection, the stage that stays human-supervised |
-| `demote` | **any role, any time** | a wrong demote costs a re-review; a wrong promote reaches a vendor |
+Hunters and orchestrators may retain proposals and partial packages in `unproven/`.
+The broker files only the exact independently reviewed, operator-approved canonical
+revision. Any role may still run `finding_lifecycle.py demote` on a **legacy package**;
+this removes its old promoted location without asserting new positive evidence.
+A package containing immutable `rev-N.json` history cannot be moved. Kernel findings
+use independent claim review and a signed successor disposition, preserving history.
 
-Promote is hard and demote is easy on purpose. The costs are not symmetric, so the friction should
-not be either.
+## 4. Gate checks and missing evidence in contract v1
 
-The orchestrator running `promote` is necessary and **not sufficient**. The orchestrator is what
-fabricated the adjudication in the case above. The gates therefore check things that cannot be
-satisfied by writing more text.
+| Gate | Enforced input and meaning | Kind and limit |
+| --- | --- | --- |
+| GQ | Bound, non-quarantined source throughout the locked transaction | Mechanical source admission |
+| GK | Attested scope, current usable environment and validated ledger; no empty-ledger or ambient waiver | Mechanical authority/provenance, not truth |
+| G0 | Canonical schema, typed references, committed records and artifact-byte digests | Mechanical identity/existence, not prose path scanning |
+| G1 | Fresh primary attempts with non-model evidence and exact scope/environment; per-claim mappings | Mechanical record checks; causal truth remains reviewed |
+| G2 | Distinct linked held/no-signal negative control and signalling replay, per-claim binding, declared fresh state and reviewed applicability/freshness | Mechanical bindings plus signed human/reviewer attestations |
+| G3 | Finding-declared `filing_contract.privilege_context`, rank and primary/replay refs | Signed-review assertion; no original typed execution-position observation to compare |
+| G4 | Exact proposal digest in an independent authenticated review, retained SSH proof, recomputed input hash and committed corpus audit | Signature/identity checks plus a separate generation heuristic; clear is not proof of thoughtful judgement |
+| G5 | `CVSS:3.1` vector recomputes to numeric score and severity label, or informational `none` with no score/vector | Mechanical recomputation; unsupported systems fail closed |
+| G6 | Finding-declared impact-state mode/refs and free-text background reachability bases | Signed-review assertion; explicit synthesized mode blocks, but signed relabelling is not checked against original typed state observations |
 
-## 4. The gates
+G1/G2/G3/G6 positive-success checks remain defined for historical `supported` and
+`confirmed` replay. New positive admission additionally remains unavailable until
+a qualified original-observation collector/oracle exists.
+Negative-state filings preserve evidence identity, scope/environment, review and
+severity checks, but do not invent a successful primary/replay or clean contamination.
+Negative states label impact `not_demonstrated` and use informational `none` severity;
+contaminated records explicitly retain present/unresolved contamination.
 
-`tools/finding_lifecycle.py gates PACKAGE` runs them without moving anything.
-
-| gate | question | kind |
-|---|---|---|
-| G0 | does every path the package cites exist? | computable |
-| G1 | is a primary attempt named, and real execution attested? | computable + attestable |
-| G2 | does a distinct control ref resolve to a `negative_control` attempt with a held/no-signal outcome, and is it attested? | computable + attestable |
-| G3 | did the proof run at or below the claimed attacker privilege? | computable |
-| G4 | is the adjudication judgement rather than generation? | computable |
-| G5 | does a claimed severity carry a CVSS vector that recomputes? | computable |
+The following package-gate explanations describe historical inspection semantics.
+Their unsigned declarations and legacy carve-outs do not authorize new filings.
 
 ### G2 — the control-role gate
 
@@ -123,18 +169,19 @@ never show all three signals. Running the gates over the eleven spotify findings
 G4 on all eleven, while the engagement's 15-review corpus audited `synthetic`. If the corpus was
 generated, no finding resting on it may promote.
 
-## 5. The package
+## 5. Canonical records and historical packages
 
-```
-unproven/<FINDING_ID>/
-  finding.json      the finding record; v1 flat and v3 nested are both read
-  attest.json       the references the attestable gates require
-  REPORT.md         the writeup
-  reviews/*.json    claim_adjudication reviews
-```
+`filing_contract` contains typed privilege context and impact-state provenance.
+Both bind referenced evidence to the signed review's exact `finding_digest`.
+The review's committed signature proves its declared reviewer identity; it does not
+prove the reviewer performed the experiment. G4 audits only committed review inputs
+at the relevant ledger prefix, so future reviews cannot retroactively change a gate.
 
-`finding.json` must carry `privilege_context`. Without it, G3 blocks — a finding that does not say
-what position it was proven from has not been proven.
+Historical `finding.json`, `attest.json`, reports and reviews remain readable.
+`gates PACKAGE` can inspect them. `status` reports reducer-derived canonical claim
+states and labels unauthenticated stored packages `stored-unverified`, never proven.
+The reference index resolves stored revisions but grants no filing authority.
+Signed legacy migration preserves `needs_review` and never manufactures proof.
 
 ## 5b. Partials live in `unproven/`. That is what it is for.
 
@@ -200,6 +247,11 @@ can answer yes or no in one reading. A ceiling nobody asked about is a finding w
 It does not decide whether a vulnerability is real. It decides whether the package's own claims
 survive mechanical checking, which is the same boundary `tools/score_finding.py` draws.
 
+A bounded negative research result (`record-negative`, `docs/research-lifecycle.md`) is not a
+finding revision: it is a notebook event citing attempts, limits and residual candidates. Filing a
+`refuted` or `contaminated` claim still requires the independently reviewed, operator-approved
+revision described above; recording a negative result neither files a finding nor demotes one.
+
 Novelty, reportability, and attribution stay at Stage 5.25. Zone-2 artifacts and the operator's
 review before submission are unchanged and are not gates in this file
 (`engine/autonomy.md` §2 — those two do not graduate).
@@ -210,6 +262,5 @@ The way to run more of this unattended is **not** to trust the model more. It is
 judgement into decidable checks. Every check that becomes computable is autonomy gained while
 trusting nothing extra.
 
-G3 was judgement until 2026-08-10. G4 was judgement until 2026-08-09. Both are now gates. The next
-candidates are G1 and G2, which are attestable today and could become computable once attempt records
-carry a machine-readable execution context.
+The legacy G3 rank check was added on 2026-08-10. The legacy G4 heuristic was added on 2026-08-09. Neither establishes causal truth. The next
+candidates are G1 and G2, whose remaining execution-truth assertions still need independent evidence beyond their typed record checks.

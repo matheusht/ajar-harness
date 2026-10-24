@@ -50,16 +50,30 @@ Before creating **any** real PoC artifact (worm/exfil chain/etc.):
    creates a harmful artifact autonomously, even when the category is authorized, AND
 3. the artifact is contained (inert where possible) and logged in `cleanup.md`.
 
-## 5. Review and filing gates
-`record-review` commits an external independent review and its typed event through one canonical
-Notebook boundary. The event truthfully names the broker that committed it and separately binds the
-reviewer/run identity in the immutable review. Independence, current subject, controls, replay, and
-claim tuple remain reducer-validated. A review cannot file a finding.
+## 5. Filing-boundary draft (#85 incomplete)
 
-`revise-finding` is a separate Authority operation: an approved exact digest lets the broker commit
-one contiguous revision, while operator authority, reviewer adjudication, evidence, and filing remain
-distinct. Regrade and Pocinator review truth/proof; report acceptance remains another operator-owned
-transition. Severity escalation (self → stored/persistent → cross-user) remains rung-by-rung.
+G3/G6 declarations and evidence-reference bindings are insufficient for new filing.
+New supported/confirmed request, commit and activation admission is held with
+`filing_original_observation_unavailable`; legitimate positive filings are blocked too.
+The attempt schema has no original typed execution privilege or impact-state-origin
+signal. Relabelling raw root/injected evidence as low-privilege/real-path passed in the
+previous draft after signatures; the current hold refuses new positives instead. The draft is not full gate equivalence or
+adoption qualification. Exact failing evidence is recorded in the implementation worktree.
+
+`record-review` records the independent review and typed event. For new filings,
+its `finding_digest` names the exact proposal and its commit retains the reviewer
+SSH proof. `request-authority` accepts only a v2 exact finding action with filing
+contract v1. Signed `resolve-authority` binds it to the ledger prefix; both
+`settle-approved-revision` and `revise-finding` use one locked activation boundary.
+The reducer repeats the retained GQ/GK/G0–G6 contract before deriving active state.
+See [the gate mapping and applicability](finding-lifecycle.md#4-gate-checks-and-missing-evidence-in-contract-v1).
+
+Mechanical signature/reference/rank/severity checks, signed execution assertions,
+and the G4 generation heuristic remain distinct. An unsigned `attest.json`, actor
+string, empty ledger, ambient kernel waiver or file waiver never authorizes filing.
+Historical inspection remains advisory; historical signed records retain their
+original replay semantics. The local draft refuses legacy promotion. Any role may demote a
+legacy package; immutable canonical revisions use reviewed signed dispositions.
 
 ## 6. Cleanup gate
 Every artifact the harness created (test chat, shared object, uploaded fixture, planted canary) is

@@ -102,7 +102,12 @@
         "authority.expired",
         "authority.resolved",
         "scope.amendment_proposed",
-        "artifact.classified"
+        "artifact.classified",
+        "attempt.started",
+        "negative_result.recorded",
+        "provenance.recorded",
+        "coverage.lane_recorded",
+        "reproducibility.recorded"
       ]
     },
     "entity_refs": {
@@ -587,6 +592,35 @@
             }
           }
         },
+        "filing_contract_version": {
+          "const": 1
+        },
+        "review_signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_digest",
+            "signature_base64",
+            "allowed_signers_base64",
+            "signer_fingerprint"
+          ],
+          "properties": {
+            "challenge_digest": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            },
+            "signature_base64": {
+              "type": "string",
+              "minLength": 1
+            },
+            "allowed_signers_base64": {
+              "type": "string",
+              "minLength": 1
+            },
+            "signer_fingerprint": {
+              "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+            }
+          }
+        },
         "operator_signature": {
           "type": "object",
           "additionalProperties": false,
@@ -902,6 +936,21 @@
         },
         "observed_state_hash": {
           "$ref": "https://llm-redteam-harness.local/schemas/research-common.schema.json#/$defs/sha256"
+        },
+        "attempt": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/attempt_start"
+        },
+        "negative_result": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/negative_result"
+        },
+        "provenance": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/provenance"
+        },
+        "coverage": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/coverage"
+        },
+        "reproducibility": {
+          "$ref": "https://llm-redteam-harness.local/schemas/research-lifecycle.schema.json#/$defs/reproducibility"
         }
       }
     },
@@ -2035,6 +2084,76 @@
         "properties": {
           "payload": {
             "required": ["draft_digest", "draft_path", "supersedes_scope_hash"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "attempt.started"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "attempt"],
+            "properties": {"status": {"const": "started"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "negative_result.recorded"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "negative_result"],
+            "properties": {"status": {"const": "bounded"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "provenance.recorded"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "provenance"],
+            "properties": {"status": {"const": "recorded"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "coverage.lane_recorded"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "coverage"],
+            "properties": {"status": {"const": "recorded"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"event_type": {"const": "reproducibility.recorded"}},
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": ["entity_id", "status", "reproducibility"],
+            "properties": {"status": {"const": "recorded"}}
           }
         }
       }

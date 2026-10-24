@@ -1,5 +1,14 @@
 # Decision 0006 — the record kernel is the agent's notebook, not the operator's checkpoint
 
+For the **local #85 finding-activation draft**, [decision 0013](decisions/0013-canonical-filing-contract.md)
+and `engine/finding-lifecycle.md` describe the signed contract-v1 boundary. G3/G6 lack original typed attempt/state
+observations; new positive filings are unavailable, including legitimate ones.
+This interim hold is incomplete and does not qualify adoption.
+Both canonical CLI routes share it; old action versions are replay-only for filing.
+Immutable storage alone grants no proof or active membership. Negative/nonterminal
+claim states and historical replay retain their explicit semantics.
+
+
 **Status:** proposed; interim experiment exists, but the design below is not yet implemented
 
 **Relationship:** refines Decision 0005's authority boundary; does not weaken signed scope, independent adjudication, Zone-2, cleanup, reporting, submission, memory, or closure gates

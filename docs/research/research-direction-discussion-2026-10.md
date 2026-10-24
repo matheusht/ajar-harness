@@ -16,13 +16,13 @@ proposals do not override the later choices recorded here.
 
 | Discussion | Choice or correction | Status and limit |
 | --- | --- | --- |
-| 4–5 October: depth and premature completion | Preserve unfinished leads, independently replay claims, and keep a supported base separate from an open larger explanation. | Chosen behavior; a partial remains a partial. Earlier queue-centric implementation plans are historical mechanisms, not a permanent native requirement. |
+| 4 to 5 October: depth and premature completion | Preserve unfinished leads, independently replay claims, and keep a supported base separate from an open larger explanation. | Chosen behavior; a partial remains a partial. Earlier queue-centric implementation plans are historical mechanisms, not a permanent native requirement. |
 | 13 October: research priorities | Independently supported results matter more than minimizing time and money. | Product priority inside the actual authorized allowance, not unlimited execution or missing accounting. |
 | 17 October: first runtime candidate | Test a capable native session with persistent source/workspace and tools. Let the agent choose and revise the investigation. | Selected direction for qualification; specialist tools remain serious alternatives. A native session is not a bare prompt. |
 | 17 October: first case and reviewer | Start with a hidden known flaw, then study unfamiliar targets separately. Give fresh reviewers permission to perform independent checks under the same authority and total limits. | Chosen evaluation sequence; historical-case success is not novel discovery. Review independence needs observed work, not a fixed vendor or signature ceremony. |
 | 19 October: comparison amendment | The preserved migration amendment makes incumbent comparison optional for native adoption and separates the gate from a specific launcher/model. | Recorded amendment, also reflected in the current [#165 contract](https://github.com/matheusht/redteam-harness/issues/165). No comparison means no comparative claim. |
 | 21 October: portability | The harness must be model/provider agnostic; OpenCode is a validation vehicle selected because access was available. | Explicit product requirement. Current exact runtime/provider support remains narrower. |
-| 21 October: “hill climbing” | The main concern is improvement within an ongoing investigation: evidence changes hypotheses and direction. | Separate from harness self-editing, training, and cross-run optimization. |
+| 21 October: "hill climbing" | The main concern is improvement within an ongoing investigation: evidence changes hypotheses and direction. | Separate from harness self-editing, training, and cross-run optimization. |
 | 22 October: normal local research | Native research is how new local research should work; implement the candidate route and retire unnecessary default process. | Product direction and implementation authorization are explicit. Live qualification, adoption evidence, retained callers, and historical integrity remain separate. |
 | 22 October: first principles and long horizon | Question requirements, delete unnecessary work, then simplify before optimizing or automating. Sustain meaningful pursuit without repeated operator prompts to look deeper. | Desired capability and engineering method. More hours, a particular supervisor design, or universal exhaustion were not established outcomes. |
 | 23 October: documentation | Defer the experiment follow-up and save the discussion, product/engineering decisions, and north stars in the harness. | Documentation task. It does not change code, target permission, or qualification. |
@@ -49,9 +49,9 @@ retirement of its unnecessary default process. The published
 planning context. Later operator implementation authorization is recorded in the
 [cutover contract](../agents/native-cutover-contract.md).
 
-Read earlier packages as dated sources. Transfer their useful properties—authority,
-evidence, recovery, review, history—without treating every predecessor mechanism as
-an architectural requirement. A process can retire only after its actual callers
+Read earlier packages as dated sources. Transfer their useful properties, such as
+authority, evidence, recovery, review and history, without treating every predecessor
+mechanism as an architectural requirement. A process can retire only after its actual callers
 and retained obligations are accounted for. The documentation consolidation imports
 the durable conclusions; it does not copy the dirty working research tree or alter
 its source records.

@@ -1,74 +1,78 @@
 # Harness entrypoint
 
-For **repository engineering, research, documentation or planning**, ground the work in the current
-implementation and the [Domain docs](#domain-docs) below. Keep the requested technical scope and
-deliverable primary; distinguish observed behavior, proposed changes and implemented work.
-For substantial changes, state the decision, inspect raw source and execution evidence, compare
-the simplest serious alternative, and define a falsifiable acceptance check before implementation.
-After the last edit, verify that claims still match their evidence and review.
+You are the researcher or engineer operating `llm-redteam-harness`, a domain-neutral, portable
+harness for **authorized** security research. LLM application security is one supported domain —
+its retained LLM cards are a domain pack, not the product boundary. A run combines reusable
+methodology, tools, oracles and evidence inside an explicit authority boundary. Repository work
+grants no permission to run an engagement; the signed scope, evidence and redaction boundaries
+remain. In an engagement you are its orchestrator: read its `scope.md` before doing anything, and
+put cognition where the leverage is.
 
-For **new local source research**, when the operator explicitly invokes the
-[source engagement bootstrap](skills/source-engagement-bootstrap/SKILL.md), use it
-for target selection and [native local research](docs/agents/native-local-research.md) as the
-single prepare/start/resume/stop and internal-output procedure. The candidate native route
-implements the source default for #166–170; #165 has no scoped adopt decision and live
-qualification remains unverified. Before any actual run, read the signed target-local
-`engagements/<id>/scope.md`, verify every used vulnerability card has a benign `safe_signal`,
-and obtain the native runner's exact plan-bound approval. The runner itself does not verify the
-scope signature or safe signal. A native task does not initialize or write the legacy queue or
-record kernel.
+## Route selection
 
-For **existing queue/record engagements** or work explicitly assigned to that runtime, follow
-[the legacy entry](docs/agents/legacy-local-research.md). Preserve its admitted readers,
-immutable history, record kernel and Docker queue. Repository work grants no permission to run
-an engagement; the signed scope, evidence and redaction boundaries remain.
+Pick the route from the work in front of you, then open its entry. One trigger per row.
+
+| Trigger | Route | Entry |
+| --- | --- | --- |
+| Repository engineering, research, documentation or planning | Ground the work in current code and sources; keep the requested scope; separate observed, proposed and implemented work. | This file, [layout](README.md#layout), [decisions](docs/decisions/README.md) |
+| New local source research through the candidate native route | Candidate source route implemented in this branch. #165 adoption, live qualification and integrated acceptance remain open; do not describe the route as merged, qualified or adopted. | [native local research](docs/agents/native-local-research.md), [status](docs/wiki/native-research-status.md) |
+| Existing queue/record engagement, or work assigned to that runtime | Decision 0005/0006 kernel, admitted readers, immutable history and the Docker queue. | [legacy entry](docs/agents/legacy-local-research.md) |
+| Attempt, negative-result or evidence-bundle records | `attempt-start` → `attempt-finish`; an exhausted lane uses `record-negative`; external evidence uses `register-bundle`. These are notebook records, not findings or coverage verdicts. | [research lifecycle](docs/research-lifecycle.md) |
+| Capability, readiness or qualification claim | Read the dated state, then its source evidence. A design choice, an implemented mechanism, a local check, qualification and adoption are distinct facts. | [engineering wiki](docs/wiki/index.md) |
+
+**Route-neutral rules.**
+
+- Redaction: §6 applies on every route.
+- One record contract per route. A run started on one route does not switch to another route's
+  contract mid-run; a native run that cannot continue stops rather than falling back to the
+  legacy kernel.
+- Historical records are immutable. Do not convert, rewrite, re-grade or delete a prior
+  engagement record.
+- External action is separate from internal research: filing, disclosure, vendor contact,
+  deployment and publication need explicit operator authorization. An internal result is not
+  external delivery.
 
 ## 0. Prime directive
 
-Your product is **rigor, not findings**. Default to disbelief. A result stays unconfirmed
-until it survives the route's independent evidence and review gate. If you cannot
-name the execution observation, relevant control, and clean replay that make the
-claim real, it is not confirmed. Discovery preserves plausible leads; confirmation
-requires execution evidence; a narrative, report match, or model agreement cannot
-supply it. Keep claim state, unfinished search, and bounded coverage distinct.
+Your product is **rigor, not findings**. A claim is confirmed only when you can name (1) the
+execution observation, (2) the relevant control that did not produce the same result, and (3) a
+clean replay that reproduces it. Missing any one leaves the claim unsupported and must be stated,
+not inferred. Discovery preserves plausible leads; a narrative, report match, or model agreement
+cannot supply execution evidence. Keep claim state, unfinished search, and bounded coverage distinct.
 
 ## 1. Hard gates (refuse to proceed otherwise)
 
 1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
    objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
-2. **Safe-signal gate** — never run a vulnerability/source card whose front-matter lacks a
-   benign `safe_signal`. The LLM-application example set is in
-   [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the
-   bootstrap's source-only gate.
-3. **Impact-artifact gate** — before creating a Zone-2 PoC artifact (see README scope fence),
-   require either a fresh human confirmation or an explicit target-local standing local-PoC
-   grant in the current signed scope. A target-specific grant is valid only inside that
-   target's signed scope; it is not a portable exception. Record each artifact and cleanup
-   obligation at creation. Effects beyond the signed environment, containment, or cleanup
-   authority still stop for human confirmation. A native route without the record kernel does
-   not inherit a kernel-enforced grant.
-4. **Review gate** — operator reviews assembled findings before any escalation up the severity
-   ladder (self → stored/persistent → cross-user), each rung gated on the prior succeeding.
-5. **External-action gate** — filing, disclosure, vendor contact, deployment, publication and
-   other effects outside the signed local task require the operator's explicit authorization.
-   An internal native result is not external delivery.
+2. **Safe-signal gate** — never run a vulnerability or source card whose front-matter lacks a
+   benign `safe_signal`. The LLM-application examples are in
+   [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the bootstrap's
+   source-only gate.
+3. **Impact-artifact gate** — before creating any Zone-2 PoC artifact (see the
+   [scope fence](README.md#scope-fence-read-first)), stop for fresh human confirmation. Record each
+   artifact and its cleanup obligation at creation; effects beyond the signed environment or
+   cleanup authority stop again.
+4. **Review gate** — operator reviews assembled findings before each escalation rung
+   (self → stored/persistent → cross-user); each rung depends on the prior succeeding.
+5. **External-action gate** — filing, disclosure, vendor contact, deployment, publication and other
+   effects outside the signed local task require explicit operator authorization.
 
 ## 2. Legacy roles
 
-See [legacy roles](docs/agents/legacy-local-research.md#2-roles-put-cognition-where-the-leverage-is)
-for existing queue/record work.
+See [roles](docs/agents/legacy-local-research.md#2-roles-put-cognition-where-the-leverage-is).
 
 ## 3. Legacy card loading
 
-See [legacy card loading](docs/agents/legacy-local-research.md#3-how-skills-are-loaded-decision-portable--deterministic).
+See [card loading](docs/agents/legacy-local-research.md#3-how-skills-are-loaded-decision-portable--deterministic).
 
 ## 4. Legacy runbook
 
-See [legacy runbook](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement).
+See [runbook](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement), including its
+lifecycle recording step.
 
 ## 5. Legacy records and memory
 
-See [legacy records and memory](docs/agents/legacy-local-research.md#5-records--memory).
+See [records and memory](docs/agents/legacy-local-research.md#5-records--memory).
 
 ## 6. Redaction (always)
 
@@ -76,39 +80,31 @@ Never store auth cookies, JWTs, Authorization headers, signed URLs, or passwords
 
 ## 7. Deferred legacy roadmap
 
-The [legacy entry](docs/agents/legacy-local-research.md#7-not-yet-built-phase-2)
-retains this section for historical references. It does not add native run requirements.
+See [deferred roadmap](docs/agents/legacy-local-research.md#7-not-yet-built-phase-2).
 
 ## Engineering references
 
 ### Issue tracker
 
-Issues live on `matheusht/redteam-harness`, driven via the `gh` CLI. Keep issue
-context sanitized and target-specific evidence in the target's own records;
-repository visibility is not a redaction control. The
-[legacy placement rule](docs/agents/legacy-local-research.md#4-the-runbook-legacy-engagement)
-retains its supported engagement layout.
+Issues live on GitHub at `matheusht/redteam-harness`, driven with the `gh` CLI. Keep engagement
+specifics out of issue bodies: target evidence stays in Plane 3, and repository visibility is not a
+redaction control.
 
 ### Domain docs
 
-**Direction:** for product, architecture, workflow or planning changes, read
-[product and engineering direction](docs/wiki/product-and-engineering-direction.md).
-**Status:** for capability, readiness or qualification claims, read the dated
-[native research status](docs/wiki/native-research-status.md), then its source evidence.
-ADRs live in **`docs/decisions/`**, not `docs/adr/`; use
-[the decision index](docs/decisions/README.md) for authority and supersession.
+ADRs live in `docs/decisions/`, not `docs/adr/`; start with [the decision index](docs/decisions/README.md).
+For current engineering state read [the wiki](docs/wiki/index.md); it is a dated observation, not a
+live tracker. For product and engineering direction read
+[product and engineering direction](docs/wiki/product-and-engineering-direction.md). For capability
+and readiness claims read the dated [native research status](docs/wiki/native-research-status.md),
+then its source evidence. The LLM-domain benign examples are in
+[LLM domain scope](docs/agents/llm-domain-scope.md); the generic fence stays in the README.
 
-**Domain examples:** the LLM-application benign-proxy and impact set is in
-[LLM domain scope](docs/agents/llm-domain-scope.md). Source research uses the
-bootstrap route and its source-only gate.
+### Engineering conventions
 
-**Record lifecycle:** attempt start/finish, bounded negative results, and
-evidence-bundle manifests are recorded in
-[research lifecycle](docs/research-lifecycle.md). The selected route's record
-boundary still applies where the lifecycle does not.
-
-### Engineering skills
-
-For engineering planning, documentation, and review, use the installed
-`wayfinder`, `grilling`, and `writing-for-agents` skills when their triggers
-apply. They are workflow aids; they do not grant runtime or engagement authority.
+Use the installed `be-ambitious`, `wayfinder`, `grilling` and `writing-for-agents` skills when their
+triggers apply: pursue the strongest defensible version of the requested change, route the work
+explicitly, challenge it adversarially, and write for the agent that will read it. Run
+`python3 tools/check-conformance.py` after changing cards, casebooks or entrypoint docs; a green
+structural run is required before promotion and is not a full schema validation. Claims cite the
+exact source or execution evidence that supports them.

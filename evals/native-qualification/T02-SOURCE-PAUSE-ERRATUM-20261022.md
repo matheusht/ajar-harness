@@ -9,7 +9,7 @@ The current T04 check pauses once after material workspace **and target** state
 exist, then resumes the same native session under the remaining allowance or
 records a declared reconstruction. It does not require the first completed
 vulnerability test, per-operation admission, or a particular tool-action
-boundary. The [current operator preflight](T04-UNHINTED-PREFLIGHT.md#deliberate-pause-and-continuation)
+boundary. The [current operator preflight](T04-UNHINTED-PREFLIGHT.md#stateful-pause-and-continuation)
 defines the pause and evidence to retain.
 
 This correction changes no historical receipt or source pin. The live native

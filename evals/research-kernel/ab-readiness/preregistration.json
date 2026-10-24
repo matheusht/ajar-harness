@@ -154,7 +154,7 @@
     "files": [
       {
         "path": "AGENTS.md",
-        "sha256": "sha256:ee9c28e03cdf809681ca1e97775a0021aeffa6ef97bd04ae41e68d4e67ff5694"
+        "sha256": "sha256:6f4c792d73b89425d4a376b5d14f078f25e1d721347515b067f84ca96708d180"
       },
       {
         "path": "engagements/_TEMPLATE/scope.md",
@@ -162,7 +162,7 @@
       },
       {
         "path": "engine/gates.md",
-        "sha256": "sha256:450dc47d978213f767db9e74b26572b115738ddfe81d3ce3684301f8b0c4e616"
+        "sha256": "sha256:44e7e7d8d46b5aa89d273a32314d5adfcdc7af1a9d2f9965bb32ed1a3418301f"
       },
       {
         "path": "skills/oracles/adjudication-oracle.md",

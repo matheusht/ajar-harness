@@ -57,7 +57,7 @@ Its cost-normalized outcome is unavailable without complete charged-cost evidenc
 
 ## Evidence chronology
 
-The 22 October #166–170 cutover pass was source/caller inspection with testing
+The 22 October #166 to #170 cutover pass was source/caller inspection with testing
 deferred. Later source-mode and continuation work added local checks. Those later
 checks do not retroactively qualify the cutover or earlier source revisions.
 

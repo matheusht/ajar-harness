@@ -1,5 +1,12 @@
 # Decision 0010 — Promotion gates: default-reject, computable where possible, and the fail-open lesson
 
+**Replacement draft: [0013](0013-canonical-filing-contract.md); #85 remains incomplete.**
+The package writer and gate classifications below are historical rationale. The
+local draft refuses legacy promotion; any role may
+still demote a legacy package. Current GQ/GK/G0–G6 applicability and mechanical,
+signed-review and heuristic distinctions live in `engine/finding-lifecycle.md`.
+
+
 **Status:** accepted; implemented (G0–G6 live, Phase 9 complete for G1/G2)\
 **Date:** 2026-08-16\
 **Effect:** records the gate stack that governs promotion, why each gate exists, and the recurring

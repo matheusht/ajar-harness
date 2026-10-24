@@ -1,0 +1,221 @@
+{
+  "case_observations": [
+    {
+      "attribution": "exact_spawned_subtree",
+      "case_id": "authorized-read",
+      "effect": {
+        "after_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "before_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "classification": "unchanged"
+      },
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "observer",
+        "sha256": "771fbada7aeb152cc70fda461147b38b0c6832f5ede4ef3ef120fba94ebc73c1"
+      },
+      "result": {
+        "outcome": "authorized",
+        "response_sha256": "3de6c3f462bf672b84fa8e1ee48c2b5c51b558d505634af370d50f55731b2f36",
+        "status_code": 200
+      },
+      "runtime_binding": {
+        "dispatch_id": "dispatch:authorized-read",
+        "session": "owned-session-v1",
+        "tool": "owned-tool:authorized-read"
+      },
+      "status": "observed"
+    },
+    {
+      "attribution": "exact_spawned_subtree",
+      "case_id": "denied-change",
+      "effect": {
+        "after_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "before_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "classification": "unchanged"
+      },
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "observer",
+        "sha256": "8dfa2d109e39368e6ac63c896ad41f41fcc4c01574a5d23539e85e3593dc6ab6"
+      },
+      "result": {
+        "outcome": "denied",
+        "response_sha256": "ee326ca10edc4947f937097468403f40be6a8294de08c6e1d53c3f174432d1f8",
+        "status_code": 403
+      },
+      "runtime_binding": {
+        "dispatch_id": "dispatch:denied-change",
+        "session": "owned-session-v1",
+        "tool": "owned-tool:denied-change"
+      },
+      "status": "observed"
+    },
+    {
+      "attribution": "exact_spawned_subtree",
+      "case_id": "direct-bypass",
+      "effect": {
+        "after_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "before_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "classification": "unchanged"
+      },
+      "missing_transition": "application-observer-receipt",
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "bypass",
+        "sha256": "d9d38fd52b0ec3641987d39ffc946f8fdcd191a94479f0c1bb5da004681fc84b"
+      },
+      "result": {
+        "outcome": "bypass_response",
+        "response_sha256": "815933e967314f4c138b770fcb8527f2e26a6a2c99783537ca7c391e9ad83d85",
+        "status_code": 200
+      },
+      "runtime_binding": {
+        "dispatch_id": "dispatch:direct-bypass",
+        "session": "owned-session-v1",
+        "tool": "owned-tool:direct-bypass"
+      },
+      "status": "capture_claim_refused"
+    },
+    {
+      "attribution": "exact_spawned_subtree",
+      "case_id": "effect-write",
+      "effect": {
+        "after_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "before_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "classification": "changed"
+      },
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "observer",
+        "sha256": "2eb44325c8620765674ec7d07895d302485849831eb493f625a1618fe580065b"
+      },
+      "result": {
+        "outcome": "effect_applied",
+        "response_sha256": "716235b713b0f85c99d1f82255a534d0a635d2eec83255d905f841791d95e42e",
+        "status_code": 200
+      },
+      "runtime_binding": {
+        "dispatch_id": "dispatch:effect-write",
+        "session": "owned-session-v1",
+        "tool": "owned-tool:effect-write"
+      },
+      "status": "observed"
+    },
+    {
+      "attribution": "host_replay",
+      "case_id": "host-replay",
+      "effect": {
+        "after_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "before_sha256": "663177275af1fa3690752fd29fa41d243f5ef7baded88e5b6e54871b58c73d69",
+        "classification": "unchanged"
+      },
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "observer",
+        "sha256": "01eaeab2d030b7e8e3d27e939ca02c3552979964929a01494bd300915a3a2484"
+      },
+      "result": {
+        "outcome": "authorized",
+        "response_sha256": "3de6c3f462bf672b84fa8e1ee48c2b5c51b558d505634af370d50f55731b2f36",
+        "status_code": 200
+      },
+      "status": "host_replay"
+    },
+    {
+      "attribution": "exact_spawned_subtree",
+      "case_id": "state-consumption",
+      "effect": {
+        "after_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "before_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "classification": "unchanged"
+      },
+      "request": {
+        "method": "POST",
+        "path_class": "owned_action",
+        "route_class": "observer",
+        "sha256": "51c63cc4c97ea14014820c09f99c39fa0fb6dc71b86756400907b0e7b8966e1e"
+      },
+      "result": {
+        "outcome": "authorized",
+        "response_sha256": "b1144811e08cf34c98a3f75e4e3366ab6da545bedfe3e754b1d144323a0b5efc",
+        "status_code": 200
+      },
+      "runtime_binding": {
+        "dispatch_id": "dispatch:state-consumption",
+        "session": "owned-session-v1",
+        "tool": "owned-tool:state-consumption"
+      },
+      "status": "observed"
+    }
+  ],
+  "chain_state": {
+    "consumed": [
+      {
+        "consumer_case_id": "state-consumption",
+        "observed_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec",
+        "state_id": "owned-effect-state-v1"
+      }
+    ],
+    "contrary_results": [
+      {
+        "case_id": "denied-change",
+        "meaning": "private change denied and state unchanged"
+      },
+      {
+        "case_id": "direct-bypass",
+        "meaning": "direct route exists outside application observer"
+      }
+    ],
+    "missing_transitions": [
+      {
+        "case_id": "direct-bypass",
+        "transition": "application-observer-receipt"
+      }
+    ],
+    "produced": [
+      {
+        "producer_case_id": "effect-write",
+        "state_id": "owned-effect-state-v1",
+        "state_sha256": "33d4ba998e6f8fde515936f34aaa2fad99b7b6c8f751dd0965963c1eeefac7ec"
+      }
+    ],
+    "unfinished_conditions": [
+      {
+        "condition": "managed launcher supplies protected native process attribution",
+        "status": "unavailable_in_this_lane"
+      },
+      {
+        "condition": "evidence changes a later native investigation action",
+        "status": "not_run"
+      }
+    ]
+  },
+  "scenario_id": "owned-original-application-observation-v1",
+  "schema_version": 1,
+  "source_pins": {
+    "manifest": {
+      "dependencies": {
+        "native_review_handoff_manifest": "26056e8abd33e6b55cfac99929e611b7f8bc8b9193bf914c589c4592c15f7f74"
+      },
+      "files": {
+        "experiments/native-observation-qualification/FAILURE-CHECKS.md": "f45914fdf117172360ee68cf9186a09f40af2cb8e9d1edac317e9dbcf7312b01",
+        "experiments/native-observation-qualification/README.md": "2c9d3f70acdd60e06c46abbc5e570c081950851ee9225718b4a8e2a2c5c61517",
+        "experiments/native-observation-qualification/check_owned_e2e.py": "e73901f5ab2bf4e2bc29e708fa4273da53ed429e0c0e1c1eae635980aec25318",
+        "experiments/native-observation-qualification/fixtures/expected-owned-e2e.json": "d98e80d9cab052af6bccda7a07f1b7d5f252e6a7ded5a5bc1675b8ed409abea0",
+        "experiments/native-observation-qualification/native_observation.py": "b1bc5ec3de0d7cf33373fb2797e784b94334d407b17527f8ffca9361d1b5de7c",
+        "experiments/native-review-qualification/OBSERVATION-INTEGRATION-SEAM-20261021.md": "6401bc7764f890a204681599229b33cfd62dbbac3f0cc5914b5afae136c5aea5"
+      },
+      "parent_version_ids": [
+        "ac6348b56df9334e54a09dada382b425bf29d4c6"
+      ],
+      "source_id": "redteam-harness:native-observation-qualification",
+      "version_id": "dd6ee7fcca37e0643162d74e25fc7712f7d959a4"
+    },
+    "manifest_sha256": "44c5592b9bc54ad9a698d95e1f6fb9a6dfdc8a3f8310ac19347bc275f69f3bdb"
+  }
+}

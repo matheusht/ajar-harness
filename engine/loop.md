@@ -1,5 +1,12 @@
 # engine/loop.md — the adaptive loop (ladder + winners, no UCB)
 
+> **Retained legacy workflow.** This procedure governs explicit queue/ledger-backed
+> work only. New native local source research uses the [native guide](../docs/agents/native-local-research.md)
+> and [portable workflow](native-research-workflow.md). Reuse evidence-guided test
+> selection if useful; do not import this document's scheduler, record writes,
+> Stop hook, coverage/queue completion predicate or closure rules into native work.
+> Existing legacy callers keep all rules below, including terminal invariants.
+
 > **Before the loop:** recon emits activation signals that select the cards (`engine/routing.md`).
 > The loop below runs the objectives those signals surfaced — not a fixed card list.
 

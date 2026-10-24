@@ -1,0 +1,215 @@
+{
+  "application_observer": {
+    "allowed_address_classes": [
+      "owned_loopback"
+    ],
+    "allowed_nonroute_destination_classes": [
+      "local_name_service_absent"
+    ],
+    "available": true,
+    "declared_route": "observer",
+    "producer_storage_visibility": "absent_from_producer_namespace",
+    "qualification_scope": "owned_fixture_only_managed_native_unavailable",
+    "route_completeness_claimed": false,
+    "storage_owner": "host_fixture"
+  },
+  "attribution_scope": "owned_fixture_only_managed_native_unavailable",
+  "case_bindings": [
+    {
+      "case_id": "authorized-read",
+      "connection_projection": {
+        "admitted_count": 1,
+        "nonroute_counts": {
+          "local_name_service_absent": 2
+        },
+        "total_connect_syscalls": 3
+      },
+      "process_attribution": "exact_spawned_subtree",
+      "status": "observed"
+    },
+    {
+      "case_id": "denied-change",
+      "connection_projection": {
+        "admitted_count": 1,
+        "nonroute_counts": {
+          "local_name_service_absent": 2
+        },
+        "total_connect_syscalls": 3
+      },
+      "process_attribution": "exact_spawned_subtree",
+      "status": "observed"
+    },
+    {
+      "case_id": "direct-bypass",
+      "connection_projection": {
+        "admitted_count": 1,
+        "nonroute_counts": {
+          "local_name_service_absent": 2
+        },
+        "total_connect_syscalls": 3
+      },
+      "process_attribution": "exact_spawned_subtree",
+      "status": "capture_claim_refused"
+    },
+    {
+      "case_id": "effect-write",
+      "connection_projection": {
+        "admitted_count": 1,
+        "nonroute_counts": {
+          "local_name_service_absent": 2
+        },
+        "total_connect_syscalls": 3
+      },
+      "process_attribution": "exact_spawned_subtree",
+      "status": "observed"
+    },
+    {
+      "case_id": "host-replay",
+      "connection_projection": null,
+      "process_attribution": "host_replay",
+      "status": "host_replay"
+    },
+    {
+      "case_id": "state-consumption",
+      "connection_projection": {
+        "admitted_count": 1,
+        "nonroute_counts": {
+          "local_name_service_absent": 2
+        },
+        "total_connect_syscalls": 3
+      },
+      "process_attribution": "exact_spawned_subtree",
+      "status": "observed"
+    }
+  ],
+  "cleanup": {
+    "checks": {
+      "observer_endpoints_released": true,
+      "observer_processes_stopped": true,
+      "owned_resources_only": true,
+      "private_scratch_removed": true,
+      "producer_processes_stopped": true,
+      "raw_capture_removed": true
+    },
+    "status": "complete",
+    "stop_verified": true
+  },
+  "collection": {
+    "application_bodies_retained": false,
+    "network_scope": "owned_loopback_only",
+    "provider_calls": 0,
+    "raw_process_trace_retained": false,
+    "sensitive_scan": "defense_in_depth_no_pattern_match",
+    "target_calls": 0
+  },
+  "coverage": {
+    "capture_refusal_cases": [
+      "direct-bypass"
+    ],
+    "host_replay_cases": [
+      "host-replay"
+    ],
+    "observed_cases": [
+      "authorized-read",
+      "denied-change",
+      "effect-write",
+      "state-consumption"
+    ],
+    "unavailable_cases": []
+  },
+  "lifecycle_fixtures": {
+    "capture_cleanup_claim_rejected": true,
+    "capture_manifest_repeatable": true,
+    "capture_ready_not_finalized": true,
+    "changed_capture_byte_rejected": true,
+    "cleanup_schema_rejected": true,
+    "existing_final_receipt_rejected": true,
+    "extra_capture_file_rejected": true,
+    "final_receipt_atomic": true,
+    "final_receipt_linked": true,
+    "finalization_does_not_claim_review": true,
+    "finalization_does_not_mutate_capture": true,
+    "forged_final_receipt_rejected": true,
+    "forged_manifest_receipt_rejected": true,
+    "incomplete_capture_check_inventory_rejected": true,
+    "incomplete_finalizations_fail": true,
+    "invalid_capture_not_ready": true,
+    "legacy_final_rejects_pending": true,
+    "legacy_final_still_valid": true,
+    "lifecycle_scratch_removed": true,
+    "malformed_capture_component_rejected": true,
+    "missing_capture_file_rejected": true,
+    "ordinary_incomplete_remains_invalid": true,
+    "sealed_capture_cleanup_claim_rejected": true,
+    "symlinked_capture_file_rejected": true,
+    "wrong_manifest_rejected": true
+  },
+  "offline_boundary_fixtures": {
+    "atomic_chmod_failure_cleaned": true,
+    "atomic_dangling_output_rejected": true,
+    "atomic_fixture_scratch_removed": true,
+    "atomic_partial_output_absent": true,
+    "atomic_relative_output_rejected": true,
+    "boolean_integer_confusion_rejected": true,
+    "bypass_missing_transition_rejected": true,
+    "chain_causality_rejected": true,
+    "changed_effect_requires_authority": true,
+    "changed_effect_requires_produced_state": true,
+    "cleanup_missing_key_rejected": true,
+    "failed_inet_connect_rejected": true,
+    "failure_publication_error_preserved": true,
+    "failure_receipt_details_preserved": true,
+    "generic_arbitrary_packet_accepted": true,
+    "generic_single_run_packet_accepted": true,
+    "inconsistent_effect_digest_rejected": true,
+    "invalid_effect_classification_rejected": true,
+    "malformed_chain_reference_rejected": true,
+    "nonfinite_packet_rejected": true,
+    "nonportable_json_shapes_rejected": true,
+    "pending_inet_connect_admitted": true,
+    "public_cli_dangling_output_rejected": true,
+    "public_cli_duplicate_key_rejected": true,
+    "public_cli_failure_preserved": true,
+    "public_cli_nonfinite_rejected": true,
+    "public_cli_pre_review_succeeded": true,
+    "public_cli_relative_output_rejected": true,
+    "public_cli_scratch_removed": true,
+    "public_cli_succeeded": true,
+    "sensitive_key_alias_count": 15,
+    "sensitive_key_aliases_rejected": true,
+    "sensitive_pair_shape_rejected": true,
+    "sensitive_value_pattern_count": 4,
+    "sensitive_value_patterns_rejected": true,
+    "spurious_bypass_transition_rejected": true,
+    "unknown_critical_field_rejected": true,
+    "unsupported_connect_families_rejected": true,
+    "unsupported_discovery_credit_rejected": true,
+    "unsupported_process_attribution_rejected": true
+  },
+  "offline_failure_fixtures": {
+    "authorized_result_mismatch": true,
+    "capture_completeness_unproven": true,
+    "causal_order_invalid": true,
+    "cleanup_incomplete": true,
+    "denied_effect_changed": true,
+    "host_activity_in_researcher_window": true,
+    "host_replay_miscredited": true,
+    "normalized_repeat_mismatch": true,
+    "observer_channel_exposed": true,
+    "observer_unavailable": true,
+    "producer_can_write_observer": true,
+    "request_binding_ambiguous": true,
+    "sensitive_evidence_detected": true,
+    "session_binding_missing": true,
+    "source_pin_mismatch": true,
+    "stop_unverified": true,
+    "tool_binding_missing": true,
+    "trace_incomplete": true,
+    "unexpected_route": true
+  },
+  "repeatability": {
+    "normalized_match": true,
+    "runs": 2
+  },
+  "schema_version": 1
+}

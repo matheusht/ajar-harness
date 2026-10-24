@@ -9,7 +9,7 @@
 
 ## 0. The mode shift from black-box
 
-Black-box mode establishes a session and drives a live target (`AGENTS.md §2`: orchestrator plans,
+Black-box mode establishes a session and drives a live target (`docs/agents/legacy-local-research.md` §2: orchestrator plans,
 Hunter drives). White-box/gray-box mode usually has **no live target to session into at all** — for
 programs like Vercel's OSS bounty, testing against production is explicitly forbidden; the work is
 standing up the project locally (or in an isolated repro environment) and auditing the source, then
@@ -109,7 +109,7 @@ survival, and killing requires their agreement, mirroring the adversarial-verify
 `Workflow` but **inverted in bias**: adversarial-verify (used to confirm a *finding*) is biased
 toward refuting a weak claim; this grading panel (used to *not lose* a candidate) is biased toward
 keeping an uncertain one alive for another round. Log every kill with the reasoning, so a human can
-audit *why* a candidate was dropped, same as `AGENTS.md §4` step 3's override-log requirement for a
+audit *why* a candidate was dropped, same as `docs/agents/legacy-local-research.md` §4 step 3's override-log requirement for a
 strong signal not pursued.
 
 ## 4. Verification epistemics — mechanical checks are necessary, not sufficient
@@ -169,7 +169,7 @@ so the adjudication pass must interrogate the harness's fidelity, not just its o
 ## 5. Model role division (learned this session, generalizes across white-box engagements)
 
 Different models have different comparative advantage in this pipeline — assign roles to match, on
-top of `AGENTS.md §2`'s Orchestrator/Hunter/Helper split:
+top of `docs/agents/legacy-local-research.md` §2's Orchestrator/Hunter/Helper split:
 
 - **Orchestrator / triage tier (e.g. Opus).** Planning, triaging candidates, authoring and debugging
   the pipeline/harness code itself, deciding what gets escalated to deep verification. High judgment,
@@ -186,7 +186,7 @@ top of `AGENTS.md §2`'s Orchestrator/Hunter/Helper split:
   session's worth of probing — and it is the sharpest evidence yet for why persistence framing has
   to be *explicitly and repeatedly invoked* for the grunt-execution tier: left to its own judgment, it
   will call "infeasible" well before the budget the operator is actually willing to spend.
-- **Helper tier**, unchanged from `AGENTS.md §2`: cheap, offline-only mechanical work (diffing,
+- **Helper tier**, unchanged from `docs/agents/legacy-local-research.md` §2: cheap, offline-only mechanical work (diffing,
   dedup, log scraping) — never the tier trusted with a kill/keep or confirm/refute verdict.
 
 Put simply: **the planning/triage tier decides what's worth pursuing and builds the harness; the

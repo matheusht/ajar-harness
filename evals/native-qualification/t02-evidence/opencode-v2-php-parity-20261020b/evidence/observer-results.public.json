@@ -1,0 +1,75 @@
+{
+  "case": "Kanboard local observer preflight",
+  "status": "pass",
+  "arms": [
+    {
+      "release": "vulnerable",
+      "loopback": true,
+      "php": "PHP 8.4.26 (cli) (built: Sep 25 2026 15:57:16) (NTS)",
+      "runtime": "t02-kanboard-runtime@sha256:31b7fa2b80f17bbddfeffd0577634257df40490f1b8d4c57f8507b40956cdf15",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "result": {
+          "id": 2,
+          "project_id": 1,
+          "name": "Observer Swimlane"
+        }
+      },
+      "cleanup": {
+        "container_id": "789522710ecb83abaab85a27a5f99edaa9f179a23c79d28f0c0704dd9bdfd869",
+        "host_pid": null,
+        "loopback_port": 50945,
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir": "[REDACTED_HOST_PATH]",
+        "run_dir_absent": true,
+        "db_path": "[REDACTED_HOST_PATH]/app/data/db.sqlite",
+        "db_absent": true
+      },
+      "commit": "f0f7d27007f5a788f14416c548421efd740b7bce",
+      "archive_sha256": "3f24269475bf00137d4b0d957d97a2567a5249101dad89067a49d609f4df2edf"
+    },
+    {
+      "release": "fixed",
+      "loopback": true,
+      "php": "PHP 8.4.26 (cli) (built: Sep 25 2026 15:57:16) (NTS)",
+      "runtime": "t02-kanboard-runtime@sha256:31b7fa2b80f17bbddfeffd0577634257df40490f1b8d4c57f8507b40956cdf15",
+      "project_id": 1,
+      "swimlane_id": 2,
+      "authorized_project": 1,
+      "authorized_swimlane": 2,
+      "private_project_control": {
+        "code": 403,
+        "message": "Forbidden"
+      },
+      "cross_role_read": {
+        "denial": {
+          "code": 403,
+          "message": "Forbidden"
+        }
+      },
+      "cleanup": {
+        "container_id": "3e3ff83b4a68c71c3fcdd2e88c3565668767388d3b50768030421275f6fbe052",
+        "host_pid": null,
+        "loopback_port": 50976,
+        "stop_returncode": 0,
+        "container_absent": true,
+        "port_closed": true,
+        "run_dir": "[REDACTED_HOST_PATH]",
+        "run_dir_absent": true,
+        "db_path": "[REDACTED_HOST_PATH]/app/data/db.sqlite",
+        "db_absent": true
+      },
+      "commit": "a98bc5f855d4e7e47eb3425a6c7da6c6cc6748a3",
+      "archive_sha256": "44db3df81a25bbd56c768c8b3180a1f05879e2c7fbaa6ac73707e7f3e9098f56"
+    }
+  ]
+}

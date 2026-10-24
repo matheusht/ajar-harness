@@ -1,0 +1,67 @@
+{
+  "checks": [
+    {
+      "name": "public prepare creates a private sealed run",
+      "observed": {
+        "exit": 0,
+        "status": "prepared_provider_free"
+      },
+      "pass": true
+    },
+    {
+      "name": "source, allowance and mutable state are pinned",
+      "observed": {
+        "duration_seconds": 7200,
+        "mutable_paths": [
+          "data"
+        ],
+        "source_count": 1
+      },
+      "pass": true
+    },
+    {
+      "name": "public status reports prepared and no authority",
+      "observed": {
+        "exit": 0,
+        "status": "prepared"
+      },
+      "pass": true
+    },
+    {
+      "name": "declared mutable target state survives preflight; missing approval still rejects",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "pass": true
+    },
+    {
+      "name": "immutable target source drift rejects before approval or Docker",
+      "observed": {
+        "code": "target_source_or_state_changed",
+        "exit": 2
+      },
+      "pass": true
+    },
+    {
+      "name": "preactivation recovery is a no-op without resources",
+      "observed": {
+        "exit": 0,
+        "status": "no_resources"
+      },
+      "pass": true
+    },
+    {
+      "name": "source pin fails before approval or Docker",
+      "observed": {
+        "code": "source_pin_mismatch",
+        "exit": 2
+      },
+      "pass": true
+    }
+  ],
+  "kind": "native-research-provider-free-prepare-e2e-v1",
+  "passed": true,
+  "provider_or_target_executed": false,
+  "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895"
+}

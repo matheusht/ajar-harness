@@ -933,10 +933,6 @@ def _stop_output(
 
 
 def _verify_current_selected_action(record: dict[str, Any], state: dict[str, Any], engagement: Path) -> None:
-    try:
-        from work_queue_actions import queue_command_payload
-    except ImportError as exc:
-        raise RecordError("driver_queue_contract_unavailable", "admission") from exc
     payload = queue_command_payload("next", state, engagement)
     item = payload.get("item")
     action = item.get("next_action") if isinstance(item, dict) else None

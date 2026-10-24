@@ -16,7 +16,7 @@ import stat
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 class RecordError(ValueError):
     """A stable, operator-facing record validation failure."""
@@ -1067,7 +1067,3 @@ def write_canonical_json(path: os.PathLike[str] | str, value: Any) -> None:
     from engagement_quarantine import atomic_write_offline
 
     atomic_write_offline(Path(path), canonical_json_bytes(value))
-
-
-def summarize_errors(errors: Iterable[dict[str, Any]]) -> str:
-    return "; ".join(f"{error['code']} {error.get('instance_path', '/')}: {error['message']}" for error in errors)

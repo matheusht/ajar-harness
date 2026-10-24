@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "t02-runtime-build-receipt",
+  "status": "pass",
+  "classification": "pinned runtime build and offline inspection; zero provider/model calls",
+  "platform": "linux/amd64",
+  "base": "ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319",
+  "image_id": "sha256:9ef722322521322a1288a18427ba5bf6ce1479085c97e0ac821982eec4f01769",
+  "tag": "t02-kanboard-runtime:amd64-live-prep",
+  "opencode_version": "opencode v2.0.32",
+  "php_version": "8.4.26",
+  "required_php_modules": {
+    "PDO": true,
+    "gd": true,
+    "pdo_sqlite": true
+  },
+  "critical_image_env_names": [],
+  "layer_scan": {
+    "apk_secret_path_entries": 0,
+    "exact_build_ca_blob_matches": 0
+  },
+  "build_inputs": {
+    "dockerfile_sha256": "7a1ab9b257fb36a216fc1baafabc757436d0a15ffcb9498b6fbe697da3a9bf4b",
+    "proxy_values_recorded": false,
+    "ca_path_recorded": false,
+    "ca_bytes_recorded": false
+  },
+  "provider_calls": 0,
+  "model_calls": 0
+}

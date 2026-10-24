@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""External, budget-bounded driver for one target-local engagement queue."""
+"""Explicit legacy budget-bounded driver for one target-local engagement queue.
+
+The native local research route does not dispatch through this driver.
+"""
 
 from __future__ import annotations
 
@@ -553,6 +556,7 @@ def _state_stop(state: dict[str, Any]) -> str | None:
 
 
 def load_stop_hook_settings() -> dict[str, Any]:
+    """Generate explicit legacy session hooks without relying on project inheritance."""
     if not STOP_HOOK.is_file() or STOP_HOOK.is_symlink():
         raise DriverError("driver_stop_hook_unavailable")
     python = os.path.abspath(sys.executable)
@@ -676,6 +680,7 @@ def _container_session_prompt(
 
 
 def _container_stop_hook_settings(python_executable: str) -> dict[str, Any]:
+    """Generate the retained legacy container broker Stop hook for this session."""
     command = " ".join(
         (
             shlex.quote(python_executable),

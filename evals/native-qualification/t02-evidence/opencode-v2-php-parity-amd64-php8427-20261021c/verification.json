@@ -1,0 +1,870 @@
+{
+  "schema_version": 1,
+  "kind": "kanboard-current-runtime-public-verification",
+  "qualification_id": "t01-kanboard-php8427-amd64-20261021c",
+  "verifier_sha256": "75b47f0b51c1b233d4a8ac6ee6cba8ba38454b4fd1edc618e22eb6bc5ce025b6",
+  "artifact_sha256": {
+    "README.md": "65b77519db23ff9a6f352603a16c24da324634ae27a333c9fea91fbf47dba600",
+    "build-command.txt": "26c36644ee686c7538b6da2f266fbc445f37ff5710ecd8081017381e151ee2be",
+    "candidate.json": "b988d104545f4ace568a268f79cdf1d2bfb2f686d948ce34f144a01db394df73",
+    "docker-observations.txt": "aa4b36938b3117f0b794200a78bff7f062a5a8e7522d6f661932dc19449d0344",
+    "evidence/fixed-requests.json": "037fef5ac1842e4413c281f3868a474d0ef1bdf7e049de3220cd55b6f4c9ad4b",
+    "evidence/observer-results.public.json": "cf7b83e7c79dcb2ade0f833e158ed3535e94350d7effcbc9e34075aca7f92b9d",
+    "evidence/vulnerable-requests.json": "088257b93fffbe83284c25ffec0b2a938cbffcc41c31ddf86b5623c1c64aad00",
+    "inputs.json": "915656a1ef7798d5b1bcec0bc33a06f689a5274d8bd11ef7280310b0b1ff6c33",
+    "result.json": "eaef887fe2aa1c527b1db4d260001e2ecf0475b4dcfae85a43de2d40ff58aef7",
+    "run-command.txt": "d1a7d7519cdcd5a277026642b6947518f1b44f4232e72d91a97c7b46f6f15213",
+    "runtime-admission.json": "0481663a5d4e62b8ec84054288af98523300128fda04512b02c4e89a77ed1e4c"
+  },
+  "status": "pass",
+  "checks_passed": 211,
+  "checks_total": 211,
+  "network_required": false,
+  "docker_required": false,
+  "checks": [
+    {
+      "name": "complete bytes pinned: README.md",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: candidate.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: evidence/fixed-requests.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: evidence/observer-results.public.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: evidence/vulnerable-requests.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: inputs.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: result.json",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: run-command.txt",
+      "pass": true
+    },
+    {
+      "name": "complete bytes pinned: runtime-admission.json",
+      "pass": true
+    },
+    {
+      "name": "inputs top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "result top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "observer top-level schema exact",
+      "pass": true
+    },
+    {
+      "name": "trace labels exact",
+      "pass": true
+    },
+    {
+      "name": "input requested scope schema exact",
+      "pass": true
+    },
+    {
+      "name": "input repository schema exact",
+      "pass": true
+    },
+    {
+      "name": "input path bases schema exact",
+      "pass": true
+    },
+    {
+      "name": "input docker schema exact",
+      "pass": true
+    },
+    {
+      "name": "input builder schema exact",
+      "pass": true
+    },
+    {
+      "name": "input baseline schema exact",
+      "pass": true
+    },
+    {
+      "name": "input image source schema exact",
+      "pass": true
+    },
+    {
+      "name": "input managed ca schema exact",
+      "pass": true
+    },
+    {
+      "name": "input receipts schema exact",
+      "pass": true
+    },
+    {
+      "name": "input public artifacts schema exact",
+      "pass": true
+    },
+    {
+      "name": "input constraints schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate build inputs schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate managed ca schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate inspection schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate outer baseline schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate execution schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate claim limits schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime execution policy schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime packages schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime php schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime application schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime external activity schema exact",
+      "pass": true
+    },
+    {
+      "name": "runtime claim limits schema exact",
+      "pass": true
+    },
+    {
+      "name": "result image schema exact",
+      "pass": true
+    },
+    {
+      "name": "result runtime schema exact",
+      "pass": true
+    },
+    {
+      "name": "result archive schema exact",
+      "pass": true
+    },
+    {
+      "name": "result observer schema exact",
+      "pass": true
+    },
+    {
+      "name": "result execution schema exact",
+      "pass": true
+    },
+    {
+      "name": "result cleanup schema exact",
+      "pass": true
+    },
+    {
+      "name": "result claims schema exact",
+      "pass": true
+    },
+    {
+      "name": "input archive schema exact",
+      "pass": true
+    },
+    {
+      "name": "candidate archive schema exact",
+      "pass": true
+    },
+    {
+      "name": "observer arms use exact schema",
+      "pass": true
+    },
+    {
+      "name": "trace entry schemas exact",
+      "pass": true
+    },
+    {
+      "name": "input identity and stage exact",
+      "pass": true
+    },
+    {
+      "name": "requested scope is current-runtime semantic comparison only",
+      "pass": true
+    },
+    {
+      "name": "repository chain exact",
+      "pass": true
+    },
+    {
+      "name": "path bases disambiguated",
+      "pass": true
+    },
+    {
+      "name": "docker and builder identity exact",
+      "pass": true
+    },
+    {
+      "name": "complete empty pre-build baseline exact",
+      "pass": true
+    },
+    {
+      "name": "image source exact",
+      "pass": true
+    },
+    {
+      "name": "managed ca provenance exact",
+      "pass": true
+    },
+    {
+      "name": "receipt hashes exact",
+      "pass": true
+    },
+    {
+      "name": "archives exact and both pre-admitted",
+      "pass": true
+    },
+    {
+      "name": "source pin manifest exact",
+      "pass": true
+    },
+    {
+      "name": "public arm artifact hashes exact",
+      "pass": true
+    },
+    {
+      "name": "input constraints exact",
+      "pass": true
+    },
+    {
+      "name": "candidate is scoped pre-execution registration",
+      "pass": true
+    },
+    {
+      "name": "candidate image binding exact",
+      "pass": true
+    },
+    {
+      "name": "candidate build source exact",
+      "pass": true
+    },
+    {
+      "name": "candidate managed ca exact",
+      "pass": true
+    },
+    {
+      "name": "candidate baseline is pre-build and cleanup pending",
+      "pass": true
+    },
+    {
+      "name": "candidate archives remained unretrieved",
+      "pass": true
+    },
+    {
+      "name": "candidate dependent execution remained zero",
+      "pass": true
+    },
+    {
+      "name": "candidate claims remained false",
+      "pass": true
+    },
+    {
+      "name": "runtime receipt identity exact",
+      "pass": true
+    },
+    {
+      "name": "runtime command policy exact",
+      "pass": true
+    },
+    {
+      "name": "runtime required packages exact",
+      "pass": true
+    },
+    {
+      "name": "runtime all php84 packages use one revision",
+      "pass": true
+    },
+    {
+      "name": "runtime php and modules exact",
+      "pass": true
+    },
+    {
+      "name": "runtime application remained not run",
+      "pass": true
+    },
+    {
+      "name": "runtime external activity remained zero",
+      "pass": true
+    },
+    {
+      "name": "runtime pre-application claims remained false",
+      "pass": true
+    },
+    {
+      "name": "observer receipt identity exact",
+      "pass": true
+    },
+    {
+      "name": "observer has exactly two unique release arms",
+      "pass": true
+    },
+    {
+      "name": "ordinary controls pass on both arms",
+      "pass": true
+    },
+    {
+      "name": "vulnerable arm returns exact metadata",
+      "pass": true
+    },
+    {
+      "name": "fixed arm returns exact denial",
+      "pass": true
+    },
+    {
+      "name": "application semantics match historical t01",
+      "pass": true
+    },
+    {
+      "name": "arm cleanup complete and redacted",
+      "pass": true
+    },
+    {
+      "name": "current runtime exact on both arms",
+      "pass": true
+    },
+    {
+      "name": "archive source pins exact on both arms",
+      "pass": true
+    },
+    {
+      "name": "trace requests and parameters exact for both arms",
+      "pass": true
+    },
+    {
+      "name": "trace synthetic user passwords redacted",
+      "pass": true
+    },
+    {
+      "name": "trace raw responses are unique-key json",
+      "pass": true
+    },
+    {
+      "name": "trace semantic response effects exact for all calls",
+      "pass": true
+    },
+    {
+      "name": "result remains pre-oracle needs-review evidence",
+      "pass": true
+    },
+    {
+      "name": "result image cross-binding exact",
+      "pass": true
+    },
+    {
+      "name": "result runtime cross-binding exact",
+      "pass": true
+    },
+    {
+      "name": "result archive gate exact",
+      "pass": true
+    },
+    {
+      "name": "result observer hashes exact",
+      "pass": true
+    },
+    {
+      "name": "result runner summary exact",
+      "pass": true
+    },
+    {
+      "name": "result observer claims independently supported",
+      "pass": true
+    },
+    {
+      "name": "result execution is two owned arms and zero external activity",
+      "pass": true
+    },
+    {
+      "name": "outer cleanup removed the exact task resources",
+      "pass": true
+    },
+    {
+      "name": "outer cleanup exactly restored complete baseline",
+      "pass": true
+    },
+    {
+      "name": "claim limits are explicit and exact",
+      "pass": true
+    },
+    {
+      "name": "limits retain exact current-runtime scope",
+      "pass": true
+    },
+    {
+      "name": "source manifest in inputs exact",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427_test.py",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/smoke/check_v2_php_parity_amd64.py",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/smoke/check_v2_php_parity_amd64_test.py",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/observer_case.py",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/observer-evidence-final/observer-results.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/RESEARCHER-BRIEF.md",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/README.md",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/result.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verification.json",
+      "pass": true
+    },
+    {
+      "name": "source file pinned: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verify.py",
+      "pass": true
+    },
+    {
+      "name": "image source paths and hashes exact",
+      "pass": true
+    },
+    {
+      "name": "image source pinned: evals/native-qualification/Dockerfile.opencode-kanboard-runtime-php8427",
+      "pass": true
+    },
+    {
+      "name": "image source pinned: evals/native-qualification/T01-AMD64-KANBOARD-PHP8427-SOURCE-MANIFEST.json",
+      "pass": true
+    },
+    {
+      "name": "image source pinned: evals/native-qualification/T01-AMD64-KANBOARD-PHP8427-CHECKS-20261021.md",
+      "pass": true
+    },
+    {
+      "name": "all public artifacts are utf-8",
+      "pass": true
+    },
+    {
+      "name": "json header and plaintext secret values absent",
+      "pass": true
+    },
+    {
+      "name": "signed url credential values absent",
+      "pass": true
+    },
+    {
+      "name": "raw jwt values absent",
+      "pass": true
+    },
+    {
+      "name": "proxy ca and private-key material absent",
+      "pass": true
+    },
+    {
+      "name": "private workspace paths absent",
+      "pass": true
+    },
+    {
+      "name": "parsed public json contains no secret values",
+      "pass": true
+    },
+    {
+      "name": "build and replay commands are shell-valid",
+      "pass": true
+    },
+    {
+      "name": "historical build command exact and bounded",
+      "pass": true
+    },
+    {
+      "name": "replay command never builds tags or pulls",
+      "pass": true
+    },
+    {
+      "name": "replay mismatch gate precedes python",
+      "pass": true
+    },
+    {
+      "name": "replay binds exact receipts image and platform",
+      "pass": true
+    },
+    {
+      "name": "replay binds exact adapter before image execution",
+      "pass": true
+    },
+    {
+      "name": "readme states current-runtime limits and oracle boundary",
+      "pass": true
+    },
+    {
+      "name": "docker observations state exact restored lifecycle",
+      "pass": true
+    },
+    {
+      "name": "self-test verification receipt binds exact verifier bytes",
+      "pass": true
+    },
+    {
+      "name": "self-test verification receipt binds exact public artifact map",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/Dockerfile.opencode-kanboard-runtime",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/README.md",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/failed-build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/inputs.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/result.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verification.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject immutable historical mutation: evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-fresh-20261021b/verify.py",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: README.md",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: build-command.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: candidate.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: docker-observations.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: evidence/fixed-requests.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: evidence/observer-results.public.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: evidence/vulnerable-requests.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: inputs.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: result.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: run-command.txt",
+      "pass": true
+    },
+    {
+      "name": "self-test reject CRLF byte substitution: runtime-admission.json",
+      "pass": true
+    },
+    {
+      "name": "self-test reject duplicate json key",
+      "pass": true
+    },
+    {
+      "name": "self-test reject extra input key",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-int input constraint substitutions",
+      "pass": true
+    },
+    {
+      "name": "self-test reject wrong result image id",
+      "pass": true
+    },
+    {
+      "name": "self-test reject wrong php runtime",
+      "pass": true
+    },
+    {
+      "name": "self-test reject altered exact php version line",
+      "pass": true
+    },
+    {
+      "name": "self-test reject non-exact runtime command",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int runtime exit code",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int runtime application count",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int runtime external count",
+      "pass": true
+    },
+    {
+      "name": "self-test reject result runtime version substitution",
+      "pass": true
+    },
+    {
+      "name": "self-test reject arm runtime version substitution",
+      "pass": true
+    },
+    {
+      "name": "self-test reject mixed php84 package revision",
+      "pass": true
+    },
+    {
+      "name": "self-test reject changed archive pin",
+      "pass": true
+    },
+    {
+      "name": "self-test reject missing arm",
+      "pass": true
+    },
+    {
+      "name": "self-test reject duplicate arm",
+      "pass": true
+    },
+    {
+      "name": "self-test reject vulnerable semantic mismatch",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int observer effect",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int observer cleanup",
+      "pass": true
+    },
+    {
+      "name": "self-test reject altered intermediate trace parameters",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int trace parameter substitution",
+      "pass": true
+    },
+    {
+      "name": "self-test reject altered intermediate trace effect",
+      "pass": true
+    },
+    {
+      "name": "self-test reject nested bool-for-int trace substitution",
+      "pass": true
+    },
+    {
+      "name": "self-test reject incomplete outer cleanup",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int result execution count",
+      "pass": true
+    },
+    {
+      "name": "self-test reject bool-for-int final cleanup bytes",
+      "pass": true
+    },
+    {
+      "name": "self-test reject wrong final cleanup readback hash",
+      "pass": true
+    },
+    {
+      "name": "self-test reject substituted result classification",
+      "pass": true
+    },
+    {
+      "name": "self-test reject substituted result limits",
+      "pass": true
+    },
+    {
+      "name": "self-test reject forged php8426 parity claim",
+      "pass": true
+    },
+    {
+      "name": "self-test reject int-for-bool result claim",
+      "pass": true
+    },
+    {
+      "name": "self-test reject quoted Authorization value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject quoted api_key value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject raw JWT value",
+      "pass": true
+    },
+    {
+      "name": "self-test reject Digest Authorization header",
+      "pass": true
+    },
+    {
+      "name": "self-test reject Proxy-Authorization header",
+      "pass": true
+    },
+    {
+      "name": "self-test reject Cookie header",
+      "pass": true
+    },
+    {
+      "name": "self-test reject Set-Cookie header",
+      "pass": true
+    },
+    {
+      "name": "self-test reject unquoted password assignment",
+      "pass": true
+    },
+    {
+      "name": "self-test reject unquoted Password field",
+      "pass": true
+    },
+    {
+      "name": "self-test reject unquoted api_key assignment",
+      "pass": true
+    },
+    {
+      "name": "self-test reject unquoted API-Key field",
+      "pass": true
+    },
+    {
+      "name": "self-test accept exact plaintext redactions",
+      "pass": true
+    },
+    {
+      "name": "self-test reject AWS signed URL marker",
+      "pass": true
+    },
+    {
+      "name": "self-test reject Google signed URL marker",
+      "pass": true
+    },
+    {
+      "name": "self-test reject generic signed URL marker",
+      "pass": true
+    },
+    {
+      "name": "self-test reject false-branch run-command mutation",
+      "pass": true
+    },
+    {
+      "name": "self-test wrong-id replay executes no python",
+      "pass": true
+    },
+    {
+      "name": "self-test changed adapter replay executes no docker or python",
+      "pass": true
+    },
+    {
+      "name": "self-test reject source pin substitution",
+      "pass": true
+    }
+  ]
+}

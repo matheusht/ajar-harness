@@ -17,9 +17,9 @@ byte-identical to it.
 
 On `main`, the Decision 0005/0006 record kernel (legacy engagements) and the
 [research lifecycle](docs/research-lifecycle.md) layer (attempt start/finish, bounded negative
-results, evidence-bundle manifests) are implemented. New local source research also has a
-**candidate native route in external [PR #192](https://github.com/matheusht/redteam-harness/pull/192)**;
-it is not on `main`, not qualified, and not adopted here. Treat it as candidate evidence, not a
+results, evidence-bundle manifests) are implemented. New local source research has a candidate
+native route in this checkout. It is not qualified or adopted. #165 adoption, #171 integrated
+qualification and #172 unfamiliar-target study remain open. Treat it as candidate evidence, not a
 shipped procedure.
 
 ## Scope fence (read first)
@@ -47,7 +47,7 @@ across domains.
 | Repository engineering, research, docs or planning | [`AGENTS.md`](AGENTS.md), then [the layout](#layout) and [decision index](docs/decisions/README.md) |
 | Existing queue/record engagement | [legacy queue and record entry](docs/agents/legacy-local-research.md) |
 | Attempts, bounded negatives, evidence bundles | [research lifecycle](docs/research-lifecycle.md) |
-| Candidate native source research | external [PR #192](https://github.com/matheusht/redteam-harness/pull/192) — not on `main` |
+| Candidate native source research | [native local research](docs/agents/native-local-research.md) and [status](docs/wiki/native-research-status.md); adoption and qualification remain open |
 | Capability, readiness or qualification claim | [engineering wiki](docs/wiki/index.md), then its source evidence |
 
 ## Layout
@@ -104,5 +104,6 @@ not a full schema validator, and it does not prove a research result.
 Dated pointer, 2026-10-23: the [engineering wiki](docs/wiki/index.md) holds the maintained
 engineering synthesis and its dated delivery state; recheck the source commit and issue state
 before acting. The wiki's own status is an observation, not a live tracker. The candidate native
-route remains in external PR #192 and must not be described as merged, qualified or adopted from
-this checkout. Earlier benchmark records retain their original scope.
+route is present in this checkout; #165 adoption, #171 integrated qualification and #172
+unfamiliar-target study remain open. It must not be described as qualified or adopted. Earlier
+benchmark records retain their original scope.

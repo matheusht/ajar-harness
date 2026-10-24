@@ -1,0 +1,108 @@
+diff --git a/packages/core/src/effect/app-node-platform.ts b/packages/core/src/effect/app-node-platform.ts
+index 5b5aee6..a93fad4 100644
+--- a/packages/core/src/effect/app-node-platform.ts
++++ b/packages/core/src/effect/app-node-platform.ts
+@@ -4,2 +4,4 @@ import { FetchHttpClient, HttpClient } from "effect/http"
+ import { Socket } from "effect/socket"
++import { createHash } from "node:crypto"
++import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs"
+ import { makeGlobalNode } from "@opencode/util/effect/app-node"
+@@ -9,2 +11,87 @@ import { WebSocketConstructor } from "./websocket-constructor.js"
+ // Bun's fetch ends a request after five quiet minutes, before provider routes' own header and chunk timeouts.
++const EXCLUSIVE_CA_PATH = "/fixture/runtime-ca.pem"
++const MAX_EXCLUSIVE_CA_BYTES = 4 * 1024 * 1024
++const EXCLUSIVE_CA_REJECTION_PREFIX = "OPENCODE_EXCLUSIVE_CA_REJECT:"
++
++class ExclusiveCaRejection extends Error {}
++
++function rejectExclusiveCa(code: string): never {
++  throw new ExclusiveCaRejection(EXCLUSIVE_CA_REJECTION_PREFIX + code)
++}
++
++function normalizeExclusiveCaError(error: unknown) {
++  return error instanceof ExclusiveCaRejection
++    ? error
++    : new ExclusiveCaRejection(EXCLUSIVE_CA_REJECTION_PREFIX + "internal")
++}
++
++function openExclusiveCa(path: string) {
++  try {
++    return openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
++  } catch {
++    return rejectExclusiveCa("open_failed")
++  }
++}
++
++function statExclusiveCa(descriptor: number) {
++  try {
++    return fstatSync(descriptor)
++  } catch {
++    return rejectExclusiveCa("read_failed")
++  }
++}
++
++function readExclusiveCa(descriptor: number, input: Buffer, offset: number, length: number) {
++  try {
++    return readSync(descriptor, input, offset, length, null)
++  } catch {
++    return rejectExclusiveCa("read_failed")
++  }
++}
++
++function exclusiveRequestInit(): BunFetchRequestInit {
++  const path = process.env.OPENCODE_EXCLUSIVE_CA_FILE
++  const expected = process.env.OPENCODE_EXCLUSIVE_CA_SHA256
++  if (path === undefined) return rejectExclusiveCa("path_required")
++  if (path !== EXCLUSIVE_CA_PATH) return rejectExclusiveCa("path_fixed")
++  if (expected === undefined) return rejectExclusiveCa("digest_required")
++  if (!/^[0-9a-f]{64}$/.test(expected)) return rejectExclusiveCa("digest_format")
++
++  const descriptor = openExclusiveCa(path)
++  try {
++    const before = statExclusiveCa(descriptor)
++    if (!before.isFile() || before.size === 0 || before.size > MAX_EXCLUSIVE_CA_BYTES)
++      return rejectExclusiveCa("size_invalid")
++    const input = Buffer.allocUnsafe(MAX_EXCLUSIVE_CA_BYTES + 1)
++    let length = 0
++    while (length < input.length) {
++      const count = readExclusiveCa(descriptor, input, length, input.length - length)
++      if (count === 0) break
++      length += count
++    }
++    if (length === 0 || length > MAX_EXCLUSIVE_CA_BYTES)
++      return rejectExclusiveCa("size_invalid")
++    const ca = input.subarray(0, length)
++    const after = statExclusiveCa(descriptor)
++    if (
++      length !== before.size ||
++      after.dev !== before.dev ||
++      after.ino !== before.ino ||
++      after.size !== before.size ||
++      after.mtimeMs !== before.mtimeMs ||
++      after.ctimeMs !== before.ctimeMs
++    )
++      return rejectExclusiveCa("changed")
++    if (createHash("sha256").update(ca).digest("hex") !== expected)
++      return rejectExclusiveCa("digest_mismatch")
++    return { timeout: false, tls: { ca, rejectUnauthorized: true } }
++  } finally {
++    try {
++      closeSync(descriptor)
++    } catch {
++      rejectExclusiveCa("close_failed")
++    }
++  }
++}
++
+ const withoutBunTimeout = Layer.effect(
+@@ -13,5 +100,9 @@ const withoutBunTimeout = Layer.effect(
+     const client = yield* HttpClient.HttpClient
+     return HttpClient.transformResponse(
+       client,
+-      Effect.provideService(FetchHttpClient.RequestInit, { timeout: false } as BunFetchRequestInit),
++      (response) =>
++        Effect.flatMap(
++          Effect.orDie(Effect.try({ try: exclusiveRequestInit, catch: normalizeExclusiveCaError })),
++          (requestInit) => Effect.provideService(response, FetchHttpClient.RequestInit, requestInit),
++        ),
+     )

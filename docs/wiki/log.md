@@ -484,3 +484,85 @@ that source plus this rotation, each with exit 0:
 These are offline/synthetic self-tests, not real engagement/provider/model execution. Prior scenario
 packet experiments remain unexecuted. The pending `a63eef8f` wiki assessment is included in publication.
 Full hosted CI will validate the pushed head separately; no merge or issue closure occurred here.
+
+## [2026-10-23] consolidate | Product direction, native research and evidence limits
+
+At the operator's request, reviewed the product/engineering discussion and current
+documentation before recording the north stars and updating agent navigation.
+Implementation and experiment follow-up remain deferred. Source baseline:
+`cf8b213aa9979297def3b71f8f63a05dcc7945d6`; isolated documentation branch:
+`codex/harness-direction-docs-20261023`. The dirty primary checkout and candidate
+implementation branch were read as evidence and not edited by this slice.
+
+Added [product and engineering direction](product-and-engineering-direction.md),
+[dated native status](native-research-status.md), and an
+[October discussion record](../research/research-direction-discussion-2026-10.md).
+Preserved the detailed [source review](../research/native-session-source-review-2026-10.md)
+with a historical-status notice and corrected relative code links. Its body retains
+the original research claims and later-choice pointers; this is not a new online
+source verification. Requested but unfinished reading leads stay explicitly open.
+
+The synthesis records model/provider independence, native research as the chosen
+direction, within-run adaptation, depth and useful partials, continuity, fresh
+review, shared limits, optional diagnostic comparison, and deletion before added
+mechanism. Root entrypoints remain short routers. README now reflects the domain-neutral
+product. The wiki separates October direction from September delivery. Dated scope
+notes preserve accepted decisions and the August autonomy aspiration without
+turning their old observations into current capability claims.
+
+Source/evidence review corrected the candidate documentation: a controller now
+exists but is unqualified; generic source runtimes do not prove generic model or
+provider support; connection/byte/time limits do not establish monetary accounting;
+review-file binding does not prove independent review. The continuation smoke calls
+the controller function with a synthetic child CLI. Its tests were added after
+implementation. The comparison specification's outcomes and decision rule are
+unchanged; its source/test descriptions and revision-freeze instruction are clarified.
+Earlier receipts keep their bytes, hashes and historical revision scope.
+
+Verification for this documentation slice:
+
+- Changed local Markdown destinations and heading fragments resolve; all new topic
+  pages are reachable from root/wiki pointers. Root mirrors remain byte-identical,
+  root sections 0–7 remain, and the changed paths are documentation only.
+- Independent read-only reviews checked navigation/hierarchy and implementation
+  claims. The coordinator checked the recorded operator corrections and addressed
+  the review findings before final validation.
+- `python3 tools/check-conformance.py --engineering-guidance`: navigation and mirror
+  checks pass; the combined command exits 1 for two stale draft-study overlay pins.
+  `overlay_pins.py check --json` reports the same two paths on the unchanged baseline
+  and this documentation branch, with zero validation failures and
+  `execution_authorized: false`. The pins were not refreshed.
+- Whitespace validation and retained-review import checks pass. No application,
+  controller, provider, target or hosted-CI run is part of this documentation pass.
+
+This entry records documentation and source inspection. It does not adopt a runtime,
+authorize an engagement, update target readiness, merge a branch, or close an issue.
+
+### Correction pass (same day)
+
+The review pass separated the root's generic three-boundary fence from the
+LLM-application domain examples, which now live in
+[LLM domain scope](../agents/llm-domain-scope.md). It removed the target-specific
+standing-grant exception from portable root and bootstrap instructions; a
+target-specific grant now belongs only in that target's signed scope. It restored a
+concrete evidence test to the root prime directive, restored the installed
+engineering-skills pointer, clarified explicit bootstrap invocation, aligned
+repository-visibility wording, and replaced branch-specific language with the stable
+candidate-route name. The attempt/negative/bundle lifecycle is recorded as a forward
+pointer to PR #193 until `docs/research-lifecycle.md` lands. The direction page now
+labels itself as a maintained synthesis rather than an accepted ADR.
+
+## [2026-10-23] correct | Live research-lifecycle citations and overlay pins
+
+PR #193 landed on main. The forward pointer is now the local
+[research lifecycle](../research-lifecycle.md) link in the README, both root mirrors
+and Decision 0005. This stacked branch carries the landed lifecycle document so its
+links resolve before the stack reaches main. Refreshed the draft AB-readiness overlay
+pins after the root guidance edit, and split the synthetic bearer sentinel in the
+native T02 verifier so the repository secret scan does not mistake a negative test
+for a leaked credential.
+
+Verification: `check-conformance.py` reports 898 checks, 0 failing;
+`--engineering-guidance` reports 12/12; changed-document local links and anchors
+resolve; `git diff --check` is clean. No application, controller, provider, target or
+hosted-CI run is part of this correction.

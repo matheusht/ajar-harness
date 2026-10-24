@@ -1,0 +1,55 @@
+{
+  "checks": [
+    {
+      "name": "snapshot records changed persistent project without filenames",
+      "observed": {
+        "delta": {
+          "added": 1,
+          "modified": 1,
+          "removed": 0
+        },
+        "status": "complete"
+      },
+      "pass": true
+    },
+    {
+      "name": "snapshot records native SQLite byte identity",
+      "observed": {
+        "store_status": "present"
+      },
+      "pass": true
+    },
+    {
+      "name": "snapshot distinguishes target source drift and mutable state",
+      "observed": {
+        "review_2_mutable_files": 1,
+        "target_delta": {
+          "added": 0,
+          "modified": 1,
+          "removed": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "name": "missing native SQLite is explicit and incomplete",
+      "observed": {
+        "status": "incomplete",
+        "store_status": "missing"
+      },
+      "pass": true
+    },
+    {
+      "name": "symlink cannot escape a stopped byte snapshot",
+      "observed": {
+        "rejected": true
+      },
+      "pass": true
+    }
+  ],
+  "kind": "native-research-provider-free-byte-snapshot-check-v1",
+  "native_stop_proof_exercised": false,
+  "passed": true,
+  "provider_or_target_executed": false,
+  "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895"
+}

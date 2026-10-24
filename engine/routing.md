@@ -30,7 +30,7 @@ unguarded sibling nearby is the bug (see `pattern.legacy-route-differential`).
 ## Not a checklist — guided, overridable
 The orchestrator MAY use, ignore, or override an activated card. But for any **strong** signal on a
 **high-impact** path, record one line on why if you skip it. The point is a reviewable reasoning trail,
-not a rigid gate. Selection stays deterministic (load the exact card by id, per `AGENTS.md §3`); what
+not a rigid gate. Selection stays deterministic (load the exact card by id, per `docs/agents/legacy-local-research.md` §3); what
 routing adds is *which* ids, justified by what recon saw.
 
 ## Where the signals come from / go

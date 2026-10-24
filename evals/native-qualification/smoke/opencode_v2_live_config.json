@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/deepseek-v4.1-flash-free",
+  "update": "disable",
+  "share": "disabled",
+  "plugins": ["/observer/opencode_v2_request_observer"],
+  "mcp": {"servers": {}},
+  "websearch": false,
+  "permissions": [
+    {"action": "*", "resource": "*", "effect": "deny"},
+    {"action": "read", "resource": "*", "effect": "allow"},
+    {"action": "glob", "resource": "*", "effect": "allow"},
+    {"action": "grep", "resource": "*", "effect": "allow"},
+    {"action": "edit", "resource": "*", "effect": "allow"},
+    {"action": "write", "resource": "*", "effect": "allow"},
+    {"action": "shell", "resource": "*", "effect": "allow"}
+  ],
+  "policies": [
+    {"action": "provider.use", "resource": "*", "effect": "deny"},
+    {"action": "provider.use", "resource": "opencode", "effect": "allow"}
+  ]
+}

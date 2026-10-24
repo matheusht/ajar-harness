@@ -28,3 +28,9 @@ For the maintained engineering synthesis and implementation evidence, start with
 - [0012 — Full autonomy as the north star: scope is the only human decision](0012-full-autonomy-north-star.md) — **RECORDED DIRECTION, not accepted**: the intended end state, the six preconditions none of which is met today, and the reframe that a hard gate is removed by BOUNDING the capability rather than by trusting supervision more
 
 - [0013 — One versioned signed finding activation](0013-canonical-filing-contract.md) — **interim fail-closed draft; new positive filings unavailable because original G3/G6 producer is missing; #85 incomplete**
+
+The [native local research source route](../agents/native-local-research.md) is implemented as a
+candidate for new local source research; the [legacy entry](../agents/legacy-local-research.md)
+remains for supported existing queue/record work. This source implementation does not revise
+accepted decisions or historical records. #165 adoption, #171 integrated qualification and #172
+unfamiliar-target study remain open.

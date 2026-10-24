@@ -1,0 +1,76 @@
+{
+  "status": "strong_lead_challenge_calibrated_native_review_not_run",
+  "source_sha256": {
+    "fixture/app.py": "053e7d0979e9e33fe136b7573c831a81ebafb9ad7211f73e3f9039bc67639b29",
+    "fixture/note.json": "97c43250ae98066677012b9b2d06d9cee8def0383b8650d45a0f02fab8995bbf",
+    "fixture/policy-v2.json": "34e387a2d469ae1750880ae7185a7493013861f42da2b87ab329e77256f518b9"
+  },
+  "prewritten_checks_sha256": "e85e8bc91e3225573275f7773de710dcda80c416b62b0d87439944e41e124a6f",
+  "order": [
+    {
+      "sequence": 1,
+      "file": "BEFORE-DROP.json",
+      "sha256": "57f517cfe7a748347d79e7febe9f6cbb6c5ccec91d9fd33dd2b351888e4b561e"
+    },
+    {
+      "sequence": 2,
+      "file": "ATTEMPTED-DISPOSITION.md",
+      "sha256": "8e56339f33c0dd837b301ad52c97c84c7665f081b47ad51870179458850d1e9a"
+    },
+    {
+      "sequence": 3,
+      "file": "AFTER-DROP-CHECK.json",
+      "sha256": "c106c38122a79d7e872208cbecdf8b4003aa025238597ef0571f192620f1c81d"
+    }
+  ],
+  "pre_drop_evidence_unchanged_after_checks": true,
+  "observed_cli_calls": 5,
+  "observed": {
+    "valid_base": "Alice draft created and preserved under v2",
+    "A": "Alice publication denied under original v2",
+    "B": "Bob publication copied exact existing draft under original v2",
+    "competing_C": "Carol publication denied under original note/v2",
+    "control": "Bob without draft unavailable/no file",
+    "extension": "identity/delegation-import/network delivery not supplied or demonstrated"
+  },
+  "raw_vs_sanitized": [
+    {
+      "private_raw": "<HOME>/.local/share/codex-private-evidence/t06-strong-lead-b49jfh3x/BEFORE-DROP-RAW.json",
+      "raw_sha256": "6f76451f07a9af9e512a8283148b5063731f6191a45f8689d6408c5b72fe850c",
+      "sanitized_file": "BEFORE-DROP.json",
+      "sanitized_sha256": "57f517cfe7a748347d79e7febe9f6cbb6c5ccec91d9fd33dd2b351888e4b561e",
+      "substitution_order": [
+        "owned temporary root -> <RUN>",
+        "execution-user home -> <HOME>"
+      ]
+    },
+    {
+      "private_raw": "<HOME>/.local/share/codex-private-evidence/t06-strong-lead-b49jfh3x/AFTER-DROP-RAW.json",
+      "raw_sha256": "aae081a822d9ea4d8c29e11306fcfdcb717c9d65749f7f7d88d50a9e20df5178",
+      "sanitized_file": "AFTER-DROP-CHECK.json",
+      "sanitized_sha256": "c106c38122a79d7e872208cbecdf8b4003aa025238597ef0571f192620f1c81d",
+      "substitution_order": [
+        "owned temporary root -> <RUN>",
+        "execution-user home -> <HOME>"
+      ]
+    }
+  ],
+  "private_permissions": "0700 directory; 0600 files",
+  "provider_calls": 0,
+  "native_contexts": [],
+  "reviewer_outcome": "not_run",
+  "cost": {
+    "provider": 0,
+    "human_preparation_time": "unmetered"
+  },
+  "cleanup": {
+    "owned_temporary_root_absent": true,
+    "new_servers": 0,
+    "new_containers": 0
+  },
+  "gates": {
+    "158": "shared aggregate allowance still unavailable",
+    "159": "actual native review incomplete",
+    "162": "open; challenge preparation only"
+  }
+}

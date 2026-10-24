@@ -199,7 +199,7 @@ warranted — is a judgment task, and belongs on the planning/reasoning tier, sa
 `engine/pocinator.md`'s own model-tier section. The mechanical legwork underneath it (running a
 build, executing a test suite, grepping a codebase for live call sites) doesn't need the expensive
 tier to execute — it can be Helper-tier work that feeds the planning-tier verdict, per the
-Orchestrator/Hunter/Helper split (`CLAUDE.md` §2). `engine/roster.md` doesn't currently assign
+Orchestrator/Hunter/Helper split (`docs/agents/legacy-local-research.md` §2). `engine/roster.md` doesn't currently assign
 regrade a tier at all; this doc self-declares one, the same way `pocinator.md` had to.
 
 ## 7. Decision-0005 record output

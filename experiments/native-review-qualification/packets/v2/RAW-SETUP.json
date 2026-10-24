@@ -1,0 +1,219 @@
+{
+  "origin": "operator_setup_not_native_reviewer_execution",
+  "records": [
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "alice",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v1.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 2,
+      "stdout": "{\"effect\": \"unavailable\", \"error\": \"FileNotFoundError\"}\n",
+      "stderr": "",
+      "observer_files": {}
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "draft",
+        "--actor",
+        "carol",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v1.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 3,
+      "stdout": "{\"effect\": \"denied\", \"actor\": \"carol\", \"action\": \"draft\", \"policy\": \"v1\"}\n",
+      "stderr": "",
+      "observer_files": {}
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "draft",
+        "--actor",
+        "alice",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v1.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 0,
+      "stdout": "{\"effect\": \"written\", \"file\": \"draft.txt\", \"actor\": \"alice\", \"policy\": \"v1\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "alice",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v1.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 0,
+      "stdout": "{\"effect\": \"written\", \"file\": \"published.txt\", \"actor\": \"alice\", \"policy\": \"v1\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        },
+        "published.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "carol",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v1.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 3,
+      "stdout": "{\"effect\": \"denied\", \"actor\": \"carol\", \"action\": \"publish\", \"policy\": \"v1\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "draft",
+        "--actor",
+        "alice",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v2.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 0,
+      "stdout": "{\"effect\": \"written\", \"file\": \"draft.txt\", \"actor\": \"alice\", \"policy\": \"v2\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "alice",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v2.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 3,
+      "stdout": "{\"effect\": \"denied\", \"actor\": \"alice\", \"action\": \"publish\", \"policy\": \"v2\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "bob",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v2.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 0,
+      "stdout": "{\"effect\": \"written\", \"file\": \"published.txt\", \"actor\": \"bob\", \"policy\": \"v2\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        },
+        "published.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    },
+    {
+      "argv": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/app.py",
+        "publish",
+        "--actor",
+        "carol",
+        "--policy",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/policy-v2.json",
+        "--note",
+        "<HOME>/Documents/trab/llm-redteam-harness/experiments/native-review-qualification/evidence/local-fixture-20261019a/fixture/note.json",
+        "--state",
+        "/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-review-local-qrh_16ze/state"
+      ],
+      "returncode": 3,
+      "stdout": "{\"effect\": \"denied\", \"actor\": \"carol\", \"action\": \"publish\", \"policy\": \"v2\"}\n",
+      "stderr": "",
+      "observer_files": {
+        "draft.txt": {
+          "text": "Synthetic note: ship the local fixture.\n",
+          "sha256": "12ad28853131c252feba66b896b146e5e16d53181badf59263e70b84b2ead644"
+        }
+      }
+    }
+  ]
+}

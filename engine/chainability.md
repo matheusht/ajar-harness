@@ -259,6 +259,6 @@ constitutes a real amplifier or a clean negative is a judgment call — belongs 
 tier, not delegated wholesale to a faster model. The mechanical legwork underneath a specific angle —
 tracing a call graph, running a check against real code, grepping for a sibling pattern in an adjacent
 file — doesn't need the expensive tier to execute; it can be Helper-tier work feeding the
-planning-tier verdict, per the Orchestrator/Hunter/Helper split (`CLAUDE.md` §2). `engine/roster.md`
+planning-tier verdict, per the Orchestrator/Hunter/Helper split (`docs/agents/legacy-local-research.md` §2). `engine/roster.md`
 doesn't assign chainability a tier at all; this doc self-declares one, the same way `pocinator.md` and
 `regrade.md` each had to.

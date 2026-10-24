@@ -852,15 +852,9 @@ def main() -> int:
 
         project_settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
         project_hooks = project_settings.get("hooks", {})
-        stop_commands = project_hooks.get("Stop", [{}])[0].get("hooks", [])
-        project_command = stop_commands[0] if stop_commands else {}
         checks.append((
-            "tracked project settings register Stop only with a ten-second fail-open timeout",
-            set(project_hooks) == {"Stop"}
-            and project_command.get("type") == "command"
-            and project_command.get("timeout") == 10
-            and "${CLAUDE_PROJECT_DIR}/.venv/bin/python" in project_command.get("command", "")
-            and "${CLAUDE_PROJECT_DIR}/tools/claude-stop-hook.py" in project_command.get("command", ""),
+            "repository sessions do not inherit the legacy queue Stop hook",
+            "Stop" not in project_hooks,
             repr(project_settings),
         ))
 
@@ -875,7 +869,7 @@ def main() -> int:
         generated = decode_one_json_document(generated_process.stdout)
         generated_command = generated["hooks"]["Stop"][0]["hooks"][0]
         checks.append((
-            "target-cwd launch settings use absolute harness paths and never install SubagentStop",
+            "explicit legacy launch settings retain absolute Stop paths and never install SubagentStop",
             generated_process.returncode == 0
             and not generated_process.stderr
             and set(generated["hooks"]) == {"Stop"}

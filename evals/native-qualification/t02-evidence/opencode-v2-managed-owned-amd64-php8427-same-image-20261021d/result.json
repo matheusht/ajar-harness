@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "t02-managed-owned-amd64-php8427-same-image-public-result",
+  "completed_at": "2026-10-21T22:15:14Z",
+  "status": "pass",
+  "failure": null,
+  "source_commit": "1781eb457b633f9391c89a911ebd3c66c378d3f4",
+  "image_id": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f",
+  "runtime_admission": {
+    "status": "pass",
+    "image_id": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f",
+    "platform": "linux/amd64",
+    "php_package_revision": "8.4.27-r0",
+    "php_version": "8.4.27",
+    "opencode_version": "v2.0.32",
+    "pull": "never",
+    "network": "none"
+  },
+  "application_parity": {
+    "status": "pass",
+    "image_id": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f",
+    "arm_image_ids": {
+      "vulnerable": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f",
+      "fixed": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f"
+    },
+    "checks_passed": 32,
+    "checks_total": 32,
+    "archives_verified_before_first_arm": 2,
+    "both_arms_same_image": true,
+    "historical_semantic_comparison_complete": true,
+    "inner_docker_baseline_restored": true
+  },
+  "managed_owned": {
+    "status": "pass",
+    "image_id": "sha256:4aae0f3a516cd2fcde717e5f2ac055105a04e3a5bb81afe6c484f0c3953b769f",
+    "classification": "owned TLS/native managed CONNECT offline E2E; zero provider calls",
+    "review_status": "unqualified_owned_synthetic_response",
+    "checks_passed": 80,
+    "checks_total": 80,
+    "native_stages": [
+      "first",
+      "reviewer",
+      "resume"
+    ],
+    "cleanup_complete": true,
+    "temporary_secret_files_removed": true,
+    "source_pins_stable": true,
+    "source_copies_match": true
+  },
+  "same_image_chain": {
+    "candidate_runtime_parity_and_managed_ids_equal": true,
+    "image_rebuilt_between_stages": false,
+    "historical_receipt_reused": false
+  },
+  "external_activity": {
+    "public_source_archives_retrieved": 2,
+    "provider_calls": 0,
+    "model_calls": 0,
+    "live_targets_contacted": 0,
+    "external_credentials_used": 0,
+    "engagements_started": 0,
+    "researcher_bundle_created": false
+  },
+  "live_admission_enabled": false,
+  "cleanup": {
+    "image_removed": true,
+    "registered_build_cache_records_removed": 7,
+    "unresolved_build_cache_records": 0,
+    "errors": [],
+    "baseline_before_sha256": "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5",
+    "baseline_after_sha256": "91a7a28d7ec6e52022f6c534aa35facc447a72a8f65b14c84944366af6c418a5",
+    "baseline_restored": true,
+    "controller_post_cleanup_readback": {
+      "containers": 0,
+      "images": 0,
+      "volumes": 0,
+      "build_cache_records": 0,
+      "default_networks_unchanged": true
+    }
+  },
+  "claim_limits": {
+    "owned_offline_current_runtime_only": true,
+    "provider_or_model_route_qualified": false,
+    "live_tls_qualified": false,
+    "receiver_qualified": false,
+    "target_qualified": false,
+    "hosted_ci_qualified": false,
+    "independent_cleanup_readback_verified": false,
+    "default_adoption": false,
+    "issue_165_unblocked": false,
+    "retirement_work_authorized": false
+  }
+}

@@ -3,6 +3,11 @@
 Full brainstorm + decision history: `harness-merged-architecture-v1.html` (kept with the originating
 engagement wiki). This is the original conceptual summary, retained as history.
 
+For current product choices and the native/legacy boundary, start with
+[product and engineering direction](wiki/product-and-engineering-direction.md) and
+[native research status](wiki/native-research-status.md). The mechanisms and deferred
+phases below describe the original architecture; they are not the native task procedure.
+
 For the implemented record and review model, read the
 [record-kernel architecture](decision-0005-implementation-architecture.md). Follow the
 [decision index](decisions/README.md) for later decisions and supersession status; the three record
@@ -21,7 +26,7 @@ types below describe the original conceptual pipeline, not the complete current 
 1. **Composable two axes** — vuln (`what`) × technique (`how`), judged by oracles. Coverage is
    multiplicative. (Convergent with PyRIT converter / garak probe / promptfoo strategy.)
 2. **Skills-as-modules, portable + deterministic** — plain `SKILL.md`, orchestrator loads the exact
-   card by id. Engine-agnostic; native `.claude/skills/` mirror optional later. (See CLAUDE.md §3.)
+   card by id. Engine-agnostic; native `.claude/skills/` mirror optional later. (See `docs/agents/legacy-local-research.md` §3.)
 3. **`safe_signal` is a load-gate** — a vuln card without a benign win-condition won't load. The
    scope fence made structural.
 4. **Three record types** — `attempt` (many) → `finding` (few) → `pattern` (very few). Prevents one

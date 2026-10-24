@@ -52,7 +52,7 @@ Unknown coverage is not proof that a flaw exists or that the entire asset is saf
 | Hunter | may allocate bounded search effort; never assume a flaw exists | wasted compute, extra candidates |
 | Refuter / oracle / adjudicator | **forbidden — never told a flaw is expected** | a false report to a vendor |
 
-A hunter cannot emit `confirmed` (`CLAUDE.md` §2), so its bias is contained. The orchestrator's standing
+A hunter cannot emit `confirmed` (`docs/agents/legacy-local-research.md` §2), so its bias is contained. The orchestrator's standing
 duty is to stop the hunter's prior from leaking into a refuter's brief. A refuter brief that says
 "confirm this bug" has already failed.
 

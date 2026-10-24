@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Run the reducer-owned work queue from outside model sessions."""
+"""Run the explicit legacy work queue from outside model sessions.
+
+New local source research uses tools/native_research.py.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ def emit(value: object) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
-    run = subcommands.add_parser("run", help="run one target-local queue under external budgets")
+    run = subcommands.add_parser("run", help="run one legacy target-local queue under external budgets")
     run.add_argument(
         "--workspace",
         type=Path,
@@ -49,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         required=True,
         help=(
-            "ordered fresh-reviewer model pool; repeat for claim/regrade/Pocinator lineage "
+            "legacy queue fresh-reviewer model pool; repeat for claim/regrade/Pocinator lineage "
             "independence"
         ),
     )

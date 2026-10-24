@@ -1,0 +1,65 @@
+{
+  "base_commit": "decea24eae5de43050ecdcafb921efe811ce7bd6",
+  "docker_image": "sha256:2fc782d346b0670c43378557cf8a2a9926a1f3d28e596180e7b21a0736d8cb7d",
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "kind": "source-mode-local-checks-v1",
+  "not_executed": [
+    "native model review",
+    "paid provider",
+    "credential containment",
+    "TLS integration",
+    "stop/owner-loss authority",
+    "target SDK",
+    "hosted CI",
+    "full qualification matrix"
+  ],
+  "python_version": "3.14.6",
+  "results": [
+    {
+      "command": [
+        "python3",
+        "tools/check_native_source_mode.py",
+        "--docker",
+        "sha256:2fc782d346b0670c43378557cf8a2a9926a1f3d28e596180e7b21a0736d8cb7d"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "{\n  \"checks\": [\n    \"runtime_schema\",\n    \"check_and_control_binding\",\n    \"original_source_preserved\",\n    \"two_batches_three_clean_replays_each\",\n    \"old_outputs_preserved\",\n    \"reviewer_frozen_source_execution\",\n    \"modified_original_refused\",\n    \"unknown_effect_blocks_next_batch\"\n  ],\n  \"status\": \"passed\",\n  \"limits\": \"Synthetic executor checks; no native model or provider qualification.\"\n}\n"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools",
+        "-p",
+        "test_native_source_sdk.py"
+      ],
+      "exit_code": 0,
+      "stderr": "....\n----------------------------------------------------------------------\nRan 4 tests in 0.015s\n\nOK\n",
+      "stdout": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": ""
+    }
+  ],
+  "source_sha256": {
+    "tools/check_native_source_mode.py": "8d80dfef6871fbc8ff78877f23ef35038f52ac614854e940cc3372739ed6527f",
+    "tools/native_provider_gateway.py": "2c2b409b2c33b44b507983406134f5c48d56b934187a0c1c0be420ff2da4935c",
+    "tools/native_research.py": "9e6de2b6c2d10d7b8e03c8bb0a8fd4ad8807d9cd4ea47844228f49b7b555ac73",
+    "tools/test_native_source_sdk.py": "6e3a6527803ac7c9b4c14a539f8b0219a9001ce4c4f3b21cf711d44fc7ff3ec0"
+  },
+  "syntax_parse": "passed",
+  "test_boundary": "Real local Docker executor operations with synthetic source and a substituted test owner; not a native or engagement E2E run."
+}

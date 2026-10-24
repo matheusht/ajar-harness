@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Fail-open Claude Code Stop adapter for the target-local work queue.
+"""Explicit legacy Claude Code Stop adapter for the target-local work queue.
+
+Legacy launchers opt in through --print-additional-settings; repository sessions do not
+inherit this hook from project settings.
 
 The platform contract is intentionally tiny: stdout is always exactly one JSON object and this
 process never exits 2.  A valid top-level ``decision: block`` is emitted only after the same locked

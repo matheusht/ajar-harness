@@ -2,9 +2,10 @@
 
 Use this route for a supported existing engagement that depends on the Decision 0005/0006 queue,
 record kernel or historical ledger, and for work explicitly assigned to that runtime. New local
-source research is not this route: the candidate native route is external
-[PR #192](https://github.com/matheusht/redteam-harness/pull/192) and is **not on `main`**. Do not
-infer its behavior here, and do not convert, rewrite or re-grade a historical engagement.
+source research is not this route: the candidate native route is
+[native local research](native-local-research.md); #165 adoption, #171 integrated qualification and
+#172 unfamiliar-target study remain open. Do not infer its behavior here, and do not convert,
+rewrite or re-grade a historical engagement.
 
 The root [entrypoint](../../AGENTS.md) gates and the signed target-local scope still control every
 action. See the [harness flow](../harness-flow.md) for the stage overview, the

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Replay only with the already supplied exact image. Never build, tag or pull here.
+: "${PHP8427_OUTPUT:?set a new private absolute output directory}"
+TAG='t02-kanboard-runtime:amd64-php8427-20261021c'
+EXPECTED='sha256:241dd8f788c62d5c9ef87bdab07ce1f05aca7db0199d532a68b5910c7397f7de linux/amd64'
+CANDIDATE='evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-php8427-20261021c/candidate.json'
+RUNTIME='evals/native-qualification/t02-evidence/opencode-v2-php-parity-amd64-php8427-20261021c/runtime-admission.json'
+ADAPTER='evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py'
+
+[ "$(sha256sum "${CANDIDATE}" | cut -d' ' -f1)" = 'b988d104545f4ace568a268f79cdf1d2bfb2f686d948ce34f144a01db394df73' ]
+[ "$(sha256sum "${RUNTIME}" | cut -d' ' -f1)" = '0481663a5d4e62b8ec84054288af98523300128fda04512b02c4e89a77ed1e4c' ]
+[ "$(sha256sum "${ADAPTER}" | cut -d' ' -f1)" = '100cebaaf715e42fa9c10e4c396a5075c931f6f780baac64f590844308d0973d' ]
+ACTUAL="$(docker image inspect "${TAG}" --format '{{.Id}} {{.Os}}/{{.Architecture}}')"
+if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+  printf '%s\n' 'exact registered image is unavailable; refusing execution' >&2
+  exit 1
+fi
+
+exec python3 evals/native-qualification/smoke/check_v2_php_parity_amd64_php8427.py \
+  --output "${PHP8427_OUTPUT}"

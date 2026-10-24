@@ -1,0 +1,61 @@
+{
+  "classification": "owned synthetic review-input lifetime; no native review",
+  "runner_sha256": "bced7e13c11af9649fc9646f3a5994ded5c03367d47f6d02d1ff1af49e7836f2",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "checks": [
+    {
+      "name": "unchanged actual claim and source match frozen packet",
+      "pass": true
+    },
+    {
+      "name": "frozen packet retains contrary baseline and candidate effect",
+      "pass": true
+    },
+    {
+      "name": "offline PHP execution observes frozen candidate result",
+      "pass": true
+    },
+    {
+      "name": "material signal requires reviewer execution and observed result",
+      "pass": true
+    },
+    {
+      "name": "quoted PHP is not execution",
+      "pass": true
+    },
+    {
+      "name": "other session cannot provide reviewer material check",
+      "pass": true
+    },
+    {
+      "name": "failed or result-free tool is not a material check",
+      "pass": true
+    },
+    {
+      "name": "unbound PHP path is not the frozen candidate",
+      "pass": true
+    },
+    {
+      "name": "changed claim is stale despite intact packet",
+      "pass": true
+    },
+    {
+      "name": "changed current source is stale despite intact packet",
+      "pass": true
+    },
+    {
+      "name": "new current source file is stale despite intact packet",
+      "pass": true
+    },
+    {
+      "name": "stop before packet/review cannot become current",
+      "pass": true
+    },
+    {
+      "name": "post-freeze packet change is stale",
+      "pass": true
+    }
+  ],
+  "status": "pass"
+}

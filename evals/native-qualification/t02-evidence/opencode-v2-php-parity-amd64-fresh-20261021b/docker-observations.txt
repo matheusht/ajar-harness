@@ -1,0 +1,218 @@
+# Sanitized Docker lifecycle observations
+
+The fenced blocks below preserve the non-secret stdout returned during the
+task, copied from the execution transcript before this receipt was sealed.
+The independent final readback was also retained directly at execution time;
+its private raw-file SHA-256 is recorded below. No build log, proxy value, CA
+bytes, credential, or private task path appears here.
+
+## Pre-build baseline — 2026-10-21T19:55:40Z
+
+```text
+[containers]
+[images]
+[volumes]
+[networks]
+1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba	bridge	bridge	local
+dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb	host	host	local
+8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216	none	null	local
+[buildx-du]
+Reclaimable:	0B
+Total:		0B
+[fresh-tag]
+absent
+```
+
+## After failed build — 2026-10-21T20:01:31Z
+
+```text
+[containers]
+[images]
+[volumes]
+[networks]
+1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba	bridge	bridge	local
+dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb	host	host	local
+8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216	none	null	local
+[cache]
+ID:           47ehtoqw71c1f0ovp2sfysmh9
+Parents:
+ - urofb9wv6yehq8rk8l81or3vz
+Created at:   2026-10-21 20:01:03.482448571 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    28 seconds ago
+Type:         regular
+
+ID:           uae38gxj80a02n8gzi2f73pdz
+Parents:
+ - x92kc87fqeg51fzy5c41la612
+Created at:   2026-10-21 20:01:03.487154336 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    27 seconds ago
+Type:         regular
+
+ID:           urofb9wv6yehq8rk8l81or3vz
+Created at:   2026-10-21 20:01:03.480010175 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    28 seconds ago
+Type:         regular
+
+ID:           x92kc87fqeg51fzy5c41la612
+Parents:
+ - 47ehtoqw71c1f0ovp2sfysmh9
+Created at:   2026-10-21 20:01:03.48479563 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    28 seconds ago
+Type:         regular
+
+ID:           ydik7lbwq2hcxwqyttv2gls84
+Created at:   2026-10-21 20:00:59.823002616 +0000 UTC
+Mutable:      true
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  local source for context
+Usage count:  1
+Last used:    27 seconds ago
+Type:         source.local
+
+ID:           9u2iccw8sozn5ehtlzjldleql
+Created at:   2026-10-21 20:00:58.87870105 +0000 UTC
+Mutable:      true
+Reclaimable:  true
+Shared:       false
+Size:         584B
+Description:  local source for dockerfile
+Usage count:  1
+Last used:    27 seconds ago
+Type:         source.local
+
+Reclaimable:	584B
+Total:		584B
+[candidate-tag]
+absent
+```
+
+## First exact-ID removal pass
+
+The commands used `docker buildx prune --force --filter id=<exact-id>` in this
+order: `47ehtoqw71c1f0ovp2sfysmh9`, `uae38gxj80a02n8gzi2f73pdz`,
+`urofb9wv6yehq8rk8l81or3vz`, `x92kc87fqeg51fzy5c41la612`,
+`ydik7lbwq2hcxwqyttv2gls84`, `9u2iccw8sozn5ehtlzjldleql`.
+
+```text
+Total:	0B
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+uae38gxj80a02n8gzi2f73pdz               	true 		0B        	41 seconds ago
+Total:	0B
+Total:	0B
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+x92kc87fqeg51fzy5c41la612               	true 		0B        	42 seconds ago
+Total:	0B
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+ydik7lbwq2hcxwqyttv2gls84*              	true 		0B        	41 seconds ago
+Total:	0B
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+9u2iccw8sozn5ehtlzjldleql*              	true 		584B      	41 seconds ago
+Total:	584B
+```
+
+## Intermediate readback — 2026-10-21T20:01:55Z
+
+```text
+ID:           47ehtoqw71c1f0ovp2sfysmh9
+Parents:
+ - urofb9wv6yehq8rk8l81or3vz
+Created at:   2026-10-21 20:01:03.482448571 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    52 seconds ago
+Type:         regular
+
+ID:           urofb9wv6yehq8rk8l81or3vz
+Created at:   2026-10-21 20:01:03.480010175 +0000 UTC
+Mutable:      false
+Reclaimable:  true
+Shared:       false
+Size:         0B
+Description:  pulled from ghcr.io/anomalyco/opencode@sha256:85986f556e985e377bd24cd68a5ccfbc647bb49e591194edda8a0e4542303319
+Usage count:  1
+Last used:    52 seconds ago
+Type:         regular
+
+Reclaimable:	0B
+Total:		0B
+```
+
+## Retried exact parent IDs
+
+```text
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+47ehtoqw71c1f0ovp2sfysmh9                	true 		0B        	About a minute ago
+Total:	0B
+ID						RECLAIMABLE	SIZE		LAST ACCESSED
+urofb9wv6yehq8rk8l81or3vz                	true 		0B        	About a minute ago
+Total:	0B
+Reclaimable:	0B
+Total:		0B
+```
+
+## Final readback — 2026-10-21T20:02:20Z
+
+```text
+[containers]
+[images]
+[volumes]
+[networks]
+1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba	bridge	bridge	local
+dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb	host	host	local
+8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216	none	null	local
+[cache]
+Reclaimable:	0B
+Total:		0B
+[candidate-tag]
+absent
+```
+
+## Independent retained final readback — 2026-10-21T20:07:51Z
+
+Private raw-file SHA-256:
+`ecc94f6b186ecf4f237adb5b05bb603e4fd23ad6376d3418ec65fa1ff05e7a64`.
+
+```text
+[containers]
+[images]
+[volumes]
+[networks]
+1050252286e8631bf8ee038d52cc1cffb8307746317da75e16c8c33afbde07ba	bridge	bridge	local
+dc064e5cfa5c545dfe98b45b11f9bd068174af23daf4b5e8155a9ada938b68bb	host	host	local
+8065fb4aff55641f71f0708775e982d2e8bda062d0ac7ffd91c29ce55e43b216	none	null	local
+[cache]
+Reclaimable:	0B
+Total:		0B
+[candidate-tag]
+absent
+```

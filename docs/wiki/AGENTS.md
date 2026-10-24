@@ -20,10 +20,15 @@ This directory is the maintained synthesis of engineering decisions, evidence an
 
 Use this process when a source is ingested, an engineering decision changes, a slice is implemented/tested, or a reusable answer adds evidence. Do not manufacture an update for every tool call. A question with no new durable information can be answered with citations to the existing page.
 
+For agent-facing instructions, use the installed `writing-for-agents` skill: keep context pointers sharp, make completion criteria checkable, and separate steps from disclosed reference.
+
 ## Lightweight operation
 
 The index, ordinary Markdown links, `rg` and Git cover the current need. Add no database, search service, embeddings, generated dashboard, background job or wiki-specific test framework without a demonstrated problem.
 
 At the end of a meaningful work slice, check that changed pages are reachable, their source links resolve, dates/statuses agree and missing evidence remains explicit. This is a bounded content check, not a repository-wide ingestion campaign.
 
-Implementation workers follow the model/effort and permission limits in the [implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md). Wiki editing never grants additional execution authority.
+Workers implementing the September 5 package follow that package's
+[implementation goal prompt](../research/harness-engineering-2026-09-05/implementation-goal-prompt.md).
+Its model/effort and permission choices are scoped to that task. Other work follows
+its current assignment and actual authority; wiki editing grants no execution authority.

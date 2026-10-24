@@ -15,7 +15,7 @@ Pick the route from the work in front of you, then open its entry. One trigger p
 | Trigger | Route | Entry |
 | --- | --- | --- |
 | Repository engineering, research, documentation or planning | Ground the work in current code and sources; keep the requested scope; separate observed, proposed and implemented work. | This file, [layout](README.md#layout), [decisions](docs/decisions/README.md) |
-| New local source research through the candidate native route | Candidate only, in external [PR #192](https://github.com/matheusht/redteam-harness/pull/192). Its native docs are **not on `main`**; re-check the PR head before relying on them, and do not describe the route as merged, qualified or adopted. | PR #192 |
+| New local source research through the candidate native route | Candidate source route implemented in this branch. #165 adoption, live qualification and integrated acceptance remain open; do not describe the route as merged, qualified or adopted. | [native local research](docs/agents/native-local-research.md), [status](docs/wiki/native-research-status.md) |
 | Existing queue/record engagement, or work assigned to that runtime | Decision 0005/0006 kernel, admitted readers, immutable history and the Docker queue. | [legacy entry](docs/agents/legacy-local-research.md) |
 | Attempt, negative-result or evidence-bundle records | `attempt-start` → `attempt-finish`; an exhausted lane uses `record-negative`; external evidence uses `register-bundle`. These are notebook records, not findings or coverage verdicts. | [research lifecycle](docs/research-lifecycle.md) |
 | Capability, readiness or qualification claim | Read the dated state, then its source evidence. A design choice, an implemented mechanism, a local check, qualification and adoption are distinct facts. | [engineering wiki](docs/wiki/index.md) |
@@ -44,8 +44,10 @@ cannot supply execution evidence. Keep claim state, unfinished search, and bound
 
 1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
    objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
-2. **Safe-signal gate** — never run a vulnerability card whose front-matter lacks a benign
-   `safe_signal`.
+2. **Safe-signal gate** — never run a vulnerability or source card whose front-matter lacks a
+   benign `safe_signal`. The LLM-application examples are in
+   [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the bootstrap's
+   source-only gate.
 3. **Impact-artifact gate** — before creating any Zone-2 PoC artifact (see the
    [scope fence](README.md#scope-fence-read-first)), stop for fresh human confirmation. Record each
    artifact and its cleanup obligation at creation; effects beyond the signed environment or
@@ -92,13 +94,17 @@ redaction control.
 
 ADRs live in `docs/decisions/`, not `docs/adr/`; start with [the decision index](docs/decisions/README.md).
 For current engineering state read [the wiki](docs/wiki/index.md); it is a dated observation, not a
-live tracker. The LLM-domain benign examples are in [LLM domain scope](docs/agents/llm-domain-scope.md);
-the generic fence stays in the README.
+live tracker. For product and engineering direction read
+[product and engineering direction](docs/wiki/product-and-engineering-direction.md). For capability
+and readiness claims read the dated [native research status](docs/wiki/native-research-status.md),
+then its source evidence. The LLM-domain benign examples are in
+[LLM domain scope](docs/agents/llm-domain-scope.md); the generic fence stays in the README.
 
 ### Engineering conventions
 
-Use the installed `be-ambitious` and `writing-for-agents` skills when their triggers apply: pursue
-the strongest defensible version of the requested change, and write for the agent that will read it.
-Run `python3 tools/check-conformance.py` after changing cards, casebooks or entrypoint docs; a green
+Use the installed `be-ambitious`, `wayfinder`, `grilling` and `writing-for-agents` skills when their
+triggers apply: pursue the strongest defensible version of the requested change, route the work
+explicitly, challenge it adversarially, and write for the agent that will read it. Run
+`python3 tools/check-conformance.py` after changing cards, casebooks or entrypoint docs; a green
 structural run is required before promotion and is not a full schema validation. Claims cite the
 exact source or execution evidence that supports them.

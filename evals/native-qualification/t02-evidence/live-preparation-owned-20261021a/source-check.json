@@ -1,0 +1,145 @@
+{
+  "checks": [
+    {
+      "error_code": "live_runtime_ca_required",
+      "name": "missing-pair",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_required",
+      "name": "path-only",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_required",
+      "name": "hash-only",
+      "pass": true
+    },
+    {
+      "error_code": "runtime_ca_live_only",
+      "name": "offline-pair",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "relative-path",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "symlink",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "directory",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "fifo",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "mutable",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "empty",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "oversized",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "private-key",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "malformed-pem",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_invalid",
+      "name": "mixed-valid-malformed-pem",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_sha256_invalid",
+      "name": "malformed-hash",
+      "pass": true
+    },
+    {
+      "error_code": "live_runtime_ca_hash_mismatch",
+      "name": "hash-mismatch",
+      "pass": true
+    },
+    {
+      "error_code": "cloud_live_route_not_qualified",
+      "name": "valid-still-blocked",
+      "pass": true
+    },
+    {
+      "error_code": "cloud_live_route_not_qualified",
+      "name": "ambient SSLKEYLOGFILE has no pre-denial effect",
+      "pass": true
+    },
+    {
+      "name": "validated bytes use a private exact snapshot",
+      "pass": true
+    },
+    {
+      "name": "live trust plan is exact and read-only",
+      "pass": true
+    },
+    {
+      "name": "live trust plan refuses missing snapshot",
+      "pass": true
+    },
+    {
+      "name": "NODE_TLS_REJECT_UNAUTHORIZED presence is rejected",
+      "pass": true
+    },
+    {
+      "name": "GIT_SSL_NO_VERIFY presence is rejected",
+      "pass": true
+    },
+    {
+      "name": "SSLKEYLOGFILE presence is rejected",
+      "pass": true
+    },
+    {
+      "name": "provider state supports missing or owned responder",
+      "pass": true
+    }
+  ],
+  "classification": "offline source and parameter validation; no Docker invocation or network syscall observed",
+  "docker_called": false,
+  "kind": "t02-live-preparation-source-check",
+  "live_gate": "cloud_live_route_not_qualified",
+  "observation_complete": true,
+  "schema_version": 1,
+  "source_sha256": {
+    "checker": "e873349893d808b664f7b887bf1cf0a1155a16a8a560a6dfb56f957bf881491b",
+    "manifest": "e27b45692eccbd8da1958428759c4f14e9fec0be3ea99b153cb07b1424cc95a9",
+    "runner": "659920699cd3c0a70807ef2d0ade83e14c7123feafd2e31ec4b5031734dd24b9"
+  },
+  "status": "pass",
+  "synthetic_ca": {
+    "bytes": 1155,
+    "certificate_count": 1,
+    "private_key_present": false,
+    "sha256": "2f263c8f17c257f41f994de2ce887fa93b590e40fdacdc393aace6a0ccc6e5dd"
+  },
+  "network_observation": {
+    "method": "strace -qq -f -e trace=network -e signal=none",
+    "scope": "checker child and all descendants",
+    "syscalls_observed": 0
+  }
+}

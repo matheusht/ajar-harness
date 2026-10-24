@@ -1,5 +1,12 @@
 # engine/persistence.md — exhausting leads, thoughtfully
 
+> **Retained legacy workflow.** Queue, hypothesis-event and terminal-state rules
+> below apply to explicit legacy record-backed work. New native local source
+> research follows the [native guide](../docs/agents/native-local-research.md) and
+> [portable workflow](native-research-workflow.md). Its researcher may reuse the
+> domain reasoning and backtracking without creating legacy transitions or earning
+> a queue/coverage ending. Existing legacy callers retain the full semantics below.
+
 > The **computed work queue is the single completion condition** (`engine/loop.md`). Evidence changes
 > the work that must be represented in that queue: it *licenses* persistence, a bounded space makes
 > "dry" mean something, a staged funnel keeps the grind rigorous, and a counterweight keeps it from

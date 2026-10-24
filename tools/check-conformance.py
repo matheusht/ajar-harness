@@ -1599,8 +1599,8 @@ def check_active_guidance():
 
 
 def check_queue_stop_doctrine():
-    """Keep the computed queue as the only completion predicate in active loop doctrine."""
-    print("\n[doctrine] computed queue is the single completion condition")
+    """Preserve queue completion semantics for retained legacy engagements only."""
+    print("\n[doctrine] retained legacy queue completion condition")
     core_doctrine_paths = (
         "engine/loop.md",
         "engine/persistence.md",
@@ -1629,7 +1629,7 @@ def check_queue_stop_doctrine():
             f"queue stop doctrine: {relative} requires no blocking queue item for completion",
         )
 
-    operational_paths = {"CLAUDE.md", "AGENTS.md", *core_doctrine_paths}
+    operational_paths = {"docs/agents/legacy-local-research.md", *core_doctrine_paths}
     for relative_root in (
         "engagements/_TEMPLATE/goal-prompts",
         "skills",
@@ -1653,7 +1653,7 @@ def check_queue_stop_doctrine():
             if match:
                 doctrine_offenders.append(f"{relative}: {description}: {match.group(0)}")
     record(not doctrine_offenders,
-           "queue stop doctrine: active prompts, cards, and engine docs have no counter-based stop",
+           "legacy queue doctrine: prompts, cards, and engine docs have no counter-based stop",
            "; ".join(doctrine_offenders))
     doctrine_regression_spellings = (
         "K~3 dry rounds",

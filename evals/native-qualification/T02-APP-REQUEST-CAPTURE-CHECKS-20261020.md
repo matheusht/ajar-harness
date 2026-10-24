@@ -50,9 +50,6 @@ failure modes:
    and disposable data are removed by exact owned IDs; source pins survive.
 
 This step produced checks and topology only; it made no model/provider call.
-T05's [first managed-send receipt](../../experiments/native-network-preflight/evidence/v2-managed-send-before-20261020a/result.json)
-exposed an upload forwarded after verified producer stop. Its
-[offline rerun](../../experiments/native-network-preflight/evidence/v2-managed-send-after-20261020b/result.json)
-held that upload and passed the focused case with exact cleanup. That receipt
-is explicitly partial T05 evidence; T02 must wait for the completed producer
-stop qualification before binding the handle to a live run.
+T02 must wait for T05's completed producer stop qualification before binding the
+handle to a live run. Earlier managed-send attempts are not retained as citable
+receipts in this tree, so this note does not rely on them as evidence.

@@ -3930,7 +3930,9 @@ def _reset_source_executor(root: Path, role: str, identifier: str, plan: dict) -
 def source_execute(run_root: Path, command_file: Path | None = None, *,
                    source_snapshot: Path | None = None, owner_role: str = 'researcher',
                    execution_id: str | None = None, expected_command: list[str] | None = None,
-                   expected_input: dict[str, str] | None = None) -> dict:
+                   expected_input: dict[str, str] | None = None,
+                   paired_request: Path | None = None,
+                   source_variant: str = 'original') -> dict:
     root = _private_root(run_root)
     with _turn_lock(root):
         plan = _verified_plan(root)
@@ -3941,6 +3943,20 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
             _source_executor_envelope(root, plan)
         if owner_role not in ('researcher', 'reviewer-1', 'reviewer-2'):
             _fail('source_owner_invalid')
+        checked_source = plan['source_sha256']
+        patch_sha = None
+        if paired_request is not None:
+            if owner_role == 'researcher' or source_snapshot is None or source_variant not in ('original', 'patched'):
+                _fail('source_patch_request_invalid')
+            import native_patch_check as paired
+            patch = paired.verify_patch(root, _read_json(paired_request), plan,
+                                        _load_review_module(root))
+            if Path(paired_request) != patch['area'] / 'request.json':
+                _fail('source_patch_request_invalid')
+            checked_source = patch['original_manifest'] if source_variant == 'original' else patch['patched_manifest']
+            patch_sha = _sha(paired_request)
+        elif source_variant != 'original':
+            _fail('source_patch_request_invalid')
         command = _validate_target_command(command_file or _controls(root) / 'target-command.json')
         if expected_command is not None and command != expected_command:
             _fail('source_execution_command_changed')
@@ -3949,7 +3965,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
             if expected_input is not None and inventory != expected_input:
                 _fail('source_execution_input_changed')
             if owner_role.startswith('reviewer-'):
-                _verify_source_original(plan['source_sha256'], inventory)
+                _verify_source_original(checked_source, inventory)
         identity = execution_id or uuid.uuid4().hex
         if not re.fullmatch(r'[0-9a-f]{32}', identity):
             _fail('source_execution_id_invalid')
@@ -3964,6 +3980,11 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                    'command': command, 'image_id': plan['target_image_id'],
                    'platform': plan['platform'], 'runtime': _source_runtime(plan),
                    'network': 'none', 'runs': [], 'assessment': 'needs_review'}
+        if patch_sha is not None:
+            receipt.update(source_variant=source_variant,
+                           paired_patch_request_sha256=patch_sha,
+                           checked_source_manifest_sha256=hashlib.sha256(
+                               json.dumps(checked_source, sort_keys=True).encode()).hexdigest())
         _write_json(path, receipt, once=True)
         try:
             if source_snapshot is None:
@@ -3974,7 +3995,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                 if expected_input is not None:
                     _verify_inventory(directory / 'input', expected_input)
             if owner_role.startswith('reviewer-'):
-                _verify_source_original(plan['source_sha256'], inventory)
+                _verify_source_original(checked_source, inventory)
             _write_json(directory / 'input-manifest.json', inventory, once=True)
             receipt['input_manifest_sha256'] = _sha(directory / 'input-manifest.json')
             _write_json(path, receipt)
@@ -3996,7 +4017,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                     _fail('source_executor_freeze_unavailable')
                 output_inventory = _inventory(work)
                 if owner_role.startswith('reviewer-'):
-                    _verify_source_original(plan['source_sha256'], output_inventory)
+                    _verify_source_original(checked_source, output_inventory)
                 shutil.copytree(work, output / 'files', symlinks=True)
                 _verify_inventory(output / 'files', output_inventory)
                 _write_json(output / 'files.json', output_inventory, once=True)
@@ -5569,17 +5590,21 @@ def _load_review_module(root: Path):
     return module
 
 
-def _validate_source_check(value: object, input_id: str) -> dict:
+def _validate_source_check(value: object, input_id: str, *, paired: bool = False) -> dict:
+    commands = ('effect', 'control', 'normal', 'connected') if paired else ('effect', 'control')
     if (not isinstance(value, dict) or set(value) !=
-            {'kind', 'input_id', 'effect', 'control', 'rationale'}
-            or value['kind'] != 'native-source-check-v1' or value['input_id'] != input_id
+            {'kind', 'input_id', 'rationale', *commands}
+            or value['kind'] != ('native-paired-source-check-v1' if paired else 'native-source-check-v1')
+            or value['input_id'] != input_id
             or not isinstance(value['rationale'], str) or not value['rationale'].strip()
             or len(value['rationale'].encode()) > 4096 or CREDENTIAL_TEXT.search(value['rationale'])):
         _fail('source_review_check_invalid')
-    _validate_argv(value['effect'])
-    _validate_argv(value['control'])
+    for name in commands:
+        _validate_argv(value[name])
     if value['effect'] == value['control']:
         _fail('source_review_control_missing')
+    if paired and len({tuple(value[name]) for name in commands}) != len(commands):
+        _fail('source_review_check_invalid')
     return value
 
 
@@ -5626,6 +5651,17 @@ def _publish_source_manifest(path: Path, manifest: dict[str, str], public_bytes)
 def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> dict:
     plan = _verified_plan(root)
     _verify_inventory(root / role / 'project', plan['source_sha256'])
+    patch_request = None
+    patch_area = None
+    if (packet / 'PATCH.json').exists():
+        import native_patch_check as paired
+        patch_request = json.loads((packet / 'PATCH.json').read_bytes())
+        pair = paired.verify_patch(root, patch_request, plan, module)
+        patch_area = pair['area']
+        if ((packet / 'PATCH.diff').read_bytes() != (patch_area / 'PATCH.diff').read_bytes()
+                or pin['files'].get('PATCH.json') != _sha(packet / 'PATCH.json')
+                or pin['files'].get('PATCH.diff') != _sha(packet / 'PATCH.diff')):
+            _fail('source_review_patch_packet_changed')
     destination = _controls(root) / ('source-review-' + role)
     destination.mkdir(mode=0o700)
     receipt_path = _controls(root) / ('review-' + role + '.json')
@@ -5633,17 +5669,25 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
               'assessment': {'status': 'unfinished'}, 'input_id': pin['input_id'],
               'reviewer_role': role, 'plan_sha256': _sha(root / 'plan.json'),
               'packet_pin': pin, 'filing_or_escalation_authorized': False}
+    if patch_request is not None:
+        result['paired_patch_request_sha256'] = _sha(patch_area / 'request.json')
+        result['patch_assessment'] = 'unproven'
     _write_json(receipt_path, result, once=True)
     prompt = (packet / 'PROMPT.txt').read_text()
     begin = prompt.index('Read /workspace/project/target.json')
     end = prompt.index('Examine each proposed', begin)
     prompt = prompt[:begin] + (
-        'This is source review. Read /workspace/SOURCE.json. The project is a clean copy of the '
+        ('This is paired patch review. Compare the original and patched copies; the patched copy '
+         'is never an original-target replay. ' if patch_request else 'This is source review. ') +
+        'Read /workspace/SOURCE.json. The project is a clean copy of the '
         'original source. Add scripts without changing or deleting any original file. '
-        'Write /workspace/source-check.json with exactly kind="native-source-check-v1", '
+        'Write /workspace/source-check.json with exactly kind="' +
+        ('native-paired-source-check-v1' if patch_request else 'native-source-check-v1') + '", '
         'input_id from REQUEST.json, effect (argv array), control (different argv array), '
-        'and rationale (why this control tests the causal claim). Both commands must terminate. '
-        'The host will freeze your scripts and run each command on three clean offline copies. '
+        + ('normal and connected (argv arrays), ' if patch_request else '') +
+        'and rationale (why the checks test the causal claim). Commands must terminate. '
+        'The host will freeze your scripts and run each command on three clean offline copies' +
+        (' of each variant. ' if patch_request else '. ') +
         'Do not modify original files during execution. The host compares original file bytes '
         'before and after each command; this does not rule out temporary changes. ' +
         ('Use /deps' if 'checked_setup' in plan else 'Use /modules') +
@@ -5665,7 +5709,8 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
             _fail('source_review_unavailable')
         inventory = _freeze_source_input(root, destination / 'input', role)
         _verify_source_original(plan['source_sha256'], inventory)
-        check = _validate_source_check(_read_json(destination / 'source-check.json'), pin['input_id'])
+        check = _validate_source_check(_read_json(destination / 'source-check.json'),
+                                       pin['input_id'], paired=patch_request is not None)
         _write_json(destination / 'input-manifest.json', inventory, once=True)
     evidence = {'kind': 'native-source-review-evidence-v1', 'input_id': pin['input_id'],
                 'plan_sha256': result['plan_sha256'], 'check': check,
@@ -5675,46 +5720,90 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
     execution_paths = {}
     manifest_paths = {}
     evidence_dir = _controls(root) / 'source-evidence' / role
-    for name in ('effect', 'control'):
+    checks = ('effect', 'control', 'normal', 'connected') if patch_request else ('effect', 'control')
+    variants = {'original': (destination / 'input', inventory)}
+    scripts = {}
+    if patch_request is not None:
+        patched_input, patched_inventory, scripts = paired.review_input(
+            root, patch_request, destination / 'input', inventory)
+        variants['patched'] = patched_input, patched_inventory
+        evidence['patch'] = {'request': patch_request,
+                             'request_sha256': _sha(patch_area / 'request.json'),
+                             'reviewer_scripts': scripts,
+                             'patched_input_manifest': patched_inventory}
+        evidence['cases'] = {'original': {}, 'patched': {}}
+    for name in checks:
         command = destination / (name + '.json')
         _write_json(command, check[name], once=True)
-        executed = source_execute(root, command, source_snapshot=destination / 'input', owner_role=role)
-        path = Path(executed['receipt_path'])
-        execution_paths[name] = path
-        captured = _read_json(path)
-        if (executed['status'] != 'captured' or _sha(path) != executed['receipt_sha256']
-                or captured['input_manifest_sha256'] != evidence['input_manifest_sha256']
-                or captured['plan_sha256'] != result['plan_sha256'] or captured['owner_role'] != role
-                or captured['command'] != check[name]
-                or not isinstance(captured['runs'], list) or len(captured['runs']) != 3
-                or any(not isinstance(row, dict) for row in captured['runs'])
-                or {row.get('role') for row in captured['runs']} != set(CAPTURE_TARGETS)):
-            _fail('source_review_execution_binding_changed')
-        outputs = {}
-        for row in captured['runs']:
-            folder = path.parent / row['role']
-            output_inventory = _read_json(folder / 'files.json')
-            if _sha(folder / 'files.json') != row['output_manifest_sha256']:
-                _fail('source_review_output_changed')
-            _verify_inventory(folder / 'files', output_inventory)
-            manifest_path = evidence_dir / ('manifest-' + name + '-' + row['role'] + '.json')
-            manifest_digest = _publish_source_manifest(manifest_path, output_inventory,
-                                                       module.validate_public_bytes)
-            if manifest_digest != row['output_manifest_sha256']:
-                _fail('source_review_output_changed')
-            manifest_paths[manifest_path] = manifest_digest
-            outputs[row['role']] = {**_source_output_summary(inventory, output_inventory),
-                                    'manifest_path': '/source-evidence/' + manifest_path.name,
-                                    'manifest_sha256': manifest_digest}
-            for stream in ('stdout', 'stderr'):
-                output = folder / (stream + '.txt')
-                if row.get(stream + '_redacted') or not output.exists():
-                    _fail('source_review_output_redacted')
-                if _sha(output) != row[stream + '_sha256']:
+        for variant, (snapshot, source_inventory) in variants.items():
+            executed = source_execute(root, command, source_snapshot=snapshot, owner_role=role,
+                                      paired_request=(patch_area / 'request.json' if patch_request else None),
+                                      source_variant=variant)
+            path = Path(executed['receipt_path'])
+            execution_paths[variant, name] = path
+            captured = _read_json(path)
+            if (executed['status'] != 'captured' or _sha(path) != executed['receipt_sha256']
+                    or captured['input_manifest_sha256'] != _sha(path.parent / 'input-manifest.json')
+                    or _read_json(path.parent / 'input-manifest.json') != source_inventory
+                    or captured['plan_sha256'] != result['plan_sha256'] or captured['owner_role'] != role
+                    or captured['command'] != check[name]
+                    or (patch_request is not None and
+                        (captured.get('source_variant') != variant
+                         or captured.get('paired_patch_request_sha256') != evidence['patch']['request_sha256']))
+                    or not isinstance(captured['runs'], list) or len(captured['runs']) != 3
+                    or any(not isinstance(row, dict) for row in captured['runs'])
+                    or {row.get('role') for row in captured['runs']} != set(CAPTURE_TARGETS)):
+                _fail('source_review_execution_binding_changed')
+            outputs = {}
+            for row in captured['runs']:
+                folder = path.parent / row['role']
+                output_inventory = _read_json(folder / 'files.json')
+                if _sha(folder / 'files.json') != row['output_manifest_sha256']:
                     _fail('source_review_output_changed')
-                outputs[row['role']][stream] = output.read_text()
-        evidence['cases'][name] = {'receipt': captured, 'receipt_sha256': executed['receipt_sha256'],
-                                   'outputs': outputs}
+                _verify_inventory(folder / 'files', output_inventory)
+                if any(output_inventory.get(file) != digest for file, digest in scripts.items()):
+                    _fail('source_review_check_script_changed')
+                manifest_path = evidence_dir / ('manifest-' +
+                    (variant + '-' if patch_request else '') + name + '-' + row['role'] + '.json')
+                manifest_digest = _publish_source_manifest(manifest_path, output_inventory,
+                                                           module.validate_public_bytes)
+                if manifest_digest != row['output_manifest_sha256']:
+                    _fail('source_review_output_changed')
+                manifest_paths[manifest_path] = manifest_digest
+                outputs[row['role']] = {**_source_output_summary(source_inventory, output_inventory),
+                                        'manifest_path': '/source-evidence/' + manifest_path.name,
+                                        'manifest_sha256': manifest_digest}
+                for stream in ('stdout', 'stderr'):
+                    output = folder / (stream + '.txt')
+                    if row.get(stream + '_redacted') or not output.exists():
+                        _fail('source_review_output_redacted')
+                    if _sha(output) != row[stream + '_sha256']:
+                        _fail('source_review_output_changed')
+                    outputs[row['role']][stream] = output.read_text()
+            row = {'receipt': captured, 'receipt_sha256': executed['receipt_sha256'],
+                   'outputs': outputs}
+            if patch_request:
+                evidence['cases'][variant][name] = row
+            else:
+                evidence['cases'][name] = row
+    if patch_request:
+        def signature(variant, name):
+            receipt = evidence['cases'][variant][name]['receipt']
+            return [(row['exit_code'], row['stdout_sha256'], row['stderr_sha256'])
+                    for row in receipt['runs']]
+        replays_stable = all(evidence['cases'][variant][name]['receipt']['replay_output_equal'] is True
+                             and len(set(signature(variant, name))) == 1
+                             for variant in variants for name in checks)
+        preserved = all(signature('original', name)[0] == signature('patched', name)[0]
+                        and signature('original', name)[0][0] == 0
+                        for name in ('normal', 'connected'))
+        control_held = signature('original', 'control')[0] == signature('patched', 'control')[0]
+        effect_changed = signature('original', 'effect')[0] != signature('patched', 'effect')[0]
+        evidence['paired_observation'] = {
+            'status': 'differential_with_normal_paths_preserved' if
+                replays_stable and preserved and control_held and effect_changed else 'unproven',
+            'replays_stable': replays_stable, 'normal_and_connected_preserved': preserved,
+            'control_held': control_held, 'effect_changed': effect_changed}
     evidence_path = _controls(root) / 'source-evidence' / role / 'RESULTS.json'
     public = (json.dumps(evidence, sort_keys=True, indent=2) + '\n').encode()
     if len(public) > 1024 * 1024 or module.validate_public_bytes(public) != public:
@@ -5729,29 +5818,40 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         '`sha256sum /source-evidence/RESULTS.json` with the shell tool. '
         'Full output manifests are at the read-only paths listed in RESULTS; inspect them '
         'when assessing a changed or missing file. '
-        'Compare the host effect and control results and the three replays. Nonzero exits are '
+        'Compare the host effect and control results and the three replays. '
+        + ('For the patch, compare the same effect, control, normal, and connected commands '
+           'on original and patched copies. Explain the material fix link and any changed '
+           'ordinary behavior. ' if patch_request else '') +
+        'Nonzero exits are '
         'observations, not proof of a security defect. Explain limitations and any weak control. '
         'Return the same review JSON schema required by /handoff/PROMPT.txt. '
-        'Include source-evidence-sha256:' + evidence_digest + ' in checked_link. '
+        'Include source-evidence-sha256:' + evidence_digest + ' in checked_link. ' +
+        ('Also include patch-diff-sha256:' + patch_request['diff_sha256'] +
+         ' and explain which original effect changes, the diff line causing it, and the patched result '
+         'in checked_link. ' if patch_request else '') +
         'The executed scripts were yours; execution was by the host. No filing is authorized.', include_raw=True)
     raw = final.pop('_raw_stdout', '')
     after = allowance_snapshot(root)
-    stable = (run_active(root) and module._same_allowance(first['allowance_before'], before)
+    review_stable = (run_active(root) and module._same_allowance(first['allowance_before'], before)
               and module._same_allowance(before, after) and module.verify_packet(packet, pin)
               and _sha(evidence_path) == evidence_digest
               and all(_sha(path) == digest for path, digest in manifest_paths.items())
               and _sha(root / 'plan.json') == result['plan_sha256'])
     _verify_inventory(root / 'original', plan['source_sha256'])
     _verify_inventory(destination / 'input', inventory)
+    if patch_request is not None:
+        paired.verify_patch(root, patch_request, plan, module)
+        _verify_inventory(patched_input, patched_inventory)
     if (_sha(destination / 'source-check.json') != evidence['check_sha256']
-            or any(_sha(path) != evidence['cases'][name]['receipt_sha256']
-                   for name, path in execution_paths.items())):
+            or any(_sha(path) != (evidence['cases'][variant][name] if patch_request
+                                 else evidence['cases'][name])['receipt_sha256']
+                   for (variant, name), path in execution_paths.items())):
         _fail('source_review_evidence_changed')
-    invocation = {'status': 'native_turn_observed_unassessed' if stable and final['status'] == 'acknowledged' else 'unfinished',
+    invocation = {'status': 'native_turn_observed_unassessed' if review_stable and final['status'] == 'acknowledged' else 'unfinished',
                   'session_id': first['session_id'], 'reviewer_role': role, 'native': final}
     material = module.project_review_material(root, packet, pin, invocation, raw,
                                              public_bytes=module.validate_public_bytes)
-    result.update({'final': final, 'material': material, 'same_original_allowance': stable,
+    result.update({'final': final, 'material': material, 'same_original_allowance': review_stable,
                    'evidence_sha256': evidence_digest, 'evidence_path': str(evidence_path)})
     if (material.get('status') == 'captured' and _source_evidence_read(raw, first['session_id'], evidence_digest)
             and 'source-evidence-sha256:' + evidence_digest in material['outcome']['checked_link']):
@@ -5762,6 +5862,12 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
                                 'evidence_sha256': evidence_digest,
                                 'execution_origin': 'host_executed_reviewer_scripts',
                                 'filing_or_escalation_authorized': False}
+        if (patch_request is not None
+                and evidence['paired_observation']['status'] == 'differential_with_normal_paths_preserved'
+                and material['outcome']['decision'] in ('raise', 'retain')
+                and 'patch-diff-sha256:' + patch_request['diff_sha256'] in
+                    material['outcome']['checked_link']):
+            result['patch_assessment'] = 'checked_fix_candidate'
     _write_json(receipt_path, result)
     return result
 

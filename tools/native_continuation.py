@@ -26,10 +26,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import native_research as runner
+import native_patch_check as paired
 
 NEXT_KIND = 'native-continuation-next-v1'
 SOURCE_ACTION_KIND = 'native-source-execute-v1'
 SOURCE_REVIEW_ACTION_KIND = 'native-source-review-v1'
+SOURCE_PATCH_ACTION_KIND = 'native-patch-check-v1'
 SOURCE_REQUEST_KIND = 'native-source-action-request-v1'
 SOURCE_TERMINAL_KIND = 'native-source-action-terminal-v1'
 STATE_KIND = 'native-continuation-state-v1'
@@ -175,6 +177,8 @@ def _validate_next(value: dict) -> dict:
         if action.get('kind') == SOURCE_ACTION_KIND and set(action) == {'kind', 'command'}:
             runner._validate_argv(action['command'])
         elif action.get('kind') == SOURCE_REVIEW_ACTION_KIND and set(action) == {'kind', 'claim'}:
+            _text(action['claim'], 'claim', limit=4096)
+        elif action.get('kind') == SOURCE_PATCH_ACTION_KIND and set(action) == {'kind', 'claim'}:
             _text(action['claim'], 'claim', limit=4096)
         else:
             _fail('continuation_source_action_invalid')
@@ -1050,7 +1054,7 @@ def _review_source_actions(root: Path, state: dict, module) -> list[dict]:
 
 
 def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
-                      plan: dict, module) -> tuple[Path, Path, str, str, str]:
+                      plan: dict, module, patch_request: dict | None = None) -> tuple[Path, Path, str, str, str]:
     base = _cont(root) / 'reviews'
     base.mkdir(mode=0o700, exist_ok=True)
     identity = os.urandom(16).hex()
@@ -1087,6 +1091,11 @@ def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
     roles = {'claim': ['CLAIM.json'], 'conditions': ['CONDITIONS.json'],
              'source': [], 'raw': ['RAW.json'], 'contrary': ['CONTRARY.json'],
              'unfinished': ['UNFINISHED.json']}
+    if patch_request is not None:
+        pair = paired.verify_patch(root, patch_request, plan, module)
+        files['PATCH.json'] = patch_request
+        files['PATCH.diff'] = (pair['area'] / 'PATCH.diff').read_text()
+        roles['conditions'] += ['PATCH.json', 'PATCH.diff']
     source_paths = {}
     for number, (name, content) in enumerate(original.items(), 1):
         flat = 'SOURCE-%04d.txt' % number
@@ -1122,8 +1131,9 @@ def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
 
 
 def _review_projection(identity: str, plan_sha: str, next_sha: str, selected_sha: str,
-                       receipt_path: Path, receipt: dict) -> dict:
-    return {'kind': 'native-source-review-results-v1', 'review_id': identity,
+                       receipt_path: Path, receipt: dict,
+                       patch_sha: str | None = None) -> dict:
+    projection = {'kind': 'native-source-review-results-v1', 'review_id': identity,
             'plan_sha256': plan_sha, 'next_sha256': next_sha,
             'input_id': receipt['input_id'], 'selection_sha256': selected_sha,
             'packet_request_sha256': receipt['packet_pin']['files']['REQUEST.json'],
@@ -1131,6 +1141,10 @@ def _review_projection(identity: str, plan_sha: str, next_sha: str, selected_sha
             'status': receipt['status'], 'assessment': receipt.get('assessment'),
             'security_effect': 'unproven',
             'filing_or_escalation_authorized': False}
+    if patch_sha is not None:
+        projection['paired_patch_request_sha256'] = patch_sha
+        projection['patch_assessment'] = receipt.get('patch_assessment', 'unproven')
+    return projection
 
 
 def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
@@ -1152,10 +1166,14 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
     receipt_path = root / 'controls' / ('review-' + role + '.json')
     receipt = _read_private(receipt_path)
     assessment = receipt.get('assessment')
-    if (set(projection) != {'kind', 'review_id', 'plan_sha256', 'next_sha256',
+    patch_sha = previous.get('patch_request_sha256')
+    expected_keys = {'kind', 'review_id', 'plan_sha256', 'next_sha256',
                             'input_id', 'selection_sha256', 'packet_request_sha256',
                             'receipt_sha256', 'status', 'assessment', 'security_effect',
                             'filing_or_escalation_authorized'}
+    if patch_sha is not None:
+        expected_keys.update({'paired_patch_request_sha256', 'patch_assessment'})
+    if (set(projection) != expected_keys
             or projection.get('kind') != 'native-source-review-results-v1'
             or projection.get('review_id') != identity
             or projection.get('plan_sha256') != state['plan_sha256']
@@ -1186,6 +1204,16 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
             or not module.verify_packet(packet, pin)):
         _fail('source_review_cached_packet_changed')
     request = json.loads((packet / 'REQUEST.json').read_bytes())
+    if patch_sha is not None:
+        patch_request = json.loads((packet / 'PATCH.json').read_bytes())
+        pair = paired.verify_patch(root, patch_request, plan, module)
+        if (runner._sha(pair['area'] / 'request.json') != patch_sha
+                or (packet / 'PATCH.diff').read_bytes() != (pair['area'] / 'PATCH.diff').read_bytes()
+                or receipt.get('paired_patch_request_sha256') != patch_sha
+                or projection.get('paired_patch_request_sha256') != patch_sha
+                or projection.get('patch_assessment') != receipt.get('patch_assessment')):
+            _fail('source_review_cached_patch_changed')
+        paired.verify_review_evidence(root, role, receipt)
     directory = _cont(root) / 'reviews' / identity
     selected_sha = projection.get('selection_sha256')
     selected, _ = module._selection(directory / 'observer', directory / 'selection.json',
@@ -1260,7 +1288,8 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
     if previous and previous.get('phase') == 'dispatched' and (
             previous.get('after_invocations') != state['invocations']
             or previous.get('next_sha256') != next_sha
-            or (nxt.get('host_action') or {}).get('kind') != SOURCE_REVIEW_ACTION_KIND):
+            or (nxt.get('host_action') or {}).get('kind') not in
+                (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND)):
         return {'status': 'review_incomplete', 'review_id': previous.get('review_id'),
                 'reason': 'source_review_cached_binding_changed'}
     if previous and previous.get('after_invocations') == state['invocations']:
@@ -1283,7 +1312,8 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
                         selection = _cont(root) / 'reviews' / identity / 'selection.json'
                         selected_sha = runner._sha(runner._file(selection, private=True))
                         projection = _review_projection(identity, state['plan_sha256'], next_sha,
-                                                        selected_sha, receipt_path, receipt)
+                                                        selected_sha, receipt_path, receipt,
+                                                        previous.get('patch_request_sha256'))
                         _verified_cached_review(root, state, nxt, previous, next_sha, projection)
                         target = path.parent
                         if target.resolve() != target:
@@ -1317,12 +1347,18 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
         return {'status': 'review_incomplete', 'review_id': previous['review_id']}
     try:
         plan, allowance, module, role = _review_preflight(root, state)
+        patch_request = None
+        if nxt['host_action']['kind'] == SOURCE_PATCH_ACTION_KIND:
+            patch_request = paired.freeze_patch(root, nxt, next_sha, plan, allowance, module)
         observer, selection, identity, note_sha, actions_sha = _review_selection(
-            root, state, nxt, next_sha, plan, module)
-    except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
-            TypeError, KeyError) as error:
-        reason = (str(error) if isinstance(error, (ContinuationError, runner.NativeResearchError))
-                  else 'source_review_input_unavailable')
+            root, state, nxt, next_sha, plan, module, patch_request)
+    except (ContinuationError, runner.NativeResearchError, paired.PatchCheckError,
+            OSError, ValueError, TypeError, KeyError) as error:
+        if isinstance(error, paired.PatchCheckError):
+            reason = str(error)
+        else:
+            reason = (str(error) if isinstance(error, (ContinuationError, runner.NativeResearchError))
+                      else 'source_review_input_unavailable')
         path = _cont(root) / ('review-incomplete-' + next_sha + '.json')
         record = {'kind': 'native-source-review-incomplete-v1', 'next_sha256': next_sha,
                   'plan_sha256': state['plan_sha256'], 'reason': reason,
@@ -1338,6 +1374,9 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
     state['review_action'] = {'review_id': identity, 'next_sha256': next_sha,
                               'after_invocations': state['invocations'],
                               'role': role, 'phase': 'dispatched'}
+    if patch_request is not None:
+        state['review_action']['patch_request_sha256'] = runner._sha(
+            _cont(root) / 'patches' / next_sha / 'request.json')
     _save_state(root, state)
     _event(root, {'at': _now(), 'event': 'source_review_dispatched',
                   'review_id': identity, 'selection_sha256': selected_sha,
@@ -1368,8 +1407,11 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
             or not module.verify_packet(packet, receipt['packet_pin'])
             or _next_hash(root) != next_sha):
         _fail('source_review_receipt_changed')
+    if patch_request is not None and receipt['status'] == 'reviewed':
+        paired.verify_review_evidence(root, role, receipt)
     projection = _review_projection(identity, state['plan_sha256'], next_sha,
-                                    selected_sha, receipt_path, receipt)
+                                    selected_sha, receipt_path, receipt,
+                                    state['review_action'].get('patch_request_sha256'))
     try:
         module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
     except (ValueError, UnicodeError):
@@ -1705,7 +1747,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
             if state['invocations'] and nxt is not None and reopen_check is None:
-                if nxt.get('host_action') and nxt['host_action']['kind'] == SOURCE_REVIEW_ACTION_KIND:
+                if nxt.get('host_action') and nxt['host_action']['kind'] in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND):
                     outcome = _agent_review(root, state, nxt)
                     if outcome['status'] != 'captured':
                         return _finish(root, state, 'review_incomplete', review_action=outcome)

@@ -320,6 +320,47 @@ or open filing. The original-file checks establish the starting and ending bytes
 they cannot exclude temporary source changes made by a script. The operator must
 inspect the scripts and causal control. Host execution is labeled as such; it is
 not claimed as a native tool action directly observed on a target service.
+
+## Conditional paired patch check
+
+When the frozen goal explicitly contains `Patch goal: required`, the researcher
+may write a regular UTF-8 `/workspace/PATCH.diff` and request one paired check:
+
+```json
+{"kind": "native-patch-check-v1", "claim": "The proposed diff removes the observed effect."}
+```
+
+Put this object in `host_action` in `NEXT.json`, with `next: null` and
+`proposed_stop: false`. Write the candidate `project/RESULT.md` before this
+request if the same review should support closeout. A goal without the opt-in
+line needs no patch action. An unrequested patch is rejected.
+
+The host copies the pinned original source, applies the exact diff there, and
+records the full original and patched byte and mode manifests, the diff hash,
+goal, plan, approval, actor, initial state, and remaining allowance. It never
+applies the diff to `original/`. The diff and both manifests enter the immutable
+fresh-review packet. Unsafe paths, symlinks, binary patches, changed originals,
+or a diff that does not reproduce the patched manifest stop before review.
+
+The independent reviewer writes `source-check.json` with kind
+`native-paired-source-check-v1`, the packet `input_id`, distinct `effect`,
+`control`, `normal`, and `connected` argv arrays, and a rationale. Its scripts
+are frozen separately from the patch and must have identical bytes on both
+copies. The host runs each command on three clean original copies and three
+clean patched copies under the same offline source executor. Every execution
+receipt labels its variant; a patched run cannot count as original replay.
+The reviewer reads and hashes the paired result, checks the material fix link,
+and states limits. Its checked link must bind the evidence hash, diff hash,
+original effect, changed line, and patched result. A changed effect with stable
+replays, preserved normal and connected outputs, and an unchanged control can
+become a **checked-fix candidate**
+for internal operator review. It is not a confirmed security result or external
+filing authority. Any mismatch stays unproven. A supported closeout under a
+patch goal requires this exact reviewed candidate and the normal stop/cleanup
+readback. A blocked or dry ending may close without a patch.
+
+The contained scenario and its synthetic limits are in
+[AGENT-PAIRED-PATCH-E2E](../../evals/native-qualification/AGENT-PAIRED-PATCH-E2E.md).
 Stop with the normal `stop` command and inspect the final stop/cleanup receipt.
 
 ## Verification status

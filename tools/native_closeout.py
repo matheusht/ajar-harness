@@ -19,6 +19,7 @@ import sys
 import time
 
 import native_continuation as continuation
+import native_patch_check as paired
 import native_research as runner
 
 KIND = 'native-agent-closeout-v1'
@@ -233,6 +234,19 @@ def _review(root: Path, state: dict, nxt: dict, result_sha: str,
     actions = continuation._review_source_actions(root, state, module)
     if not isinstance(raw, dict) or raw.get('source_actions') != actions:
         _fail('closeout_review_source_actions_changed')
+    patch_sha = prior.get('patch_request_sha256')
+    if patch_sha is not None:
+        patch_request = json.loads((packet / 'PATCH.json').read_bytes())
+        pair = paired.verify_patch(root, patch_request, plan, module)
+        if (runner._sha(pair['area'] / 'request.json') != patch_sha
+                or receipt.get('paired_patch_request_sha256') != patch_sha
+                or projection.get('paired_patch_request_sha256') != patch_sha
+                or projection.get('patch_assessment') != receipt.get('patch_assessment')
+                or (packet / 'PATCH.diff').read_bytes() != (pair['area'] / 'PATCH.diff').read_bytes()):
+            _fail('closeout_patch_binding_changed')
+        paired.verify_review_evidence(root, role, receipt)
+    elif (packet / 'PATCH.json').exists():
+        _fail('closeout_patch_binding_changed')
     after = receipt.get('allowance_after')
     if after is None and isinstance(receipt.get('preparation'), dict):
         after = receipt['preparation'].get('allowance_after')
@@ -262,7 +276,11 @@ def _review(root: Path, state: dict, nxt: dict, result_sha: str,
     return {'decision': decision, 'review_id': identity,
             'input_id': receipt['input_id'], 'receipt_sha256': runner._sha(receipt_path),
             'packet_request_sha256': pin['files']['REQUEST.json'],
-            'source_action_corpus_sha256': _hash(_json(actions))}
+            'source_action_corpus_sha256': _hash(_json(actions)),
+            'patch_check': ({'request_sha256': patch_sha,
+                             'assessment': receipt.get('patch_assessment'),
+                             'evidence_sha256': receipt['evidence_sha256']}
+                            if patch_sha is not None else None)}
 
 
 def _resources_absent(root: Path) -> dict:
@@ -537,8 +555,18 @@ def closeout(run_root: Path, *, wait_seconds: int = 120, stop_fn=None,
     try:
         review = _review(root, state, nxt, result_sha, allowance, plan)
     except (CloseoutError, continuation.ContinuationError, runner.NativeResearchError,
+            paired.PatchCheckError,
             OSError, ValueError, TypeError, KeyError, AttributeError):
         return {'status': 'review_required', 'reason': 'fresh_review_binding_unavailable',
+                'result_sha256': result_sha}
+    try:
+        patch_required = paired.goal_required(root, plan)
+    except (paired.PatchCheckError, runner.NativeResearchError, OSError, ValueError):
+        return {'status': 'review_required', 'reason': 'patch_goal_changed',
+                'result_sha256': result_sha}
+    if (nxt['last_result']['state'] == 'supported' and patch_required
+            and (review.get('patch_check') or {}).get('assessment') != 'checked_fix_candidate'):
+        return {'status': 'review_required', 'reason': 'patch_check_required',
                 'result_sha256': result_sha}
     stop_now = continuation._stop(root)
     if stop_now:

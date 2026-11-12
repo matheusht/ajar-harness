@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -36,17 +37,42 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def call(*argv, timeout=60):
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+def call(*argv, timeout=60, env=None):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False,
+                          env=env)
 
 
-def cli(path, *args, timeout=60):
-    result = call(sys.executable, str(path), *args, timeout=timeout)
+def cli(path, *args, timeout=60, env=None):
+    result = call(sys.executable, str(path), *args, timeout=timeout, env=env)
     try:
         payload = json.loads(result.stdout)
     except ValueError:
         payload = {'code': 'non_json_cli_output', 'stderr': result.stderr[:1000]}
     return result.returncode, payload
+
+
+def crash_after_checked_rename(run_root, approval, catalog):
+    script = r'''
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[1])
+import native_setup_builder as builder
+root = Path(sys.argv[2])
+original = os.rename
+def interrupt(source, destination):
+    original(source, destination)
+    if (Path(source) == root / 'controls/setup-build/stage'
+            and Path(destination) == root / 'controls/setup-checked'):
+        raise SystemExit(73)
+os.rename = interrupt
+sys.argv = [str(builder.__file__), 'setup-build', '--run-root', str(root),
+            '--approval', sys.argv[3], '--dependency-catalog', sys.argv[4]]
+builder.main()
+raise SystemExit(74)
+'''
+    return call(sys.executable, '-c', script, str(ROOT / 'tools'), str(run_root),
+                str(approval), str(catalog), timeout=120)
 
 
 def signed(value, key, signers, fingerprint):
@@ -477,6 +503,123 @@ def main():
                                 '--approval', str(approval_path), '--dependency-catalog', str(catalog))
         check('a dispatched build is never automatically retried', retry_code == 2,
               {'exit': retry_code, 'code': retry.get('code')})
+        adopt_root = base / 'checked-adoption-run'
+        shutil.copytree(run_root, adopt_root)
+        shutil.rmtree(adopt_root / 'controls/setup-build')
+        shutil.rmtree(adopt_root / 'controls/setup-checked')
+        interrupted = crash_after_checked_rename(adopt_root, approval_path, catalog)
+        adopt_controls = adopt_root / 'controls'
+        adopt_journal_path = adopt_controls / 'setup-build/journal.json'
+        adopt_receipt_path = adopt_controls / 'setup-checked/receipt.json'
+        interrupted_journal = json.loads(adopt_journal_path.read_text()) if adopt_journal_path.exists() else {}
+        interrupted_receipt = json.loads(adopt_receipt_path.read_text()) if adopt_receipt_path.exists() else {}
+        receipt_before = sha(adopt_receipt_path) if adopt_receipt_path.exists() else None
+        events_before = interrupted_journal.get('events')
+        check('injected exit lands after checked rename before ready journal',
+              interrupted.returncode == 73 and receipt_before is not None
+              and interrupted_journal.get('status') == 'pending'
+              and interrupted_journal.get('pending_action') is None
+              and interrupted_journal.get('cleanup') is None
+              and interrupted_receipt.get('cleanup', {}).get('status') == 'complete'
+              and isinstance(events_before, list) and events_before
+              and all(row.get('status') == 'acknowledged' for row in events_before),
+              {'exit': interrupted.returncode, 'journal_status': interrupted_journal.get('status'),
+               'checked_receipt_sha256': receipt_before,
+               'stderr': interrupted.stderr[:500], 'stdout': interrupted.stdout[:500]})
+        pre_code, pre_result = cli(BUILDER, 'setup-build-status', '--run-root',
+                                   str(adopt_root), '--verify-checked')
+        check('uncommitted checked package is not verified ready', pre_code == 2,
+              {'exit': pre_code, 'code': pre_result.get('code')})
+        no_repeat_code, no_repeat = cli(BUILDER, 'setup-build', '--run-root', str(adopt_root),
+                                        '--approval', str(approval_path),
+                                        '--dependency-catalog', str(catalog))
+        check('visible checked package blocks a repeated build', no_repeat_code == 2
+              and no_repeat.get('code') == 'build_already_dispatched',
+              {'exit': no_repeat_code, 'code': no_repeat.get('code')})
+        symlink_root = base / 'checked-adoption-dangling-symlink'
+        shutil.copytree(adopt_root, symlink_root)
+        symlink_checked = symlink_root / 'controls/setup-checked'
+        shutil.rmtree(symlink_checked)
+        symlink_checked.symlink_to(base / 'missing-checked-package')
+        symlink_code, symlink_result = cli(BUILDER, 'setup-build', '--run-root',
+            str(symlink_root), '--approval', str(approval_path),
+            '--dependency-catalog', str(catalog))
+        check('dangling checked path blocks a repeated build', symlink_code == 2
+              and symlink_result.get('code') == 'build_already_dispatched'
+              and symlink_checked.is_symlink(),
+              {'exit': symlink_code, 'code': symlink_result.get('code')})
+        for failure in ('changed_receipt', 'uncertain_journal', 'failed_acknowledgement',
+                        'wrong_daemon', 'daemon_unavailable', 'missing_native_stop',
+                        'resource_present'):
+            rejected_root = base / ('checked-adoption-' + failure)
+            shutil.copytree(adopt_root, rejected_root)
+            rejected_controls = rejected_root / 'controls'
+            rejected_journal_path = rejected_controls / 'setup-build/journal.json'
+            if failure == 'changed_receipt':
+                changed = json.loads((rejected_controls / 'setup-checked/receipt.json').read_text())
+                changed['security_result'] = 'forged'
+                (rejected_controls / 'setup-checked/receipt.json').write_text(
+                    json.dumps(changed, sort_keys=True) + '\n')
+            elif failure == 'uncertain_journal':
+                changed = json.loads(rejected_journal_path.read_text())
+                changed['events'][-1]['status'] = 'unknown_effect'
+                changed['status'] = 'unknown_effect'
+                rejected_journal_path.write_text(json.dumps(changed, sort_keys=True) + '\n')
+            elif failure == 'failed_acknowledgement':
+                changed = json.loads(rejected_journal_path.read_text())
+                changed['events'][-1]['exit_code'] = 1
+                rejected_journal_path.write_text(json.dumps(changed, sort_keys=True) + '\n')
+            elif failure == 'wrong_daemon':
+                changed = json.loads(rejected_journal_path.read_text())
+                changed['docker_daemon_id'] = 'different-daemon'
+                rejected_journal_path.write_text(json.dumps(changed, sort_keys=True) + '\n')
+            elif failure == 'missing_native_stop':
+                (rejected_controls / 'native-state/REVOKED').rename(
+                    rejected_controls / 'native-state/REVOKED-held')
+            elif failure == 'resource_present':
+                candidate = json.loads(rejected_journal_path.read_text())
+                created = call('docker', 'container', 'create', '--name', candidate['container_name'],
+                               '--label', 'io.llm-redteam-harness.setup-build=' + candidate['nonce'],
+                               '--network', 'none', '--pull', 'never', image_id,
+                               'sh', '-c', 'true')
+                if created.returncode:
+                    raise RuntimeError('adoption resource fixture creation failed: ' + created.stderr)
+                atexit.register(call, 'docker', 'container', 'rm', '-f', candidate['container_name'])
+            try:
+                environment = None
+                if failure == 'daemon_unavailable':
+                    environment = dict(os.environ)
+                    environment.pop('DOCKER_CONTEXT', None)
+                    environment['DOCKER_HOST'] = 'unix://' + str(base / 'missing-docker.sock')
+                rejected_code, rejected = cli(BUILDER, 'setup-build-reconcile',
+                                              '--run-root', str(rejected_root), env=environment)
+                resource_survived = (failure != 'resource_present' or
+                    call('docker', 'container', 'inspect', candidate['container_name']).returncode == 0)
+            finally:
+                if failure == 'resource_present':
+                    removed = call('docker', 'container', 'rm', '-f', candidate['container_name'])
+                    if removed.returncode:
+                        raise RuntimeError('adoption resource fixture cleanup failed: ' + removed.stderr)
+            after = json.loads(rejected_journal_path.read_text())
+            held = rejected_code == 2 and after.get('status') != 'ready' and resource_survived
+            check('checked adoption holds ' + failure, held,
+                  {'exit': rejected_code, 'status': rejected.get('status'),
+                   'code': rejected.get('code'), 'journal_status': after.get('status')})
+        adopted_code, adopted = cli(BUILDER, 'setup-build-reconcile',
+                                    '--run-root', str(adopt_root))
+        adopted_journal = json.loads(adopt_journal_path.read_text())
+        check('reconcile adopts exact checked package without a second build',
+              adopted_code == 0 and adopted.get('status') == 'ready'
+              and adopted_journal.get('status') == 'ready'
+              and adopted_journal.get('events') == events_before
+              and sha(adopt_receipt_path) == receipt_before,
+              {'exit': adopted_code, 'status': adopted.get('status'),
+               'journal_status': adopted_journal.get('status')})
+        adopted_verify_code, adopted_verify = cli(BUILDER, 'setup-build-status',
+            '--run-root', str(adopt_root), '--verify-checked')
+        check('adopted package passes public readback', adopted_verify_code == 0
+              and adopted_verify.get('receipt', {}).get('status') == 'ready',
+              {'exit': adopted_verify_code, 'code': adopted_verify.get('code')})
         crash_root = base / 'crash-run'
         shutil.copytree(run_root, crash_root)
         shutil.rmtree(crash_root / 'controls/setup-build')
@@ -487,17 +630,18 @@ def main():
         shutil.copy2(approval_path, crash_journal / 'authority.json')
         pending_action = {'action': 'container_create', 'status': 'pending',
                           'argv_sha256': '0' * 64}
+        crash_nonce = uuid.uuid4().hex
+        crash_name = 'lrh-setup-build-' + crash_nonce[:20]
         (crash_journal / 'journal.json').write_text(json.dumps({
             'kind': 'native-setup-build-journal-v1', 'status': 'pending',
-            'nonce': '1' * 32, 'container_name': 'lrh-setup-build-' + '1' * 20,
+            'nonce': crash_nonce, 'container_name': crash_name,
             'container_id': None, 'authority_sha256': sha(crash_journal / 'authority.json'),
             'docker_daemon_id': daemon_id[:-1] + ('a' if daemon_id[-1] != 'a' else 'b'),
             'catalog_tree_sha256': template['scope_amendment']['dependency_catalog_tree_sha256'],
             'events': [pending_action], 'pending_action': 'container_create',
             'cleanup': None}, sort_keys=True) + '\n')
-        crash_name = 'lrh-setup-build-' + '1' * 20
         created_crash = call('docker', 'container', 'create', '--name', crash_name,
-                             '--label', 'io.llm-redteam-harness.setup-build=' + '1' * 32,
+                             '--label', 'io.llm-redteam-harness.setup-build=' + crash_nonce,
                              '--network', 'none', '--pull', 'never', image_id, 'sh', '-c', 'true')
         if created_crash.returncode:
             raise RuntimeError('crash fixture container creation failed: ' + created_crash.stderr)
@@ -640,7 +784,9 @@ def main():
                   'catalog_manifest_sha256': sha(catalog / 'catalog.json'), 'image_id': image_id,
                   'builder_sha256': sha(BUILDER), 'scenario_sha256': sha(Path(__file__))}
         artifacts = {'journal_sha256': sha(marker) if marker.exists() else None,
-                     'checked_receipt_sha256': sha(receipt_path) if receipt_path.exists() else None}
+                     'checked_receipt_sha256': sha(receipt_path) if receipt_path.exists() else None,
+                     'adopted_journal_sha256': sha(adopt_journal_path),
+                     'adopted_receipt_sha256': sha(adopt_receipt_path)}
     result = {'kind': 'native-setup-builder-synthetic-e2e-v1', 'inputs': inputs,
               'artifacts': artifacts, 'checks': checks,
               'passed': all(row['passed'] for row in checks),

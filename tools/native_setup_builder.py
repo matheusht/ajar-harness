@@ -334,7 +334,7 @@ def check_setup_fresh(setup: dict) -> None:
         fail('checked_setup_grant_expired')
 
 
-def prior_build_attempts(setup: dict) -> dict:
+def prior_build_attempts(setup: dict, *, ignore_current: bool = False) -> dict:
     controls = setup['controls']
     archive = controls / 'setup-build-attempts'
     paths = []
@@ -347,7 +347,7 @@ def prior_build_attempts(setup: dict) -> dict:
                for index, path in enumerate(paths, 1)):
             fail('build_prior_archive_invalid')
     current = controls / 'setup-build'
-    if current.exists():
+    if current.exists() and not ignore_current:
         journal = read_json(current / 'journal.json')
         if journal.get('status') != 'ready':
             paths.append(current)
@@ -410,7 +410,7 @@ def verify_build_signature(setup: dict, record: object) -> None:
 def template(run_root: Path, image_id: str, catalog_path: Path,
              max_workspace_bytes: int, memory_bytes: int, duration_seconds: int,
              output_paths: list[str], approved_at: str, expires_at: str,
-             *, require_fresh: bool = True) -> dict:
+             *, require_fresh: bool = True, ignore_current: bool = False) -> dict:
     setup = frozen_setup(run_root)
     if require_fresh:
         check_setup_fresh(setup)
@@ -427,7 +427,7 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
     if len(set(outputs)) != len(outputs):
         fail('build_output_duplicate')
     catalog = catalog_snapshot(catalog_path, recipe)
-    prior = prior_build_attempts(setup)
+    prior = prior_build_attempts(setup, ignore_current=ignore_current)
     approved, expires = utc(approved_at), utc(expires_at)
     if (approved >= expires or expires > approved + timedelta(hours=24)
             or (require_fresh and not approved <= datetime.now(timezone.utc) < expires)):
@@ -488,7 +488,7 @@ def read_json_from_scope(path: Path) -> dict:
 
 
 def verify_authority(setup: dict, path: Path, catalog: dict,
-                     *, historical: bool = False) -> dict:
+                     *, historical: bool = False, adopting: bool = False) -> dict:
     controls, plan = setup['controls'], setup['plan']
     authority = read_json(nr._file(path, private=True))
     if (set(authority) != {'kind', 'scope_amendment', 'approval'}
@@ -506,7 +506,7 @@ def verify_authority(setup: dict, path: Path, catalog: dict,
                             amendment.get('max_workspace_bytes'), amendment.get('memory_bytes'),
                             amendment.get('duration_seconds'), amendment.get('outputs'),
                             approval.get('approved_at'), approval.get('expires_at'),
-                            require_fresh=not historical)
+                            require_fresh=not historical, ignore_current=adopting)
     except (TypeError, KeyError):
         fail('build_authority_invalid')
     if (amendment_unsigned != expected['scope_amendment']
@@ -695,11 +695,11 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
     controls, recipe, plan = (setup[key] for key in ('controls', 'recipe', 'plan'))
     catalog = catalog_snapshot(catalog_path, recipe)
     with build_lock(controls):
+        journal_dir = controls / 'setup-build'
+        if (controls / 'setup-checked').exists() or (controls / 'setup-checked').is_symlink():
+            fail('build_already_dispatched')
         authority = verify_authority(setup, approval_path, catalog)
         amendment = authority['scope_amendment']
-        journal_dir = controls / 'setup-build'
-        if (controls / 'setup-checked').exists():
-            fail('build_already_dispatched')
         if journal_dir.exists():
             prior = prior_build_attempts(setup)
             if not prior['receipts'] or prior['receipts'][-1] != amendment['prior_build_attempts'][-1]:
@@ -999,6 +999,31 @@ def reconcile(run_root: Path) -> dict:
         directory = controls / 'setup-build'
         journal_path = directory / 'journal.json'
         journal = read_json(journal_path)
+        if not isinstance(journal, dict):
+            fail('build_reconciliation_journal_invalid')
+        checked = controls / 'setup-checked'
+        if checked.exists() or checked.is_symlink():
+            adopting = journal.get('status') != 'ready'
+            if not adopting:
+                verified = verify_checked(run_root, require_fresh=False)
+            else:
+                journal_sha = sha(journal_path)
+                verified = _verify_checked(run_root, require_fresh=False, adopting=True)
+                receipt_path = checked / 'receipt.json'
+                receipt_sha = sha(receipt_path)
+                if sha(journal_path) != journal_sha:
+                    fail('checked_adoption_journal_changed')
+                journal['status'] = 'ready'
+                journal['cleanup'] = verified['receipt']['cleanup']
+                write_json(journal_path, journal)
+                if sha(receipt_path) != receipt_sha:
+                    fail('checked_adoption_package_changed')
+                verify_checked(run_root, require_fresh=False)
+            return {'kind': 'native-setup-checked-v1', 'status': 'ready',
+                    'receipt_path': str(checked / 'receipt.json'),
+                    'receipt_sha256': sha(checked / 'receipt.json'),
+                    'cleanup': verified['receipt']['cleanup'],
+                    'adopted_after_crash': adopting}
         authority_path = directory / 'authority.json'
         nonce, name = journal.get('nonce'), journal.get('container_name')
         events = journal.get('events')
@@ -1063,7 +1088,8 @@ def reconcile(run_root: Path) -> dict:
         return receipt
 
 
-def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
+def _verify_checked(run_root: Path, *, require_fresh: bool = True,
+                    adopting: bool = False) -> dict:
     """Read-only recheck for a later research-plan preparer.
 
     Returns the frozen, host-owned paths and content only after checking the
@@ -1072,45 +1098,73 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
     """
     setup = frozen_setup(run_root)
     controls, recipe, chain = (setup[key] for key in ('controls', 'recipe', 'chain'))
-    checked = controls / 'setup-checked'
+    checked = private_directory(controls / 'setup-checked')
+    if {path.name for path in checked.iterdir()} != {'receipt.json', 'output', 'dependencies'}:
+        fail('checked_build_package_invalid')
     receipt = read_json(checked / 'receipt.json')
     journal_dir = controls / 'setup-build'
     journal = read_json(journal_dir / 'journal.json')
-    if not isinstance(journal.get('docker_daemon_id'), str):
+    if not isinstance(receipt, dict) or not isinstance(journal, dict):
+        fail('checked_build_package_invalid')
+    if adopting:
+        if (journal.get('status') != 'pending' or journal.get('pending_action') is not None
+                or journal.get('code') is not None or (journal_dir / 'stage').exists()
+                or (journal_dir / 'stage').is_symlink()
+                or journal.get('cleanup') not in (None, receipt.get('cleanup'))):
+            fail('checked_adoption_journal_invalid')
+        journal = {**journal, 'status': 'ready', 'cleanup': receipt.get('cleanup')}
+    if (not isinstance(journal.get('docker_daemon_id'), str)
+            or not 1 <= len(journal['docker_daemon_id']) <= 128
+            or not journal['docker_daemon_id'].isascii()):
         fail('checked_build_journal_invalid')
     setup['docker_daemon_id'] = journal['docker_daemon_id']
     archived_authority = journal_dir / 'authority.json'
     catalog = catalog_snapshot(checked / 'dependencies', recipe)
     authority = verify_authority(setup, archived_authority, catalog,
-                                 historical=not require_fresh)
+                                 historical=not require_fresh, adopting=adopting)
     amendment = authority['scope_amendment']
     approval = authority['approval']
     if require_fresh:
         check_setup_fresh(setup)
     if (journal.get('kind') != 'native-setup-build-journal-v1'
             or journal.get('status') != 'ready'
+            or not isinstance(journal.get('nonce'), str)
+            or not re.fullmatch(r'[0-9a-f]{32}', journal['nonce'])
+            or journal.get('container_name') != 'lrh-setup-build-' + journal['nonce'][:20]
+            or not re.fullmatch(r'[0-9a-f]{64}', str(journal.get('container_id')))
             or journal.get('authority_sha256') != sha(archived_authority)
             or journal.get('catalog_tree_sha256') != catalog['tree']['tree_sha256']
             or not isinstance(journal.get('events'), list)
             or not journal['events']
-            or any(row.get('status') != 'acknowledged' for row in journal['events'])
+            or any(not isinstance(row, dict) or row.get('status') != 'acknowledged'
+                   or type(row.get('exit_code')) is not int or row['exit_code'] != 0
+                   or row.get('output_redacted') is not False
+                   or any(not nr.HEX_RE.fullmatch(str(row.get(key)))
+                          for key in ('argv_sha256', 'stdout_sha256', 'stderr_sha256'))
+                   for row in journal['events'])
             or journal.get('pending_action') is not None
-            or journal.get('cleanup', {}).get('status') != 'complete'):
+            or journal.get('cleanup') != {
+                'status': 'complete', 'container_name': journal['container_name'],
+                'container_id': journal['container_id'], 'absent': True}):
         fail('checked_build_journal_invalid')
     actions = [row['action'] for row in journal['events']]
-    if (actions.count('container_create') != 1 or actions.count('container_inspect_prestart') != 1
-            or actions.count('container_start') != 1
-            or actions.index('container_create') > actions.index('container_inspect_prestart')
-            or actions.index('container_inspect_prestart') > actions.index('container_start')
-            or actions.count('source_copy') != 1 or actions.count('source_readback') != 1
-            or actions.count('dependency_readback') != 1 or actions.count('runtime_version') != 1
-            or actions.count('dependency_probe') != 1 or actions.count('target_build') != 1
-            or actions.count('container_remove') != 1
-            or any(actions.count('output_read_1:' + path) != 1 or
-                   actions.count('output_read_2:' + path) != 1 for path in amendment['outputs'])):
+    expected_actions = [
+        'container_create', 'container_inspect_prestart', 'container_start',
+        'source_copy', 'source_readback', 'dependency_readback', 'runtime_version',
+        'dependency_probe', 'target_build',
+        *(action + ':' + path for path in amendment['outputs']
+          for action in ('output_read_1', 'output_read_2')),
+        'container_remove',
+    ]
+    if actions != expected_actions:
         fail('checked_build_action_sequence_invalid')
     if inspect_container(setup, journal['container_name']) is not None:
         fail('checked_build_container_still_present')
+    listing = docker_call(setup, ['container', 'ls', '-a', '--no-trunc',
+                                   '--filter', 'name=^/' + journal['container_name'] + '$',
+                                   '--format', '{{.ID}}'], timeout=15)
+    if listing.returncode or listing.stdout.strip() or listing.stderr.strip():
+        fail('checked_build_container_absence_unverified')
     output_dir = checked / 'output'
     output_hashes = nr._inventory(output_dir, max_files=64, max_bytes=128 * 1024 * 1024)
     output_inventory = {name: {'sha256': digest,
@@ -1161,6 +1215,11 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
             'output_dir': str(output_dir),
             'dependency_dir': str(checked / 'dependencies/payload'),
             'checked_root': str(checked)}
+
+
+def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
+    """Read-only verification of an already committed checked package."""
+    return _verify_checked(run_root, require_fresh=require_fresh)
 
 
 def main() -> int:

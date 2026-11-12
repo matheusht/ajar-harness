@@ -55,6 +55,17 @@ def digest(value: object) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
 
+def source_modes(root: Path, inventory: dict[str, str]) -> dict[str, int]:
+    modes = {}
+    for name in inventory:
+        entry = (root / name).stat(follow_symlinks=False)
+        mode = stat.S_IMODE(entry.st_mode)
+        if not stat.S_ISREG(entry.st_mode) or mode > 0o777 or mode & 0o022:
+            fail('build_source_mode_unsafe')
+        modes[name] = mode
+    return modes
+
+
 def read_json(path: Path) -> dict:
     return nr._read_json(path)
 
@@ -684,8 +695,10 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             read = event_call(setup, journal_path, journal, 'source_readback',
                               ['cp', identifier + ':/source/.', str(source_readback)],
                               timeout=remaining(30))
-            if read.returncode or nr._inventory(source_readback, max_files=nr.SETUP_SOURCE_MAX_FILES,
-                                                max_bytes=nr.SETUP_SOURCE_MAX_BYTES) != plan['source_sha256']:
+            original_modes = source_modes(setup['root'] / 'original', plan['source_sha256'])
+            if (read.returncode or nr._inventory(source_readback, max_files=nr.SETUP_SOURCE_MAX_FILES,
+                                                 max_bytes=nr.SETUP_SOURCE_MAX_BYTES) != plan['source_sha256']
+                    or source_modes(source_readback, plan['source_sha256']) != original_modes):
                 fail('build_mounted_source_mismatch')
             dependency_readback = stage / 'dependency-readback'
             dependency_readback.mkdir(mode=0o700)
@@ -778,6 +791,7 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         checked = controls / 'setup-checked'
         receipt = {'kind': 'native-setup-checked-v1', 'status': 'ready',
                    'source_manifest_sha256': plan['source_manifest_sha256'],
+                   'source_mode_sha256': digest(original_modes),
                    'setup_plan_sha256': sha(setup['root'] / 'plan.json'),
                    'setup_scope_sha256': plan['scope_sha256'],
                    'goal_sha256': plan['brief_sha256'],
@@ -948,6 +962,8 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
     expected = {
         'kind': 'native-setup-checked-v1', 'status': 'ready',
         'source_manifest_sha256': setup['plan']['source_manifest_sha256'],
+        'source_mode_sha256': digest(source_modes(setup['root'] / 'original',
+                                                  setup['plan']['source_sha256'])),
         'setup_plan_sha256': sha(setup['root'] / 'plan.json'),
         'setup_scope_sha256': setup['plan']['scope_sha256'],
         'goal_sha256': setup['plan']['brief_sha256'],

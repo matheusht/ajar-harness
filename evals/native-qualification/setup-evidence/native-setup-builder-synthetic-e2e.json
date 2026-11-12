@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "checked_receipt_sha256": "83f901de297971f42a87a27cbeb9a858f8e97eb6de17efe6ef2af21a033310e5",
-    "journal_sha256": "65b328a9a287bb8fb47f6a4c07b8b66f2d501b71b102b6a38fb700ccea675a9e"
+    "checked_receipt_sha256": "111d80b5aa5bb5c456978b2d05f9647e313a89c4c67851f96afab47a31d33bd1",
+    "journal_sha256": "830c77fcb232d8e0cbf7938e07d78f5cdc462d382217099b42a35fd059263fb2"
   },
   "checks": [
     {
@@ -59,13 +59,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "fbe9e374e06efa26ad4478dc305ea25729352d6863b08f3feb47d31bee87660c",
-            "container_name": "lrh-setup-build-0a4a87198fd241c8a244",
+            "container_id": "5b38d654ec62878648c0b4d9e496d362b10eb9bff43ad4a7ed9603bcf84d9aaa",
+            "container_name": "lrh-setup-build-30b2f9d5e9c74c579456",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-y8gpj9lq/run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "83f901de297971f42a87a27cbeb9a858f8e97eb6de17efe6ef2af21a033310e5",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-f2mt4obr/run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "111d80b5aa5bb5c456978b2d05f9647e313a89c4c67851f96afab47a31d33bd1",
           "status": "ready"
         }
       },
@@ -138,6 +138,14 @@
       "passed": true
     },
     {
+      "name": "original source mode drift invalidates checked package",
+      "observed": {
+        "code": "checked_receipt_or_bytes_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "a dispatched build is never automatically retried",
       "observed": {
         "code": "build_already_dispatched",
@@ -165,7 +173,7 @@
             "container_name": "lrh-setup-build-11111111111111111111",
             "status": "complete"
           },
-          "journal_sha256": "717d243dc7962ae8c42b76196ec48c793dd05cbced150001163bf4f94a77fdb8",
+          "journal_sha256": "b6b83155c480f9695b91d42f4ed0a83160fa901842bf3e1b322a2676154f6796",
           "kind": "native-setup-build-reconciliation-v1",
           "pending_action": "container_create",
           "retry_requires_new_approval": true,
@@ -197,13 +205,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "a5dcfe4d56a0b5ef21d8da37babfeb3d8917b9650163a1d6e8128e4f29253c92",
-            "container_name": "lrh-setup-build-6fd97534cfea46ee86bf",
+            "container_id": "02543e55b4a94cc91b5ad975187d36157da8ddf9ae8d7b8222bcb353b8faf3f3",
+            "container_name": "lrh-setup-build-84a374492e2b485cb9ad",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-y8gpj9lq/linked-run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "3a421f0dd977ed3f2476ff004dbd2773211717d83f8372e5828569e801c456c0",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-f2mt4obr/linked-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "20844492b598f02cc4f54519f7e0db735f076f33cf001ecb739dde5c8a806ccf",
           "status": "ready"
         }
       },
@@ -218,21 +226,21 @@
       "passed": true
     }
   ],
-  "classification": "synthetic setup turn and stop, real local offline Docker build",
+  "classification": "synthetic setup turn, stop, and pending host crash; real local offline Docker build",
   "fixture_roots": null,
   "inputs": {
-    "build_authority_sha256": "dea748189ff5bb45de90dee386b67c6a170f0df06f0c7bba46b39618a327a34c",
-    "builder_sha256": "61037c0576673d0e472d0670b0cde22fe7d64ffb5affc7aabf652fa86b6bee16",
+    "build_authority_sha256": "9d96898f49b7ca0d93f48357462879c2e318fdec65cc8369fb2422296b82d34b",
+    "builder_sha256": "34e6d452df841de31ecab385dec480d4913f07cb210f41e75b8312b369854505",
     "catalog_manifest_sha256": "9600ea91559a5c7fca060ded4dbe76cc9b8305b61afb1e514bb7c79bd010e4c5",
-    "frozen_setup_receipt_sha256": "71fb71c5879bf44eeddb97f887caef67341c5ba4ebdcbacbdc3506de4a80d37d",
+    "frozen_setup_receipt_sha256": "3d71a9aab654e13ddc47af1babfd5bd66eba629e5cfbcd1f898ba4e390407408",
     "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
-    "scenario_sha256": "1c34f88eebd05de8e1fab3e81ce59211cccb331112eafb4fd28272accab4d8dc",
-    "scope_sha256": "51eb620354b1515a86f7c26fa6003f3ad694d2af239644ce84effe6c89a36b47",
-    "setup_approval_sha256": "97150b30e64b130c4d6124bdece31dec58c8d6f210d17c4e8e46c254821af228",
+    "scenario_sha256": "515eb23d504490dbea3fcc09a4a34c373bb7d2300088fbd324420c4c5ae92b7e",
+    "scope_sha256": "d49b1706e2b9728f24aa6537d07971d5a787c64a1839c22c557005f94ceb55ca",
+    "setup_approval_sha256": "44393efeded1fd68586acc59754ab14d3ac6a97c79ea7dfce2470677caf71153",
     "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976"
   },
   "kind": "native-setup-builder-synthetic-e2e-v1",
-  "limits": "No native model turn, provider qualification, real engagement, or later research run.",
+  "limits": "No real host kill, native model turn, provider qualification, engagement, or research run.",
   "passed": true,
   "provider_executed": false,
   "target_service_executed": false

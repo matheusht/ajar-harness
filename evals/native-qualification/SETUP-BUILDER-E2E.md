@@ -16,7 +16,7 @@ amendment and a separate signed build approval bind the exact build effect.
 | Image or catalog changed, missing or symlinked dependency | Reject before Docker; image ID and full catalog tree must match the signed pins, and every proposed dependency must be supplied. |
 | Docker reports a different bind source or exposes bytes unlike the signed source/catalog | Reject before recipe execution; read back both mounted trees inside the container and compare their hashes. |
 | Active provider tunnel or inconsistent per-tunnel bytes in a stopped v1 setup | Reject a new build effect even when the last turn's aggregate receipt matches. |
-| Executable dependency or output loses its mode, or archived mode changes | Keep the approved executable bit in the checked package and reject later mode drift. |
+| Source, executable dependency, or output mode changes | Pin the source mode map, retain approved dependency modes and the output executable bit, and reject later drift. |
 | Secret-like output | Reject the result, retain only hashes and a redaction flag; never save raw command output. |
 | Workspace, output, process, time or memory limit exceeded | Stop, remove the exact owned container, and report the bounded failure. |
 | Host crashes after a create, start, exec or output-read dispatch | Durable pending action remains `unknown_effect`; a second build call must not repeat it. Reconciliation checks and removes the exact owned container, retains the uncertain action, and charges the full approved build duration as an upper bound. |
@@ -34,7 +34,7 @@ receipt gives both run-root paths. Do not treat these fabricated setup records
 as provider or target evidence.
 
 Expected success: `controls/setup-checked/receipt.json` has
-`kind=native-setup-checked-v1`, `status=ready`, hashes for source, frozen setup,
+`kind=native-setup-checked-v1`, `status=ready`, hashes for source bytes and modes, frozen setup,
 both signed authority objects, image, recipe, threat model, outputs and
 dependencies, plus exact cleanup and a remaining setup allowance observation.
 The script exits zero only when its checks pass and writes the JSON artifact.

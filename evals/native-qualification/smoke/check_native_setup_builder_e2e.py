@@ -441,6 +441,14 @@ def main():
             check(label + ' mode drift invalidates checked package', drift_code == 2,
                   {'exit': drift_code, 'code': drift.get('code')})
             path.chmod(previous_mode)
+        original_build = run_root / 'original/build.sh'
+        original_mode = stat.S_IMODE(original_build.stat().st_mode)
+        original_build.chmod(0o700 if original_mode != 0o700 else 0o600)
+        source_mode_code, source_mode_result = cli(BUILDER, 'setup-build-status',
+            '--run-root', str(run_root), '--verify-checked')
+        check('original source mode drift invalidates checked package', source_mode_code == 2,
+              {'exit': source_mode_code, 'code': source_mode_result.get('code')})
+        original_build.chmod(original_mode)
         retry_code, retry = cli(BUILDER, 'setup-build', '--run-root', str(run_root),
                                 '--approval', str(approval_path), '--dependency-catalog', str(catalog))
         check('a dispatched build is never automatically retried', retry_code == 2,
@@ -519,8 +527,8 @@ def main():
                                  'v2': str(args.keep_root / 'linked-run')}
                                 if args.keep_root else None),
               'provider_executed': False, 'target_service_executed': False,
-              'classification': 'synthetic setup turn and stop, real local offline Docker build',
-              'limits': 'No native model turn, provider qualification, real engagement, or later research run.'}
+              'classification': 'synthetic setup turn, stop, and pending host crash; real local offline Docker build',
+              'limits': 'No real host kill, native model turn, provider qualification, engagement, or research run.'}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, sort_keys=True, indent=2) + '\n')
     print(json.dumps({'passed': result['passed'], 'result': str(args.output)}, sort_keys=True))

@@ -1,9 +1,10 @@
 # Contained review crash adoption check
 
 Decision: a restart may adopt a completed review only when the pending checkpoint,
-protected packet, terminal reviewer receipt, independent evidence, and published
-readback projection still describe the same request. It must not call the reviewer
-again. A partial or changed review holds.
+protected packet, terminal reviewer receipt, and independent evidence still describe
+the same request. If the derivative readback projection was not written before the
+crash, reconstruct it from those protected inputs and verify it before agent readback.
+It must not call the reviewer again. A partial or changed review holds.
 
 Run `python3 evals/native-qualification/smoke/check_native_review_crash_adoption.py`
 from the repository root. Python 3 and the checked-in source are the only inputs.
@@ -18,10 +19,10 @@ Expected cases, written before the implementation:
 | Interrupted or changed state | Expected restart result |
 | --- | --- |
 | Terminal receipt, packet, evidence, and projection persisted; checkpoint still `dispatched` | Adopt once, show the same projection to the agent, one reviewer call total |
-| Reviewer receipt persisted but no projection | Hold; no reviewer or agent call |
-| Projection missing or changed | Hold; no reviewer or agent call |
+| Terminal reviewer receipt persisted but projection was never written | Rebuild and verify the derivative projection, then adopt once; one reviewer call total |
+| Existing projection changed | Hold; no reviewer or agent call |
 | Reviewer receipt missing or changed | Hold; no reviewer or agent call |
-| Packet changed | Hold; no reviewer or agent call |
+| Packet or selection missing or changed before projection | Hold; no reviewer or agent call; no projection written |
 | Claim checkpoint or live source changed | Hold; no reviewer or agent call |
 | Reviewer receipt says `unfinished`, even with a matching projection | Hold; no reviewer or agent call |
 

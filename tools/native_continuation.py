@@ -1119,8 +1119,20 @@ def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
     return observer, selected, identity, note_sha, actions_sha
 
 
+def _review_projection(identity: str, plan_sha: str, next_sha: str, selected_sha: str,
+                       receipt_path: Path, receipt: dict) -> dict:
+    return {'kind': 'native-source-review-results-v1', 'review_id': identity,
+            'plan_sha256': plan_sha, 'next_sha256': next_sha,
+            'input_id': receipt['input_id'], 'selection_sha256': selected_sha,
+            'packet_request_sha256': receipt['packet_pin']['files']['REQUEST.json'],
+            'receipt_sha256': runner._sha(receipt_path),
+            'status': receipt['status'], 'assessment': receipt.get('assessment'),
+            'security_effect': 'unproven',
+            'filing_or_escalation_authorized': False}
+
+
 def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
-                            next_sha: str) -> None:
+                            next_sha: str, projection: dict | None = None) -> None:
     identity, role = previous.get('review_id'), previous.get('role')
     if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
             or role not in ('reviewer-1', 'reviewer-2')):
@@ -1130,9 +1142,11 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
         _fail('source_review_cached_binding_changed')
     module = runner._load_review_module(root)
     projection_path = root / 'controls/research/reviews' / identity / 'RESULTS.json'
-    if runner._sha(runner._file(projection_path, private=True)) != previous.get('projection_sha256'):
-        _fail('source_review_projection_changed')
-    projection = _read_private(projection_path)
+    reconstructed = projection is not None
+    if projection is None:
+        if runner._sha(runner._file(projection_path, private=True)) != previous.get('projection_sha256'):
+            _fail('source_review_projection_changed')
+        projection = _read_private(projection_path)
     receipt_path = root / 'controls' / ('review-' + role + '.json')
     receipt = _read_private(receipt_path)
     assessment = receipt.get('assessment')
@@ -1203,6 +1217,8 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
             or unfinished.get('research_note') !=
                 runner._file(root / 'researcher/RESEARCH.md').read_text()):
         _fail('source_review_cached_source_changed')
+    if reconstructed:
+        module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
 
 
 def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
@@ -1220,13 +1236,31 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
         if previous.get('phase') in ('captured', 'dispatched'):
             candidate = previous
             if previous['phase'] == 'dispatched':
-                identity = previous.get('review_id')
-                if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
+                identity, role = previous.get('review_id'), previous.get('role')
+                if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+                        or role not in ('reviewer-1', 'reviewer-2')):
                     return {'status': 'review_incomplete', 'review_id': identity,
                             'reason': 'source_review_cached_binding_changed'}
                 path = root / 'controls/research/reviews' / identity / 'RESULTS.json'
             try:
                 if previous['phase'] == 'dispatched':
+                    if not path.exists() and not path.is_symlink():
+                        receipt_path = root / 'controls' / ('review-' + role + '.json')
+                        receipt = _read_private(receipt_path)
+                        selection = _cont(root) / 'reviews' / identity / 'selection.json'
+                        selected_sha = runner._sha(runner._file(selection, private=True))
+                        projection = _review_projection(identity, state['plan_sha256'], next_sha,
+                                                        selected_sha, receipt_path, receipt)
+                        _verified_cached_review(root, state, nxt, previous, next_sha, projection)
+                        target = path.parent
+                        if target.resolve() != target:
+                            _fail('source_review_projection_changed')
+                        target.mkdir(parents=True, mode=0o700, exist_ok=True)
+                        entry = target.stat(follow_symlinks=False)
+                        if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
+                                or entry.st_mode & 0o077):
+                            _fail('source_review_projection_changed')
+                        runner._write_json(path, projection, once=True)
                     candidate = {**previous, 'projection_sha256': runner._sha(
                         runner._file(path, private=True))}
                 _verified_cached_review(root, state, nxt, candidate, next_sha)
@@ -1301,14 +1335,8 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
             or not module.verify_packet(packet, receipt['packet_pin'])
             or _next_hash(root) != next_sha):
         _fail('source_review_receipt_changed')
-    projection = {'kind': 'native-source-review-results-v1', 'review_id': identity,
-                  'plan_sha256': state['plan_sha256'], 'next_sha256': next_sha,
-                  'input_id': receipt['input_id'], 'selection_sha256': selected_sha,
-                  'packet_request_sha256': receipt['packet_pin']['files']['REQUEST.json'],
-                  'receipt_sha256': runner._sha(receipt_path),
-                  'status': result['status'], 'assessment': receipt.get('assessment'),
-                  'security_effect': 'unproven',
-                  'filing_or_escalation_authorized': False}
+    projection = _review_projection(identity, state['plan_sha256'], next_sha,
+                                    selected_sha, receipt_path, receipt)
     try:
         module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
     except (ValueError, UnicodeError):

@@ -47,7 +47,7 @@ def run_case(base: Path, case: str) -> dict:
         return receipt
 
     def agent_turn(command, session, prompt):
-        assert case == 'adopt' and command == 'resume' and session == 'ses_fixture'
+        assert case in ('adopt', 'no_projection') and command == 'resume' and session == 'ses_fixture'
         projection = next((root / 'controls/research/reviews').glob('*/RESULTS.json'))
         assert projection.parent.name in prompt.read_text()
         assert runner._read_json(projection)['security_effect'] == 'unproven'
@@ -79,7 +79,7 @@ def run_case(base: Path, case: str) -> dict:
             side_effect=lambda *args: {'items': []}))
         stack.enter_context(patch.object(runner, '_source_review',
             side_effect=terminal_review))
-        if case == 'no_projection':
+        if case.startswith('no_projection'):
             original_review = runner.review
 
             def interrupted_review(*args):
@@ -111,39 +111,51 @@ def run_case(base: Path, case: str) -> dict:
         projection = root / 'controls/research/reviews' / identity / 'RESULTS.json'
         receipt = root / 'controls/review-reviewer-1.json'
         packet = root / 'handoff/reviewer-1'
-        if case == 'missing_projection':
-            projection.unlink()
-        elif case == 'changed_projection':
+        mutation = case.removeprefix('no_projection_')
+        if mutation == 'changed_projection':
             value = runner._read_json(projection)
             value['unsupported_claim'] = 'confirmed'
             runner._write_json(projection, value)
-        elif case == 'missing_receipt':
+        elif mutation == 'missing_receipt':
             receipt.unlink()
-        elif case == 'changed_receipt':
+        elif mutation == 'changed_receipt':
             value = runner._read_json(receipt)
             value['assessment']['status'] = 'unfinished'
             runner._write_json(receipt, value)
-        elif case == 'changed_packet':
+        elif mutation == 'missing_packet':
+            packet.chmod(0o700)
+            (packet / 'RAW.json').unlink()
+        elif mutation == 'changed_packet':
             packet.chmod(0o700)
             raw = packet / 'RAW.json'
             raw.chmod(0o600)
             raw.write_bytes(raw.read_bytes() + b' ')
-        elif case == 'changed_claim':
+        elif mutation == 'missing_selection':
+            (root / 'controls/continuation/reviews' / identity / 'selection.json').unlink()
+        elif mutation == 'changed_selection':
+            selected = root / 'controls/continuation/reviews' / identity / 'selection.json'
+            value = runner._read_json(selected)
+            value['claim_version'] = '0' * 64
+            runner._write_json(selected, value)
+        elif mutation == 'changed_claim':
             value = runner._read_json(root / 'researcher/NEXT.json')
             value['host_action']['claim'] = 'Changed after reviewer dispatch'
             runner._write_json(root / 'researcher/NEXT.json', value)
-        elif case == 'changed_source':
+        elif mutation == 'changed_source':
             (root / 'researcher/project/check.sh').write_text('printf changed\n')
-        elif case == 'unfinished_receipt':
+        elif mutation == 'missing_source':
+            (root / 'researcher/project/check.sh').unlink()
+        elif mutation == 'unfinished_receipt':
             value = runner._read_json(receipt)
             value['status'] = 'unfinished'
             value['assessment']['status'] = 'unfinished'
             runner._write_json(receipt, value)
-            projected = runner._read_json(projection)
-            projected['status'] = 'unfinished'
-            projected['assessment'] = value['assessment']
-            projected['receipt_sha256'] = runner._sha(receipt)
-            runner._write_json(projection, projected)
+            if projection.exists():
+                projected = runner._read_json(projection)
+                projected['status'] = 'unfinished'
+                projected['assessment'] = value['assessment']
+                projected['receipt_sha256'] = runner._sha(receipt)
+                runner._write_json(projection, projected)
         try:
             result = continuation.continue_run(root, max_invocations=2,
                 closeout_wait_seconds=0, invoke=agent_turn,
@@ -152,7 +164,7 @@ def run_case(base: Path, case: str) -> dict:
         except (continuation.ContinuationError, runner.NativeResearchError) as error:
             outcome = 'held:' + str(error)
         assert len(review_calls) == 1
-        if case == 'adopt':
+        if case in ('adopt', 'no_projection'):
             assert outcome == 'cleanup_pending' and agent_calls == ['resume'], (outcome, agent_calls)
             assert continuation._state(root)['review_action']['phase'] == 'captured'
             assert len([line for line in (root / 'controls/continuation/events.jsonl').read_text().splitlines()
@@ -162,15 +174,22 @@ def run_case(base: Path, case: str) -> dict:
                     'projection_sha256': runner._sha(projection)}
         assert outcome == 'review_incomplete' or outcome.startswith('held:')
         assert not agent_calls
+        if case.startswith('no_projection'):
+            assert not projection.exists()
         return {'outcome': outcome, 'review_calls': 1, 'agent_calls': 0}
 
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix='native-review-crash-adoption-') as temp:
         base = Path(temp).resolve()
-        cases = ('adopt', 'no_projection', 'missing_projection', 'changed_projection',
-                 'missing_receipt', 'changed_receipt', 'changed_packet', 'changed_claim',
-                 'changed_source', 'unfinished_receipt')
+        cases = ('adopt', 'no_projection', 'changed_projection', 'missing_receipt',
+                 'changed_receipt', 'changed_packet', 'changed_claim', 'changed_source',
+                 'unfinished_receipt', 'no_projection_missing_receipt',
+                 'no_projection_changed_receipt', 'no_projection_missing_packet',
+                 'no_projection_changed_packet', 'no_projection_missing_selection',
+                 'no_projection_changed_selection', 'no_projection_changed_claim',
+                 'no_projection_missing_source', 'no_projection_changed_source',
+                 'no_projection_unfinished_receipt')
         results = {case: run_case(base, case) for case in cases}
     assert not base.exists()
     print(json.dumps({'status': 'passed', 'cases': results,

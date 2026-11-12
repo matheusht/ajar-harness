@@ -80,7 +80,7 @@ Pass `--keep-root /absolute/new/private/dir` to retain the harmless fixture
 and prepared research run; the builder removes the synthetic operator signing
 key first.
 
-The 2026-11-12 local result is saved in
+The 2026-11-12 local run passed 48 of 48 checks. Its result is saved in
 `setup-evidence/native-setup-to-research-synthetic-e2e.json`. It records hashes,
 refusal codes, the Docker `/deps` readback, and checked source-action and
 fresh-review preflight results under a synthetic active allowance. The observed

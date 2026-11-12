@@ -36,6 +36,6 @@ for those checks.
 
 The 2026-11-12 result is saved in
 [JOINED-ENGAGEMENT-E2E-RESULT.json](JOINED-ENGAGEMENT-E2E-RESULT.json).
-It observed 31 passing transition checks, one simulated source action, one
+It observed 48 passing transition checks, one simulated source action, one
 simulated fresh review, three simulated native turns, and one simulated stop.
 The companion transition and closeout scenarios exercise the refusal cases.

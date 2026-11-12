@@ -1,5 +1,5 @@
 {
-  "closeout_result_sha256": "efcd882814634f3528e0aee8114561005a36657be60edc193568ee61b4bdb56f",
+  "closeout_result_sha256": "aa956fbf3d72f925e05a6ea65f939796b82c04ad481a2e140f9e7054a7548248",
   "environment": {
     "platform": "darwin",
     "python": "3.14.6"
@@ -8,16 +8,16 @@
   "kind": "native-engagement-joined-synthetic-e2e-v1",
   "limits": "Synthetic native turns, source receipts, reviewer, owner, and cleanup; no live provider, target service, or real owner teardown.",
   "owner_stops": 1,
-  "plan_sha256": "587a8ab4bed219cddbdfd424fb36d3862f82e2af64654f89aca89997aa542739",
+  "plan_sha256": "4b040878225b8e6d8a6242e6c0fa661a32a599a2a8f6a7b55e9da5d27f83f978",
   "provider_calls": 0,
-  "review_projection_sha256": "ea76da67fa076fc5be142418e9f6264bf44d0e14702885a45c9a1b6393615441",
+  "review_projection_sha256": "1bbed5944f839f833b0705eaf9cd2187bc592c907bc6030666525128b8fffb29",
   "scenario_sha256": "48ba6062021d264e1e57f237e197f7f3f4353ea1118f5938d44722d925715e21",
   "source_actions": 1,
-  "source_terminal_sha256": "738ca13187c578d17cbe4af607c50c32b8112b3650290c3af54d68b7b3f97b81",
+  "source_terminal_sha256": "6a5a7761fd5517cd436aa8a9c029a3ce447da836fd366b6be7c0d3177e32000a",
   "status": "passed",
   "target_service_calls": 0,
-  "transition_checks": 31,
-  "transition_evidence_sha256": "c7170fb724264fe0fd597c3273e2a1ca3a324b07b1bd278116697a57aa1b2c6c",
+  "transition_checks": 48,
+  "transition_evidence_sha256": "55f13488b00e406e9bc4e5a43a4b01cc7ba4aa76c66a09bb892bb670b38ed968",
   "turns": [
     "research",
     "resume",

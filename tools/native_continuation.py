@@ -302,7 +302,7 @@ def _stop(root: Path) -> str | None:
         return 'operator_stop'
 
 
-def _closure(root: Path) -> dict | None:
+def _closure(root: Path, applied_review_sha: str | None = None) -> dict | None:
     request_path = _cont(root) / 'closure-request.json'
     if not request_path.exists():
         return None
@@ -322,6 +322,10 @@ def _closure(root: Path) -> dict | None:
     _text(review.get('reason'), 'reason')
     if review['decision'] == 'reopen':
         _text(review.get('test'), 'test')
+        if runner._sha(review_path) == applied_review_sha:
+            return None
+    if request.get('next_sha256') != _next_hash(root):
+        _fail('continuation_closure_request_stale')
     return {'request': request, 'review': review}
 
 
@@ -1643,7 +1647,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return closed
             reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
             reopen_before_result_sha = closed['result_sha256']
-        closure = None if reopen_check else _closure(root)
+        closure = None if reopen_check else _closure(
+            root, state.get('applied_closure_review_sha256'))
         if closure is not None:
             if closure['review'] is None:
                 return _finish(root, state, 'closure_review_required',
@@ -1651,6 +1656,12 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             review_sha = runner._sha(cont / 'closure-review.json')
             if closure['review']['decision'] == 'accept':
                 _record_review(root, closure['review'])
+                if checked_setup:
+                    closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                             forced_stop_reason='manual_closure_accepted')
+                    if closed is None:
+                        _fail('continuation_closeout_unavailable')
+                    return closed
                 return _finish(root, state, 'closed', reason=closure['review']['reason'])
             if state.get('applied_closure_review_sha256') != review_sha:
                 _record_review(root, closure['review'])
@@ -1707,7 +1718,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             if (state.get('last_strong_lead') is True and nxt.get('strong_lead') is False
                     and reopen_check is None
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
-                             == SOURCE_REVIEW_ACTION_KIND)):
+                             in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1749,7 +1760,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     and nxt is not None and nxt.get('strong_lead') is False
                     and reopen_check is None
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
-                             == SOURCE_REVIEW_ACTION_KIND)):
+                             in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1904,7 +1915,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             if (state.get('last_strong_lead') is True and nxt.get('strong_lead') is False
                     and not nxt.get('proposed_stop')
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
-                             == SOURCE_REVIEW_ACTION_KIND)):
+                             in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,

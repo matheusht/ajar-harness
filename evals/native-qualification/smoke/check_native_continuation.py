@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+from unittest.mock import patch
+import contextlib
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools'))
 import native_research as runner
 import native_continuation as continuation
+import check_agent_closeout as closeout_check
 
 FAKE_RUNNER = r'''
 import json
@@ -119,11 +123,60 @@ def main():
             'kind': 'native-continuation-closure-review-v1',
             'request_sha256': runner._sha(request),
             'decision': 'accept', 'reason': 'bounded local coverage accepted'})
+        next_path = root / 'researcher/NEXT.json'
+        original_next = next_path.read_bytes()
+        changed = json.loads(original_next)
+        changed['last_result']['unresolved'] = 'a newly observed condition'
+        runner._write_json(next_path, changed)
+        try:
+            run_controller(root, fake)
+            stale_rejected = False
+        except continuation.ContinuationError as error:
+            stale_rejected = str(error) == 'continuation_closure_request_stale'
+        check('review cannot accept a changed stop proposal', stale_rejected)
+        next_path.write_bytes(original_next)
         second = run_controller(root, fake)
         check('accepted closure returns without another invocation',
               second.get('status') == 'closed'
               and [json.loads(line)['command'] for line in
                    (base / 'calls.jsonl').read_text().splitlines()] == calls)
+        reopened = base / 'reopened-closure'
+        (reopened / 'controls').mkdir(parents=True, mode=0o700)
+        reopened.chmod(0o700)
+        (reopened / 'researcher').mkdir(mode=0o700)
+        runner._write_json(reopened / 'plan.json', {'kind': 'continuation-smoke'}, once=True)
+        reopen_state = continuation._state(reopened)
+        reopen_state['invocations'] = 1
+        continuation._save_state(reopened, reopen_state)
+        old_next = {'kind': continuation.NEXT_KIND,
+                    'last_result': {'state': 'inconclusive', 'unresolved': 'old condition'},
+                    'capabilities': [], 'coverage': [], 'next': None,
+                    'proposed_stop': True, 'strong_lead': False}
+        runner._write_json(reopened / 'researcher/NEXT.json', old_next)
+        continuation._closure_request(reopened, reopen_state, old_next)
+        reopen_request = reopened / 'controls/continuation/closure-request.json'
+        reopen_review = reopened / 'controls/continuation/closure-review.json'
+        runner._write_json(reopen_review, {
+            'kind': continuation.REVIEW_KIND,
+            'request_sha256': runner._sha(reopen_request),
+            'decision': 'reopen', 'reason': 'test another path',
+            'test': 'check the new condition'}, once=True)
+        reopen_state['applied_closure_review_sha256'] = runner._sha(reopen_review)
+        reopen_state['stop_reason'] = None
+        continuation._save_state(reopened, reopen_state)
+        runner._write_json(reopened / 'researcher/NEXT.json', {
+            **old_next, 'proposed_stop': False,
+            'next': {'question': 'is the new path reachable?', 'test': 'check the new condition',
+                     'prediction': 'reachable', 'disconfirming': 'denied',
+                     'authority': 'same approval'}})
+        try:
+            reopened_outcome = continuation.continue_run(
+                reopened, runner_path=fake, max_invocations=1)
+        except continuation.ContinuationError:
+            reopened_outcome = None
+        check('applied reopen permits a new next brief',
+              reopened_outcome is not None
+              and reopened_outcome['status'] == 'max_invocations')
         manual = base / 'manual-dismissal'
         (manual / 'controls').mkdir(parents=True, mode=0o700)
         manual.chmod(0o700)
@@ -168,8 +221,81 @@ def main():
               legacy_outcome['status'] == 'closed'
               and [json.loads(line)['command'] for line in
                    (base / 'calls.jsonl').read_text().splitlines()] == calls)
+        patch_root = base / 'patch-dismissal'
+        (patch_root / 'controls').mkdir(parents=True, mode=0o700)
+        patch_root.chmod(0o700)
+        (patch_root / 'researcher').mkdir(mode=0o700)
+        runner._write_json(patch_root / 'plan.json', {
+            'kind': 'continuation-smoke', 'checked_setup': {'synthetic': True}}, once=True)
+        patch_state = continuation._state(patch_root)
+        patch_state.update(invocations=1, last_strong_lead=True)
+        continuation._save_state(patch_root, patch_state)
+        runner._write_json(patch_root / 'researcher/NEXT.json', {
+            'kind': continuation.NEXT_KIND,
+            'last_result': {'state': 'supported', 'unresolved': 'the prior lead'},
+            'capabilities': [], 'coverage': [], 'next': None,
+            'host_action': {'kind': continuation.SOURCE_PATCH_ACTION_KIND,
+                            'claim': 'Check the proposed fix and lead disposition'},
+            'proposed_stop': False, 'strong_lead': False})
+        with patch.object(continuation, '_agent_review', return_value={
+                'status': 'review_incomplete', 'review_id': 'synthetic'}) as reviewed:
+            patch_outcome = run_controller(patch_root, fake)
+        check('checked patch dismissal reaches independent review',
+              patch_outcome['status'] == 'review_incomplete'
+              and reviewed.call_count == 1
+              and not (patch_root / 'controls/continuation/closure-request.json').exists())
+        checked = base / 'checked-closure'
+        (checked / 'controls').mkdir(parents=True, mode=0o700)
+        checked.chmod(0o700)
+        (checked / 'researcher').mkdir(mode=0o700)
+        runner._write_json(checked / 'plan.json', {
+            'kind': 'continuation-smoke', 'source_only': {'synthetic': True},
+            'checked_setup': {'synthetic': True}}, once=True)
+        checked_state = continuation._state(checked)
+        checked_state.update(invocations=1, last_strong_lead=True)
+        continuation._save_state(checked, checked_state)
+        checked_next = {
+            'kind': continuation.NEXT_KIND,
+            'last_result': {'state': 'refuted', 'unresolved': 'original entry'},
+            'capabilities': [], 'coverage': [], 'next': None,
+            'host_action': {'kind': continuation.SOURCE_REVIEW_ACTION_KIND,
+                            'claim': 'Review the bounded stop'},
+            'proposed_stop': False, 'strong_lead': False}
+        runner._write_json(checked / 'researcher/NEXT.json', checked_next)
+        continuation._closure_request(checked, checked_state, checked_next,
+                                      reason='strong_lead_abandoned')
+        checked_request = checked / 'controls/continuation/closure-request.json'
+        runner._write_json(checked / 'controls/continuation/closure-review.json', {
+            'kind': continuation.REVIEW_KIND,
+            'request_sha256': runner._sha(checked_request),
+            'decision': 'accept', 'reason': 'bounded stop accepted'}, once=True)
+        (checked / 'controls/owner.lock').write_text('')
+        (checked / 'controls/owner.lock').chmod(0o600)
+        stops = []
+        def fake_stop(run_root):
+            stops.append('stop')
+            closeout_check.write_final(run_root)
+            return {'status': 'stop_requested'}
+        def fake_docker(*argv, **_kwargs):
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=(b'synthetic-daemon-A\n' if argv[0] == 'info' else b''),
+                stderr=b'')
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(runner, '_verified_plan',
+                side_effect=lambda run_root, **_kw: runner._read_json(run_root / 'plan.json')))
+            stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+            stack.enter_context(patch.object(runner, 'stop', side_effect=fake_stop))
+            stack.enter_context(patch.object(runner, '_docker', side_effect=fake_docker))
+            checked_outcome = run_controller(checked, fake)
+        check('accepted checked closure uses owner stop and cleanup path',
+              checked_outcome['status'] == 'stopped_incomplete'
+              and checked_outcome['cleanup']['resource_absence'] is True
+              and stops == ['stop']
+              and runner._read_json(checked / 'controls/closeout/result.json')['reason']
+                  == 'manual_closure_accepted')
         print(json.dumps({'checks': checks, 'status': 'passed',
-                          'limits': 'Synthetic subprocess only; no native model, provider, or target.'},
+                          'limits': 'Synthetic subprocess, owner stop, and Docker readback; '
+                                    'no native model, provider, Docker daemon, or target.'},
                          indent=2))
         return 0
 

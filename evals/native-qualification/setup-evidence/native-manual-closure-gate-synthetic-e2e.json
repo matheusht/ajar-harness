@@ -21,14 +21,34 @@
       "pass": true
     },
     {
+      "name": "review cannot accept a changed stop proposal",
+      "pass": true
+    },
+    {
       "name": "accepted closure returns without another invocation",
+      "pass": true
+    },
+    {
+      "name": "applied reopen permits a new next brief",
       "pass": true
     },
     {
       "name": "manual dismissal still requires legacy closure review",
       "pass": true
+    },
+    {
+      "name": "legacy source-only closure uses accepted manual review",
+      "pass": true
+    },
+    {
+      "name": "checked patch dismissal reaches independent review",
+      "pass": true
+    },
+    {
+      "name": "accepted checked closure uses owner stop and cleanup path",
+      "pass": true
     }
   ],
   "status": "passed",
-  "limits": "Synthetic subprocess only; no native model, provider, or target."
+  "limits": "Synthetic subprocess, owner stop, and Docker readback; no native model, provider, Docker daemon, or target."
 }

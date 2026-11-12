@@ -170,14 +170,26 @@ def main() -> int:
                 root, max_invocations=3 if missing_disposition else 5,
                 closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _root: {'status': 'active', 'allowance': {'active': True}})
-        expected = ('closure_review_required' if args.missing_disposition_continue else
-                    'stopped_incomplete' if args.missing_disposition else
+            if args.missing_disposition_continue:
+                assert outcome['status'] == 'closure_review_required', outcome
+                request = controls / 'continuation/closure-request.json'
+                runner._write_json(controls / 'continuation/closure-review.json', {
+                    'kind': continuation.REVIEW_KIND,
+                    'request_sha256': runner._sha(request),
+                    'decision': 'accept',
+                    'reason': 'Bounded stop accepted; original entry remains untested.'}, once=True)
+                outcome = continuation.continue_run(
+                    root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
+                    status_fn=lambda _root: {'status': 'active', 'allowance': {'active': True}})
+        expected = ('stopped_incomplete' if missing_disposition else
                     'complete_internal_candidate')
         assert outcome['status'] == expected, outcome
         expected_turns = ['research', 'resume', 'resume'] + ([] if missing_disposition else ['resume'])
         assert turns == expected_turns and len(action_calls) == 1, (turns, action_calls)
         assert review_calls == ['reviewer-1']
-        assert stop_calls == ([] if args.missing_disposition_continue else ['stop']), stop_calls
+        assert stop_calls == ['stop'], stop_calls
+        assert (controls / 'closeout/stop-request.json').exists()
+        assert runner._read_json(controls / 'closeout/result.json')['cleanup']['resource_absence'] is True
         state = continuation._state(root)
         assert state['source_action']['phase'] == 'captured'
         assert state['review_action']['phase'] == 'captured'

@@ -1130,6 +1130,7 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
     projection = _read_private(projection_path)
     receipt_path = root / 'controls' / ('review-' + role + '.json')
     receipt = _read_private(receipt_path)
+    assessment = receipt.get('assessment')
     if (projection.get('kind') != 'native-source-review-results-v1'
             or projection.get('review_id') != identity
             or projection.get('plan_sha256') != state['plan_sha256']
@@ -1143,8 +1144,9 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
             or receipt.get('plan_sha256') != state['plan_sha256']
             or receipt.get('reviewer_role') != role
             or receipt.get('filing_or_escalation_authorized') is not False
-            or receipt.get('assessment', {}).get('status') != 'candidate_for_operator_review'
-            or projection.get('assessment') != receipt.get('assessment')
+            or not isinstance(assessment, dict)
+            or assessment.get('status') != 'candidate_for_operator_review'
+            or projection.get('assessment') != assessment
             or projection.get('input_id') != receipt.get('input_id')):
         _fail('source_review_cached_binding_changed')
     evidence = root / 'controls/source-evidence' / role / 'RESULTS.json'
@@ -1153,8 +1155,9 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
         _fail('source_review_cached_evidence_changed')
     pin = receipt.get('packet_pin')
     packet = root / 'handoff' / role
-    if (not isinstance(pin, dict) or pin.get('input_id') != receipt['input_id']
-            or projection.get('packet_request_sha256') != pin.get('files', {}).get('REQUEST.json')
+    if (not isinstance(pin, dict) or not isinstance(pin.get('files'), dict)
+            or pin.get('input_id') != receipt['input_id']
+            or projection.get('packet_request_sha256') != pin['files'].get('REQUEST.json')
             or not module.verify_packet(packet, pin)):
         _fail('source_review_cached_packet_changed')
     request = json.loads((packet / 'REQUEST.json').read_bytes())
@@ -1180,6 +1183,7 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
     if (not isinstance(current, dict)
             or conditions.get('current_files') != _review_tree(directory / 'current-source',
                                                                current, module)
+            or runner._inventory(root / 'researcher/project') != current
             or raw.get('source_actions') != _review_source_actions(root, state, module)
             or unfinished.get('checkpoint') != nxt
             or unfinished.get('research_note') !=
@@ -1197,7 +1201,7 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
             try:
                 _verified_cached_review(root, state, nxt, previous, next_sha)
             except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
-                    TypeError, KeyError, RuntimeError):
+                    TypeError, KeyError, AttributeError, RuntimeError):
                 previous.update(phase='incomplete',
                                 evidence_change_reason='source_review_cached_evidence_changed')
                 _save_state(root, state)

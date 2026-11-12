@@ -18,7 +18,7 @@ fake native reviewer; it makes no provider or target call.
 | Original effect, causal control, actor or starting state is absent | The reviewer may investigate, but no security-effect or confirmed finding follows from repeated output. The result records the exact missing link. |
 | Approval is stale, the shared allowance is exhausted, a prior action is uncertain, or the reviewer slot/store is reused | Reject before filling `/handoff` or creating a reviewer session. Recheck authority and allowance before dispatch. |
 | The review packet or claim changes after freezing | Refuse dispatch or hold the result; an earlier review never covers new bytes. |
-| A cached review projection remains but its protected receipt, host evidence, packet, observer selection or source-action corpus disappears or changes | Hold readback as incomplete; never send a second reviewer turn. |
+| A cached review projection remains but its protected receipt, host evidence, packet, observer selection, source-action corpus or live researcher source disappears or changes | Hold readback as incomplete; never send a second reviewer turn. |
 | Reviewer dispatch is uncertain or a result is lost | Do not send a second review automatically. Reconcile from the exact protected receipt or leave it unfinished. |
 | Review output is favorable without a material effect/control check | Keep the assessment unfinished or at most a candidate for operator review. Filing and escalation remain unauthorized. |
 
@@ -42,7 +42,8 @@ fake native reviewer; it makes no provider or target call.
    session. After an unknown, unfinished, or packet-changed dispatched review,
    a replayed request must not consume the second slot or issue another native
    turn. Repeat from a captured review with a missing or changed protected
-   receipt, host evidence, packet, selection or source-action output; no researcher readback may
+   receipt, host evidence, packet, selection, source-action output or live
+   researcher source; no researcher readback may
    be sent from the cached projection alone.
 4. Return a hash-bound review receipt through the same run's read-only
    `/research` projection. Have the synthetic researcher read it on the next

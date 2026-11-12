@@ -276,8 +276,9 @@ projection binds the plan, `NEXT.json`, observer selection, packet request and
 protected reviewer receipt by hash. It always says `security_effect: unproven`
 and `filing_or_escalation_authorized: false`. An uncertain or unfinished review
 does not automatically dispatch again or use the other reviewer slot. The
-cached readback rechecks the protected receipt and host evidence, sealed packet, observer selection
-and source-action corpus; a changed or missing binding holds the review incomplete.
+cached readback rechecks the protected receipt and host evidence, sealed packet,
+observer selection, source-action corpus and live researcher source; a changed
+or missing binding holds the review incomplete.
 The contained request-to-readback scenario and its limits are in
 [AGENT-REQUESTED-REVIEW-E2E](../../evals/native-qualification/AGENT-REQUESTED-REVIEW-E2E.md).
 

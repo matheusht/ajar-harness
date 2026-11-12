@@ -365,7 +365,8 @@ def main() -> None:
         cached_readback_denied = []
         for case in ('missing_receipt', 'changed_receipt', 'missing_packet',
                      'changed_packet', 'changed_selection', 'changed_source_action',
-                     'missing_reviewer_evidence', 'changed_reviewer_evidence'):
+                     'missing_reviewer_evidence', 'changed_reviewer_evidence',
+                     'changed_live_source', 'malformed_assessment', 'malformed_pin_files'):
             blocked = fixture(base / ('cached-' + case))
             source_action(blocked, '1' * 32, 'before\n', 1)
             source_action(blocked, '2' * 32, 'after\n', 0)
@@ -442,6 +443,22 @@ def main() -> None:
                     else:
                         evidence.chmod(0o644)
                         evidence.write_bytes(evidence.read_bytes() + b' ')
+                elif case == 'changed_live_source':
+                    (blocked / 'researcher/project/check.sh').write_text('printf changed-after-review\n')
+                elif case in ('malformed_assessment', 'malformed_pin_files'):
+                    receipt = runner._read_json(receipt_path)
+                    if case == 'malformed_assessment':
+                        receipt['assessment'] = None
+                    else:
+                        receipt['packet_pin']['files'] = None
+                    runner._write_json(receipt_path, receipt)
+                    projection = blocked / 'controls/research/reviews' / review_id / 'RESULTS.json'
+                    value = runner._read_json(projection)
+                    value['receipt_sha256'] = runner._sha(receipt_path)
+                    value['assessment'] = receipt['assessment']
+                    runner._write_json(projection, value)
+                    state['review_action']['projection_sha256'] = runner._sha(projection)
+                    continuation._save_state(blocked, state)
                 repeated = continuation.continue_run(blocked, max_invocations=2,
                     invoke=lambda *args: (_ for _ in ()).throw(AssertionError('cached_readback_sent')),
                     status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})

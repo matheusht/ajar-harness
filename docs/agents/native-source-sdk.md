@@ -246,8 +246,42 @@ establish repeated output. The original entry path, starting state, actor
 permission, protected effect and causal control still need independent evidence
 and fresh review.
 
-Use the normal frozen-packet `review` flow. Include the exact claim, relevant
-receipts, original source, changed inputs, controls, failures and limits. A fresh
+## Researcher-requested fresh source review
+
+The same active source-only run may request one fresh review with a separate
+`host_action` in `/workspace/NEXT.json`:
+
+```json
+{"kind": "native-source-review-v1", "claim": "The after branch may preserve the harmless note."}
+```
+
+Set `next` to `null` and `proposed_stop` to `false` as in the source-check
+example. This is one typed request, with no agent-selected evidence paths. The
+host checks the current signed plan and approval, shared allowance, unresolved
+effects, original source, and an empty reviewer handoff and session store before
+creating a packet. It then freezes the claim, original and current source,
+research note and checkpoint, and independently enumerates every protected
+researcher source-action receipt. Raw output, including adverse batches, enters
+the existing six-role packet only when it is present, hash-bound and safe to
+disclose. An unfinished action or missing, unsafe or oversized required evidence
+holds the request incomplete before a reviewer session starts.
+An optional `researcher/project/RESULT.md` is frozen with the current source
+and repeated in the unfinished role with its hash and agent-statement label.
+It adds no separate finalization step.
+
+The existing fresh source reviewer and host effect/control path consumes this
+packet. A completed internal assessment is returned to the same run at read-only
+`/research/reviews/<review_id>/RESULTS.json` on the next native turn. The
+projection binds the plan, `NEXT.json`, observer selection, packet request and
+protected reviewer receipt by hash. It always says `security_effect: unproven`
+and `filing_or_escalation_authorized: false`. An uncertain or unfinished review
+does not automatically dispatch again or use the other reviewer slot. The
+contained request-to-readback scenario and its limits are in
+[AGENT-REQUESTED-REVIEW-E2E](../../evals/native-qualification/AGENT-REQUESTED-REVIEW-E2E.md).
+
+Both manual and researcher-requested reviews use the frozen-packet `review`
+flow. The packet includes the exact claim, relevant receipts, original source,
+changed inputs, controls, failures and limits. A fresh
 reviewer receives the pinned packet and a clean source copy. It adds scripts and
 writes `/workspace/source-check.json` with `kind: native-source-check-v1`, the
 packet `input_id`, separate `effect` and `control` argv arrays, and a `rationale`.

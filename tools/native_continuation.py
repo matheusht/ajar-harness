@@ -28,6 +28,7 @@ import native_research as runner
 
 NEXT_KIND = 'native-continuation-next-v1'
 SOURCE_ACTION_KIND = 'native-source-execute-v1'
+SOURCE_REVIEW_ACTION_KIND = 'native-source-review-v1'
 SOURCE_REQUEST_KIND = 'native-source-action-request-v1'
 SOURCE_TERMINAL_KIND = 'native-source-action-terminal-v1'
 STATE_KIND = 'native-continuation-state-v1'
@@ -168,11 +169,14 @@ def _validate_next(value: dict) -> dict:
     following = value.get('next')
     action = value.get('host_action')
     if action is not None:
-        if (proposed or following is not None or not isinstance(action, dict)
-                or set(action) != {'kind', 'command'}
-                or action.get('kind') != SOURCE_ACTION_KIND):
+        if proposed or following is not None or not isinstance(action, dict):
             _fail('continuation_source_action_invalid')
-        runner._validate_argv(action.get('command'))
+        if action.get('kind') == SOURCE_ACTION_KIND and set(action) == {'kind', 'command'}:
+            runner._validate_argv(action['command'])
+        elif action.get('kind') == SOURCE_REVIEW_ACTION_KIND and set(action) == {'kind', 'claim'}:
+            _text(action['claim'], 'claim', limit=4096)
+        else:
+            _fail('continuation_source_action_invalid')
     if proposed:
         if following is not None:
             _fail('continuation_next_invalid')
@@ -233,14 +237,16 @@ def _state(root: Path) -> dict:
         value = {'kind': STATE_KIND, 'plan_sha256': plan_sha, 'invocations': 0,
                  'session_id': None, 'last_pool': None, 'stop_reason': None,
                  'pending': None, 'last_strong_lead': None,
-                 'applied_closure_review_sha256': None, 'source_action': None}
+                 'applied_closure_review_sha256': None, 'source_action': None,
+                 'review_action': None}
         _write_private(path, value)
         return value
     value = _read_private(path)
     if (value.get('kind') != STATE_KIND or value.get('plan_sha256') != plan_sha
             or type(value.get('invocations')) is not int or value['invocations'] < 0):
         _fail('continuation_checkpoint_stale')
-    for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256', 'source_action'):
+    for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256',
+                'source_action', 'review_action'):
         value.setdefault(key, None)
     return value
 
@@ -899,7 +905,309 @@ def _source_action(root: Path, state: dict, nxt: dict | None) -> dict | None:
     return _adopt_source_receipt(root, state, directory, request, inventory)
 
 
-def _prompt(root: Path, number: int, source_action: dict | None = None) -> Path:
+def _review_preflight(root: Path, state: dict) -> tuple[dict, dict, object, str]:
+    prior = state.get('source_action')
+    if prior and prior.get('phase') != 'captured':
+        _fail('source_review_prior_action_unresolved')
+    plan = runner._verified_plan(root)
+    if ('source_only' not in plan or
+            plan.get('source_effect_envelope') != runner.SOURCE_EFFECT_ENVELOPE):
+        _fail('source_review_authority_required')
+    runner._approval_active(root)
+    if not runner.run_active(root) or runner._unresolved_dispatches(root):
+        _fail('source_review_run_inactive_or_unresolved')
+    allowance = runner.allowance_snapshot(root)
+    limits = allowance.get('hard_limits')
+    if (allowance.get('active') is not True or limits != plan['limits']
+            or not isinstance(allowance.get('run_identity'), dict)
+            or type(allowance.get('used_tunnels')) is not int
+            or type(allowance.get('charged_tunnel_bytes')) is not int
+            or allowance['used_tunnels'] < 0 or allowance['charged_tunnel_bytes'] < 0
+            or allowance['used_tunnels'] >= limits['max_connections']
+            or allowance['charged_tunnel_bytes'] >= limits['max_bytes']):
+        _fail('source_review_allowance_exhausted')
+    runner._source_executor_envelope(root, plan)
+    module = runner._load_review_module(root)
+    runner._verify_inventory(root / 'original', plan['source_sha256'])
+    for role in ('reviewer-1', 'reviewer-2'):
+        handoff = root / 'handoff' / role
+        receipt = root / 'controls' / ('review-' + role + '.json')
+        if receipt.exists() or receipt.is_symlink():
+            continue
+        entry = handoff.stat(follow_symlinks=False)
+        if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
+                or entry.st_mode & 0o077 or list(handoff.iterdir())):
+            continue
+        runner._verify_inventory(root / role / 'project', plan['source_sha256'])
+        if module._sessions(root, role, runner.native_api):
+            continue
+        return plan, allowance, module, role
+    _fail('source_review_slot_unavailable')
+
+
+def _review_public_file(path: Path, digest: str, module) -> bytes:
+    file = runner._file(path)
+    if file.stat().st_size > 4 * 1024 * 1024:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    data = file.read_bytes()
+    if hashlib.sha256(data).hexdigest() != digest:
+        _fail('source_review_evidence_changed')
+    if data:
+        try:
+            module.validate_public_bytes(data)
+        except (ValueError, UnicodeError):
+            _fail('source_review_evidence_unsafe_or_oversize')
+    return data
+
+
+def _review_tree(root: Path, inventory: dict, module) -> dict[str, str]:
+    if len(inventory) > 256:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    if runner._inventory(root) != inventory:
+        _fail('source_review_evidence_changed')
+    result = {name: _review_public_file(root / name, digest, module).decode()
+              for name, digest in inventory.items()}
+    if sum(len(value.encode()) for value in result.values()) > 16 * 1024 * 1024:
+        _fail('source_review_evidence_unsafe_or_oversize')
+    if runner._inventory(root) != inventory:
+        _fail('source_review_evidence_changed')
+    return result
+
+
+def _review_source_actions(root: Path, state: dict, module) -> list[dict]:
+    base = _source_actions(root)
+    events = _source_action_events(root)
+    captured, dispatched = {}, set()
+    for event in events:
+        if event.get('event') == 'source_action_dispatched':
+            identity = event.get('action_id')
+            if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
+                _fail('source_review_source_history_incomplete')
+            dispatched.add(identity)
+        if event.get('event') != 'source_action_captured':
+            continue
+        identity, digest = event.get('action_id'), event.get('terminal_sha256')
+        if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+                or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                or identity in captured and captured[identity] != digest):
+            _fail('source_review_source_history_incomplete')
+        captured[identity] = digest
+    prior = state.get('source_action')
+    if ((dispatched - set(captured))
+            or prior and (prior.get('action_id') not in captured
+                          or prior.get('terminal_sha256') != captured[prior['action_id']])):
+        _fail('source_review_source_history_incomplete')
+    observed = []
+    for directory in sorted(base.iterdir()):
+        if re.fullmatch(r'authority-[0-9a-f]{64}\.json', directory.name):
+            _read_private(directory)
+            continue
+        if not re.fullmatch(r'[0-9a-f]{32}', directory.name) or directory.name not in captured:
+            _fail('source_review_source_history_incomplete')
+        _verified_captured_source_action(root, state, directory, captured[directory.name])
+        request = _read_private(directory / 'request.json')
+        inventory = _read_private(directory / 'input-manifest.json')
+        receipt_path, receipt = _source_receipt(root, directory, request, inventory)
+        execution = receipt_path.parent
+        runs = []
+        for row in receipt['runs']:
+            folder = execution / row['role']
+            if any(row.get(stream + '_redacted') or not (folder / (stream + '.txt')).exists()
+                   for stream in ('stdout', 'stderr')):
+                _fail('source_review_raw_evidence_unavailable')
+            runs.append({'receipt': row,
+                         'stdout': _review_public_file(folder / 'stdout.txt',
+                                                       row['stdout_sha256'], module).decode(),
+                         'stderr': _review_public_file(folder / 'stderr.txt',
+                                                       row['stderr_sha256'], module).decode(),
+                         'output_files': _review_tree(folder / 'files',
+                                                      _read_private(folder / 'files.json'), module)})
+        observed.append({'action_id': directory.name, 'request': request,
+                         'terminal': _read_private(directory / 'terminal.json'),
+                         'receipt': receipt, 'input_files': _review_tree(directory / 'input', inventory, module),
+                         'runs': runs})
+    if set(captured) != {row['action_id'] for row in observed}:
+        _fail('source_review_source_history_incomplete')
+    executions = root / 'controls/source-executions'
+    for directory in executions.iterdir():
+        if not re.fullmatch(r'[0-9a-f]{32}', directory.name):
+            _fail('source_review_source_history_incomplete')
+        receipt = directory / 'receipt.json'
+        if receipt.exists() or receipt.is_symlink():
+            row = _read_private(receipt)
+            if row.get('owner_role') == 'researcher' and directory.name not in captured:
+                _fail('source_review_source_history_incomplete')
+        elif directory.name not in captured:
+            _fail('source_review_source_history_incomplete')
+    return observed
+
+
+def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
+                      plan: dict, module) -> tuple[Path, Path, str, str, str]:
+    base = _cont(root) / 'reviews'
+    base.mkdir(mode=0o700, exist_ok=True)
+    identity = os.urandom(16).hex()
+    directory = base / identity
+    directory.mkdir(mode=0o700)
+    frozen = directory / 'current-source'
+    current = runner._freeze_source_input(root, frozen, 'researcher')
+    if _next_hash(root) != next_sha:
+        _fail('source_review_request_changed')
+    note = root / 'researcher/RESEARCH.md'
+    note_sha = runner._sha(runner._file(note))
+    note_text = _review_public_file(note, note_sha, module).decode()
+    original = _review_tree(root / 'original', plan['source_sha256'], module)
+    current_text = _review_tree(frozen, current, module)
+    actions = _review_source_actions(root, state, module)
+    if _next_hash(root) != next_sha or runner._sha(note) != note_sha:
+        _fail('source_review_request_changed')
+    files = {'CLAIM.json': {'claim': nxt['host_action']['claim'], 'next_sha256': next_sha},
+             'CONDITIONS.json': {'plan_sha256': state['plan_sha256'],
+                                 'source_manifest_sha256': plan['source_manifest_sha256'],
+                                 'original_source': plan['source_sha256'],
+                                 'current_source': current, 'current_files': current_text},
+             'RAW.json': {'source_actions': actions},
+             'CONTRARY.json': {'adverse_source_actions': [row for row in actions
+                 if not row['receipt']['all_commands_succeeded']
+                 or not row['receipt']['replay_output_equal']]},
+             'UNFINISHED.json': {'research_note': note_text, 'checkpoint': nxt,
+                                 'native_tool_content': 'not independently supplied',
+                                 'security_effect': 'unproven'}}
+    if 'RESULT.md' in current:
+        files['UNFINISHED.json']['result_note'] = {
+            'sha256': current['RESULT.md'], 'text': current_text['RESULT.md'],
+            'provenance': 'agent_statement_frozen_source'}
+    roles = {'claim': ['CLAIM.json'], 'conditions': ['CONDITIONS.json'],
+             'source': [], 'raw': ['RAW.json'], 'contrary': ['CONTRARY.json'],
+             'unfinished': ['UNFINISHED.json']}
+    source_paths = {}
+    for number, (name, content) in enumerate(original.items(), 1):
+        flat = 'SOURCE-%04d.txt' % number
+        files[flat] = content
+        roles['source'].append(flat)
+        source_paths[flat] = name
+    observer = directory / 'observer'
+    observer.mkdir(mode=0o700)
+    digests = {}
+    for name, value in files.items():
+        data = ((json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + '\n').encode()
+                if not isinstance(value, str) else value.encode())
+        try:
+            module.validate_public_bytes(data)
+        except (ValueError, UnicodeError):
+            _fail('source_review_evidence_unsafe_or_oversize')
+        path = observer / name
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        digests[name] = hashlib.sha256(data).hexdigest()
+    selection = {'claim_id': identity, 'claim_version': next_sha,
+                 'source_manifest_sha256': plan['source_manifest_sha256'],
+                 'source_paths': source_paths, 'roles': roles, 'files': digests}
+    selected = directory / 'selection.json'
+    _write_private(selected, selection)
+    if _next_hash(root) != next_sha or runner._inventory(frozen) != current:
+        _fail('source_review_request_changed')
+    actions_sha = hashlib.sha256(json.dumps(actions, sort_keys=True).encode()).hexdigest()
+    return observer, selected, identity, note_sha, actions_sha
+
+
+def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
+    next_sha = _next_hash(root)
+    previous = state.get('review_action')
+    if previous and previous.get('after_invocations') == state['invocations']:
+        if previous.get('next_sha256') != next_sha:
+            _fail('source_review_checkpoint_changed_before_readback')
+        if previous.get('phase') == 'captured':
+            projection = root / 'controls/research/reviews' / previous['review_id'] / 'RESULTS.json'
+            if runner._sha(projection) != previous['projection_sha256']:
+                _fail('source_review_projection_changed')
+            return {'status': 'captured', 'review_id': previous['review_id']}
+        return {'status': 'review_incomplete', 'review_id': previous['review_id']}
+    try:
+        plan, allowance, module, role = _review_preflight(root, state)
+        observer, selection, identity, note_sha, actions_sha = _review_selection(
+            root, state, nxt, next_sha, plan, module)
+    except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
+            TypeError, KeyError) as error:
+        reason = (str(error) if isinstance(error, (ContinuationError, runner.NativeResearchError))
+                  else 'source_review_input_unavailable')
+        path = _cont(root) / ('review-incomplete-' + next_sha + '.json')
+        record = {'kind': 'native-source-review-incomplete-v1', 'next_sha256': next_sha,
+                  'plan_sha256': state['plan_sha256'], 'reason': reason,
+                  'packet_created': False, 'reviewer_dispatched': False}
+        if path.exists():
+            if _read_private(path) != record:
+                _fail('source_review_incomplete_record_changed')
+        else:
+            _write_private(path, record)
+        return {'status': 'review_incomplete', 'reason': reason,
+                'incomplete_record': str(path)}
+    selected_sha = runner._sha(selection)
+    state['review_action'] = {'review_id': identity, 'next_sha256': next_sha,
+                              'after_invocations': state['invocations'],
+                              'role': role, 'phase': 'dispatched'}
+    _save_state(root, state)
+    _event(root, {'at': _now(), 'event': 'source_review_dispatched',
+                  'review_id': identity, 'selection_sha256': selected_sha,
+                  'role': role})
+    fresh = runner.allowance_snapshot(root)
+    if (fresh.get('run_identity') != allowance.get('run_identity')
+            or fresh.get('used_tunnels', -1) < allowance['used_tunnels']
+            or fresh.get('charged_tunnel_bytes', -1) < allowance['charged_tunnel_bytes']):
+        _fail('source_review_allowance_changed')
+    if (_review_preflight(root, state)[3] != role
+            or _next_hash(root) != next_sha
+            or runner._sha(root / 'researcher/RESEARCH.md') != note_sha
+            or hashlib.sha256(json.dumps(_review_source_actions(root, state, module),
+                                         sort_keys=True).encode()).hexdigest() != actions_sha):
+        _fail('source_review_slot_changed')
+    result = runner.review(root, observer, selection, selected_sha, role)
+    receipt_path = root / 'controls' / ('review-' + role + '.json')
+    receipt = _read_private(receipt_path)
+    packet = root / 'handoff' / role
+    if (receipt.get('kind') != 'native-source-review-v1'
+            or receipt.get('status') != result.get('status')
+            or receipt.get('reviewer_role') != role
+            or receipt.get('plan_sha256') != state['plan_sha256']
+            or receipt.get('filing_or_escalation_authorized') is not False
+            or receipt.get('assessment', {}).get('status') not in
+                ('candidate_for_operator_review', 'unfinished')
+            or receipt.get('input_id') != receipt.get('packet_pin', {}).get('input_id')
+            or not module.verify_packet(packet, receipt['packet_pin'])
+            or _next_hash(root) != next_sha):
+        _fail('source_review_receipt_changed')
+    projection = {'kind': 'native-source-review-results-v1', 'review_id': identity,
+                  'plan_sha256': state['plan_sha256'], 'next_sha256': next_sha,
+                  'input_id': receipt['input_id'], 'selection_sha256': selected_sha,
+                  'packet_request_sha256': receipt['packet_pin']['files']['REQUEST.json'],
+                  'receipt_sha256': runner._sha(receipt_path),
+                  'status': result['status'], 'assessment': receipt.get('assessment'),
+                  'security_effect': 'unproven',
+                  'filing_or_escalation_authorized': False}
+    try:
+        module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
+    except (ValueError, UnicodeError):
+        _fail('source_review_projection_unsafe')
+    target = root / 'controls/research/reviews' / identity
+    target.mkdir(parents=True, mode=0o700)
+    path = target / 'RESULTS.json'
+    runner._write_json(path, projection, once=True)
+    phase = ('captured' if result['status'] == 'reviewed'
+             and receipt['assessment']['status'] == 'candidate_for_operator_review'
+             else 'incomplete')
+    state['review_action'].update(phase=phase, projection_sha256=runner._sha(path))
+    _save_state(root, state)
+    _event(root, {'at': _now(), 'event': 'source_review_captured',
+                  'review_id': identity, 'projection_sha256': state['review_action']['projection_sha256']})
+    return {'status': 'captured' if phase == 'captured' else 'review_incomplete',
+            'review_id': identity, 'projection': str(path)}
+
+
+def _prompt(root: Path, number: int, source_action: dict | None = None,
+            review_action: dict | None = None) -> Path:
     path = _cont(root) / ('prompt-%04d.md' % number)
     _write_text(path, (
         'Continue the saved investigation from ordinary workspace files. Read '
@@ -914,7 +1222,12 @@ def _prompt(root: Path, number: int, source_action: dict | None = None) -> Path:
             + source_action['action_id'] + '/RESULTS.json before revising the next test. '
             'It establishes repeated output only, not a security effect.\n')
            if source_action and source_action.get('phase') == 'captured'
-           and source_action.get('after_invocations') == number else '')))
+           and source_action.get('after_invocations') == number else '')
+        + (('Read the fresh source review at /research/reviews/'
+            + review_action['review_id'] + '/RESULTS.json before revising the next test. '
+            'It is an internal assessment, not a confirmed security effect or filing authority.\n')
+           if review_action and review_action.get('phase') == 'captured'
+           and review_action.get('after_invocations') == number else '')))
     return path
 
 
@@ -977,6 +1290,10 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             return _finish(root, state, 'reconciliation_required',
                            pending=pending, stopped=stop)
         action = state.get('source_action') or {}
+        review_action = state.get('review_action') or {}
+        if review_action.get('phase') in ('dispatched', 'incomplete'):
+            return _finish(root, state, 'review_incomplete',
+                           review_id=review_action.get('review_id'))
         if action.get('phase') == 'evidence_changed':
             return _finish(root, state, 'evidence_changed', source_action={
                 'status': 'evidence_changed', 'action_id': action.get('action_id'),
@@ -1065,18 +1382,25 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
             if state['invocations'] and nxt is not None:
-                outcome = _source_action(root, state, nxt)
-                if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',
-                                                     'authority_required'):
-                    return _finish(root, state, outcome['status'], source_action=outcome)
+                if nxt.get('host_action') and nxt['host_action']['kind'] == SOURCE_REVIEW_ACTION_KIND:
+                    outcome = _agent_review(root, state, nxt)
+                    if outcome['status'] != 'captured':
+                        return _finish(root, state, 'review_incomplete', review_action=outcome)
+                else:
+                    outcome = _source_action(root, state, nxt)
+                    if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',
+                                                         'authority_required'):
+                        return _finish(root, state, outcome['status'], source_action=outcome)
             if state['invocations']:
                 if nxt is None:
                     return _finish(root, state, 'next_brief_missing')
                 command, session = 'resume', state.get('session_id')
-                prompt = _prompt(root, state['invocations'], state.get('source_action'))
+                prompt = _prompt(root, state['invocations'], state.get('source_action'),
+                                 state.get('review_action'))
                 if not session:
                     command, session, prompt = 'reconstruct', None, _prompt(
-                        root, state['invocations'], state.get('source_action'))
+                        root, state['invocations'], state.get('source_action'),
+                        state.get('review_action'))
             else:
                 command, session, prompt = 'research', None, None
             state['pending'] = {'role': command, 'session': session, 'started_at': _now()}
@@ -1093,7 +1417,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 _event(root, {'at': _now(), 'event': 'dispatch_not_sent',
                               'role': command, 'code': result.get('code')})
                 command, session, prompt = 'reconstruct', None, _prompt(
-                    root, state['invocations'], state.get('source_action'))
+                    root, state['invocations'], state.get('source_action'),
+                    state.get('review_action'))
                 state['pending'] = {'role': command, 'session': None, 'started_at': _now()}
                 _save_state(root, state)
                 _event(root, {'at': _now(), 'event': 'dispatch_started',

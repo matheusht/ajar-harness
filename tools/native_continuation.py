@@ -1516,9 +1516,10 @@ def _finish(root: Path, state: dict, status: str, **extra) -> dict:
 
 def _agent_closeout(root: Path, state: dict, *, wait_seconds: int,
                     nxt: dict | None = None, forced_stop_reason: str | None = None) -> dict | None:
-    if ('checked_setup' not in _read_private(root / 'plan.json')
-            or (forced_stop_reason is None and
-                (nxt is None or nxt.get('proposed_stop') is not True))):
+    plan = _read_private(root / 'plan.json')
+    if ('source_only' not in plan or (forced_stop_reason is None and
+            ('checked_setup' not in plan or nxt is None or
+             nxt.get('proposed_stop') is not True))):
         return None
     from native_closeout import closeout
     result = closeout(root, wait_seconds=wait_seconds,

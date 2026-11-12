@@ -293,6 +293,27 @@ def main():
               and stops == ['stop']
               and runner._read_json(checked / 'controls/closeout/result.json')['reason']
                   == 'manual_closure_accepted')
+        legacy_stop = base / 'legacy-forced-stop'
+        (legacy_stop / 'controls/continuation').mkdir(parents=True, mode=0o700)
+        legacy_stop.chmod(0o700)
+        (legacy_stop / 'researcher').mkdir(mode=0o700)
+        runner._write_json(legacy_stop / 'plan.json', {
+            'kind': 'continuation-smoke', 'source_only': {'synthetic': True}}, once=True)
+        runner._write_json(legacy_stop / 'controls/continuation/STOP', {
+            'kind': continuation.STOP_KIND, 'reason': 'operator_stop'}, once=True)
+        (legacy_stop / 'controls/owner.lock').write_text('')
+        (legacy_stop / 'controls/owner.lock').chmod(0o600)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(runner, '_verified_plan',
+                side_effect=lambda run_root, **_kw: runner._read_json(run_root / 'plan.json')))
+            stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+            stack.enter_context(patch.object(runner, 'stop', side_effect=fake_stop))
+            stack.enter_context(patch.object(runner, '_docker', side_effect=fake_docker))
+            legacy_stop_outcome = run_controller(legacy_stop, fake)
+        check('legacy forced stop still checks owner cleanup',
+              legacy_stop_outcome['status'] == 'stopped_incomplete'
+              and legacy_stop_outcome['cleanup']['resource_absence'] is True
+              and stops == ['stop', 'stop'])
         print(json.dumps({'checks': checks, 'status': 'passed',
                           'limits': 'Synthetic subprocess, owner stop, and Docker readback; '
                                     'no native model, provider, Docker daemon, or target.'},

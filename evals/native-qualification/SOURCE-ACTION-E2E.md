@@ -94,9 +94,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 tools/check_native_source_mode.py
 PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_native_continuation.py
 ```
 
-These report four source-mode checks and eight continuation checks. The
+These report four source-mode checks and thirteen continuation checks. The
 continuation scenario includes a legacy source-only plan with an accepted
-manual closure review. From the repository root with Python 3, its expected
-result is `status: passed` with eight passing checks; the saved result is
+manual closure review and a forced stop that checks owner cleanup. From the
+repository root with Python 3, its expected result is `status: passed` with
+thirteen passing checks; the saved result is
 [CONTINUATION-LOCAL-CHECKS.json](CONTINUATION-LOCAL-CHECKS.json). Both use
 synthetic execution, so they do not qualify a native model, provider or target.

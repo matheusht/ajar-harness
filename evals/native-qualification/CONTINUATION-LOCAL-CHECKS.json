@@ -47,6 +47,10 @@
     {
       "name": "accepted checked closure uses owner stop and cleanup path",
       "pass": true
+    },
+    {
+      "name": "legacy forced stop still checks owner cleanup",
+      "pass": true
     }
   ],
   "status": "passed",

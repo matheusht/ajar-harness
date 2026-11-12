@@ -1,0 +1,146 @@
+{
+  "artifacts": {
+    "checked_receipt_sha256": "854833de19c6bef42bd883f1992873238f946f3adfa457fb45d761684fd790be",
+    "journal_sha256": "caeb3f2607ca78ca0570401eb7c9847ab7b0135e4d1462fbc04b94db3e1d8d45"
+  },
+  "checks": [
+    {
+      "name": "missing native stop proof rejects before template or build",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "missing catalog dependency rejects before build",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed build authority rejects before dispatch",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed source rejects before dispatch",
+      "observed": {
+        "code": "source_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "public offline build reaches checked ready receipt",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "db8123db148f5515275e5e90563bece84fcfd64164c135ed4730d975fffbef04",
+            "container_name": "lrh-setup-build-b1a05e69befa4131b6a9",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/tmp/native-setup-builder-fixture-20261112-c/run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "854833de19c6bef42bd883f1992873238f946f3adfa457fb45d761684fd790be",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "output and dependency bytes are saved and pinned",
+      "observed": {
+        "output_sha256": "f1761bcdd8c9642732bc621617841662135295fe36f09a8124e137910661847c"
+      },
+      "passed": true
+    },
+    {
+      "name": "status reports completed cleanup",
+      "observed": {
+        "exit": 0,
+        "status": "ready"
+      },
+      "passed": true
+    },
+    {
+      "name": "public readback verifies archived checked package",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "a dispatched build is never automatically retried",
+      "observed": {
+        "code": "build_already_dispatched",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "linked setup chain permits a separately signed build template",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "linked setup chain produces checked offline build",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "c2d7394628f79bf758f636eeab9e0b846e823b5c60604e07b85fb5c420c9e272",
+            "container_name": "lrh-setup-build-74f1178215fd48c3afe4",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/tmp/native-setup-builder-fixture-20261112-c/linked-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "a97a5756ba67dc445f748d46ddc19f8c1efb46cdd91e32fc77e0e7a78738d48b",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "linked checked package passes public readback",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    }
+  ],
+  "classification": "synthetic setup turn and stop, real local offline Docker build",
+  "fixture_roots": {
+    "v1": "/tmp/native-setup-builder-fixture-20261112-c/run",
+    "v2": "/tmp/native-setup-builder-fixture-20261112-c/linked-run"
+  },
+  "inputs": {
+    "build_authority_sha256": "f01303d856cde7801371cd97e0081ee9e6e0c348919c7f64b98936b0f90f6e03",
+    "builder_sha256": "00206cb0a4ac16701e791c4df3931501e9d1b77695aabb38c2e0c2e10c21250c",
+    "catalog_manifest_sha256": "2aac76686179d1adf9a1f2a1b5791625c782b5ce96c991c091b91c8d6ed72774",
+    "frozen_setup_receipt_sha256": "4056851accce42c918822d21c3c1be16d3281f5087f79533ca0c50b28cf8e989",
+    "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+    "scenario_sha256": "a30fdcc6651d579e5286c37f179b67eed52d6344e991760c6033858b9e5f4d4c",
+    "scope_sha256": "944f3ae9e4741227084828b53a7c4e2944793b5a77a3098d20f43ee97e579dd8",
+    "setup_approval_sha256": "07274d454656a8897e5bb794a77c1e5b3b49c8a0d427e12bda0fec1474320d75",
+    "source_manifest_sha256": "bb42dfd176c72ebc44361e4ece4e961ad4dc61b672634eaf3eca2ba66f603623"
+  },
+  "kind": "native-setup-builder-synthetic-e2e-v1",
+  "limits": "No native model turn, provider qualification, real engagement, or later research run.",
+  "passed": true,
+  "provider_executed": false,
+  "target_service_executed": false
+}

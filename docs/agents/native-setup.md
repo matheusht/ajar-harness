@@ -280,3 +280,10 @@ caps, checkpoint and empty native store. It does not prove live owner loss,
 model reconstruction, provider billing or production cleanup. A saved 20-check
 result is at
 `evals/native-qualification/setup-evidence/native-setup-linked-epoch-synthetic-e2e.json`.
+
+After the final proposal is frozen and its run has stopped, the host can
+prepare an offline runtime with `tools/native_setup_builder.py`. Its separate
+signed build authority, catalog format, public scenario and evidence limits are
+documented in
+[`SETUP-BUILDER-E2E.md`](../../evals/native-qualification/SETUP-BUILDER-E2E.md).
+The checked build is still not a research approval or security result.

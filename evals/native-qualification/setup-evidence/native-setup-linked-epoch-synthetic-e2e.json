@@ -99,7 +99,7 @@
     {
       "name": "public read-only chain reports original total use",
       "observed": {
-        "chain_sha256": "8dfef19fa5ccc36a0cf2f57dec4d7c5a5e87cb2a2f8d63c42414df5150be883b",
+        "chain_sha256": "aa8c3fb61e213d31fae62bdb26f47bf9ba52c47b9001376c1ca8ed0930a81170",
         "exit": 0,
         "used": {
           "bytes": 4096,
@@ -120,7 +120,7 @@
     {
       "name": "residual limits and original pins persist",
       "observed": {
-        "duration_seconds": 171,
+        "duration_seconds": 172,
         "max_bytes": 1044480,
         "max_connections": 2
       },
@@ -129,7 +129,7 @@
     {
       "name": "successor keeps signed original absolute deadline",
       "observed": {
-        "deadline": "2026-11-12T20:35:29Z",
+        "deadline": "2026-11-12T21:01:53Z",
         "used_before": {
           "bytes": 4096,
           "connections": 1
@@ -161,6 +161,15 @@
       "passed": true
     },
     {
+      "name": "third epoch cannot enter an ancestor source tree",
+      "observed": {
+        "code": "setup_next_root_invalid",
+        "created": false,
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "same stopped epoch cannot branch twice",
       "observed": {
         "code": "setup_epoch_successor_already_exists",
@@ -171,12 +180,12 @@
   ],
   "classification": "synthetic signed grant, fabricated stop and provider ledger, Docker absence shim",
   "inputs": {
-    "cli_sha256": "baeb77f84569db25f0d56a0d910868c26707677cdd7bb1e70c3a73e8a011a26c",
-    "first_plan_sha256": "6f715d36123d5e05049cfd7f5834aeaecf3b59fec4f259275c79056f1260fcad",
-    "grant_sha256": "d34ef2339645a1e6b6a3f035a9b6d128d356099e206c8fa63908e21d58e909d1",
-    "provider_ledger_sha256": "f2a6897a4ae79522963e4a90a64233ee3cc453c14e307e1c2ca115f9a968c1e6",
+    "cli_sha256": "1d3fe672a7ae7c8d08d813256dc87def3b6561081813399fcf0018c92fa12475",
+    "first_plan_sha256": "c821f88a6c60367d6cdc3381c6b9a1ca754ef9cdbe64a3b96349e472176e1e65",
+    "grant_sha256": "71aa17862cbdd789184aaee765bc5e9383c9c2435519d4f960dec9aefc8c7759",
+    "provider_ledger_sha256": "431f86cea3ec617c2259877827ec8d33a9a62a034c4c68630abd5a52c7d8e18d",
     "revoked_sha256": "07aa79d71a13f0b7bf891389a6720f88c15ac52ce9798a65875a0d0076ba6235",
-    "scenario_sha256": "8d4328c0e44beaeefbc796d7dcfa011d302fa6b07c350bb1ba743b84ff820a81",
+    "scenario_sha256": "57a00de71ca2e011efec027a22701ea9b75c73b07d7c0705bdfbd39e807e2ca0",
     "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
   },
   "kind": "native-setup-linked-epoch-synthetic-e2e-v1",

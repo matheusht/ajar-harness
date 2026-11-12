@@ -276,8 +276,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 
 It uses synthetic signed authority, fabricated stop and provider receipts,
 and a Docker absence shim. It checks the successor's original pins, residual
-caps, checkpoint and empty native store. It does not prove live owner loss,
-model reconstruction, provider billing or production cleanup. A saved 20-check
+caps, checkpoint, empty native store, and ancestor path exclusion. It does not prove live owner loss,
+model reconstruction, provider billing or production cleanup. A saved 21-check
 result is at
 `evals/native-qualification/setup-evidence/native-setup-linked-epoch-synthetic-e2e.json`.
 

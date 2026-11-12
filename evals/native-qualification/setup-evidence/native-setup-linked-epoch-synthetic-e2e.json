@@ -1,0 +1,187 @@
+{
+  "checks": [
+    {
+      "name": "signed expired absolute deadline rejects before Docker",
+      "observed": {
+        "code": "setup_epoch_deadline_expired_or_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed v2 grant rejects before Docker",
+      "observed": {
+        "code": "setup_approval_signature_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "signed v2 initial grant reaches resource boundary",
+      "observed": {
+        "code": "docker_command_failed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "nested successor root refuses before resource readback",
+      "observed": {
+        "code": "setup_next_root_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "missing verified stop refuses successor",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "resource still present refuses successor",
+      "observed": {
+        "code": "setup_epoch_resource_still_present",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "unknown setup turn refuses automatic retry",
+      "observed": {
+        "code": "setup_epoch_unknown_effect",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed host checkpoint refuses successor",
+      "observed": {
+        "code": "setup_checkpoint_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "failed cleanup refuses successor",
+      "observed": {
+        "code": "setup_epoch_terminal_receipt_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "active provider tunnel refuses successor",
+      "observed": {
+        "code": "setup_provider_accounting_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "over-cap provider ledger refuses successor",
+      "observed": {
+        "code": "setup_provider_accounting_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "inconsistent provider byte ledger refuses successor",
+      "observed": {
+        "code": "setup_provider_accounting_invalid",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "public read-only chain reports original total use",
+      "observed": {
+        "chain_sha256": "987f90ced54e8aeeeb276087bbee733ea2ff2ad0ba31b4259076b875d96874e9",
+        "exit": 0,
+        "used": {
+          "bytes": 4096,
+          "connections": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "stopped owner prepares residual successor",
+      "observed": {
+        "code": null,
+        "exit": 0,
+        "status": "prepared_residual_setup_epoch"
+      },
+      "passed": true
+    },
+    {
+      "name": "residual limits and original pins persist",
+      "observed": {
+        "duration_seconds": 172,
+        "max_bytes": 1044480,
+        "max_connections": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "successor keeps signed original absolute deadline",
+      "observed": {
+        "deadline": "2026-11-12T20:33:53Z",
+        "used_before": {
+          "bytes": 4096,
+          "connections": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "host checkpoint mounted for fresh context",
+      "observed": {
+        "checkpoint_sha256": "4a87d164eaca24b73c5467e939f7994218e3e7f7d650671da0e46ee3060c2e60"
+      },
+      "passed": true
+    },
+    {
+      "name": "successor cannot mint a fresh grant template",
+      "observed": {
+        "code": "setup_template_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "linked grant reaches resource boundary for successor",
+      "observed": {
+        "code": "docker_command_failed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "same stopped epoch cannot branch twice",
+      "observed": {
+        "code": "setup_epoch_successor_already_exists",
+        "exit": 2
+      },
+      "passed": true
+    }
+  ],
+  "classification": "synthetic signed grant, fabricated stop and provider ledger, Docker absence shim",
+  "inputs": {
+    "cli_sha256": "b4f8bac6800c348849826469435cb20c7ef49a20f433bfb4bbd871060de1b15b",
+    "first_plan_sha256": "6a54b415639aa09a09545bc693a1be4d1bd7747918274ad0db95a32db35eedf8",
+    "grant_sha256": "67df0eccd9045e9434d8f43fcda42f7eb76472042919f6aa2eef11bfc61a5bab",
+    "provider_ledger_sha256": "658809b097db21a7dceff8538a509c0354c79d7a9cd4102b73c9417144ff7a42",
+    "revoked_sha256": "07aa79d71a13f0b7bf891389a6720f88c15ac52ce9798a65875a0d0076ba6235",
+    "scenario_sha256": "8d4328c0e44beaeefbc796d7dcfa011d302fa6b07c350bb1ba743b84ff820a81",
+    "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
+  },
+  "kind": "native-setup-linked-epoch-synthetic-e2e-v1",
+  "limits": "Does not prove live owner loss, provider billing, native reconstruction, or real cleanup.",
+  "model_or_provider_executed": false,
+  "passed": true,
+  "target_executed": false
+}

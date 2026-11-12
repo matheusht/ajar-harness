@@ -248,7 +248,8 @@ def _setup_scope_challenge(scope_hash: str, engagement_id: str) -> bytes:
 
 def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
                         engagement_id: str, operator_id: str, trusted_fingerprint: str,
-                        source_manifest_sha256: str | None, goal_sha256: str) -> str:
+                        source_manifest_sha256: str | None, goal_sha256: str,
+                        *, allow_expired: bool = False) -> str:
     if (not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', engagement_id)
             or not re.fullmatch(r'[A-Za-z0-9_.@+-]{1,128}', operator_id)
             or not re.fullmatch(r'sha256:[0-9a-f]{64}', trusted_fingerprint)):
@@ -316,7 +317,7 @@ def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
         expiry = datetime.strptime(boundary['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
     except ValueError:
         _fail('setup_scope_incomplete')
-    if datetime.now(timezone.utc) >= expiry:
+    if not allow_expired and datetime.now(timezone.utc) >= expiry:
         _fail('setup_scope_expired')
     try:
         fingerprint = verify_operator_signature_bytes(
@@ -331,13 +332,18 @@ def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
     return boundary['source_manifest_sha256']
 
 
-def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
+def _setup_approval(root: Path, plan: dict, approval_path: Path, *,
+                    allow_expired: bool = False) -> None:
     approval = _read_json(approval_path)
     if approval.get('monetary_cap_usd') is not None:
         _fail('setup_monetary_cap_unenforceable')
+    linked = approval.get('kind') == 'native-setup-approval-v2'
+    epoch_path = _controls(root) / 'setup-epoch.json'
+    if epoch_path.exists() and not linked:
+        _fail('setup_epoch_requires_linked_grant')
     expected = {'kind': 'native-setup-approval-v1',
                 'engagement_id': plan['setup_only']['engagement_id'],
-                'plan_sha256': _sha(root / 'plan.json'),
+                'plan_sha256': (approval.get('plan_sha256') if linked else _sha(root / 'plan.json')),
                 'source_manifest_sha256': plan['source_manifest_sha256'],
                 'scope_sha256': plan['scope_sha256'], 'brief_sha256': plan['brief_sha256'],
                 'image_id': plan['image_id'], 'platform': plan['platform'],
@@ -346,9 +352,13 @@ def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
                 'relay_sha256': plan['relay_sha256'],
                 'runtime_ca_sha256': plan['runtime_ca_sha256'],
                 'effect_class': SETUP_EFFECT_CLASS, 'network_class': SETUP_NETWORK_CLASS,
-                'limits': plan['limits'],
+                'limits': (approval.get('limits') if linked else plan['limits']),
                 'max_workspace_bytes': plan['setup_only']['max_workspace_bytes'],
                 'monetary_cap_usd': None}
+    if linked:
+        expected.update(kind='native-setup-approval-v2',
+                        initial_run_root=str(approval.get('initial_run_root')),
+                        absolute_deadline=approval.get('absolute_deadline'))
     if (any(approval.get(key) != value for key, value in expected.items())
             or set(approval) != set(expected) | {'approved_by', 'approved_at', 'expires_at', 'operator_signature'}):
         _fail('setup_approval_mismatch')
@@ -363,8 +373,23 @@ def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
     except ValueError:
         _fail('setup_approval_invalid')
     age = (datetime.now(timezone.utc) - approved).total_seconds()
-    if not 0 <= age <= 24 * 3600 or not approved < expires <= approved + timedelta(hours=24) or datetime.now(timezone.utc) >= expires:
+    if (age < 0 or (not allow_expired and age > 24 * 3600)
+            or not approved < expires <= approved + timedelta(hours=24)
+            or (not allow_expired and datetime.now(timezone.utc) >= expires)):
         _fail('setup_approval_stale_or_future')
+    if linked:
+        try:
+            deadline = datetime.strptime(approval['absolute_deadline'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        except (KeyError, TypeError, ValueError):
+            _fail('setup_epoch_deadline_invalid')
+        if (not _valid_limits(approval['limits']) or not approved < deadline <= expires
+                or deadline > approved + timedelta(seconds=approval['limits']['duration_seconds'])
+                or (not allow_expired and datetime.now(timezone.utc) >= deadline)):
+            _fail('setup_epoch_deadline_expired_or_invalid')
+        if not epoch_path.exists() and (approval['initial_run_root'] != str(root)
+              or approval['plan_sha256'] != _sha(root / 'plan.json')
+              or approval['limits'] != plan['limits']):
+            _fail('setup_initial_grant_mismatch')
     unsigned = {key: value for key, value in approval.items() if key != 'operator_signature'}
     controls = _controls(root)
     try:
@@ -378,6 +403,8 @@ def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
         _fail('setup_approval_signature_invalid')
     if fingerprint != plan['setup_only']['trusted_fingerprint']:
         _fail('setup_approval_signer_untrusted')
+    if linked and epoch_path.exists():
+        _verify_setup_epoch_link(root, plan, approval, allow_expired=allow_expired)
     archived = controls / 'approval.json'
     if archived.exists():
         if archived.read_bytes() != approval_path.read_bytes():
@@ -395,12 +422,16 @@ def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
         _write_json(receipt_path, receipt, once=True)
 
 
-def setup_approval_template(run_root: Path, approved_at: str, expires_at: str) -> dict:
+def setup_approval_template(run_root: Path, approved_at: str, expires_at: str, *,
+                            linked_epochs: bool = False, absolute_deadline: str | None = None) -> dict:
     root = _private_root(run_root)
     plan = _verified_plan(root, pristine=True)
-    if 'setup_only' not in plan or (_controls(root) / 'resources.json').exists():
+    if ('setup_only' not in plan or (_controls(root) / 'resources.json').exists()
+            or (_controls(root) / 'setup-epoch.json').exists()):
         _fail('setup_template_unavailable')
-    return {'kind': 'native-setup-approval-v1',
+    if bool(linked_epochs) != bool(absolute_deadline):
+        _fail('setup_epoch_template_deadline_required')
+    result = {'kind': 'native-setup-approval-v1',
             'engagement_id': plan['setup_only']['engagement_id'],
             'plan_sha256': _sha(root / 'plan.json'),
             'source_manifest_sha256': plan['source_manifest_sha256'],
@@ -416,6 +447,10 @@ def setup_approval_template(run_root: Path, approved_at: str, expires_at: str) -
             'monetary_cap_usd': None,
             'approved_by': plan['setup_only']['operator_id'],
             'approved_at': approved_at, 'expires_at': expires_at}
+    if linked_epochs:
+        result.update(kind='native-setup-approval-v2', initial_run_root=str(root),
+                      absolute_deadline=absolute_deadline)
+    return result
 
 
 def setup_source_manifest(source: Path) -> dict:
@@ -1327,7 +1362,8 @@ def _image(image_id: str, platform: str, *, official: bool = False) -> None:
         _fail('image_ambient_credential')
 
 
-def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
+def _verified_plan(root: Path, *, pristine: bool = False,
+                   allow_expired_setup: bool = False) -> dict:
     global DOCKER_BINARY
     plan = _plan(root)
     controls = _controls(root)
@@ -1407,7 +1443,8 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
         _verify_setup_scope(controls / 'scope.md', controls / 'setup-scope.sig',
                             controls / 'setup-allowed-signers', setup['engagement_id'],
                             setup['operator_id'], setup['trusted_fingerprint'],
-                            plan['source_manifest_sha256'], plan['brief_sha256'])
+                            plan['source_manifest_sha256'], plan['brief_sha256'],
+                            allow_expired=allow_expired_setup)
     if _read_json(controls / 'opencode.json') != config:
         _fail('run_config_mismatch')
     if 'source_only' in plan:
@@ -2474,8 +2511,17 @@ def allowance_snapshot(run_root: Path) -> dict:
     run = native.snapshot(_controls(root) / 'native-state')
     pool = _provider_snapshot(root)
     config = pool['config']
+    planned_limits = _plan(root)['limits']
+    planned = planned_limits['duration_seconds']
+    linked = (_controls(root) / 'approval.json').exists() and _read_json(
+        _controls(root) / 'approval.json').get('kind') == 'native-setup-approval-v2'
     if (config.get('authority') != AUTHORITY or config.get('producer_manifest_sha256') != run['manifest_sha256']
-            or config.get('native_run_duration') != _plan(root)['limits']['duration_seconds']):
+            or config.get('max_connections') != planned_limits['max_connections']
+            or config.get('max_bytes') != planned_limits['max_bytes']
+            or type(config.get('native_run_duration')) is not int
+            or config.get('duration') != config['native_run_duration']
+            or (not 1 <= config['native_run_duration'] <= planned if linked else
+                config['native_run_duration'] != planned)):
         _fail('shared_allowance_identity_mismatch')
     return {'run_identity': {key: run[key] for key in
                             ('manifest_sha256', 'nonce', 'ids', 'deadline_monotonic', 'created_monotonic')},
@@ -2869,6 +2915,84 @@ def _setup_dispatches(root: Path) -> list[dict]:
     return rows
 
 
+def _setup_checkpoint(root: Path, record: dict) -> str:
+    """Freeze the bounded proposal state before acknowledging a setup turn."""
+    controls = _controls(root)
+    final = controls / 'setup-checkpoints' / record['dispatch_id']
+    staging_root = controls / 'setup-checkpoint-staging'
+    staging_root.mkdir(mode=0o700, exist_ok=True)
+    final.parent.mkdir(mode=0o700, exist_ok=True)
+    staging = staging_root / uuid.uuid4().hex
+    staging.mkdir(mode=0o700)
+    identifier = _resources(root)['researcher']
+    files = {}
+    script = ('if [ -L "$1" ]; then exit 3; elif [ -f "$1" ]; then '
+              'head -c 1048577 "$1"; elif [ -e "$1" ]; then exit 3; else exit 4; fi')
+    for name in SETUP_OUTPUT_FILES:
+        argv = ('container', 'exec', identifier, 'sh', '-c', script,
+                'setup-checkpoint', '/workspace/project/' + name)
+        first = _docker(*argv, timeout=20, allow_failure=True)
+        second = _docker(*argv, timeout=20, allow_failure=True)
+        if (first.returncode != second.returncode or first.stdout != second.stdout
+                or first.returncode not in (0, 4) or len(first.stdout) > 1024 * 1024):
+            _fail('setup_checkpoint_unstable')
+        if first.returncode == 4:
+            files[name] = None
+            continue
+        try:
+            content = first.stdout.decode('utf-8')
+        except UnicodeError:
+            _fail('setup_checkpoint_encoding_invalid')
+        if CREDENTIAL_TEXT.search(content):
+            _fail('setup_checkpoint_credential_like')
+        target = staging / name
+        target.write_bytes(first.stdout)
+        target.chmod(0o600)
+        files[name] = _sha(target)
+    receipt = {'kind': 'native-setup-checkpoint-v1',
+               'plan_sha256': _sha(root / 'plan.json'),
+               'approval_sha256': _sha(controls / 'approval.json'),
+               'dispatch_id': record['dispatch_id'],
+               'native_trace_sha256': record['native_trace_sha256'],
+               'pool_after': record['pool_after'], 'files': files}
+    _write_json(staging / 'receipt.json', receipt, once=True)
+    os.rename(staging, final)
+    descriptor = os.open(final.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return _sha(final / 'receipt.json')
+
+
+def _verified_setup_checkpoint(root: Path, dispatch: dict) -> tuple[Path, dict]:
+    controls = _controls(root)
+    path = controls / 'setup-checkpoints' / dispatch['dispatch_id']
+    receipt_path = path / 'receipt.json'
+    receipt = _read_json(receipt_path)
+    trace = controls / 'dispatch' / (dispatch['dispatch_id'] + '.trace.json')
+    if (receipt.get('kind') != 'native-setup-checkpoint-v1'
+            or receipt.get('plan_sha256') != _sha(root / 'plan.json')
+            or receipt.get('approval_sha256') != _sha(controls / 'approval.json')
+            or receipt.get('dispatch_id') != dispatch['dispatch_id']
+            or receipt.get('native_trace_sha256') != dispatch.get('native_trace_sha256')
+            or receipt.get('native_trace_sha256') != _sha(trace)
+            or receipt.get('pool_after') != dispatch.get('pool_after')
+            or dispatch.get('checkpoint_sha256') != _sha(receipt_path)
+            or not isinstance(receipt.get('files'), dict)
+            or set(receipt['files']) != set(SETUP_OUTPUT_FILES)):
+        _fail('setup_checkpoint_changed')
+    for name, digest in receipt['files'].items():
+        target = path / name
+        if digest is None:
+            if target.exists() or target.is_symlink():
+                _fail('setup_checkpoint_changed')
+        elif (not isinstance(digest, str) or not HEX_RE.fullmatch(digest)
+              or target.stat().st_size > 1024 * 1024 or _sha(_file(target, private=True)) != digest):
+            _fail('setup_checkpoint_changed')
+    return path, receipt
+
+
 def _setup_output_open(root: Path) -> None:
     if (_controls(root) / 'setup-output').exists():
         _fail('setup_output_already_frozen')
@@ -2994,11 +3118,16 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         pool_before = allowance_snapshot(root)
         if setup_only and role in ('researcher', 'resume'):
             _verify_inventory(root / 'original', _plan(root)['source_sha256'], setup_limit=True)
+            checkpoint_note = ('This is a fresh physical setup epoch and a fresh native session. '
+                               'Read /research/setup-checkpoint/receipt.json and its proposal files; '
+                               'reconstruct the unfinished proposal from those host-frozen bytes. '
+                               'Do not assume native history survived.\n'
+                               if (_controls(root) / 'setup-epoch.json').exists() else '')
             prompt = (
                 'Read /research/WORKFLOW.md and /research/BRIEF.md first. '
                 'The original source is read-only at /source. Write only in '
                 '/workspace/project. Prepare a runtime recipe and THREAT_MODEL.md; '
-                'do not run target code or fetch dependencies.\n\n' + prompt)
+                'do not run target code or fetch dependencies.\n' + checkpoint_note + '\n' + prompt)
             record.update({'continuity': continuity or 'fresh_setup',
                            'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()})
         elif role in ('researcher', 'resume'):
@@ -3093,6 +3222,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             if _origin_enabled(_plan(root)):
                 target = ORIGIN_ROLES[role]
                 record['origin_window_close_sha256'] = _sha(_origin_close_window(root, target, dispatch_id))
+            if setup_only:
+                record['checkpoint_sha256'] = _setup_checkpoint(root, record)
             _write_json(record_path, record)
             returned = dict(record)
             if include_raw:
@@ -3723,6 +3854,13 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
     if (controls / 'resources.json').exists() or (controls / 'native-state/RUN.json').exists():
         _fail('run_already_started_or_ambiguous')
     _approval(root, plan, Path(approval_path))
+    runtime_duration = plan['limits']['duration_seconds']
+    setup_grant = (_read_json(controls / 'approval.json') if 'setup_only' in plan else None)
+    if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2':
+        deadline = datetime.strptime(setup_grant['absolute_deadline'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        runtime_duration = min(runtime_duration, int(deadline.timestamp() - time.time()) - 5)
+        if runtime_duration < 30:
+            _fail('setup_epoch_allowance_exhausted')
     _image(plan['image_id'], plan['platform'], official=True)
     if 'setup_only' not in plan:
         _image(plan['target_image_id'], plan['platform'])
@@ -3747,11 +3885,15 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
         _, producer = _activate_controls(root)
         manifest = _created_manifest(root, nonce, rows, producer)
         native_module, _ = _activate_controls(root)
+        if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2':
+            runtime_duration = min(runtime_duration, int(deadline.timestamp() - time.time()) - 5)
+            if runtime_duration < 30:
+                _fail('setup_epoch_allowance_exhausted')
         proxy_args = ['--state-dir', str(controls / 'provider'),
                       '--capability-file', str(capability_path),
                       '--max-connections', str(plan['limits']['max_connections']),
                       '--max-bytes', str(plan['limits']['max_bytes']),
-                      '--duration', str(plan['limits']['duration_seconds']), '--port', str(port)]
+                      '--duration', str(runtime_duration), '--port', str(port)]
         if paid:
             spec = importlib.util.spec_from_file_location('native_paid_gateway', controls / 'provider-gateway.py')
             module = importlib.util.module_from_spec(spec)
@@ -3763,7 +3905,7 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
                                      lambda: native_module.dispatch_guard(controls / 'native-state'))
             proxy_args += ['--upstream-proxy-env', 'HTTPS_PROXY']
         native = native_module.NativeRun(manifest, controls / 'native-state',
-                                         plan['limits']['duration_seconds'], proxy_args)
+                                         runtime_duration, proxy_args)
         if _capture_mode(plan):
             _capture_approved_specs(root, plan,
                                     _validate_target_command(controls / 'target-command.json'),
@@ -3838,6 +3980,9 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
                   'provider_request_count': None, 'monetary_spend': None}
         print(json.dumps(result, sort_keys=True), flush=True)
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
+            if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2' and time.time() >= deadline.timestamp():
+                native_module.request_stop(controls / 'native-state', 'operator_stop')
+                break
             time.sleep(.2)
     finally:
         if gateway is not None:
@@ -3987,6 +4132,333 @@ def recover_start(run_root: Path) -> dict:
                     'capture_cleanup': capture_cleanup}
         _write_json(controls / 'recovery.json', recovery)
         return recovery
+
+
+def _setup_provider_pins(root: Path) -> dict[str, str]:
+    provider = _controls(root) / 'provider'
+    result = {}
+    for name in ('tunnel.sqlite3', 'tunnel.sqlite3-wal', 'tunnel.sqlite3-shm'):
+        path = provider / name
+        if path.exists() or path.is_symlink():
+            result[name] = _sha(_file(path, private=True))
+    if 'tunnel.sqlite3' not in result:
+        _fail('setup_provider_ledger_unavailable')
+    return result
+
+
+def _setup_terminal_accounting(root: Path, approval: dict, *, allow_frozen: bool = False,
+                               allow_expired: bool = False) -> dict:
+    """Read a stopped physical epoch, never infer absence or usage from notes."""
+    plan = _verified_plan(root, allow_expired_setup=allow_expired)
+    controls = _controls(root)
+    if 'setup_only' not in plan or approval.get('kind') != 'native-setup-approval-v2':
+        _fail('setup_linked_epoch_required')
+    archived = controls / 'approval.json'
+    if _read_json(archived) != approval:
+        _fail('setup_epoch_grant_changed')
+    if not (controls / 'setup-approval-receipt.json').exists():
+        _fail('setup_epoch_approval_receipt_missing')
+    _setup_approval(root, plan, archived, allow_expired=allow_expired)
+    if not allow_frozen:
+        _setup_output_open(root)
+    if _unresolved_dispatches(root):
+        _fail('setup_epoch_unknown_effect')
+    dispatches = _setup_dispatches(root)
+    if not dispatches or dispatches[-1].get('status') != 'acknowledged':
+        _fail('setup_epoch_no_acknowledged_turn')
+    checkpoint_path, checkpoint = _verified_setup_checkpoint(root, dispatches[-1])
+    state = controls / 'native-state'
+    manifest_path, revoked_path = controls / 'producer-manifest.json', state / 'REVOKED'
+    manifest, revoked = _read_json(manifest_path), _read_json(revoked_path)
+    run = _read_json(state / 'RUN.json')
+    resources = _read_json(controls / 'resources.json')
+    rows = resources.get('resources')
+    if (not isinstance(rows, list) or len(rows) != 4
+            or {row.get('role') for row in rows if row.get('kind') == 'container'} != {'relay', 'researcher'}
+            or {row.get('role') for row in rows if row.get('kind') == 'network'} != {'external', 'research'}
+            or any(not isinstance(row.get('id'), str) or not HEX_RE.fullmatch(row['id'])
+                   or not isinstance(row.get('name'), str) or not row['name'] for row in rows)
+            or len({row['id'] for row in rows}) != 4):
+        _fail('setup_epoch_resource_record_invalid')
+    producer_ids = [row['id'] for row in rows if row['kind'] == 'container']
+    if (producer_ids != [row.get('id') for row in manifest.get('producers', [])]
+            or run.get('ids') != producer_ids or revoked.get('ids') != producer_ids
+            or run.get('manifest_sha256') != _sha(manifest_path)
+            or revoked.get('manifest_sha256') != _sha(manifest_path)
+            or revoked.get('producers_verified_stopped') is not True
+            or (state / 'UNSAFE').exists()):
+        _fail('setup_epoch_stop_proof_invalid')
+    final_path, recovery_path = controls / 'final.json', controls / 'recovery.json'
+    if recovery_path.exists() and _read_json(recovery_path).get('status') == 'recovered_exact_resources':
+        terminal_path = recovery_path
+        terminal = _read_json(recovery_path)
+        stopped = terminal.get('native_state') == 'stopped'
+    else:
+        terminal_path = final_path
+        terminal = _read_json(final_path)
+        stopped = (terminal.get('status') == 'stopped_complete'
+                   and terminal.get('native_stop', {}).get('status') == 'stopped')
+    cleanup_path, snapshot_path = controls / 'cleanup.json', controls / 'host-snapshot.json'
+    cleanup, snapshot = _read_json(cleanup_path), _read_json(snapshot_path)
+    expected_cleanup = [{'kind': row['kind'], 'name': row['name'], 'absent': True}
+                        for row in reversed(rows)]
+    if (not stopped or terminal.get('cleanup') != cleanup
+            or cleanup != {'status': 'complete', 'resources': expected_cleanup}
+            or terminal.get('host_snapshot', {}).get('status') != 'complete'
+            or terminal['host_snapshot'].get('receipt_sha256') != _sha(snapshot_path)
+            or snapshot.get('status') != 'complete'
+            or snapshot.get('plan_sha256') != _sha(root / 'plan.json')
+            or snapshot.get('native_stop', {}).get('manifest_sha256') != _sha(manifest_path)
+            or snapshot.get('native_stop', {}).get('revoked_sha256') != _sha(revoked_path)):
+        _fail('setup_epoch_terminal_receipt_invalid')
+    for row in rows:
+        command = (row['kind'], 'ls', '-a', '--no-trunc', '--filter', 'id=' + row['id'],
+                   '--format', '{{.ID}}') if row['kind'] == 'container' else (
+                   'network', 'ls', '--no-trunc', '--filter', 'id=' + row['id'], '--format', '{{.ID}}')
+        if _docker(*command).stdout.strip():
+            _fail('setup_epoch_resource_still_present')
+    before = _setup_provider_pins(root)
+    try:
+        pool = _provider_snapshot(root)
+        with closing(sqlite3.connect('file:' + str(controls / 'provider/tunnel.sqlite3') + '?mode=ro',
+                                     uri=True, timeout=1)) as db:
+            pool_rows = db.execute('SELECT COUNT(*) FROM pool').fetchone()[0]
+            tunnel_rows, tunnel_bytes = db.execute(
+                'SELECT COUNT(*),COALESCE(SUM(uploaded+downloaded),0) FROM tunnels').fetchone()
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        _fail('setup_provider_ledger_unavailable')
+    if _setup_provider_pins(root) != before:
+        _fail('setup_provider_ledger_changed')
+    config = pool.get('config')
+    duration = config.get('duration') if isinstance(config, dict) else None
+    if (not isinstance(config, dict) or config.get('authority') != AUTHORITY
+            or config.get('producer_manifest_sha256') != _sha(manifest_path)
+            or config.get('max_connections') != plan['limits']['max_connections']
+            or config.get('max_bytes') != plan['limits']['max_bytes']
+            or type(duration) is not int or not 1 <= duration <= plan['limits']['duration_seconds']
+            or config.get('native_run_duration') != duration
+            or type(pool.get('used_tunnels')) is not int
+            or not 0 <= pool['used_tunnels'] <= config['max_connections']
+            or type(pool.get('charged_tunnel_bytes')) is not int
+            or not 0 <= pool['charged_tunnel_bytes'] <= config['max_bytes']
+            or type(pool.get('created')) not in (int, float)
+            or not math.isfinite(pool['created'])
+            or pool['created'] < datetime.strptime(
+                approval['approved_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            or pool['created'] + duration > datetime.strptime(
+                approval['absolute_deadline'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            or set(pool.get('tunnel_phases', {})) - {'closed'}
+            or sum(pool['tunnel_phases'].values()) != pool['used_tunnels']
+            or pool_rows != 1 or tunnel_rows != pool['used_tunnels']
+            or tunnel_bytes != pool['charged_tunnel_bytes']):
+        _fail('setup_provider_accounting_invalid')
+    return {'plan_sha256': _sha(root / 'plan.json'),
+            'terminal_sha256': _sha(terminal_path), 'revoked_sha256': _sha(revoked_path),
+            'cleanup_sha256': _sha(cleanup_path), 'provider_pins': before,
+            'checkpoint_sha256': _sha(checkpoint_path / 'receipt.json'),
+            'checkpoint_path': checkpoint_path, 'checkpoint': checkpoint,
+            'used_connections': pool['used_tunnels'],
+            'charged_bytes': pool['charged_tunnel_bytes']}
+
+
+def _verify_setup_epoch_link(root: Path, plan: dict, approval: dict, *,
+                             allow_expired: bool = False) -> None:
+    controls = _controls(root)
+    link = _read_json(controls / 'setup-epoch.json')
+    required = {'kind', 'epoch_index', 'previous_run_root', 'previous_plan_sha256',
+                'previous_terminal_sha256', 'previous_revoked_sha256',
+                'previous_cleanup_sha256', 'previous_provider_pins',
+                'previous_checkpoint_sha256', 'used_before', 'grant_sha256',
+                'current_plan_sha256', 'absolute_deadline'}
+    if (set(link) != required or link['kind'] != 'native-setup-epoch-v1'
+            or type(link['epoch_index']) is not int or not 2 <= link['epoch_index'] <= 16
+            or link['current_plan_sha256'] != _sha(root / 'plan.json')
+            or link['absolute_deadline'] != approval['absolute_deadline']
+            or link['grant_sha256'] != _sha(controls / 'approval.json')
+            or not isinstance(link['used_before'], dict)
+            or set(link['used_before']) != {'connections', 'bytes'}):
+        _fail('setup_epoch_link_invalid')
+    previous = _private_root(Path(link['previous_run_root']))
+    if previous == root or previous == Path(approval['initial_run_root']).resolve() and link['epoch_index'] != 2:
+        _fail('setup_epoch_link_invalid')
+    previous_approval = _read_json(_controls(previous) / 'approval.json')
+    if previous_approval != approval:
+        _fail('setup_epoch_grant_changed')
+    prior_link_path = _controls(previous) / 'setup-epoch.json'
+    prior_index = _read_json(prior_link_path)['epoch_index'] if prior_link_path.exists() else 1
+    if prior_index + 1 != link['epoch_index']:
+        _fail('setup_epoch_order_invalid')
+    prior = _setup_terminal_accounting(previous, approval, allow_expired=allow_expired)
+    used_before = ({'connections': 0, 'bytes': 0} if prior_index == 1 else
+                   _read_json(prior_link_path)['used_before'])
+    cumulative = {'connections': used_before['connections'] + prior['used_connections'],
+                  'bytes': used_before['bytes'] + prior['charged_bytes']}
+    if (link['previous_plan_sha256'] != prior['plan_sha256']
+            or link['previous_terminal_sha256'] != prior['terminal_sha256']
+            or link['previous_revoked_sha256'] != prior['revoked_sha256']
+            or link['previous_cleanup_sha256'] != prior['cleanup_sha256']
+            or link['previous_provider_pins'] != prior['provider_pins']
+            or link['previous_checkpoint_sha256'] != prior['checkpoint_sha256']
+            or link['used_before'] != cumulative
+            or plan['limits']['max_connections'] != approval['limits']['max_connections'] - cumulative['connections']
+            or plan['limits']['max_bytes'] != approval['limits']['max_bytes'] - cumulative['bytes']
+            or plan['limits']['duration_seconds'] > approval['limits']['duration_seconds']):
+        _fail('setup_epoch_residual_mismatch')
+    successor = _read_json(_controls(previous) / 'setup-successor.json')
+    if successor != {'kind': 'native-setup-successor-v1', 'next_run_root': str(root),
+                     'next_plan_sha256': _sha(root / 'plan.json'),
+                     'epoch_receipt_sha256': _sha(controls / 'setup-epoch.json')}:
+        _fail('setup_epoch_successor_changed')
+    copied = controls / 'research/setup-checkpoint'
+    for name, digest in prior['checkpoint']['files'].items():
+        path = copied / name
+        if digest is None:
+            if path.exists() or path.is_symlink():
+                _fail('setup_epoch_checkpoint_copy_changed')
+        elif _sha(_file(path, private=True)) != digest:
+            _fail('setup_epoch_checkpoint_copy_changed')
+    if _sha(copied / 'receipt.json') != prior['checkpoint_sha256']:
+        _fail('setup_epoch_checkpoint_copy_changed')
+
+
+def setup_next_epoch(run_root: Path, next_run_root: Path) -> dict:
+    """Prepare one fresh physical run under a signed residual setup grant."""
+    root = _private_root(run_root)
+    next_run_root = Path(next_run_root)
+    if (not next_run_root.is_absolute() or next_run_root.is_symlink()
+            or next_run_root.exists() or next_run_root == root
+            or next_run_root.is_relative_to(root) or root.is_relative_to(next_run_root)
+            or next_run_root.resolve(strict=False) != next_run_root):
+        _fail('setup_next_root_invalid')
+    with _owner_lock(root):
+        controls = _controls(root)
+        if (controls / 'setup-successor.json').exists():
+            _fail('setup_epoch_successor_already_exists')
+        plan = _verified_plan(root)
+        approval = _read_json(controls / 'approval.json')
+        if approval.get('kind') != 'native-setup-approval-v2':
+            _fail('setup_linked_epoch_required')
+        terminal = _setup_terminal_accounting(root, approval)
+        prior_link = controls / 'setup-epoch.json'
+        epoch_index = (_read_json(prior_link)['epoch_index'] + 1 if prior_link.exists() else 2)
+        if epoch_index > 16:
+            _fail('setup_epoch_limit')
+        before = (_read_json(prior_link)['used_before'] if prior_link.exists() else
+                  {'connections': 0, 'bytes': 0})
+        cumulative = {'connections': before['connections'] + terminal['used_connections'],
+                      'bytes': before['bytes'] + terminal['charged_bytes']}
+        original = approval['limits']
+        connections = original['max_connections'] - cumulative['connections']
+        bytes_left = original['max_bytes'] - cumulative['bytes']
+        deadline = datetime.strptime(approval['absolute_deadline'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        duration = min(original['duration_seconds'], int(deadline.timestamp() - time.time()) - 5)
+        if connections < 1 or bytes_left < 1024 or duration < 30:
+            _fail('setup_epoch_allowance_exhausted')
+        previous_approval = controls / 'approval.json'
+        arguments = argparse.Namespace(
+            run_root=str(next_run_root), source=str(root / 'original'),
+            brief=str(controls / 'BRIEF.md'), scope_file=str(controls / 'scope.md'),
+            scope_sha256=plan['scope_sha256'], relay=str(controls / 'relay'),
+            relay_sha256=plan['relay_sha256'], runtime_ca=str(controls / 'runtime-ca.pem'),
+            runtime_ca_sha256=plan['runtime_ca_sha256'], image_id=plan['image_id'],
+            platform=plan['platform'], target_image_id=None, target_port=None,
+            target_command=None, source_only=False, setup_only=True,
+            setup_engagement_id=plan['setup_only']['engagement_id'],
+            setup_operator_id=plan['setup_only']['operator_id'],
+            setup_scope_signature=str(controls / 'setup-scope.sig'),
+            setup_allowed_signers=str(controls / 'setup-allowed-signers'),
+            setup_trusted_fingerprint=plan['setup_only']['trusted_fingerprint'],
+            setup_max_workspace_bytes=plan['setup_only']['max_workspace_bytes'],
+            source_runtime=None, build_command=None, go_toolchain=None, module_cache=None,
+            kanboard_capture=False, t01_capture=False, origin_ingress=False,
+            mutable_path=[], expected_skill_id=[], model=plan['model'],
+            provider_route=plan['provider_route'], provider_authority=plan['provider_authority'],
+            max_connections=connections, max_bytes=bytes_left, duration_seconds=duration)
+        prepared = prepare(arguments)
+        next_controls = _controls(next_run_root)
+        checkpoint_copy = next_controls / 'research/setup-checkpoint'
+        checkpoint_copy.mkdir(mode=0o700)
+        for name, digest in terminal['checkpoint']['files'].items():
+            if digest is not None:
+                shutil.copy2(terminal['checkpoint_path'] / name, checkpoint_copy / name)
+                (checkpoint_copy / name).chmod(0o600)
+        shutil.copy2(terminal['checkpoint_path'] / 'receipt.json', checkpoint_copy / 'receipt.json')
+        (checkpoint_copy / 'receipt.json').chmod(0o600)
+        shutil.copy2(previous_approval, next_controls / 'approval.json')
+        (next_controls / 'approval.json').chmod(0o600)
+        link = {'kind': 'native-setup-epoch-v1', 'epoch_index': epoch_index,
+                'previous_run_root': str(root), 'previous_plan_sha256': terminal['plan_sha256'],
+                'previous_terminal_sha256': terminal['terminal_sha256'],
+                'previous_revoked_sha256': terminal['revoked_sha256'],
+                'previous_cleanup_sha256': terminal['cleanup_sha256'],
+                'previous_provider_pins': terminal['provider_pins'],
+                'previous_checkpoint_sha256': terminal['checkpoint_sha256'],
+                'used_before': cumulative, 'grant_sha256': _sha(previous_approval),
+                'current_plan_sha256': _sha(next_run_root / 'plan.json'),
+                'absolute_deadline': approval['absolute_deadline']}
+        _write_json(next_controls / 'setup-epoch.json', link, once=True)
+        marker = {'kind': 'native-setup-successor-v1', 'next_run_root': str(next_run_root),
+                  'next_plan_sha256': prepared['plan_sha256'],
+                  'epoch_receipt_sha256': _sha(next_controls / 'setup-epoch.json')}
+        _write_json(controls / 'setup-successor.json', marker, once=True)
+        _verify_setup_epoch_link(next_run_root, _verified_plan(next_run_root), approval)
+        return {'status': 'prepared_residual_setup_epoch', 'run_root': str(next_run_root),
+                'epoch_index': epoch_index, 'plan_sha256': prepared['plan_sha256'],
+                'remaining_connections': connections, 'remaining_bytes': bytes_left,
+                'duration_seconds': duration, 'absolute_deadline': approval['absolute_deadline'],
+                'checkpoint_sha256': terminal['checkpoint_sha256'],
+                'provider_request_count': None, 'monetary_spend': None}
+
+
+def setup_chain_snapshot(run_root: Path) -> dict:
+    """Read-only host proof of cumulative v2 setup use after the final stop.
+
+    Consumers must separately validate the frozen setup output; this proves
+    only the linked setup authority, physical stops, cleanup and accounting.
+    """
+    root = _private_root(run_root)
+    plan = _verified_plan(root, allow_expired_setup=True)
+    controls = _controls(root)
+    approval = _read_json(controls / 'approval.json')
+    if 'setup_only' not in plan or approval.get('kind') != 'native-setup-approval-v2':
+        _fail('setup_linked_epoch_required')
+    current = _setup_terminal_accounting(root, approval, allow_frozen=True,
+                                         allow_expired=True)
+    link_path = controls / 'setup-epoch.json'
+    used_before = (_read_json(link_path)['used_before'] if link_path.exists() else
+                   {'connections': 0, 'bytes': 0})
+    cumulative = {'connections': used_before['connections'] + current['used_connections'],
+                  'bytes': used_before['bytes'] + current['charged_bytes']}
+    if (cumulative['connections'] > approval['limits']['max_connections']
+            or cumulative['bytes'] > approval['limits']['max_bytes']):
+        _fail('setup_epoch_residual_mismatch')
+    chain = []
+    cursor = root
+    for _ in range(16):
+        epoch_path = _controls(cursor) / 'setup-epoch.json'
+        chain.append({'run_root': str(cursor), 'plan_sha256': _sha(cursor / 'plan.json'),
+                      'epoch_sha256': _sha(epoch_path) if epoch_path.exists() else None})
+        if not epoch_path.exists():
+            break
+        cursor = _private_root(Path(_read_json(epoch_path)['previous_run_root']))
+    else:
+        _fail('setup_epoch_limit')
+    if (str(cursor) != approval['initial_run_root']
+            or _sha(cursor / 'plan.json') != approval['plan_sha256']):
+        _fail('setup_initial_grant_mismatch')
+    chain.reverse()
+    return {'kind': 'native-setup-chain-snapshot-v1',
+            'initial_run_root': approval['initial_run_root'],
+            'initial_plan_sha256': approval['plan_sha256'],
+            'current_run_root': str(root), 'current_plan_sha256': _sha(root / 'plan.json'),
+            'approval_sha256': _sha(controls / 'approval.json'),
+            'epoch_index': len(chain), 'cumulative_used': cumulative,
+            'original_limits': approval['limits'],
+            'absolute_deadline': approval['absolute_deadline'],
+            'current_terminal_sha256': current['terminal_sha256'],
+            'current_checkpoint_sha256': current['checkpoint_sha256'],
+            'chain_sha256': hashlib.sha256(canonical_json_bytes(chain)).hexdigest(),
+            'provider_request_count': None, 'monetary_spend': None}
 
 
 def _poststop_role_grant_boundary(root: Path, dispatch_id: str) -> Path:
@@ -5251,6 +5723,15 @@ def _parser() -> argparse.ArgumentParser:
     setup_template_cmd.add_argument('--run-root', required=True)
     setup_template_cmd.add_argument('--approved-at', required=True)
     setup_template_cmd.add_argument('--expires-at', required=True)
+    setup_template_cmd.add_argument('--linked-epochs', action='store_true')
+    setup_template_cmd.add_argument('--absolute-deadline')
+    setup_next_cmd = commands.add_parser('setup-next-epoch',
+                                         help='prepare one residual setup run after verified owner loss')
+    setup_next_cmd.add_argument('--run-root', required=True)
+    setup_next_cmd.add_argument('--next-run-root', required=True)
+    setup_chain_cmd = commands.add_parser('setup-chain',
+                                          help='read-only verified cumulative v2 setup authority and usage')
+    setup_chain_cmd.add_argument('--run-root', required=True)
     setup_manifest_cmd = commands.add_parser('setup-source-manifest',
                                              help='provider-free regular-file source identity before scope signing')
     setup_manifest_cmd.add_argument('--source', required=True)
@@ -5354,7 +5835,13 @@ def main() -> int:
         elif args.command == 'setup-freeze':
             result = setup_freeze(Path(args.run_root))
         elif args.command == 'setup-approval-template':
-            result = setup_approval_template(Path(args.run_root), args.approved_at, args.expires_at)
+            result = setup_approval_template(Path(args.run_root), args.approved_at, args.expires_at,
+                                             linked_epochs=args.linked_epochs,
+                                             absolute_deadline=args.absolute_deadline)
+        elif args.command == 'setup-next-epoch':
+            result = setup_next_epoch(Path(args.run_root), Path(args.next_run_root))
+        elif args.command == 'setup-chain':
+            result = setup_chain_snapshot(Path(args.run_root))
         elif args.command == 'setup-source-manifest':
             result = setup_source_manifest(Path(args.source))
         elif args.command == 'stop':

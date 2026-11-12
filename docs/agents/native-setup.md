@@ -142,6 +142,26 @@ The template includes `monetary_cap_usd: null`. A requested monetary cap
 cannot be enforced by this provider boundary and `start` rejects it. If the
 operator requires a monetary cap, stop before dispatch.
 
+For an owner-loss continuation, sign a v2 linked-epoch grant instead of v1.
+Choose an absolute UTC deadline no later than both the approval expiry and
+`approved_at + duration_seconds`. The signed v2 grant binds the initial run
+root and plan, original connection and byte ceilings, source, scope, goal,
+image, model route, relay, trust material, and setup effect and network classes.
+It permits only checked successor epochs under residual allowance; it does not
+authorize a target build.
+
+```sh
+python3 tools/native_research.py setup-approval-template \
+  --run-root /private/setup-run \
+  --approved-at 2026-11-12T19:00:00Z \
+  --expires-at 2026-11-12T20:00:00Z \
+  --linked-epochs --absolute-deadline 2026-11-12T19:02:00Z \
+  > /private/setup-approval-unsigned.json
+```
+
+Sign and attach the v2 template with the same commands below. A v1 approval
+remains a single-run grant.
+
 Sign the canonical unsigned JSON and attach its proof. The signing key remains
 outside the harness. `allowed_signers` is the same file pinned in the scope.
 
@@ -205,10 +225,34 @@ root and reconcile owned resources before another setup run.
 
 An acknowledged turn may use `setup-resume --session <session-id> --prompt-file
 /private/prompt.md` while the same run and allowance are active. An unknown
-dispatch remains blocked and must not be retried automatically. The current
-runner cannot recover a model session after its foreground owner and tmpfs
-container have stopped; that case needs a new explicit authority decision and
-must not be described as a same-run resume.
+dispatch remains blocked and must not be retried automatically. Each
+acknowledged turn freezes the bounded proposal files and a checkpoint receipt
+under `controls/setup-checkpoints/<dispatch-id>/`, outside agent write access.
+
+If a v2 run loses its foreground owner, run `recover-start` after the native
+stop owner has recorded `REVOKED`. Inspect its exact resource cleanup and the
+provider ledger. Then prepare one successor root:
+
+```sh
+python3 tools/native_research.py recover-start --run-root /private/setup-run
+python3 tools/native_research.py setup-next-epoch \
+  --run-root /private/setup-run --next-run-root /private/setup-run-2
+python3 tools/native_research.py start --run-root /private/setup-run-2 \
+  --approval /private/setup-approval.json
+python3 tools/native_research.py setup-turn --run-root /private/setup-run-2
+```
+
+`setup-next-epoch` requires the exact stopped producer proof, absent owned
+containers and networks, a settled provider ledger, no unknown dispatch, and
+the last acknowledged host checkpoint. It reserves remaining connections and
+bytes and keeps the original absolute deadline. The successor has a fresh
+native store and session; the agent reconstructs its proposal from a read-only
+checkpoint at `/research/setup-checkpoint/`. It does not restore the previous
+model conversation. A failed check leaves the old run blocked for operator
+reconciliation. A crash after preparing a successor but before the predecessor
+marker leaves an inert root that cannot start; inspect and remove it only after
+confirming it created no resources. The v1 approval cannot authorize a linked
+epoch.
 
 ## Local evidence boundary
 
@@ -220,3 +264,18 @@ approval path and an already-local BusyBox image for source read-only, tmpfs,
 network-none and cleanup readback. It does not execute a native model turn or
 qualify a live provider. A fresh target requires its own signed scope, images,
 approval, effect review and cleanup proof.
+
+The linked-epoch CLI scenario is:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  evals/native-qualification/smoke/check_native_setup_epoch.py \
+  --output /tmp/native-setup-epoch-e2e.json
+```
+
+It uses synthetic signed authority, fabricated stop and provider receipts,
+and a Docker absence shim. It checks the successor's original pins, residual
+caps, checkpoint and empty native store. It does not prove live owner loss,
+model reconstruction, provider billing or production cleanup. A saved 20-check
+result is at
+`evals/native-qualification/setup-evidence/native-setup-linked-epoch-synthetic-e2e.json`.

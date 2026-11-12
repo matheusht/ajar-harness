@@ -1136,7 +1136,11 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
     receipt_path = root / 'controls' / ('review-' + role + '.json')
     receipt = _read_private(receipt_path)
     assessment = receipt.get('assessment')
-    if (projection.get('kind') != 'native-source-review-results-v1'
+    if (set(projection) != {'kind', 'review_id', 'plan_sha256', 'next_sha256',
+                            'input_id', 'selection_sha256', 'packet_request_sha256',
+                            'receipt_sha256', 'status', 'assessment', 'security_effect',
+                            'filing_or_escalation_authorized'}
+            or projection.get('kind') != 'native-source-review-results-v1'
             or projection.get('review_id') != identity
             or projection.get('plan_sha256') != state['plan_sha256']
             or projection.get('next_sha256') != next_sha
@@ -1184,8 +1188,13 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
     raw = json.loads((directory / 'observer/RAW.json').read_bytes())
     unfinished = json.loads((directory / 'observer/UNFINISHED.json').read_bytes())
     conditions = json.loads((directory / 'observer/CONDITIONS.json').read_bytes())
+    claim = json.loads((directory / 'observer/CLAIM.json').read_bytes())
     current = conditions.get('current_source')
-    if (not isinstance(current, dict)
+    if (claim != {'claim': nxt['host_action']['claim'], 'next_sha256': next_sha}
+            or conditions.get('plan_sha256') != state['plan_sha256']
+            or conditions.get('source_manifest_sha256') != plan['source_manifest_sha256']
+            or conditions.get('original_source') != plan['source_sha256']
+            or not isinstance(current, dict)
             or conditions.get('current_files') != _review_tree(directory / 'current-source',
                                                                current, module)
             or runner._inventory(root / 'researcher/project') != current
@@ -1199,12 +1208,28 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
 def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
     next_sha = _next_hash(root)
     previous = state.get('review_action')
+    if previous and previous.get('phase') == 'dispatched' and (
+            previous.get('after_invocations') != state['invocations']
+            or previous.get('next_sha256') != next_sha
+            or (nxt.get('host_action') or {}).get('kind') != SOURCE_REVIEW_ACTION_KIND):
+        return {'status': 'review_incomplete', 'review_id': previous.get('review_id'),
+                'reason': 'source_review_cached_binding_changed'}
     if previous and previous.get('after_invocations') == state['invocations']:
         if previous.get('next_sha256') != next_sha:
             _fail('source_review_checkpoint_changed_before_readback')
-        if previous.get('phase') == 'captured':
+        if previous.get('phase') in ('captured', 'dispatched'):
+            candidate = previous
+            if previous['phase'] == 'dispatched':
+                identity = previous.get('review_id')
+                if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity):
+                    return {'status': 'review_incomplete', 'review_id': identity,
+                            'reason': 'source_review_cached_binding_changed'}
+                path = root / 'controls/research/reviews' / identity / 'RESULTS.json'
             try:
-                _verified_cached_review(root, state, nxt, previous, next_sha)
+                if previous['phase'] == 'dispatched':
+                    candidate = {**previous, 'projection_sha256': runner._sha(
+                        runner._file(path, private=True))}
+                _verified_cached_review(root, state, nxt, candidate, next_sha)
             except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
                     TypeError, KeyError, AttributeError, RuntimeError):
                 previous.update(phase='incomplete',
@@ -1214,6 +1239,13 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
                               'review_id': previous['review_id']})
                 return {'status': 'review_incomplete', 'review_id': previous['review_id'],
                         'reason': 'source_review_cached_evidence_changed'}
+            if previous['phase'] == 'dispatched':
+                previous.update(phase='captured',
+                                projection_sha256=candidate['projection_sha256'])
+                _save_state(root, state)
+                _event(root, {'at': _now(), 'event': 'source_review_captured',
+                              'review_id': previous['review_id'],
+                              'projection_sha256': candidate['projection_sha256']})
             return {'status': 'captured', 'review_id': previous['review_id']}
         return {'status': 'review_incomplete', 'review_id': previous['review_id']}
     try:
@@ -1458,7 +1490,16 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             return _finish(root, state, 'stopped', reason=stop)
         action = state.get('source_action') or {}
         review_action = state.get('review_action') or {}
-        if review_action.get('phase') in ('dispatched', 'incomplete'):
+        if review_action.get('phase') == 'dispatched':
+            try:
+                nxt = _next(root)
+            except ContinuationError:
+                nxt = None
+            outcome = (_agent_review(root, state, nxt) if nxt is not None else
+                       {'status': 'review_incomplete', 'review_id': review_action.get('review_id')})
+            if outcome['status'] != 'captured':
+                return _finish(root, state, 'review_incomplete', review_action=outcome)
+        elif review_action.get('phase') == 'incomplete':
             return _finish(root, state, 'review_incomplete',
                            review_id=review_action.get('review_id'))
         if action.get('phase') == 'evidence_changed':

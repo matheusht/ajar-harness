@@ -1114,6 +1114,79 @@ def _review_selection(root: Path, state: dict, nxt: dict, next_sha: str,
     return observer, selected, identity, note_sha, actions_sha
 
 
+def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
+                            next_sha: str) -> None:
+    identity, role = previous.get('review_id'), previous.get('role')
+    if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+            or role not in ('reviewer-1', 'reviewer-2')):
+        _fail('source_review_cached_binding_changed')
+    plan = runner._verified_plan(root)
+    if runner._sha(root / 'plan.json') != state['plan_sha256']:
+        _fail('source_review_cached_binding_changed')
+    module = runner._load_review_module(root)
+    projection_path = root / 'controls/research/reviews' / identity / 'RESULTS.json'
+    if runner._sha(runner._file(projection_path, private=True)) != previous.get('projection_sha256'):
+        _fail('source_review_projection_changed')
+    projection = _read_private(projection_path)
+    receipt_path = root / 'controls' / ('review-' + role + '.json')
+    receipt = _read_private(receipt_path)
+    if (projection.get('kind') != 'native-source-review-results-v1'
+            or projection.get('review_id') != identity
+            or projection.get('plan_sha256') != state['plan_sha256']
+            or projection.get('next_sha256') != next_sha
+            or projection.get('status') != 'reviewed'
+            or projection.get('security_effect') != 'unproven'
+            or projection.get('filing_or_escalation_authorized') is not False
+            or projection.get('receipt_sha256') != runner._sha(receipt_path)
+            or receipt.get('kind') != 'native-source-review-v1'
+            or receipt.get('status') != 'reviewed'
+            or receipt.get('plan_sha256') != state['plan_sha256']
+            or receipt.get('reviewer_role') != role
+            or receipt.get('filing_or_escalation_authorized') is not False
+            or receipt.get('assessment', {}).get('status') != 'candidate_for_operator_review'
+            or projection.get('assessment') != receipt.get('assessment')
+            or projection.get('input_id') != receipt.get('input_id')):
+        _fail('source_review_cached_binding_changed')
+    evidence = root / 'controls/source-evidence' / role / 'RESULTS.json'
+    if (receipt.get('evidence_path') != str(evidence)
+            or receipt.get('evidence_sha256') != runner._sha(runner._file(evidence))):
+        _fail('source_review_cached_evidence_changed')
+    pin = receipt.get('packet_pin')
+    packet = root / 'handoff' / role
+    if (not isinstance(pin, dict) or pin.get('input_id') != receipt['input_id']
+            or projection.get('packet_request_sha256') != pin.get('files', {}).get('REQUEST.json')
+            or not module.verify_packet(packet, pin)):
+        _fail('source_review_cached_packet_changed')
+    request = json.loads((packet / 'REQUEST.json').read_bytes())
+    directory = _cont(root) / 'reviews' / identity
+    selected_sha = projection.get('selection_sha256')
+    selected, _ = module._selection(directory / 'observer', directory / 'selection.json',
+                                   selected_sha, module.validate_public_bytes)
+    if (request.get('claim_id') != identity
+            or request.get('claim_version') != next_sha
+            or request.get('input_id') != receipt['input_id']
+            or request.get('selection_sha256') != selected_sha
+            or request.get('source_manifest_sha256') != plan['source_manifest_sha256']
+            or request.get('roles') != selected['roles']
+            or request.get('files') != selected['files']
+            or request.get('source_paths') != selected['source_paths']
+            or any(plan['source_sha256'].get(path) != selected['files'][name]
+                   for name, path in selected['source_paths'].items())):
+        _fail('source_review_cached_selection_changed')
+    raw = json.loads((directory / 'observer/RAW.json').read_bytes())
+    unfinished = json.loads((directory / 'observer/UNFINISHED.json').read_bytes())
+    conditions = json.loads((directory / 'observer/CONDITIONS.json').read_bytes())
+    current = conditions.get('current_source')
+    if (not isinstance(current, dict)
+            or conditions.get('current_files') != _review_tree(directory / 'current-source',
+                                                               current, module)
+            or raw.get('source_actions') != _review_source_actions(root, state, module)
+            or unfinished.get('checkpoint') != nxt
+            or unfinished.get('research_note') !=
+                runner._file(root / 'researcher/RESEARCH.md').read_text()):
+        _fail('source_review_cached_source_changed')
+
+
 def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
     next_sha = _next_hash(root)
     previous = state.get('review_action')
@@ -1121,9 +1194,17 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
         if previous.get('next_sha256') != next_sha:
             _fail('source_review_checkpoint_changed_before_readback')
         if previous.get('phase') == 'captured':
-            projection = root / 'controls/research/reviews' / previous['review_id'] / 'RESULTS.json'
-            if runner._sha(projection) != previous['projection_sha256']:
-                _fail('source_review_projection_changed')
+            try:
+                _verified_cached_review(root, state, nxt, previous, next_sha)
+            except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
+                    TypeError, KeyError, RuntimeError):
+                previous.update(phase='incomplete',
+                                evidence_change_reason='source_review_cached_evidence_changed')
+                _save_state(root, state)
+                _event(root, {'at': _now(), 'event': 'source_review_cached_evidence_changed',
+                              'review_id': previous['review_id']})
+                return {'status': 'review_incomplete', 'review_id': previous['review_id'],
+                        'reason': 'source_review_cached_evidence_changed'}
             return {'status': 'captured', 'review_id': previous['review_id']}
         return {'status': 'review_incomplete', 'review_id': previous['review_id']}
     try:

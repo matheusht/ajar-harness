@@ -362,6 +362,91 @@ def main() -> None:
                     status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
             assert repeated['status'] == 'review_incomplete' and len(review_calls) == 1
             post_dispatch.append(case)
+        cached_readback_denied = []
+        for case in ('missing_receipt', 'changed_receipt', 'missing_packet',
+                     'changed_packet', 'changed_selection', 'changed_source_action',
+                     'missing_reviewer_evidence', 'changed_reviewer_evidence'):
+            blocked = fixture(base / ('cached-' + case))
+            source_action(blocked, '1' * 32, 'before\n', 1)
+            source_action(blocked, '2' * 32, 'after\n', 0)
+            requested_review(blocked)
+            review_calls = []
+
+            def cached_review(run_root, packet, pin, role, module):
+                review_calls.append(case)
+                evidence = run_root / 'controls/source-evidence' / role / 'RESULTS.json'
+                evidence.parent.mkdir(parents=True, mode=0o700)
+                runner._write_json(evidence, {'kind': 'synthetic-source-review-evidence-v1',
+                                              'input_id': pin['input_id']}, once=True)
+                evidence.chmod(0o444)
+                receipt = {'kind': 'native-source-review-v1', 'status': 'reviewed',
+                           'assessment': {'status': 'candidate_for_operator_review'},
+                           'plan_sha256': runner._sha(run_root / 'plan.json'),
+                           'input_id': pin['input_id'], 'packet_pin': pin,
+                           'evidence_path': str(evidence),
+                           'evidence_sha256': runner._sha(evidence),
+                           'reviewer_role': role, 'filing_or_escalation_authorized': False}
+                runner._write_json(run_root / 'controls/review-reviewer-1.json', receipt, once=True)
+                return receipt
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(runner, '_verified_plan',
+                    side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+                stack.enter_context(patch.object(runner, '_approval_active'))
+                stack.enter_context(patch.object(runner, 'run_active', return_value=True))
+                stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value=allowance))
+                stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+                stack.enter_context(patch.object(runner, '_source_executor_envelope'))
+                stack.enter_context(patch.object(runner, '_freeze_source_input',
+                    side_effect=lambda run_root, destination, role: (
+                        shutil.copytree(run_root / 'researcher/project', destination)
+                        and runner._inventory(destination))))
+                stack.enter_context(patch.object(runner, 'native_api',
+                    side_effect=lambda *args: {'items': []}))
+                stack.enter_context(patch.object(runner, '_source_review',
+                    side_effect=cached_review))
+                state = continuation._state(blocked)
+                first = continuation._agent_review(blocked, state, continuation._next(blocked))
+                assert first['status'] == 'captured' and len(review_calls) == 1
+                cached = continuation._agent_review(blocked, state, continuation._next(blocked))
+                assert cached['status'] == 'captured' and len(review_calls) == 1
+                review_id = first['review_id']
+                receipt_path = blocked / 'controls/review-reviewer-1.json'
+                packet = blocked / 'handoff/reviewer-1'
+                if case == 'missing_receipt':
+                    receipt_path.unlink()
+                elif case == 'changed_receipt':
+                    receipt = runner._read_json(receipt_path)
+                    receipt['assessment']['status'] = 'unfinished'
+                    runner._write_json(receipt_path, receipt)
+                elif case == 'missing_packet':
+                    packet.chmod(0o755)
+                    (packet / 'RAW.json').unlink()
+                elif case == 'changed_packet':
+                    raw = packet / 'RAW.json'
+                    raw.chmod(0o644)
+                    raw.write_bytes(raw.read_bytes() + b' ')
+                elif case == 'changed_selection':
+                    selection = blocked / 'controls/continuation/reviews' / review_id / 'selection.json'
+                    value = runner._read_json(selection)
+                    value['claim_version'] = '0' * 64
+                    runner._write_json(selection, value)
+                elif case == 'changed_source_action':
+                    stream = blocked / ('controls/source-executions/' + '1' * 32
+                                        + '/target/stdout.txt')
+                    stream.write_text('changed after packet\n')
+                elif case in ('missing_reviewer_evidence', 'changed_reviewer_evidence'):
+                    evidence = blocked / 'controls/source-evidence/reviewer-1/RESULTS.json'
+                    if case == 'missing_reviewer_evidence':
+                        evidence.unlink()
+                    else:
+                        evidence.chmod(0o644)
+                        evidence.write_bytes(evidence.read_bytes() + b' ')
+                repeated = continuation.continue_run(blocked, max_invocations=2,
+                    invoke=lambda *args: (_ for _ in ()).throw(AssertionError('cached_readback_sent')),
+                    status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+            assert repeated['status'] == 'review_incomplete' and len(review_calls) == 1
+            cached_readback_denied.append(case)
         packet = root / 'handoff/reviewer-1'
         reviewer = root / 'controls/review-reviewer-1.json'
         projection = next((root / 'controls/research/reviews').glob('*/RESULTS.json'))
@@ -389,6 +474,7 @@ def main() -> None:
                   'source_actions': action_rows,
                   'provider_calls': 0, 'target_calls': 0, 'native_review': 'synthetic',
                   'denied': denied, 'post_dispatch_no_retry': post_dispatch,
+                  'cached_readback_denied': cached_readback_denied,
                   'environment': {'python': platform.python_version(),
                                   'platform': platform.system().lower()},
                   'source_sha256': runner._sha(ROOT / 'tools/native_continuation.py'),

@@ -3222,7 +3222,7 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
             if _origin_enabled(_plan(root)):
                 target = ORIGIN_ROLES[role]
                 record['origin_window_close_sha256'] = _sha(_origin_close_window(root, target, dispatch_id))
-            if setup_only:
+            if setup_only and _read_json(_controls(root) / 'approval.json').get('kind') == 'native-setup-approval-v2':
                 record['checkpoint_sha256'] = _setup_checkpoint(root, record)
             _write_json(record_path, record)
             returned = dict(record)

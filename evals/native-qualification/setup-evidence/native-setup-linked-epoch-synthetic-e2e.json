@@ -99,7 +99,7 @@
     {
       "name": "public read-only chain reports original total use",
       "observed": {
-        "chain_sha256": "987f90ced54e8aeeeb276087bbee733ea2ff2ad0ba31b4259076b875d96874e9",
+        "chain_sha256": "8dfef19fa5ccc36a0cf2f57dec4d7c5a5e87cb2a2f8d63c42414df5150be883b",
         "exit": 0,
         "used": {
           "bytes": 4096,
@@ -120,7 +120,7 @@
     {
       "name": "residual limits and original pins persist",
       "observed": {
-        "duration_seconds": 172,
+        "duration_seconds": 171,
         "max_bytes": 1044480,
         "max_connections": 2
       },
@@ -129,7 +129,7 @@
     {
       "name": "successor keeps signed original absolute deadline",
       "observed": {
-        "deadline": "2026-11-12T20:33:53Z",
+        "deadline": "2026-11-12T20:35:29Z",
         "used_before": {
           "bytes": 4096,
           "connections": 1
@@ -171,10 +171,10 @@
   ],
   "classification": "synthetic signed grant, fabricated stop and provider ledger, Docker absence shim",
   "inputs": {
-    "cli_sha256": "b4f8bac6800c348849826469435cb20c7ef49a20f433bfb4bbd871060de1b15b",
-    "first_plan_sha256": "6a54b415639aa09a09545bc693a1be4d1bd7747918274ad0db95a32db35eedf8",
-    "grant_sha256": "67df0eccd9045e9434d8f43fcda42f7eb76472042919f6aa2eef11bfc61a5bab",
-    "provider_ledger_sha256": "658809b097db21a7dceff8538a509c0354c79d7a9cd4102b73c9417144ff7a42",
+    "cli_sha256": "baeb77f84569db25f0d56a0d910868c26707677cdd7bb1e70c3a73e8a011a26c",
+    "first_plan_sha256": "6f715d36123d5e05049cfd7f5834aeaecf3b59fec4f259275c79056f1260fcad",
+    "grant_sha256": "d34ef2339645a1e6b6a3f035a9b6d128d356099e206c8fa63908e21d58e909d1",
+    "provider_ledger_sha256": "f2a6897a4ae79522963e4a90a64233ee3cc453c14e307e1c2ca115f9a968c1e6",
     "revoked_sha256": "07aa79d71a13f0b7bf891389a6720f88c15ac52ce9798a65875a0d0076ba6235",
     "scenario_sha256": "8d4328c0e44beaeefbc796d7dcfa011d302fa6b07c350bb1ba743b84ff820a81",
     "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"

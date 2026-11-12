@@ -225,9 +225,10 @@ root and reconcile owned resources before another setup run.
 
 An acknowledged turn may use `setup-resume --session <session-id> --prompt-file
 /private/prompt.md` while the same run and allowance are active. An unknown
-dispatch remains blocked and must not be retried automatically. Each
-acknowledged turn freezes the bounded proposal files and a checkpoint receipt
-under `controls/setup-checkpoints/<dispatch-id>/`, outside agent write access.
+dispatch remains blocked and must not be retried automatically. Under a v2
+grant, each acknowledged turn freezes the bounded proposal files and a
+checkpoint receipt under `controls/setup-checkpoints/<dispatch-id>/`, outside
+agent write access.
 
 If a v2 run loses its foreground owner, run `recover-start` after the native
 stop owner has recorded `REVOKED`. Inspect its exact resource cleanup and the

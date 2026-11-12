@@ -264,14 +264,14 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                     assert third['status'] == 'cleanup_pending', third
                     assert len(calls) == 1 and turns == ['research']
             else:
-                assert second['status'] == 'closure_review_required'
+                assert second['status'] == 'cleanup_pending'
                 assert len(calls) == 1 and turns == ['research', 'resume']
         else:
-            assert first['status'] == 'closure_review_required'
+            assert first['status'] == 'cleanup_pending'
             assert turns == ['research', 'resume'] and len(calls) == 1
             second = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-            assert second['status'] == 'closure_review_required' and len(calls) == 1
+            assert second['status'] == 'cleanup_pending' and len(calls) == 1
     try:
         action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
         directory = root / 'controls/continuation/source-actions' / action['action_id']
@@ -323,7 +323,7 @@ def run_prepared_resume(root: Path, calls: list, turns: list, invoke,
             side_effect=fake_execute(calls)))
         result = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-    assert result['status'] == 'closure_review_required'
+    assert result['status'] == 'cleanup_pending'
     assert len(calls) == 1 and turns == ['research', 'resume']
     return {'first_status': first_status,
             'second_status': result['status'], 'source_batches': len(calls),
@@ -396,7 +396,7 @@ def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
                     'source_batches': 0}
         result = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-        assert result['status'] == 'closure_review_required'
+        assert result['status'] == 'cleanup_pending'
     assert len(calls) == 1 and calls[0] != orphan.name and turns == ['research', 'resume']
     abort = root / 'controls/continuation/aborted-source-actions' / orphan.name / 'abort.json'
     assert runner._read_json(abort)['status'] == 'aborted_before_dispatch'
@@ -464,7 +464,7 @@ def second_action_orphan_case(base: Path, *, incomplete: bool) -> dict:
         orphan = next(path for path in action_dirs if path.name != first_id)
         result = continuation.continue_run(root, max_invocations=4, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-    assert result['status'] == 'closure_review_required'
+    assert result['status'] == 'cleanup_pending'
     assert len(calls) == 2 and turns == ['research', 'resume', 'resume']
     assert (calls[1] != orphan.name) == incomplete
     if incomplete:
@@ -521,7 +521,7 @@ def captured_event_gap_case(base: Path) -> dict:
         assert state['source_action']['phase'] == 'captured' and calls == [first_id]
         result = continuation.continue_run(root, max_invocations=5, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-    assert result['status'] == 'closure_review_required'
+    assert result['status'] == 'cleanup_pending'
     assert len(calls) == 3 and len(set(calls)) == 3
     assert turns == ['research', 'resume', 'resume', 'resume']
     events = continuation._source_action_events(root)

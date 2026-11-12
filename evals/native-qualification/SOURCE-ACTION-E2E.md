@@ -83,6 +83,10 @@ source/check hashes, image ID, observed statuses and receipt hashes. Its
 `native_tool_trace` and `provider_cost` are null: real native readback,
 signed-target behavior and provider spend remain unverified.
 
+This source-action fixture has no final `RESULT.md` or fresh review. The
+continuation now reaches `cleanup_pending` after its simulated stop. The
+separate closeout scenario checks a complete internal result and review.
+
 The affected source-mode and continuation checks also passed locally:
 
 ```sh

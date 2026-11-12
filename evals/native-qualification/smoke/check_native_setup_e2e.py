@@ -138,12 +138,26 @@ def main():
                               '-E', 'sha256').stdout.split('SHA256:')[1].split()[0]
         fingerprint = 'sha256:' + base64.b64decode(fingerprint_b64 + '=' * (-len(fingerprint_b64) % 4)).hex()
         scope = base / 'scope.md'
-        scope.write_text('# Harmless synthetic setup scope\n\n'
-                         '- Operator allowed signers SHA256: sha256:' + sha(signers) + '\n'
-                         '- Source: synthetic three-file fixture\n'
-                         '- Native setup effect class: read-only-original-and-disposable-offline-proposal\n'
-                         '- Native setup network class: metered-model-relay-only\n'
-                         '- Signed: [x] synthetic operator\n')
+        boundary = {'kind': 'native-setup-scope-v1', 'engagement_id': 'fixture-208',
+                    'operator_id': 'synthetic-operator',
+                    'source_manifest_sha256': hashlib.sha256(json.dumps(
+                        source_pin, sort_keys=True).encode()).hexdigest(),
+                    'goal_sha256': sha(brief),
+                    'surfaces': ['owned original source tree'],
+                    'benign_objectives': ['propose an offline runtime recipe and threat model'],
+                    'escalation_ceiling': 'setup_only', 'impact_demo_authorized': False,
+                    'accounts': [],
+                    'cleanup': 'Stop and remove every owned setup container and network.',
+                    'effect_class': 'read-only-original-and-disposable-offline-proposal',
+                    'network_class': 'metered-model-relay-only',
+                    'expires_at': (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
+                        '%Y-%m-%dT%H:%M:%SZ')}
+        scope_prefix = ('# Harmless synthetic setup scope\n\n'
+                        '- Operator allowed signers SHA256: sha256:' + sha(signers) + '\n'
+                        '- Signed: [x] synthetic operator\n\n')
+        def scope_text(value):
+            return scope_prefix + '```native-setup-scope-v1\n' + json.dumps(value, sort_keys=True) + '\n```\n'
+        scope.write_text(scope_text(boundary))
         scope_signature = base / 'scope.sig'
         scope_signature.write_bytes(sign(key, canonical_json_bytes({
             'kind': 'native-setup-scope-challenge-v1', 'engagement_id': 'fixture-208',
@@ -178,6 +192,29 @@ def main():
                         '--image-id', 'sha256:' + '1' * 64, '--platform', 'linux/amd64',
                         '--max-connections', '2', '--max-bytes', '1048576',
                         '--duration-seconds', '120')
+        manifest_code, manifest = cli(env, 'setup-source-manifest', '--source', str(source))
+        check('public source identity matches signed manifest',
+              manifest_code == 0 and manifest.get('source_sha256') == source_pin
+              and manifest.get('source_manifest_sha256') == boundary['source_manifest_sha256'],
+              {'exit': manifest_code, 'source_manifest_sha256': manifest.get('source_manifest_sha256')})
+        incomplete_scope = base / 'scope-incomplete.md'
+        incomplete_boundary = dict(boundary)
+        incomplete_boundary.pop('benign_objectives')
+        incomplete_scope.write_text(scope_text(incomplete_boundary))
+        incomplete_sig = base / 'scope-incomplete.sig'
+        incomplete_sig.write_bytes(sign(key, canonical_json_bytes({
+            'kind': 'native-setup-scope-challenge-v1', 'engagement_id': 'fixture-208',
+            'scope_sha256': sha(incomplete_scope)})))
+        incomplete_args = list(prepare_args)
+        incomplete_args[incomplete_args.index('--scope-file') + 1] = str(incomplete_scope)
+        incomplete_args[incomplete_args.index('--scope-sha256') + 1] = sha(incomplete_scope)
+        incomplete_args[incomplete_args.index('--setup-scope-signature') + 1] = str(incomplete_sig)
+        incomplete_args[incomplete_args.index('--run-root') + 1] = str(base / 'incomplete-run')
+        code, incomplete = cli(env, *incomplete_args)
+        check('signed but incomplete scope refuses before run creation',
+              code == 2 and incomplete.get('code') == 'setup_scope_incomplete'
+              and not (base / 'incomplete-run').exists() and not marker.exists(),
+              {'exit': code, 'code': incomplete.get('code')})
         unsigned_args = list(prepare_args)
         unsigned_args[unsigned_args.index('--setup-scope-signature') + 1] = str(base / 'absent.sig')
         unsigned_args[unsigned_args.index('--run-root') + 1] = str(base / 'unsigned-run')
@@ -198,6 +235,17 @@ def main():
               code == 2 and large.get('code') == 'setup_source_limit_exceeded'
               and not (base / 'large-run').exists() and not marker.exists(),
               {'exit': code, 'code': large.get('code')})
+        changed_source = base / 'changed-source'
+        shutil.copytree(source, changed_source)
+        (changed_source / 'main.py').write_text('print("changed fixture")\n')
+        changed_source_args = list(prepare_args)
+        changed_source_args[changed_source_args.index('--source') + 1] = str(changed_source)
+        changed_source_args[changed_source_args.index('--run-root') + 1] = str(base / 'changed-source-run')
+        code, changed_source_result = cli(env, *changed_source_args)
+        check('signed source digest rejects changed export before copy',
+              code == 2 and changed_source_result.get('code') == 'setup_signed_source_mismatch'
+              and not (base / 'changed-source-run').exists() and not marker.exists(),
+              {'exit': code, 'code': changed_source_result.get('code')})
         code, prepared = cli(env, *prepare_args)
         check('signed scope and source prepare without Docker contact',
               code == 0 and prepared.get('status') == 'prepared_provider_free'
@@ -211,6 +259,20 @@ def main():
                       for name, digest in source_pin.items()),
               {'source_file_count': len(source_pin),
                'source_manifest_sha256': plan.get('source_manifest_sha256')})
+        dispatch_dir = run_root / 'controls/dispatch'
+        older_id, newer_id = 'f' * 32, '0' * 31 + '1'
+        (dispatch_dir / (older_id + '.json')).write_text(json.dumps({
+            'kind': 'native-dispatch-v1', 'role': 'researcher', 'status': 'acknowledged',
+            'dispatch_id': older_id, 'setup_sequence': 1}) + '\n')
+        (dispatch_dir / (newer_id + '.json')).write_text(json.dumps({
+            'kind': 'native-dispatch-v1', 'role': 'resume', 'status': 'acknowledged',
+            'dispatch_id': newer_id, 'setup_sequence': 2}) + '\n')
+        status_code, ordering = cli(env, 'status', '--run-root', str(run_root))
+        check('latest turn follows durable order, not reversed UUID order',
+              status_code == 0 and ordering.get('setup', {}).get('last_dispatch_id') == newer_id,
+              {'exit': status_code, 'last_dispatch_id': ordering.get('setup', {}).get('last_dispatch_id')})
+        (dispatch_dir / (older_id + '.json')).unlink()
+        (dispatch_dir / (newer_id + '.json')).unlink()
         code, missing = cli(env, 'start', '--run-root', str(run_root),
                             '--approval', str(base / 'missing-approval.json'))
         check('missing setup approval rejects before effect',

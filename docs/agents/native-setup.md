@@ -16,19 +16,48 @@ format with placeholders. The key's public fingerprint is supplied independently
 to `prepare`, not read from the proposed scope.
 
 Create an `allowed_signers` file containing exactly the operator identity and
-their SSH public key, for example `matheus ssh-ed25519 AAAA...`. Put these
-machine-checked lines in the target-local `scope.md`:
+their SSH public key, for example `matheus ssh-ed25519 AAAA...`. Put its exact
+SHA256 in the target-local `scope.md` and include one fenced setup section:
 
-```text
-- Operator allowed signers SHA256: sha256:<SHA256 of exact allowed_signers bytes>
-- Native setup effect class: read-only-original-and-disposable-offline-proposal
-- Native setup network class: metered-model-relay-only
+````text
+- Operator allowed signers SHA256: sha256:<allowed-signers-hex-sha256>
+
+```native-setup-scope-v1
+{
+  "kind": "native-setup-scope-v1",
+  "engagement_id": "ID",
+  "operator_id": "matheus",
+  "source_manifest_sha256": "<manifest-hex-sha256>",
+  "goal_sha256": "<brief-hex-sha256>",
+  "surfaces": ["owned original source tree for this engagement"],
+  "benign_objectives": ["propose an offline runtime recipe and initial threat model"],
+  "escalation_ceiling": "setup_only",
+  "impact_demo_authorized": false,
+  "accounts": [],
+  "cleanup": "Stop and remove every owned setup container and network.",
+  "effect_class": "read-only-original-and-disposable-offline-proposal",
+  "network_class": "metered-model-relay-only",
+  "expires_at": "<UTC date/time no later than the operator grant>"
+}
+```
+````
+
+The host computes the source manifest from regular files in the authorized
+export and binds its digest in this signed section. `accounts: []` means the
+setup uses no target accounts. Name every actual source surface and benign
+objective; replace all sample text before signing.
+
+```sh
+python3 tools/native_research.py setup-source-manifest \
+  --source /absolute/source > /private/setup-source-manifest.json
+shasum -a 256 /private/setup-goal.md
 ```
 
-Fill and sign the rest of the scope according to the target's policy. For this
-setup phase, it must authorize reading that source, the model route, an offline
-disposable proposal workspace, and cleanup. Then generate the canonical
-challenge for the exact scope bytes:
+Copy `source_manifest_sha256` from that JSON and the brief's hex SHA256 into
+the signed scope block. This identity pass does not execute source code. The
+runner checks the declared source and goal hashes, expiry, and detached
+signature before its preparation inventory. Generate the canonical challenge
+for the exact scope bytes:
 
 ```sh
 PYTHONPATH=tools python3 - <<'PY' > /private/setup-scope.challenge

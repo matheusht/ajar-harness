@@ -1,6 +1,22 @@
 {
   "checks": [
     {
+      "name": "public source identity matches signed manifest",
+      "observed": {
+        "exit": 0,
+        "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
+      },
+      "passed": true
+    },
+    {
+      "name": "signed but incomplete scope refuses before run creation",
+      "observed": {
+        "code": "setup_scope_incomplete",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "unsigned scope refuses before run creation",
       "observed": {
         "code": "regular_file_unavailable",
@@ -17,13 +33,21 @@
       "passed": true
     },
     {
+      "name": "signed source digest rejects changed export before copy",
+      "observed": {
+        "code": "setup_signed_source_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "signed scope and source prepare without Docker contact",
       "observed": {
         "exit": 0,
         "result": {
           "live_approval_required": true,
-          "plan_sha256": "2900e554d2f7e0d8d31a9cea17aec38c9c4b52fe1dedae990374020de1b86f8e",
-          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-e2e-pqjaow92/run",
+          "plan_sha256": "c395d0a18609f1418e8442441e602381f62397caf20e11efa1bc6b8d7d706320",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-e2e-uhw46oel/run",
           "source_files": 3,
           "status": "prepared_provider_free"
         }
@@ -35,6 +59,14 @@
       "observed": {
         "source_file_count": 3,
         "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
+      },
+      "passed": true
+    },
+    {
+      "name": "latest turn follows durable order, not reversed UUID order",
+      "observed": {
+        "exit": 0,
+        "last_dispatch_id": "00000000000000000000000000000001"
       },
       "passed": true
     },
@@ -92,7 +124,7 @@
       "name": "local Docker source and cleanup boundary",
       "observed": {
         "cleanup_absent": true,
-        "container_id": "b525335d0625fbe79d8826873dd68f04be141a9439326bdf4638c9266aa9ddd7",
+        "container_id": "423dcc86d42da0c61d3075f209ad38a2a2342c5de7ba71b7531ce099254df8a1",
         "network": "none",
         "passed": true,
         "readonly_root": true,
@@ -108,14 +140,14 @@
   ],
   "classification": "synthetic signed authority, Docker shim, and local boundary probe",
   "inputs": {
-    "cli_sha256": "33b4490836cbfc9e600c88d044507ca8da5e86336a82d996b7694bdaa3534e20",
+    "cli_sha256": "fad30f0fa07b9daa42a786a0b8f21a94fab129aabb369170d556920ef7c6f3f7",
     "goal_sha256": "70d300cd9ddba9327d19fa3dc9fd058c7a3a663b594fa21a58d61a716c078354",
     "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
-    "runtime_ca_sha256": "e7676392193cdc4450aa6cc605bf10d393ddc78e1993c10af7fccc1ec8b80ecd",
-    "scenario_sha256": "7a78f6d7fdd67a36d82e5c2fe746f056d29fc3a83777ebe0ecc503ab0cc96a3d",
-    "scope_sha256": "269c0580cf84e8a460ee95f3e314b73f086c84cf85ed6a672766e998c162b7ac",
-    "scope_signature_sha256": "d9edd8bbfedc89a0932d5bfa455e0c75a6ab2f0e2e53c9ededf5327745520e38",
-    "setup_approval_sha256": "25a3b6ccc0657d96443b1035759faa9b35dc958a4a587d86fa96a5151a124504",
+    "runtime_ca_sha256": "86bdd8b93f936a050305a95dab1b75bec05698644beb59c8f1550d5ff376a855",
+    "scenario_sha256": "3bf01ed7cae1e75a6fb67f88e7ace186c573d7798864b20904f96afd29f3a6d8",
+    "scope_sha256": "b892633bac0da07c8ef2dd25d0229912e924464f06142b473802922ab94b00c5",
+    "scope_signature_sha256": "c045c303ec37f5d08fc021a0096a88fd3c0d596d3c25e23a5501f2b13670d441",
+    "setup_approval_sha256": "4756103405ec40a934907bae0f90418737e0e6cd2a0109368eae8b3e69f5eb82",
     "source": {
       "main.py": "04bd88d6c082b8266c28d044f590138f128c64029cf7bed48bb33087479672e1",
       "pkg/__init__.py": "8ad85b90108ebaad552b841d21e7895a651a7e49cf21a46d48ae04332ee827c0",

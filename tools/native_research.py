@@ -247,7 +247,8 @@ def _setup_scope_challenge(scope_hash: str, engagement_id: str) -> bytes:
 
 
 def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
-                        engagement_id: str, operator_id: str, trusted_fingerprint: str) -> None:
+                        engagement_id: str, operator_id: str, trusted_fingerprint: str,
+                        source_manifest_sha256: str | None, goal_sha256: str) -> str:
     if (not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', engagement_id)
             or not re.fullmatch(r'[A-Za-z0-9_.@+-]{1,128}', operator_id)
             or not re.fullmatch(r'sha256:[0-9a-f]{64}', trusted_fingerprint)):
@@ -256,12 +257,67 @@ def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
     signature = _file(signature, private=True)
     signers = _file(signers, private=True)
     scope_bytes = scope.read_bytes()
-    for label, required in (('effect class', SETUP_EFFECT_CLASS),
-                            ('network class', SETUP_NETWORK_CLASS)):
-        pattern = rb'^\s*-\s*Native setup ' + label.encode() + rb':\s*([^\r\n]+)\s*$'
-        matches = re.findall(pattern, scope_bytes, re.MULTILINE)
-        if matches != [required.encode()]:
-            _fail('setup_scope_effect_boundary_missing')
+    try:
+        scope_text = scope_bytes.decode('utf-8')
+    except UnicodeError:
+        _fail('setup_scope_incomplete')
+    if len(scope_bytes) > 256 * 1024:
+        _fail('setup_scope_incomplete')
+    sections = re.findall(r'^```native-setup-scope-v1\s*\n(.*?)^```\s*$',
+                          scope_text, re.MULTILINE | re.DOTALL)
+    if len(sections) != 1:
+        _fail('setup_scope_incomplete')
+    def unique_pairs(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate key')
+            value[key] = item
+        return value
+    try:
+        boundary = json.loads(sections[0], object_pairs_hook=unique_pairs)
+    except ValueError:
+        _fail('setup_scope_incomplete')
+    required = {'kind', 'engagement_id', 'operator_id', 'source_manifest_sha256',
+                'goal_sha256', 'surfaces', 'benign_objectives', 'escalation_ceiling',
+                'impact_demo_authorized', 'accounts', 'cleanup', 'effect_class',
+                'network_class', 'expires_at'}
+    def concrete(value):
+        return (isinstance(value, str) and 8 <= len(value.strip()) <= 1000
+                and not re.search(r'\b(?:TBD|TODO|unknown|placeholder|n/a)\b|<|>|___', value, re.I)
+                and not CREDENTIAL_TEXT.search(value))
+    if (not isinstance(boundary, dict) or set(boundary) != required
+            or boundary['kind'] != 'native-setup-scope-v1'
+            or boundary['engagement_id'] != engagement_id
+            or boundary['operator_id'] != operator_id
+            or not isinstance(boundary['source_manifest_sha256'], str)
+            or not HEX_RE.fullmatch(boundary['source_manifest_sha256'])
+            or (source_manifest_sha256 is not None
+                and boundary['source_manifest_sha256'] != source_manifest_sha256)
+            or boundary['goal_sha256'] != goal_sha256
+            or not isinstance(boundary['surfaces'], list)
+            or not boundary['surfaces'] or len(boundary['surfaces']) > 16
+            or not all(concrete(item) for item in boundary['surfaces'])
+            or not isinstance(boundary['benign_objectives'], list)
+            or not boundary['benign_objectives'] or len(boundary['benign_objectives']) > 16
+            or not all(concrete(item) for item in boundary['benign_objectives'])
+            or boundary['escalation_ceiling'] != 'setup_only'
+            or boundary['impact_demo_authorized'] is not False
+            or not isinstance(boundary['accounts'], list) or len(boundary['accounts']) > 16
+            or not all(concrete(item) for item in boundary['accounts'])
+            or not concrete(boundary['cleanup'])
+            or boundary['effect_class'] != SETUP_EFFECT_CLASS
+            or boundary['network_class'] != SETUP_NETWORK_CLASS
+            or not isinstance(boundary['expires_at'], str)
+            or not re.fullmatch(r'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z',
+                                boundary['expires_at'])):
+        _fail('setup_scope_incomplete')
+    try:
+        expiry = datetime.strptime(boundary['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except ValueError:
+        _fail('setup_scope_incomplete')
+    if datetime.now(timezone.utc) >= expiry:
+        _fail('setup_scope_expired')
     try:
         fingerprint = verify_operator_signature_bytes(
             scope_bytes=scope_bytes, operator_id=operator_id,
@@ -272,6 +328,7 @@ def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
         _fail('setup_scope_signature_invalid')
     if fingerprint != trusted_fingerprint:
         _fail('setup_scope_signer_untrusted')
+    return boundary['source_manifest_sha256']
 
 
 def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
@@ -359,6 +416,18 @@ def setup_approval_template(run_root: Path, approved_at: str, expires_at: str) -
             'monetary_cap_usd': None,
             'approved_by': plan['setup_only']['operator_id'],
             'approved_at': approved_at, 'expires_at': expires_at}
+
+
+def setup_source_manifest(source: Path) -> dict:
+    source = Path(source)
+    if not source.is_absolute() or source.is_symlink() or not source.is_dir():
+        _fail('source_directory_invalid')
+    inventory = _inventory(source, max_files=SETUP_SOURCE_MAX_FILES,
+                           max_bytes=SETUP_SOURCE_MAX_BYTES)
+    return {'kind': 'native-setup-source-manifest-v1',
+            'source_manifest_sha256': hashlib.sha256(
+                json.dumps(inventory, sort_keys=True).encode()).hexdigest(),
+            'source_files': len(inventory), 'source_sha256': inventory}
 
 
 def _inventory(directory: Path, *, max_files: int | None = None,
@@ -555,6 +624,8 @@ def _filesystem_snapshot(root: Path, plan: dict) -> dict:
                     or package.get('plan_sha256') != _sha(root / 'plan.json')
                     or package.get('approval_sha256') != _sha(_controls(root) / 'approval.json')
                     or package.get('original_source_manifest_sha256') != plan['source_manifest_sha256']
+                    or package.get('setup_sequence') != _read_json(_controls(root) / 'dispatch' /
+                                                                   (dispatch_id + '.json')).get('setup_sequence')
                     or package.get('dispatch_sha256') != _sha(_controls(root) / 'dispatch' /
                                                               (dispatch_id + '.json'))
                     or package.get('native_trace_sha256') != _sha(_controls(root) / 'dispatch' /
@@ -928,12 +999,18 @@ def prepare(args: argparse.Namespace) -> dict:
                 or type(args.setup_max_workspace_bytes) is not int
                 or not 8 * 1024 * 1024 <= args.setup_max_workspace_bytes <= 512 * 1024 * 1024):
             _fail('setup_authority_input_missing')
-        _verify_setup_scope(scope, Path(args.setup_scope_signature),
-                            Path(args.setup_allowed_signers), args.setup_engagement_id,
-                            args.setup_operator_id, args.setup_trusted_fingerprint)
+        signed_source_manifest = _verify_setup_scope(
+            scope, Path(args.setup_scope_signature), Path(args.setup_allowed_signers),
+            args.setup_engagement_id, args.setup_operator_id,
+            args.setup_trusted_fingerprint, None, _sha(brief))
     elif any((args.setup_operator_id, args.setup_engagement_id, args.setup_scope_signature,
               args.setup_allowed_signers, args.setup_trusted_fingerprint)):
         _fail('setup_authority_unexpected')
+    source_inventory = (_inventory(source, max_files=SETUP_SOURCE_MAX_FILES,
+                                   max_bytes=SETUP_SOURCE_MAX_BYTES) if setup_only else _inventory(source))
+    source_manifest = hashlib.sha256(json.dumps(source_inventory, sort_keys=True).encode()).hexdigest()
+    if setup_only and source_manifest != signed_source_manifest:
+        _fail('setup_signed_source_mismatch')
     for path, expected in ((scope, args.scope_sha256), (relay, args.relay_sha256),
                            (ca, args.runtime_ca_sha256)):
         if not HEX_RE.fullmatch(expected) or _sha(path) != expected:
@@ -962,8 +1039,6 @@ def prepare(args: argparse.Namespace) -> dict:
     if (not stat.S_ISREG(docker_entry.st_mode) or not os.access(docker_binary, os.X_OK)
             or docker_entry.st_mode & 0o022):
         _fail('docker_executable_invalid')
-    source_inventory = (_inventory(source, max_files=SETUP_SOURCE_MAX_FILES,
-                                   max_bytes=SETUP_SOURCE_MAX_BYTES) if setup_only else _inventory(source))
     if source_only and any(name == '.native-source' or name.startswith('.native-source/')
                            for name in source_inventory):
         _fail('source_reserved_execution_path')
@@ -1328,7 +1403,8 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
             _fail('setup_plan_invalid')
         _verify_setup_scope(controls / 'scope.md', controls / 'setup-scope.sig',
                             controls / 'setup-allowed-signers', setup['engagement_id'],
-                            setup['operator_id'], setup['trusted_fingerprint'])
+                            setup['operator_id'], setup['trusted_fingerprint'],
+                            plan['source_manifest_sha256'], plan['brief_sha256'])
     if _read_json(controls / 'opencode.json') != config:
         _fail('run_config_mismatch')
     if 'source_only' in plan:
@@ -2769,6 +2845,25 @@ def _unresolved_dispatches(root: Path) -> list[str]:
     return sorted(unresolved)
 
 
+def _setup_dispatches(root: Path) -> list[dict]:
+    rows = []
+    for path in (_controls(root) / 'dispatch').glob('*.json'):
+        if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
+            continue
+        row = _read_json(path)
+        if row.get('role') in ('researcher', 'resume'):
+            if (row.get('kind') != 'native-dispatch-v1'
+                    or row.get('dispatch_id') != path.stem
+                    or type(row.get('setup_sequence')) is not int
+                    or row['setup_sequence'] < 1):
+                _fail('setup_dispatch_order_invalid')
+            rows.append(row)
+    rows.sort(key=lambda row: row['setup_sequence'])
+    if [row['setup_sequence'] for row in rows] != list(range(1, len(rows) + 1)):
+        _fail('setup_dispatch_order_invalid')
+    return rows
+
+
 def _research_context(root: Path, continuity: str, *, pool: dict | None = None) -> dict | None:
     """Project current authority into advice; never treat notes as authority."""
     plan = _plan(root)
@@ -2919,6 +3014,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
                     _fail('native_turn_input_invalid')
                 record.update({'continuity': continuity, 'research_snapshot_sha256': _sha(snapshot_path),
                                'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()})
+        if setup_only:
+            record['setup_sequence'] = len(_setup_dispatches(root)) + 1
         record['pool_before'] = pool_before
         _write_json(record_path, record, once=True)
         _write_json(record_path.with_name(dispatch_id + '.pre.json'), record, once=True)
@@ -3368,13 +3465,7 @@ def setup_freeze(run_root: Path) -> dict:
         _approval_active(root)
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')
-        records = []
-        for path in sorted((_controls(root) / 'dispatch').glob('*.json')):
-            if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
-                continue
-            row = _read_json(path)
-            if row.get('role') in ('researcher', 'resume'):
-                records.append(row)
+        records = _setup_dispatches(root)
         if not records or records[-1].get('status') != 'acknowledged':
             _fail('setup_turn_not_acknowledged')
         latest = records[-1]
@@ -3430,6 +3521,7 @@ def setup_freeze(run_root: Path) -> dict:
                    'approval_sha256': _sha(_controls(root) / 'approval.json'),
                    'original_source_manifest_sha256': plan['source_manifest_sha256'],
                    'dispatch_id': latest['dispatch_id'],
+                   'setup_sequence': latest['setup_sequence'],
                    'dispatch_sha256': _sha(_controls(root) / 'dispatch' /
                                            (latest['dispatch_id'] + '.json')),
                    'native_trace_sha256': _sha(trace),
@@ -4506,9 +4598,11 @@ def status(run_root: Path) -> dict:
             'provider_request_count': None, 'monetary_spend': None}
     if 'setup_only' in plan:
         frozen = controls / 'setup-output/receipt.json'
+        setup_dispatches = _setup_dispatches(root)
         result['setup'] = {'original_source_manifest_sha256': plan['source_manifest_sha256'],
                            'max_workspace_bytes': plan['setup_only']['max_workspace_bytes'],
                            'frozen_proposal_receipt_sha256': _sha(frozen) if frozen.exists() else None,
+                           'last_dispatch_id': setup_dispatches[-1]['dispatch_id'] if setup_dispatches else None,
                            'pending_dispatches': _unresolved_dispatches(root),
                            'target_build_executed': False}
     return result
@@ -5145,6 +5239,9 @@ def _parser() -> argparse.ArgumentParser:
     setup_template_cmd.add_argument('--run-root', required=True)
     setup_template_cmd.add_argument('--approved-at', required=True)
     setup_template_cmd.add_argument('--expires-at', required=True)
+    setup_manifest_cmd = commands.add_parser('setup-source-manifest',
+                                             help='provider-free regular-file source identity before scope signing')
+    setup_manifest_cmd.add_argument('--source', required=True)
     source_cmd = commands.add_parser('source-execute', help='offline source execution and two clean replays')
     source_cmd.add_argument('--run-root', required=True)
     source_cmd.add_argument('--command-file', help='optional experiment argv; default is the pinned build command')
@@ -5246,6 +5343,8 @@ def main() -> int:
             result = setup_freeze(Path(args.run_root))
         elif args.command == 'setup-approval-template':
             result = setup_approval_template(Path(args.run_root), args.approved_at, args.expires_at)
+        elif args.command == 'setup-source-manifest':
+            result = setup_source_manifest(Path(args.source))
         elif args.command == 'stop':
             result = stop(Path(args.run_root))
         elif args.command == 'recover-start':

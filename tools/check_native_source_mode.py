@@ -7,6 +7,7 @@ not qualification of approval, stop ownership, native review, or paid transport.
 import argparse
 import contextlib
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -101,7 +102,8 @@ def docker_scenario(image):
                     'module_cache_sha256': 'a' * 64, 'build_command': ['sh', 'experiment.sh']},
                 'source_sha256': runner._inventory(original), 'source_manifest_sha256': 'b' * 64,
                 'target_image_id': image, 'platform': 'linux/arm64',
-                'limits': {'duration_seconds': 30}}
+                'limits': {'duration_seconds': 30},
+                'source_effect_envelope': runner.SOURCE_EFFECT_ENVELOPE}
         runner._write_json(root / 'plan.json', plan)
         runner._write_json(controls / 'target-command.json', ['sh', 'experiment.sh'])
         runner._write_json(controls / 'resources.json', {'nonce': root.name})
@@ -114,8 +116,13 @@ def docker_scenario(image):
                 if role in runner.CAPTURE_TARGETS:
                     shutil.copytree(original, target, dirs_exist_ok=True)
                 result = runner._docker('container', 'run', '-d', '--pull', 'never', '--network', 'none',
-                    '--read-only', '--label', runner.LABEL + '=' + root.name,
+                    '--read-only', '--restart', 'no', '--log-driver', 'none', '--cap-drop', 'ALL',
+                    '--security-opt', 'no-new-privileges=true',
+                    '--user', f'{os.getuid()}:{os.getgid()}', '--memory', '1g', '--cpus', '1',
+                    '--pids-limit', '64', '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m',
+                    '--label', runner.LABEL + '=' + root.name,
                     '--mount', 'type=bind,src=' + str(target) + ',dst=/target',
+                    '--mount', 'type=bind,src=' + str(controls / 'source-modules') + ',dst=/modules,readonly',
                     '-w', '/target', '--entrypoint', 'sh', image,
                     '-c', 'while :; do sleep 3600; done')
                 bindings[role] = result.stdout.decode().strip()

@@ -27,6 +27,9 @@ from pathlib import Path
 import native_research as runner
 
 NEXT_KIND = 'native-continuation-next-v1'
+SOURCE_ACTION_KIND = 'native-source-execute-v1'
+SOURCE_REQUEST_KIND = 'native-source-action-request-v1'
+SOURCE_TERMINAL_KIND = 'native-source-action-terminal-v1'
 STATE_KIND = 'native-continuation-state-v1'
 STOP_KIND = 'native-continuation-stop-v1'
 REQUEST_KIND = 'native-continuation-closure-request-v1'
@@ -163,10 +166,17 @@ def _validate_next(value: dict) -> dict:
     if type(proposed) is not bool or type(strong) is not bool:
         _fail('continuation_next_invalid')
     following = value.get('next')
+    action = value.get('host_action')
+    if action is not None:
+        if (proposed or following is not None or not isinstance(action, dict)
+                or set(action) != {'kind', 'command'}
+                or action.get('kind') != SOURCE_ACTION_KIND):
+            _fail('continuation_source_action_invalid')
+        runner._validate_argv(action.get('command'))
     if proposed:
         if following is not None:
             _fail('continuation_next_invalid')
-    else:
+    elif action is None:
         if not isinstance(following, dict):
             _fail('continuation_next_invalid')
         for name in ('question', 'test', 'prediction', 'disconfirming', 'authority'):
@@ -223,14 +233,14 @@ def _state(root: Path) -> dict:
         value = {'kind': STATE_KIND, 'plan_sha256': plan_sha, 'invocations': 0,
                  'session_id': None, 'last_pool': None, 'stop_reason': None,
                  'pending': None, 'last_strong_lead': None,
-                 'applied_closure_review_sha256': None}
+                 'applied_closure_review_sha256': None, 'source_action': None}
         _write_private(path, value)
         return value
     value = _read_private(path)
     if (value.get('kind') != STATE_KIND or value.get('plan_sha256') != plan_sha
             or type(value.get('invocations')) is not int or value['invocations'] < 0):
         _fail('continuation_checkpoint_stale')
-    for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256'):
+    for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256', 'source_action'):
         value.setdefault(key, None)
     return value
 
@@ -376,7 +386,317 @@ def reconcile(run_root: Path, *, dispatch_id: str, decision: str,
                 'dispatch_id': dispatch_id}
 
 
-def _prompt(root: Path, number: int) -> Path:
+def _source_actions(root: Path) -> Path:
+    path = _cont(root) / 'source-actions'
+    if not path.exists():
+        path.mkdir(mode=0o700)
+    entry = path.stat(follow_symlinks=False)
+    if not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid() or entry.st_mode & 0o077:
+        _fail('source_action_state_permissions')
+    return path
+
+
+def _source_authority_request(root: Path, state: dict, next_sha: str, reason: str) -> dict:
+    path = _source_actions(root) / ('authority-' + next_sha + '.json')
+    record = {'kind': 'native-source-authority-request-v1', 'next_sha256': next_sha,
+              'plan_sha256': state['plan_sha256'], 'reason': reason,
+              'human_decision_required': True, 'research_help': False}
+    if path.exists():
+        if _read_private(path) != record:
+            _fail('source_action_authority_record_changed')
+    else:
+        _write_private(path, record)
+        _event(root, {'at': _now(), 'event': 'source_authority_required',
+                      'record_sha256': runner._sha(path), 'reason': reason})
+    return {'status': 'authority_required', 'authority_request': str(path)}
+
+
+def _source_preflight(root: Path, state: dict, next_sha: str) -> dict:
+    plan = runner._verified_plan(root)
+    if ('source_only' not in plan or
+            plan.get('source_effect_envelope') != runner.SOURCE_EFFECT_ENVELOPE):
+        return _source_authority_request(root, state, next_sha, 'offline_source_envelope_missing')
+    runner._approval_active(root)
+    if not runner.run_active(root) or runner._unresolved_dispatches(root):
+        _fail('source_action_run_inactive_or_unresolved')
+    allowance = runner.allowance_snapshot(root)
+    limits = allowance.get('hard_limits') or plan['limits']
+    if (allowance.get('active') is not True
+            or limits != plan['limits']
+            or not isinstance(allowance.get('run_identity'), dict)
+            or type(allowance.get('used_tunnels')) is not int
+            or type(allowance.get('charged_tunnel_bytes')) is not int
+            or allowance['used_tunnels'] < 0 or allowance['charged_tunnel_bytes'] < 0
+            or allowance['used_tunnels'] >= limits['max_connections']
+            or allowance['charged_tunnel_bytes'] >= limits['max_bytes']):
+        _fail('source_action_allowance_exhausted')
+    runner._source_executor_envelope(root, plan)
+    return {'status': 'authorized', 'plan': plan, 'allowance': allowance}
+
+
+def _source_request(root: Path, state: dict, nxt: dict, next_sha: str,
+                    allowance: dict, plan: dict) -> dict:
+    base = _source_actions(root)
+    if state.get('source_action') is None:
+        for child in base.iterdir():
+            if re.fullmatch(r'authority-[0-9a-f]{64}\.json', child.name):
+                _read_private(child)
+            else:
+                _fail('source_action_orphan_requires_reconciliation')
+    identity = os.urandom(16).hex()
+    directory = base / identity
+    directory.mkdir(mode=0o700)
+    descriptor = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    command_path = directory / 'command.json'
+    _write_private(command_path, nxt['host_action']['command'])
+    input_path = directory / 'input'
+    inventory = runner._freeze_source_input(root, input_path, 'researcher')
+    if _next_hash(root) != next_sha:
+        _fail('source_action_request_changed')
+    manifest_path = directory / 'input-manifest.json'
+    _write_private(manifest_path, inventory)
+    request = {'kind': SOURCE_REQUEST_KIND, 'action_id': identity,
+               'next_sha256': next_sha, 'plan_sha256': state['plan_sha256'],
+               'scope_sha256': plan['scope_sha256'],
+               'approval_sha256': runner._sha(root / 'controls/approval.json'),
+               'command_sha256': runner._sha(command_path),
+               'input_manifest_sha256': runner._sha(manifest_path),
+               'allowance_before': allowance}
+    request_path = directory / 'request.json'
+    _write_private(request_path, request)
+    state['source_action'] = {'action_id': identity, 'next_sha256': next_sha,
+                              'request_sha256': runner._sha(request_path),
+                              'after_invocations': state['invocations'],
+                              'phase': 'prepared', 'terminal_sha256': None}
+    _save_state(root, state)
+    _event(root, {'at': _now(), 'event': 'source_action_prepared',
+                  'action_id': identity, 'request_sha256': state['source_action']['request_sha256']})
+    return request
+
+
+def _frozen_source_request(root: Path, state: dict, nxt: dict, next_sha: str) -> tuple[Path, dict, dict]:
+    pending = state['source_action']
+    identity = pending.get('action_id')
+    if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+            or pending.get('next_sha256') != next_sha
+            or pending.get('after_invocations') != state['invocations']):
+        _fail('source_action_pending_mismatch')
+    directory = _source_actions(root) / identity
+    entry = directory.stat(follow_symlinks=False)
+    if not stat.S_ISDIR(entry.st_mode) or entry.st_mode & 0o077 or entry.st_uid != os.getuid():
+        _fail('source_action_state_permissions')
+    request_path = directory / 'request.json'
+    request = _read_private(request_path)
+    if (runner._sha(request_path) != pending.get('request_sha256')
+            or request.get('kind') != SOURCE_REQUEST_KIND
+            or request.get('action_id') != identity
+            or request.get('next_sha256') != next_sha
+            or request.get('plan_sha256') != state['plan_sha256']
+            or request.get('scope_sha256') != runner._plan(root).get('scope_sha256')
+            or request.get('approval_sha256') != runner._sha(root / 'controls/approval.json')
+            or request.get('command_sha256') != runner._sha(directory / 'command.json')
+            or request.get('input_manifest_sha256') != runner._sha(directory / 'input-manifest.json')):
+        _fail('source_action_request_changed')
+    command = json.loads(runner._file(directory / 'command.json', private=True).read_bytes())
+    if command != nxt['host_action']['command']:
+        _fail('source_action_command_changed')
+    inventory = _read_private(directory / 'input-manifest.json')
+    if runner._inventory(directory / 'input') != inventory:
+        _fail('source_action_input_changed')
+    return directory, request, inventory
+
+
+def _source_receipt(root: Path, directory: Path, request: dict, inventory: dict) -> tuple[Path, dict] | None:
+    identity = request['action_id']
+    execution = root / 'controls/source-executions' / identity
+    receipt_path = execution / 'receipt.json'
+    if not receipt_path.exists():
+        return None
+    receipt = _read_private(receipt_path)
+    if receipt.get('status') != 'captured':
+        return None
+    plan = runner._plan(root)
+    if (receipt.get('kind') != 'native-source-execution-v1'
+            or receipt.get('execution_id') != identity
+            or receipt.get('owner_role') != 'researcher'
+            or receipt.get('plan_sha256') != request['plan_sha256']
+            or receipt.get('original_source_manifest_sha256') != plan['source_manifest_sha256']
+            or receipt.get('module_cache_sha256') != plan['source_only']['module_cache_sha256']
+            or receipt.get('image_id') != plan['target_image_id']
+            or receipt.get('platform') != plan['platform']
+            or receipt.get('network') != 'none'
+            or receipt.get('command') != json.loads((directory / 'command.json').read_bytes())
+            or receipt.get('input_manifest_sha256') != request['input_manifest_sha256']
+            or runner._sha(execution / 'input-manifest.json') != request['input_manifest_sha256']
+            or _read_private(execution / 'input-manifest.json') != inventory
+            or runner._inventory(execution / 'input') != inventory
+            or receipt.get('assessment') != 'needs_review'
+            or [row.get('role') for row in receipt.get('runs', [])] != list(runner.CAPTURE_TARGETS)):
+        _fail('source_action_receipt_mismatch')
+    if (any(type(row.get('exit_code')) is not int for row in receipt['runs'])
+            or receipt.get('replay_output_equal') is not
+            (len({(row['exit_code'], row.get('stdout_sha256'), row.get('stderr_sha256'))
+                  for row in receipt['runs']}) == 1)
+            or receipt.get('all_commands_succeeded') is not
+            all(row['exit_code'] == 0 for row in receipt['runs'])):
+        _fail('source_action_receipt_mismatch')
+    for row in receipt['runs']:
+        output = execution / row['role']
+        if (row.get('output_manifest_sha256') != runner._sha(output / 'files.json')
+                or runner._inventory(output / 'files') != _read_private(output / 'files.json')):
+            _fail('source_action_output_changed')
+        for stream in ('stdout', 'stderr'):
+            path = output / (stream + '.txt')
+            if path.exists():
+                if runner._sha(runner._file(path, private=True)) != row.get(stream + '_sha256'):
+                    _fail('source_action_output_changed')
+            elif row.get(stream + '_redacted') is not True:
+                _fail('source_action_output_missing')
+    return receipt_path, receipt
+
+
+def _source_projection(root: Path, request: dict, receipt_path: Path, receipt: dict) -> dict:
+    runs = []
+    for row in receipt['runs']:
+        item = {key: row.get(key) for key in ('role', 'exit_code', 'stdout_sha256',
+                                              'stderr_sha256', 'output_manifest_sha256')}
+        for stream in ('stdout', 'stderr'):
+            item[stream + '_withheld'] = True
+        runs.append(item)
+    return {'kind': 'native-source-action-results-v1', 'action_id': request['action_id'],
+            'request_sha256': runner._sha(_source_actions(root) / request['action_id'] / 'request.json'),
+            'source_receipt_sha256': runner._sha(receipt_path), 'assessment': 'needs_review',
+            'security_effect': 'unproven',
+            'replay_output_equal': receipt.get('replay_output_equal'),
+            'all_commands_succeeded': receipt.get('all_commands_succeeded'),
+            'runs': runs}
+
+
+def _adopt_source_receipt(root: Path, state: dict, directory: Path,
+                          request: dict, inventory: dict) -> dict:
+    try:
+        observed = _source_receipt(root, directory, request, inventory)
+    except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
+        observed = None
+    if observed is None:
+        state['source_action']['phase'] = 'unknown_effect'
+        _save_state(root, state)
+        _event(root, {'at': _now(), 'event': 'source_action_unknown_effect',
+                      'action_id': request['action_id']})
+        return {'status': 'unknown_effect', 'action_id': request['action_id']}
+    receipt_path, receipt = observed
+    projection = _source_projection(root, request, receipt_path, receipt)
+    projection_dir = root / 'controls/research/source-actions' / request['action_id']
+    projection_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    projection_path = projection_dir / 'RESULTS.json'
+    if projection_path.exists():
+        if _read_private(projection_path) != projection:
+            _fail('source_action_projection_changed')
+    else:
+        runner._write_json(projection_path, projection, once=True)
+    terminal_path = directory / 'terminal.json'
+    if terminal_path.exists():
+        terminal = _read_private(terminal_path)
+        if (terminal.get('kind') != SOURCE_TERMINAL_KIND
+                or terminal.get('status') != 'captured'
+                or terminal.get('action_id') != request['action_id']
+                or terminal.get('request_sha256') != state['source_action']['request_sha256']
+                or terminal.get('source_receipt_sha256') != runner._sha(receipt_path)
+                or terminal.get('projection_sha256') != runner._sha(projection_path)
+                or terminal.get('allowance_before') != request['allowance_before']
+                or terminal.get('assessment') != 'needs_review'
+                or terminal.get('security_effect') != 'unproven'):
+            _fail('source_action_terminal_changed')
+    else:
+        try:
+            allowance_after = runner.allowance_snapshot(root)
+        except (runner.NativeResearchError, OSError):
+            allowance_after = None
+        before = request['allowance_before']
+        if (allowance_after is not None
+                and (allowance_after.get('run_identity') != before.get('run_identity')
+                     or allowance_after.get('used_tunnels', -1) < before.get('used_tunnels', 0)
+                     or allowance_after.get('charged_tunnel_bytes', -1)
+                     < before.get('charged_tunnel_bytes', 0))):
+            _fail('source_action_allowance_changed')
+        terminal = {'kind': SOURCE_TERMINAL_KIND, 'status': 'captured',
+                    'action_id': request['action_id'],
+                    'request_sha256': state['source_action']['request_sha256'],
+                    'source_receipt_sha256': runner._sha(receipt_path),
+                    'projection_sha256': runner._sha(projection_path),
+                    'allowance_before': request['allowance_before'],
+                    'allowance_observed_at_adoption': allowance_after,
+                    'assessment': 'needs_review', 'security_effect': 'unproven'}
+        runner._write_json(terminal_path, terminal, once=True)
+    digest = runner._sha(terminal_path)
+    if state['source_action'].get('terminal_sha256') not in (None, digest):
+        _fail('source_action_terminal_changed')
+    if state['source_action']['phase'] != 'captured':
+        state['source_action'].update(phase='captured', terminal_sha256=digest)
+        _save_state(root, state)
+        _event(root, {'at': _now(), 'event': 'source_action_captured',
+                      'action_id': request['action_id'], 'terminal_sha256': digest})
+    return {'status': 'captured', 'action_id': request['action_id'],
+            'terminal_sha256': digest, 'projection': str(projection_path)}
+
+
+def _source_action(root: Path, state: dict, nxt: dict | None) -> dict | None:
+    prior = state.get('source_action')
+    if nxt is None or nxt.get('host_action') is None:
+        if prior and prior.get('phase') != 'captured':
+            _fail('source_action_pending_request_missing')
+        if prior and prior.get('after_invocations') == state['invocations']:
+            _fail('source_action_checkpoint_changed_before_readback')
+        return None
+    next_sha = _next_hash(root)
+    if prior and prior.get('after_invocations') == state['invocations']:
+        if prior.get('next_sha256') != next_sha:
+            _fail('source_action_checkpoint_changed_before_readback')
+        directory, request, inventory = _frozen_source_request(root, state, nxt, next_sha)
+        phase = prior.get('phase')
+        if phase == 'unknown_effect':
+            return {'status': 'unknown_effect', 'action_id': prior['action_id']}
+        if phase in ('dispatched', 'captured'):
+            return _adopt_source_receipt(root, state, directory, request, inventory)
+        if phase != 'prepared':
+            _fail('source_action_state_invalid')
+    else:
+        if prior and prior.get('phase') != 'captured':
+            _fail('source_action_prior_unresolved')
+        authorization = _source_preflight(root, state, next_sha)
+        if authorization['status'] != 'authorized':
+            return authorization
+        request = _source_request(root, state, nxt, next_sha,
+                                  authorization['allowance'], authorization['plan'])
+        directory = _source_actions(root) / request['action_id']
+        inventory = _read_private(directory / 'input-manifest.json')
+    authorization = _source_preflight(root, state, next_sha)
+    if authorization['status'] != 'authorized':
+        return authorization
+    directory, request, inventory = _frozen_source_request(root, state, nxt, next_sha)
+    before, current = request['allowance_before'], authorization['allowance']
+    if (current['run_identity'] != before.get('run_identity')
+            or current['used_tunnels'] < before.get('used_tunnels', -1)
+            or current['charged_tunnel_bytes'] < before.get('charged_tunnel_bytes', -1)):
+        _fail('source_action_allowance_changed')
+    state['source_action']['phase'] = 'dispatched'
+    _save_state(root, state)
+    _event(root, {'at': _now(), 'event': 'source_action_dispatched',
+                  'action_id': request['action_id'],
+                  'request_sha256': state['source_action']['request_sha256']})
+    runner.source_execute(root, directory / 'command.json',
+                          source_snapshot=directory / 'input',
+                          owner_role='researcher', execution_id=request['action_id'],
+                          expected_command=nxt['host_action']['command'],
+                          expected_input=inventory)
+    return _adopt_source_receipt(root, state, directory, request, inventory)
+
+
+def _prompt(root: Path, number: int, source_action: dict | None = None) -> Path:
     path = _cont(root) / ('prompt-%04d.md' % number)
     _write_text(path, (
         'Continue the saved investigation from ordinary workspace files. Read '
@@ -386,7 +706,12 @@ def _prompt(root: Path, number: int) -> Path:
         'blocked, no longer useful, or you propose to stop, update /workspace/NEXT.json '
         'with the observed result and an explicit stop proposal. Do not invent a branch '
         'after a refutation. A supported, refuted, blocked or inconclusive result is '
-        'recorded in NEXT.json; a missing next test without a stop proposal is invalid.\n'))
+        'recorded in NEXT.json; a missing next test without a stop proposal is invalid.\n'
+        + (('Read the protected source result at /research/source-actions/'
+            + source_action['action_id'] + '/RESULTS.json before revising the next test. '
+            'It establishes repeated output only, not a security effect.\n')
+           if source_action and source_action.get('phase') == 'captured'
+           and source_action.get('after_invocations') == number else '')))
     return path
 
 
@@ -448,6 +773,10 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
         if pending is not None:
             return _finish(root, state, 'reconciliation_required',
                            pending=pending, stopped=stop)
+        if (state.get('source_action') or {}).get('phase') in ('dispatched', 'unknown_effect'):
+            outcome = _source_action(root, state, _next(root))
+            if outcome and outcome['status'] == 'unknown_effect':
+                return _finish(root, state, 'unknown_effect', source_action=outcome)
         if stop:
             return _finish(root, state, 'stopped', reason=stop)
         closure = _closure(root)
@@ -526,13 +855,18 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                               'request_sha256': runner._sha(cont / 'closure-request.json')})
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
+            if state['invocations'] and nxt is not None:
+                outcome = _source_action(root, state, nxt)
+                if outcome and outcome['status'] in ('unknown_effect', 'authority_required'):
+                    return _finish(root, state, outcome['status'], source_action=outcome)
             if state['invocations']:
                 if nxt is None:
                     return _finish(root, state, 'next_brief_missing')
                 command, session = 'resume', state.get('session_id')
-                prompt = _prompt(root, state['invocations'])
+                prompt = _prompt(root, state['invocations'], state.get('source_action'))
                 if not session:
-                    command, session, prompt = 'reconstruct', None, _prompt(root, state['invocations'])
+                    command, session, prompt = 'reconstruct', None, _prompt(
+                        root, state['invocations'], state.get('source_action'))
             else:
                 command, session, prompt = 'research', None, None
             state['pending'] = {'role': command, 'session': session, 'started_at': _now()}
@@ -549,7 +883,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 _event(root, {'at': _now(), 'event': 'dispatch_not_sent',
                               'role': command, 'code': result.get('code')})
                 command, session, prompt = 'reconstruct', None, _prompt(
-                    root, state['invocations'])
+                    root, state['invocations'], state.get('source_action'))
                 state['pending'] = {'role': command, 'session': None, 'started_at': _now()}
                 _save_state(root, state)
                 _event(root, {'at': _now(), 'event': 'dispatch_started',

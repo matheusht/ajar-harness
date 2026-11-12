@@ -66,6 +66,12 @@ T01_MIDDLEWARE_SHA = 'b58767b343bcbfaa1d9ae461cf39dc72e7f489ba3899dea2246541153b
 T01_BRIEF_SHA = 'cfa72ecb1279d292cd915c4c8b7c9405095405e422d1bf96e211db809b139c95'
 T01_WORKSPACE_BRIEF_SHA = '64b2b256fdc3285237bdf5c69f478ad680121e4a30284e1090819cff05b9cf09'
 CAPTURE_TARGETS = ('target', 'review-target-1', 'review-target-2')
+SOURCE_EFFECT_ENVELOPE = {
+    'kind': 'native-offline-source-effect-v1', 'network': 'none',
+    'writable_host_mount': '/target:owned_disposable_copy',
+    'readonly_host_mount': '/modules:offline_dependencies',
+    'replays': 2, 'assessment': 'reproducibility_only',
+}
 ORIGIN_ROLES = {'researcher': 'target', 'resume': 'target',
                 'reviewer-1': 'review-target-1', 'reviewer-2': 'review-target-2'}
 ORIGIN_SOURCE_FILES = {
@@ -923,6 +929,7 @@ def prepare(args: argparse.Namespace) -> dict:
             plan['source_only'] = dict(source_profile,
                 module_cache_sha256=hashlib.sha256(json.dumps(module_inventory, sort_keys=True).encode()).hexdigest(),
                 build_command=target_command)
+            plan['source_effect_envelope'] = SOURCE_EFFECT_ENVELOPE
         if args.model == PAID_MODEL:
             plan['provider_gateway_sha256'] = _sha(controls / 'provider-gateway.py')
         if capture:
@@ -1069,6 +1076,8 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
         module_digest = hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
         if module_digest != source['module_cache_sha256']:
             _fail('source_module_cache_changed')
+        if 'source_effect_envelope' in plan and plan['source_effect_envelope'] != SOURCE_EFFECT_ENVELOPE:
+            _fail('source_effect_envelope_changed')
     if _sha(root / 'researcher/brief/BRIEF.md') != plan.get('brief_sha256'):
         _fail('run_brief_changed')
     if 'research_workflow_sha256' in plan:
@@ -2741,6 +2750,8 @@ def _source_command(root: Path, identifier: str, workdir: str, argv: list[str],
     buffers = [bytearray(), bytearray()]
     try:
         with native.dispatch_guard(_controls(root) / 'native-state'):
+            if 'source_effect_envelope' in plan:
+                _source_executor_envelope(root, plan)
             child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      env={key: value for key, value in os.environ.items()
@@ -2824,6 +2835,35 @@ def _freeze_source_input(root: Path, destination: Path, role: str) -> dict:
         raise
 
 
+def _source_executor_envelope(root: Path, plan: dict) -> None:
+    """Read back the approved offline effect boundary immediately before a batch."""
+    if plan.get('source_effect_envelope') != SOURCE_EFFECT_ENVELOPE:
+        _fail('source_action_authority_required')
+    resources = _read_json(_controls(root) / 'resources.json')
+    nonce = resources.get('nonce')
+    for role in CAPTURE_TARGETS:
+        identifier = _resources(root)[role]
+        info = _inspect('container', identifier)
+        host = info.get('HostConfig') or {}
+        config = info.get('Config') or {}
+        mounts = {(row.get('Source'), row.get('Destination'), row.get('RW'))
+                  for row in info.get('Mounts', [])}
+        expected = {(str(root / role), '/target', True),
+                    (str(_controls(root) / 'source-modules'), '/modules', False)}
+        if (info.get('Id') != identifier or info.get('Image') != plan['target_image_id']
+                or config.get('Labels', {}).get(LABEL) != nonce
+                or config.get('User') != f'{os.getuid()}:{os.getgid()}'
+                or host.get('NetworkMode') != 'none' or host.get('ReadonlyRootfs') is not True
+                or set(info.get('NetworkSettings', {}).get('Networks', {})) != {'none'}
+                or host.get('Privileged') is not False or host.get('CapDrop') != ['ALL']
+                or 'no-new-privileges=true' not in (host.get('SecurityOpt') or [])
+                or host.get('PidsLimit') != 64 or host.get('Memory') != 1024 * 1024 * 1024
+                or host.get('NanoCpus') != 1000000000
+                or host.get('RestartPolicy', {}).get('Name') != 'no'
+                or mounts != expected):
+            _fail('source_effect_envelope_not_enforced')
+
+
 def _reset_source_executor(root: Path, role: str, identifier: str, plan: dict) -> None:
     native, _ = _activate_controls(root)
     with native.dispatch_guard(_controls(root) / 'native-state'):
@@ -2861,21 +2901,31 @@ def _reset_source_executor(root: Path, role: str, identifier: str, plan: dict) -
 
 
 def source_execute(run_root: Path, command_file: Path | None = None, *,
-                   source_snapshot: Path | None = None, owner_role: str = 'researcher') -> dict:
+                   source_snapshot: Path | None = None, owner_role: str = 'researcher',
+                   execution_id: str | None = None, expected_command: list[str] | None = None,
+                   expected_input: dict[str, str] | None = None) -> dict:
     root = _private_root(run_root)
     with _turn_lock(root):
         plan = _verified_plan(root)
         if 'source_only' not in plan or not run_active(root) or _unresolved_dispatches(root):
             _fail('source_execution_unavailable')
         _approval_active(root)
+        if 'source_effect_envelope' in plan:
+            _source_executor_envelope(root, plan)
         if owner_role not in ('researcher', 'reviewer-1', 'reviewer-2'):
             _fail('source_owner_invalid')
         command = _validate_target_command(command_file or _controls(root) / 'target-command.json')
+        if expected_command is not None and command != expected_command:
+            _fail('source_execution_command_changed')
         if source_snapshot is not None:
             inventory = _inventory(source_snapshot)
+            if expected_input is not None and inventory != expected_input:
+                _fail('source_execution_input_changed')
             if owner_role.startswith('reviewer-'):
                 _verify_source_original(plan['source_sha256'], inventory)
-        identity = uuid.uuid4().hex
+        identity = execution_id or uuid.uuid4().hex
+        if not re.fullmatch(r'[0-9a-f]{32}', identity):
+            _fail('source_execution_id_invalid')
         directory = _controls(root) / 'source-executions' / identity
         directory.mkdir(mode=0o700)
         path = directory / 'receipt.json'
@@ -2894,12 +2944,16 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
             else:
                 shutil.copytree(source_snapshot, directory / 'input', symlinks=True)
                 _verify_inventory(directory / 'input', inventory)
+                if expected_input is not None:
+                    _verify_inventory(directory / 'input', expected_input)
             if owner_role.startswith('reviewer-'):
                 _verify_source_original(plan['source_sha256'], inventory)
             _write_json(directory / 'input-manifest.json', inventory, once=True)
             receipt['input_manifest_sha256'] = _sha(directory / 'input-manifest.json')
             _write_json(path, receipt)
             for role in CAPTURE_TARGETS:
+                if 'source_effect_envelope' in plan:
+                    _source_executor_envelope(root, plan)
                 identifier = _resources(root)[role]
                 _reset_source_executor(root, role, identifier, plan)
                 output = directory / role

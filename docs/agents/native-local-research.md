@@ -112,6 +112,13 @@ proposal or a `strong_lead` change from true to false produces
  "test": "required when decision is reopen; the concrete discriminating test"}
 ```
 
+For approved source-only runs, `NEXT.json` may instead request one typed
+[source check](native-source-sdk.md#researcher-requested-source-check). The host
+freezes the source and command, executes under the offline envelope, and makes a
+hash-only protected result visible to the next native turn. A missing envelope
+stops for an authority decision; an older plan cannot be changed in place to
+grant it. The result does not establish a security effect.
+
 A reopen also requires a concrete next brief in `researcher/NEXT.json`; the
 review's `test` is recorded in the closure review, and the researcher must put the
 concrete next test in `NEXT.json` before the reopen continues. Budget or operator

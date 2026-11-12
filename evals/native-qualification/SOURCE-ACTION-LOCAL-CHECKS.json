@@ -1,0 +1,143 @@
+{
+  "adopted": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "255f998957300e9261a20e25daf4d370",
+      "request_sha256": "e807faaf26d4f0b38a67676a2511da4323c289ad07b9a92ca3a3d53d44144cc1",
+      "source_receipt_sha256": "b3f2901532f8d54931c02e8da99eb2f10d844014f736e77ce69a1a38a3281075",
+      "terminal_sha256": "66348ea82b422af3b2d2ea725d1d1941b20f8c2602ea4729b7fb10397a837733"
+    },
+    "first_status": "synthetic_crash_after_capture",
+    "second_status": "closure_review_required",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "check_sha256": "3d507f9a2d2ee2bf9230432dabc4055fce67b91d5ed3e45eb52e4d420e618076",
+  "command": [
+    "sh",
+    "check.sh"
+  ],
+  "continuation_sha256": "f519bd9012abf17effd9359f24538565672857f5baed36a4a10cd3350ce97b00",
+  "docker": {
+    "cleanup": "all_fixture_containers_absent",
+    "evidence": {
+      "action_id": "f4a2a1474cacaa373701146b56da1e9d",
+      "request_sha256": "d3cba7792825919b3469f67f8b770b06d9082b72e1cbb1deb40ab4bec4c01ed2",
+      "source_receipt_sha256": "f805e8d335eb65ccb26004e49e45b66b9d9dbfe0125bd7ffcebb0f4fce8598c7",
+      "terminal_sha256": "ea35c03bd1b45d8f6e0b6c53d137a020c789e808b0c6784b5e982c00c318d8dd"
+    },
+    "first_status": "closure_review_required",
+    "second_status": "closure_review_required",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "environment": {
+    "docker": "29.3.1",
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "expected": {
+    "clean_executor_runs": 3,
+    "source_batches_per_request": 1,
+    "unknown_effect_auto_retries": 0
+  },
+  "happy": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "815b6f50debf3c4977b07c177fcb58f8",
+      "request_sha256": "02dbbcd8ff44b8f8191caf9c4b493bf96759403425ac338d263af57b0c0f2c70",
+      "source_receipt_sha256": "ded9b9f30d1d3848c9dddc1a53e19b6c43b93b89bbef6975e1d328728fea3552",
+      "terminal_sha256": "2c42ae2778b49280d50d101745022a634b5e1a503fdc52b81a7f1e159b10261c"
+    },
+    "first_status": "closure_review_required",
+    "second_status": "closure_review_required",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+  "limits": "Synthetic native turns and authority; Docker source executor only when requested. No provider or target qualification.",
+  "native_tool_trace": null,
+  "prepared": {
+    "first_status": "synthetic_crash_before_dispatch",
+    "second_status": "closure_review_required",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "prior_authority_record": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "2bbad517f01870dc0380e73efbd33585",
+      "request_sha256": "18446b5b9ddef81140c34cc726fda21ec92c5a7a9910a0c5772109ee11484146",
+      "source_receipt_sha256": "90133bbaf0a94b799b87de05b0070f8de571fe07739aeb9f3a514e1693be911d",
+      "terminal_sha256": "7c0ddeaf622b88c3283aa97e7ff75fe74b175790c5af9abc939700f8b9349921"
+    },
+    "first_status": "closure_review_required",
+    "second_status": "closure_review_required",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "provider_cost": null,
+  "rejected": [
+    "malformed",
+    "duplicate_key",
+    "oversized",
+    "symlink",
+    "invalid_argv",
+    "stale_next",
+    "swapped_command",
+    "swapped_source",
+    "swapped_request",
+    "missing_envelope",
+    "expired_approval",
+    "exhausted",
+    "stopped",
+    "concurrent"
+  ],
+  "source_sha256": "8b7d3fef1424007f4be58ea30591bb148612e038c5f25cf16d9fc84558dcbcae",
+  "status": "passed",
+  "tampered_receipt": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "526eae125a21e3d6ae7dc404376a9dc6",
+      "request_sha256": "1349b70f419b443303c0ed54fc7c9b2296147abd641f26c9732d83c90f111d8e",
+      "source_receipt_sha256": null,
+      "terminal_sha256": null
+    },
+    "first_status": "synthetic_crash_after_capture",
+    "second_status": "unknown_effect",
+    "source_batches": 1,
+    "turns": [
+      "research"
+    ]
+  },
+  "uncertain": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "91dbc4a03ddb1919a84f80dcc5c3e4be",
+      "request_sha256": "2ef506af0b566aae0dd7a5aced8989bd33c58c127bc24749488e54ec4db2cb92",
+      "source_receipt_sha256": null,
+      "terminal_sha256": null
+    },
+    "first_status": "synthetic_crash_after_dispatch",
+    "second_status": "unknown_effect",
+    "source_batches": 1,
+    "turns": [
+      "research"
+    ]
+  }
+}

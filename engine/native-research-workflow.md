@@ -81,9 +81,23 @@ files under its own workspace root and must supply its own enforced run limits.
    }
    ```
 
-   Set `next` to `null` only with `"proposed_stop": true`. Coverage status is one
-   of `tested`, `blocked`, `out_of_scope`, or `untested`. Changing a strong lead
-   from `true` to `false` is an abandonment decision and needs fresh review.
+   Set `next` to `null` only for a stop proposal or a typed host action.
+   Coverage status is one of `tested`, `blocked`, `out_of_scope`, or
+   `untested`. Changing a strong lead from `true` to `false` is an abandonment
+   decision and needs fresh review.
+
+   In an approved source-only run, a host check request is the other reason for
+   `next: null`. Keep `proposed_stop: false` and add exactly one typed
+   `host_action`, for example
+   `{"kind":"native-source-execute-v1","command":["sh","check.sh"]}`.
+   Put the chosen script in the source workspace first. The host checks the
+   approved offline effect envelope and shared allowance, freezes the command
+   and source, and runs one protected batch. The following native turn reads
+   `/research/source-actions/<id>/RESULTS.json` and updates `NEXT.json` from the
+   result. The projection exposes exit codes and hashes, while raw output stays
+   host-protected. A matching replay output is only a reproducibility result;
+   it cannot establish a security effect. See
+   [native source research](../docs/agents/native-source-sdk.md#researcher-requested-source-check).
 
 
 5. **Follow real connections.** When one step appears to enable another, record

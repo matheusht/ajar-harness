@@ -74,6 +74,16 @@ Preparation copies and pins inputs. It starts no container or model session.
 Source mode has no listener, target URL or TCP readiness probe. The existing
 service profile retains its target command and port.
 
+New source plans pin `native-offline-source-effect-v1`. The live approval signs
+the exact plan, including this class. Before a requested action, the host reads
+back all three executors: network `none`, only the writable owned `/target`
+copy and read-only offline `/modules` mount, read-only container root, non-root
+user, dropped capabilities, no privilege gain, and finite CPU, memory and
+process limits. This class permits an agent-selected argv and script only inside
+those disposable copies. An older source plan without this envelope can still
+use its manual `source-execute` path, but cannot dispatch a researcher-requested
+host action. A matching scope hash or a sentence in `NEXT.json` is not a grant.
+
 ## Other runtimes
 
 Use `--source-runtime /absolute/private/runtime.json` instead of `--go-toolchain`.
@@ -161,6 +171,7 @@ old executor processes, restores original source, clears private caches, and
 starts the same sealed container ID under the existing run authority. It then
 copies the new captured input. Earlier inputs, output bytes and receipts remain
 in their own evidence directories. Do not reset or unpause executors manually.
+
 Each command has at most the original run duration; the shared deadline can end
 it earlier. Each
 stdout/stderr stream is limited to 1 MiB. Credential-like output is withheld,
@@ -173,6 +184,52 @@ dependency closure, command, environment, image, platform, runtime, exact execut
 IDs, exit codes and output hashes. Matching replay output is a reproducibility
 observation. It does not prove a security claim. Verify the causal link and a
 counterexample/control separately.
+
+## Researcher-requested source check
+
+In a newly prepared source-only run with the approved offline envelope, the
+researcher may choose a command and script in its ordinary source workspace,
+then put one typed request in `/workspace/NEXT.json`:
+
+```json
+{
+  "kind": "native-continuation-next-v1",
+  "last_result": {"state": "inconclusive", "rules_out": "none", "unresolved": "entry path"},
+  "capabilities": [], "coverage": [], "strong_lead": false,
+  "proposed_stop": false, "next": null,
+  "host_action": {"kind": "native-source-execute-v1", "command": ["sh", "check.sh"]}
+}
+```
+
+`continue` checks live approval, shared allowance, the source-only plan and
+actual executor isolation. It freezes the command and current source copy,
+assigns an action ID, saves the request and frozen hashes, then marks dispatch
+before calling the existing `source_execute` executor once. A captured result
+appears at read-only `/research/source-actions/<id>/RESULTS.json` for the next
+native turn. The projection shows exit codes and output hashes; raw stdout,
+stderr and files remain withheld because a generic regex cannot establish
+that arbitrary target output is safe to expose. The full protected source
+receipt and immutable action terminal stay under `controls/`. The controller
+prompts the next turn to read this result and revise `NEXT.json`.
+A duplicate request cannot start another batch.
+
+After a crash, `continue` may adopt a captured source receipt only when the
+pending action ID, exact command, frozen input manifest, plan and receipt bytes
+match. A prepared action can dispatch after those checks. Missing, corrupt or
+unknown post-dispatch results stop as `unknown_effect`; they need operator
+readback or a separately authorized reset. An action outside the offline class
+records `authority_required` separately from research help. The source request
+does not grant a service or external effect.
+
+An older plan without the class stops as `authority_required`. Count that as a
+human authority intervention and retain the blocked run; the immutable plan
+and approval cannot be upgraded in place. Prepare and approve a new run if the
+operator grants the class.
+
+The projection always says `security_effect: unproven`. Three matching runs
+establish repeated output. The original entry path, starting state, actor
+permission, protected effect and causal control still need independent evidence
+and fresh review.
 
 Use the normal frozen-packet `review` flow. Include the exact claim, relevant
 receipts, original source, changed inputs, controls, failures and limits. A fresh

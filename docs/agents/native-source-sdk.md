@@ -228,7 +228,10 @@ executor directory or dispatch event exists. An incomplete freeze is moved to
 then a fresh ID is prepared if the same run remains active. Any executor
 directory, dispatch event, or ambiguous journal stops for reconciliation.
 Earlier captured action directories are checked against their terminal receipts
-and capture history before a later action's orphan is recovered.
+and capture history before a later action's orphan is recovered. If a crash
+saved captured state but interrupted its journal event, the controller verifies
+the terminal, receipt and projection, then restores the event before replacing
+that state with a new action.
 An action outside the offline class
 records `authority_required` separately from research help. The source request
 does not grant a service or external effect.

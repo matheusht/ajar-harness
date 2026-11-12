@@ -568,15 +568,22 @@ def _source_request(root: Path, state: dict, nxt: dict, next_sha: str,
                 _fail('source_action_orphan_requires_reconciliation')
             captured[identity] = digest
     prior = state.get('source_action')
+    captured_event_missing = False
     if prior and prior.get('phase') == 'captured':
         identity, digest = prior.get('action_id'), prior.get('terminal_sha256')
         if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
                 or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
                 or identity in captured and captured[identity] != digest):
             _fail('source_action_orphan_requires_reconciliation')
+        captured_event_missing = identity not in captured
         captured[identity] = digest
     for identity, digest in captured.items():
         _verified_captured_source_action(root, state, base / identity, digest)
+    if captured_event_missing:
+        _event(root, {'at': _now(), 'event': 'source_action_captured',
+                      'action_id': prior['action_id'],
+                      'terminal_sha256': prior['terminal_sha256'],
+                      'recovered_from_state': True})
     orphans = []
     for child in base.iterdir():
         if re.fullmatch(r'authority-[0-9a-f]{64}\.json', child.name):

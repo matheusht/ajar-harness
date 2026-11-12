@@ -476,6 +476,63 @@ def second_action_orphan_case(base: Path, *, incomplete: bool) -> dict:
             'second_action_id': calls[1], 'orphan_quarantined': incomplete}
 
 
+def captured_event_gap_case(base: Path) -> dict:
+    root = fixture(base)
+    calls, turns = [], []
+    interrupted = False
+    def invoke(command, session, prompt):
+        turns.append(command)
+        runner._write_json(root / 'researcher/NEXT.json',
+                           checkpoint(action=ACTION if len(turns) < 4 else None,
+                                      stop=len(turns) == 4))
+        return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                   'dispatch_id': 'a' * 32,
+                   'pool_after': {'used_tunnels': len(turns),
+                                  'charged_tunnel_bytes': len(turns), 'active': True}}
+    original_event = continuation._event
+    def event(run_root, value):
+        nonlocal interrupted
+        if not interrupted and value.get('event') == 'source_action_captured':
+            interrupted = True
+            raise RuntimeError('synthetic_crash_before_captured_event')
+        original_event(run_root, value)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(runner, '_verified_plan',
+            side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+        stack.enter_context(patch.object(runner, '_approval_active'))
+        stack.enter_context(patch.object(runner, 'run_active', return_value=True))
+        stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value={
+            'active': True, 'run_identity': {'nonce': 'fixture'},
+            'used_tunnels': 0, 'charged_tunnel_bytes': 0}))
+        stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+        stack.enter_context(patch.object(runner, '_freeze_source_input', side_effect=fake_freeze))
+        stack.enter_context(patch.object(runner, '_source_executor_envelope'))
+        stack.enter_context(patch.object(runner, 'source_execute',
+            side_effect=fake_execute(calls)))
+        stack.enter_context(patch.object(continuation, '_event', side_effect=event))
+        try:
+            continuation.continue_run(root, max_invocations=5, invoke=invoke,
+                status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+        except RuntimeError as error:
+            assert str(error) == 'synthetic_crash_before_captured_event'
+        else:
+            raise AssertionError('captured event interruption was not observed')
+        state = runner._read_json(root / 'controls/continuation/state.json')
+        first_id = state['source_action']['action_id']
+        assert state['source_action']['phase'] == 'captured' and calls == [first_id]
+        result = continuation.continue_run(root, max_invocations=5, invoke=invoke,
+            status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+    assert result['status'] == 'closure_review_required'
+    assert len(calls) == 3 and len(set(calls)) == 3
+    assert turns == ['research', 'resume', 'resume', 'resume']
+    events = continuation._source_action_events(root)
+    captured = [row for row in events if row.get('event') == 'source_action_captured'
+                and row.get('action_id') == first_id]
+    assert len(captured) == 1 and captured[0].get('recovered_from_state') is True
+    return {'status': 'recovered_captured_event', 'source_batches': len(calls),
+            'first_action_id': first_id, 'first_captured_events': len(captured)}
+
+
 def rejection_cases(base: Path) -> list[str]:
     cases = ('malformed', 'duplicate_key', 'oversized', 'symlink', 'invalid_argv',
              'stale_next', 'swapped_command', 'swapped_source', 'swapped_request',
@@ -601,6 +658,7 @@ def main():
                                                            incomplete=False)
         second_orphan_incomplete = second_action_orphan_case(base / 'second-orphan-incomplete',
                                                              incomplete=True)
+        captured_event_gap = captured_event_gap_case(base / 'captured-event-gap')
         late_capture = run_case(base / 'late-capture', late_capture=True)
         adopted = run_case(base / 'adopted', crash_after_capture=True)
         tampered_receipt = run_case(base / 'tampered-receipt',
@@ -619,6 +677,7 @@ def main():
                       'orphan_malformed_journal': orphan_malformed_journal,
                       'second_orphan_prepared': second_orphan_prepared,
                       'second_orphan_incomplete': second_orphan_incomplete,
+                      'captured_event_gap': captured_event_gap,
                       'late_capture': late_capture,
                       'rejected': rejected,
                       'docker': docker,

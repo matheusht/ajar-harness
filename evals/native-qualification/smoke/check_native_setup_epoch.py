@@ -26,7 +26,7 @@ def write(path, value):
     path.write_text(json.dumps(value, sort_keys=True) + '\n')
 
 
-def stop_synthetic_successor(root, grant, now):
+def stop_synthetic_successor(root, now):
     """Give the second epoch stopped receipts so the third-epoch path is exercised."""
     controls = root / 'controls'
     plan = json.loads((root / 'plan.json').read_text())
@@ -352,7 +352,7 @@ def main():
             check('linked grant reaches resource boundary for successor',
                   code == 2 and successor_start.get('code') == 'docker_command_failed',
                   {'exit': code, 'code': successor_start.get('code')})
-            stop_synthetic_successor(successor, grant, now)
+            stop_synthetic_successor(successor, now)
             ancestor_nested = first / 'original/third-epoch'
             code, nested_ancestor = cli(env, 'setup-next-epoch', '--run-root', str(successor),
                                         '--next-run-root', str(ancestor_nested))

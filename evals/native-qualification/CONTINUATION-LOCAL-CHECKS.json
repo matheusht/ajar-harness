@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "first run stopped for closure review",
+      "pass": true
+    },
+    {
+      "name": "research, failed resume, reconstruction order",
+      "pass": true
+    },
+    {
+      "name": "checkpoint records the reconstruction session",
+      "pass": true
+    },
+    {
+      "name": "failed resume was not counted as a dispatch",
+      "pass": true
+    },
+    {
+      "name": "closure request was produced",
+      "pass": true
+    },
+    {
+      "name": "accepted closure returns without another invocation",
+      "pass": true
+    },
+    {
+      "name": "manual dismissal still requires legacy closure review",
+      "pass": true
+    },
+    {
+      "name": "legacy source-only closure uses accepted manual review",
+      "pass": true
+    }
+  ],
+  "status": "passed",
+  "limits": "Synthetic subprocess only; no native model, provider, or target."
+}

@@ -144,6 +144,30 @@ def main():
               manual_outcome['status'] == 'closure_review_required'
               and runner._read_json(manual / 'controls/continuation/closure-request.json')
                   ['reason'] == 'strong_lead_abandoned')
+        legacy = base / 'legacy-source-closure'
+        (legacy / 'controls').mkdir(parents=True, mode=0o700)
+        legacy.chmod(0o700)
+        (legacy / 'researcher').mkdir(mode=0o700)
+        runner._write_json(legacy / 'plan.json', {
+            'kind': 'continuation-smoke', 'source_only': {'build_command': ['true']}}, once=True)
+        legacy_state = continuation._state(legacy)
+        legacy_state['invocations'] = 1
+        continuation._save_state(legacy, legacy_state)
+        legacy_next = {'kind': continuation.NEXT_KIND,
+                       'last_result': {'state': 'refuted', 'unresolved': 'bounded negative'},
+                       'capabilities': [], 'coverage': [], 'next': None,
+                       'proposed_stop': True, 'strong_lead': False}
+        runner._write_json(legacy / 'researcher/NEXT.json', legacy_next)
+        continuation._closure_request(legacy, legacy_state, legacy_next)
+        legacy_request = legacy / 'controls/continuation/closure-request.json'
+        runner._write_json(legacy / 'controls/continuation/closure-review.json', {
+            'kind': continuation.REVIEW_KIND, 'request_sha256': runner._sha(legacy_request),
+            'decision': 'accept', 'reason': 'legacy bounded closeout accepted'})
+        legacy_outcome = run_controller(legacy, fake)
+        check('legacy source-only closure uses accepted manual review',
+              legacy_outcome['status'] == 'closed'
+              and [json.loads(line)['command'] for line in
+                   (base / 'calls.jsonl').read_text().splitlines()] == calls)
         print(json.dumps({'checks': checks, 'status': 'passed',
                           'limits': 'Synthetic subprocess only; no native model, provider, or target.'},
                          indent=2))

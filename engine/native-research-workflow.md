@@ -156,7 +156,7 @@ setup build as evidence of a security effect.
    unavailable run establishes neither target safety nor full coverage. Keep
    credentials, cookies, tokens and signed URLs out of durable notes and results.
 
-   For an approved source-only run, write `/workspace/project/RESULT.md` with
+   For a checked-setup source-only run, write `/workspace/project/RESULT.md` with
    nonempty `## Supported effects`, `## Controls`, `## Contrary evidence`,
    `## Tested paths`, `## Untested paths`, `## Assistance`,
    `## Unfinished leads`, and `## Limits` sections. Request a fresh

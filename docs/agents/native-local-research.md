@@ -104,7 +104,7 @@ not add monetary accounting or reconciled provider billing.
 `NEXT.json` is the checkpoint-level handoff. It records one of `supported`,
 `refuted`, `blocked`, or `inconclusive`, what the result rules out, useful
 capabilities and coverage, and the next brief or a stop proposal. Outside the
-approved source-only closeout route, an explicit stop proposal or a `strong_lead`
+checked-setup source-only closeout route, an explicit stop proposal or a `strong_lead`
 change from true to false produces
 `closure_review_required`; a fresh reviewer or operator writes
 `controls/continuation/closure-review.json` with mode `0600`:
@@ -117,7 +117,7 @@ change from true to false produces
  "test": "required when decision is reopen; the concrete discriminating test"}
 ```
 
-For an approved source-only run, the agent saves
+For a checked-setup source-only run, the agent saves
 `researcher/project/RESULT.md`, requests a fresh source review of those exact
 bytes, then sets `proposed_stop: true` with no next test or host action.
 `continue` invokes closeout itself: accepted review stops the native owner and

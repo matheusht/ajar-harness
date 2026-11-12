@@ -41,6 +41,10 @@ def result_text(outcome: str) -> str:
 def setup(base: Path, *, outcome: str, review: bool = True,
           review_decision: str = 'raise', lead_disposition: bool = True) -> Path:
     root = source_check.fixture(base)
+    plan = runner._read_json(root / 'plan.json')
+    plan['checked_setup'] = {'kind': 'synthetic-checked-setup'}
+    plan['source_effect_envelope'] = runner.CHECKED_SOURCE_EFFECT_ENVELOPE
+    runner._write_json(root / 'plan.json', plan)
     source_check.source_action(root, '1' * 32, 'before\n', 1)
     source_check.source_action(root, '2' * 32, 'after\n', 0)
     source_check.requested_review(root)
@@ -91,6 +95,7 @@ def setup(base: Path, *, outcome: str, review: bool = True,
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(runner, '_verified_plan',
                 side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+            stack.enter_context(patch.object(runner, '_verify_checked_research_scope'))
             stack.enter_context(patch.object(runner, '_approval_active'))
             stack.enter_context(patch.object(runner, 'run_active', return_value=True))
             stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value=ALLOWANCE))
@@ -297,6 +302,7 @@ def bridge_cases(base: Path) -> dict:
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(runner, '_verified_plan',
                 side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+            stack.enter_context(patch.object(runner, '_verify_checked_research_scope'))
             stack.enter_context(patch.object(runner, '_approval_active'))
             stack.enter_context(patch.object(runner, 'run_active', return_value=True))
             stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value=allowance))

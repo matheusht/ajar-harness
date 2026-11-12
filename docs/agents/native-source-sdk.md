@@ -267,7 +267,7 @@ disclose. An unfinished action or missing, unsafe or oversized required evidence
 holds the request incomplete before a reviewer session starts.
 An optional `researcher/project/RESULT.md` is frozen with the current source
 and repeated in the unfinished role with its hash and agent-statement label.
-For agent-owned closeout, the researcher writes this result before requesting
+For checked-setup agent-owned closeout, the researcher writes this result before requesting
 review. Before that request, write the final claim, coverage, capabilities, and
 lead state in `NEXT.json`. After review, propose a stop while leaving those
 reviewed fields, the result, and source bytes unchanged. The continuation host

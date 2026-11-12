@@ -4,7 +4,7 @@
 This is a control loop, not a researcher. It preserves one run root and one shared
 allowance across bounded native turns. The researcher chooses the next experiment in
 ``/workspace/NEXT.json``; this controller only checks that a usable next brief or an
-explicit stop proposal exists. For a source-only stop proposal, it
+explicit stop proposal exists. For a checked-setup source-only stop proposal, it
 also invokes the internal closeout and verifies owner stop and cleanup. It never
 renews approval, creates a new run, or resets spend.
 
@@ -1512,7 +1512,7 @@ def _finish(root: Path, state: dict, status: str, **extra) -> dict:
 
 def _agent_closeout(root: Path, state: dict, *, wait_seconds: int,
                     nxt: dict | None = None, forced_stop_reason: str | None = None) -> dict | None:
-    if ('source_only' not in _read_private(root / 'plan.json')
+    if ('checked_setup' not in _read_private(root / 'plan.json')
             or (forced_stop_reason is None and
                 (nxt is None or nxt.get('proposed_stop') is not True))):
         return None

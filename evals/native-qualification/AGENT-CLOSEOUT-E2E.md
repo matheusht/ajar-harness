@@ -61,7 +61,8 @@ python3 evals/native-qualification/smoke/check_agent_closeout.py \
 ```
 
 It needs Python 3 and the repository checkout. It uses disposable run roots,
-synthetic owner and Docker responses, and no provider or target calls. Expected
+synthetic checked-setup authority, owner and Docker responses, and no provider
+or target calls. Expected
 output is JSON with `status: passed`, `provider_calls: 0`, `target_calls: 0`,
 source, continuation and check hashes, and a `continuation_bridge` case map.
 The checked-in result of this run is

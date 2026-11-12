@@ -100,6 +100,7 @@ OFFICIAL_IMAGE_ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
                       'BUN_RUNTIME_TRANSPILER_CACHE_PATH': '0'}
 DEFAULT_LIMITS = {'max_connections': 16, 'max_bytes': 8 * 1024 * 1024, 'duration_seconds': 300}
 SETUP_SIGNATURE_NAMESPACE = 'llm-redteam-harness-native-setup-v1'
+RESEARCH_SIGNATURE_NAMESPACE = 'llm-redteam-harness-native-research-v1'
 SETUP_EFFECT_CLASS = 'read-only-original-and-disposable-offline-proposal'
 SETUP_NETWORK_CLASS = 'metered-model-relay-only'
 SETUP_OUTPUT_FILES = ('recipe.json', 'THREAT_MODEL.md')
@@ -251,6 +252,94 @@ def _read_json(path: Path) -> dict:
 def _setup_scope_challenge(scope_hash: str, engagement_id: str) -> bytes:
     return canonical_json_bytes({'kind': 'native-setup-scope-challenge-v1',
                                  'engagement_id': engagement_id, 'scope_sha256': scope_hash})
+
+
+def _research_scope_challenge(scope_hash: str, engagement_id: str) -> bytes:
+    return canonical_json_bytes({'kind': 'native-research-scope-challenge-v1',
+                                 'engagement_id': engagement_id, 'scope_sha256': scope_hash})
+
+
+def _verify_research_scope(scope: Path, signature: Path, signers: Path, *,
+                           engagement_id: str, operator_id: str,
+                           trusted_fingerprint: str, source_manifest_sha256: str,
+                           goal_sha256: str, limits: dict,
+                           allow_expired: bool = False) -> dict:
+    scope, signature, signers = (_file(path, private=True)
+                                 for path in (scope, signature, signers))
+    scope_bytes = scope.read_bytes()
+    if len(scope_bytes) > 256 * 1024:
+        _fail('research_scope_invalid')
+    try:
+        scope_text = scope_bytes.decode('utf-8')
+    except UnicodeError:
+        _fail('research_scope_invalid')
+    sections = re.findall(r'^```native-research-scope-v1\s*\n(.*?)^```\s*$',
+                          scope_text, re.MULTILINE | re.DOTALL)
+    if len(sections) != 1:
+        _fail('research_scope_invalid')
+    def unique_pairs(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate key')
+            value[key] = item
+        return value
+    try:
+        boundary = json.loads(sections[0], object_pairs_hook=unique_pairs)
+    except ValueError:
+        _fail('research_scope_invalid')
+    def concrete(value):
+        return (isinstance(value, str) and 8 <= len(value.strip()) <= 1000
+                and not re.search(r'\b(?:TBD|TODO|unknown|placeholder|n/a)\b|<|>|___', value, re.I)
+                and not CREDENTIAL_TEXT.search(value))
+    required = {'kind', 'engagement_id', 'operator_id', 'source_manifest_sha256',
+                'goal_sha256', 'surfaces', 'benign_objectives', 'escalation_ceiling',
+                'impact_demo_authorized', 'accounts', 'cleanup', 'effect_class',
+                'network_class', 'limits', 'expires_at'}
+    if (not isinstance(boundary, dict) or set(boundary) != required
+            or boundary['kind'] != 'native-research-scope-v1'
+            or boundary['engagement_id'] != engagement_id
+            or boundary['operator_id'] != operator_id
+            or boundary['source_manifest_sha256'] != source_manifest_sha256
+            or boundary['goal_sha256'] != goal_sha256
+            or not isinstance(boundary['surfaces'], list)
+            or not 1 <= len(boundary['surfaces']) <= 16
+            or not all(concrete(item) for item in boundary['surfaces'])
+            or not isinstance(boundary['benign_objectives'], list)
+            or not 1 <= len(boundary['benign_objectives']) <= 16
+            or not all(concrete(item) for item in boundary['benign_objectives'])
+            or boundary['escalation_ceiling'] != 'source_only_research'
+            or boundary['impact_demo_authorized'] is not False
+            or not isinstance(boundary['accounts'], list)
+            or len(boundary['accounts']) > 16
+            or not all(concrete(item) for item in boundary['accounts'])
+            or not concrete(boundary['cleanup'])
+            or boundary['effect_class'] != 'checked-offline-source-research'
+            or boundary['network_class'] != 'metered-model-relay-only'
+            or boundary['limits'] != limits
+            or not _valid_limits(boundary['limits'])
+            or not isinstance(boundary['expires_at'], str)
+            or not re.fullmatch(r'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z',
+                                boundary['expires_at'])):
+        _fail('research_scope_invalid')
+    try:
+        expiry = datetime.strptime(boundary['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except ValueError:
+        _fail('research_scope_invalid')
+    if not allow_expired and datetime.now(timezone.utc) >= expiry:
+        _fail('research_scope_expired')
+    try:
+        fingerprint = verify_operator_signature_bytes(
+            scope_bytes=scope_bytes, operator_id=operator_id,
+            challenge_bytes=_research_scope_challenge(_sha(scope), engagement_id),
+            signature_bytes=signature.read_bytes(), allowed_signers_bytes=signers.read_bytes(),
+            namespace=RESEARCH_SIGNATURE_NAMESPACE)
+    except (RecordError, OSError):
+        _fail('research_scope_signature_invalid')
+    if fingerprint != trusted_fingerprint:
+        _fail('research_scope_signer_untrusted')
+    return {'expires_at': boundary['expires_at'], 'signature_sha256': _sha(signature),
+            'allowed_signers_sha256': _sha(signers)}
 
 
 def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
@@ -677,6 +766,39 @@ def _verify_checked_setup(root: Path, plan: dict) -> None:
         _fail('checked_setup_pin_mismatch')
 
 
+def _verify_checked_research_scope(root: Path, plan: dict, *,
+                                   allow_expired: bool = False) -> None:
+    controls = _controls(root)
+    pin = plan.get('checked_research_scope')
+    setup_plan = _read_json(controls / 'checked-setup/setup-plan.json')
+    setup = setup_plan.get('setup_only', {})
+    scope_file = _file(controls / 'scope.md', private=True)
+    signature_file = _file(controls / 'research-scope.sig', private=True)
+    signers_file = _file(controls / 'research-allowed-signers', private=True)
+    required = {'kind', 'engagement_id', 'operator_id', 'trusted_fingerprint',
+                'signature_sha256', 'allowed_signers_sha256', 'expires_at'}
+    if (not isinstance(pin, dict) or set(pin) != required
+            or pin['kind'] != 'native-checked-research-scope-authority-v1'
+            or pin['engagement_id'] != setup.get('engagement_id')
+            or pin['operator_id'] != setup.get('operator_id')
+            or pin['trusted_fingerprint'] != setup.get('trusted_fingerprint')
+            or _sha(scope_file) != plan['scope_sha256']
+            or _sha(signature_file) != pin['signature_sha256']
+            or _sha(signers_file) != pin['allowed_signers_sha256']):
+        _fail('checked_research_scope_pin_mismatch')
+    proof = _verify_research_scope(
+        scope_file, signature_file, signers_file,
+        engagement_id=pin['engagement_id'], operator_id=pin['operator_id'],
+        trusted_fingerprint=pin['trusted_fingerprint'],
+        source_manifest_sha256=plan['source_manifest_sha256'],
+        goal_sha256=plan['brief_sha256'], limits=plan['limits'],
+        allow_expired=allow_expired)
+    if (proof['expires_at'] != pin['expires_at']
+            or proof['signature_sha256'] != pin['signature_sha256']
+            or proof['allowed_signers_sha256'] != pin['allowed_signers_sha256']):
+        _fail('checked_research_scope_pin_mismatch')
+
+
 def prepare_checked(args: argparse.Namespace) -> dict:
     """Seal a source-only research plan from a checked, stopped setup package."""
     scope = _file(Path(args.scope_file), private=True)
@@ -707,6 +829,15 @@ def prepare_checked(args: argparse.Namespace) -> dict:
               'duration_seconds': args.duration_seconds}
     if not _valid_limits(limits):
         _fail('research_allowance_invalid')
+    research_signature = Path(args.research_scope_signature)
+    research_signers = Path(args.research_allowed_signers)
+    scope_proof = _verify_research_scope(
+        scope, research_signature, research_signers,
+        engagement_id=setup_plan['setup_only']['engagement_id'],
+        operator_id=setup_plan['setup_only']['operator_id'],
+        trusted_fingerprint=setup_plan['setup_only']['trusted_fingerprint'],
+        source_manifest_sha256=receipt['source_manifest_sha256'],
+        goal_sha256=receipt['goal_sha256'], limits=limits)
     with tempfile.TemporaryDirectory(prefix='native-checked-prepare-') as temporary:
         temporary_root = Path(temporary).resolve(strict=True)
         runtime = temporary_root / 'runtime.json'
@@ -732,7 +863,15 @@ def prepare_checked(args: argparse.Namespace) -> dict:
         if receipt.get('dependencies'):
             words.extend(('--module-cache', checked['dependency_dir']))
         prepared_args = _parser().parse_args(words)
-        prepared_args.checked_setup = {'checked': checked, 'setup_root': setup_root}
+        prepared_args.checked_setup = {
+            'checked': checked, 'setup_root': setup_root,
+            'research_signature': research_signature, 'research_signers': research_signers,
+            'research_scope': {
+                'kind': 'native-checked-research-scope-authority-v1',
+                'engagement_id': setup_plan['setup_only']['engagement_id'],
+                'operator_id': setup_plan['setup_only']['operator_id'],
+                'trusted_fingerprint': setup_plan['setup_only']['trusted_fingerprint'],
+                **scope_proof}}
         result = prepare(prepared_args)
     result['checked_setup_receipt_sha256'] = _sha(
         Path(args.run_root) / 'controls/checked-setup/package/receipt.json')
@@ -1487,6 +1626,16 @@ def prepare(args: argparse.Namespace) -> dict:
         if checked_context is not None:
             checked_pin = _copy_checked_setup(root, checked_context['checked'],
                                               checked_context['setup_root'])
+            for source_path, name, expected in (
+                    (checked_context['research_signature'], 'research-scope.sig',
+                     checked_context['research_scope']['signature_sha256']),
+                    (checked_context['research_signers'], 'research-allowed-signers',
+                     checked_context['research_scope']['allowed_signers_sha256'])):
+                destination = controls / name
+                shutil.copy2(_file(source_path, private=True), destination)
+                destination.chmod(0o600)
+                if _sha(destination) != expected:
+                    _fail('checked_research_scope_copy_changed')
         notebook = root / 'researcher/RESEARCH.md'
         notebook.write_text(
             '# Research notebook\n\n'
@@ -1538,7 +1687,9 @@ def prepare(args: argparse.Namespace) -> dict:
                                               if checked_pin is not None else SOURCE_EFFECT_ENVELOPE)
         if checked_pin is not None:
             plan['checked_setup'] = checked_pin
+            plan['checked_research_scope'] = checked_context['research_scope']
             _verify_checked_setup(root, plan)
+            _verify_checked_research_scope(root, plan)
         if setup_only:
             plan['setup_only'] = {
                 'engagement_id': args.setup_engagement_id,
@@ -1727,6 +1878,7 @@ def _verified_plan(root: Path, *, pristine: bool = False,
         _fail('checked_setup_plan_membership_changed')
     if 'checked_setup' in plan:
         _verify_checked_setup(root, plan)
+        _verify_checked_research_scope(root, plan, allow_expired=True)
     if _sha(root / 'researcher/brief/BRIEF.md') != plan.get('brief_sha256'):
         _fail('run_brief_changed')
     if 'research_workflow_sha256' in plan:
@@ -1812,6 +1964,8 @@ def _approval(root: Path, plan: dict, path: Path) -> None:
 
 def _approval_active(root: Path) -> None:
     plan = _plan(root)
+    if 'checked_setup' in plan:
+        _verify_checked_research_scope(root, plan)
     plan_sha = _sha(root / 'plan.json')
     approval_path = _controls(root) / 'approval.json'
     approval = _read_json(approval_path)
@@ -4126,6 +4280,8 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
                  provider_tls_key: Path | None = None) -> dict:
     root = _private_root(Path(run_root))
     plan = _verified_plan(root, pristine=True)
+    if 'checked_setup' in plan:
+        _verify_checked_research_scope(root, plan)
     controls = _controls(root)
     paid = plan['model'] == PAID_MODEL
     if paid:
@@ -4141,6 +4297,13 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
         _fail('run_already_started_or_ambiguous')
     _approval(root, plan, Path(approval_path))
     runtime_duration = plan['limits']['duration_seconds']
+    research_deadline = (datetime.strptime(plan['checked_research_scope']['expires_at'],
+                                           '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+                         if 'checked_setup' in plan else None)
+    if research_deadline is not None:
+        runtime_duration = min(runtime_duration, int(research_deadline.timestamp() - time.time()) - 5)
+        if runtime_duration < 30:
+            _fail('research_scope_window_exhausted')
     setup_grant = (_read_json(controls / 'approval.json') if 'setup_only' in plan else None)
     if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2':
         deadline = datetime.strptime(setup_grant['absolute_deadline'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
@@ -4175,6 +4338,10 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
             runtime_duration = min(runtime_duration, int(deadline.timestamp() - time.time()) - 5)
             if runtime_duration < 30:
                 _fail('setup_epoch_allowance_exhausted')
+        if research_deadline is not None:
+            runtime_duration = min(runtime_duration, int(research_deadline.timestamp() - time.time()) - 5)
+            if runtime_duration < 30:
+                _fail('research_scope_window_exhausted')
         proxy_args = ['--state-dir', str(controls / 'provider'),
                       '--capability-file', str(capability_path),
                       '--max-connections', str(plan['limits']['max_connections']),
@@ -4267,6 +4434,9 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
         print(json.dumps(result, sort_keys=True), flush=True)
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
             if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2' and time.time() >= deadline.timestamp():
+                native_module.request_stop(controls / 'native-state', 'operator_stop')
+                break
+            if research_deadline is not None and time.time() >= research_deadline.timestamp():
                 native_module.request_stop(controls / 'native-state', 'operator_stop')
                 break
             time.sleep(.2)
@@ -5599,7 +5769,9 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
 def review(run_root: Path, observer_root: Path, selection: Path,
            selection_sha256: str, role: str) -> dict:
     root = _private_root(Path(run_root))
-    _verified_plan(root)
+    plan = _verified_plan(root)
+    if 'checked_setup' in plan:
+        _verify_checked_research_scope(root, plan)
     if role not in ('reviewer-1', 'reviewer-2') or not HEX_RE.fullmatch(selection_sha256):
         _fail('review_input_invalid')
     if not run_active(root) or _unresolved_dispatches(root):
@@ -6003,7 +6175,8 @@ def _parser() -> argparse.ArgumentParser:
     prepare_cmd.add_argument('--duration-seconds', type=int, default=DEFAULT_LIMITS['duration_seconds'])
     checked_cmd = commands.add_parser('prepare-checked',
                                       help='seal source-only research from a host-checked setup package')
-    for name in ('run-root', 'checked-setup-root', 'scope-file', 'scope-sha256'):
+    for name in ('run-root', 'checked-setup-root', 'scope-file', 'scope-sha256',
+                 'research-scope-signature', 'research-allowed-signers'):
         checked_cmd.add_argument('--' + name, required=True)
     checked_cmd.add_argument('--max-connections', type=int, required=True)
     checked_cmd.add_argument('--max-bytes', type=int, required=True)

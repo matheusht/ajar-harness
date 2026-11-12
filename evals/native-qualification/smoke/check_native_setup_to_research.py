@@ -6,6 +6,7 @@ does not execute a native model or target service. See SETUP-TO-RESEARCH-E2E.md.
 """
 
 import argparse
+import atexit
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -22,6 +23,8 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / 'tools'))
+from engagement_records import canonical_json_bytes  # noqa: E402
 NATIVE = ROOT / 'tools/native_research.py'
 BUILDER_SCENARIO = ROOT / 'evals/native-qualification/smoke/check_native_setup_builder_e2e.py'
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -66,7 +69,8 @@ def main():
         builder_output = base / 'builder-e2e.json'
         builder_root = base / 'builder-fixture'
         built = subprocess.run([sys.executable, str(BUILDER_SCENARIO),
-                                '--output', str(builder_output), '--keep-root', str(builder_root)],
+                                '--output', str(builder_output), '--keep-root', str(builder_root),
+                                '--emit-research-scope-fixtures'],
                                cwd=ROOT, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'},
                                capture_output=True, text=True, timeout=180, check=False)
         builder_evidence = json.loads(builder_output.read_text()) if builder_output.exists() else {}
@@ -79,19 +83,18 @@ def main():
         setup_controls = setup_root / 'controls'
         setup_plan = json.loads((setup_root / 'plan.json').read_text())
         checked = json.loads((setup_controls / 'setup-checked/receipt.json').read_text())
-        research_scope = base / 'research-scope.md'
-        research_scope.write_text('# Synthetic research scope\n\n'
-                                  '- Synthetic fixture: unsigned; no live authority.\n'
-                                  '- Surfaces: owned harmless source copy.\n'
-                                  '- Benign objective: assess a concrete unsafe effect with a control.\n'
-                                  '- Effect ceiling: offline source checks on owned copies.\n'
-                                  '- Cleanup: stop and remove all owned research resources.\n')
+        scope_fixtures = builder_root / 'research-scopes'
+        research_scope = scope_fixtures / 'valid.md'
+        research_signature = scope_fixtures / 'valid.sig'
+        research_signers = builder_root / 'allowed_signers'
         research = base / 'research'
         limits = ('--max-connections', '2', '--max-bytes', '1048576',
                   '--duration-seconds', '120')
         prepare = ('prepare-checked', '--run-root', str(research),
                    '--checked-setup-root', str(setup_root),
                    '--scope-file', str(research_scope), '--scope-sha256', sha(research_scope),
+                   '--research-scope-signature', str(research_signature),
+                   '--research-allowed-signers', str(research_signers),
                    *limits)
 
         def rejected(name, arguments, expected_code=None):
@@ -99,6 +102,71 @@ def main():
             check(name, code == 2 and not Path(arguments[arguments.index('--run-root') + 1]).exists()
                   and (expected_code is None or result.get('code') == expected_code),
                   {'exit': code, 'code': result.get('code')})
+
+        def scope_variant(name):
+            arguments = list(prepare)
+            scope_path = scope_fixtures / (name + '.md')
+            arguments[arguments.index('--scope-file') + 1] = str(scope_path)
+            arguments[arguments.index('--scope-sha256') + 1] = sha(scope_path)
+            arguments[arguments.index('--research-scope-signature') + 1] = str(
+                scope_fixtures / (name + '.sig'))
+            return arguments
+
+        held_signature = research_signature.with_name('valid-held.sig')
+        research_signature.rename(held_signature)
+        rejected('missing detached research signature refuses before root', prepare,
+                 'regular_file_unavailable')
+        held_signature.rename(research_signature)
+        signature_bytes = research_signature.read_bytes()
+        research_signature.write_text('not a signature\n')
+        rejected('changed detached research signature refuses before root', prepare,
+                 'research_scope_signature_invalid')
+        research_signature.write_bytes(signature_bytes)
+        held_signers = research_signers.with_name('allowed_signers_held')
+        research_signers.rename(held_signers)
+        rejected('missing research allowed-signers file refuses before root', prepare,
+                 'regular_file_unavailable')
+        held_signers.rename(research_signers)
+        signers_bytes = research_signers.read_bytes()
+        research_signers.write_bytes(signers_bytes + b'changed\n')
+        rejected('changed research allowed-signers pin refuses before root', prepare,
+                 'research_scope_signature_invalid')
+        research_signers.write_bytes(signers_bytes)
+        for variant in ('expired', 'wrong-engagement', 'broad-effect',
+                        'wrong-source', 'wrong-goal', 'wrong-limits'):
+            rejected('signed ' + variant + ' research scope refuses before root',
+                     scope_variant(variant),
+                     'research_scope_expired' if variant == 'expired' else 'research_scope_invalid')
+        alternate_key = base / 'alternate-research-key'
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(alternate_key)],
+                       capture_output=True, check=True, timeout=10)
+        atexit.register(alternate_key.unlink, missing_ok=True)
+        alternate_signers = base / 'alternate-research-signers'
+        alternate_signers.write_text('synthetic-operator ' +
+                                      alternate_key.with_suffix('.pub').read_text())
+        alternate_scope = base / 'alternate-research-scope.md'
+        alternate_scope.write_bytes(research_scope.read_bytes().replace(
+            ('sha256:' + sha(research_signers)).encode(),
+            ('sha256:' + sha(alternate_signers)).encode()))
+        alternate_signature = base / 'alternate-research-scope.sig'
+        alternate_challenge = canonical_json_bytes({
+            'kind': 'native-research-scope-challenge-v1',
+            'engagement_id': setup_plan['setup_only']['engagement_id'],
+            'scope_sha256': sha(alternate_scope)})
+        alternate_signature.write_bytes(subprocess.run([
+            'ssh-keygen', '-Y', 'sign', '-f', str(alternate_key), '-n',
+            'llm-redteam-harness-native-research-v1'], input=alternate_challenge,
+            capture_output=True, check=True, timeout=10).stdout)
+        alternate_key.unlink()
+        wrong_signer = list(prepare)
+        wrong_signer[wrong_signer.index('--scope-file') + 1] = str(alternate_scope)
+        wrong_signer[wrong_signer.index('--scope-sha256') + 1] = sha(alternate_scope)
+        wrong_signer[wrong_signer.index('--research-scope-signature') + 1] = str(
+            alternate_signature)
+        wrong_signer[wrong_signer.index('--research-allowed-signers') + 1] = str(
+            alternate_signers)
+        rejected('valid signature from untrusted signer refuses before root', wrong_signer,
+                 'research_scope_signer_untrusted')
 
         missing = setup_controls / 'setup-checked/receipt.json'
         missing.rename(missing.with_name('receipt-held.json'))
@@ -211,6 +279,17 @@ def main():
                   review_status in ('reviewer-1', 'reviewer-2'),
                   {'status': review_status})
         controls = research / 'controls'
+        scope_pin = plan.get('checked_research_scope', {})
+        check('sealed research plan pins a separate signed scope',
+              scope_pin.get('engagement_id') == setup_plan['setup_only']['engagement_id']
+              and scope_pin.get('operator_id') == setup_plan['setup_only']['operator_id']
+              and scope_pin.get('trusted_fingerprint')
+              == setup_plan['setup_only']['trusted_fingerprint']
+              and scope_pin.get('signature_sha256') == sha(research_signature)
+              and scope_pin.get('allowed_signers_sha256') == sha(research_signers)
+              and sha(controls / 'research-scope.sig') == sha(research_signature)
+              and sha(controls / 'research-allowed-signers') == sha(research_signers),
+              {'signature_sha256': scope_pin.get('signature_sha256')})
         initial = controls / 'research/checked-setup/INITIAL_THREAT_MODEL.md'
         trace = controls / 'research/checked-setup/SETUP_TRACE.json'
         check('read-only research inputs retain original threat and trace',
@@ -264,6 +343,52 @@ def main():
               and not (controls / 'resources.json').exists(),
               {'exit': isolated_code, 'code': isolated.get('code')})
         held_setup_root.rename(setup_root)
+        archived_signature = controls / 'research-scope.sig'
+        held_archived_signature = controls / 'research-scope-held.sig'
+        archived_signature.rename(held_archived_signature)
+        missing_archive_code, missing_archive = cli('start', '--run-root', str(research),
+                                                     '--approval', str(approval))
+        check('missing archived research signature refuses before Docker',
+              missing_archive_code == 2
+              and missing_archive.get('code') == 'regular_file_unavailable'
+              and not (controls / 'resources.json').exists(),
+              {'exit': missing_archive_code, 'code': missing_archive.get('code')})
+        held_archived_signature.rename(archived_signature)
+        archived_signature_bytes = archived_signature.read_bytes()
+        archived_signature.write_text('changed signature\n')
+        sig_code, sig_result = cli('start', '--run-root', str(research),
+                                    '--approval', str(approval))
+        check('changed archived research signature refuses before Docker',
+              sig_code == 2 and sig_result.get('code') == 'checked_research_scope_pin_mismatch'
+              and not (controls / 'resources.json').exists(),
+              {'exit': sig_code, 'code': sig_result.get('code')})
+        turn_code, turn_result = cli('research', '--run-root', str(research))
+        check('research turn preflight refuses changed archived signature',
+              turn_code == 2
+              and turn_result.get('code') == 'checked_research_scope_pin_mismatch'
+              and not (controls / 'resources.json').exists(),
+              {'exit': turn_code, 'code': turn_result.get('code')})
+        archived_signature.write_bytes(archived_signature_bytes)
+        archived_signers = controls / 'research-allowed-signers'
+        archived_signers_bytes = archived_signers.read_bytes()
+        archived_signers.write_bytes(archived_signers_bytes + b'changed\n')
+        signer_code, signer_result = cli('start', '--run-root', str(research),
+                                          '--approval', str(approval))
+        check('changed archived signer pin refuses before Docker',
+              signer_code == 2
+              and signer_result.get('code') == 'checked_research_scope_pin_mismatch'
+              and not (controls / 'resources.json').exists(),
+              {'exit': signer_code, 'code': signer_result.get('code')})
+        archived_signers.write_bytes(archived_signers_bytes)
+        archived_scope = controls / 'scope.md'
+        archived_scope_bytes = archived_scope.read_bytes()
+        archived_scope.write_bytes(archived_scope_bytes + b'changed\n')
+        scope_code, scope_result = cli('start', '--run-root', str(research),
+                                        '--approval', str(approval))
+        check('changed archived research scope refuses before Docker',
+              scope_code == 2 and not (controls / 'resources.json').exists(),
+              {'exit': scope_code, 'code': scope_result.get('code')})
+        archived_scope.write_bytes(archived_scope_bytes)
         archived_threat = controls / 'checked-setup/THREAT_MODEL.md'
         threat_bytes = archived_threat.read_bytes()
         archived_threat.write_text('swapped\n')
@@ -372,6 +497,7 @@ def main():
                   'builder_evidence_sha256': sha(builder_output),
                   'checked_receipt_sha256': sha(setup_controls / 'setup-checked/receipt.json'),
                   'research_scope_sha256': sha(research_scope),
+                  'research_scope_signature_sha256': sha(research_signature),
                   'research_plan_sha256': sha(research / 'plan.json'),
                   'scenario_sha256': sha(Path(__file__))}
         fixture_roots = ({'setup': str(setup_root), 'research': str(research),

@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "checked_receipt_sha256": "7915b05af8ae74bda4c3343482fca70179ac1335fd2e4d5e16df72856e40526f",
-    "journal_sha256": "041b95843c7226421217d497b5fc30148a03e4bc20c055e033b7d043bd0fbb7b"
+    "checked_receipt_sha256": "2dc2ffe17fe4f066ead87572d3d097540c781b755965a2af85f35658394d448b",
+    "journal_sha256": "1333e8946e32f1c47cdbdcbb402e902882655d28d295015b8fe4501d2c2c84f1"
   },
   "checks": [
     {
@@ -67,13 +67,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "058f73f34f477f07e97c8046b97b898d08e31238b679e7740aee94a0039f5a88",
-            "container_name": "lrh-setup-build-cbac2201c4934f52b3de",
+            "container_id": "f9e4cbfae1360d84102bd0e94d5c04a8c4d285ec0ccf3b02e996cb281c2e8de1",
+            "container_name": "lrh-setup-build-06e75fe203fb41b18a45",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "7915b05af8ae74bda4c3343482fca70179ac1335fd2e4d5e16df72856e40526f",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-8bco421a/run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "2dc2ffe17fe4f066ead87572d3d097540c781b755965a2af85f35658394d448b",
           "status": "ready"
         }
       },
@@ -190,11 +190,11 @@
         "result": {
           "cleanup": {
             "code": "build_docker_daemon_changed",
-            "container_id": "6330ef980ab9bb19bfd9bb18bb1f22600e043800cf52e20f68b501c6637b665b",
+            "container_id": "383097c589d1909035a6914dfdae729375ff012e3ebcc5548ff7bf7f0a6b9618",
             "container_name": "lrh-setup-build-11111111111111111111",
             "status": "unresolved"
           },
-          "journal_sha256": "93f2f610f3b03dc7c0b0464b4b8a0c1f58acc38f5efea3c24f88be3869dd8508",
+          "journal_sha256": "39aa5a3acca2510d982a4f3f5095aec1baf8a84e1cefecaf0207970bb37c202a",
           "kind": "native-setup-build-reconciliation-v1",
           "pending_action": "container_create",
           "retry_requires_new_approval": true,
@@ -215,11 +215,11 @@
           "build_duration_charged_upper_bound_seconds": 30,
           "cleanup": {
             "absent": true,
-            "container_id": "6330ef980ab9bb19bfd9bb18bb1f22600e043800cf52e20f68b501c6637b665b",
+            "container_id": "383097c589d1909035a6914dfdae729375ff012e3ebcc5548ff7bf7f0a6b9618",
             "container_name": "lrh-setup-build-11111111111111111111",
             "status": "complete"
           },
-          "journal_sha256": "197dc6cdda250d2a661c12c0c05c958f3e5ccb102023834a9f972c2eabe4e286",
+          "journal_sha256": "b01ea6261ced4c38ab0f2da2afdd139ee23d8d8560b30cf497573e1ff06e0f8b",
           "kind": "native-setup-build-reconciliation-v1",
           "pending_action": "container_create",
           "retry_requires_new_approval": true,
@@ -250,7 +250,7 @@
         "exit": 0,
         "result": {
           "approval": {
-            "approved_at": "2026-11-12T21:17:02Z",
+            "approved_at": "2026-11-12T21:51:17Z",
             "approved_by": "synthetic-operator",
             "cumulative_build_duration_charged_upper_bound_seconds": 30,
             "cumulative_setup_used": {
@@ -260,7 +260,7 @@
             "dependency_catalog_tree_sha256": "98c71d5f44ac2d2048dc6efd06f3e3166596b951e72f3d1059c78b4237db186f",
             "duration_seconds": 30,
             "effect_class": "owned-disposable-offline-target-build",
-            "expires_at": "2026-11-12T22:17:02Z",
+            "expires_at": "2026-11-12T22:51:17Z",
             "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
             "kind": "native-setup-build-approval-v1",
             "max_workspace_bytes": 8388608,
@@ -270,12 +270,12 @@
               "out/result.txt"
             ],
             "prior_build_attempts": [
-              "eb5251599fa1d5149b5a8936122fcc6179c0bb8d0bb025b77051c9bb1493637d"
+              "1c679846febc5b6096962f0337e7328bc95483870ef9c737729854e5fe88ef17"
             ],
-            "scope_amendment_sha256": "efb2e7b9cb5013b1c04d1a987de6aec6922a29d0c76ac9698075603f00f7fd99",
-            "setup_approval_sha256": "726f164ca9eea835abc1027483e37b8306340d52f243cdbdfae7b879f5a508d4",
-            "setup_chain_sha256": "f6d7480774feec3ffd099a8bb3cd1c796213ef6475bc4455576e9ed03ec289b0",
-            "setup_plan_sha256": "af9b102821b8bd039aba10bbaf86761e26b4358518690e96adba1781af4a729a"
+            "scope_amendment_sha256": "47c9ef21c7ca4df70447985b83283fb22f94a33f2888b078b89fb952acb85848",
+            "setup_approval_sha256": "4fc11fddbc4af36ed0a982c8eb319a9dd7efa155dab4aab1a101ba89f4244e1d",
+            "setup_chain_sha256": "fe8fb7999e5cc2c9c52e8579650abf847bf13120fb80c0f249799b475e0b1034",
+            "setup_plan_sha256": "a8d7da1dcd462ab0aacbd27f1d758fe3d059ebf5c6c32d5294f0802b92a6aa92"
           },
           "kind": "native-setup-build-template-v1",
           "scope_amendment": {
@@ -294,7 +294,7 @@
             "duration_seconds": 30,
             "effect_class": "owned-disposable-offline-target-build",
             "engagement_id": "fixture-202",
-            "expires_at": "2026-11-12T22:17:02Z",
+            "expires_at": "2026-11-12T22:51:17Z",
             "goal_sha256": "220449a9e93b81f26f49aaf3f8fdff9d8a3a9ae7428eb138956d8eb61be05842",
             "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
             "kind": "native-setup-build-scope-v1",
@@ -307,12 +307,12 @@
             ],
             "platform": "linux/arm64",
             "prior_build_attempts": [
-              "eb5251599fa1d5149b5a8936122fcc6179c0bb8d0bb025b77051c9bb1493637d"
+              "1c679846febc5b6096962f0337e7328bc95483870ef9c737729854e5fe88ef17"
             ],
             "recipe_sha256": "19996186ad27deec203c0e5785d8541daf71b23284222f4d6813bdf7e74d3944",
-            "setup_chain_sha256": "f6d7480774feec3ffd099a8bb3cd1c796213ef6475bc4455576e9ed03ec289b0",
-            "setup_output_receipt_sha256": "68918bcf9d83998885ae1f82308b81b922176d14120e9fc1ba9ba3829d4c1bdc",
-            "setup_scope_sha256": "b405e0140a94e88978a984b3ca5434bc42cb43bf2caf8309511a61fb985e082b",
+            "setup_chain_sha256": "fe8fb7999e5cc2c9c52e8579650abf847bf13120fb80c0f249799b475e0b1034",
+            "setup_output_receipt_sha256": "aab63188c69f4e08c7334597f76a2d7e4368f7ca217420ad2f7c8039f73e0f18",
+            "setup_scope_sha256": "7a0cb77140f24d6737c12179bd824187f4f16d3fcedbfd62c622ff8d9ff3f7bd",
             "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976",
             "source_mode_sha256": "01edc2ae2641669cd97531ce06d332c20f10ec5e34057fd5cbe58d7c02220eee",
             "threat_model_sha256": "8429fcacfebc9d8bc6d286ec59d6678b624e919146f825806fe0eba52069aaa6"
@@ -329,13 +329,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "7009f54a1ef27ea7e6658e313855c77af58830c8de7a57d71e9c32f9b4cbd59b",
-            "container_name": "lrh-setup-build-7cf480a7c17f4329a2fe",
+            "container_id": "1c77f8d0f7cfdf7451143c2ca69e66e97e9df72fb14cb2b9068b5bf10b063651",
+            "container_name": "lrh-setup-build-cc7a17bdb3c44e0a87e0",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/crash-run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "5a058ca6ba2fda730eff69d1b74e7ba7fbafa592319f3a74c07fd3688f51c246",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-8bco421a/crash-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "3eb2e028fd46ca1ee95a2d39e7b1ad8334f0e5fed1572dd0be4d8be6bcc82605",
           "status": "ready"
         }
       },
@@ -364,13 +364,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "03deadf356093a4653b1e3118d29b1c9ef9c392ae0293e4ee7a29c3a58efd7a4",
-            "container_name": "lrh-setup-build-0de037173d76476fa15a",
+            "container_id": "b98884aa1222bffd5a5fcb836fb552145b697e25914ce9591a20763f9b322ff8",
+            "container_name": "lrh-setup-build-9725c43bf1da49699831",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/linked-run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "6de60aa15a02cddca6c46d8d0e47db7ffb67cf6d21101f5ab822da72834f357c",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-8bco421a/linked-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "8172d58880261780206d98460c4507f3fc5a3ba0161212b1f72258914da86795",
           "status": "ready"
         }
       },
@@ -388,14 +388,14 @@
   "classification": "synthetic setup turn, stop, and pending host crash; real local offline Docker build",
   "fixture_roots": null,
   "inputs": {
-    "build_authority_sha256": "cb690bcc9c8ed8e27ea494f3f16df0a5079920c16d3a16f0c26d280096931ea2",
+    "build_authority_sha256": "37ef8b4f54a4b9c9000195a53bc1ce556ac11f47c2dcc2c6fe246261437480db",
     "builder_sha256": "a5cdb3973603fec29b1a3c1fcaee96ad30aa3986bf362a7a6cb3fa19a4960306",
     "catalog_manifest_sha256": "9600ea91559a5c7fca060ded4dbe76cc9b8305b61afb1e514bb7c79bd010e4c5",
-    "frozen_setup_receipt_sha256": "68918bcf9d83998885ae1f82308b81b922176d14120e9fc1ba9ba3829d4c1bdc",
+    "frozen_setup_receipt_sha256": "aab63188c69f4e08c7334597f76a2d7e4368f7ca217420ad2f7c8039f73e0f18",
     "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
-    "scenario_sha256": "4cb55dc041cea4a8ca6af5a2b043078bfb8d5ebf5b8c34e74cc4bce7e3025a9b",
-    "scope_sha256": "b405e0140a94e88978a984b3ca5434bc42cb43bf2caf8309511a61fb985e082b",
-    "setup_approval_sha256": "726f164ca9eea835abc1027483e37b8306340d52f243cdbdfae7b879f5a508d4",
+    "scenario_sha256": "9920dbbeccee6a4af363eb84617dc32e0ce0516a7874d0a1dcda1f2a2e3388e0",
+    "scope_sha256": "7a0cb77140f24d6737c12179bd824187f4f16d3fcedbfd62c622ff8d9ff3f7bd",
+    "setup_approval_sha256": "4fc11fddbc4af36ed0a982c8eb319a9dd7efa155dab4aab1a101ba89f4244e1d",
     "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976"
   },
   "kind": "native-setup-builder-synthetic-e2e-v1",

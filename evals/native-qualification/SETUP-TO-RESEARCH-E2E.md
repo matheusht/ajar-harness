@@ -16,10 +16,24 @@ or dependency set at this transition.
 | Invalid image/platform, runtime probe, build argv, or dependency closure | Reject; do not substitute an operator command or fetch packages. |
 | Package says cleanup complete but an owned resource remains | Reject until exact resource absence is verified. |
 | Research plan or approval omits or changes the checked-package pin | Reject before research start. |
+| Missing, changed, or wrong-key detached research-scope signature or allowed-signers file | Reject before creating the research run; the signer must match the trusted setup operator fingerprint. |
+| Research scope has a different engagement, source, goal, effect envelope, allowance, or an expired grant | Reject before creating the research run even when its signature is valid. |
+| Copied scope proof changes or expires after preparation | Reject before start and before each active native turn or API action. |
 | Transition interrupted after preparation | Resume only against the same immutable plan and package; do not duplicate setup build or reset setup spend. |
 | Checked research plan uses its pinned `/deps` effect envelope | Accept agent-requested source execution and fresh review under that exact envelope; do not ask for new authority solely because it differs from the ordinary `/modules` route. |
 | Threat model correction in research | Preserve the original pinned threat model and record the correction as a new observation. |
 | Setup result or repeated build presented as a security effect | Keep it as setup evidence; require original entry-path evidence and independent review for a claim. |
+
+The checked route's separate `native-research-scope-v1` fenced JSON section
+names the exact `engagement_id`, `operator_id`, source and goal SHA-256,
+surfaces, benign objectives, `source_only_research` ceiling, false impact-demo
+authorization, accounts, cleanup, `checked-offline-source-research` effect
+class, `metered-model-relay-only` network class, the research connection/byte/
+duration limits, and expiry. The Markdown scope pins the allowed-signers file
+hash. A detached signature over its exact bytes uses the
+`llm-redteam-harness-native-research-v1` SSH namespace and a challenge with
+kind `native-research-scope-challenge-v1`, engagement ID, and scope SHA-256.
+The signer fingerprint must equal the setup operator's already pinned key.
 
 ## Public end-to-end scenario
 
@@ -28,7 +42,8 @@ or dependency set at this transition.
    signers, approvals, allowance, and expected source output. Run the bounded
    setup turn and the offline host builder. Keep their exact receipts and
    cleanup readback.
-2. Prepare research from the checked package, without an operator build command
+2. Sign a separate filled research scope with the setup operator's pinned key.
+   Prepare research from the checked package, without an operator build command
    or dependency selection. Assert the research plan pins the source, setup
    output, builder receipt, runtime, dependencies, build argv, initial threat
    model, setup allowance used, and separate research allowance.
@@ -53,7 +68,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 It needs local Docker with an already-local `busybox:1.37` image, Go,
 OpenSSL and `ssh-keygen`. It calls the #202 public builder scenario to create a
 fresh synthetic v2 checked package, then invokes public `prepare-checked` with
-a separate research scope and explicit research connection, byte and duration
+a separate, detached-signed research scope and explicit research connection, byte and duration
 allowance. It checks the sealed plan, copied package and read-only `/research`
 inputs, source and dependency bytes and modes, and changed input refusal before
 run creation. A local network-none Docker replay mounts checked dependencies
@@ -65,16 +80,16 @@ Pass `--keep-root /absolute/new/private/dir` to retain the harmless fixture
 and prepared research run; the builder removes the synthetic operator signing
 key first.
 
-The 2026-11-12 local run passed 31 of 31 checks recorded in
-`setup-evidence/native-setup-to-research-synthetic-e2e.json`; the fixture roots
-were removed, and the result records hashes, refusal codes, and the Docker
-`/deps` readback. The checked research plan also passed the agent source-action
-and fresh-review preflight gates with a synthetic active allowance. The observed
-passing gate with an exact research approval
-was the existing pinned-agent-image check, before a native research turn.
+The 2026-11-12 local result is saved in
+`setup-evidence/native-setup-to-research-synthetic-e2e.json`. It records hashes,
+refusal codes, the Docker `/deps` readback, and checked source-action and
+fresh-review preflight results under a synthetic active allowance. The observed
+passing gate with an exact research approval is the existing pinned-agent-image
+check, before a native research turn.
 
 The builder's v2 fixture fabricates setup turns, stop records and provider
-accounting. Its research scope is an unsigned synthetic fixture. This
+accounting. Its research scope is signed by the synthetic setup operator and
+the private test key is removed before the fixture returns. This
 transition scenario does not run a native model turn or
 provider. The live research turn and pause/resume in step 3 require a fresh
 authorized target, actual runtime image, signed scope and provider route.
@@ -91,19 +106,27 @@ python3 tools/native_research.py prepare-checked \
   --checked-setup-root /absolute/private/stopped-setup-run \
   --scope-file /absolute/private/research-scope.md \
   --scope-sha256 <sha256-of-research-scope> \
+  --research-scope-signature /absolute/private/research-scope.sig \
+  --research-allowed-signers /absolute/private/allowed-signers \
   --max-connections <approved-count> \
   --max-bytes <approved-byte-limit> \
   --duration-seconds <approved-duration>
 ```
 
-The operator must supply a separately authorized research scope. The command
-enforces a different scope hash and refuses the structured setup-only scope,
-including byte-edited and spaced-fence copies. It does not verify a research-scope signature.
+The operator must supply a separately filled and detached-signed research
+scope. The command verifies its exact scope hash, signed source and goal,
+engagement, effect ceiling, limits, expiry, allowed-signers pin, and the
+setup-pinned operator fingerprint. It refuses the structured setup-only scope,
+including byte-edited and spaced-fence copies. The signature and signer file
+are copied into the sealed research run and rechecked at start and before
+active turns. The live runtime is bounded by the remaining scope window;
+scope expiry stops new actions while cleanup remains available.
 The command accepts no replacement build command, runtime, image, or
 dependency catalog. It checks that the setup and build grants are still fresh,
 then seals the copied package, consumed setup allowance, source bytes and
 modes, runtime, dependencies, and initial threat model into `plan.json`.
 `start` still needs a human-authored `native-research-live-approval-v1` for the
 exact new plan and its research allowance. Its existing approval mechanism
-checks the plan and scope hashes and expiry; this scenario does not qualify a
-cryptographic signature on that research approval.
+checks the plan and scope hashes and expiry. The approval remains human-authored
+JSON; this change adds signature verification to the checked research scope,
+not to the separate research approval.

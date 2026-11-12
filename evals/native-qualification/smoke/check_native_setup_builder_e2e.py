@@ -64,7 +64,11 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep-root', type=Path,
                         help='retain the private synthetic fixture without its signing key')
+    parser.add_argument('--emit-research-scope-fixtures', action='store_true',
+                        help='sign downstream synthetic research scopes before removing the test key')
     args = parser.parse_args()
+    if args.emit_research_scope_fixtures and not args.keep_root:
+        parser.error('--emit-research-scope-fixtures requires --keep-root')
     if args.keep_root:
         if not args.keep_root.is_absolute() or args.keep_root.exists():
             parser.error('--keep-root must be a new absolute directory')
@@ -94,6 +98,7 @@ def main():
         key = base / 'operator_key'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)],
                        check=True, timeout=10)
+        atexit.register(key.unlink, missing_ok=True)
         signers = base / 'allowed_signers'
         signers.write_text('synthetic-operator ' + (base / 'operator_key.pub').read_text())
         fingerprint_b64 = call('ssh-keygen', '-lf', str(base / 'operator_key.pub'),
@@ -590,6 +595,43 @@ def main():
             check('linked checked package passes public readback',
                   linked_verified_code == 0 and linked_verified.get('receipt', {}).get('status') == 'ready',
                   {'exit': linked_verified_code, 'code': linked_verified.get('code')})
+        if args.emit_research_scope_fixtures:
+            research_scopes = base / 'research-scopes'
+            research_scopes.mkdir(mode=0o700)
+            boundary = {
+                'kind': 'native-research-scope-v1', 'engagement_id': 'fixture-202',
+                'operator_id': 'synthetic-operator', 'source_manifest_sha256': manifest_hash,
+                'goal_sha256': sha(goal), 'surfaces': ['owned harmless source copy'],
+                'benign_objectives': ['assess a concrete unsafe effect with a control'],
+                'escalation_ceiling': 'source_only_research',
+                'impact_demo_authorized': False, 'accounts': [],
+                'cleanup': 'Stop and remove all owned research resources.',
+                'effect_class': 'checked-offline-source-research',
+                'network_class': 'metered-model-relay-only',
+                'limits': {'max_connections': 2, 'max_bytes': 1048576,
+                           'duration_seconds': 120},
+                'expires_at': stamp(now + timedelta(hours=1))}
+            variants = {
+                'valid': boundary,
+                'expired': dict(boundary, expires_at=stamp(now - timedelta(hours=1))),
+                'wrong-engagement': dict(boundary, engagement_id='other-fixture'),
+                'broad-effect': dict(boundary, effect_class='networked-target-research'),
+                'wrong-source': dict(boundary, source_manifest_sha256='0' * 64),
+                'wrong-goal': dict(boundary, goal_sha256='0' * 64),
+                'wrong-limits': dict(boundary, limits={**boundary['limits'], 'max_bytes': 1048577}),
+            }
+            for name, value in variants.items():
+                scope_path = research_scopes / (name + '.md')
+                scope_path.write_text('# Synthetic checked research scope\n\n'
+                    '- Operator allowed signers SHA256: sha256:' + sha(signers) + '\n\n'
+                    '```native-research-scope-v1\n' + json.dumps(value, sort_keys=True) + '\n```\n')
+                challenge = canonical_json_bytes({
+                    'kind': 'native-research-scope-challenge-v1',
+                    'engagement_id': 'fixture-202', 'scope_sha256': sha(scope_path)})
+                (research_scopes / (name + '.sig')).write_bytes(subprocess.run(
+                    ['ssh-keygen', '-Y', 'sign', '-f', str(key), '-n',
+                     'llm-redteam-harness-native-research-v1'], input=challenge,
+                    capture_output=True, check=True, timeout=10).stdout)
         key.unlink()
         inputs = {'source_manifest_sha256': manifest_hash,
                   'scope_sha256': sha(scope), 'setup_approval_sha256': sha(controls / 'approval.json'),

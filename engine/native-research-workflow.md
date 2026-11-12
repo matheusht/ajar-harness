@@ -15,6 +15,11 @@ and closure rules do not apply when a reference links to their domain reasoning.
 Resolve a missing permission boundary before a target action. These paths are
 the current integration's layout; another runtime can use the same ordinary
 files under its own workspace root and must supply its own enforced run limits.
+When `/research/checked-setup/` is present, read `INITIAL_THREAT_MODEL.md`
+and `SETUP_TRACE.json` before the first research action. They are frozen setup
+inputs, not findings. Record any correction in `/workspace/RESEARCH.md` or a
+new research artifact; do not overwrite the original threat model or treat the
+setup build as evidence of a security effect.
 
 1. **Ground the case.** Check the target and source version, build and service
    state, available actors, permitted effects, and remaining allowance against

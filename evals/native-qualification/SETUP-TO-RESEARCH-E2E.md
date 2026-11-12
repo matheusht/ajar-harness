@@ -41,6 +41,66 @@ or dependency set at this transition.
    resource absence and remaining effects. Save CLI output, plan and receipt
    hashes, trace, allowance, assistance, and cleanup as the repeatable result.
 
-A synthetic local scenario may check the transition mechanics, but it cannot
-qualify the live model, provider, or a new target. The live scenario needs a
-fresh signed target and authority supplied for that run.
+The executable provider-free slice is:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  evals/native-qualification/smoke/check_native_setup_to_research.py \
+  --output /tmp/native-setup-to-research-e2e.json
+```
+
+It needs local Docker with an already-local `busybox:1.37` image, Go,
+OpenSSL and `ssh-keygen`. It calls the #202 public builder scenario to create a
+fresh synthetic v2 checked package, then invokes public `prepare-checked` with
+a separate research scope and explicit research connection, byte and duration
+allowance. It checks the sealed plan, copied package and read-only `/research`
+inputs, source and dependency bytes and modes, and changed input refusal before
+run creation. A local network-none Docker replay mounts checked dependencies
+read-only at `/deps`, reads their exact bytes, and builds a disposable source
+copy. The scenario also checks exact plan-approval mismatch before Docker,
+plan swap refusal, interrupted preparation refusal, and ordinary source-only
+preparation. The JSON output records input hashes, checks, results and limits.
+Pass `--keep-root /absolute/new/private/dir` to retain the harmless fixture
+and prepared research run; the builder removes the synthetic operator signing
+key first.
+
+The 2026-11-12 local run passed 28 of 28 checks recorded in
+`setup-evidence/native-setup-to-research-synthetic-e2e.json`; the fixture roots
+were removed, and the result records hashes, refusal codes, and the Docker
+`/deps` readback. The observed passing gate with an exact research approval
+was the existing pinned-agent-image check, before a native research turn.
+
+The builder's v2 fixture fabricates setup turns, stop records and provider
+accounting. Its research scope is an unsigned synthetic fixture. This
+transition scenario does not run a native model turn or
+provider. The live research turn and pause/resume in step 3 require a fresh
+authorized target, actual runtime image, signed scope and provider route.
+No prepared plan or passing synthetic check is a research result.
+
+## Host transition
+
+After a checked setup build and its cleanup are verified, prepare a new private
+research run from that exact setup root:
+
+```sh
+python3 tools/native_research.py prepare-checked \
+  --run-root /absolute/new/private/research-run \
+  --checked-setup-root /absolute/private/stopped-setup-run \
+  --scope-file /absolute/private/research-scope.md \
+  --scope-sha256 <sha256-of-research-scope> \
+  --max-connections <approved-count> \
+  --max-bytes <approved-byte-limit> \
+  --duration-seconds <approved-duration>
+```
+
+The operator must supply a separately authorized research scope. The command
+enforces a different scope hash and refuses the structured setup-only scope,
+including a byte-edited copy. It does not verify a research-scope signature.
+The command accepts no replacement build command, runtime, image, or
+dependency catalog. It checks that the setup and build grants are still fresh,
+then seals the copied package, consumed setup allowance, source bytes and
+modes, runtime, dependencies, and initial threat model into `plan.json`.
+`start` still needs a human-authored `native-research-live-approval-v1` for the
+exact new plan and its research allowance. Its existing approval mechanism
+checks the plan and scope hashes and expiry; this scenario does not qualify a
+cryptographic signature on that research approval.

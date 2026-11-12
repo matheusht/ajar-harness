@@ -1,0 +1,246 @@
+{
+  "checks": [
+    {
+      "name": "fresh v2 checked setup fixture is available",
+      "observed": {
+        "builder_checks": 21,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "missing checked receipt refuses before research root",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed frozen source refuses before research root",
+      "observed": {
+        "code": "source_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed source mode refuses before research root",
+      "observed": {
+        "code": "checked_receipt_or_bytes_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed checked output refuses before research root",
+      "observed": {
+        "code": "checked_receipt_or_bytes_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed offline dependency refuses before research root",
+      "observed": {
+        "code": "build_catalog_file_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed offline dependency mode refuses before research root",
+      "observed": {
+        "code": "build_catalog_mode_changed_or_unsafe",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "setup-only scope cannot become research scope",
+      "observed": {
+        "code": "separate_research_scope_required",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "byte-edited setup-only scope cannot become research scope",
+      "observed": {
+        "code": "separate_research_scope_required",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed research scope pin refuses preparation",
+      "observed": {
+        "code": "research_scope_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "research root inside checked package refuses before copy",
+      "observed": {
+        "code": "checked_setup_run_root_overlap",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "interrupted preparation root cannot be resealed",
+      "observed": {
+        "code": "run_root_already_exists",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "public checked preparation seals research plan",
+      "observed": {
+        "exit": 0,
+        "plan_sha256": "3b9be97f372e35a76b3c04715fecd912ca0b085ede5fa4e88d505f1190edf06b",
+        "status": "prepared_provider_free"
+      },
+      "passed": true
+    },
+    {
+      "name": "plan derives runtime build and target image from checked setup",
+      "observed": {
+        "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976",
+        "target_image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec"
+      },
+      "passed": true
+    },
+    {
+      "name": "read-only research inputs retain original threat and trace",
+      "observed": {
+        "threat_sha256": "8429fcacfebc9d8bc6d286ec59d6678b624e919146f825806fe0eba52069aaa6",
+        "trace_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+      },
+      "passed": true
+    },
+    {
+      "name": "offline Docker reads pinned /deps and builds disposable source copy",
+      "observed": {
+        "exit": 0,
+        "readback_sha256": [
+          "c3039e9d479a3b6b868cc4c31ec97d84bcddcde9290f7a6f2ab99743d626ad64",
+          "f1761bcdd8c9642732bc621617841662135295fe36f09a8124e137910661847c"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "name": "research plan approval mismatch refuses before Docker",
+      "observed": {
+        "code": "live_approval_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "sealed research plan rechecks without original setup root",
+      "observed": {
+        "code": "live_approval_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "swapped archived threat refuses before Docker",
+      "observed": {
+        "code": "checked_setup_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "missing checked effect envelope refuses before Docker",
+      "observed": {
+        "code": "source_effect_envelope_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "swapped archived output mode refuses before Docker",
+      "observed": {
+        "code": "checked_setup_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed research source mode refuses before Docker",
+      "observed": {
+        "code": "checked_setup_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed pristine target script mode refuses before Docker",
+      "observed": {
+        "code": "checked_setup_pristine_source_mode_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed active dependency mode refuses before Docker",
+      "observed": {
+        "code": "checked_setup_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "valid plan approval reaches pinned agent image gate",
+      "observed": {
+        "code": "opencode_image_environment_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "interrupted transition cannot reseal same research root",
+      "observed": {
+        "code": "run_root_already_exists",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "later correction leaves original threat model pinned",
+      "observed": {
+        "initial_threat_model_sha256": "8429fcacfebc9d8bc6d286ec59d6678b624e919146f825806fe0eba52069aaa6"
+      },
+      "passed": true
+    },
+    {
+      "name": "ordinary source-only preparation remains available",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    }
+  ],
+  "classification": "synthetic setup/provenance and provider-free research preparation",
+  "fixture_roots": null,
+  "inputs": {
+    "builder_evidence_sha256": "1fbfb8914af79c99d7f40a6e0161007b008daddbf478abcdbd815ee37b2e4b6f",
+    "builder_scenario_sha256": "515eb23d504490dbea3fcc09a4a34c373bb7d2300088fbd324420c4c5ae92b7e",
+    "checked_receipt_sha256": "e78336b9d5861d13e84e12994be103077c8c976e889c6b5d405141a3a932e5a3",
+    "research_plan_sha256": "3b9be97f372e35a76b3c04715fecd912ca0b085ede5fa4e88d505f1190edf06b",
+    "research_scope_sha256": "d15fc89494a63eea5c359ed6e30ff40d47e12a030bfc1c5db0fac0dfadf169ca",
+    "scenario_sha256": "24372cda984a59fda4e833e7be8df54548c62e7bf68d519bfb143e3229a6e823"
+  },
+  "kind": "native-setup-to-research-synthetic-e2e-v1",
+  "limits": "No live native research turn, provider qualification, pause/resume, or actual target.",
+  "passed": true,
+  "provider_or_model_executed": false,
+  "target_service_executed": false
+}

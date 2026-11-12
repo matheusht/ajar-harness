@@ -30,6 +30,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -76,6 +77,12 @@ SOURCE_EFFECT_ENVELOPE = {
     'readonly_host_mount': '/modules:offline_dependencies',
     'replays': 2, 'assessment': 'reproducibility_only',
 }
+CHECKED_SOURCE_EFFECT_ENVELOPE = dict(
+    SOURCE_EFFECT_ENVELOPE, readonly_host_mount='/deps:offline_dependencies')
+
+
+def _source_dependency_destination(plan: dict) -> str:
+    return '/deps' if 'checked_setup' in plan else '/modules'
 ORIGIN_ROLES = {'researcher': 'target', 'resume': 'target',
                 'reviewer-1': 'review-target-1', 'reviewer-2': 'review-target-2'}
 ORIGIN_SOURCE_FILES = {
@@ -498,6 +505,238 @@ def _verify_inventory(directory: Path, expected: dict[str, str], *,
                            max_bytes=SETUP_SOURCE_MAX_BYTES) if setup_limit else _inventory(directory))
     if observed != expected:
         _fail('source_pin_mismatch')
+
+
+def _checked_archive_manifest(directory: Path) -> dict:
+    inventory = _inventory(directory, max_files=11000, max_bytes=320 * 1024 * 1024)
+    entries = {}
+    total = 0
+    for relative, digest in inventory.items():
+        path = directory / relative
+        entry = path.stat(follow_symlinks=False)
+        total += entry.st_size
+        entries[relative] = {'sha256': digest, 'mode': stat.S_IMODE(entry.st_mode)}
+    return {'files': len(entries), 'bytes': total,
+            'sha256': hashlib.sha256(canonical_json_bytes(entries)).hexdigest()}
+
+
+def _copy_checked_setup(root: Path, checked: dict, setup_root: Path) -> dict:
+    """Archive the verified package before the first research plan is sealed."""
+    controls = _controls(root)
+    archive = controls / 'checked-setup'
+    archive.mkdir(mode=0o700)
+    shutil.copytree(Path(checked['checked_root']), archive / 'package')
+    source_controls = setup_root / 'controls'
+    frozen = source_controls / 'setup-output'
+    proposal = _read_json(frozen / 'receipt.json')
+    trace = source_controls / 'dispatch' / (proposal['dispatch_id'] + '.trace.json')
+    for source, name in ((setup_root / 'plan.json', 'setup-plan.json'),
+                         (source_controls / 'scope.md', 'setup-scope.md'),
+                         (source_controls / 'approval.json', 'setup-approval.json'),
+                         (source_controls / 'setup-build/authority.json', 'build-authority.json'),
+                         (frozen / 'receipt.json', 'setup-output-receipt.json'),
+                         (frozen / 'recipe.json', 'recipe.json'),
+                         (frozen / 'THREAT_MODEL.md', 'THREAT_MODEL.md'),
+                         (trace, 'setup-trace.json')):
+        shutil.copy2(_file(source, private=True), archive / name)
+        (archive / name).chmod(0o600)
+    research = controls / 'research/checked-setup'
+    research.mkdir(mode=0o700)
+    for source, name in ((archive / 'THREAT_MODEL.md', 'INITIAL_THREAT_MODEL.md'),
+                         (archive / 'setup-trace.json', 'SETUP_TRACE.json')):
+        shutil.copy2(source, research / name)
+        (research / name).chmod(0o600)
+    receipt = checked['receipt']
+    recipe = checked['recipe']
+    if (_read_json(archive / 'package/receipt.json') != receipt
+            or _read_json(archive / 'recipe.json') != recipe
+            or receipt.get('source_manifest_sha256') != _plan_source_manifest(root)
+            or receipt.get('source_mode_sha256') != _source_mode_digest(root / 'original')
+            or receipt.get('goal_sha256') != _sha(controls / 'BRIEF.md')):
+        _fail('checked_setup_source_or_goal_mismatch')
+    return {'kind': 'native-checked-setup-transition-v1',
+            'archive': _checked_archive_manifest(archive),
+            'checked_receipt_sha256': _sha(archive / 'package/receipt.json'),
+            'setup_output_receipt_sha256': _sha(archive / 'setup-output-receipt.json'),
+            'recipe_sha256': _sha(archive / 'recipe.json'),
+            'initial_threat_model_sha256': _sha(archive / 'THREAT_MODEL.md'),
+            'setup_trace_sha256': _sha(archive / 'setup-trace.json'),
+            'build_authority_sha256': _sha(archive / 'build-authority.json'),
+            'setup_chain_sha256': receipt['setup_chain_sha256'],
+            'cumulative_setup_used': receipt['cumulative_setup_used'],
+            'source_manifest_sha256': receipt['source_manifest_sha256'],
+            'source_mode_sha256': receipt['source_mode_sha256'],
+            'goal_sha256': receipt['goal_sha256'],
+            'target_image_id': receipt['image_id'],
+            'platform': receipt['platform'],
+            'runtime_sha256': hashlib.sha256(canonical_json_bytes(recipe['runtime'])).hexdigest(),
+            'build_command_sha256': hashlib.sha256(canonical_json_bytes(recipe['build_command'])).hexdigest()}
+
+
+def _plan_source_manifest(root: Path) -> str:
+    inventory = _inventory(root / 'original')
+    return hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
+
+
+def _file_modes(directory: Path, inventory: dict[str, str]) -> dict[str, int]:
+    return {name: stat.S_IMODE((directory / name).stat(follow_symlinks=False).st_mode)
+            for name in inventory}
+
+
+def _checked_files(directory: Path) -> dict[str, dict[str, int | str]]:
+    if not directory.exists():
+        return {}
+    if directory.is_symlink() or not directory.is_dir():
+        _fail('checked_setup_directory_invalid')
+    if not any(directory.iterdir()):
+        return {}
+    inventory = _inventory(directory)
+    modes = _file_modes(directory, inventory)
+    return {name: {'sha256': digest, 'mode': modes[name]}
+            for name, digest in inventory.items()}
+
+
+def _source_mode_digest(directory: Path) -> str:
+    inventory = _inventory(directory)
+    return hashlib.sha256(canonical_json_bytes(_file_modes(directory, inventory))).hexdigest()
+
+
+def _verify_checked_setup(root: Path, plan: dict) -> None:
+    pin = plan['checked_setup']
+    controls = _controls(root)
+    archive = controls / 'checked-setup'
+    required = {'kind', 'archive', 'checked_receipt_sha256', 'setup_output_receipt_sha256',
+                'recipe_sha256', 'initial_threat_model_sha256', 'setup_trace_sha256',
+                'build_authority_sha256', 'setup_chain_sha256', 'cumulative_setup_used',
+                'source_manifest_sha256', 'source_mode_sha256', 'goal_sha256',
+                'target_image_id', 'platform',
+                'runtime_sha256', 'build_command_sha256'}
+    if (not isinstance(pin, dict) or set(pin) != required
+            or pin['kind'] != 'native-checked-setup-transition-v1'
+            or 'source_only' not in plan or 'setup_only' in plan
+            or plan['scope_sha256'] == _sha(archive / 'setup-scope.md')
+            or pin['archive'] != _checked_archive_manifest(archive)):
+        _fail('checked_setup_pin_mismatch')
+    checked = _read_json(archive / 'package/receipt.json')
+    proposal = _read_json(archive / 'setup-output-receipt.json')
+    recipe = _read_json(archive / 'recipe.json')
+    setup_plan = _read_json(archive / 'setup-plan.json')
+    import native_setup_builder as builder
+    catalog = builder.catalog_snapshot(archive / 'package/dependencies', recipe)
+    dependency_root = archive / 'package/dependencies/payload'
+    archived_dependencies = _checked_files(dependency_root)
+    active_dependencies = _checked_files(controls / 'source-modules')
+    archived_outputs = _checked_files(archive / 'package/output')
+    if (pin['checked_receipt_sha256'] != _sha(archive / 'package/receipt.json')
+            or pin['setup_output_receipt_sha256'] != _sha(archive / 'setup-output-receipt.json')
+            or pin['recipe_sha256'] != _sha(archive / 'recipe.json')
+            or pin['initial_threat_model_sha256'] != _sha(archive / 'THREAT_MODEL.md')
+            or pin['setup_trace_sha256'] != _sha(archive / 'setup-trace.json')
+            or pin['build_authority_sha256'] != _sha(archive / 'build-authority.json')
+            or pin['setup_chain_sha256'] != checked.get('setup_chain_sha256')
+            or pin['cumulative_setup_used'] != checked.get('cumulative_setup_used')
+            or pin['source_manifest_sha256'] != checked.get('source_manifest_sha256')
+            or pin['source_mode_sha256'] != checked.get('source_mode_sha256')
+            or pin['goal_sha256'] != checked.get('goal_sha256')
+            or pin['target_image_id'] != checked.get('image_id')
+            or pin['platform'] != checked.get('platform')
+            or pin['runtime_sha256'] != hashlib.sha256(
+                canonical_json_bytes(recipe.get('runtime'))).hexdigest()
+            or pin['build_command_sha256'] != hashlib.sha256(
+                canonical_json_bytes(recipe.get('build_command'))).hexdigest()
+            or checked.get('kind') != 'native-setup-checked-v1'
+            or checked.get('status') != 'ready'
+            or checked.get('setup_output_receipt_sha256') != pin['setup_output_receipt_sha256']
+            or checked.get('recipe_sha256') != pin['recipe_sha256']
+            or checked.get('threat_model_sha256') != pin['initial_threat_model_sha256']
+            or checked.get('build_authority_sha256') != pin['build_authority_sha256']
+            or checked.get('dependency_catalog_tree_sha256') != catalog['tree']['tree_sha256']
+            or checked.get('dependencies') != catalog['selected']
+            or proposal.get('files') != {'recipe.json': pin['recipe_sha256'],
+                                         'THREAT_MODEL.md': pin['initial_threat_model_sha256']}
+            or proposal.get('native_trace_sha256') != pin['setup_trace_sha256']
+            or setup_plan.get('source_manifest_sha256') != pin['source_manifest_sha256']
+            or setup_plan.get('brief_sha256') != pin['goal_sha256']
+            or _sha(archive / 'setup-plan.json') != checked.get('setup_plan_sha256')
+            or _sha(archive / 'setup-scope.md') != checked.get('setup_scope_sha256')
+            or _sha(archive / 'setup-approval.json') != checked.get('setup_approval_sha256')
+            or _sha(controls / 'research/checked-setup/INITIAL_THREAT_MODEL.md')
+            != pin['initial_threat_model_sha256']
+            or _sha(controls / 'research/checked-setup/SETUP_TRACE.json')
+            != pin['setup_trace_sha256']
+            or plan['source_manifest_sha256'] != pin['source_manifest_sha256']
+            or _source_mode_digest(root / 'original') != pin['source_mode_sha256']
+            or plan['brief_sha256'] != pin['goal_sha256']
+            or plan['target_image_id'] != pin['target_image_id']
+            or plan['platform'] != pin['platform']
+            or plan['source_only'].get('runtime') != recipe.get('runtime')
+            or plan['source_only'].get('build_command') != recipe.get('build_command')
+            or archived_dependencies != checked.get('dependencies')
+            or archived_outputs != checked.get('outputs')
+            or archived_dependencies != active_dependencies):
+        _fail('checked_setup_pin_mismatch')
+
+
+def prepare_checked(args: argparse.Namespace) -> dict:
+    """Seal a source-only research plan from a checked, stopped setup package."""
+    scope = _file(Path(args.scope_file), private=True)
+    if _sha(scope) != args.scope_sha256:
+        _fail('research_scope_pin_mismatch')
+    setup_root = _private_root(Path(args.checked_setup_root))
+    research_root = Path(args.run_root)
+    if not research_root.is_absolute():
+        _fail('checked_setup_run_root_overlap')
+    resolved_setup = setup_root.resolve(strict=True)
+    resolved_research = research_root.resolve(strict=False)
+    if (resolved_research.is_relative_to(resolved_setup)
+            or resolved_setup.is_relative_to(resolved_research)):
+        _fail('checked_setup_run_root_overlap')
+    import native_setup_builder as builder
+    checked = builder.verify_checked(setup_root, require_fresh=True)
+    receipt = checked['receipt']
+    recipe = checked['recipe']
+    if (args.scope_sha256 == receipt['setup_scope_sha256']
+            or b'```native-setup-scope-v1' in scope.read_bytes()):
+        _fail('separate_research_scope_required')
+    setup_plan = _read_json(setup_root / 'plan.json')
+    setup_controls = _controls(setup_root)
+    if (receipt['setup_plan_sha256'] != _sha(setup_root / 'plan.json')
+            or receipt['goal_sha256'] != _sha(setup_controls / 'BRIEF.md')):
+        _fail('checked_setup_goal_or_plan_changed')
+    limits = {'max_connections': args.max_connections, 'max_bytes': args.max_bytes,
+              'duration_seconds': args.duration_seconds}
+    if not _valid_limits(limits):
+        _fail('research_allowance_invalid')
+    with tempfile.TemporaryDirectory(prefix='native-checked-prepare-') as temporary:
+        temporary_root = Path(temporary).resolve(strict=True)
+        runtime = temporary_root / 'runtime.json'
+        command = temporary_root / 'command.json'
+        _write_json(runtime, recipe['runtime'], once=True)
+        _write_json(command, recipe['build_command'], once=True)
+        words = ['prepare', '--source-only', '--run-root', str(args.run_root),
+                 '--source', checked['source_dir'],
+                 '--brief', str(setup_controls / 'BRIEF.md'),
+                 '--scope-file', str(scope), '--scope-sha256', args.scope_sha256,
+                 '--relay', str(setup_controls / 'relay'),
+                 '--relay-sha256', setup_plan['relay_sha256'],
+                 '--runtime-ca', str(setup_controls / 'runtime-ca.pem'),
+                 '--runtime-ca-sha256', setup_plan['runtime_ca_sha256'],
+                 '--image-id', setup_plan['image_id'],
+                 '--target-image-id', receipt['image_id'],
+                 '--platform', receipt['platform'],
+                 '--source-runtime', str(runtime), '--build-command', str(command),
+                 '--model', setup_plan['model'], '--provider-route', setup_plan['provider_route'],
+                 '--max-connections', str(args.max_connections),
+                 '--max-bytes', str(args.max_bytes),
+                 '--duration-seconds', str(args.duration_seconds)]
+        if receipt.get('dependencies'):
+            words.extend(('--module-cache', checked['dependency_dir']))
+        prepared_args = _parser().parse_args(words)
+        prepared_args.checked_setup = {'checked': checked, 'setup_root': setup_root}
+        result = prepare(prepared_args)
+    result['checked_setup_receipt_sha256'] = _sha(
+        Path(args.run_root) / 'controls/checked-setup/package/receipt.json')
+    return result
 
 
 def _copy_setup_source(source: Path, destination: Path, inventory: dict[str, str]) -> None:
@@ -967,6 +1206,9 @@ def prepare(args: argparse.Namespace) -> dict:
     ca = _file(Path(args.runtime_ca), private=True)
     source_only = bool(getattr(args, 'source_only', False))
     setup_only = bool(getattr(args, 'setup_only', False))
+    checked_context = getattr(args, 'checked_setup', None)
+    if checked_context is not None and (not source_only or setup_only):
+        _fail('checked_setup_source_profile_required')
     source_modules = None
     module_inventory = {}
     source_profile = {}
@@ -1241,6 +1483,10 @@ def prepare(args: argparse.Namespace) -> dict:
         for input_path, name in ((workflow, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
             shutil.copy2(input_path, controls / 'research' / name)
             (controls / 'research' / name).chmod(0o600)
+        checked_pin = None
+        if checked_context is not None:
+            checked_pin = _copy_checked_setup(root, checked_context['checked'],
+                                              checked_context['setup_root'])
         notebook = root / 'researcher/RESEARCH.md'
         notebook.write_text(
             '# Research notebook\n\n'
@@ -1288,7 +1534,11 @@ def prepare(args: argparse.Namespace) -> dict:
             plan['source_only'] = dict(source_profile,
                 module_cache_sha256=hashlib.sha256(json.dumps(module_inventory, sort_keys=True).encode()).hexdigest(),
                 build_command=target_command)
-            plan['source_effect_envelope'] = SOURCE_EFFECT_ENVELOPE
+            plan['source_effect_envelope'] = (CHECKED_SOURCE_EFFECT_ENVELOPE
+                                              if checked_pin is not None else SOURCE_EFFECT_ENVELOPE)
+        if checked_pin is not None:
+            plan['checked_setup'] = checked_pin
+            _verify_checked_setup(root, plan)
         if setup_only:
             plan['setup_only'] = {
                 'engagement_id': args.setup_engagement_id,
@@ -1468,8 +1718,15 @@ def _verified_plan(root: Path, *, pristine: bool = False,
         module_digest = hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
         if module_digest != source['module_cache_sha256']:
             _fail('source_module_cache_changed')
-        if 'source_effect_envelope' in plan and plan['source_effect_envelope'] != SOURCE_EFFECT_ENVELOPE:
+        expected_envelope = (CHECKED_SOURCE_EFFECT_ENVELOPE if 'checked_setup' in plan
+                             else SOURCE_EFFECT_ENVELOPE)
+        if ('checked_setup' in plan or 'source_effect_envelope' in plan) and plan.get(
+                'source_effect_envelope') != expected_envelope:
             _fail('source_effect_envelope_changed')
+    if (controls / 'checked-setup').exists() != ('checked_setup' in plan):
+        _fail('checked_setup_plan_membership_changed')
+    if 'checked_setup' in plan:
+        _verify_checked_setup(root, plan)
     if _sha(root / 'researcher/brief/BRIEF.md') != plan.get('brief_sha256'):
         _fail('run_brief_changed')
     if 'research_workflow_sha256' in plan:
@@ -1483,6 +1740,10 @@ def _verified_plan(root: Path, *, pristine: bool = False,
             _verify_inventory(root / 'researcher/project', plan['source_sha256'])
             for name in ('target', 'review-target-1', 'review-target-2'):
                 _verify_target_state(root / name, plan['source_sha256'], plan['mutable_paths'])
+            if 'checked_setup' in plan:
+                for name in ('researcher/project', 'target', 'review-target-1', 'review-target-2'):
+                    if _source_mode_digest(root / name) != plan['checked_setup']['source_mode_sha256']:
+                        _fail('checked_setup_pristine_source_mode_changed')
     return plan
 
 
@@ -2108,7 +2369,8 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
         if 'source_only' in plan:
             network, ip = 'none', None
             command = ['sh', '-c', 'while :; do sleep 3600; done']
-            extra_mounts = [_mount(controls / 'source-modules', '/modules', readonly=True)]
+            extra_mounts = [_mount(controls / 'source-modules',
+                                   _source_dependency_destination(plan), readonly=True)]
             for sub in ('tmp', 'go-build-cache'):
                 (root / role / '.native-source' / sub).mkdir(parents=True, mode=0o700)
             extra_env = _source_environment('/target/.native-source', plan)
@@ -2139,7 +2401,8 @@ def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
             mounts.append(_mount(root / 'original', '/workspace/original', readonly=True))
         environment = _research_environment(root, role, relay_ip, target_ip, capability)
         if 'source_only' in plan:
-            mounts.append(_mount(controls / 'source-modules', '/modules', readonly=True))
+            mounts.append(_mount(controls / 'source-modules',
+                                 _source_dependency_destination(plan), readonly=True))
             environment.extend(_source_environment('/workspace', plan))
             if role in ('reviewer-1', 'reviewer-2'):
                 mounts.append(_mount(controls / 'source-evidence' / role, '/source-evidence', readonly=True))
@@ -3301,7 +3564,8 @@ def _source_environment(base: str, plan: dict) -> list[str]:
     if 'runtime' in plan['source_only']:
         return []
     return ['GOTOOLCHAIN=local', 'GOPROXY=off', 'GOSUMDB=off', 'GOWORK=off',
-            'GOENV=off', 'GOFLAGS=-mod=readonly', 'GOMODCACHE=/modules',
+            'GOENV=off', 'GOFLAGS=-mod=readonly',
+            'GOMODCACHE=' + _source_dependency_destination(plan),
             'GOCACHE=' + base + '/go-build-cache', 'GOTMPDIR=' + base + '/tmp', 'CGO_ENABLED=0']
 
 
@@ -3424,7 +3688,9 @@ def _freeze_source_input(root: Path, destination: Path, role: str) -> dict:
 
 def _source_executor_envelope(root: Path, plan: dict) -> None:
     """Read back the approved offline effect boundary immediately before a batch."""
-    if plan.get('source_effect_envelope') != SOURCE_EFFECT_ENVELOPE:
+    expected_envelope = (CHECKED_SOURCE_EFFECT_ENVELOPE if 'checked_setup' in plan
+                         else SOURCE_EFFECT_ENVELOPE)
+    if plan.get('source_effect_envelope') != expected_envelope:
         _fail('source_action_authority_required')
     resources = _read_json(_controls(root) / 'resources.json')
     nonce = resources.get('nonce')
@@ -3436,7 +3702,8 @@ def _source_executor_envelope(root: Path, plan: dict) -> None:
         mounts = {(row.get('Source'), row.get('Destination'), row.get('RW'))
                   for row in info.get('Mounts', [])}
         expected = {(str(root / role), '/target', True),
-                    (str(_controls(root) / 'source-modules'), '/modules', False)}
+                    (str(_controls(root) / 'source-modules'),
+                     _source_dependency_destination(plan), False)}
         if (info.get('Id') != identifier or info.get('Image') != plan['target_image_id']
                 or config.get('Labels', {}).get(LABEL) != nonce
                 or config.get('User') != f'{os.getuid()}:{os.getgid()}'
@@ -5189,8 +5456,9 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         'and rationale (why this control tests the causal claim). Both commands must terminate. '
         'The host will freeze your scripts and run each command on three clean offline copies. '
         'Do not modify original files during execution. The host compares original file bytes '
-        'before and after each command; this does not rule out temporary changes. '
-        'Use /modules for prepared dependencies. Return decision unfinished until you have read '
+        'before and after each command; this does not rule out temporary changes. ' +
+        ('Use /deps' if 'checked_setup' in plan else 'Use /modules') +
+        ' for prepared dependencies. Return decision unfinished until you have read '
         'the host results. Do not treat your workspace output as host evidence.\n') + prompt[end:]
 
     def invoke_initial(run_root, reviewer_role, session, unused_prompt, **kwargs):
@@ -5714,6 +5982,13 @@ def _parser() -> argparse.ArgumentParser:
     prepare_cmd.add_argument('--max-connections', type=int, default=DEFAULT_LIMITS['max_connections'])
     prepare_cmd.add_argument('--max-bytes', type=int, default=DEFAULT_LIMITS['max_bytes'])
     prepare_cmd.add_argument('--duration-seconds', type=int, default=DEFAULT_LIMITS['duration_seconds'])
+    checked_cmd = commands.add_parser('prepare-checked',
+                                      help='seal source-only research from a host-checked setup package')
+    for name in ('run-root', 'checked-setup-root', 'scope-file', 'scope-sha256'):
+        checked_cmd.add_argument('--' + name, required=True)
+    checked_cmd.add_argument('--max-connections', type=int, required=True)
+    checked_cmd.add_argument('--max-bytes', type=int, required=True)
+    checked_cmd.add_argument('--duration-seconds', type=int, required=True)
     start_cmd = commands.add_parser('start', help='foreground live owner; requires fresh plan-bound approval')
     start_cmd.add_argument('--run-root', required=True)
     start_cmd.add_argument('--approval', required=True)
@@ -5806,6 +6081,8 @@ def main() -> int:
     try:
         if args.command == 'prepare':
             result = prepare(args)
+        elif args.command == 'prepare-checked':
+            result = prepare_checked(args)
         elif args.command == 'capture-stage':
             result = capture_stage(Path(args.run_root), args.target, s=args.s, q=args.q, t=args.t, b=args.b)
         elif args.command == 'start':

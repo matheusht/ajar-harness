@@ -26,6 +26,61 @@ def write(path, value):
     path.write_text(json.dumps(value, sort_keys=True) + '\n')
 
 
+def stop_synthetic_successor(root, grant, now):
+    """Give the second epoch stopped receipts so the third-epoch path is exercised."""
+    controls = root / 'controls'
+    plan = json.loads((root / 'plan.json').read_text())
+    ids = ['1' * 64, '2' * 64]
+    rows = ([{'kind': 'container', 'role': role, 'name': 'next-' + role, 'id': identifier}
+             for role, identifier in zip(('relay', 'researcher'), ids)]
+            + [{'kind': 'network', 'role': role, 'name': 'next-' + role, 'id': identifier}
+               for role, identifier in zip(('external', 'research'), ['3' * 64, '4' * 64])])
+    manifest = controls / 'producer-manifest.json'
+    write(manifest, {'producers': [{'id': value} for value in ids]})
+    revoked = controls / 'native-state/REVOKED'
+    write(controls / 'native-state/RUN.json', {'ids': ids, 'manifest_sha256': sha(manifest)})
+    write(revoked, {'ids': ids, 'manifest_sha256': sha(manifest),
+                    'producers_verified_stopped': True})
+    write(controls / 'resources.json', {'nonce': 'second-fixture', 'resources': rows})
+    cleanup = {'status': 'complete', 'resources': [
+        {'kind': row['kind'], 'name': row['name'], 'absent': True} for row in reversed(rows)]}
+    write(controls / 'cleanup.json', cleanup)
+    snapshot = controls / 'host-snapshot.json'
+    write(snapshot, {'status': 'complete', 'plan_sha256': sha(root / 'plan.json'),
+                     'native_stop': {'manifest_sha256': sha(manifest),
+                                     'revoked_sha256': sha(revoked)}})
+    write(controls / 'final.json', {'status': 'stopped_complete',
+          'native_stop': {'status': 'stopped'},
+          'host_snapshot': {'status': 'complete', 'receipt_sha256': sha(snapshot)},
+          'cleanup': cleanup})
+    provider = controls / 'provider/tunnel.sqlite3'
+    provider.parent.mkdir(exist_ok=True)
+    with sqlite3.connect(provider) as db:
+        db.execute('CREATE TABLE pool(config TEXT,created REAL,bytes INTEGER)')
+        db.execute('CREATE TABLE tunnels(id INTEGER PRIMARY KEY,phase TEXT, '
+                   'uploaded INTEGER DEFAULT 0, downloaded INTEGER DEFAULT 0)')
+        db.execute('INSERT INTO pool VALUES(?,?,?)', (json.dumps({
+            'authority': 'opencode.ai:443', 'producer_manifest_sha256': sha(manifest),
+            'native_run_duration': 30, 'max_connections': plan['limits']['max_connections'],
+            'max_bytes': plan['limits']['max_bytes'], 'duration': 30}), now.timestamp(), 0))
+    dispatch_id = 'f' * 32
+    trace = controls / 'dispatch' / (dispatch_id + '.trace.json')
+    write(trace, {'kind': 'protected-native-event-trace-v1', 'session_id': 'ses_fixture_2', 'events': []})
+    checkpoint = controls / 'setup-checkpoints' / dispatch_id
+    checkpoint.mkdir(parents=True)
+    (checkpoint / 'THREAT_MODEL.md').write_text('# Harmless second epoch\nNo target effect.\n')
+    write(checkpoint / 'receipt.json', {'kind': 'native-setup-checkpoint-v1',
+          'plan_sha256': sha(root / 'plan.json'), 'dispatch_id': dispatch_id,
+          'approval_sha256': sha(controls / 'approval.json'), 'pool_after': {'status': 'synthetic'},
+          'native_trace_sha256': sha(trace),
+          'files': {'recipe.json': None, 'THREAT_MODEL.md': sha(checkpoint / 'THREAT_MODEL.md')}})
+    write(controls / 'dispatch' / (dispatch_id + '.json'), {
+        'kind': 'native-dispatch-v1', 'role': 'researcher', 'status': 'acknowledged',
+        'dispatch_id': dispatch_id, 'setup_sequence': 1, 'session_id': 'ses_fixture_2',
+        'pool_after': {'status': 'synthetic'},
+        'native_trace_sha256': sha(trace), 'checkpoint_sha256': sha(checkpoint / 'receipt.json')})
+
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -297,6 +352,17 @@ def main():
             check('linked grant reaches resource boundary for successor',
                   code == 2 and successor_start.get('code') == 'docker_command_failed',
                   {'exit': code, 'code': successor_start.get('code')})
+            stop_synthetic_successor(successor, grant, now)
+            ancestor_nested = first / 'original/third-epoch'
+            code, nested_ancestor = cli(env, 'setup-next-epoch', '--run-root', str(successor),
+                                        '--next-run-root', str(ancestor_nested))
+            check('third epoch cannot enter an ancestor source tree',
+                  code == 2 and nested_ancestor.get('code') == 'setup_next_root_invalid'
+                  and not ancestor_nested.exists(),
+                  {'exit': code, 'code': nested_ancestor.get('code'),
+                   'created': ancestor_nested.exists()})
+            if ancestor_nested.exists():
+                shutil.rmtree(ancestor_nested)
         code, duplicate = cli(env, *next_cmd[:-1], str(base / 'run-3'))
         check('same stopped epoch cannot branch twice', code == 2 and not (base / 'run-3').exists(),
               {'exit': code, 'code': duplicate.get('code')})

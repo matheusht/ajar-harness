@@ -4339,6 +4339,15 @@ def setup_next_epoch(run_root: Path, next_run_root: Path) -> dict:
         if approval.get('kind') != 'native-setup-approval-v2':
             _fail('setup_linked_epoch_required')
         terminal = _setup_terminal_accounting(root, approval)
+        ancestor = root
+        for _ in range(16):
+            link_path = _controls(ancestor) / 'setup-epoch.json'
+            if not link_path.exists():
+                break
+            ancestor = _private_root(Path(_read_json(link_path)['previous_run_root']))
+            if (next_run_root.is_relative_to(ancestor)
+                    or ancestor.is_relative_to(next_run_root)):
+                _fail('setup_next_root_invalid')
         prior_link = controls / 'setup-epoch.json'
         epoch_index = (_read_json(prior_link)['epoch_index'] + 1 if prior_link.exists() else 2)
         if epoch_index > 16:

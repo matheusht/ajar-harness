@@ -134,6 +134,15 @@ def main():
         edited_scope[edited_scope.index('--scope-sha256') + 1] = sha(edited_setup_scope)
         rejected('byte-edited setup-only scope cannot become research scope',
                  edited_scope, 'separate_research_scope_required')
+        spaced_setup_scope = base / 'setup-scope-spaced-fence.md'
+        spaced_setup_scope.write_bytes((setup_controls / 'scope.md').read_bytes().replace(
+            b'```native-setup-scope-v1', b'``` native-setup-scope-v1'))
+        spaced_scope = list(prepare)
+        spaced_scope[spaced_scope.index('--run-root') + 1] = str(base / 'spaced-scope-research')
+        spaced_scope[spaced_scope.index('--scope-file') + 1] = str(spaced_setup_scope)
+        spaced_scope[spaced_scope.index('--scope-sha256') + 1] = sha(spaced_setup_scope)
+        rejected('space-edited setup-only scope cannot become research scope',
+                 spaced_scope, 'separate_research_scope_required')
         wrong_hash = list(prepare)
         wrong_hash[wrong_hash.index('--scope-sha256') + 1] = '0' * 64
         rejected('changed research scope pin refuses preparation', wrong_hash)

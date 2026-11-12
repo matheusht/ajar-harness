@@ -3,7 +3,7 @@
     {
       "name": "fresh v2 checked setup fixture is available",
       "observed": {
-        "builder_checks": 21,
+        "builder_checks": 28,
         "exit": 0
       },
       "passed": true
@@ -27,7 +27,7 @@
     {
       "name": "changed source mode refuses before research root",
       "observed": {
-        "code": "checked_receipt_or_bytes_changed",
+        "code": "build_authority_mismatch",
         "exit": 2
       },
       "passed": true
@@ -73,6 +73,14 @@
       "passed": true
     },
     {
+      "name": "space-edited setup-only scope cannot become research scope",
+      "observed": {
+        "code": "separate_research_scope_required",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "changed research scope pin refuses preparation",
       "observed": {
         "code": "research_scope_pin_mismatch",
@@ -100,7 +108,7 @@
       "name": "public checked preparation seals research plan",
       "observed": {
         "exit": 0,
-        "plan_sha256": "3b9be97f372e35a76b3c04715fecd912ca0b085ede5fa4e88d505f1190edf06b",
+        "plan_sha256": "cd557e24470d9d9d1b5203e68febf68a7223bf324b5787332acdcdc2fd8dc2d6",
         "status": "prepared_provider_free"
       },
       "passed": true
@@ -231,12 +239,12 @@
   "classification": "synthetic setup/provenance and provider-free research preparation",
   "fixture_roots": null,
   "inputs": {
-    "builder_evidence_sha256": "1fbfb8914af79c99d7f40a6e0161007b008daddbf478abcdbd815ee37b2e4b6f",
-    "builder_scenario_sha256": "515eb23d504490dbea3fcc09a4a34c373bb7d2300088fbd324420c4c5ae92b7e",
-    "checked_receipt_sha256": "e78336b9d5861d13e84e12994be103077c8c976e889c6b5d405141a3a932e5a3",
-    "research_plan_sha256": "3b9be97f372e35a76b3c04715fecd912ca0b085ede5fa4e88d505f1190edf06b",
+    "builder_evidence_sha256": "89fa533e6c1ffb34a9d6022ada8a385c51a9d2511cbef41acf8ca3414aa463e4",
+    "builder_scenario_sha256": "4cb55dc041cea4a8ca6af5a2b043078bfb8d5ebf5b8c34e74cc4bce7e3025a9b",
+    "checked_receipt_sha256": "37b2cda4362fe75d2f1c4e2a8edc9f0f12a46b40bba568cf6175b079f20c1b84",
+    "research_plan_sha256": "cd557e24470d9d9d1b5203e68febf68a7223bf324b5787332acdcdc2fd8dc2d6",
     "research_scope_sha256": "d15fc89494a63eea5c359ed6e30ff40d47e12a030bfc1c5db0fac0dfadf169ca",
-    "scenario_sha256": "24372cda984a59fda4e833e7be8df54548c62e7bf68d519bfb143e3229a6e823"
+    "scenario_sha256": "2e6065e6fe6ae52c1962af9a1c61bb4423147397a14cdbbd025912e2c80aa897"
   },
   "kind": "native-setup-to-research-synthetic-e2e-v1",
   "limits": "No live native research turn, provider qualification, pause/resume, or actual target.",

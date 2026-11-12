@@ -276,6 +276,9 @@ puts its concrete next check in a new agent prompt under the same approval and
 remaining allowance. User, allowance and unknown-effect stops bypass a new
 review and preserve an incomplete result and teardown receipt. The contained
 workflow is in [AGENT-CLOSEOUT-E2E](../../evals/native-qualification/AGENT-CLOSEOUT-E2E.md).
+If a stop proposal has no valid `RESULT.md`, the controller prompts one agent
+turn to repair it. A stale review prompts the agent to request a new review.
+Unchanged result and checkpoint bytes after that turn stop the run incomplete.
 
 The existing fresh source reviewer and host effect/control path consumes this
 packet. A completed internal assessment is returned to the same run at read-only

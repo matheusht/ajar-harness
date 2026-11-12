@@ -64,7 +64,7 @@ Pass `--keep-root /absolute/new/private/dir` to retain the harmless fixture
 and prepared research run; the builder removes the synthetic operator signing
 key first.
 
-The 2026-11-12 local run passed 28 of 28 checks recorded in
+The 2026-11-12 local run passed 29 of 29 checks recorded in
 `setup-evidence/native-setup-to-research-synthetic-e2e.json`; the fixture roots
 were removed, and the result records hashes, refusal codes, and the Docker
 `/deps` readback. The observed passing gate with an exact research approval
@@ -95,7 +95,7 @@ python3 tools/native_research.py prepare-checked \
 
 The operator must supply a separately authorized research scope. The command
 enforces a different scope hash and refuses the structured setup-only scope,
-including a byte-edited copy. It does not verify a research-scope signature.
+including byte-edited and spaced-fence copies. It does not verify a research-scope signature.
 The command accepts no replacement build command, runtime, image, or
 dependency catalog. It checks that the setup and build grants are still fresh,
 then seals the copied package, consumed setup allowance, source bytes and

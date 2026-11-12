@@ -4,7 +4,7 @@
 This is a control loop, not a researcher. It preserves one run root and one shared
 allowance across bounded native turns. The researcher chooses the next experiment in
 ``/workspace/NEXT.json``; this controller only checks that a usable next brief or an
-explicit stop proposal exists. For a source-only proposal with ``RESULT.md``, it
+explicit stop proposal exists. For a source-only stop proposal, it
 also invokes the internal closeout and verifies owner stop and cleanup. It never
 renews approval, creates a new run, or resets spend.
 
@@ -1365,12 +1365,34 @@ def _agent_closeout(root: Path, state: dict, *, wait_seconds: int,
                     nxt: dict | None = None, forced_stop_reason: str | None = None) -> dict | None:
     if ('source_only' not in _read_private(root / 'plan.json')
             or (forced_stop_reason is None and
-                (nxt is None or nxt.get('proposed_stop') is not True
-                 or not (root / 'researcher/project/RESULT.md').exists()))):
+                (nxt is None or nxt.get('proposed_stop') is not True))):
         return None
     from native_closeout import closeout
     result = closeout(root, wait_seconds=wait_seconds,
                       forced_stop_reason=forced_stop_reason)
+    if result['status'] in ('result_invalid', 'review_required'):
+        feedback = {'kind': 'native-closeout-feedback-v1',
+                    'status': result['status'], 'reason': result['reason'],
+                    'result_sha256': result.get('result_sha256'),
+                    'next_sha256': _next_hash(root),
+                    'review_projection_sha256': (state.get('review_action') or {}).get(
+                        'projection_sha256')}
+        path = root / 'controls/closeout' / ('feedback-' + hashlib.sha256(
+            runner.canonical_json_bytes(feedback)).hexdigest() + '.json')
+        if path.exists():
+            if _read_private(path) != feedback:
+                _fail('closeout_feedback_changed')
+        else:
+            runner._write_json(path, feedback, once=True)
+        result = {'status': 'reopen_required',
+                  'next_check': ('Write a complete RESULT.md and keep its claim bounded.'
+                                 if feedback['status'] == 'result_invalid' else
+                                 'Request fresh review of the current RESULT.md and evidence '
+                                 'before proposing closeout again.'),
+                  'result_sha256': feedback['result_sha256'],
+                  'next_sha256': feedback['next_sha256'],
+                  'review_projection_sha256': feedback['review_projection_sha256'],
+                  'reopen_record_sha256': runner._sha(path)}
     if result['status'] == 'reopen_required':
         previous = state.get('last_reopen')
         binding = {'result_sha256': result['result_sha256'],
@@ -1454,12 +1476,14 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             return _finish(root, state, 'stopped', reason=stop)
         reopen_check = None
         reopen_before_sha = None
+        reopen_before_result_sha = None
         closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
                                  nxt=_next(root))
         if closed is not None:
             if closed['status'] != 'reopen_required':
                 return closed
             reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+            reopen_before_result_sha = closed['result_sha256']
         closure = None if reopen_check else _closure(root)
         if closure is not None:
             if closure['review'] is None:
@@ -1513,6 +1537,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     if closed['status'] != 'reopen_required':
                         return closed
                     reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                    reopen_before_result_sha = closed['result_sha256']
                 else:
                     request = _closure_request(root, state, nxt)
                     _event(root, {'at': _now(), 'event': 'closure_request',
@@ -1551,6 +1576,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     if closed['status'] != 'reopen_required':
                         return closed
                     reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                    reopen_before_result_sha = closed['result_sha256']
                 else:
                     request = _closure_request(root, state, nxt)
                     _event(root, {'at': _now(), 'event': 'closure_request',
@@ -1678,13 +1704,16 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 if closed is not None:
                     return closed
                 return _finish(root, state, 'inactive', reason='allowance_inactive')
-            if reopen_check is not None and _next_hash(root) == reopen_before_sha:
+            result_file = root / 'researcher/project/RESULT.md'
+            current_result_sha = runner._sha(result_file) if result_file.is_file() else None
+            if (reopen_check is not None and _next_hash(root) == reopen_before_sha
+                    and current_result_sha == reopen_before_result_sha):
                 closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
                                          forced_stop_reason='reopen_no_agent_revision')
                 if closed is not None:
                     return closed
                 return _finish(root, state, 'reopen_no_agent_revision')
-            reopen_check, reopen_before_sha = None, None
+            reopen_check, reopen_before_sha, reopen_before_result_sha = None, None, None
             nxt = _next(root)
             if nxt is None:
                 return _finish(root, state, 'next_brief_missing')
@@ -1712,6 +1741,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     if closed['status'] != 'reopen_required':
                         return closed
                     reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                    reopen_before_result_sha = closed['result_sha256']
                     continue
                 request = _closure_request(root, state, nxt)
                 _event(root, {'at': _now(), 'event': 'closure_request',

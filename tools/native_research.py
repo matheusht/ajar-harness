@@ -696,7 +696,7 @@ def prepare_checked(args: argparse.Namespace) -> dict:
     receipt = checked['receipt']
     recipe = checked['recipe']
     if (args.scope_sha256 == receipt['setup_scope_sha256']
-            or b'```native-setup-scope-v1' in scope.read_bytes()):
+            or b'native-setup-scope-v1' in scope.read_bytes()):
         _fail('separate_research_scope_required')
     setup_plan = _read_json(setup_root / 'plan.json')
     setup_controls = _controls(setup_root)
@@ -1867,7 +1867,24 @@ def _activate_controls(root: Path):
 
 
 def _save_resources(root: Path, nonce: str, rows: list[dict]) -> None:
-    _write_json(_controls(root) / 'resources.json', {'nonce': nonce, 'resources': rows})
+    path = _controls(root) / 'resources.json'
+    if path.exists():
+        prior = _read_json(path)
+        daemon_id = prior.get('docker_daemon_id')
+        if prior.get('nonce') != nonce or not isinstance(daemon_id, str):
+            _fail('docker_daemon_pin_missing_or_changed')
+    else:
+        daemon_id = _docker_daemon_id()
+    if _docker_daemon_id() != daemon_id:
+        _fail('docker_daemon_changed')
+    _write_json(path, {'nonce': nonce, 'docker_daemon_id': daemon_id, 'resources': rows})
+
+
+def _docker_daemon_id() -> str:
+    value = _docker('info', '--format', '{{.ID}}').stdout.decode(errors='replace').strip()
+    if not 1 <= len(value) <= 128 or not value.isascii():
+        _fail('docker_daemon_identity_unavailable')
+    return value
 
 
 def _declare_resource(root: Path, nonce: str, rows: list[dict], kind: str, name: str, role: str) -> None:
@@ -2684,6 +2701,8 @@ def _capture_cleanup(root: Path, plan: dict) -> dict:
 
 def _cleanup_resources(root: Path, *, require_created: bool = False) -> dict:
     record = _read_json(_controls(root) / 'resources.json')
+    if record.get('docker_daemon_id') is not None and _docker_daemon_id() != record['docker_daemon_id']:
+        _fail('docker_daemon_changed')
     nonce = record.get('nonce')
     if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce):
         _fail('resource_record_invalid')

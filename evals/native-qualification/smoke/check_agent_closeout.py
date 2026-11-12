@@ -113,7 +113,7 @@ def setup(base: Path, *, outcome: str, review: bool = True,
 
 def write_final(root: Path, *, complete: bool = True) -> None:
     controls = root / 'controls'
-    resource = {'nonce': 'a' * 32,
+    resource = {'nonce': 'a' * 32, 'docker_daemon_id': 'synthetic-daemon-A',
                 'resources': [{'kind': 'container', 'name': 'synthetic-owner', 'id': 'b' * 64,
                                'role': 'researcher'},
                               {'kind': 'network', 'name': 'synthetic-network', 'id': 'c' * 64,
@@ -152,7 +152,8 @@ def bridge_cases(base: Path) -> dict:
         ('accepted', 'complete_internal_candidate'),
         ('agent_turn', 'complete_internal_candidate'),
         ('delayed_cleanup', 'cleanup_pending'),
-        ('stale_result', 'review_required'),
+        ('stale_result', 'complete_internal_candidate'),
+        ('missing_result', 'complete_internal_candidate'),
         ('user_stop_during_review', 'stopped_incomplete'),
         ('review_reopen', 'complete_internal_candidate'),
         ('reopen_no_revision', 'stopped_incomplete'),
@@ -168,6 +169,8 @@ def bridge_cases(base: Path) -> dict:
         if case == 'stale_result':
             (root / 'researcher/project/RESULT.md').write_text(
                 result_text('supported') + '\nChanged after review.\n')
+        if case == 'missing_result':
+            (root / 'researcher/project/RESULT.md').unlink()
         if case in ('agent_turn', 'budget_without_proposal', 'user_stop', 'unknown_pending'):
             nxt = dict(proposal)
             nxt['proposed_stop'] = False
@@ -202,6 +205,29 @@ def bridge_cases(base: Path) -> dict:
                                     'active': True},
                     'pool_after': {'used_tunnels': 1, 'charged_tunnel_bytes': 10,
                                    'active': True}}
+            if case == 'missing_result':
+                assert 'RESULT.md' in _args[2].read_text()
+                (root / 'researcher/project/RESULT.md').write_text(result_text('supported'))
+                return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                    'dispatch_id': '9' * 32,
+                    'pool_before': {'used_tunnels': 0, 'charged_tunnel_bytes': 0, 'active': True},
+                    'pool_after': {'used_tunnels': 1, 'charged_tunnel_bytes': 10, 'active': True}}
+            if case == 'stale_result':
+                prompt = _args[2]
+                if calls.count('invoke') == 1:
+                    assert 'fresh review' in prompt.read_text().lower()
+                    (root / 'researcher/RESEARCH.md').write_text(
+                        'The internal result changed; request a fresh review.\n')
+                    nxt = dict(proposal, proposed_stop=False, next=None,
+                        host_action={'kind': continuation.SOURCE_REVIEW_ACTION_KIND,
+                                     'claim': 'Review the changed result.'})
+                    runner._write_json(root / 'researcher/NEXT.json', nxt)
+                else:
+                    runner._write_json(root / 'researcher/NEXT.json', proposal)
+                return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                    'dispatch_id': ('8' if calls.count('invoke') == 1 else '7') * 32,
+                    'pool_before': {'used_tunnels': 0, 'charged_tunnel_bytes': 0, 'active': True},
+                    'pool_after': {'used_tunnels': 1, 'charged_tunnel_bytes': 10, 'active': True}}
             if case == 'review_reopen':
                 prompt = _args[2]
                 if len([item for item in calls if item == 'invoke']) == 1:
@@ -269,7 +295,8 @@ def bridge_cases(base: Path) -> dict:
             stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
             stack.enter_context(patch.object(runner, '_docker',
                 side_effect=lambda *argv, **kw: subprocess.CompletedProcess(
-                    argv, 0, stdout=b'', stderr=b'')))
+                    argv, 0, stdout=(b'synthetic-daemon-A\n' if argv[0] == 'info' else b''),
+                    stderr=b'')))
             stack.enter_context(patch.object(runner, 'stop', side_effect=fake_stop))
             if case == 'user_stop_during_review':
                 original_review = closeout._review
@@ -282,7 +309,7 @@ def bridge_cases(base: Path) -> dict:
 
                 stack.enter_context(patch.object(closeout, '_review',
                     side_effect=review_then_stop))
-            if case == 'review_reopen':
+            if case in ('review_reopen', 'stale_result'):
                 stack.enter_context(patch.object(runner, '_source_executor_envelope'))
                 stack.enter_context(patch.object(runner, '_freeze_source_input',
                     side_effect=lambda run_root, destination, role: (
@@ -296,8 +323,8 @@ def bridge_cases(base: Path) -> dict:
                 invoke=fail_invoke, status_fn=lambda _root: {'status': 'active',
                     'allowance': {'active': case != 'budget_without_proposal'}})
         assert response['status'] == expected, (case, response)
-        expected_calls = (['invoke', 'stop'] if case == 'agent_turn' else
-            ['invoke', 'invoke', 'stop'] if case == 'review_reopen' else
+        expected_calls = (['invoke', 'stop'] if case in ('agent_turn', 'missing_result') else
+            ['invoke', 'invoke', 'stop'] if case in ('review_reopen', 'stale_result') else
             ['invoke', 'stop'] if case == 'reopen_no_revision' else
             ['stop'] if case in ('accepted', 'delayed_cleanup', 'budget_stop',
             'budget_without_proposal', 'user_stop', 'user_stop_during_review',
@@ -315,7 +342,8 @@ def bridge_cases(base: Path) -> dict:
                 stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
                 stack.enter_context(patch.object(runner, '_docker',
                     side_effect=lambda *argv, **kw: subprocess.CompletedProcess(
-                        argv, 0, stdout=b'', stderr=b'')))
+                        argv, 0, stdout=(b'synthetic-daemon-A\n' if argv[0] == 'info' else b''),
+                        stderr=b'')))
                 stack.enter_context(patch.object(runner, 'stop', side_effect=fake_stop))
                 response = continuation.continue_run(root, max_invocations=3,
                     closeout_wait_seconds=0, invoke=fail_invoke,
@@ -363,6 +391,7 @@ def main() -> None:
             ('user_stop', 'supported', False, 'raise', 'stopped_incomplete'),
             ('failed_cleanup', 'supported', True, 'raise', 'cleanup_unverified'),
             ('remaining_resource', 'supported', True, 'raise', 'cleanup_unverified'),
+            ('wrong_docker_daemon', 'supported', True, 'raise', 'cleanup_unverified'),
             ('owner_missing', 'supported', True, 'raise', 'cleanup_pending'),
             ('controller_closed_alone', 'supported', True, 'raise', 'cleanup_pending'),
             ('stop_request_unknown', 'supported', True, 'raise', 'stop_request_unknown'),
@@ -414,7 +443,9 @@ def main() -> None:
 
             def fake_docker(*argv, **kwargs):
                 return subprocess.CompletedProcess(argv, 0,
-                    stdout=b'present' if case == 'remaining_resource' else b'', stderr=b'')
+                    stdout=(b'other-daemon\n' if case == 'wrong_docker_daemon' else
+                            b'synthetic-daemon-A\n') if argv[0] == 'info' else
+                    b'present' if case == 'remaining_resource' else b'', stderr=b'')
 
             current_allowance = dict(ALLOWANCE)
             if case == 'budget_stop':
@@ -452,6 +483,19 @@ def main() -> None:
             if case in ('failed_cleanup', 'remaining_resource', 'owner_missing',
                         'controller_closed_alone', 'stop_request_unknown'):
                 assert len(stop_calls) == 1 and response['status'] != 'complete_internal_candidate'
+            if case == 'stop_request_unknown':
+                def recovered_stop(run_root):
+                    stop_calls.append('retry')
+                    write_final(run_root)
+                    return {'status': 'stop_requested', 'run_root': str(run_root)}
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.object(runner, '_verified_plan',
+                        side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+                    stack.enter_context(patch.object(runner, '_docker', side_effect=fake_docker))
+                    stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+                    resumed = closeout.closeout(root, wait_seconds=0, stop_fn=recovered_stop)
+                assert resumed['status'] == 'complete_internal_candidate' and stop_calls == [
+                    'stop_request_unknown', 'retry'], resumed
             observed[case] = {'status': response['status'], 'stop_calls': len(stop_calls),
                               'record_sha256': response.get('record_sha256')}
         observed['continuation_bridge'] = bridge_cases(base)

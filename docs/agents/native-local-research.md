@@ -125,7 +125,11 @@ checks the final receipt and exact resource absence. A reviewer `reopen`
 decision becomes the next agent prompt in the same run; the agent must revise
 `NEXT.json` and obtain fresh review after a material change. User, allowance
 and unknown-effect stops immediately request owner stop and preserve incomplete
-evidence. `complete_internal_candidate` grants no filing or deployment authority.
+evidence. A missing result prompts the agent to complete it. A changed result
+prompts a fresh review request. If the next turn leaves both the result and
+checkpoint unchanged, the host stops with an incomplete result. Cleanup
+readback checks the Docker daemon identity pinned before resource creation.
+`complete_internal_candidate` grants no filing or deployment authority.
 
 For approved source-only runs, `NEXT.json` may instead request one typed
 [source check](native-source-sdk.md#researcher-requested-source-check). The host
@@ -134,7 +138,7 @@ hash-only protected result visible to the next native turn. A missing envelope
 stops for an authority decision; an older plan cannot be changed in place to
 grant it. The result does not establish a security effect.
 
-A reopen also requires a concrete next brief in `researcher/NEXT.json`; the
+In the older closure path, a reopen also requires a concrete next brief in `researcher/NEXT.json`; the
 review's `test` is recorded in the closure review, and the researcher must put the
 concrete next test in `NEXT.json` before the reopen continues. Budget or operator
 stop is immediate and bypasses review. A refutation can close a lead; a blocked

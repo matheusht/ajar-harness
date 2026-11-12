@@ -270,9 +270,13 @@ def _review(root: Path, state: dict, nxt: dict, result_sha: str,
 def _resources_absent(root: Path) -> dict:
     resources = runner._read_json(root / 'controls/resources.json')
     rows = resources.get('resources')
+    daemon_id = resources.get('docker_daemon_id')
     if (not isinstance(resources.get('nonce'), str) or not HEX32.fullmatch(resources['nonce'])
-            or not isinstance(rows, list) or not rows):
+            or not isinstance(rows, list) or not rows
+            or not isinstance(daemon_id, str) or not 1 <= len(daemon_id) <= 128):
         _fail('closeout_resource_record_invalid')
+    if runner._docker_daemon_id() != daemon_id:
+        _fail('closeout_docker_daemon_changed')
     readback = []
     for row in rows:
         if (not isinstance(row, dict) or row.get('kind') not in ('container', 'network')
@@ -290,6 +294,8 @@ def _resources_absent(root: Path) -> dict:
                                  + name + '$', '--format', '{{.ID}}')
         absent = not by_id.stdout.strip() and not by_name.stdout.strip()
         readback.append({'kind': kind, 'name': name, 'id': identity, 'absent': absent})
+    if runner._docker_daemon_id() != daemon_id:
+        _fail('closeout_docker_daemon_changed')
     return {'resource_absence': all(row['absent'] for row in readback), 'resources': readback,
             'resources_sha256': runner._sha(root / 'controls/resources.json')}
 
@@ -392,7 +398,7 @@ def _stop_and_readback(root: Path, *, reason: str, accepted: bool, result_sha: s
     marker_path = area / 'stop-request.json'
     first = not marker_path.exists()
     marker_sha = _write_once(marker_path, marker)
-    if first:
+    if first or not (root / 'controls/final.json').exists():
         try:
             stop_fn(root)
         except Exception:

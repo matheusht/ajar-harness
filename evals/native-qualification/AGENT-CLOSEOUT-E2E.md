@@ -19,8 +19,10 @@ engagement complete. External filing and deployment are separate actions.
 | Operator stop arrives while review bytes are checked | Treat it as an incomplete stop and verify cleanup before returning. |
 | Review asks for a new test | Reopen only under the same live approval and remaining allowance, with a concrete next test. |
 | Owner stops but cleanup/readback is absent or incomplete | Do not mark complete; record exact owned resources and remaining effects. |
+| Docker context points at a different daemon during cleanup readback | Reject completion; check the daemon identity pinned before resource creation. |
 | Controller reports `closed` without actual native stop | Keep engagement open until stop and cleanup are verified. |
 | A stop proposal depends on manually running a second closeout command | The continuation controller invokes closeout and returns the verified terminal status. |
+| A source-only stop proposal lacks a result or uses stale review | Prompt the agent to complete the result or request fresh review under the same allowance; unchanged bytes after a turn stop incomplete. |
 | Fresh review says reopen | Put its concrete next check in the next agent prompt under the same live approval and allowance. Freeze the old proposal, result and review; require fresh review after material changes. |
 | The reopened agent leaves `NEXT.json` unchanged | Stop incomplete; do not loop on the same proposal or dispatch another effect. |
 
@@ -64,6 +66,6 @@ The checked-in result of this run is
 [AGENT-CLOSEOUT-E2E-RESULT.json](AGENT-CLOSEOUT-E2E-RESULT.json). That map checks
 automatic acceptance after an agent turn, autonomous reopen with a second fresh
 review, stale-review refusal, immediate user/allowance/unknown-effect stop,
-delayed cleanup readback, and a no-change reopen ending. The redirected JSON is
+delayed cleanup readback, wrong-daemon refusal, stop-request replay, agent repair of a missing result, fresh review after a changed result, and a no-change reopen ending. The redirected JSON is
 the saved local result. It is control-flow evidence only; the cleanup receipt
 and resource absence in these cases are simulated.

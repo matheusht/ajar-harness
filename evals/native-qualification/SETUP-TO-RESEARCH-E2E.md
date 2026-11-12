@@ -17,6 +17,7 @@ or dependency set at this transition.
 | Package says cleanup complete but an owned resource remains | Reject until exact resource absence is verified. |
 | Research plan or approval omits or changes the checked-package pin | Reject before research start. |
 | Transition interrupted after preparation | Resume only against the same immutable plan and package; do not duplicate setup build or reset setup spend. |
+| Checked research plan uses its pinned `/deps` effect envelope | Accept agent-requested source execution and fresh review under that exact envelope; do not ask for new authority solely because it differs from the ordinary `/modules` route. |
 | Threat model correction in research | Preserve the original pinned threat model and record the correction as a new observation. |
 | Setup result or repeated build presented as a security effect | Keep it as setup evidence; require original entry-path evidence and independent review for a claim. |
 
@@ -64,10 +65,12 @@ Pass `--keep-root /absolute/new/private/dir` to retain the harmless fixture
 and prepared research run; the builder removes the synthetic operator signing
 key first.
 
-The 2026-11-12 local run passed 29 of 29 checks recorded in
+The 2026-11-12 local run passed 31 of 31 checks recorded in
 `setup-evidence/native-setup-to-research-synthetic-e2e.json`; the fixture roots
 were removed, and the result records hashes, refusal codes, and the Docker
-`/deps` readback. The observed passing gate with an exact research approval
+`/deps` readback. The checked research plan also passed the agent source-action
+and fresh-review preflight gates with a synthetic active allowance. The observed
+passing gate with an exact research approval
 was the existing pinned-agent-image check, before a native research turn.
 
 The builder's v2 fixture fabricates setup turns, stop records and provider

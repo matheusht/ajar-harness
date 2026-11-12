@@ -420,8 +420,10 @@ def _source_authority_request(root: Path, state: dict, next_sha: str, reason: st
 
 def _source_preflight(root: Path, state: dict, next_sha: str) -> dict:
     plan = runner._verified_plan(root)
+    envelope = (runner.CHECKED_SOURCE_EFFECT_ENVELOPE if 'checked_setup' in plan
+                else runner.SOURCE_EFFECT_ENVELOPE)
     if ('source_only' not in plan or
-            plan.get('source_effect_envelope') != runner.SOURCE_EFFECT_ENVELOPE):
+            plan.get('source_effect_envelope') != envelope):
         return _source_authority_request(root, state, next_sha, 'offline_source_envelope_missing')
     runner._approval_active(root)
     if not runner.run_active(root) or runner._unresolved_dispatches(root):
@@ -911,8 +913,10 @@ def _review_preflight(root: Path, state: dict) -> tuple[dict, dict, object, str]
     if prior and prior.get('phase') != 'captured':
         _fail('source_review_prior_action_unresolved')
     plan = runner._verified_plan(root)
+    envelope = (runner.CHECKED_SOURCE_EFFECT_ENVELOPE if 'checked_setup' in plan
+                else runner.SOURCE_EFFECT_ENVELOPE)
     if ('source_only' not in plan or
-            plan.get('source_effect_envelope') != runner.SOURCE_EFFECT_ENVELOPE):
+            plan.get('source_effect_envelope') != envelope):
         _fail('source_review_authority_required')
     runner._approval_active(root)
     if not runner.run_active(root) or runner._unresolved_dispatches(root):
@@ -1446,6 +1450,12 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return closed
             return _finish(root, state, 'reconciliation_required',
                            pending=pending, stopped=stop)
+        if stop:
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason=stop)
+            if closed is not None:
+                return closed
+            return _finish(root, state, 'stopped', reason=stop)
         action = state.get('source_action') or {}
         review_action = state.get('review_action') or {}
         if review_action.get('phase') in ('dispatched', 'incomplete'):
@@ -1468,12 +1478,6 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 if closed is not None:
                     return closed
                 return _finish(root, state, outcome['status'], source_action=outcome)
-        if stop:
-            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
-                                     forced_stop_reason=stop)
-            if closed is not None:
-                return closed
-            return _finish(root, state, 'stopped', reason=stop)
         reopen_check = None
         reopen_before_sha = None
         reopen_before_result_sha = None

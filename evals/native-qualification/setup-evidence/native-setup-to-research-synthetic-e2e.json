@@ -108,7 +108,7 @@
       "name": "public checked preparation seals research plan",
       "observed": {
         "exit": 0,
-        "plan_sha256": "cd557e24470d9d9d1b5203e68febf68a7223bf324b5787332acdcdc2fd8dc2d6",
+        "plan_sha256": "521810c4c66993a53ba96727e74ef7f3c93b8b7fe394cc52e327394c728e1343",
         "status": "prepared_provider_free"
       },
       "passed": true
@@ -118,6 +118,20 @@
       "observed": {
         "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976",
         "target_image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked effect envelope admits agent source action",
+      "observed": {
+        "status": "authorized"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked effect envelope admits agent fresh review",
+      "observed": {
+        "status": "reviewer-1"
       },
       "passed": true
     },
@@ -239,12 +253,12 @@
   "classification": "synthetic setup/provenance and provider-free research preparation",
   "fixture_roots": null,
   "inputs": {
-    "builder_evidence_sha256": "89fa533e6c1ffb34a9d6022ada8a385c51a9d2511cbef41acf8ca3414aa463e4",
+    "builder_evidence_sha256": "1f479c27687631031d008ca004a655474246bab4ce3820b5d2d2054222beb0a7",
     "builder_scenario_sha256": "4cb55dc041cea4a8ca6af5a2b043078bfb8d5ebf5b8c34e74cc4bce7e3025a9b",
-    "checked_receipt_sha256": "37b2cda4362fe75d2f1c4e2a8edc9f0f12a46b40bba568cf6175b079f20c1b84",
-    "research_plan_sha256": "cd557e24470d9d9d1b5203e68febf68a7223bf324b5787332acdcdc2fd8dc2d6",
+    "checked_receipt_sha256": "0f62923d615b3581dde95349d470e8f8267530b1708fe81361bbb31051e681af",
+    "research_plan_sha256": "521810c4c66993a53ba96727e74ef7f3c93b8b7fe394cc52e327394c728e1343",
     "research_scope_sha256": "d15fc89494a63eea5c359ed6e30ff40d47e12a030bfc1c5db0fac0dfadf169ca",
-    "scenario_sha256": "2e6065e6fe6ae52c1962af9a1c61bb4423147397a14cdbbd025912e2c80aa897"
+    "scenario_sha256": "ce3e03a94f0f57c003e216a771d63550505abb5d29ca917a11936cdce05993b9"
   },
   "kind": "native-setup-to-research-synthetic-e2e-v1",
   "limits": "No live native research turn, provider qualification, pause/resume, or actual target.",

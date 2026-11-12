@@ -17,11 +17,16 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[3]
 NATIVE = ROOT / 'tools/native_research.py'
 BUILDER_SCENARIO = ROOT / 'evals/native-qualification/smoke/check_native_setup_builder_e2e.py'
+sys.path.insert(0, str(ROOT / 'tools'))
+import native_continuation as continuation
+import native_research as runner
 
 
 def sha(path):
@@ -185,6 +190,26 @@ def main():
                                      'duration_seconds': 120},
               {'source_manifest_sha256': plan.get('source_manifest_sha256'),
                'target_image_id': plan.get('target_image_id')})
+        allowance = {'active': True, 'hard_limits': plan['limits'],
+                     'run_identity': {'nonce': 'synthetic'}, 'used_tunnels': 0,
+                     'charged_tunnel_bytes': 0}
+        with patch.object(runner, '_approval_active'), \
+             patch.object(runner, 'run_active', return_value=True), \
+             patch.object(runner, '_unresolved_dispatches', return_value=[]), \
+             patch.object(runner, 'allowance_snapshot', return_value=allowance), \
+             patch.object(runner, '_source_executor_envelope'), \
+             patch.object(runner, '_load_review_module', return_value=SimpleNamespace(
+                 _sessions=lambda *args: [])):
+            source_gate = continuation._source_preflight(
+                research, {'plan_sha256': sha(research / 'plan.json')}, 'a' * 64)
+            check('checked effect envelope admits agent source action',
+                  source_gate['status'] == 'authorized',
+                  {'status': source_gate['status']})
+            review_gate = continuation._review_preflight(research, {})
+            review_status = review_gate[3]
+            check('checked effect envelope admits agent fresh review',
+                  review_status in ('reviewer-1', 'reviewer-2'),
+                  {'status': review_status})
         controls = research / 'controls'
         initial = controls / 'research/checked-setup/INITIAL_THREAT_MODEL.md'
         trace = controls / 'research/checked-setup/SETUP_TRACE.json'

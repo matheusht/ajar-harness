@@ -160,8 +160,9 @@ setup build as evidence of a security effect.
    nonempty `## Supported effects`, `## Controls`, `## Contrary evidence`,
    `## Tested paths`, `## Untested paths`, `## Assistance`,
    `## Unfinished leads`, and `## Limits` sections. Request a fresh
-   `native-source-review-v1` host action after the final result draft is saved.
-   Keep the result and source bytes unchanged after that review. Then set
+   `native-source-review-v1` host action after the final result draft and the
+   final claim, coverage, capabilities, and lead state in `NEXT.json` are saved.
+   Keep those fields, the result, and source bytes unchanged after that review. Then set
    `proposed_stop: true`, `next: null`, and `host_action: null` in `NEXT.json`.
    The continuation host checks that exact review, requests owner stop, and
    reads back cleanup and exact resource absence. An unavailable review holds

@@ -218,6 +218,9 @@ def _review(root: Path, state: dict, nxt: dict, result_sha: str,
             or unfinished.get('research_note') !=
                 runner._file(root / 'researcher/RESEARCH.md').read_text()):
         _fail('closeout_review_result_changed')
+    if any(reviewed_checkpoint.get(key) != nxt.get(key) for key in
+           ('last_result', 'capabilities', 'coverage', 'strong_lead')):
+        _fail('closeout_review_claim_changed')
     conditions = json.loads((directory / 'observer/CONDITIONS.json').read_bytes())
     current = conditions.get('current_source') if isinstance(conditions, dict) else None
     if (not isinstance(current, dict) or current.get('RESULT.md') != result_sha

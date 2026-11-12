@@ -268,8 +268,9 @@ holds the request incomplete before a reviewer session starts.
 An optional `researcher/project/RESULT.md` is frozen with the current source
 and repeated in the unfinished role with its hash and agent-statement label.
 For agent-owned closeout, the researcher writes this result before requesting
-review. After the review is captured, it proposes a stop in `NEXT.json` while
-leaving the reviewed result and source bytes unchanged. The continuation host
+review. Before that request, write the final claim, coverage, capabilities, and
+lead state in `NEXT.json`. After review, propose a stop while leaving those
+reviewed fields, the result, and source bytes unchanged. The continuation host
 then checks the exact result, evidence and review, requests the existing owner
 stop, and verifies cleanup and resource absence. A reviewer decision to reopen
 puts its concrete next check in a new agent prompt under the same approval and

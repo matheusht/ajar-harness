@@ -12,10 +12,12 @@ engagement complete. External filing and deployment are separate actions.
 | --- | --- |
 | Missing, malformed, credential-like, or changed result or evidence link | Hold closeout; do not accept a claim or erase the draft. |
 | Old review applied after the final result, source, effect receipt, or claim changed | Reject stale review and request a fresh check on the new bytes. |
+| Final checkpoint changes its claim, coverage, or lead state after review | Reject the unreviewed final fields before accepted closeout. |
 | Strong lead dismissed without fresh review and contrary evidence | Keep the lead unfinished or reopen with a concrete next test. |
 | Pending/unknown host or native effect | Stop dispatch; retain the effect and cleanup obligation as unresolved. |
 | Agent labels untested paths safe or a bounded negative as full coverage | Return a bounded result that states the tested paths and limits. |
 | Budget, operator, or safety stop | Stop immediately without a new review experiment; keep draft and unfinished work. |
+| Operator stop arrives while fresh review is incomplete | Stop and verify cleanup before returning the incomplete review state. |
 | Operator stop arrives while review bytes are checked | Treat it as an incomplete stop and verify cleanup before returning. |
 | Review asks for a new test | Reopen only under the same live approval and remaining allowance, with a concrete next test. |
 | Owner stops but cleanup/readback is absent or incomplete | Do not mark complete; record exact owned resources and remaining effects. |

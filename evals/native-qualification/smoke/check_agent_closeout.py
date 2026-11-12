@@ -48,7 +48,19 @@ def setup(base: Path, *, outcome: str, review: bool = True,
     (root / 'controls/owner.lock').chmod(0o600)
     result = root / 'researcher/project/RESULT.md'
     result.write_text(result_text(outcome))
+    final_fields = {
+        'last_result': {'state': 'supported' if outcome == 'supported' else
+                        'blocked' if outcome == 'blocked' else 'refuted',
+                        'rules_out': 'only the tested source branch',
+                        'unresolved': 'original actor and protected effect'},
+        'capabilities': [],
+        'coverage': [{'surface': 'offline source branch', 'status': 'tested'},
+                     {'surface': 'original attacker entry', 'status': 'untested',
+                      'limit': 'actor rights unavailable'}],
+        'strong_lead': outcome == 'supported'}
     if review:
+        reviewed_next = {**runner._read_json(root / 'researcher/NEXT.json'), **final_fields}
+        runner._write_json(root / 'researcher/NEXT.json', reviewed_next)
         def fake_review(run_root, packet, pin, role, module):
             evidence = run_root / 'controls/source-evidence' / role / 'RESULTS.json'
             evidence.parent.mkdir(parents=True, mode=0o700)
@@ -97,17 +109,8 @@ def setup(base: Path, *, outcome: str, review: bool = True,
     state['last_strong_lead'] = True
     continuation._save_state(root, state)
     runner._write_json(root / 'researcher/NEXT.json', {
-        'kind': continuation.NEXT_KIND,
-        'last_result': {'state': 'supported' if outcome == 'supported' else
-                        'blocked' if outcome == 'blocked' else 'refuted',
-                        'rules_out': 'only the tested source branch',
-                        'unresolved': 'original actor and protected effect'},
-        'capabilities': [],
-        'coverage': [{'surface': 'offline source branch', 'status': 'tested'},
-                     {'surface': 'original attacker entry', 'status': 'untested',
-                      'limit': 'actor rights unavailable'}],
-        'next': None, 'host_action': None, 'proposed_stop': True,
-        'strong_lead': outcome == 'supported'})
+        'kind': continuation.NEXT_KIND, **final_fields,
+        'next': None, 'host_action': None, 'proposed_stop': True})
     return root
 
 
@@ -160,6 +163,7 @@ def bridge_cases(base: Path) -> dict:
         ('budget_stop', 'stopped_incomplete'),
         ('budget_without_proposal', 'stopped_incomplete'),
         ('user_stop', 'stopped_incomplete'),
+        ('user_stop_review_incomplete', 'stopped_incomplete'),
         ('unknown_pending', 'stopped_incomplete')):
         root = setup(base / ('bridge_' + case), outcome='supported',
                      review=case not in ('budget_stop', 'user_stop', 'unknown_pending'),
@@ -179,9 +183,13 @@ def bridge_cases(base: Path) -> dict:
                            'disconfirming': 'the control fails',
                            'authority': 'same signed scope'}
             runner._write_json(root / 'researcher/NEXT.json', nxt)
-        if case == 'user_stop':
+        if case in ('user_stop', 'user_stop_review_incomplete'):
             runner._write_json(root / 'controls/continuation/STOP',
                                {'kind': continuation.STOP_KIND, 'reason': 'operator_stop'})
+        if case == 'user_stop_review_incomplete':
+            state = continuation._state(root)
+            state['review_action']['phase'] = 'incomplete'
+            continuation._save_state(root, state)
         if case == 'unknown_pending':
             state = continuation._state(root)
             state['pending'] = {'role': 'resume', 'session': 'ses_fixture',
@@ -328,7 +336,7 @@ def bridge_cases(base: Path) -> dict:
             ['invoke', 'stop'] if case == 'reopen_no_revision' else
             ['stop'] if case in ('accepted', 'delayed_cleanup', 'budget_stop',
             'budget_without_proposal', 'user_stop', 'user_stop_during_review',
-            'unknown_pending') else [])
+            'user_stop_review_incomplete', 'unknown_pending') else [])
         assert calls == expected_calls, (case, calls)
         if case == 'delayed_cleanup':
             write_final(root)
@@ -381,6 +389,8 @@ def main() -> None:
             ('stale_result', 'supported', True, 'raise', 'review_required'),
             ('changed_source', 'supported', True, 'raise', 'review_required'),
             ('changed_effect_receipt', 'supported', True, 'raise', 'review_required'),
+            ('changed_final_claim', 'supported', True, 'raise', 'review_required'),
+            ('changed_final_coverage', 'supported', True, 'raise', 'review_required'),
             ('missing_review', 'supported', False, 'raise', 'review_required'),
             ('dismissed_lead', 'bounded_negative', False, 'raise', 'review_required'),
             ('weak_dismissal', 'bounded_negative', True, 'retain', 'review_required'),
@@ -422,6 +432,14 @@ def main() -> None:
                 value = runner._read_json(receipt)
                 value['runs'][0]['exit_code'] = 0
                 runner._write_json(receipt, value)
+            if case in ('changed_final_claim', 'changed_final_coverage'):
+                value = runner._read_json(root / 'researcher/NEXT.json')
+                if case == 'changed_final_claim':
+                    value['last_result']['state'] = 'refuted'
+                    value['last_result']['rules_out'] = 'every reachable effect'
+                else:
+                    value['coverage'] = [{'surface': 'every path', 'status': 'tested'}]
+                runner._write_json(root / 'researcher/NEXT.json', value)
             if case == 'blocked_missing_result':
                 (root / 'researcher/project/RESULT.md').unlink()
             if case == 'controller_closed_alone':

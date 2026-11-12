@@ -1287,21 +1287,19 @@ def _review_disposes_lead(root: Path, state: dict, nxt: dict) -> bool:
     review = state.get('review_action') or {}
     if (review.get('phase') != 'captured'
             or review.get('after_invocations') != state['invocations']):
-        return False
-    try:
-        _verified_cached_review(root, state, nxt, review, _next_hash(root))
-        receipt = _read_private(root / 'controls' / ('review-' + review['role'] + '.json'))
-    except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
-            TypeError, KeyError, AttributeError, RuntimeError):
-        return False
+        _fail('source_review_cached_binding_changed')
+    _verified_cached_review(root, state, nxt, review, _next_hash(root))
+    receipt = _read_private(root / 'controls' / ('review-' + review['role'] + '.json'))
     assessment, material = receipt.get('assessment'), receipt.get('material')
     outcome = assessment.get('outcome') if isinstance(assessment, dict) else None
-    return (isinstance(material, dict) and material.get('status') == 'captured'
-            and receipt.get('same_original_allowance') is True
-            and material.get('input_id') == receipt.get('input_id')
-            and material.get('outcome') == outcome
-            and isinstance(outcome, dict) and outcome.get('decision') in ('raise', 'retain')
-            and _valid_lead_dispositions(outcome))
+    if (not isinstance(material, dict) or material.get('status') != 'captured'
+            or receipt.get('same_original_allowance') is not True
+            or material.get('input_id') != receipt.get('input_id')
+            or material.get('outcome') != outcome
+            or not isinstance(outcome, dict)
+            or outcome.get('decision') not in ('raise', 'retain')):
+        _fail('source_review_cached_binding_changed')
+    return _valid_lead_dispositions(outcome)
 
 
 def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
@@ -1764,13 +1762,26 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     if outcome['status'] != 'captured':
                         return _finish(root, state, 'review_incomplete', review_action=outcome)
                     if (checked_setup and state.get('last_strong_lead') is True
-                            and nxt.get('strong_lead') is False
-                            and _review_disposes_lead(root, state, nxt)):
-                        state['dismissed_strong_lead'] = True
-                        state['last_strong_lead'] = False
-                        _save_state(root, state)
-                        _event(root, {'at': _now(), 'event': 'strong_lead_disposition_reviewed',
-                                      'review_id': state['review_action']['review_id']})
+                            and nxt.get('strong_lead') is False):
+                        try:
+                            disposed = _review_disposes_lead(root, state, nxt)
+                        except (ContinuationError, runner.NativeResearchError, OSError,
+                                ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+                            review = state['review_action']
+                            review.update(phase='incomplete',
+                                          evidence_change_reason='source_review_cached_evidence_changed')
+                            _save_state(root, state)
+                            _event(root, {'at': _now(), 'event': 'source_review_cached_evidence_changed',
+                                          'review_id': review['review_id']})
+                            return _finish(root, state, 'review_incomplete', review_action={
+                                'status': 'review_incomplete', 'review_id': review['review_id'],
+                                'reason': 'source_review_cached_evidence_changed'})
+                        if disposed:
+                            state['dismissed_strong_lead'] = True
+                            state['last_strong_lead'] = False
+                            _save_state(root, state)
+                            _event(root, {'at': _now(), 'event': 'strong_lead_disposition_reviewed',
+                                          'review_id': state['review_action']['review_id']})
                 else:
                     outcome = _source_action(root, state, nxt)
                     if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',

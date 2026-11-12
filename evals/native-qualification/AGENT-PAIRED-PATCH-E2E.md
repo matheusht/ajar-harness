@@ -70,7 +70,7 @@ the bound patch request, execution receipts and hashes, file/mode variant
 observations, verified cleanup
 receipts for patch and no-patch closeout,
 and `provider_calls: 0`, `target_calls: 0`.
-The command uses disposable source trees and synthetic provider/Docker receipts.
+The command uses disposable source trees, synthetic signed-scope and approval checks, and synthetic provider/Docker receipts.
 Fresh review identifiers and their derived hashes vary between runs; the
 commands, outputs, denial outcomes, and cleanup statuses should agree.
 It tests the host's binding and control flow, not a live provider, attacker

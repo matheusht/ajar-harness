@@ -282,6 +282,7 @@ def main() -> None:
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(runner, '_verified_plan',
                 side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+            stack.enter_context(patch.object(runner, '_verify_checked_research_scope'))
             stack.enter_context(patch.object(runner, '_approval_active'))
             stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
             stack.enter_context(patch.object(runner, '_source_executor_envelope'))

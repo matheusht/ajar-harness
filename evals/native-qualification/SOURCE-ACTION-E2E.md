@@ -21,8 +21,10 @@ component evidence; a live native provider/target run remains a separate gate.
 | A captured receipt appears after an earlier `unknown_effect` stop | Read back and adopt that exact receipt without calling the executor again; resume only if the same run is still active. |
 | Crash after the frozen request is written but before `state.json` names it | Recover the one complete, matching pre-dispatch request after proving no source execution directory exists. |
 | Crash during the freeze, leaving an incomplete action directory | Prove no execution directory or dispatch event, quarantine the pre-dispatch bytes and safely prepare a new ID. Otherwise stop as unknown. |
+| Second action crashes before prepared state is saved | Distinguish earlier verified captured action directories, then recover the one complete new request or quarantine its incomplete freeze. Never assign a third ID for a complete orphan. |
 | Duplicate request after capture, or changed request with the old ID | Do not dispatch twice. New request needs a new host action after the previous one is read. |
 | Source execution repeats stdout | Report reproducibility only. Attacker reachability, protected effect, initial state, permission and causal control remain unproven. |
+| Invalid captured receipt is later replaced with valid bytes | Pin the first observed bad receipt hash and reason; hold until explicit reconciliation. Do not auto-adopt replacement or run another effect. |
 | Receipt/projection changed after capture | Reject adoption and further effects. |
 
 ## Public E2E scenario

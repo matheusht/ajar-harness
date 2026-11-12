@@ -232,15 +232,29 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
         if tamper_receipt:
             action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
             receipt_path = root / 'controls/source-executions' / action['action_id'] / 'receipt.json'
-            receipt = runner._read_json(receipt_path)
+            original_receipt = runner._read_json(receipt_path)
+            receipt = dict(original_receipt)
             receipt['command'] = ['sh', 'swapped.sh']
             runner._write_json(receipt_path, receipt)
+            bad_receipt_sha = runner._sha(receipt_path)
         if crash or crash_after_capture or late_capture:
             second = continuation.continue_run(root, max_invocations=3, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
             if crash or tamper_receipt or late_capture:
-                assert second['status'] in ('unknown_effect', 'reconciliation_required')
+                assert second['status'] == ('evidence_changed' if tamper_receipt
+                                            else 'unknown_effect')
                 assert len(calls) == 1 and turns == ['research']
+                if tamper_receipt:
+                    held = runner._read_json(root / 'controls/continuation/state.json')['source_action']
+                    assert held['phase'] == 'evidence_changed'
+                    assert held['observed_receipt_sha256'] == bad_receipt_sha
+                    assert held['evidence_change_reason'] == 'source_action_receipt_mismatch'
+                    runner._write_json(receipt_path, original_receipt)
+                    third = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                        status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+                    assert third['status'] == 'evidence_changed'
+                    assert third['source_action']['observed_receipt_sha256'] == bad_receipt_sha
+                    assert len(calls) == 1 and turns == ['research']
                 if late_capture:
                     action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
                     directory = root / 'controls/continuation/source-actions' / action['action_id']
@@ -267,6 +281,9 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                     'terminal_sha256': action['terminal_sha256'],
                     'source_receipt_sha256': (runner._sha(root / 'controls/source-executions'
                         / action['action_id'] / 'receipt.json') if action['terminal_sha256'] else None)}
+        if tamper_receipt:
+            evidence['observed_bad_receipt_sha256'] = action['observed_receipt_sha256']
+            evidence['evidence_change_reason'] = action['evidence_change_reason']
         if action['terminal_sha256']:
             receipt = runner._read_json(root / 'controls/source-executions' / action['action_id'] / 'receipt.json')
             request = runner._read_json(directory / 'request.json')
@@ -280,6 +297,7 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                     'synthetic_crash_after_dispatch'),
                 'second_status': second['status'], 'source_batches': len(calls),
                 'late_receipt_status': third['status'] if late_capture else None,
+                'replacement_status': third['status'] if tamper_receipt else None,
                 'turns': turns, 'evidence': evidence,
                 'cleanup': 'all_fixture_containers_absent' if image else 'temporary_files_removed'}
     finally:
@@ -386,6 +404,76 @@ def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
     assert not (root / 'controls/source-executions' / orphan.name).exists()
     return {'status': 'recovered_pre_dispatch', 'source_batches': len(calls),
             'aborted_orphan': orphan.name, 'new_action_id': calls[0]}
+
+
+def second_action_orphan_case(base: Path, *, incomplete: bool) -> dict:
+    root = fixture(base)
+    calls, turns, freezes = [], [], []
+    interrupted = False
+    def invoke(command, session, prompt):
+        turns.append(command)
+        runner._write_json(root / 'researcher/NEXT.json',
+                           checkpoint(action=ACTION if len(turns) < 3 else None,
+                                      stop=len(turns) == 3))
+        return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                   'dispatch_id': 'a' * 32,
+                   'pool_after': {'used_tunnels': len(turns),
+                                  'charged_tunnel_bytes': len(turns), 'active': True}}
+    def freeze(run_root, destination, role):
+        nonlocal interrupted
+        freezes.append(1)
+        inventory = fake_freeze(run_root, destination, role)
+        if incomplete and len(freezes) == 2 and not interrupted:
+            interrupted = True
+            raise RuntimeError('synthetic_second_freeze_crash')
+        return inventory
+    original_save = continuation._save_state
+    def save(run_root, value):
+        nonlocal interrupted
+        if (not incomplete and not interrupted
+                and (value.get('source_action') or {}).get('phase') == 'prepared'
+                and (value.get('source_action') or {}).get('after_invocations') == 2):
+            interrupted = True
+            raise RuntimeError('synthetic_second_prepared_crash')
+        original_save(run_root, value)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(runner, '_verified_plan',
+            side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+        stack.enter_context(patch.object(runner, '_approval_active'))
+        stack.enter_context(patch.object(runner, 'run_active', return_value=True))
+        stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value={
+            'active': True, 'run_identity': {'nonce': 'fixture'},
+            'used_tunnels': 0, 'charged_tunnel_bytes': 0}))
+        stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+        stack.enter_context(patch.object(runner, '_freeze_source_input', side_effect=freeze))
+        stack.enter_context(patch.object(runner, '_source_executor_envelope'))
+        stack.enter_context(patch.object(runner, 'source_execute',
+            side_effect=fake_execute(calls)))
+        stack.enter_context(patch.object(continuation, '_save_state', side_effect=save))
+        try:
+            continuation.continue_run(root, max_invocations=4, invoke=invoke,
+                status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+        except RuntimeError as error:
+            assert str(error) == ('synthetic_second_freeze_crash' if incomplete
+                                  else 'synthetic_second_prepared_crash')
+        else:
+            raise AssertionError('second action interruption was not observed')
+        state = runner._read_json(root / 'controls/continuation/state.json')
+        first_id = state['source_action']['action_id']
+        assert state['source_action']['phase'] == 'captured' and len(calls) == 1
+        action_dirs = list((root / 'controls/continuation/source-actions').iterdir())
+        orphan = next(path for path in action_dirs if path.name != first_id)
+        result = continuation.continue_run(root, max_invocations=4, invoke=invoke,
+            status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+    assert result['status'] == 'closure_review_required'
+    assert len(calls) == 2 and turns == ['research', 'resume', 'resume']
+    assert (calls[1] != orphan.name) == incomplete
+    if incomplete:
+        abort = root / 'controls/continuation/aborted-source-actions' / orphan.name / 'abort.json'
+        assert runner._read_json(abort)['status'] == 'aborted_before_dispatch'
+    return {'status': 'recovered_second_action', 'source_batches': len(calls),
+            'first_action_id': first_id, 'orphan_action_id': orphan.name,
+            'second_action_id': calls[1], 'orphan_quarantined': incomplete}
 
 
 def rejection_cases(base: Path) -> list[str]:
@@ -509,6 +597,10 @@ def main():
                                                         disputed='dispatch_event')
         orphan_malformed_journal = incomplete_orphan_case(base / 'orphan-malformed-journal',
                                                           disputed='malformed_journal')
+        second_orphan_prepared = second_action_orphan_case(base / 'second-orphan-prepared',
+                                                           incomplete=False)
+        second_orphan_incomplete = second_action_orphan_case(base / 'second-orphan-incomplete',
+                                                             incomplete=True)
         late_capture = run_case(base / 'late-capture', late_capture=True)
         adopted = run_case(base / 'adopted', crash_after_capture=True)
         tampered_receipt = run_case(base / 'tampered-receipt',
@@ -525,6 +617,8 @@ def main():
                       'orphan_execution': orphan_execution,
                       'orphan_dispatch_event': orphan_dispatch_event,
                       'orphan_malformed_journal': orphan_malformed_journal,
+                      'second_orphan_prepared': second_orphan_prepared,
+                      'second_orphan_incomplete': second_orphan_incomplete,
                       'late_capture': late_capture,
                       'rejected': rejected,
                       'docker': docker,
@@ -534,7 +628,8 @@ def main():
                                                  .stdout.decode().strip() if args.docker else None)},
                       'expected': {'source_batches_per_request': 1,
                                    'clean_executor_runs': 3,
-                                   'unknown_effect_auto_retries': 0},
+                                   'unknown_effect_auto_retries': 0,
+                                   'changed_receipt_auto_adoptions': 0},
                       'native_tool_trace': None,
                       'provider_cost': None,
                       'source_sha256': runner._sha(ROOT / 'tools/native_research.py'),

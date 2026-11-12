@@ -434,13 +434,10 @@ def _source_preflight(root: Path, state: dict, next_sha: str) -> dict:
     return {'status': 'authorized', 'plan': plan, 'allowance': allowance}
 
 
-def _source_orphan_never_dispatched(root: Path, identity: str) -> None:
-    execution = root / 'controls/source-executions' / identity
-    if execution.exists() or execution.is_symlink():
-        _fail('source_action_orphan_requires_reconciliation')
+def _source_action_events(root: Path) -> list[dict]:
     journal = _cont(root) / 'events.jsonl'
     if not journal.exists() and not journal.is_symlink():
-        return
+        return []
     def unique(pairs):
         value = {}
         for key, item in pairs:
@@ -452,6 +449,7 @@ def _source_orphan_never_dispatched(root: Path, identity: str) -> None:
         path = runner._file(journal, private=True)
         if path.stat().st_size > MAX_JOURNAL_BYTES:
             _fail('source_action_orphan_requires_reconciliation')
+        events = []
         with path.open('rb') as stream:
             for line in stream:
                 if not line.endswith(b'\n'):
@@ -460,15 +458,64 @@ def _source_orphan_never_dispatched(root: Path, identity: str) -> None:
                                    parse_constant=_reject_constant)
                 if not isinstance(event, dict):
                     _fail('source_action_orphan_requires_reconciliation')
-                if (event.get('event') == 'source_action_dispatched'
-                        and event.get('action_id') == identity):
-                    _fail('source_action_orphan_requires_reconciliation')
+                events.append(event)
     except (runner.NativeResearchError, OSError, UnicodeError, ValueError, TypeError):
+        _fail('source_action_orphan_requires_reconciliation')
+    return events
+
+
+def _source_orphan_never_dispatched(root: Path, identity: str, events: list[dict]) -> None:
+    execution = root / 'controls/source-executions' / identity
+    if (execution.exists() or execution.is_symlink()
+            or any(event.get('event') == 'source_action_dispatched'
+                   and event.get('action_id') == identity for event in events)):
+        _fail('source_action_orphan_requires_reconciliation')
+
+
+def _verified_captured_source_action(root: Path, state: dict, directory: Path,
+                                     terminal_sha: str) -> None:
+    try:
+        entry = directory.stat(follow_symlinks=False)
+        if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
+                or entry.st_mode & 0o077):
+            _fail('source_action_orphan_requires_reconciliation')
+        request_path = directory / 'request.json'
+        terminal_path = directory / 'terminal.json'
+        request = _read_private(request_path)
+        terminal = _read_private(terminal_path)
+        inventory_path = directory / 'input-manifest.json'
+        inventory = _read_private(inventory_path)
+        if (request.get('kind') != SOURCE_REQUEST_KIND
+                or request.get('action_id') != directory.name
+                or request.get('plan_sha256') != state['plan_sha256']
+                or request.get('command_sha256') != runner._sha(directory / 'command.json')
+                or request.get('input_manifest_sha256') != runner._sha(inventory_path)
+                or runner._inventory(directory / 'input') != inventory
+                or terminal.get('kind') != SOURCE_TERMINAL_KIND
+                or terminal.get('status') != 'captured'
+                or terminal.get('action_id') != directory.name
+                or terminal.get('request_sha256') != runner._sha(request_path)
+                or terminal.get('allowance_before') != request.get('allowance_before')
+                or terminal.get('assessment') != 'needs_review'
+                or terminal.get('security_effect') != 'unproven'
+                or runner._sha(terminal_path) != terminal_sha):
+            _fail('source_action_orphan_requires_reconciliation')
+        observed = _source_receipt(root, directory, request, inventory)
+        if observed is None:
+            _fail('source_action_orphan_requires_reconciliation')
+        receipt_path, receipt = observed
+        projection_path = root / 'controls/research/source-actions' / directory.name / 'RESULTS.json'
+        if (terminal.get('source_receipt_sha256') != runner._sha(receipt_path)
+                or terminal.get('projection_sha256') != runner._sha(projection_path)
+                or _read_private(projection_path) !=
+                _source_projection(root, request, receipt_path, receipt)):
+            _fail('source_action_orphan_requires_reconciliation')
+    except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
         _fail('source_action_orphan_requires_reconciliation')
 
 
 def _abort_incomplete_source_orphan(root: Path, state: dict, orphan: Path,
-                                    next_sha: str) -> None:
+                                    next_sha: str, events: list[dict]) -> None:
     entry = orphan.stat(follow_symlinks=False)
     if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
             or entry.st_mode & 0o077 or (orphan / 'request.json').exists()
@@ -476,7 +523,7 @@ def _abort_incomplete_source_orphan(root: Path, state: dict, orphan: Path,
             or (orphan / 'terminal.json').exists()
             or (orphan / 'terminal.json').is_symlink()):
         _fail('source_action_orphan_requires_reconciliation')
-    _source_orphan_never_dispatched(root, orphan.name)
+    _source_orphan_never_dispatched(root, orphan.name, events)
     base = _cont(root) / 'aborted-source-actions'
     base.mkdir(mode=0o700, exist_ok=True)
     base_entry = base.stat(follow_symlinks=False)
@@ -510,46 +557,66 @@ def _abort_incomplete_source_orphan(root: Path, state: dict, orphan: Path,
 def _source_request(root: Path, state: dict, nxt: dict, next_sha: str,
                     allowance: dict, plan: dict) -> dict:
     base = _source_actions(root)
-    if state.get('source_action') is None:
-        orphans = []
-        for child in base.iterdir():
-            if re.fullmatch(r'authority-[0-9a-f]{64}\.json', child.name):
-                _read_private(child)
-            elif re.fullmatch(r'[0-9a-f]{32}', child.name):
+    events = _source_action_events(root)
+    captured = {}
+    for event in events:
+        if event.get('event') == 'source_action_captured':
+            identity, digest = event.get('action_id'), event.get('terminal_sha256')
+            if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+                    or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                    or identity in captured and captured[identity] != digest):
+                _fail('source_action_orphan_requires_reconciliation')
+            captured[identity] = digest
+    prior = state.get('source_action')
+    if prior and prior.get('phase') == 'captured':
+        identity, digest = prior.get('action_id'), prior.get('terminal_sha256')
+        if (not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{32}', identity)
+                or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                or identity in captured and captured[identity] != digest):
+            _fail('source_action_orphan_requires_reconciliation')
+        captured[identity] = digest
+    for identity, digest in captured.items():
+        _verified_captured_source_action(root, state, base / identity, digest)
+    orphans = []
+    for child in base.iterdir():
+        if re.fullmatch(r'authority-[0-9a-f]{64}\.json', child.name):
+            _read_private(child)
+        elif re.fullmatch(r'[0-9a-f]{32}', child.name):
+            if child.name not in captured:
                 orphans.append(child)
-            else:
-                _fail('source_action_orphan_requires_reconciliation')
-        if orphans:
-            if len(orphans) != 1:
-                _fail('source_action_orphan_requires_reconciliation')
-            orphan = orphans[0]
-            _source_orphan_never_dispatched(root, orphan.name)
-            if not (orphan / 'request.json').exists() and not (orphan / 'request.json').is_symlink():
-                _abort_incomplete_source_orphan(root, state, orphan, next_sha)
-            else:
-                try:
-                    request_path = orphan / 'request.json'
-                    request = _read_private(request_path)
-                    state['source_action'] = {
-                        'action_id': orphan.name, 'next_sha256': next_sha,
-                        'request_sha256': runner._sha(request_path),
-                        'after_invocations': state['invocations'],
-                        'phase': 'prepared', 'terminal_sha256': None}
-                    _frozen_source_request(root, state, nxt, next_sha)
-                    before = request.get('allowance_before')
-                    if (not isinstance(before, dict)
-                            or not isinstance(before.get('run_identity'), dict)
-                            or type(before.get('used_tunnels')) is not int
-                            or type(before.get('charged_tunnel_bytes')) is not int):
-                        _fail('source_action_orphan_requires_reconciliation')
-                except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
-                    state['source_action'] = None
+        else:
+            _fail('source_action_orphan_requires_reconciliation')
+    if orphans:
+        if len(orphans) != 1:
+            _fail('source_action_orphan_requires_reconciliation')
+        orphan = orphans[0]
+        _source_orphan_never_dispatched(root, orphan.name, events)
+        if not (orphan / 'request.json').exists() and not (orphan / 'request.json').is_symlink():
+            _abort_incomplete_source_orphan(root, state, orphan, next_sha, events)
+        else:
+            try:
+                request_path = orphan / 'request.json'
+                request = _read_private(request_path)
+                state['source_action'] = {
+                    'action_id': orphan.name, 'next_sha256': next_sha,
+                    'request_sha256': runner._sha(request_path),
+                    'after_invocations': state['invocations'],
+                    'phase': 'prepared', 'terminal_sha256': None}
+                _frozen_source_request(root, state, nxt, next_sha)
+                before = request.get('allowance_before')
+                if (not isinstance(before, dict)
+                        or not isinstance(before.get('run_identity'), dict)
+                        or type(before.get('used_tunnels')) is not int
+                        or type(before.get('charged_tunnel_bytes')) is not int):
                     _fail('source_action_orphan_requires_reconciliation')
-                _save_state(root, state)
-                _event(root, {'at': _now(), 'event': 'source_action_prepared_recovered',
-                              'action_id': orphan.name,
-                              'request_sha256': state['source_action']['request_sha256']})
-                return request
+            except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
+                state['source_action'] = None
+                _fail('source_action_orphan_requires_reconciliation')
+            _save_state(root, state)
+            _event(root, {'at': _now(), 'event': 'source_action_prepared_recovered',
+                          'action_id': orphan.name,
+                          'request_sha256': state['source_action']['request_sha256']})
+            return request
     identity = os.urandom(16).hex()
     directory = base / identity
     directory.mkdir(mode=0o700)
@@ -621,11 +688,13 @@ def _source_receipt(root: Path, directory: Path, request: dict, inventory: dict)
     identity = request['action_id']
     execution = root / 'controls/source-executions' / identity
     receipt_path = execution / 'receipt.json'
-    if not receipt_path.exists():
+    if not receipt_path.exists() and not receipt_path.is_symlink():
         return None
     receipt = _read_private(receipt_path)
-    if receipt.get('status') != 'captured':
+    if receipt.get('status') == 'unknown_effect':
         return None
+    if receipt.get('status') != 'captured':
+        _fail('source_action_receipt_status_invalid')
     plan = runner._plan(root)
     if (receipt.get('kind') != 'native-source-execution-v1'
             or receipt.get('execution_id') != identity
@@ -687,8 +756,23 @@ def _adopt_source_receipt(root: Path, state: dict, directory: Path,
                           request: dict, inventory: dict) -> dict:
     try:
         observed = _source_receipt(root, directory, request, inventory)
-    except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
-        observed = None
+    except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError) as error:
+        receipt_path = root / 'controls/source-executions' / request['action_id'] / 'receipt.json'
+        try:
+            observed_sha = runner._sha(runner._file(receipt_path, private=True))
+        except (runner.NativeResearchError, OSError):
+            observed_sha = None
+        reason = (str(error) if isinstance(error, (ContinuationError, runner.NativeResearchError))
+                  else 'source_action_receipt_unreadable')
+        state['source_action'].update(phase='evidence_changed',
+                                      observed_receipt_sha256=observed_sha,
+                                      evidence_change_reason=reason)
+        _save_state(root, state)
+        _event(root, {'at': _now(), 'event': 'source_action_evidence_changed',
+                      'action_id': request['action_id'],
+                      'observed_receipt_sha256': observed_sha, 'reason': reason})
+        return {'status': 'evidence_changed', 'action_id': request['action_id'],
+                'observed_receipt_sha256': observed_sha, 'reason': reason}
     if observed is None:
         if state['source_action']['phase'] != 'unknown_effect':
             state['source_action']['phase'] = 'unknown_effect'
@@ -766,6 +850,10 @@ def _source_action(root: Path, state: dict, nxt: dict | None) -> dict | None:
     if prior and prior.get('after_invocations') == state['invocations']:
         if prior.get('next_sha256') != next_sha:
             _fail('source_action_checkpoint_changed_before_readback')
+        if prior.get('phase') == 'evidence_changed':
+            return {'status': 'evidence_changed', 'action_id': prior['action_id'],
+                    'observed_receipt_sha256': prior.get('observed_receipt_sha256'),
+                    'reason': prior.get('evidence_change_reason')}
         directory, request, inventory = _frozen_source_request(root, state, nxt, next_sha)
         phase = prior.get('phase')
         if phase in ('dispatched', 'captured', 'unknown_effect'):
@@ -881,6 +969,12 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
         if pending is not None:
             return _finish(root, state, 'reconciliation_required',
                            pending=pending, stopped=stop)
+        action = state.get('source_action') or {}
+        if action.get('phase') == 'evidence_changed':
+            return _finish(root, state, 'evidence_changed', source_action={
+                'status': 'evidence_changed', 'action_id': action.get('action_id'),
+                'observed_receipt_sha256': action.get('observed_receipt_sha256'),
+                'reason': action.get('evidence_change_reason')})
         if (state.get('source_action') or {}).get('phase') in ('dispatched', 'unknown_effect'):
             outcome = _source_action(root, state, _next(root))
             if outcome and outcome['status'] == 'unknown_effect':
@@ -965,7 +1059,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                                request=str(cont / 'closure-request.json'))
             if state['invocations'] and nxt is not None:
                 outcome = _source_action(root, state, nxt)
-                if outcome and outcome['status'] in ('unknown_effect', 'authority_required'):
+                if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',
+                                                     'authority_required'):
                     return _finish(root, state, outcome['status'], source_action=outcome)
             if state['invocations']:
                 if nxt is None:

@@ -434,15 +434,122 @@ def _source_preflight(root: Path, state: dict, next_sha: str) -> dict:
     return {'status': 'authorized', 'plan': plan, 'allowance': allowance}
 
 
+def _source_orphan_never_dispatched(root: Path, identity: str) -> None:
+    execution = root / 'controls/source-executions' / identity
+    if execution.exists() or execution.is_symlink():
+        _fail('source_action_orphan_requires_reconciliation')
+    journal = _cont(root) / 'events.jsonl'
+    if not journal.exists() and not journal.is_symlink():
+        return
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate event key')
+            value[key] = item
+        return value
+    try:
+        path = runner._file(journal, private=True)
+        if path.stat().st_size > MAX_JOURNAL_BYTES:
+            _fail('source_action_orphan_requires_reconciliation')
+        with path.open('rb') as stream:
+            for line in stream:
+                if not line.endswith(b'\n'):
+                    _fail('source_action_orphan_requires_reconciliation')
+                event = json.loads(line, object_pairs_hook=unique,
+                                   parse_constant=_reject_constant)
+                if not isinstance(event, dict):
+                    _fail('source_action_orphan_requires_reconciliation')
+                if (event.get('event') == 'source_action_dispatched'
+                        and event.get('action_id') == identity):
+                    _fail('source_action_orphan_requires_reconciliation')
+    except (runner.NativeResearchError, OSError, UnicodeError, ValueError, TypeError):
+        _fail('source_action_orphan_requires_reconciliation')
+
+
+def _abort_incomplete_source_orphan(root: Path, state: dict, orphan: Path,
+                                    next_sha: str) -> None:
+    entry = orphan.stat(follow_symlinks=False)
+    if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
+            or entry.st_mode & 0o077 or (orphan / 'request.json').exists()
+            or (orphan / 'request.json').is_symlink()
+            or (orphan / 'terminal.json').exists()
+            or (orphan / 'terminal.json').is_symlink()):
+        _fail('source_action_orphan_requires_reconciliation')
+    _source_orphan_never_dispatched(root, orphan.name)
+    base = _cont(root) / 'aborted-source-actions'
+    base.mkdir(mode=0o700, exist_ok=True)
+    base_entry = base.stat(follow_symlinks=False)
+    if (not stat.S_ISDIR(base_entry.st_mode) or base_entry.st_uid != os.getuid()
+            or base_entry.st_mode & 0o077 or (base / orphan.name).exists()
+            or (base / orphan.name).is_symlink()):
+        _fail('source_action_orphan_requires_reconciliation')
+    record = {'kind': 'native-source-action-abort-v1',
+              'status': 'aborted_before_dispatch', 'action_id': orphan.name,
+              'plan_sha256': state['plan_sha256'], 'next_sha256': next_sha,
+              'reason': 'incomplete_freeze_before_prepared_state',
+              'execution_directory_absent': True, 'dispatch_event_absent': True}
+    path = orphan / 'abort.json'
+    if path.exists() or path.is_symlink():
+        if _read_private(path) != record:
+            _fail('source_action_orphan_requires_reconciliation')
+    else:
+        _write_private(path, record)
+    orphan.rename(base / orphan.name)
+    for parent in (orphan.parent, base):
+        descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    _event(root, {'at': _now(), 'event': 'source_action_incomplete_aborted',
+                  'action_id': orphan.name,
+                  'abort_sha256': runner._sha(base / orphan.name / 'abort.json')})
+
+
 def _source_request(root: Path, state: dict, nxt: dict, next_sha: str,
                     allowance: dict, plan: dict) -> dict:
     base = _source_actions(root)
     if state.get('source_action') is None:
+        orphans = []
         for child in base.iterdir():
             if re.fullmatch(r'authority-[0-9a-f]{64}\.json', child.name):
                 _read_private(child)
+            elif re.fullmatch(r'[0-9a-f]{32}', child.name):
+                orphans.append(child)
             else:
                 _fail('source_action_orphan_requires_reconciliation')
+        if orphans:
+            if len(orphans) != 1:
+                _fail('source_action_orphan_requires_reconciliation')
+            orphan = orphans[0]
+            _source_orphan_never_dispatched(root, orphan.name)
+            if not (orphan / 'request.json').exists() and not (orphan / 'request.json').is_symlink():
+                _abort_incomplete_source_orphan(root, state, orphan, next_sha)
+            else:
+                try:
+                    request_path = orphan / 'request.json'
+                    request = _read_private(request_path)
+                    state['source_action'] = {
+                        'action_id': orphan.name, 'next_sha256': next_sha,
+                        'request_sha256': runner._sha(request_path),
+                        'after_invocations': state['invocations'],
+                        'phase': 'prepared', 'terminal_sha256': None}
+                    _frozen_source_request(root, state, nxt, next_sha)
+                    before = request.get('allowance_before')
+                    if (not isinstance(before, dict)
+                            or not isinstance(before.get('run_identity'), dict)
+                            or type(before.get('used_tunnels')) is not int
+                            or type(before.get('charged_tunnel_bytes')) is not int):
+                        _fail('source_action_orphan_requires_reconciliation')
+                except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
+                    state['source_action'] = None
+                    _fail('source_action_orphan_requires_reconciliation')
+                _save_state(root, state)
+                _event(root, {'at': _now(), 'event': 'source_action_prepared_recovered',
+                              'action_id': orphan.name,
+                              'request_sha256': state['source_action']['request_sha256']})
+                return request
     identity = os.urandom(16).hex()
     directory = base / identity
     directory.mkdir(mode=0o700)
@@ -583,10 +690,11 @@ def _adopt_source_receipt(root: Path, state: dict, directory: Path,
     except (ContinuationError, runner.NativeResearchError, OSError, ValueError, TypeError, KeyError):
         observed = None
     if observed is None:
-        state['source_action']['phase'] = 'unknown_effect'
-        _save_state(root, state)
-        _event(root, {'at': _now(), 'event': 'source_action_unknown_effect',
-                      'action_id': request['action_id']})
+        if state['source_action']['phase'] != 'unknown_effect':
+            state['source_action']['phase'] = 'unknown_effect'
+            _save_state(root, state)
+            _event(root, {'at': _now(), 'event': 'source_action_unknown_effect',
+                          'action_id': request['action_id']})
         return {'status': 'unknown_effect', 'action_id': request['action_id']}
     receipt_path, receipt = observed
     projection = _source_projection(root, request, receipt_path, receipt)
@@ -637,6 +745,8 @@ def _adopt_source_receipt(root: Path, state: dict, directory: Path,
         _fail('source_action_terminal_changed')
     if state['source_action']['phase'] != 'captured':
         state['source_action'].update(phase='captured', terminal_sha256=digest)
+        if state.get('stop_reason') == 'unknown_effect':
+            state['stop_reason'] = None
         _save_state(root, state)
         _event(root, {'at': _now(), 'event': 'source_action_captured',
                       'action_id': request['action_id'], 'terminal_sha256': digest})
@@ -658,9 +768,7 @@ def _source_action(root: Path, state: dict, nxt: dict | None) -> dict | None:
             _fail('source_action_checkpoint_changed_before_readback')
         directory, request, inventory = _frozen_source_request(root, state, nxt, next_sha)
         phase = prior.get('phase')
-        if phase == 'unknown_effect':
-            return {'status': 'unknown_effect', 'action_id': prior['action_id']}
-        if phase in ('dispatched', 'captured'):
+        if phase in ('dispatched', 'captured', 'unknown_effect'):
             return _adopt_source_receipt(root, state, directory, request, inventory)
         if phase != 'prepared':
             _fail('source_action_state_invalid')

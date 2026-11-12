@@ -18,6 +18,9 @@ component evidence; a live native provider/target run remains a separate gate.
 | Concurrent continuation/controller or source executor | One lease and turn lock; never two host batches for one request. |
 | Crash before dispatch | Keep prepared ID and frozen hashes; resume only after checking the same request and inputs. |
 | Crash after dispatch, before/after source receipt capture | Adopt only an exact captured receipt once. Missing/corrupt/unknown result stops for readback; never silently execute again. |
+| A captured receipt appears after an earlier `unknown_effect` stop | Read back and adopt that exact receipt without calling the executor again; resume only if the same run is still active. |
+| Crash after the frozen request is written but before `state.json` names it | Recover the one complete, matching pre-dispatch request after proving no source execution directory exists. |
+| Crash during the freeze, leaving an incomplete action directory | Prove no execution directory or dispatch event, quarantine the pre-dispatch bytes and safely prepare a new ID. Otherwise stop as unknown. |
 | Duplicate request after capture, or changed request with the old ID | Do not dispatch twice. New request needs a new host action after the previous one is read. |
 | Source execution repeats stdout | Report reproducibility only. Attacker reachability, protected effect, initial state, permission and causal control remain unproven. |
 | Receipt/projection changed after capture | Reject adoption and further effects. |
@@ -76,3 +79,13 @@ windows. [Saved local result](SOURCE-ACTION-LOCAL-CHECKS.json) records exact
 source/check hashes, image ID, observed statuses and receipt hashes. Its
 `native_tool_trace` and `provider_cost` are null: real native readback,
 signed-target behavior and provider spend remain unverified.
+
+The affected source-mode and continuation checks also passed locally:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tools/check_native_source_mode.py
+PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_native_continuation.py
+```
+
+These report four source-mode checks and six continuation checks. Both use
+synthetic execution, so they do not qualify a native model, provider or target.

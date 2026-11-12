@@ -68,6 +68,44 @@ def fake_freeze(root: Path, destination: Path, role: str) -> dict:
     return runner._inventory(destination)
 
 
+def captured_receipt(root: Path, command_file: Path, source_snapshot: Path,
+                     execution_id: str) -> dict:
+    directory = root / 'controls/source-executions' / execution_id
+    directory.mkdir()
+    shutil.copytree(source_snapshot, directory / 'input')
+    inventory = runner._inventory(directory / 'input')
+    runner._write_json(directory / 'input-manifest.json', inventory, once=True)
+    receipt = {'kind': 'native-source-execution-v1', 'status': 'captured',
+               'execution_id': execution_id, 'owner_role': 'researcher',
+               'plan_sha256': runner._sha(root / 'plan.json'),
+               'original_source_manifest_sha256': runner._plan(root)['source_manifest_sha256'],
+               'module_cache_sha256': runner._plan(root)['source_only']['module_cache_sha256'],
+               'image_id': runner._plan(root)['target_image_id'],
+               'platform': runner._plan(root)['platform'], 'network': 'none',
+               'command': json.loads(command_file.read_text()),
+               'input_manifest_sha256': runner._sha(directory / 'input-manifest.json'),
+               'assessment': 'needs_review', 'replay_output_equal': True,
+               'all_commands_succeeded': True, 'runs': []}
+    for role in runner.CAPTURE_TARGETS:
+        output = directory / role
+        output.mkdir()
+        shutil.copytree(source_snapshot, output / 'files')
+        runner._write_json(output / 'files.json', inventory, once=True)
+        (output / 'stdout.txt').write_text('benign-check\n')
+        (output / 'stderr.txt').write_text('')
+        (output / 'stdout.txt').chmod(0o600)
+        (output / 'stderr.txt').chmod(0o600)
+        receipt['runs'].append({'role': role, 'exit_code': 0,
+                                'stdout_sha256': runner._sha(output / 'stdout.txt'),
+                                'stderr_sha256': runner._sha(output / 'stderr.txt'),
+                                'output_manifest_sha256': runner._sha(output / 'files.json')})
+    path = directory / 'receipt.json'
+    runner._write_json(path, receipt, once=True)
+    return {'status': 'captured', 'assessment': 'needs_review',
+            'receipt_path': str(path), 'receipt_sha256': runner._sha(path),
+            'replay_output_equal': True, 'all_commands_succeeded': True}
+
+
 def fake_execute(calls: list, *, crash: bool = False, crash_after_capture: bool = False):
     def execute(root: Path, command_file: Path | None = None, *,
                 source_snapshot: Path | None = None, owner_role: str = 'researcher',
@@ -80,46 +118,15 @@ def fake_execute(calls: list, *, crash: bool = False, crash_after_capture: bool 
         calls.append(execution_id)
         if crash:
             raise RuntimeError('synthetic_crash_after_dispatch')
-        directory = root / 'controls/source-executions' / execution_id
-        directory.mkdir()
-        shutil.copytree(source_snapshot, directory / 'input')
-        inventory = runner._inventory(directory / 'input')
-        runner._write_json(directory / 'input-manifest.json', inventory, once=True)
-        receipt = {'kind': 'native-source-execution-v1', 'status': 'captured',
-                   'execution_id': execution_id, 'owner_role': 'researcher',
-                   'plan_sha256': runner._sha(root / 'plan.json'),
-                   'original_source_manifest_sha256': runner._plan(root)['source_manifest_sha256'],
-                   'module_cache_sha256': runner._plan(root)['source_only']['module_cache_sha256'],
-                   'image_id': runner._plan(root)['target_image_id'],
-                   'platform': runner._plan(root)['platform'], 'network': 'none',
-                   'command': ACTION['command'],
-                   'input_manifest_sha256': runner._sha(directory / 'input-manifest.json'),
-                   'assessment': 'needs_review', 'replay_output_equal': True,
-                   'all_commands_succeeded': True, 'runs': []}
-        for role in runner.CAPTURE_TARGETS:
-            output = directory / role
-            output.mkdir()
-            shutil.copytree(source_snapshot, output / 'files')
-            runner._write_json(output / 'files.json', inventory, once=True)
-            (output / 'stdout.txt').write_text('benign-check\n')
-            (output / 'stderr.txt').write_text('')
-            (output / 'stdout.txt').chmod(0o600)
-            (output / 'stderr.txt').chmod(0o600)
-            receipt['runs'].append({'role': role, 'exit_code': 0,
-                                    'stdout_sha256': runner._sha(output / 'stdout.txt'),
-                                    'stderr_sha256': runner._sha(output / 'stderr.txt'),
-                                    'output_manifest_sha256': runner._sha(output / 'files.json')})
-        path = directory / 'receipt.json'
-        runner._write_json(path, receipt, once=True)
+        result = captured_receipt(root, command_file, source_snapshot, execution_id)
         if crash_after_capture:
             raise RuntimeError('synthetic_crash_after_capture')
-        return {'status': 'captured', 'assessment': 'needs_review',
-                'receipt_path': str(path), 'receipt_sha256': runner._sha(path),
-                'replay_output_equal': True, 'all_commands_succeeded': True}
+        return result
     return execute
 
 
 def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = False,
+             crash_before_state: bool = False, late_capture: bool = False,
              crash_after_capture: bool = False, tamper_receipt: bool = False,
              image: str | None = None, authority_record: bool = False):
     root = fixture(base, image)
@@ -189,8 +196,16 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
         else:
             stack.enter_context(patch.object(runner, '_source_executor_envelope'))
             stack.enter_context(patch.object(runner, 'source_execute',
-                side_effect=fake_execute(calls, crash=crash,
+                side_effect=fake_execute(calls, crash=crash or late_capture,
                                          crash_after_capture=crash_after_capture)))
+        if crash_before_state:
+            original_save = continuation._save_state
+            def interrupt_state(run_root, value):
+                if (value.get('source_action') or {}).get('phase') == 'prepared':
+                    raise RuntimeError('synthetic_crash_before_prepared_state')
+                original_save(run_root, value)
+            stack.enter_context(patch.object(continuation, '_save_state',
+                                             side_effect=interrupt_state))
         if crash_before_dispatch:
             original_event = continuation._event
             def interrupt_prepared(run_root, event):
@@ -204,24 +219,37 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         except RuntimeError as error:
             assert (crash and str(error) == 'synthetic_crash_after_dispatch'
+                    or late_capture and str(error) == 'synthetic_crash_after_dispatch'
+                    or crash_before_state and str(error) == 'synthetic_crash_before_prepared_state'
                     or crash_before_dispatch and str(error) == 'synthetic_crash_before_dispatch'
                     or crash_after_capture and str(error) == 'synthetic_crash_after_capture')
             first = None
-        if crash_before_dispatch:
+        if crash_before_dispatch or crash_before_state:
             stack.pop_all().close()
-            return run_prepared_resume(root, calls, turns, invoke)
+            return run_prepared_resume(root, calls, turns, invoke,
+                'synthetic_crash_before_prepared_state' if crash_before_state
+                else 'synthetic_crash_before_dispatch')
         if tamper_receipt:
             action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
             receipt_path = root / 'controls/source-executions' / action['action_id'] / 'receipt.json'
             receipt = runner._read_json(receipt_path)
             receipt['command'] = ['sh', 'swapped.sh']
             runner._write_json(receipt_path, receipt)
-        if crash or crash_after_capture:
+        if crash or crash_after_capture or late_capture:
             second = continuation.continue_run(root, max_invocations=3, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-            if crash or tamper_receipt:
+            if crash or tamper_receipt or late_capture:
                 assert second['status'] in ('unknown_effect', 'reconciliation_required')
                 assert len(calls) == 1 and turns == ['research']
+                if late_capture:
+                    action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
+                    directory = root / 'controls/continuation/source-actions' / action['action_id']
+                    captured_receipt(root, directory / 'command.json', directory / 'input',
+                                     action['action_id'])
+                    third = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                        status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+                    assert third['status'] == 'closure_review_required'
+                    assert len(calls) == 1 and turns == ['research', 'resume']
             else:
                 assert second['status'] == 'closure_review_required'
                 assert len(calls) == 1 and turns == ['research', 'resume']
@@ -251,6 +279,7 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                     'synthetic_crash_after_capture' if crash_after_capture else
                     'synthetic_crash_after_dispatch'),
                 'second_status': second['status'], 'source_batches': len(calls),
+                'late_receipt_status': third['status'] if late_capture else None,
                 'turns': turns, 'evidence': evidence,
                 'cleanup': 'all_fixture_containers_absent' if image else 'temporary_files_removed'}
     finally:
@@ -261,7 +290,8 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
             assert remaining.stdout.strip() == b''
 
 
-def run_prepared_resume(root: Path, calls: list, turns: list, invoke) -> dict:
+def run_prepared_resume(root: Path, calls: list, turns: list, invoke,
+                        first_status: str) -> dict:
     with contextlib.ExitStack() as stack:
         stack.enter_context(patch.object(runner, '_verified_plan',
             side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
@@ -278,9 +308,84 @@ def run_prepared_resume(root: Path, calls: list, turns: list, invoke) -> dict:
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
     assert result['status'] == 'closure_review_required'
     assert len(calls) == 1 and turns == ['research', 'resume']
-    return {'first_status': 'synthetic_crash_before_dispatch',
+    return {'first_status': first_status,
             'second_status': result['status'], 'source_batches': len(calls),
             'turns': turns}
+
+
+def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
+    root = fixture(base)
+    calls = []
+    freeze_calls = []
+    turns = []
+    def invoke(command, session, prompt):
+        turns.append(command)
+        if command == 'research':
+            runner._write_json(root / 'researcher/NEXT.json', checkpoint(action=ACTION))
+        else:
+            assert command == 'resume'
+            runner._write_json(root / 'researcher/NEXT.json', checkpoint(action=None, stop=True))
+        return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                   'dispatch_id': 'a' * 32,
+                   'pool_after': {'used_tunnels': len(turns),
+                                  'charged_tunnel_bytes': len(turns), 'active': True}}
+    def interrupted_freeze(run_root, destination, role):
+        freeze_calls.append(1)
+        inventory = fake_freeze(run_root, destination, role)
+        if len(freeze_calls) == 1:
+            raise RuntimeError('synthetic_crash_during_freeze')
+        return inventory
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(runner, '_verified_plan',
+            side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+        stack.enter_context(patch.object(runner, '_approval_active'))
+        stack.enter_context(patch.object(runner, 'run_active', return_value=True))
+        stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value={
+            'active': True, 'run_identity': {'nonce': 'fixture'},
+            'used_tunnels': 0, 'charged_tunnel_bytes': 0}))
+        stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+        stack.enter_context(patch.object(runner, '_freeze_source_input',
+            side_effect=interrupted_freeze))
+        stack.enter_context(patch.object(runner, '_source_executor_envelope'))
+        stack.enter_context(patch.object(runner, 'source_execute',
+            side_effect=fake_execute(calls)))
+        try:
+            continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+        except RuntimeError as error:
+            assert str(error) == 'synthetic_crash_during_freeze'
+        else:
+            raise AssertionError('freeze interruption was not observed')
+        orphan = next((root / 'controls/continuation/source-actions').iterdir())
+        if disputed == 'execution':
+            (root / 'controls/source-executions' / orphan.name).mkdir()
+        elif disputed == 'dispatch_event':
+            continuation._event(root, {'event': 'source_action_dispatched',
+                                       'action_id': orphan.name})
+        elif disputed == 'malformed_journal':
+            with (root / 'controls/continuation/events.jsonl').open('ab') as stream:
+                stream.write(b'{"event":"source_action_dispatched"')
+        if disputed:
+            try:
+                continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                    status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+            except continuation.ContinuationError as error:
+                assert str(error) == 'source_action_orphan_requires_reconciliation'
+            else:
+                raise AssertionError('disputed orphan unexpectedly recovered')
+            assert not calls
+            assert orphan.exists()
+            return {'status': 'reconciliation_required', 'reason': disputed,
+                    'source_batches': 0}
+        result = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+            status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
+        assert result['status'] == 'closure_review_required'
+    assert len(calls) == 1 and calls[0] != orphan.name and turns == ['research', 'resume']
+    abort = root / 'controls/continuation/aborted-source-actions' / orphan.name / 'abort.json'
+    assert runner._read_json(abort)['status'] == 'aborted_before_dispatch'
+    assert not (root / 'controls/source-executions' / orphan.name).exists()
+    return {'status': 'recovered_pre_dispatch', 'source_batches': len(calls),
+            'aborted_orphan': orphan.name, 'new_action_id': calls[0]}
 
 
 def rejection_cases(base: Path) -> list[str]:
@@ -396,6 +501,15 @@ def main():
         prior_authority_record = run_case(base / 'authority-record', authority_record=True)
         uncertain = run_case(base / 'uncertain', crash=True)
         prepared = run_case(base / 'prepared', crash_before_dispatch=True)
+        orphan_prepared = run_case(base / 'orphan-prepared', crash_before_state=True)
+        orphan_incomplete = incomplete_orphan_case(base / 'orphan-incomplete')
+        orphan_execution = incomplete_orphan_case(base / 'orphan-execution',
+                                                   disputed='execution')
+        orphan_dispatch_event = incomplete_orphan_case(base / 'orphan-dispatch-event',
+                                                        disputed='dispatch_event')
+        orphan_malformed_journal = incomplete_orphan_case(base / 'orphan-malformed-journal',
+                                                          disputed='malformed_journal')
+        late_capture = run_case(base / 'late-capture', late_capture=True)
         adopted = run_case(base / 'adopted', crash_after_capture=True)
         tampered_receipt = run_case(base / 'tampered-receipt',
                                     crash_after_capture=True, tamper_receipt=True)
@@ -406,6 +520,12 @@ def main():
                       'tampered_receipt': tampered_receipt,
                       'prior_authority_record': prior_authority_record,
                       'prepared': prepared,
+                      'orphan_prepared': orphan_prepared,
+                      'orphan_incomplete': orphan_incomplete,
+                      'orphan_execution': orphan_execution,
+                      'orphan_dispatch_event': orphan_dispatch_event,
+                      'orphan_malformed_journal': orphan_malformed_journal,
+                      'late_capture': late_capture,
                       'rejected': rejected,
                       'docker': docker,
                       'image_id': args.docker,

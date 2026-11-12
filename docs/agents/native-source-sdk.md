@@ -217,7 +217,14 @@ After a crash, `continue` may adopt a captured source receipt only when the
 pending action ID, exact command, frozen input manifest, plan and receipt bytes
 match. A prepared action can dispatch after those checks. Missing, corrupt or
 unknown post-dispatch results stop as `unknown_effect`; they need operator
-readback or a separately authorized reset. An action outside the offline class
+readback or a separately authorized reset. A valid captured receipt that arrives
+after this stop can be adopted without another execution. A crash before the
+prepared state is saved can recover one complete frozen request only when no
+executor directory or dispatch event exists. An incomplete freeze is moved to
+`controls/continuation/aborted-source-actions/<id>/` with an abort receipt,
+then a fresh ID is prepared if the same run remains active. Any executor
+directory, dispatch event, or ambiguous journal stops for reconciliation.
+An action outside the offline class
 records `authority_required` separately from research help. The source request
 does not grant a service or external effect.
 

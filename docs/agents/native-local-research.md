@@ -103,8 +103,9 @@ not add monetary accounting or reconciled provider billing.
 
 `NEXT.json` is the checkpoint-level handoff. It records one of `supported`,
 `refuted`, `blocked`, or `inconclusive`, what the result rules out, useful
-capabilities and coverage, and the next brief or a stop proposal. An explicit stop
-proposal or a `strong_lead` change from true to false produces
+capabilities and coverage, and the next brief or a stop proposal. Outside the
+approved source-only closeout route, an explicit stop proposal or a `strong_lead`
+change from true to false produces
 `closure_review_required`; a fresh reviewer or operator writes
 `controls/continuation/closure-review.json` with mode `0600`:
 
@@ -115,6 +116,16 @@ proposal or a `strong_lead` change from true to false produces
  "reason": "what the review checked",
  "test": "required when decision is reopen; the concrete discriminating test"}
 ```
+
+For an approved source-only run, the agent saves
+`researcher/project/RESULT.md`, requests a fresh source review of those exact
+bytes, then sets `proposed_stop: true` with no next test or host action.
+`continue` invokes closeout itself: accepted review stops the native owner and
+checks the final receipt and exact resource absence. A reviewer `reopen`
+decision becomes the next agent prompt in the same run; the agent must revise
+`NEXT.json` and obtain fresh review after a material change. User, allowance
+and unknown-effect stops immediately request owner stop and preserve incomplete
+evidence. `complete_internal_candidate` grants no filing or deployment authority.
 
 For approved source-only runs, `NEXT.json` may instead request one typed
 [source check](native-source-sdk.md#researcher-requested-source-check). The host

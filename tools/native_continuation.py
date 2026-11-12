@@ -4,8 +4,9 @@
 This is a control loop, not a researcher. It preserves one run root and one shared
 allowance across bounded native turns. The researcher chooses the next experiment in
 ``/workspace/NEXT.json``; this controller only checks that a usable next brief or an
-explicit stop proposal exists. It never renews approval, creates a new run, or resets
-spend.
+explicit stop proposal exists. For a source-only proposal with ``RESULT.md``, it
+also invokes the internal closeout and verifies owner stop and cleanup. It never
+renews approval, creates a new run, or resets spend.
 
 The checkpoint is runtime-neutral. The native session id is a hint; the workspace,
 research note, next brief, and this checkpoint are the durable state.
@@ -238,7 +239,7 @@ def _state(root: Path) -> dict:
                  'session_id': None, 'last_pool': None, 'stop_reason': None,
                  'pending': None, 'last_strong_lead': None,
                  'applied_closure_review_sha256': None, 'source_action': None,
-                 'review_action': None}
+                 'review_action': None, 'last_reopen': None}
         _write_private(path, value)
         return value
     value = _read_private(path)
@@ -246,7 +247,7 @@ def _state(root: Path) -> dict:
             or type(value.get('invocations')) is not int or value['invocations'] < 0):
         _fail('continuation_checkpoint_stale')
     for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256',
-                'source_action', 'review_action'):
+                'source_action', 'review_action', 'last_reopen'):
         value.setdefault(key, None)
     return value
 
@@ -1292,7 +1293,7 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
 
 
 def _prompt(root: Path, number: int, source_action: dict | None = None,
-            review_action: dict | None = None) -> Path:
+            review_action: dict | None = None, reopen_check: str | None = None) -> Path:
     path = _cont(root) / ('prompt-%04d.md' % number)
     _write_text(path, (
         'Continue the saved investigation from ordinary workspace files. Read '
@@ -1312,7 +1313,13 @@ def _prompt(root: Path, number: int, source_action: dict | None = None,
             + review_action['review_id'] + '/RESULTS.json before revising the next test. '
             'It is an internal assessment, not a confirmed security effect or filing authority.\n')
            if review_action and review_action.get('phase') == 'captured'
-           and review_action.get('after_invocations') == number else '')))
+           and review_action.get('after_invocations') == number else '')
+        + (('Fresh review reopened the proposed closeout. Under the same approval '
+            'and remaining allowance, investigate this concrete check: ' + reopen_check +
+            '\nRead the prior result and review, then replace NEXT.json with the observed '
+            'result and a concrete next test or typed host action. Request a fresh review '
+            'if material evidence or the result changes. Do not resubmit the old stop '
+            'proposal without new review.\n') if reopen_check else '')))
     return path
 
 
@@ -1354,24 +1361,67 @@ def _finish(root: Path, state: dict, status: str, **extra) -> dict:
             'checkpoint': str(_cont(root) / 'state.json'), **extra}
 
 
+def _agent_closeout(root: Path, state: dict, *, wait_seconds: int,
+                    nxt: dict | None = None, forced_stop_reason: str | None = None) -> dict | None:
+    if ('source_only' not in _read_private(root / 'plan.json')
+            or (forced_stop_reason is None and
+                (nxt is None or nxt.get('proposed_stop') is not True
+                 or not (root / 'researcher/project/RESULT.md').exists()))):
+        return None
+    from native_closeout import closeout
+    result = closeout(root, wait_seconds=wait_seconds,
+                      forced_stop_reason=forced_stop_reason)
+    if result['status'] == 'reopen_required':
+        previous = state.get('last_reopen')
+        binding = {'result_sha256': result['result_sha256'],
+                   'review_projection_sha256': result['review_projection_sha256']}
+        if (isinstance(previous, dict)
+                and all(previous.get(key) == value for key, value in binding.items())
+                and state['invocations'] > previous.get('after_invocations', -1)):
+            result = closeout(root, wait_seconds=wait_seconds,
+                              forced_stop_reason='reopen_without_new_review')
+        else:
+            state['last_reopen'] = {**binding, 'after_invocations': state['invocations'],
+                                    'reopen_record_sha256': result['reopen_record_sha256']}
+            _save_state(root, state)
+            _event(root, {'at': _now(), 'event': 'agent_closeout_reopen',
+                          'invocation': state['invocations'],
+                          'record_sha256': result['reopen_record_sha256']})
+            return result
+    return _finish(root, state, result['status'],
+                   **{key: value for key, value in result.items() if key != 'status'})
+
+
 def continue_run(run_root: Path, *, runner_path: Path | None = None,
                  max_invocations: int = 24, invocation_timeout: int = 3700,
-                 invoke=None, status_fn=None, resume_after_stop: bool = False) -> dict:
+                 invoke=None, status_fn=None, resume_after_stop: bool = False,
+                 closeout_wait_seconds: int = 120) -> dict:
     root = runner._private_root(Path(run_root))
     cont = _cont(root)
     if type(max_invocations) is not int or not 0 <= max_invocations <= 512:
         _fail('continuation_max_invocations_invalid')
     if type(invocation_timeout) is not int or not 30 <= invocation_timeout <= 86400:
         _fail('continuation_timeout_invalid')
+    if type(closeout_wait_seconds) is not int or not 0 <= closeout_wait_seconds <= 3600:
+        _fail('continuation_closeout_wait_invalid')
     runner_path = Path(runner_path) if runner_path else Path(__file__).with_name('native_research.py')
     invoke = invoke or (lambda command, session, prompt: _child(
         runner_path, root, command, session=session, prompt=prompt, timeout=invocation_timeout))
     status_fn = status_fn or (lambda _root: _status(runner_path, root))
     with _lease(root):
         state = _state(root)
+        if (root / 'controls/closeout/stop-request.json').exists():
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason='closeout_readback')
+            if closed is not None:
+                return closed
         pending = state.get('pending')
         stop = _stop(root)
         if pending is not None:
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason=stop or 'unknown_effect')
+            if closed is not None:
+                return closed
             return _finish(root, state, 'reconciliation_required',
                            pending=pending, stopped=stop)
         action = state.get('source_action') or {}
@@ -1380,17 +1430,37 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             return _finish(root, state, 'review_incomplete',
                            review_id=review_action.get('review_id'))
         if action.get('phase') == 'evidence_changed':
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason='evidence_changed')
+            if closed is not None:
+                return closed
             return _finish(root, state, 'evidence_changed', source_action={
                 'status': 'evidence_changed', 'action_id': action.get('action_id'),
                 'observed_receipt_sha256': action.get('observed_receipt_sha256'),
                 'reason': action.get('evidence_change_reason')})
         if (state.get('source_action') or {}).get('phase') in ('dispatched', 'unknown_effect'):
             outcome = _source_action(root, state, _next(root))
-            if outcome and outcome['status'] == 'unknown_effect':
-                return _finish(root, state, 'unknown_effect', source_action=outcome)
+            if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed'):
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason=outcome['status'])
+                if closed is not None:
+                    return closed
+                return _finish(root, state, outcome['status'], source_action=outcome)
         if stop:
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason=stop)
+            if closed is not None:
+                return closed
             return _finish(root, state, 'stopped', reason=stop)
-        closure = _closure(root)
+        reopen_check = None
+        reopen_before_sha = None
+        closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                 nxt=_next(root))
+        if closed is not None:
+            if closed['status'] != 'reopen_required':
+                return closed
+            reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+        closure = None if reopen_check else _closure(root)
         if closure is not None:
             if closure['review'] is None:
                 return _finish(root, state, 'closure_review_required',
@@ -1410,7 +1480,10 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 _save_state(root, state)
                 _event(root, {'at': _now(), 'event': 'closure_reopen',
                               'review_sha256': review_sha})
-        if (state.get('stop_reason')
+        if reopen_check:
+            state['stop_reason'] = None
+            _save_state(root, state)
+        elif (state.get('stop_reason')
                 and state['stop_reason'] not in ('max_invocations', 'next_brief_missing')):
             if not resume_after_stop:
                 return {'status': 'previous_stop', 'run_root': str(root),
@@ -1424,19 +1497,31 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             _event(root, {'at': _now(), 'event': 'resume_after_stop',
                           'invocation': state['invocations']})
         if state['invocations'] >= max_invocations:
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason='max_invocations')
+            if closed is not None:
+                return closed
             return _finish(root, state, 'max_invocations')
         if state['invocations']:
             nxt = _next(root)
             if nxt is None:
                 return _finish(root, state, 'next_brief_missing')
-            if nxt.get('proposed_stop'):
-                request = _closure_request(root, state, nxt)
-                _event(root, {'at': _now(), 'event': 'closure_request',
-                              'invocation': state['invocations'], 'request': request,
-                              'request_sha256': runner._sha(cont / 'closure-request.json')})
-                return _finish(root, state, 'closure_review_required',
-                               request=str(cont / 'closure-request.json'))
-            if state.get('last_strong_lead') is True and nxt.get('strong_lead') is False:
+            if nxt.get('proposed_stop') and reopen_check is None:
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         nxt=nxt)
+                if closed is not None:
+                    if closed['status'] != 'reopen_required':
+                        return closed
+                    reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                else:
+                    request = _closure_request(root, state, nxt)
+                    _event(root, {'at': _now(), 'event': 'closure_request',
+                                  'invocation': state['invocations'], 'request': request,
+                                  'request_sha256': runner._sha(cont / 'closure-request.json')})
+                    return _finish(root, state, 'closure_review_required',
+                                   request=str(cont / 'closure-request.json'))
+            if (state.get('last_strong_lead') is True and nxt.get('strong_lead') is False
+                    and reopen_check is None):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1445,28 +1530,44 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                                request=str(cont / 'closure-request.json'))
         status = status_fn(root)
         if status.get('status') != 'active' or not (status.get('allowance') or {}).get('active'):
+            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                     forced_stop_reason='inactive')
+            if closed is not None:
+                return closed
             return _finish(root, state, 'inactive',
                            reason=status.get('stop_reason') or status.get('status'))
         while state['invocations'] < max_invocations:
             if _stop(root):
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason=_stop(root))
+                if closed is not None:
+                    return closed
                 return _finish(root, state, 'stopped', reason=_stop(root))
             nxt = _next(root) if state['invocations'] else None
-            if nxt is not None and nxt.get('proposed_stop'):
-                request = _closure_request(root, state, nxt)
-                _event(root, {'at': _now(), 'event': 'closure_request',
-                              'invocation': state['invocations'], 'request': request,
-                              'request_sha256': runner._sha(cont / 'closure-request.json')})
-                return _finish(root, state, 'closure_review_required',
-                               request=str(cont / 'closure-request.json'))
+            if nxt is not None and nxt.get('proposed_stop') and reopen_check is None:
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         nxt=nxt)
+                if closed is not None:
+                    if closed['status'] != 'reopen_required':
+                        return closed
+                    reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                else:
+                    request = _closure_request(root, state, nxt)
+                    _event(root, {'at': _now(), 'event': 'closure_request',
+                                  'invocation': state['invocations'], 'request': request,
+                                  'request_sha256': runner._sha(cont / 'closure-request.json')})
+                    return _finish(root, state, 'closure_review_required',
+                                   request=str(cont / 'closure-request.json'))
             if (state['invocations'] and state.get('last_strong_lead') is True
-                    and nxt is not None and nxt.get('strong_lead') is False):
+                    and nxt is not None and nxt.get('strong_lead') is False
+                    and reopen_check is None):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
                               'request_sha256': runner._sha(cont / 'closure-request.json')})
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
-            if state['invocations'] and nxt is not None:
+            if state['invocations'] and nxt is not None and reopen_check is None:
                 if nxt.get('host_action') and nxt['host_action']['kind'] == SOURCE_REVIEW_ACTION_KIND:
                     outcome = _agent_review(root, state, nxt)
                     if outcome['status'] != 'captured':
@@ -1475,17 +1576,22 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     outcome = _source_action(root, state, nxt)
                     if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',
                                                          'authority_required'):
+                        if outcome['status'] != 'authority_required':
+                            closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                                     forced_stop_reason=outcome['status'])
+                            if closed is not None:
+                                return closed
                         return _finish(root, state, outcome['status'], source_action=outcome)
             if state['invocations']:
                 if nxt is None:
                     return _finish(root, state, 'next_brief_missing')
                 command, session = 'resume', state.get('session_id')
                 prompt = _prompt(root, state['invocations'], state.get('source_action'),
-                                 state.get('review_action'))
+                                 state.get('review_action'), reopen_check)
                 if not session:
                     command, session, prompt = 'reconstruct', None, _prompt(
                         root, state['invocations'], state.get('source_action'),
-                        state.get('review_action'))
+                        state.get('review_action'), reopen_check)
             else:
                 command, session, prompt = 'research', None, None
             state['pending'] = {'role': command, 'session': session, 'started_at': _now()}
@@ -1503,7 +1609,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                               'role': command, 'code': result.get('code')})
                 command, session, prompt = 'reconstruct', None, _prompt(
                     root, state['invocations'], state.get('source_action'),
-                    state.get('review_action'))
+                    state.get('review_action'), reopen_check)
                 state['pending'] = {'role': command, 'session': None, 'started_at': _now()}
                 _save_state(root, state)
                 _event(root, {'at': _now(), 'event': 'dispatch_started',
@@ -1528,10 +1634,23 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     if state.get('pending') is not None and result.get('dispatch_id'):
                         state['pending']['dispatch_id'] = result['dispatch_id']
                         _save_state(root, state)
+                    closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                             forced_stop_reason='unknown_effect')
+                    if closed is not None:
+                        return closed
                     return _finish(root, state, 'unknown_effect', reason=reason)
+                if reason in pre_dispatch:
+                    closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                             forced_stop_reason=reason)
+                    if closed is not None:
+                        return closed
                 return _finish(root, state, 'invocation_failed', reason=reason)
             pool_after = result.get('pool_after')
             if not _valid_pool(pool_after):
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason='spend_unavailable')
+                if closed is not None:
+                    return closed
                 return _finish(root, state, 'spend_unavailable', reason='pool_after_missing')
             reset = _pool_reset(state.get('last_pool'), pool_after)
             previous_pool = state.get('last_pool')
@@ -1547,10 +1666,25 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                           'pool_before': result.get('pool_before'),
                           'pool_after': pool_after})
             if reset:
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason='spend_reset_detected')
+                if closed is not None:
+                    return closed
                 return _finish(root, state, 'spend_reset_detected',
                                reason='shared allowance decreased')
             if pool_after.get('active') is not True:
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason='allowance_inactive')
+                if closed is not None:
+                    return closed
                 return _finish(root, state, 'inactive', reason='allowance_inactive')
+            if reopen_check is not None and _next_hash(root) == reopen_before_sha:
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         forced_stop_reason='reopen_no_agent_revision')
+                if closed is not None:
+                    return closed
+                return _finish(root, state, 'reopen_no_agent_revision')
+            reopen_check, reopen_before_sha = None, None
             nxt = _next(root)
             if nxt is None:
                 return _finish(root, state, 'next_brief_missing')
@@ -1572,6 +1706,13 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                           'strong_lead': state['last_strong_lead'],
                           'next_sha256': next_sha})
             if nxt.get('proposed_stop'):
+                closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                         nxt=nxt)
+                if closed is not None:
+                    if closed['status'] != 'reopen_required':
+                        return closed
+                    reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
+                    continue
                 request = _closure_request(root, state, nxt)
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1579,5 +1720,9 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
 
+        closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
+                                 forced_stop_reason='max_invocations')
+        if closed is not None:
+            return closed
         return _finish(root, state, 'max_invocations')
     raise AssertionError('unreachable')

@@ -229,9 +229,10 @@ def main() -> None:
                 side_effect=lambda *args: {'items': []}))
             stack.enter_context(patch.object(runner, '_source_review',
                 side_effect=fake_source_review))
-            result = continuation.continue_run(root, max_invocations=2, invoke=invoke,
+            result = continuation.continue_run(root, max_invocations=2,
+                closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-        assert result['status'] == 'closure_review_required' and len(calls) == 1
+        assert result['status'] == 'cleanup_pending' and len(calls) == 1
         denied = []
         for case in ('malformed_claim', 'expired_approval', 'exhausted_allowance',
                      'uncertain_prior_action', 'reused_slot', 'reused_store',

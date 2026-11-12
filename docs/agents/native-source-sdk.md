@@ -267,7 +267,15 @@ disclose. An unfinished action or missing, unsafe or oversized required evidence
 holds the request incomplete before a reviewer session starts.
 An optional `researcher/project/RESULT.md` is frozen with the current source
 and repeated in the unfinished role with its hash and agent-statement label.
-It adds no separate finalization step.
+For agent-owned closeout, the researcher writes this result before requesting
+review. After the review is captured, it proposes a stop in `NEXT.json` while
+leaving the reviewed result and source bytes unchanged. The continuation host
+then checks the exact result, evidence and review, requests the existing owner
+stop, and verifies cleanup and resource absence. A reviewer decision to reopen
+puts its concrete next check in a new agent prompt under the same approval and
+remaining allowance. User, allowance and unknown-effect stops bypass a new
+review and preserve an incomplete result and teardown receipt. The contained
+workflow is in [AGENT-CLOSEOUT-E2E](../../evals/native-qualification/AGENT-CLOSEOUT-E2E.md).
 
 The existing fresh source reviewer and host effect/control path consumes this
 packet. A completed internal assessment is returned to the same run at read-only

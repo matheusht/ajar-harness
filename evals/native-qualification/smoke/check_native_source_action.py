@@ -215,7 +215,7 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
             event_patch = patch.object(continuation, '_event', side_effect=interrupt_prepared)
             stack.enter_context(event_patch)
         try:
-            first = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+            first = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         except RuntimeError as error:
             assert (crash and str(error) == 'synthetic_crash_after_dispatch'
@@ -238,11 +238,11 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
             runner._write_json(receipt_path, receipt)
             bad_receipt_sha = runner._sha(receipt_path)
         if crash or crash_after_capture or late_capture:
-            second = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+            second = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
             if crash or tamper_receipt or late_capture:
-                assert second['status'] == ('evidence_changed' if tamper_receipt
-                                            else 'unknown_effect')
+                assert second['status'] == 'cleanup_pending'
+                assert (root / 'controls/closeout/stop-request.json').exists(), second
                 assert len(calls) == 1 and turns == ['research']
                 if tamper_receipt:
                     held = runner._read_json(root / 'controls/continuation/state.json')['source_action']
@@ -250,27 +250,26 @@ def run_case(base: Path, *, crash: bool = False, crash_before_dispatch: bool = F
                     assert held['observed_receipt_sha256'] == bad_receipt_sha
                     assert held['evidence_change_reason'] == 'source_action_receipt_mismatch'
                     runner._write_json(receipt_path, original_receipt)
-                    third = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                    third = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                         status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-                    assert third['status'] == 'evidence_changed'
-                    assert third['source_action']['observed_receipt_sha256'] == bad_receipt_sha
+                    assert third['status'] == 'cleanup_pending', third
                     assert len(calls) == 1 and turns == ['research']
                 if late_capture:
                     action = runner._read_json(root / 'controls/continuation/state.json')['source_action']
                     directory = root / 'controls/continuation/source-actions' / action['action_id']
                     captured_receipt(root, directory / 'command.json', directory / 'input',
                                      action['action_id'])
-                    third = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                    third = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                         status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
-                    assert third['status'] == 'closure_review_required'
-                    assert len(calls) == 1 and turns == ['research', 'resume']
+                    assert third['status'] == 'cleanup_pending', third
+                    assert len(calls) == 1 and turns == ['research']
             else:
                 assert second['status'] == 'closure_review_required'
                 assert len(calls) == 1 and turns == ['research', 'resume']
         else:
             assert first['status'] == 'closure_review_required'
             assert turns == ['research', 'resume'] and len(calls) == 1
-            second = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+            second = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
             assert second['status'] == 'closure_review_required' and len(calls) == 1
     try:
@@ -322,7 +321,7 @@ def run_prepared_resume(root: Path, calls: list, turns: list, invoke,
         stack.enter_context(patch.object(runner, '_source_executor_envelope'))
         stack.enter_context(patch.object(runner, 'source_execute',
             side_effect=fake_execute(calls)))
-        result = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+        result = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
     assert result['status'] == 'closure_review_required'
     assert len(calls) == 1 and turns == ['research', 'resume']
@@ -368,7 +367,7 @@ def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
         stack.enter_context(patch.object(runner, 'source_execute',
             side_effect=fake_execute(calls)))
         try:
-            continuation.continue_run(root, max_invocations=3, invoke=invoke,
+            continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         except RuntimeError as error:
             assert str(error) == 'synthetic_crash_during_freeze'
@@ -385,7 +384,7 @@ def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
                 stream.write(b'{"event":"source_action_dispatched"')
         if disputed:
             try:
-                continuation.continue_run(root, max_invocations=3, invoke=invoke,
+                continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
                     status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
             except continuation.ContinuationError as error:
                 assert str(error) == 'source_action_orphan_requires_reconciliation'
@@ -395,7 +394,7 @@ def incomplete_orphan_case(base: Path, *, disputed: str | None = None) -> dict:
             assert orphan.exists()
             return {'status': 'reconciliation_required', 'reason': disputed,
                     'source_batches': 0}
-        result = continuation.continue_run(root, max_invocations=3, invoke=invoke,
+        result = continuation.continue_run(root, max_invocations=3, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         assert result['status'] == 'closure_review_required'
     assert len(calls) == 1 and calls[0] != orphan.name and turns == ['research', 'resume']
@@ -451,7 +450,7 @@ def second_action_orphan_case(base: Path, *, incomplete: bool) -> dict:
             side_effect=fake_execute(calls)))
         stack.enter_context(patch.object(continuation, '_save_state', side_effect=save))
         try:
-            continuation.continue_run(root, max_invocations=4, invoke=invoke,
+            continuation.continue_run(root, max_invocations=4, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         except RuntimeError as error:
             assert str(error) == ('synthetic_second_freeze_crash' if incomplete
@@ -463,7 +462,7 @@ def second_action_orphan_case(base: Path, *, incomplete: bool) -> dict:
         assert state['source_action']['phase'] == 'captured' and len(calls) == 1
         action_dirs = list((root / 'controls/continuation/source-actions').iterdir())
         orphan = next(path for path in action_dirs if path.name != first_id)
-        result = continuation.continue_run(root, max_invocations=4, invoke=invoke,
+        result = continuation.continue_run(root, max_invocations=4, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
     assert result['status'] == 'closure_review_required'
     assert len(calls) == 2 and turns == ['research', 'resume', 'resume']
@@ -511,7 +510,7 @@ def captured_event_gap_case(base: Path) -> dict:
             side_effect=fake_execute(calls)))
         stack.enter_context(patch.object(continuation, '_event', side_effect=event))
         try:
-            continuation.continue_run(root, max_invocations=5, invoke=invoke,
+            continuation.continue_run(root, max_invocations=5, closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
         except RuntimeError as error:
             assert str(error) == 'synthetic_crash_before_captured_event'
@@ -520,7 +519,7 @@ def captured_event_gap_case(base: Path) -> dict:
         state = runner._read_json(root / 'controls/continuation/state.json')
         first_id = state['source_action']['action_id']
         assert state['source_action']['phase'] == 'captured' and calls == [first_id]
-        result = continuation.continue_run(root, max_invocations=5, invoke=invoke,
+        result = continuation.continue_run(root, max_invocations=5, closeout_wait_seconds=0, invoke=invoke,
             status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
     assert result['status'] == 'closure_review_required'
     assert len(calls) == 3 and len(set(calls)) == 3
@@ -612,11 +611,11 @@ def rejection_cases(base: Path) -> list[str]:
                 side_effect=fake_execute(calls)))
             stack.enter_context(patch.object(continuation, '_event', side_effect=event))
             try:
-                result = continuation.continue_run(root, max_invocations=2, invoke=invoke,
+                result = continuation.continue_run(root, max_invocations=2, closeout_wait_seconds=0, invoke=invoke,
                     status_fn=lambda _: {'status': 'active', 'allowance': {'active': True}})
                 assert case in ('missing_envelope', 'stopped')
                 assert result['status'] == ('authority_required' if case == 'missing_envelope'
-                                            else 'stopped')
+                                            else 'cleanup_pending')
                 if case == 'missing_envelope':
                     authority = runner._read_json(Path(result['source_action']['authority_request']))
                     assert authority['human_decision_required'] is True

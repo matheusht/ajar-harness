@@ -16,9 +16,13 @@ engagement complete. External filing and deployment are separate actions.
 | Pending/unknown host or native effect | Stop dispatch; retain the effect and cleanup obligation as unresolved. |
 | Agent labels untested paths safe or a bounded negative as full coverage | Return a bounded result that states the tested paths and limits. |
 | Budget, operator, or safety stop | Stop immediately without a new review experiment; keep draft and unfinished work. |
+| Operator stop arrives while review bytes are checked | Treat it as an incomplete stop and verify cleanup before returning. |
 | Review asks for a new test | Reopen only under the same live approval and remaining allowance, with a concrete next test. |
 | Owner stops but cleanup/readback is absent or incomplete | Do not mark complete; record exact owned resources and remaining effects. |
 | Controller reports `closed` without actual native stop | Keep engagement open until stop and cleanup are verified. |
+| A stop proposal depends on manually running a second closeout command | The continuation controller invokes closeout and returns the verified terminal status. |
+| Fresh review says reopen | Put its concrete next check in the next agent prompt under the same live approval and allowance. Freeze the old proposal, result and review; require fresh review after material changes. |
+| The reopened agent leaves `NEXT.json` unchanged | Stop incomplete; do not loop on the same proposal or dispatch another effect. |
 
 ## Public end-to-end scenario
 
@@ -43,3 +47,23 @@ engagement complete. External filing and deployment are separate actions.
 Local synthetic checks can establish control-flow behavior. A live provider,
 fresh target, and independent effect readback are required to qualify an
 actual security conclusion or the full agent-owned engagement.
+## Repeatable contained check
+
+From the repository root, run:
+
+```sh
+python3 evals/native-qualification/smoke/check_agent_closeout.py \
+  > /tmp/agent-closeout-e2e.json
+```
+
+It needs Python 3 and the repository checkout. It uses disposable run roots,
+synthetic owner and Docker responses, and no provider or target calls. Expected
+output is JSON with `status: passed`, `provider_calls: 0`, `target_calls: 0`,
+source, continuation and check hashes, and a `continuation_bridge` case map.
+The checked-in result of this run is
+[AGENT-CLOSEOUT-E2E-RESULT.json](AGENT-CLOSEOUT-E2E-RESULT.json). That map checks
+automatic acceptance after an agent turn, autonomous reopen with a second fresh
+review, stale-review refusal, immediate user/allowance/unknown-effect stop,
+delayed cleanup readback, and a no-change reopen ending. The redirected JSON is
+the saved local result. It is control-flow evidence only; the cleanup receipt
+and resource absence in these cases are simulated.

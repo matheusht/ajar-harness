@@ -155,3 +155,15 @@ setup build as evidence of a security effect.
    actions retain their separate authority and validation. A no-finding or
    unavailable run establishes neither target safety nor full coverage. Keep
    credentials, cookies, tokens and signed URLs out of durable notes and results.
+
+   For an approved source-only run, write `/workspace/project/RESULT.md` with
+   nonempty `## Supported effects`, `## Controls`, `## Contrary evidence`,
+   `## Tested paths`, `## Untested paths`, `## Assistance`,
+   `## Unfinished leads`, and `## Limits` sections. Request a fresh
+   `native-source-review-v1` host action after the final result draft is saved.
+   Keep the result and source bytes unchanged after that review. Then set
+   `proposed_stop: true`, `next: null`, and `host_action: null` in `NEXT.json`.
+   The continuation host checks that exact review, requests owner stop, and
+   reads back cleanup and exact resource absence. An unavailable review holds
+   the claim; an operator, allowance, or unknown-effect stop ends the run as
+   incomplete without another review experiment.

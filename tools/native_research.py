@@ -6211,7 +6211,12 @@ def main() -> int:
                                                 'invocation_failed', 'spend_unavailable',
                                                 'closure_review_required', 'next_brief_missing',
                                                 'reconciliation_required', 'previous_stop',
-                                                'spend_reset_detected', 'effect_observed')
+                                                'spend_reset_detected', 'effect_observed',
+                                                'closeout_incomplete', 'result_invalid',
+                                                'review_required', 'reopen_required',
+                                                'cleanup_pending', 'cleanup_unverified',
+                                                'stop_request_unknown', 'stopped_incomplete',
+                                                'reopen_no_agent_revision')
                      and result.get('independent_host_check') != 'unavailable') else 2
     except KeyboardInterrupt:
         print(json.dumps({'status': 'interrupted', 'run_root': getattr(args, 'run_root', None)},

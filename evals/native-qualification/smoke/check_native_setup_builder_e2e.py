@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,7 +81,9 @@ def main():
         (source / 'pkg').mkdir(parents=True)
         (source / 'main.txt').write_text('hello from source\n')
         (source / 'pkg/message.txt').write_text('second source file\n')
-        (source / 'build.sh').write_text('mkdir -p out\ncat main.txt /deps/data.txt > out/result.txt\n')
+        (source / 'build.sh').write_text(
+            'mkdir -p out\ncat main.txt > out/result.txt\n'
+            '/deps/data.txt >> out/result.txt\nchmod 700 out/result.txt\n')
         source_files = {path.relative_to(source).as_posix(): sha(path)
                         for path in sorted(source.rglob('*')) if path.is_file()}
         manifest_hash = hashlib.sha256(json.dumps(source_files, sort_keys=True).encode()).hexdigest()
@@ -193,7 +196,8 @@ def main():
         connection.execute('CREATE TABLE pool (config TEXT, created REAL, bytes INTEGER)')
         connection.execute('INSERT INTO pool VALUES (?,?,?)',
                            (json.dumps(provider_config), created, 0))
-        connection.execute('CREATE TABLE tunnels (phase TEXT)')
+        connection.execute('CREATE TABLE tunnels (phase TEXT, uploaded INTEGER DEFAULT 0, '
+                           'downloaded INTEGER DEFAULT 0)')
         connection.commit()
         connection.close()
         pool_after = {'hard_limits': {'max_connections': 2, 'max_bytes': 1048576,
@@ -306,17 +310,48 @@ def main():
                        'uploaded INTEGER DEFAULT 0, downloaded INTEGER DEFAULT 0)')
         catalog = base / 'catalog'
         (catalog / 'payload').mkdir(parents=True)
-        (catalog / 'payload/data.txt').write_text('hello from dependency\n')
+        (catalog / 'payload/data.txt').write_text('#!/bin/sh\nprintf "hello from dependency\\n"\n')
+        (catalog / 'payload/data.txt').chmod(0o700)
         (catalog / 'catalog.json').write_text(json.dumps({
             'kind': 'native-setup-dependency-catalog-v1',
             'entries': [{'id': 'data.txt', 'path': 'payload/data.txt',
-                         'sha256': sha(catalog / 'payload/data.txt')}]}, sort_keys=True) + '\n')
+                         'sha256': sha(catalog / 'payload/data.txt'), 'mode': 0o700}]},
+            sort_keys=True) + '\n')
         template_args = ('setup-build-approval-template', '--run-root', str(run_root),
                          '--image-id', image_id, '--dependency-catalog', str(catalog),
                          '--max-workspace-bytes', '8388608', '--memory-bytes', '67108864',
                          '--duration-seconds', '30', '--output-path', 'out/result.txt',
                          '--approved-at', stamp(now),
                          '--expires-at', stamp(now + timedelta(hours=1)))
+        state_files = [dispatch_dir / (dispatch_id + '.json'), frozen / 'receipt.json',
+                       controls / 'host-snapshot.json', controls / 'final.json']
+        original_state = {path: path.read_bytes() for path in state_files}
+        with sqlite3.connect(provider / 'tunnel.sqlite3') as db:
+            db.execute("INSERT INTO tunnels(phase,uploaded) VALUES('active',4096)")
+            db.execute('UPDATE pool SET bytes=4096')
+        pool_after['used_tunnels'], pool_after['charged_tunnel_bytes'] = 1, 4096
+        dispatch['pool_after'] = pool_after
+        (dispatch_dir / (dispatch_id + '.json')).write_text(json.dumps(dispatch, sort_keys=True) + '\n')
+        frozen_receipt['pool_after'] = pool_after
+        frozen_receipt['dispatch_sha256'] = sha(dispatch_dir / (dispatch_id + '.json'))
+        (frozen / 'receipt.json').write_text(json.dumps(frozen_receipt, sort_keys=True) + '\n')
+        snapshot['setup_output_receipt_sha256'] = sha(frozen / 'receipt.json')
+        (controls / 'host-snapshot.json').write_text(json.dumps(snapshot, sort_keys=True) + '\n')
+        final['host_snapshot']['receipt_sha256'] = sha(controls / 'host-snapshot.json')
+        (controls / 'final.json').write_text(json.dumps(final, sort_keys=True) + '\n')
+        active_code, active_result = cli(BUILDER, *template_args)
+        check('active provider tunnel refuses offline build approval',
+              active_code == 2, {'exit': active_code, 'code': active_result.get('code')})
+        with sqlite3.connect(provider / 'tunnel.sqlite3') as db:
+            db.execute("UPDATE tunnels SET phase='closed',uploaded=2048")
+        mismatch_code, mismatch_result = cli(BUILDER, *template_args)
+        check('provider byte sum mismatch refuses offline build approval',
+              mismatch_code == 2, {'exit': mismatch_code, 'code': mismatch_result.get('code')})
+        with sqlite3.connect(provider / 'tunnel.sqlite3') as db:
+            db.execute('DELETE FROM tunnels')
+            db.execute('UPDATE pool SET bytes=0')
+        for path, data in original_state.items():
+            path.write_bytes(data)
         (state / 'REVOKED').rename(state / 'REVOKED-held')
         stopped_code, incomplete_stop = cli(BUILDER, *template_args)
         check('missing native stop proof rejects before template or build',
@@ -364,10 +399,27 @@ def main():
               {'exit': build_code, 'result': built})
         output_file = controls / 'setup-checked/output/out/result.txt'
         check('output and dependency bytes are saved and pinned',
-              output_file.is_file() and sha(output_file) == receipt.get('outputs', {}).get('out/result.txt')
+              output_file.is_file() and sha(output_file) ==
+              receipt.get('outputs', {}).get('out/result.txt', {}).get('sha256')
               and output_file.read_text() == 'hello from source\nhello from dependency\n'
               and (controls / 'setup-checked/dependencies/payload/data.txt').is_file(),
               {'output_sha256': sha(output_file) if output_file.exists() else None})
+        checked_dependency = controls / 'setup-checked/dependencies/payload/data.txt'
+        check('executable dependency and output retain usable modes',
+              checked_dependency.is_file() and output_file.is_file()
+              and stat.S_IMODE(checked_dependency.stat().st_mode) == 0o700
+              and stat.S_IMODE(output_file.stat().st_mode) == 0o700,
+              {'dependency_mode': (oct(stat.S_IMODE(checked_dependency.stat().st_mode))
+                                   if checked_dependency.exists() else None),
+               'output_mode': (oct(stat.S_IMODE(output_file.stat().st_mode))
+                               if output_file.exists() else None)})
+        journal = json.loads(marker.read_text())
+        actions = [row['action'] for row in journal['events']]
+        check('mounted source and dependencies are read back before build',
+              'target_build' in actions and all(
+                  name in actions and actions.index(name) < actions.index('target_build')
+                  for name in ('source_readback', 'dependency_readback')),
+              {'actions': actions})
         status_code, status = cli(BUILDER, 'setup-build-status', '--run-root', str(run_root))
         check('status reports completed cleanup', status_code == 0 and
               status.get('status') == 'ready' and status.get('cleanup', {}).get('status') == 'complete',
@@ -378,10 +430,51 @@ def main():
               verified_code == 0 and verified.get('receipt', {}).get('status') == 'ready'
               and verified.get('output_dir') == str(controls / 'setup-checked/output'),
               {'exit': verified_code, 'code': verified.get('code')})
+        for label, path in (('dependency', checked_dependency), ('output', output_file)):
+            if not path.exists():
+                check(label + ' mode drift invalidates checked package', False, {'file': 'missing'})
+                continue
+            previous_mode = stat.S_IMODE(path.stat().st_mode)
+            path.chmod(0o600 if previous_mode & 0o100 else 0o700)
+            drift_code, drift = cli(BUILDER, 'setup-build-status', '--run-root', str(run_root),
+                                    '--verify-checked')
+            check(label + ' mode drift invalidates checked package', drift_code == 2,
+                  {'exit': drift_code, 'code': drift.get('code')})
+            path.chmod(previous_mode)
         retry_code, retry = cli(BUILDER, 'setup-build', '--run-root', str(run_root),
                                 '--approval', str(approval_path), '--dependency-catalog', str(catalog))
         check('a dispatched build is never automatically retried', retry_code == 2,
               {'exit': retry_code, 'code': retry.get('code')})
+        crash_root = base / 'crash-run'
+        shutil.copytree(run_root, crash_root)
+        shutil.rmtree(crash_root / 'controls/setup-build')
+        shutil.rmtree(crash_root / 'controls/setup-checked')
+        crash_controls = crash_root / 'controls'
+        crash_journal = crash_controls / 'setup-build'
+        crash_journal.mkdir(mode=0o700)
+        shutil.copy2(approval_path, crash_journal / 'authority.json')
+        pending_action = {'action': 'container_create', 'status': 'pending',
+                          'argv_sha256': '0' * 64}
+        (crash_journal / 'journal.json').write_text(json.dumps({
+            'kind': 'native-setup-build-journal-v1', 'status': 'pending',
+            'nonce': '1' * 32, 'container_name': 'lrh-setup-build-' + '1' * 20,
+            'container_id': None, 'authority_sha256': sha(crash_journal / 'authority.json'),
+            'catalog_tree_sha256': template['scope_amendment']['dependency_catalog_tree_sha256'],
+            'events': [pending_action], 'pending_action': 'container_create',
+            'cleanup': None}, sort_keys=True) + '\n')
+        stopped_code, stopped = cli(BUILDER, 'setup-build', '--run-root', str(crash_root),
+                                    '--approval', str(approval_path),
+                                    '--dependency-catalog', str(catalog))
+        check('crashed pending build cannot be automatically repeated', stopped_code == 2,
+              {'exit': stopped_code, 'code': stopped.get('code')})
+        reconciled_code, reconciled = cli(BUILDER, 'setup-build-reconcile',
+                                          '--run-root', str(crash_root))
+        check('crashed pending action gets exact blocked cleanup readback',
+              reconciled_code == 0 and reconciled.get('status') == 'blocked_reconciled'
+              and reconciled.get('pending_action') == 'container_create'
+              and reconciled.get('cleanup', {}).get('status') == 'complete'
+              and reconciled.get('retry_requires_new_approval') is True,
+              {'exit': reconciled_code, 'result': reconciled})
         linked_template_args = list(template_args)
         linked_template_args[linked_template_args.index('--run-root') + 1] = str(linked_root)
         linked_template_code, linked_template = cli(BUILDER, *linked_template_args)

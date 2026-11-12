@@ -9,7 +9,7 @@ offline-build scope amendment and approval, and a host-selected image/catalog.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
@@ -20,6 +20,8 @@ import re
 import select
 import shlex
 import shutil
+import sqlite3
+import stat
 import subprocess
 import time
 import uuid
@@ -101,7 +103,7 @@ def catalog_snapshot(path: Path, recipe: dict) -> dict:
         fail('build_catalog_invalid')
     names = {}
     for row in entries:
-        if not isinstance(row, dict) or set(row) != {'id', 'path', 'sha256'}:
+        if not isinstance(row, dict) or set(row) != {'id', 'path', 'sha256', 'mode'}:
             fail('build_catalog_invalid')
         name, relative = safe_path(row['id']), safe_path(row['path'])
         if not relative.startswith('payload/'):
@@ -111,7 +113,11 @@ def catalog_snapshot(path: Path, recipe: dict) -> dict:
         file = root / relative
         if sha(nr._file(file)) != row['sha256']:
             fail('build_catalog_file_changed')
-        names[name] = {'path': relative, 'sha256': row['sha256']}
+        mode = stat.S_IMODE(file.stat(follow_symlinks=False).st_mode)
+        if (type(row['mode']) is not int or mode != row['mode'] or mode > 0o777
+                or not mode & 0o400 or mode & 0o022):
+            fail('build_catalog_mode_changed_or_unsafe')
+        names[name] = {'path': relative, 'sha256': row['sha256'], 'mode': mode}
     observed = nr._inventory(root, max_files=10000, max_bytes=MAX_CATALOG_BYTES)
     aggregate = hashlib.sha256()
     for relative, file_sha in sorted(observed.items()):
@@ -130,7 +136,8 @@ def catalog_snapshot(path: Path, recipe: dict) -> dict:
         if names[name]['path'] != 'payload/' + name:
             fail('build_dependency_path_mismatch')
     return {'root': root, 'tree': inventory, 'selected': {
-        name: names[name]['sha256'] for name in sorted(names)}}
+        name: {'sha256': names[name]['sha256'], 'mode': names[name]['mode']}
+        for name in sorted(names)}}
 
 
 def frozen_setup(run_root: Path) -> dict:
@@ -277,7 +284,17 @@ def verify_v1_stop_provenance(root: Path, plan: dict, snapshot: dict,
                                 '--format', '{{.ID}}', timeout=15)
         if result.stdout.strip():
             fail('build_setup_resource_still_present')
+    ledger_before = nr._setup_provider_pins(root)
     pool = nr._provider_snapshot(root)
+    try:
+        with closing(sqlite3.connect('file:' + str(controls / 'provider/tunnel.sqlite3') + '?mode=ro',
+                                     uri=True, timeout=1)) as db:
+            tunnel_count, tunnel_bytes = db.execute(
+                'SELECT COUNT(*),COALESCE(SUM(uploaded+downloaded),0) FROM tunnels').fetchone()
+    except sqlite3.Error:
+        fail('build_setup_provider_ledger_unavailable')
+    if nr._setup_provider_pins(root) != ledger_before:
+        fail('build_setup_provider_ledger_changed')
     config = pool['config']
     after = receipt.get('pool_after')
     if (not isinstance(after, dict)
@@ -290,17 +307,19 @@ def verify_v1_stop_provenance(root: Path, plan: dict, snapshot: dict,
             or after.get('charged_tunnel_bytes') != pool['charged_tunnel_bytes']
             or after.get('provider_deadline_unix') != pool['created'] + config['duration']
             or after.get('run_identity', {}).get('manifest_sha256') != manifest_sha
-            or after.get('run_identity', {}).get('ids') != ids):
+            or after.get('run_identity', {}).get('ids') != ids
+            or set(pool.get('tunnel_phases', {})) - {'closed'}
+            or sum(pool.get('tunnel_phases', {}).values()) != pool['used_tunnels']
+            or tunnel_count != pool['used_tunnels']
+            or tunnel_bytes != pool['charged_tunnel_bytes']):
         fail('build_setup_provider_accounting_mismatch')
 
 
 def check_setup_fresh(setup: dict) -> None:
     approval = read_json(setup['controls'] / 'approval.json')
-    deadline = setup['chain']['absolute_deadline']
-    deadline_time = (utc(deadline).timestamp() if isinstance(deadline, str) else deadline)
+    scope = read_json_from_scope(setup['controls'] / 'scope.md')
     if (datetime.now(timezone.utc) >= utc(approval['expires_at'])
-            or not isinstance(deadline_time, (int, float))
-            or datetime.now(timezone.utc).timestamp() >= deadline_time):
+            or datetime.now(timezone.utc) >= utc(scope['expires_at'])):
         fail('checked_setup_grant_expired')
 
 
@@ -575,6 +594,8 @@ def output_command(identifier: str, path: str) -> list[str]:
         prefixes.append('test ! -L ' + shlex.quote(str(current)))
     target = shlex.quote(str(current))
     script = ' && '.join([*prefixes, 'test -f ' + target,
+                          'if test -x ' + target + '; then printf "1\\n"; '
+                          'else printf "0\\n"; fi',
                           'head -c ' + str(MAX_OUTPUT_BYTES + 1) + ' ' + target])
     return ['container', 'exec', identifier, 'sh', '-c', script]
 
@@ -637,14 +658,19 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                 fail('build_container_start_failed')
             info = inspect_container(setup, journal['container_id'])
             mounts = info.get('Mounts') or []
+            mounted = {row.get('Destination'): row for row in mounts}
             host = info.get('HostConfig') or {}
             if (info.get('Id') != journal['container_id']
                     or host.get('NetworkMode') != 'none'
                     or host.get('ReadonlyRootfs') is not True
                     or host.get('Tmpfs', {}).get('/workspace') !=
                     'rw,nosuid,nodev,size=' + str(amendment['max_workspace_bytes'])
-                    or {row.get('Destination') for row in mounts} != {'/source', '/deps'}
-                    or any(row.get('RW') is not False for row in mounts)):
+                    or set(mounted) != {'/source', '/deps'}
+                    or any(row.get('Type') != 'bind' or row.get('RW') is not False
+                           or row.get('Source') != str(expected)
+                           for destination, expected in (('/source', setup['root'] / 'original'),
+                                                         ('/deps', catalog['root'] / 'payload'))
+                           for row in (mounted[destination],))):
                 fail('build_container_boundary_mismatch')
             identifier = journal['container_id']
             copied = event_call(setup, journal_path, journal, 'source_copy',
@@ -653,6 +679,28 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                                 timeout=remaining(30))
             if copied.returncode:
                 fail('build_source_copy_failed')
+            source_readback = stage / 'source-readback'
+            source_readback.mkdir(mode=0o700)
+            read = event_call(setup, journal_path, journal, 'source_readback',
+                              ['cp', identifier + ':/source/.', str(source_readback)],
+                              timeout=remaining(30))
+            if read.returncode or nr._inventory(source_readback, max_files=nr.SETUP_SOURCE_MAX_FILES,
+                                                max_bytes=nr.SETUP_SOURCE_MAX_BYTES) != plan['source_sha256']:
+                fail('build_mounted_source_mismatch')
+            dependency_readback = stage / 'dependency-readback'
+            dependency_readback.mkdir(mode=0o700)
+            read = event_call(setup, journal_path, journal, 'dependency_readback',
+                              ['cp', identifier + ':/deps/.', str(dependency_readback)],
+                              timeout=remaining(30))
+            dependency_hashes = nr._inventory(dependency_readback, max_files=10000,
+                                               max_bytes=MAX_CATALOG_BYTES)
+            if (read.returncode or set(dependency_hashes) != set(catalog['selected'])
+                    or any(dependency_hashes[name] != value['sha256'] or
+                           stat.S_IMODE((dependency_readback / name).stat().st_mode) != value['mode']
+                           for name, value in catalog['selected'].items())):
+                fail('build_mounted_dependency_mismatch')
+            shutil.rmtree(source_readback)
+            shutil.rmtree(dependency_readback)
             base = ['container', 'exec', '-w', '/workspace/project', identifier,
                     'env', '-i', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                     'HOME=/tmp', 'TMPDIR=/tmp']
@@ -676,20 +724,23 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             for path in amendment['outputs']:
                 command = output_command(identifier, path)
                 first = event_call(setup, journal_path, journal, 'output_read_1:' + path,
-                                   command, timeout=remaining(30), max_output=MAX_OUTPUT_BYTES + 1)
+                                   command, timeout=remaining(30), max_output=MAX_OUTPUT_BYTES + 3)
                 second = event_call(setup, journal_path, journal, 'output_read_2:' + path,
-                                    command, timeout=remaining(30), max_output=MAX_OUTPUT_BYTES + 1)
+                                    command, timeout=remaining(30), max_output=MAX_OUTPUT_BYTES + 3)
+                mode_flag, content = first.stdout[:2], first.stdout[2:]
                 if (first.returncode or second.returncode or first.stdout != second.stdout
-                        or len(first.stdout) > MAX_OUTPUT_BYTES):
+                        or mode_flag not in (b'0\n', b'1\n') or len(content) > MAX_OUTPUT_BYTES):
                     fail('build_output_missing')
                 destination = stage / 'output' / path
                 destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(descriptor, 'wb') as stream:
-                    stream.write(first.stdout)
+                    stream.write(content)
                     stream.flush()
                     os.fsync(stream.fileno())
-                outputs[path] = sha(destination)
+                destination.chmod(0o700 if mode_flag == b'1\n' else 0o600)
+                outputs[path] = {'sha256': sha(destination),
+                                 'mode': stat.S_IMODE(destination.stat().st_mode)}
             nr._verify_inventory(setup['root'] / 'original', plan['source_sha256'], setup_limit=True)
             current_catalog = catalog_snapshot(catalog_path, recipe)
             if current_catalog['tree'] != catalog['tree']:
@@ -702,8 +753,8 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                 destination = stage / 'dependencies/payload' / name
                 destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 shutil.copyfile(catalog['root'] / 'payload' / name, destination)
-                destination.chmod(0o600)
-                if sha(destination) != expected:
+                destination.chmod(expected['mode'])
+                if sha(destination) != expected['sha256']:
                     fail('build_dependency_copy_changed')
                 dependencies[name] = expected
             checked_catalog = catalog_snapshot(stage / 'dependencies', recipe)
@@ -777,13 +828,72 @@ def status(run_root: Path) -> dict:
         pending.append(journal['pending_action'])
     checked = controls / 'setup-checked/receipt.json'
     result = {'kind': 'native-setup-build-status-v1',
-              'status': 'unknown_effect' if pending else journal['status'],
+              'status': ('blocked_reconciled' if journal['status'] == 'blocked_reconciled' else
+                         'unknown_effect' if pending else journal['status']),
               'pending_actions': pending, 'container_name': journal.get('container_name'),
               'container_id': journal.get('container_id'),
               'cleanup': journal.get('cleanup'), 'journal_sha256': sha(path)}
     if checked.exists():
         result['checked_receipt_sha256'] = sha(checked)
+    reconciled = controls / 'setup-build/reconciliation.json'
+    if reconciled.exists():
+        result['reconciliation_sha256'] = sha(reconciled)
     return result
+
+
+def reconcile(run_root: Path) -> dict:
+    """Clean an interrupted build's exact container and retain its uncertain action."""
+    setup = frozen_setup(run_root)
+    controls = setup['controls']
+    with build_lock(controls):
+        directory = controls / 'setup-build'
+        journal_path = directory / 'journal.json'
+        journal = read_json(journal_path)
+        authority_path = directory / 'authority.json'
+        nonce, name = journal.get('nonce'), journal.get('container_name')
+        events = journal.get('events')
+        pending = [row.get('action') for row in events if row.get('status') in
+                   ('pending', 'unknown_effect')] if isinstance(events, list) else []
+        if (journal.get('kind') != 'native-setup-build-journal-v1'
+                or journal.get('status') not in ('pending', 'unknown_effect', 'blocked',
+                                                 'blocked_reconciled', 'cleanup_unresolved')
+                or not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce)
+                or name != 'lrh-setup-build-' + nonce[:20]
+                or journal.get('authority_sha256') != sha(nr._file(authority_path, private=True))
+                or not isinstance(events, list)
+                or any(not isinstance(row, dict) or not isinstance(row.get('action'), str)
+                       for row in events)
+                or journal.get('pending_action') not in (None, *pending)
+                or (journal.get('container_id') is not None and
+                    not re.fullmatch(r'[0-9a-f]{64}', str(journal['container_id'])))):
+            fail('build_reconciliation_journal_invalid')
+        receipt_path = directory / 'reconciliation.json'
+        if receipt_path.exists():
+            receipt = read_json(receipt_path)
+            if receipt.get('journal_sha256') != sha(journal_path):
+                fail('build_reconciliation_changed')
+            if inspect_container(setup, name) is not None:
+                fail('build_reconciliation_resource_reappeared')
+            return receipt
+        cleanup = cleanup_container(setup, journal_path, journal)
+        journal['cleanup'] = cleanup
+        journal['status'] = ('blocked_reconciled' if cleanup['status'] == 'complete'
+                             else 'cleanup_unresolved')
+        write_json(journal_path, journal)
+        authority = read_json(authority_path)
+        approval = authority.get('approval') if isinstance(authority, dict) else None
+        duration = approval.get('duration_seconds') if isinstance(approval, dict) else None
+        if type(duration) is not int or not 5 <= duration <= 600:
+            fail('build_reconciliation_authority_invalid')
+        receipt = {'kind': 'native-setup-build-reconciliation-v1',
+                   'status': journal['status'], 'pending_action': journal.get('pending_action'),
+                   'uncertain_actions': pending, 'cleanup': cleanup,
+                   'journal_sha256': sha(journal_path),
+                   'build_duration_charged_upper_bound_seconds': duration,
+                   'setup_cumulative_used': setup['chain']['cumulative_used'],
+                   'retry_requires_new_approval': True, 'security_result': None}
+        write_json(receipt_path, receipt, once=True)
+        return receipt
 
 
 def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
@@ -819,7 +929,8 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
         fail('checked_build_journal_invalid')
     actions = [row['action'] for row in journal['events']]
     if (actions.count('container_create') != 1 or actions.count('container_start') != 1
-            or actions.count('source_copy') != 1 or actions.count('runtime_version') != 1
+            or actions.count('source_copy') != 1 or actions.count('source_readback') != 1
+            or actions.count('dependency_readback') != 1 or actions.count('runtime_version') != 1
             or actions.count('dependency_probe') != 1 or actions.count('target_build') != 1
             or actions.count('container_remove') != 1
             or any(actions.count('output_read_1:' + path) != 1 or
@@ -828,7 +939,10 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
     if inspect_container(setup, journal['container_name']) is not None:
         fail('checked_build_container_still_present')
     output_dir = checked / 'output'
-    output_inventory = nr._inventory(output_dir, max_files=64, max_bytes=128 * 1024 * 1024)
+    output_hashes = nr._inventory(output_dir, max_files=64, max_bytes=128 * 1024 * 1024)
+    output_inventory = {name: {'sha256': digest,
+                               'mode': stat.S_IMODE((output_dir / name).stat(follow_symlinks=False).st_mode)}
+                        for name, digest in output_hashes.items()}
     if set(output_inventory) != set(amendment['outputs']):
         fail('checked_output_set_changed')
     expected = {
@@ -893,6 +1007,8 @@ def main() -> int:
     status_command.add_argument('--run-root', type=Path, required=True)
     status_command.add_argument('--verify-checked', action='store_true')
     status_command.add_argument('--historical', action='store_true')
+    reconcile_command = commands.add_parser('setup-build-reconcile')
+    reconcile_command.add_argument('--run-root', type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == 'setup-build-approval-template':
@@ -902,6 +1018,8 @@ def main() -> int:
                               args.approved_at, args.expires_at)
         elif args.command == 'setup-build':
             result = setup_build(args.run_root, args.approval, args.dependency_catalog)
+        elif args.command == 'setup-build-reconcile':
+            result = reconcile(args.run_root)
         else:
             result = (verify_checked(args.run_root, require_fresh=not args.historical)
                       if args.verify_checked
@@ -910,7 +1028,7 @@ def main() -> int:
         print(json.dumps({'status': 'refused', 'code': str(error)}, sort_keys=True))
         return 2
     print(json.dumps(result, sort_keys=True))
-    return 0 if result.get('status') not in ('blocked', 'unknown_effect') else 2
+    return 0 if result.get('status') not in ('blocked', 'unknown_effect', 'cleanup_unresolved') else 2
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "checked_receipt_sha256": "111d80b5aa5bb5c456978b2d05f9647e313a89c4c67851f96afab47a31d33bd1",
-    "journal_sha256": "830c77fcb232d8e0cbf7938e07d78f5cdc462d382217099b42a35fd059263fb2"
+    "checked_receipt_sha256": "7915b05af8ae74bda4c3343482fca70179ac1335fd2e4d5e16df72856e40526f",
+    "journal_sha256": "041b95843c7226421217d497b5fc30148a03e4bc20c055e033b7d043bd0fbb7b"
   },
   "checks": [
     {
@@ -53,19 +53,27 @@
       "passed": true
     },
     {
+      "name": "source mode changed after signing rejects before dispatch",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "public offline build reaches checked ready receipt",
       "observed": {
         "exit": 0,
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "5b38d654ec62878648c0b4d9e496d362b10eb9bff43ad4a7ed9603bcf84d9aaa",
-            "container_name": "lrh-setup-build-30b2f9d5e9c74c579456",
+            "container_id": "058f73f34f477f07e97c8046b97b898d08e31238b679e7740aee94a0039f5a88",
+            "container_name": "lrh-setup-build-cbac2201c4934f52b3de",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-f2mt4obr/run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "111d80b5aa5bb5c456978b2d05f9647e313a89c4c67851f96afab47a31d33bd1",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "7915b05af8ae74bda4c3343482fca70179ac1335fd2e4d5e16df72856e40526f",
           "status": "ready"
         }
       },
@@ -87,10 +95,24 @@
       "passed": true
     },
     {
+      "name": "builder pins Docker daemon and inspects boundary before start",
+      "observed": {
+        "actions": [
+          "container_create",
+          "container_inspect_prestart",
+          "container_start",
+          "source_copy"
+        ],
+        "daemon_pinned": true
+      },
+      "passed": true
+    },
+    {
       "name": "mounted source and dependencies are read back before build",
       "observed": {
         "actions": [
           "container_create",
+          "container_inspect_prestart",
           "container_start",
           "source_copy",
           "source_readback",
@@ -140,7 +162,7 @@
     {
       "name": "original source mode drift invalidates checked package",
       "observed": {
-        "code": "checked_receipt_or_bytes_changed",
+        "code": "build_authority_mismatch",
         "exit": 2
       },
       "passed": true
@@ -156,8 +178,32 @@
     {
       "name": "crashed pending build cannot be automatically repeated",
       "observed": {
-        "code": "build_already_dispatched",
+        "code": "regular_file_unavailable",
         "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "wrong Docker daemon cannot settle cleanup",
+      "observed": {
+        "exit": 2,
+        "result": {
+          "cleanup": {
+            "code": "build_docker_daemon_changed",
+            "container_id": "6330ef980ab9bb19bfd9bb18bb1f22600e043800cf52e20f68b501c6637b665b",
+            "container_name": "lrh-setup-build-11111111111111111111",
+            "status": "unresolved"
+          },
+          "journal_sha256": "93f2f610f3b03dc7c0b0464b4b8a0c1f58acc38f5efea3c24f88be3869dd8508",
+          "kind": "native-setup-build-reconciliation-v1",
+          "pending_action": "container_create",
+          "retry_requires_new_approval": true,
+          "security_result": null,
+          "status": "cleanup_unresolved",
+          "uncertain_actions": [
+            "container_create"
+          ]
+        }
       },
       "passed": true
     },
@@ -169,11 +215,11 @@
           "build_duration_charged_upper_bound_seconds": 30,
           "cleanup": {
             "absent": true,
-            "container_id": null,
+            "container_id": "6330ef980ab9bb19bfd9bb18bb1f22600e043800cf52e20f68b501c6637b665b",
             "container_name": "lrh-setup-build-11111111111111111111",
             "status": "complete"
           },
-          "journal_sha256": "b6b83155c480f9695b91d42f4ed0a83160fa901842bf3e1b322a2676154f6796",
+          "journal_sha256": "197dc6cdda250d2a661c12c0c05c958f3e5ccb102023834a9f972c2eabe4e286",
           "kind": "native-setup-build-reconciliation-v1",
           "pending_action": "container_create",
           "retry_requires_new_approval": true,
@@ -187,6 +233,119 @@
             "container_create"
           ]
         }
+      },
+      "passed": true
+    },
+    {
+      "name": "old build approval cannot retry reconciled effect",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "fresh approval template binds prior uncertain spend",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "approval": {
+            "approved_at": "2026-11-12T21:17:02Z",
+            "approved_by": "synthetic-operator",
+            "cumulative_build_duration_charged_upper_bound_seconds": 30,
+            "cumulative_setup_used": {
+              "bytes": 0,
+              "connections": 0
+            },
+            "dependency_catalog_tree_sha256": "98c71d5f44ac2d2048dc6efd06f3e3166596b951e72f3d1059c78b4237db186f",
+            "duration_seconds": 30,
+            "effect_class": "owned-disposable-offline-target-build",
+            "expires_at": "2026-11-12T22:17:02Z",
+            "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+            "kind": "native-setup-build-approval-v1",
+            "max_workspace_bytes": 8388608,
+            "memory_bytes": 67108864,
+            "network_class": "none",
+            "outputs": [
+              "out/result.txt"
+            ],
+            "prior_build_attempts": [
+              "eb5251599fa1d5149b5a8936122fcc6179c0bb8d0bb025b77051c9bb1493637d"
+            ],
+            "scope_amendment_sha256": "efb2e7b9cb5013b1c04d1a987de6aec6922a29d0c76ac9698075603f00f7fd99",
+            "setup_approval_sha256": "726f164ca9eea835abc1027483e37b8306340d52f243cdbdfae7b879f5a508d4",
+            "setup_chain_sha256": "f6d7480774feec3ffd099a8bb3cd1c796213ef6475bc4455576e9ed03ec289b0",
+            "setup_plan_sha256": "af9b102821b8bd039aba10bbaf86761e26b4358518690e96adba1781af4a729a"
+          },
+          "kind": "native-setup-build-template-v1",
+          "scope_amendment": {
+            "cumulative_build_duration_charged_upper_bound_seconds": 30,
+            "cumulative_setup_used": {
+              "bytes": 0,
+              "connections": 0
+            },
+            "dependencies": {
+              "data.txt": {
+                "mode": 448,
+                "sha256": "c3039e9d479a3b6b868cc4c31ec97d84bcddcde9290f7a6f2ab99743d626ad64"
+              }
+            },
+            "dependency_catalog_tree_sha256": "98c71d5f44ac2d2048dc6efd06f3e3166596b951e72f3d1059c78b4237db186f",
+            "duration_seconds": 30,
+            "effect_class": "owned-disposable-offline-target-build",
+            "engagement_id": "fixture-202",
+            "expires_at": "2026-11-12T22:17:02Z",
+            "goal_sha256": "220449a9e93b81f26f49aaf3f8fdff9d8a3a9ae7428eb138956d8eb61be05842",
+            "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+            "kind": "native-setup-build-scope-v1",
+            "max_workspace_bytes": 8388608,
+            "memory_bytes": 67108864,
+            "network_class": "none",
+            "operator_id": "synthetic-operator",
+            "outputs": [
+              "out/result.txt"
+            ],
+            "platform": "linux/arm64",
+            "prior_build_attempts": [
+              "eb5251599fa1d5149b5a8936122fcc6179c0bb8d0bb025b77051c9bb1493637d"
+            ],
+            "recipe_sha256": "19996186ad27deec203c0e5785d8541daf71b23284222f4d6813bdf7e74d3944",
+            "setup_chain_sha256": "f6d7480774feec3ffd099a8bb3cd1c796213ef6475bc4455576e9ed03ec289b0",
+            "setup_output_receipt_sha256": "68918bcf9d83998885ae1f82308b81b922176d14120e9fc1ba9ba3829d4c1bdc",
+            "setup_scope_sha256": "b405e0140a94e88978a984b3ca5434bc42cb43bf2caf8309511a61fb985e082b",
+            "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976",
+            "source_mode_sha256": "01edc2ae2641669cd97531ce06d332c20f10ec5e34057fd5cbe58d7c02220eee",
+            "threat_model_sha256": "8429fcacfebc9d8bc6d286ec59d6678b624e919146f825806fe0eba52069aaa6"
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "fresh signed retry reaches checked package with prior attempt archived",
+      "observed": {
+        "archived": 1,
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "7009f54a1ef27ea7e6658e313855c77af58830c8de7a57d71e9c32f9b4cbd59b",
+            "container_name": "lrh-setup-build-7cf480a7c17f4329a2fe",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/crash-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "5a058ca6ba2fda730eff69d1b74e7ba7fbafa592319f3a74c07fd3688f51c246",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "retried checked package passes public readback",
+      "observed": {
+        "code": null,
+        "exit": 0
       },
       "passed": true
     },
@@ -205,13 +364,13 @@
         "result": {
           "cleanup": {
             "absent": true,
-            "container_id": "02543e55b4a94cc91b5ad975187d36157da8ddf9ae8d7b8222bcb353b8faf3f3",
-            "container_name": "lrh-setup-build-84a374492e2b485cb9ad",
+            "container_id": "03deadf356093a4653b1e3118d29b1c9ef9c392ae0293e4ee7a29c3a58efd7a4",
+            "container_name": "lrh-setup-build-0de037173d76476fa15a",
             "status": "complete"
           },
           "kind": "native-setup-checked-v1",
-          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-f2mt4obr/linked-run/controls/setup-checked/receipt.json",
-          "receipt_sha256": "20844492b598f02cc4f54519f7e0db735f076f33cf001ecb739dde5c8a806ccf",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-2tnrn5_y/linked-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "6de60aa15a02cddca6c46d8d0e47db7ffb67cf6d21101f5ab822da72834f357c",
           "status": "ready"
         }
       },
@@ -229,14 +388,14 @@
   "classification": "synthetic setup turn, stop, and pending host crash; real local offline Docker build",
   "fixture_roots": null,
   "inputs": {
-    "build_authority_sha256": "9d96898f49b7ca0d93f48357462879c2e318fdec65cc8369fb2422296b82d34b",
-    "builder_sha256": "34e6d452df841de31ecab385dec480d4913f07cb210f41e75b8312b369854505",
+    "build_authority_sha256": "cb690bcc9c8ed8e27ea494f3f16df0a5079920c16d3a16f0c26d280096931ea2",
+    "builder_sha256": "a5cdb3973603fec29b1a3c1fcaee96ad30aa3986bf362a7a6cb3fa19a4960306",
     "catalog_manifest_sha256": "9600ea91559a5c7fca060ded4dbe76cc9b8305b61afb1e514bb7c79bd010e4c5",
-    "frozen_setup_receipt_sha256": "3d71a9aab654e13ddc47af1babfd5bd66eba629e5cfbcd1f898ba4e390407408",
+    "frozen_setup_receipt_sha256": "68918bcf9d83998885ae1f82308b81b922176d14120e9fc1ba9ba3829d4c1bdc",
     "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
-    "scenario_sha256": "515eb23d504490dbea3fcc09a4a34c373bb7d2300088fbd324420c4c5ae92b7e",
-    "scope_sha256": "d49b1706e2b9728f24aa6537d07971d5a787c64a1839c22c557005f94ceb55ca",
-    "setup_approval_sha256": "44393efeded1fd68586acc59754ab14d3ac6a97c79ea7dfce2470677caf71153",
+    "scenario_sha256": "4cb55dc041cea4a8ca6af5a2b043078bfb8d5ebf5b8c34e74cc4bce7e3025a9b",
+    "scope_sha256": "b405e0140a94e88978a984b3ca5434bc42cb43bf2caf8309511a61fb985e082b",
+    "setup_approval_sha256": "726f164ca9eea835abc1027483e37b8306340d52f243cdbdfae7b879f5a508d4",
     "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976"
   },
   "kind": "native-setup-builder-synthetic-e2e-v1",

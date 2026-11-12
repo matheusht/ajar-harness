@@ -334,6 +334,79 @@ def check_setup_fresh(setup: dict) -> None:
         fail('checked_setup_grant_expired')
 
 
+def prior_build_attempts(setup: dict) -> dict:
+    controls = setup['controls']
+    archive = controls / 'setup-build-attempts'
+    paths = []
+    if archive.exists():
+        private_directory(archive)
+        paths = sorted(archive.iterdir())
+        if any(not path.is_dir() or path.is_symlink() or
+               not re.fullmatch(r'[0-9]{4}-[0-9a-f]{32}', path.name) or
+               int(path.name[:4]) != index
+               for index, path in enumerate(paths, 1)):
+            fail('build_prior_archive_invalid')
+    current = controls / 'setup-build'
+    if current.exists():
+        journal = read_json(current / 'journal.json')
+        if journal.get('status') != 'ready':
+            paths.append(current)
+    receipts = []
+    charged = 0
+    for path in paths:
+        journal_path = path / 'journal.json'
+        receipt_path = path / 'reconciliation.json'
+        journal = read_json(journal_path)
+        receipt = read_json(receipt_path)
+        authority = read_json(path / 'authority.json')
+        daemon_id = journal.get('docker_daemon_id')
+        nonce = journal.get('nonce')
+        cleanup = receipt.get('cleanup')
+        if (journal.get('kind') != 'native-setup-build-journal-v1'
+                or journal.get('status') != 'blocked_reconciled'
+                or not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce)
+                or journal.get('container_name') != 'lrh-setup-build-' + nonce[:20]
+                or journal.get('authority_sha256') != sha(path / 'authority.json')
+                or not isinstance(daemon_id, str) or not 1 <= len(daemon_id) <= 128
+                or receipt.get('kind') != 'native-setup-build-reconciliation-v1'
+                or receipt.get('status') != 'blocked_reconciled'
+                or receipt.get('journal_sha256') != sha(journal_path)
+                or not isinstance(cleanup, dict) or cleanup != journal.get('cleanup')
+                or cleanup.get('status') != 'complete'
+                or cleanup.get('absent') is not True
+                or receipt.get('retry_requires_new_approval') is not True
+                or type(receipt.get('build_duration_charged_upper_bound_seconds')) is not int
+                or receipt.get('setup_cumulative_used') != setup['chain']['cumulative_used']
+                or not isinstance(authority.get('approval'), dict)
+                or receipt['build_duration_charged_upper_bound_seconds'] !=
+                authority['approval'].get('duration_seconds')):
+            fail('build_prior_attempt_unsettled')
+        for record in (authority.get('scope_amendment'), authority['approval']):
+            verify_build_signature(setup, record)
+        checked_setup = dict(setup, docker_daemon_id=daemon_id)
+        if inspect_container(checked_setup, journal['container_name']) is not None:
+            fail('build_prior_container_present')
+        receipts.append(sha(receipt_path))
+        charged += receipt['build_duration_charged_upper_bound_seconds']
+    return {'receipts': receipts, 'charged_seconds': charged}
+
+
+def verify_build_signature(setup: dict, record: object) -> None:
+    if not isinstance(record, dict) or 'operator_signature' not in record:
+        fail('build_authority_signature_invalid')
+    unsigned = {key: value for key, value in record.items() if key != 'operator_signature'}
+    try:
+        fingerprint = verify_embedded_operator_signature(
+            proof=record['operator_signature'],
+            scope_bytes=(setup['controls'] / 'scope.md').read_bytes(),
+            operator_id=setup['plan']['setup_only']['operator_id'],
+            challenge_bytes=canonical_json_bytes(unsigned), namespace=NAMESPACE)
+    except (RecordError, OSError, KeyError):
+        fail('build_authority_signature_invalid')
+    if fingerprint != setup['plan']['setup_only']['trusted_fingerprint']:
+        fail('build_authority_signer_untrusted')
+
+
 def template(run_root: Path, image_id: str, catalog_path: Path,
              max_workspace_bytes: int, memory_bytes: int, duration_seconds: int,
              output_paths: list[str], approved_at: str, expires_at: str,
@@ -354,6 +427,7 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
     if len(set(outputs)) != len(outputs):
         fail('build_output_duplicate')
     catalog = catalog_snapshot(catalog_path, recipe)
+    prior = prior_build_attempts(setup)
     approved, expires = utc(approved_at), utc(expires_at)
     if (approved >= expires or expires > approved + timedelta(hours=24)
             or (require_fresh and not approved <= datetime.now(timezone.utc) < expires)):
@@ -365,11 +439,14 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
                  'engagement_id': plan['setup_only']['engagement_id'],
                  'operator_id': plan['setup_only']['operator_id'],
                  'source_manifest_sha256': plan['source_manifest_sha256'],
+                 'source_mode_sha256': digest(source_modes(root / 'original', plan['source_sha256'])),
                  'setup_scope_sha256': plan['scope_sha256'],
                  'goal_sha256': plan['brief_sha256'],
                  'setup_output_receipt_sha256': sha(controls / 'setup-output/receipt.json'),
                  'setup_chain_sha256': setup['chain']['chain_sha256'],
                  'cumulative_setup_used': setup['chain']['cumulative_used'],
+                 'prior_build_attempts': prior['receipts'],
+                 'cumulative_build_duration_charged_upper_bound_seconds': prior['charged_seconds'],
                  'recipe_sha256': sha(controls / 'setup-output/recipe.json'),
                  'threat_model_sha256': sha(controls / 'setup-output/THREAT_MODEL.md'),
                  'effect_class': EFFECT_CLASS, 'network_class': NETWORK_CLASS,
@@ -385,6 +462,8 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
                 'setup_approval_sha256': sha(controls / 'approval.json'),
                 'setup_chain_sha256': setup['chain']['chain_sha256'],
                 'cumulative_setup_used': setup['chain']['cumulative_used'],
+                'prior_build_attempts': prior['receipts'],
+                'cumulative_build_duration_charged_upper_bound_seconds': prior['charged_seconds'],
                 'effect_class': EFFECT_CLASS, 'network_class': NETWORK_CLASS,
                 'image_id': image_id,
                 'dependency_catalog_tree_sha256': catalog['tree']['tree_sha256'],
@@ -437,17 +516,8 @@ def verify_authority(setup: dict, path: Path, catalog: dict,
         fail('build_authority_mismatch')
     if utc(amendment['expires_at']) != utc(approval['expires_at']):
         fail('build_authority_expiry_mismatch')
-    scope_bytes = (controls / 'scope.md').read_bytes()
-    for value, unsigned in ((amendment, amendment_unsigned), (approval, approval_unsigned)):
-        try:
-            fingerprint = verify_embedded_operator_signature(
-                proof=value['operator_signature'], scope_bytes=scope_bytes,
-                operator_id=plan['setup_only']['operator_id'],
-                challenge_bytes=canonical_json_bytes(unsigned), namespace=NAMESPACE)
-        except (RecordError, OSError, KeyError):
-            fail('build_authority_signature_invalid')
-        if fingerprint != plan['setup_only']['trusted_fingerprint']:
-            fail('build_authority_signer_untrusted')
+    for value in (amendment, approval):
+        verify_build_signature(setup, value)
     return authority
 
 
@@ -464,8 +534,18 @@ def build_lock(controls: Path):
 
 
 def docker_call(setup: dict, arguments: list[str], *, timeout: int,
-                max_output: int = 1024 * 1024) -> subprocess.CompletedProcess[bytes]:
+                max_output: int = 1024 * 1024,
+                check_daemon: bool = True) -> subprocess.CompletedProcess[bytes]:
+    deadline = time.monotonic() + timeout
+    if check_daemon and 'docker_daemon_id' in setup:
+        current = docker_call(setup, ['info', '--format', '{{.ID}}'], timeout=min(15, timeout),
+                              check_daemon=False)
+        if (current.returncode or current.stdout.decode(errors='replace').strip()
+                != setup['docker_daemon_id']):
+            fail('build_docker_daemon_changed')
     command = [setup['plan']['docker_binary'], *arguments]
+    if deadline <= time.monotonic():
+        raise subprocess.TimeoutExpired(command, timeout)
     environment = {key: os.environ[key] for key in
                    ('HOME', 'PATH', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')
                    if key in os.environ}
@@ -473,7 +553,6 @@ def docker_call(setup: dict, arguments: list[str], *, timeout: int,
                                stderr=subprocess.PIPE, env=environment)
     buffers = [bytearray(), bytearray()]
     streams = {process.stdout: 0, process.stderr: 1}
-    deadline = time.monotonic() + timeout
     try:
         while streams:
             remaining = deadline - time.monotonic()
@@ -615,12 +694,29 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
     setup = frozen_setup(run_root)
     controls, recipe, plan = (setup[key] for key in ('controls', 'recipe', 'plan'))
     catalog = catalog_snapshot(catalog_path, recipe)
-    authority = verify_authority(setup, approval_path, catalog)
-    amendment = authority['scope_amendment']
     with build_lock(controls):
+        authority = verify_authority(setup, approval_path, catalog)
+        amendment = authority['scope_amendment']
         journal_dir = controls / 'setup-build'
-        if journal_dir.exists() or (controls / 'setup-checked').exists():
+        if (controls / 'setup-checked').exists():
             fail('build_already_dispatched')
+        if journal_dir.exists():
+            prior = prior_build_attempts(setup)
+            if not prior['receipts'] or prior['receipts'][-1] != amendment['prior_build_attempts'][-1]:
+                fail('build_prior_attempt_unsettled')
+            archive = controls / 'setup-build-attempts'
+            archive.mkdir(mode=0o700, exist_ok=True)
+            journal_before = read_json(journal_dir / 'journal.json')
+            destination = archive / (f'{len(list(archive.iterdir())) + 1:04d}-' + journal_before['nonce'])
+            if destination.exists():
+                fail('build_prior_archive_collision')
+            os.rename(journal_dir, destination)
+        daemon = docker_call(setup, ['info', '--format', '{{.ID}}'], timeout=15,
+                             check_daemon=False)
+        daemon_id = daemon.stdout.decode(errors='replace').strip()
+        if daemon.returncode or not 1 <= len(daemon_id) <= 128 or not daemon_id.isascii():
+            fail('build_docker_daemon_unavailable')
+        setup['docker_daemon_id'] = daemon_id
         inspect_image(setup, amendment['image_id'])
         journal_dir.mkdir(mode=0o700)
         shutil.copy2(approval_path, journal_dir / 'authority.json')
@@ -629,6 +725,7 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         name = 'lrh-setup-build-' + nonce[:20]
         journal = {'kind': 'native-setup-build-journal-v1', 'status': 'pending',
                    'nonce': nonce, 'container_name': name, 'container_id': None,
+                   'docker_daemon_id': daemon_id,
                    'authority_sha256': sha(journal_dir / 'authority.json'),
                    'catalog_tree_sha256': catalog['tree']['tree_sha256'],
                    'events': [], 'pending_action': 'container_create', 'cleanup': None}
@@ -638,8 +735,12 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         stage.mkdir(mode=0o700)
         problem = None
         deadline = time.monotonic() + amendment['duration_seconds']
+        absolute_expiry = min(utc(amendment['expires_at']),
+                              utc(read_json(controls / 'approval.json')['expires_at']),
+                              utc(read_json_from_scope(controls / 'scope.md')['expires_at']))
         def remaining(maximum: int) -> int:
             seconds = int(deadline - time.monotonic())
+            seconds = min(seconds, int((absolute_expiry - datetime.now(timezone.utc)).total_seconds()))
             if seconds < 1:
                 fail('build_duration_exhausted')
             return min(maximum, seconds)
@@ -647,6 +748,7 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             create = ['container', 'create', '--name', name, '--pull', 'never',
                       '--label', 'io.llm-redteam-harness.setup-build=' + nonce,
                       '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+                      '--no-healthcheck',
                       '--security-opt', 'no-new-privileges=true',
                       '--pids-limit', '64', '--memory', str(amendment['memory_bytes']),
                       '--cpus', '1', '--entrypoint', 'sh',
@@ -662,20 +764,42 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                 fail('build_container_create_failed')
             journal['container_id'] = created.stdout.decode().strip()
             write_json(journal_path, journal)
-            started = event_call(setup, journal_path, journal, 'container_start',
-                                 ['container', 'start', journal['container_id']],
-                                 timeout=remaining(30))
-            if started.returncode:
-                fail('build_container_start_failed')
-            info = inspect_container(setup, journal['container_id'])
+            inspected = event_call(setup, journal_path, journal, 'container_inspect_prestart',
+                                   ['container', 'inspect', journal['container_id']],
+                                   timeout=remaining(15))
+            if inspected.returncode:
+                fail('build_container_inspection_unavailable')
+            try:
+                inspected_values = json.loads(inspected.stdout)
+                info = inspected_values[0]
+            except (ValueError, KeyError, IndexError, TypeError):
+                fail('build_container_inspection_invalid')
+            if (not isinstance(inspected_values, list) or len(inspected_values) != 1
+                    or not isinstance(info, dict)):
+                fail('build_container_inspection_invalid')
             mounts = info.get('Mounts') or []
+            if not isinstance(mounts, list) or any(not isinstance(row, dict) for row in mounts):
+                fail('build_container_inspection_invalid')
             mounted = {row.get('Destination'): row for row in mounts}
             host = info.get('HostConfig') or {}
+            config = info.get('Config') or {}
             if (info.get('Id') != journal['container_id']
+                    or (info.get('State') or {}).get('Status') != 'created'
                     or host.get('NetworkMode') != 'none'
                     or host.get('ReadonlyRootfs') is not True
-                    or host.get('Tmpfs', {}).get('/workspace') !=
-                    'rw,nosuid,nodev,size=' + str(amendment['max_workspace_bytes'])
+                    or host.get('Privileged') is not False
+                    or host.get('Memory') != amendment['memory_bytes']
+                    or host.get('NanoCpus') != 1_000_000_000
+                    or host.get('PidsLimit') != 64
+                    or host.get('CapDrop') != ['ALL']
+                    or host.get('SecurityOpt') != ['no-new-privileges=true']
+                    or host.get('Tmpfs') != {
+                        '/workspace': 'rw,nosuid,nodev,size=' + str(amendment['max_workspace_bytes']),
+                        '/tmp': 'rw,nosuid,nodev,size=8388608'}
+                    or config.get('User') != f'{os.getuid()}:{os.getgid()}'
+                    or config.get('Entrypoint') != ['sh']
+                    or config.get('Cmd') != ['-c', 'while :; do sleep 3600; done']
+                    or (config.get('Healthcheck') or {}).get('Test') != ['NONE']
                     or set(mounted) != {'/source', '/deps'}
                     or any(row.get('Type') != 'bind' or row.get('RW') is not False
                            or row.get('Source') != str(expected)
@@ -683,6 +807,11 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                                                          ('/deps', catalog['root'] / 'payload'))
                            for row in (mounted[destination],))):
                 fail('build_container_boundary_mismatch')
+            started = event_call(setup, journal_path, journal, 'container_start',
+                                 ['container', 'start', journal['container_id']],
+                                 timeout=remaining(30))
+            if started.returncode:
+                fail('build_container_start_failed')
             identifier = journal['container_id']
             copied = event_call(setup, journal_path, journal, 'source_copy',
                                 ['container', 'exec', identifier, 'sh', '-c',
@@ -698,7 +827,8 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             original_modes = source_modes(setup['root'] / 'original', plan['source_sha256'])
             if (read.returncode or nr._inventory(source_readback, max_files=nr.SETUP_SOURCE_MAX_FILES,
                                                  max_bytes=nr.SETUP_SOURCE_MAX_BYTES) != plan['source_sha256']
-                    or source_modes(source_readback, plan['source_sha256']) != original_modes):
+                    or source_modes(source_readback, plan['source_sha256']) != original_modes
+                    or digest(original_modes) != amendment['source_mode_sha256']):
                 fail('build_mounted_source_mismatch')
             dependency_readback = stage / 'dependency-readback'
             dependency_readback.mkdir(mode=0o700)
@@ -755,6 +885,8 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                 outputs[path] = {'sha256': sha(destination),
                                  'mode': stat.S_IMODE(destination.stat().st_mode)}
             nr._verify_inventory(setup['root'] / 'original', plan['source_sha256'], setup_limit=True)
+            if digest(source_modes(setup['root'] / 'original', plan['source_sha256'])) != amendment['source_mode_sha256']:
+                fail('build_source_mode_changed_during_execution')
             current_catalog = catalog_snapshot(catalog_path, recipe)
             if current_catalog['tree'] != catalog['tree']:
                 fail('build_catalog_changed_during_execution')
@@ -791,7 +923,7 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         checked = controls / 'setup-checked'
         receipt = {'kind': 'native-setup-checked-v1', 'status': 'ready',
                    'source_manifest_sha256': plan['source_manifest_sha256'],
-                   'source_mode_sha256': digest(original_modes),
+                   'source_mode_sha256': amendment['source_mode_sha256'],
                    'setup_plan_sha256': sha(setup['root'] / 'plan.json'),
                    'setup_scope_sha256': plan['scope_sha256'],
                    'goal_sha256': plan['brief_sha256'],
@@ -799,6 +931,10 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                    'setup_output_receipt_sha256': sha(controls / 'setup-output/receipt.json'),
                    'setup_chain_sha256': setup['chain']['chain_sha256'],
                    'cumulative_setup_used': setup['chain']['cumulative_used'],
+                   'prior_build_attempts': amendment['prior_build_attempts'],
+                   'cumulative_build_duration_charged_upper_bound_seconds':
+                   amendment['cumulative_build_duration_charged_upper_bound_seconds'] +
+                   amendment['duration_seconds'],
                    'original_setup_limits': setup['chain']['original_limits'],
                    'build_authority_sha256': sha(journal_dir / 'authority.json'),
                    'build_scope_amendment_sha256': digest({key: value for key, value in
@@ -868,11 +1004,14 @@ def reconcile(run_root: Path) -> dict:
         events = journal.get('events')
         pending = [row.get('action') for row in events if row.get('status') in
                    ('pending', 'unknown_effect')] if isinstance(events, list) else []
+        pending_action = journal.get('pending_action') or (pending[-1] if pending else None)
         if (journal.get('kind') != 'native-setup-build-journal-v1'
                 or journal.get('status') not in ('pending', 'unknown_effect', 'blocked',
                                                  'blocked_reconciled', 'cleanup_unresolved')
                 or not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce)
                 or name != 'lrh-setup-build-' + nonce[:20]
+                or not isinstance(journal.get('docker_daemon_id'), str)
+                or not 1 <= len(journal['docker_daemon_id']) <= 128
                 or journal.get('authority_sha256') != sha(nr._file(authority_path, private=True))
                 or not isinstance(events, list)
                 or any(not isinstance(row, dict) or not isinstance(row.get('action'), str)
@@ -881,6 +1020,7 @@ def reconcile(run_root: Path) -> dict:
                 or (journal.get('container_id') is not None and
                     not re.fullmatch(r'[0-9a-f]{64}', str(journal['container_id'])))):
             fail('build_reconciliation_journal_invalid')
+        setup['docker_daemon_id'] = journal['docker_daemon_id']
         receipt_path = directory / 'reconciliation.json'
         if receipt_path.exists():
             receipt = read_json(receipt_path)
@@ -891,16 +1031,29 @@ def reconcile(run_root: Path) -> dict:
             return receipt
         cleanup = cleanup_container(setup, journal_path, journal)
         journal['cleanup'] = cleanup
+        journal['pending_action'] = pending_action
         journal['status'] = ('blocked_reconciled' if cleanup['status'] == 'complete'
                              else 'cleanup_unresolved')
         write_json(journal_path, journal)
+        if cleanup['status'] != 'complete':
+            return {'kind': 'native-setup-build-reconciliation-v1',
+                    'status': 'cleanup_unresolved', 'pending_action': pending_action,
+                    'uncertain_actions': pending, 'cleanup': cleanup,
+                    'journal_sha256': sha(journal_path), 'retry_requires_new_approval': True,
+                    'security_result': None}
         authority = read_json(authority_path)
         approval = authority.get('approval') if isinstance(authority, dict) else None
+        amendment = authority.get('scope_amendment') if isinstance(authority, dict) else None
+        verify_build_signature(setup, amendment)
+        verify_build_signature(setup, approval)
+        if approval.get('scope_amendment_sha256') != digest({
+                key: value for key, value in amendment.items() if key != 'operator_signature'}):
+            fail('build_reconciliation_authority_invalid')
         duration = approval.get('duration_seconds') if isinstance(approval, dict) else None
         if type(duration) is not int or not 5 <= duration <= 600:
             fail('build_reconciliation_authority_invalid')
         receipt = {'kind': 'native-setup-build-reconciliation-v1',
-                   'status': journal['status'], 'pending_action': journal.get('pending_action'),
+                   'status': journal['status'], 'pending_action': pending_action,
                    'uncertain_actions': pending, 'cleanup': cleanup,
                    'journal_sha256': sha(journal_path),
                    'build_duration_charged_upper_bound_seconds': duration,
@@ -923,6 +1076,9 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
     receipt = read_json(checked / 'receipt.json')
     journal_dir = controls / 'setup-build'
     journal = read_json(journal_dir / 'journal.json')
+    if not isinstance(journal.get('docker_daemon_id'), str):
+        fail('checked_build_journal_invalid')
+    setup['docker_daemon_id'] = journal['docker_daemon_id']
     archived_authority = journal_dir / 'authority.json'
     catalog = catalog_snapshot(checked / 'dependencies', recipe)
     authority = verify_authority(setup, archived_authority, catalog,
@@ -942,7 +1098,10 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
             or journal.get('cleanup', {}).get('status') != 'complete'):
         fail('checked_build_journal_invalid')
     actions = [row['action'] for row in journal['events']]
-    if (actions.count('container_create') != 1 or actions.count('container_start') != 1
+    if (actions.count('container_create') != 1 or actions.count('container_inspect_prestart') != 1
+            or actions.count('container_start') != 1
+            or actions.index('container_create') > actions.index('container_inspect_prestart')
+            or actions.index('container_inspect_prestart') > actions.index('container_start')
             or actions.count('source_copy') != 1 or actions.count('source_readback') != 1
             or actions.count('dependency_readback') != 1 or actions.count('runtime_version') != 1
             or actions.count('dependency_probe') != 1 or actions.count('target_build') != 1
@@ -962,8 +1121,7 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
     expected = {
         'kind': 'native-setup-checked-v1', 'status': 'ready',
         'source_manifest_sha256': setup['plan']['source_manifest_sha256'],
-        'source_mode_sha256': digest(source_modes(setup['root'] / 'original',
-                                                  setup['plan']['source_sha256'])),
+        'source_mode_sha256': amendment['source_mode_sha256'],
         'setup_plan_sha256': sha(setup['root'] / 'plan.json'),
         'setup_scope_sha256': setup['plan']['scope_sha256'],
         'goal_sha256': setup['plan']['brief_sha256'],
@@ -971,6 +1129,10 @@ def verify_checked(run_root: Path, *, require_fresh: bool = True) -> dict:
         'setup_output_receipt_sha256': sha(controls / 'setup-output/receipt.json'),
         'setup_chain_sha256': chain['chain_sha256'],
         'cumulative_setup_used': chain['cumulative_used'],
+        'prior_build_attempts': amendment['prior_build_attempts'],
+        'cumulative_build_duration_charged_upper_bound_seconds':
+        amendment['cumulative_build_duration_charged_upper_bound_seconds'] +
+        amendment['duration_seconds'],
         'original_setup_limits': chain['original_limits'],
         'build_authority_sha256': sha(archived_authority),
         'build_scope_amendment_sha256': digest({key: value for key, value in

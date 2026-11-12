@@ -6,6 +6,7 @@ provider or target service is contacted. See SETUP-BUILDER-E2E.md.
 """
 
 import argparse
+import atexit
 import base64
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
@@ -388,6 +389,15 @@ def main():
         check('changed source rejects before dispatch', change_code == 2 and not marker.exists(),
               {'exit': change_code, 'code': changed.get('code')})
         original.write_text('hello from source\n')
+        original_build = run_root / 'original/build.sh'
+        original_build.chmod(0o700)
+        changed_mode_code, changed_mode = cli(BUILDER, 'setup-build', '--run-root', str(run_root),
+                                              '--approval', str(approval_path),
+                                              '--dependency-catalog', str(catalog))
+        check('source mode changed after signing rejects before dispatch',
+              changed_mode_code == 2 and not marker.exists(),
+              {'exit': changed_mode_code, 'code': changed_mode.get('code')})
+        original_build.chmod(0o600)
         build_code, built = cli(BUILDER, 'setup-build', '--run-root', str(run_root),
                                 '--approval', str(approval_path), '--dependency-catalog', str(catalog),
                                 timeout=120)
@@ -395,7 +405,8 @@ def main():
         receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
         check('public offline build reaches checked ready receipt',
               build_code == 0 and receipt.get('kind') == 'native-setup-checked-v1'
-              and receipt.get('status') == 'ready',
+              and receipt.get('status') == 'ready'
+              and receipt.get('cumulative_build_duration_charged_upper_bound_seconds') == 30,
               {'exit': build_code, 'result': built})
         output_file = controls / 'setup-checked/output/out/result.txt'
         check('output and dependency bytes are saved and pinned',
@@ -415,6 +426,14 @@ def main():
                                if output_file.exists() else None)})
         journal = json.loads(marker.read_text())
         actions = [row['action'] for row in journal['events']]
+        daemon_id = call('docker', 'info', '--format', '{{.ID}}').stdout.strip()
+        check('builder pins Docker daemon and inspects boundary before start',
+              journal.get('docker_daemon_id') == daemon_id
+              and 'container_inspect_prestart' in actions
+              and actions.index('container_create') < actions.index('container_inspect_prestart')
+              < actions.index('container_start'),
+              {'daemon_pinned': journal.get('docker_daemon_id') == daemon_id,
+               'actions': actions[:4]})
         check('mounted source and dependencies are read back before build',
               'target_build' in actions and all(
                   name in actions and actions.index(name) < actions.index('target_build')
@@ -467,22 +486,82 @@ def main():
             'kind': 'native-setup-build-journal-v1', 'status': 'pending',
             'nonce': '1' * 32, 'container_name': 'lrh-setup-build-' + '1' * 20,
             'container_id': None, 'authority_sha256': sha(crash_journal / 'authority.json'),
+            'docker_daemon_id': daemon_id[:-1] + ('a' if daemon_id[-1] != 'a' else 'b'),
             'catalog_tree_sha256': template['scope_amendment']['dependency_catalog_tree_sha256'],
             'events': [pending_action], 'pending_action': 'container_create',
             'cleanup': None}, sort_keys=True) + '\n')
+        crash_name = 'lrh-setup-build-' + '1' * 20
+        created_crash = call('docker', 'container', 'create', '--name', crash_name,
+                             '--label', 'io.llm-redteam-harness.setup-build=' + '1' * 32,
+                             '--network', 'none', '--pull', 'never', image_id, 'sh', '-c', 'true')
+        if created_crash.returncode:
+            raise RuntimeError('crash fixture container creation failed: ' + created_crash.stderr)
+        atexit.register(call, 'docker', 'container', 'rm', '-f', crash_name)
+        crash_state = json.loads((crash_journal / 'journal.json').read_text())
+        crash_state['container_id'] = created_crash.stdout.strip()
+        (crash_journal / 'journal.json').write_text(json.dumps(crash_state, sort_keys=True) + '\n')
         stopped_code, stopped = cli(BUILDER, 'setup-build', '--run-root', str(crash_root),
                                     '--approval', str(approval_path),
                                     '--dependency-catalog', str(catalog))
         check('crashed pending build cannot be automatically repeated', stopped_code == 2,
               {'exit': stopped_code, 'code': stopped.get('code')})
+        wrong_daemon_code, wrong_daemon = cli(BUILDER, 'setup-build-reconcile',
+                                              '--run-root', str(crash_root))
+        check('wrong Docker daemon cannot settle cleanup',
+              wrong_daemon_code == 2 and wrong_daemon.get('status') == 'cleanup_unresolved'
+              and call('docker', 'container', 'inspect', crash_name).returncode == 0
+              and not (crash_journal / 'reconciliation.json').exists(),
+              {'exit': wrong_daemon_code, 'result': wrong_daemon})
+        crash_state = json.loads((crash_journal / 'journal.json').read_text())
+        crash_state['docker_daemon_id'] = daemon_id
+        (crash_journal / 'journal.json').write_text(json.dumps(crash_state, sort_keys=True) + '\n')
         reconciled_code, reconciled = cli(BUILDER, 'setup-build-reconcile',
                                           '--run-root', str(crash_root))
         check('crashed pending action gets exact blocked cleanup readback',
               reconciled_code == 0 and reconciled.get('status') == 'blocked_reconciled'
               and reconciled.get('pending_action') == 'container_create'
               and reconciled.get('cleanup', {}).get('status') == 'complete'
+              and call('docker', 'container', 'inspect', crash_name).returncode != 0
               and reconciled.get('retry_requires_new_approval') is True,
               {'exit': reconciled_code, 'result': reconciled})
+        old_retry_code, old_retry = cli(BUILDER, 'setup-build', '--run-root', str(crash_root),
+                                        '--approval', str(approval_path),
+                                        '--dependency-catalog', str(catalog))
+        check('old build approval cannot retry reconciled effect', old_retry_code == 2,
+              {'exit': old_retry_code, 'code': old_retry.get('code')})
+        retry_template_args = list(template_args)
+        retry_template_args[retry_template_args.index('--run-root') + 1] = str(crash_root)
+        retry_template_code, retry_template = cli(BUILDER, *retry_template_args)
+        check('fresh approval template binds prior uncertain spend',
+              retry_template_code == 0
+              and retry_template.get('scope_amendment', {}).get(
+                  'cumulative_build_duration_charged_upper_bound_seconds') == 30
+              and retry_template.get('scope_amendment', {}).get('prior_build_attempts') ==
+                  [sha(crash_journal / 'reconciliation.json')],
+              {'exit': retry_template_code, 'result': retry_template})
+        if retry_template_code == 0:
+            retry_authority = {'kind': 'native-setup-build-authority-v1',
+                'scope_amendment': signed(retry_template['scope_amendment'], key, signers, fingerprint),
+                'approval': signed(retry_template['approval'], key, signers, fingerprint)}
+            retry_approval = base / 'retry-build-authority.json'
+            retry_approval.write_text(json.dumps(retry_authority, sort_keys=True) + '\n')
+            retry_code, retry_result = cli(BUILDER, 'setup-build', '--run-root', str(crash_root),
+                                           '--approval', str(retry_approval),
+                                           '--dependency-catalog', str(catalog), timeout=120)
+            retry_receipt_path = crash_controls / 'setup-checked/receipt.json'
+            retry_receipt = json.loads(retry_receipt_path.read_text()) if retry_receipt_path.exists() else {}
+            archived = list((crash_controls / 'setup-build-attempts').glob('*/reconciliation.json'))
+            check('fresh signed retry reaches checked package with prior attempt archived',
+                  retry_code == 0 and retry_receipt.get('status') == 'ready'
+                  and retry_receipt.get('cumulative_build_duration_charged_upper_bound_seconds') == 60
+                  and len(archived) == 1 and sha(archived[0]) ==
+                  retry_template['scope_amendment']['prior_build_attempts'][0],
+                  {'exit': retry_code, 'result': retry_result, 'archived': len(archived)})
+            retry_verify_code, retry_verified = cli(BUILDER, 'setup-build-status',
+                '--run-root', str(crash_root), '--verify-checked')
+            check('retried checked package passes public readback',
+                  retry_verify_code == 0 and retry_verified.get('receipt', {}).get('status') == 'ready',
+                  {'exit': retry_verify_code, 'code': retry_verified.get('code')})
         linked_template_args = list(template_args)
         linked_template_args[linked_template_args.index('--run-root') + 1] = str(linked_root)
         linked_template_code, linked_template = cli(BUILDER, *linked_template_args)

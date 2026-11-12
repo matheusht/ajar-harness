@@ -1,6 +1,6 @@
 # Agent-led setup: failure checks and public scenario
 
-**State:** pre-implementation contract for [#202](https://github.com/matheusht/redteam-harness/issues/202). The current public `native_research.py prepare` is provider-free sealing, not agent-led setup. The runnable baseline below measures that boundary; its passing result is not #202 acceptance.
+**State:** #208 has a candidate separate setup mode and a synthetic authority/isolation check. The historical baseline below measured the pre-implementation boundary and is not #202 acceptance. The full #202 host build, shared later research allowance and live qualification remain open. See the [operator flow](../../docs/agents/native-setup.md).
 
 ## Decision and source basis
 
@@ -8,7 +8,7 @@ Use a separate, bounded preparation state before the existing native `prepare` s
 
 The host must verify a human-signed scope and a **separate setup approval** before the first model turn or target build. Use a host-trusted signer input, not a signer identity supplied only by the agent or by the scope being checked. The approval covers the exact engagement, original source manifest, scope and goal digests, base agent image, model route, relay and trust material, setup effect class, network class, expiry, and finite allowance. The setup agent reaches only its metered model relay; the host builder has network `none`. The first supported build effect is an owned disposable container with no Docker socket, host credentials, unrelated mounts, or observer write path. Anything outside that class is a new authority decision. An approval that needs a hard monetary ceiling remains blocked until cost metering can enforce it. The later human plan approval remains a distinct, counted authority action.
 
-**Implementation blocker at this base:** there is no native signed-scope proof with machine-checkable setup effects, no pre-plan model relay with a host-owned pending-action journal, and no engagement allowance shared with the later sealed run. A copied research approval or a second independent native run would leave those boundaries unverified. Build those host controls together before exposing a setup dispatch command.
+The #208 setup slice now verifies a detached operator scope signature and a separately signed setup approval with a host-supplied trusted fingerprint. Its setup-only native run reserves fixed connection, byte, time and tmpfs limits. It does not execute a target build or carry its usage into a later research plan; #202 still needs that handoff. A requested monetary cap is rejected before Docker dispatch because provider billing is unavailable.
 
 ## Failure cases to prove before implementation
 
@@ -41,4 +41,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_agent_l
 
 Requires Python 3, OpenSSL CLI, and the pinned local Linux amd64 relay file. The script supplies a Docker shim that records any unexpected call; no Docker daemon is contacted. It creates a fresh harmless three-file Python source tree in a private temporary directory, calls the public `native_research.py prepare` and `status` commands, checks exact source hashes and allowance state, then calls `start` without approval and checks that no resources were created. It records that `prepare` accepts an unsigned fixture scope because the setup authority gate does not yet exist. The supplied runtime probe is never executed. Expected exit is 0 with `baseline_passed: true` and `issue_202_acceptance: blocked_unimplemented`; that is a successful **baseline measurement**, not a setup success. The JSON file is the repeatable receipt. No target, model, provider, container, or network starts.
 
-After implementation, use the same fixture through the public setup entry with a test-only signed scope and setup approval, an unhinted agent proposal (or a labeled synthetic proposal for local checks), and a host-controlled offline builder. Save the exact fixture and approval bytes, proposal, command, input/output hashes, trace, allowance, assistance, cleanup, and blocked variants above. A second operator must repeat the package from those saved inputs. A live-provider and target run remains a separate qualification gate.
+The #208 public synthetic check is:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_native_setup_e2e.py --output /tmp/native-setup-e2e.json
+```
+
+It creates a harmless three-file fixture, synthetic operator key and signatures, then calls the public `prepare` and `start` entrypoints with a Docker shim. It checks missing approval, monetary cap, expanded effect class and changed frozen source before any Docker call. A separate already-local BusyBox container checks read-only source, bounded tmpfs, network `none`, and exact cleanup absence. It saves hashes and observed results in the JSON receipt. It does not execute a model turn, provider request, setup proposal freeze, or full native-run cleanup; those remain unverified until an authorized pinned native image and provider route are available. A live-provider and target run is a separate qualification gate.

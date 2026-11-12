@@ -34,9 +34,13 @@ import threading
 import time
 import uuid
 
+from engagement_records import RecordError, canonical_json_bytes
+from operator_signature import verify_operator_signature_bytes, verify_embedded_operator_signature
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_WORKFLOW = ROOT / 'engine/native-research-workflow.md'
+SETUP_WORKFLOW = ROOT / 'engine/native-setup-workflow.md'
 CONTROL_SHA = {
     'experiments/native-network-preflight/v2_connect.py': '7f031921c0cd363fec9f7bd45cd4794bd0751df3c54008acde167cf1535698c3',
     'experiments/native-network-preflight/v2-effect-windows/native_run.py': '759fb38b0df5557b290989bc9b42eb603d5e7631511d4ded2f0646f5decf492f',
@@ -88,6 +92,12 @@ VERSION = 'opencode v2.0.32'
 OFFICIAL_IMAGE_ENV = {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                       'BUN_RUNTIME_TRANSPILER_CACHE_PATH': '0'}
 DEFAULT_LIMITS = {'max_connections': 16, 'max_bytes': 8 * 1024 * 1024, 'duration_seconds': 300}
+SETUP_SIGNATURE_NAMESPACE = 'llm-redteam-harness-native-setup-v1'
+SETUP_EFFECT_CLASS = 'read-only-original-and-disposable-offline-proposal'
+SETUP_NETWORK_CLASS = 'metered-model-relay-only'
+SETUP_OUTPUT_FILES = ('recipe.json', 'THREAT_MODEL.md')
+SETUP_SOURCE_MAX_BYTES = 128 * 1024 * 1024
+SETUP_SOURCE_MAX_FILES = 10000
 LABEL = 'io.lrh.native-research'
 OWNER_LABEL = 'io.llm-redteam-harness.runtime'
 NONCE_LABEL = 'io.llm-redteam-harness.session-nonce'
@@ -129,6 +139,9 @@ def _model_config(plan: dict) -> dict:
             ((MODEL, PROVIDER_ROUTE), (PAID_MODEL, PAID_ROUTE))):
         _fail('provider_or_model_unqualified')
     config = json.loads(json.dumps(CONFIG))
+    if plan.get('setup_only'):
+        config['permissions'] = [row for row in config['permissions']
+                                 if row.get('action') != 'shell']
     if plan['model'] == PAID_MODEL:
         config['model'] = PAID_MODEL
         config['policies'][-1]['resource'] = PAID_ROUTE
@@ -228,11 +241,133 @@ def _read_json(path: Path) -> dict:
     return value
 
 
-def _inventory(directory: Path) -> dict[str, str]:
+def _setup_scope_challenge(scope_hash: str, engagement_id: str) -> bytes:
+    return canonical_json_bytes({'kind': 'native-setup-scope-challenge-v1',
+                                 'engagement_id': engagement_id, 'scope_sha256': scope_hash})
+
+
+def _verify_setup_scope(scope: Path, signature: Path, signers: Path,
+                        engagement_id: str, operator_id: str, trusted_fingerprint: str) -> None:
+    if (not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', engagement_id)
+            or not re.fullmatch(r'[A-Za-z0-9_.@+-]{1,128}', operator_id)
+            or not re.fullmatch(r'sha256:[0-9a-f]{64}', trusted_fingerprint)):
+        _fail('setup_signer_input_invalid')
+    scope = _file(scope, private=True)
+    signature = _file(signature, private=True)
+    signers = _file(signers, private=True)
+    scope_bytes = scope.read_bytes()
+    for label, required in (('effect class', SETUP_EFFECT_CLASS),
+                            ('network class', SETUP_NETWORK_CLASS)):
+        pattern = rb'^\s*-\s*Native setup ' + label.encode() + rb':\s*([^\r\n]+)\s*$'
+        matches = re.findall(pattern, scope_bytes, re.MULTILINE)
+        if matches != [required.encode()]:
+            _fail('setup_scope_effect_boundary_missing')
+    try:
+        fingerprint = verify_operator_signature_bytes(
+            scope_bytes=scope_bytes, operator_id=operator_id,
+            challenge_bytes=_setup_scope_challenge(_sha(scope), engagement_id),
+            signature_bytes=signature.read_bytes(), allowed_signers_bytes=signers.read_bytes(),
+            namespace=SETUP_SIGNATURE_NAMESPACE)
+    except (RecordError, OSError):
+        _fail('setup_scope_signature_invalid')
+    if fingerprint != trusted_fingerprint:
+        _fail('setup_scope_signer_untrusted')
+
+
+def _setup_approval(root: Path, plan: dict, approval_path: Path) -> None:
+    approval = _read_json(approval_path)
+    if approval.get('monetary_cap_usd') is not None:
+        _fail('setup_monetary_cap_unenforceable')
+    expected = {'kind': 'native-setup-approval-v1',
+                'engagement_id': plan['setup_only']['engagement_id'],
+                'plan_sha256': _sha(root / 'plan.json'),
+                'source_manifest_sha256': plan['source_manifest_sha256'],
+                'scope_sha256': plan['scope_sha256'], 'brief_sha256': plan['brief_sha256'],
+                'image_id': plan['image_id'], 'platform': plan['platform'],
+                'model': plan['model'], 'provider_route': plan['provider_route'],
+                'provider_authority': plan['provider_authority'],
+                'relay_sha256': plan['relay_sha256'],
+                'runtime_ca_sha256': plan['runtime_ca_sha256'],
+                'effect_class': SETUP_EFFECT_CLASS, 'network_class': SETUP_NETWORK_CLASS,
+                'limits': plan['limits'],
+                'max_workspace_bytes': plan['setup_only']['max_workspace_bytes'],
+                'monetary_cap_usd': None}
+    if (any(approval.get(key) != value for key, value in expected.items())
+            or set(approval) != set(expected) | {'approved_by', 'approved_at', 'expires_at', 'operator_signature'}):
+        _fail('setup_approval_mismatch')
+    if (approval.get('approved_by') != plan['setup_only']['operator_id']
+            or not all(isinstance(approval.get(key), str) and re.fullmatch(
+                r'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', approval[key])
+                for key in ('approved_at', 'expires_at'))):
+        _fail('setup_approval_invalid')
+    try:
+        approved = datetime.strptime(approval['approved_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        expires = datetime.strptime(approval['expires_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    except ValueError:
+        _fail('setup_approval_invalid')
+    age = (datetime.now(timezone.utc) - approved).total_seconds()
+    if not 0 <= age <= 24 * 3600 or not approved < expires <= approved + timedelta(hours=24) or datetime.now(timezone.utc) >= expires:
+        _fail('setup_approval_stale_or_future')
+    unsigned = {key: value for key, value in approval.items() if key != 'operator_signature'}
+    controls = _controls(root)
+    try:
+        fingerprint = verify_embedded_operator_signature(
+            proof=approval['operator_signature'],
+            scope_bytes=(controls / 'scope.md').read_bytes(),
+            operator_id=approval['approved_by'],
+            challenge_bytes=canonical_json_bytes(unsigned),
+            namespace=SETUP_SIGNATURE_NAMESPACE)
+    except (RecordError, OSError):
+        _fail('setup_approval_signature_invalid')
+    if fingerprint != plan['setup_only']['trusted_fingerprint']:
+        _fail('setup_approval_signer_untrusted')
+    archived = controls / 'approval.json'
+    if archived.exists():
+        if archived.read_bytes() != approval_path.read_bytes():
+            _fail('setup_approval_archive_changed')
+    else:
+        shutil.copy2(approval_path, archived)
+        archived.chmod(0o600)
+    receipt = {'kind': 'native-setup-approval-receipt-v1',
+               'approval_sha256': _sha(archived), 'signer_fingerprint': fingerprint}
+    receipt_path = controls / 'setup-approval-receipt.json'
+    if receipt_path.exists():
+        if _read_json(receipt_path) != receipt:
+            _fail('setup_approval_receipt_changed')
+    else:
+        _write_json(receipt_path, receipt, once=True)
+
+
+def setup_approval_template(run_root: Path, approved_at: str, expires_at: str) -> dict:
+    root = _private_root(run_root)
+    plan = _verified_plan(root, pristine=True)
+    if 'setup_only' not in plan or (_controls(root) / 'resources.json').exists():
+        _fail('setup_template_unavailable')
+    return {'kind': 'native-setup-approval-v1',
+            'engagement_id': plan['setup_only']['engagement_id'],
+            'plan_sha256': _sha(root / 'plan.json'),
+            'source_manifest_sha256': plan['source_manifest_sha256'],
+            'scope_sha256': plan['scope_sha256'], 'brief_sha256': plan['brief_sha256'],
+            'image_id': plan['image_id'], 'platform': plan['platform'],
+            'model': plan['model'], 'provider_route': plan['provider_route'],
+            'provider_authority': plan['provider_authority'],
+            'relay_sha256': plan['relay_sha256'],
+            'runtime_ca_sha256': plan['runtime_ca_sha256'],
+            'effect_class': SETUP_EFFECT_CLASS, 'network_class': SETUP_NETWORK_CLASS,
+            'limits': plan['limits'],
+            'max_workspace_bytes': plan['setup_only']['max_workspace_bytes'],
+            'monetary_cap_usd': None,
+            'approved_by': plan['setup_only']['operator_id'],
+            'approved_at': approved_at, 'expires_at': expires_at}
+
+
+def _inventory(directory: Path, *, max_files: int | None = None,
+               max_bytes: int | None = None) -> dict[str, str]:
     if not directory.is_dir() or directory.is_symlink():
         _fail('source_directory_invalid')
     result = {}
-    for path in sorted(directory.rglob('*')):
+    total_bytes = 0
+    for path in directory.rglob('*'):
         relative = path.relative_to(directory)
         if '.git' in relative.parts or path.is_symlink():
             _fail('source_history_or_symlink_forbidden')
@@ -243,15 +378,61 @@ def _inventory(directory: Path) -> dict[str, str]:
             continue
         if not stat.S_ISREG(entry.st_mode):
             _fail('source_special_file_forbidden')
+        total_bytes += entry.st_size
+        if ((max_files is not None and len(result) >= max_files)
+                or (max_bytes is not None and total_bytes > max_bytes)):
+            _fail('setup_source_limit_exceeded')
         result[relative.as_posix()] = _sha(path)
     if not result:
         _fail('source_empty')
     return result
 
 
-def _verify_inventory(directory: Path, expected: dict[str, str]) -> None:
-    if _inventory(directory) != expected:
+def _verify_inventory(directory: Path, expected: dict[str, str], *,
+                      setup_limit: bool = False) -> None:
+    observed = (_inventory(directory, max_files=SETUP_SOURCE_MAX_FILES,
+                           max_bytes=SETUP_SOURCE_MAX_BYTES) if setup_limit else _inventory(directory))
+    if observed != expected:
         _fail('source_pin_mismatch')
+
+
+def _copy_setup_source(source: Path, destination: Path, inventory: dict[str, str]) -> None:
+    if len(inventory) > SETUP_SOURCE_MAX_FILES:
+        _fail('setup_source_limit_exceeded')
+    destination.mkdir(mode=0o700)
+    copied_bytes = 0
+    source_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for relative in inventory:
+            parts = Path(relative).parts
+            parent_fd = os.dup(source_fd)
+            target_parent = destination
+            try:
+                for part in parts[:-1]:
+                    next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                      dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+                    target_parent /= part
+                    target_parent.mkdir(mode=0o700, exist_ok=True)
+                descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+                with os.fdopen(descriptor, 'rb') as src, (target_parent / parts[-1]).open('xb') as dst:
+                    if not stat.S_ISREG(os.fstat(src.fileno()).st_mode):
+                        _fail('setup_source_changed')
+                    while True:
+                        chunk = src.read(min(1024 * 1024, SETUP_SOURCE_MAX_BYTES - copied_bytes + 1))
+                        if not chunk:
+                            break
+                        copied_bytes += len(chunk)
+                        if copied_bytes > SETUP_SOURCE_MAX_BYTES:
+                            _fail('setup_source_limit_exceeded')
+                        dst.write(chunk)
+            finally:
+                os.close(parent_fd)
+    finally:
+        os.close(source_fd)
+    _verify_inventory(source, inventory, setup_limit=True)
+    _verify_inventory(destination, inventory, setup_limit=True)
 
 
 def _valid_relative_path(value: str) -> bool:
@@ -361,7 +542,34 @@ def _snapshot_store(root: Path) -> dict:
 
 def _filesystem_snapshot(root: Path, plan: dict) -> dict:
     """Provider-free byte collection; caller is responsible for stop proof."""
-    _verify_inventory(root / 'original', plan['source_sha256'])
+    _verify_inventory(root / 'original', plan['source_sha256'], setup_limit='setup_only' in plan)
+    if 'setup_only' in plan:
+        receipt_path = _controls(root) / 'setup-output/receipt.json'
+        package = _read_json(receipt_path) if receipt_path.exists() else None
+        if package is not None:
+            expected = package.get('files')
+            dispatch_id = package.get('dispatch_id')
+            if (not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id)
+                    or package.get('kind') != 'native-setup-output-v1'
+                    or package.get('status') != 'frozen_proposal'
+                    or package.get('plan_sha256') != _sha(root / 'plan.json')
+                    or package.get('approval_sha256') != _sha(_controls(root) / 'approval.json')
+                    or package.get('original_source_manifest_sha256') != plan['source_manifest_sha256']
+                    or package.get('dispatch_sha256') != _sha(_controls(root) / 'dispatch' /
+                                                              (dispatch_id + '.json'))
+                    or package.get('native_trace_sha256') != _sha(_controls(root) / 'dispatch' /
+                                                                   (dispatch_id + '.trace.json'))
+                    or not isinstance(expected, dict) or set(expected) != set(SETUP_OUTPUT_FILES)
+                    or any(_sha(_file(_controls(root) / 'setup-output' / name, private=True)) != digest
+                           for name, digest in expected.items())):
+                _fail('setup_output_pin_mismatch')
+        store = _snapshot_store(root)
+        return {'kind': 'native-setup-host-byte-receipt-v1',
+                'status': 'complete' if package is not None else 'incomplete',
+                'plan_sha256': _sha(root / 'plan.json'),
+                'original_source_manifest_sha256': plan['source_manifest_sha256'],
+                'setup_output_receipt_sha256': _sha(receipt_path) if package else None,
+                'native_store': store}
     project, project_files, _ = _snapshot_tree(root / 'researcher/project')
     project['delta'] = _snapshot_delta(project_files, plan['source_sha256'])
     targets = {}
@@ -407,7 +615,8 @@ def _stopped_snapshot(root: Path, plan: dict) -> dict:
            if row.get('kind') == 'container']
     manifest_ids = [item.get('id') for item in manifest.get('producers', [])]
     manifest_digest = _sha(manifest_path)
-    if (len(ids) != 8 or ids != manifest_ids or state.get('ids') != ids
+    expected_count = 2 if 'setup_only' in plan else 8
+    if (len(ids) != expected_count or ids != manifest_ids or state.get('ids') != ids
             or revoked.get('ids') != ids or revoked.get('producers_verified_stopped') is not True
             or state.get('manifest_sha256') != manifest_digest
             or revoked.get('manifest_sha256') != manifest_digest):
@@ -426,11 +635,12 @@ def _stopped_snapshot(root: Path, plan: dict) -> dict:
             if info.get('Image') != plan['target_image_id']:
                 _fail('snapshot_target_build_changed')
             target_builds.add(by_id[item['id']])
-    if target_builds != {'target', 'review-target-1', 'review-target-2'}:
+    if 'setup_only' not in plan and target_builds != {'target', 'review-target-1', 'review-target-2'}:
         _fail('snapshot_target_build_missing')
     receipt = _filesystem_snapshot(root, plan)
-    receipt['target_build'] = {'image_id': plan['target_image_id'],
-                               'matching_frozen_containers': len(target_builds)}
+    if 'setup_only' not in plan:
+        receipt['target_build'] = {'image_id': plan['target_image_id'],
+                                   'matching_frozen_containers': len(target_builds)}
     receipt['native_stop'] = {'manifest_sha256': manifest_digest,
                               'producer_ids_sha256': hashlib.sha256(
                                   json.dumps(ids, separators=(',', ':')).encode()).hexdigest(),
@@ -647,10 +857,18 @@ def prepare(args: argparse.Namespace) -> dict:
     relay = _file(Path(args.relay), private=True)
     ca = _file(Path(args.runtime_ca), private=True)
     source_only = bool(getattr(args, 'source_only', False))
+    setup_only = bool(getattr(args, 'setup_only', False))
     source_modules = None
     module_inventory = {}
     source_profile = {}
-    if source_only:
+    if setup_only:
+        if (source_only or args.target_command or args.target_port is not None or args.build_command
+                or args.module_cache or args.go_toolchain or args.source_runtime
+                or args.kanboard_capture or args.t01_capture or args.origin_ingress
+                or args.mutable_path or args.expected_skill_id):
+            _fail('setup_profile_invalid')
+        command_path = None
+    elif source_only:
         if (args.target_command or args.target_port is not None or not args.build_command
                 or args.kanboard_capture or args.t01_capture or args.origin_ingress
                 or bool(args.go_toolchain) == bool(args.source_runtime)):
@@ -685,7 +903,7 @@ def prepare(args: argparse.Namespace) -> dict:
                 or args.module_cache or args.go_toolchain or args.source_runtime):
             _fail('service_profile_invalid')
         command_path = Path(args.target_command)
-    target_command = _validate_target_command(command_path)
+    target_command = None if setup_only else _validate_target_command(command_path)
     run_root = Path(args.run_root)
     if not source.is_absolute() or source.is_symlink() or not source.is_dir():
         _fail('source_directory_invalid')
@@ -697,10 +915,25 @@ def prepare(args: argparse.Namespace) -> dict:
               'duration_seconds': args.duration_seconds}
     if not _valid_limits(limits):
         _fail('allowance_invalid')
-    if (not IMAGE_RE.fullmatch(args.image_id) or not IMAGE_RE.fullmatch(args.target_image_id)
+    target_image_id = args.image_id if setup_only else args.target_image_id
+    if (not IMAGE_RE.fullmatch(args.image_id) or not isinstance(target_image_id, str)
+            or not IMAGE_RE.fullmatch(target_image_id)
             or args.platform not in ('linux/arm64', 'linux/amd64')
-            or (not source_only and not 1 <= args.target_port <= 65535)):
+            or (not source_only and not setup_only and not 1 <= args.target_port <= 65535)):
         _fail('runtime_or_target_pin_invalid')
+    if setup_only:
+        if (not all((args.setup_operator_id, args.setup_engagement_id,
+                     args.setup_scope_signature, args.setup_allowed_signers,
+                     args.setup_trusted_fingerprint))
+                or type(args.setup_max_workspace_bytes) is not int
+                or not 8 * 1024 * 1024 <= args.setup_max_workspace_bytes <= 512 * 1024 * 1024):
+            _fail('setup_authority_input_missing')
+        _verify_setup_scope(scope, Path(args.setup_scope_signature),
+                            Path(args.setup_allowed_signers), args.setup_engagement_id,
+                            args.setup_operator_id, args.setup_trusted_fingerprint)
+    elif any((args.setup_operator_id, args.setup_engagement_id, args.setup_scope_signature,
+              args.setup_allowed_signers, args.setup_trusted_fingerprint)):
+        _fail('setup_authority_unexpected')
     for path, expected in ((scope, args.scope_sha256), (relay, args.relay_sha256),
                            (ca, args.runtime_ca_sha256)):
         if not HEX_RE.fullmatch(expected) or _sha(path) != expected:
@@ -729,7 +962,8 @@ def prepare(args: argparse.Namespace) -> dict:
     if (not stat.S_ISREG(docker_entry.st_mode) or not os.access(docker_binary, os.X_OK)
             or docker_entry.st_mode & 0o022):
         _fail('docker_executable_invalid')
-    source_inventory = _inventory(source)
+    source_inventory = (_inventory(source, max_files=SETUP_SOURCE_MAX_FILES,
+                                   max_bytes=SETUP_SOURCE_MAX_BYTES) if setup_only else _inventory(source))
     if source_only and any(name == '.native-source' or name.startswith('.native-source/')
                            for name in source_inventory):
         _fail('source_reserved_execution_path')
@@ -793,18 +1027,24 @@ def prepare(args: argparse.Namespace) -> dict:
         _fail('expected_skill_id_invalid')
     root = _private_root(run_root, create=True)
     try:
-        for name in ('original', 'target', 'review-target-1', 'review-target-2', 'researcher/project'):
-            shutil.copytree(source, root / name, dirs_exist_ok=False)
-            _verify_inventory(root / name, source_inventory)
-        for name in ('researcher', 'reviewer-1', 'reviewer-2'):
+        copy_names = ('original',) if setup_only else (
+            'original', 'target', 'review-target-1', 'review-target-2', 'researcher/project')
+        for name in copy_names:
+            if setup_only:
+                _copy_setup_source(source, root / name, source_inventory)
+            else:
+                shutil.copytree(source, root / name, dirs_exist_ok=False)
+                _verify_inventory(root / name, source_inventory)
+        for name in (('researcher',) if setup_only else ('researcher', 'reviewer-1', 'reviewer-2')):
             base = root / name
             for sub in ('home', 'config/opencode', 'data', 'cache', 'state', 'tmp', 'brief'):
                 (base / sub).mkdir(parents=True, mode=0o700, exist_ok=True)
-        for name in ('reviewer-1', 'reviewer-2'):
-            if source_only:
-                shutil.copytree(source, root / name / 'project')
-            else:
-                (root / name / 'project').mkdir(mode=0o700)
+        if not setup_only:
+            for name in ('reviewer-1', 'reviewer-2'):
+                if source_only:
+                    shutil.copytree(source, root / name / 'project')
+                else:
+                    (root / name / 'project').mkdir(mode=0o700)
         (root / 'handoff').mkdir(mode=0o700)
         for name in ('reviewer-1', 'reviewer-2'):
             (root / 'handoff' / name).mkdir(mode=0o700)
@@ -868,9 +1108,14 @@ def prepare(args: argparse.Namespace) -> dict:
                             'go_binary_sha256': _sha(go_binary),
                             'source_sha256': ORIGIN_SOURCE_FILES,
                             'binary_sha256': _sha(binary)}
-        for source_path, name in ((relay, 'relay'), (ca, 'runtime-ca.pem'),
-                                  (scope, 'scope.md'), (brief, 'BRIEF.md'),
-                                  (command_path, 'target-command.json')):
+        inputs = [(relay, 'relay'), (ca, 'runtime-ca.pem'),
+                  (scope, 'scope.md'), (brief, 'BRIEF.md')]
+        if command_path is not None:
+            inputs.append((command_path, 'target-command.json'))
+        if setup_only:
+            inputs.extend(((Path(args.setup_scope_signature), 'setup-scope.sig'),
+                           (Path(args.setup_allowed_signers), 'setup-allowed-signers')))
+        for source_path, name in inputs:
             destination = controls / name
             shutil.copy2(source_path, destination)
             destination.chmod(0o700 if name == 'relay' else 0o600)
@@ -879,7 +1124,8 @@ def prepare(args: argparse.Namespace) -> dict:
         (controls / 'research').mkdir(mode=0o700)
         (controls / 'research-snapshots').mkdir(mode=0o700)
         (controls / 'continuation').mkdir(mode=0o700)
-        for input_path, name in ((RESEARCH_WORKFLOW, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
+        workflow = SETUP_WORKFLOW if setup_only else RESEARCH_WORKFLOW
+        for input_path, name in ((workflow, 'WORKFLOW.md'), (brief, 'BRIEF.md')):
             shutil.copy2(input_path, controls / 'research' / name)
             (controls / 'research' / name).chmod(0o600)
         notebook = root / 'researcher/RESEARCH.md'
@@ -903,12 +1149,12 @@ def prepare(args: argparse.Namespace) -> dict:
             'proposed_stop': False, 'strong_lead': False}, indent=2, sort_keys=True) + '\n')
         next_template.chmod(0o600)
         _write_json(controls / 'opencode.json', model_config, once=True)
-        for name in ('researcher', 'reviewer-1', 'reviewer-2'):
+        for name in (('researcher',) if setup_only else ('researcher', 'reviewer-1', 'reviewer-2')):
             (root / name / 'config/opencode/opencode.json').touch(mode=0o600)
         plan = {
             'kind': 'native-research-plan-v1', 'provider_route': args.provider_route,
             'provider_authority': AUTHORITY, 'model': args.model,
-            'image_id': args.image_id, 'target_image_id': args.target_image_id,
+            'image_id': args.image_id, 'target_image_id': target_image_id,
             'platform': args.platform, 'target_port': args.target_port,
             'opencode_version': VERSION,
             'limits': limits, 'source_sha256': source_inventory,
@@ -920,7 +1166,7 @@ def prepare(args: argparse.Namespace) -> dict:
             'scope_sha256': _sha(controls / 'scope.md'),
             'relay_sha256': _sha(controls / 'relay'),
             'runtime_ca_sha256': _sha(controls / 'runtime-ca.pem'),
-            'target_command_sha256': _sha(controls / 'target-command.json'),
+            'target_command_sha256': None if setup_only else _sha(controls / 'target-command.json'),
             'config_sha256': _sha(controls / 'opencode.json'),
             'docker_binary': str(docker_binary), 'docker_sha256': _sha(docker_binary),
             'control_sha256': CONTROL_SHA,
@@ -930,6 +1176,15 @@ def prepare(args: argparse.Namespace) -> dict:
                 module_cache_sha256=hashlib.sha256(json.dumps(module_inventory, sort_keys=True).encode()).hexdigest(),
                 build_command=target_command)
             plan['source_effect_envelope'] = SOURCE_EFFECT_ENVELOPE
+        if setup_only:
+            plan['setup_only'] = {
+                'engagement_id': args.setup_engagement_id,
+                'operator_id': args.setup_operator_id,
+                'trusted_fingerprint': args.setup_trusted_fingerprint,
+                'scope_signature_sha256': _sha(controls / 'setup-scope.sig'),
+                'allowed_signers_sha256': _sha(controls / 'setup-allowed-signers'),
+                'max_workspace_bytes': args.setup_max_workspace_bytes,
+                'effect_class': SETUP_EFFECT_CLASS, 'network_class': SETUP_NETWORK_CLASS}
         if args.model == PAID_MODEL:
             plan['provider_gateway_sha256'] = _sha(controls / 'provider-gateway.py')
         if capture:
@@ -1047,12 +1302,33 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
                 _fail('archived_t01_capture_pin_mismatch')
         if plan.get('source_manifest_sha256') != T01_SOURCE_SHA:
             _fail('t01_capture_source_pin_mismatch')
-    for name, key in (('relay', 'relay_sha256'), ('runtime-ca.pem', 'runtime_ca_sha256'),
-                      ('scope.md', 'scope_sha256'), ('BRIEF.md', 'brief_sha256'),
-                      ('target-command.json', 'target_command_sha256'),
-                      ('opencode.json', 'config_sha256')):
+    pinned_inputs = [('relay', 'relay_sha256'), ('runtime-ca.pem', 'runtime_ca_sha256'),
+                     ('scope.md', 'scope_sha256'), ('BRIEF.md', 'brief_sha256'),
+                     ('opencode.json', 'config_sha256')]
+    if 'setup_only' not in plan:
+        pinned_inputs.append(('target-command.json', 'target_command_sha256'))
+    for name, key in pinned_inputs:
         if _sha(controls / name) != plan.get(key):
             _fail('run_input_pin_mismatch')
+    if 'setup_only' in plan:
+        setup = plan['setup_only']
+        if (not isinstance(setup, dict) or set(setup) != {
+                'engagement_id', 'operator_id', 'trusted_fingerprint',
+                'scope_signature_sha256', 'allowed_signers_sha256',
+                'max_workspace_bytes', 'effect_class', 'network_class'}
+                or setup['effect_class'] != SETUP_EFFECT_CLASS
+                or setup['network_class'] != SETUP_NETWORK_CLASS
+                or type(setup['max_workspace_bytes']) is not int
+                or not 8 * 1024 * 1024 <= setup['max_workspace_bytes'] <= 512 * 1024 * 1024
+                or setup['scope_signature_sha256'] != _sha(controls / 'setup-scope.sig')
+                or setup['allowed_signers_sha256'] != _sha(controls / 'setup-allowed-signers')
+                or plan['target_command_sha256'] is not None
+                or plan['target_image_id'] != plan['image_id']
+                or 'source_only' in plan or _capture_mode(plan)):
+            _fail('setup_plan_invalid')
+        _verify_setup_scope(controls / 'scope.md', controls / 'setup-scope.sig',
+                            controls / 'setup-allowed-signers', setup['engagement_id'],
+                            setup['operator_id'], setup['trusted_fingerprint'])
     if _read_json(controls / 'opencode.json') != config:
         _fail('run_config_mismatch')
     if 'source_only' in plan:
@@ -1085,11 +1361,12 @@ def _verified_plan(root: Path, *, pristine: bool = False) -> dict:
             path = _file(controls / 'research' / name, private=True)
             if not HEX_RE.fullmatch(str(plan.get(key))) or _sha(path) != plan[key]:
                 _fail('research_workflow_changed')
-    _verify_inventory(root / 'original', plan['source_sha256'])
+    _verify_inventory(root / 'original', plan['source_sha256'], setup_limit='setup_only' in plan)
     if pristine:
-        _verify_inventory(root / 'researcher/project', plan['source_sha256'])
-        for name in ('target', 'review-target-1', 'review-target-2'):
-            _verify_target_state(root / name, plan['source_sha256'], plan['mutable_paths'])
+        if 'setup_only' not in plan:
+            _verify_inventory(root / 'researcher/project', plan['source_sha256'])
+            for name in ('target', 'review-target-1', 'review-target-2'):
+                _verify_target_state(root / name, plan['source_sha256'], plan['mutable_paths'])
     return plan
 
 
@@ -1105,6 +1382,9 @@ def capture_stage(run_root: Path, target: str, *, s: int | None = None, q: int |
 
 
 def _approval(root: Path, plan: dict, path: Path) -> None:
+    if 'setup_only' in plan:
+        _setup_approval(root, plan, path)
+        return
     capture_db_pins = {}
     if _capture_mode(plan):
         _, capture_db_pins = _capture_specs(
@@ -1159,6 +1439,13 @@ def _approval_active(root: Path) -> None:
     approval_path = _controls(root) / 'approval.json'
     approval = _read_json(approval_path)
     activation = _read_json(_controls(root) / 'activation.json')
+    if 'setup_only' in plan:
+        if (activation.get('kind') != 'native-research-activation-v1'
+                or activation.get('plan_sha256') != plan_sha
+                or activation.get('approval_sha256') != _sha(approval_path)):
+            _fail('setup_approval_changed')
+        _setup_approval(root, plan, approval_path)
+        return
     if (activation.get('kind') != 'native-research-activation-v1'
             or activation.get('plan_sha256') != plan_sha
             or activation.get('approval_sha256') != _sha(approval_path)
@@ -1255,7 +1542,8 @@ def _mount(source: Path, destination: str, *, readonly: bool = False) -> str:
 
 def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, platform: str,
             network: str, ip: str | None, mounts: list[str], environment: list[str],
-            command: list[str], *, workdir: str = '/workspace/project', dns_isolated: bool = True) -> str:
+            command: list[str], *, workdir: str = '/workspace/project', dns_isolated: bool = True,
+            workspace_tmpfs_bytes: int | None = None) -> str:
     if len({item.split('=', 1)[0] for item in environment}) != len(environment):
         _fail('container_environment_duplicate')
     name = 'lrh-native-' + nonce[:12] + '-' + role
@@ -1269,6 +1557,8 @@ def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, pla
                  '--label', NONCE_LABEL + '=' + nonce, '--workdir', workdir]
     if ip is not None:
         arguments += ['--ip', ip]
+    if workspace_tmpfs_bytes is not None:
+        arguments += ['--tmpfs', '/workspace:rw,nosuid,nodev,size=' + str(workspace_tmpfs_bytes)]
     if dns_isolated:
         arguments += ['--dns', '127.0.0.1']
     for mount in mounts:
@@ -1299,6 +1589,9 @@ def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, pla
             or info.get('HostConfig', {}).get('LogConfig', {}).get('Type') != 'none'
             or info.get('HostConfig', {}).get('RestartPolicy', {}).get('Name') != 'no'
             or info.get('HostConfig', {}).get('Dns') != (['127.0.0.1'] if dns_isolated else [])
+            or (workspace_tmpfs_bytes is not None and
+                info.get('HostConfig', {}).get('Tmpfs', {}).get('/workspace') !=
+                'rw,nosuid,nodev,size=' + str(workspace_tmpfs_bytes))
             or set(info.get('NetworkSettings', {}).get('Networks', {})) !=
                 {str(_inspect('network', network).get('Name'))}):
         _fail('container_create_mismatch')
@@ -1307,7 +1600,7 @@ def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, pla
                            and (network_state.get('IPAMConfig') or {}).get('IPv4Address') != ip):
         _fail('container_network_ip_mismatch')
     actual_mounts = {(item.get('Source'), item.get('Destination'), item.get('RW'))
-                     for item in info.get('Mounts', [])}
+                     for item in info.get('Mounts', []) if item.get('Type') == 'bind'}
     expected_mounts = set()
     for mount in mounts:
         fields = dict(part.split('=', 1) for part in mount.split(',') if '=' in part)
@@ -1333,7 +1626,11 @@ def _create(root: Path, nonce: str, rows: list[dict], role: str, image: str, pla
 
 def _created_manifest(root: Path, nonce: str, rows: list[dict], producer) -> Path:
     containers = [row for row in rows if row['kind'] == 'container']
-    if len(containers) != 8 or any(row.get('id') is None for row in containers):
+    expected_roles = ({'relay', 'researcher'} if 'setup_only' in _plan(root) else
+                      {'relay', 'researcher', 'resume', 'reviewer-1', 'reviewer-2',
+                       'target', 'review-target-1', 'review-target-2'})
+    if ({row['role'] for row in containers} != expected_roles
+            or any(row.get('id') is None for row in containers)):
         _fail('producer_set_incomplete')
     items = []
     for row in containers:
@@ -1624,8 +1921,43 @@ def _capture_approved_specs(root: Path, plan: dict, command: list[str], *,
     return {}
 
 
+def _preseal_setup(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
+                   capability: str) -> dict:
+    external, _, _ = _network(root, nonce, rows, 'external', internal=False)
+    research, relay_ip, _ = _network(root, nonce, rows, 'research', internal=True)
+    controls = _controls(root)
+    relay = _create(root, nonce, rows, 'relay', plan['image_id'], plan['platform'],
+                    external, None, [_mount(controls / 'relay', '/relay', readonly=True)],
+                    ['HOST_GATEWAY_PORT=' + str(port)], ['/relay'], workdir='/', dns_isolated=False)
+    _docker('network', 'connect', '--ip', relay_ip, research, relay)
+    network_name = _inspect('network', research)['Name']
+    actual = _inspect('container', relay)['NetworkSettings']['Networks'][network_name]
+    if actual.get('IPAddress') != relay_ip and (actual.get('IPAMConfig') or {}).get('IPv4Address') != relay_ip:
+        _fail('setup_relay_network_mismatch')
+    environment = _research_environment(root, 'researcher', relay_ip, '127.0.0.1', capability)
+    command = ['sh', '-c',
+               'mkdir -p /workspace/home /workspace/config/opencode /workspace/data '
+               '/workspace/cache /workspace/state /workspace/tmp /workspace/project && '
+               'while :; do sleep 3600; done']
+    researcher = _create(
+        root, nonce, rows, 'researcher', plan['image_id'], plan['platform'], research, None,
+        [_mount(root / 'original', '/source', readonly=True),
+         _mount(controls / 'opencode.json', '/workspace/config/opencode/opencode.json', readonly=True),
+         _mount(controls / 'runtime-ca.pem', '/runtime-ca.pem', readonly=True),
+         _mount(controls / 'research', '/research', readonly=True)],
+        environment, command, workdir='/',
+        workspace_tmpfs_bytes=plan['setup_only']['max_workspace_bytes'])
+    if set(_inspect('container', relay)['NetworkSettings']['Networks']) != {
+            _inspect('network', external)['Name'], network_name}:
+        _fail('setup_relay_membership_mismatch')
+    return {'relay': relay, 'researcher': researcher,
+            'network_names': {'research': network_name}}
+
+
 def _preseal(root: Path, plan: dict, nonce: str, rows: list[dict], port: int,
              capability: str) -> dict:
+    if 'setup_only' in plan:
+        return _preseal_setup(root, plan, nonce, rows, port, capability)
     target_command = _validate_target_command(_controls(root) / 'target-command.json')
     capture_specs = _capture_approved_specs(root, plan, target_command)
     capture = _load_capture_module(root) if capture_specs else None
@@ -2081,7 +2413,10 @@ def _resources(root: Path) -> dict:
     record = _read_json(_controls(root) / 'resources.json')
     if any(row.get('id') is None for row in record.get('resources', [])):
         _fail('unsealed_resource_record')
-    return {row['role']: row['id'] for row in record['resources'] if row['kind'] == 'container'}
+    result = {row['role']: row['id'] for row in record['resources'] if row['kind'] == 'container'}
+    if 'setup_only' in _plan(root) and 'researcher' in result:
+        result['resume'] = result['researcher']
+    return result
 
 
 @contextmanager
@@ -2513,9 +2848,12 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         _fail('native_prompt_credential_like')
     if before_dispatch is not None and not callable(before_dispatch):
         _fail('native_observer_hook_invalid')
+    setup_only = 'setup_only' in _plan(root)
     if kanboard_role_grant and role != 'resume':
         _fail('kanboard_recovery_turn_unqualified')
-    if continuity is not None and continuity not in (
+    if setup_only and continuity is not None and continuity not in ('fresh_setup', 'setup_resume'):
+        _fail('setup_continuity_invalid')
+    if not setup_only and continuity is not None and continuity not in (
             ('fresh_research',) if role == 'researcher' else
             ('native_history', 'fresh_context_from_workspace') if role == 'resume' else ()):
         _fail('research_continuity_invalid')
@@ -2547,7 +2885,16 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
         if not run_active(root):
             _fail('native_run_closed_before_dispatch')
         pool_before = allowance_snapshot(root)
-        if role in ('researcher', 'resume'):
+        if setup_only and role in ('researcher', 'resume'):
+            _verify_inventory(root / 'original', _plan(root)['source_sha256'], setup_limit=True)
+            prompt = (
+                'Read /research/WORKFLOW.md and /research/BRIEF.md first. '
+                'The original source is read-only at /source. Write only in '
+                '/workspace/project. Prepare a runtime recipe and THREAT_MODEL.md; '
+                'do not run target code or fetch dependencies.\n\n' + prompt)
+            record.update({'continuity': continuity or 'fresh_setup',
+                           'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()})
+        elif role in ('researcher', 'resume'):
             continuity = continuity or ('fresh_research' if role == 'researcher' else 'native_history')
             context = _research_context(root, continuity, pool=pool_before)
             if context is not None:
@@ -3011,6 +3358,97 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
             raise
 
 
+def setup_freeze(run_root: Path) -> dict:
+    """Copy only the two proposed files from a bounded setup workspace."""
+    root = _private_root(run_root)
+    with _turn_lock(root):
+        plan = _verified_plan(root)
+        if 'setup_only' not in plan or not run_active(root):
+            _fail('setup_freeze_unavailable')
+        _approval_active(root)
+        if _unresolved_dispatches(root):
+            _fail('prior_dispatch_unknown_effect')
+        records = []
+        for path in sorted((_controls(root) / 'dispatch').glob('*.json')):
+            if path.name.endswith(('.trace.json', '.pre.json', '.origin.json')):
+                continue
+            row = _read_json(path)
+            if row.get('role') in ('researcher', 'resume'):
+                records.append(row)
+        if not records or records[-1].get('status') != 'acknowledged':
+            _fail('setup_turn_not_acknowledged')
+        latest = records[-1]
+        output = _controls(root) / 'setup-output'
+        if output.exists():
+            _fail('setup_output_already_frozen')
+        staging_root = _controls(root) / 'setup-staging'
+        staging_root.mkdir(mode=0o700, exist_ok=True)
+        staging = staging_root / (latest['dispatch_id'] + '-' + uuid.uuid4().hex)
+        staging.mkdir(mode=0o700)
+        identifier = _resources(root)['researcher']
+        files = {}
+        for name in SETUP_OUTPUT_FILES:
+            command = ('test -f "$1" && test ! -L "$1" && '
+                       'head -c 1048577 "$1"')
+            argv = ('container', 'exec', identifier, 'sh', '-c', command,
+                    'setup-read', '/workspace/project/' + name)
+            first = _docker(*argv, timeout=20, allow_failure=True)
+            second = _docker(*argv, timeout=20, allow_failure=True)
+            if (first.returncode or second.returncode or first.stdout != second.stdout
+                    or not first.stdout or len(first.stdout) > 1024 * 1024):
+                _fail('setup_output_missing_changed_or_oversize')
+            try:
+                text = first.stdout.decode('utf-8')
+            except UnicodeError:
+                _fail('setup_output_encoding_invalid')
+            if CREDENTIAL_TEXT.search(text):
+                _fail('setup_output_credential_like')
+            path = staging / name
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(first.stdout)
+                stream.flush()
+                os.fsync(stream.fileno())
+            files[name] = _sha(path)
+        recipe = _read_json(staging / 'recipe.json')
+        if (set(recipe) != {'kind', 'runtime', 'build_command', 'offline_dependencies'}
+                or recipe['kind'] != 'native-setup-recipe-v1'
+                or not isinstance(recipe['offline_dependencies'], list)
+                or len(recipe['offline_dependencies']) > 256
+                or any(not isinstance(item, str) or not 1 <= len(item) <= 256
+                       for item in recipe['offline_dependencies'])):
+            _fail('setup_recipe_invalid')
+        _validate_source_runtime(recipe['runtime'])
+        _validate_argv(recipe['build_command'])
+        if not (staging / 'THREAT_MODEL.md').read_text().strip():
+            _fail('setup_threat_model_empty')
+        trace = _controls(root) / 'dispatch' / (latest['dispatch_id'] + '.trace.json')
+        if not trace.exists():
+            _fail('setup_trace_missing')
+        receipt = {'kind': 'native-setup-output-v1', 'status': 'frozen_proposal',
+                   'plan_sha256': _sha(root / 'plan.json'),
+                   'approval_sha256': _sha(_controls(root) / 'approval.json'),
+                   'original_source_manifest_sha256': plan['source_manifest_sha256'],
+                   'dispatch_id': latest['dispatch_id'],
+                   'dispatch_sha256': _sha(_controls(root) / 'dispatch' /
+                                           (latest['dispatch_id'] + '.json')),
+                   'native_trace_sha256': _sha(trace),
+                   'pool_before': latest.get('pool_before'),
+                   'pool_after': latest.get('pool_after'),
+                   'native_usage': latest.get('native_usage'),
+                   'files': files, 'assessment': 'proposal_needs_host_review',
+                   'target_build_executed': False, 'security_result': None}
+        _write_json(staging / 'receipt.json', receipt, once=True)
+        os.rename(staging, output)
+        descriptor = os.open(_controls(root), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        return {'status': 'frozen_proposal', 'receipt_path': str(output / 'receipt.json'),
+                'receipt_sha256': _sha(output / 'receipt.json')}
+
+
 def _workspace_runtime_probe(root: Path, container_id: str) -> dict | None:
     if 'source_only' in _plan(root):
         return _source_probe(root, container_id)
@@ -3090,7 +3528,8 @@ def _surface_probe(root: Path, container_id: str) -> dict:
 
         for _ in range(50):
             agents, plugins = get('agent'), get('plugin')
-            if agents and plugins and len(agents[0].get('permissions', [])) >= 12:
+            required_permissions = 1 if 'setup_only' in plan else 12
+            if agents and plugins and len(agents[0].get('permissions', [])) >= required_permissions:
                 break
             time.sleep(.1)
         configs = get('config')
@@ -3181,7 +3620,8 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
         _fail('run_already_started_or_ambiguous')
     _approval(root, plan, Path(approval_path))
     _image(plan['image_id'], plan['platform'], official=True)
-    _image(plan['target_image_id'], plan['platform'])
+    if 'setup_only' not in plan:
+        _image(plan['target_image_id'], plan['platform'])
     nonce = uuid.uuid4().hex
     capability = 'local_' + uuid.uuid4().hex
     capability_path = controls / 'capability'
@@ -3251,7 +3691,12 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
             topology_path = controls / 'capture-topology.json'
             _write_json(topology_path, topology, once=True)
             capture_topology_sha = _sha(topology_path)
-        if 'source_only' in plan:
+        if 'setup_only' in plan:
+            info = _inspect('container', bindings['researcher'])
+            networks = set(info.get('NetworkSettings', {}).get('Networks', {}))
+            if networks != {bindings['network_names']['research']}:
+                _fail('setup_research_network_mismatch')
+        elif 'source_only' in plan:
             for role in CAPTURE_TARGETS:
                 info = _inspect('container', bindings[role])
                 if info['HostConfig']['NetworkMode'] != 'none':
@@ -3279,7 +3724,7 @@ def _start_owned(run_root: Path, approval_path: Path, *, provider_key_file: Path
         result = {'status': 'active', 'run_root': str(root),
                   'origin_start': result['origin_start'],
                   'run_identity': allowance_snapshot(root)['run_identity'],
-                  'target_url': (None if 'source_only' in plan else
+                  'target_url': (None if 'source_only' in plan or 'setup_only' in plan else
                                  'unix:///origin/socket/ingress.sock' if _origin_enabled(plan) else
                                  f'http://{bindings["research_target_ip"]}:{plan["target_port"]}'),
                   'protected_capture': 'unavailable',
@@ -4049,7 +4494,7 @@ def status(run_root: Path) -> dict:
         if origin_path.exists():
             item['origin_hold'] = _read_json(origin_path)
         dispatches.append(item)
-    return {'status': 'active' if allowance and allowance['active'] else
+    result = {'status': 'active' if allowance and allowance['active'] else
             'stopped_complete' if final and final.get('status') == 'stopped_complete' else
             'recovered_exact_resources' if recovery and recovery.get('status') == 'recovered_exact_resources' else
             'prepared' if not activation and not final and not (controls / 'resources.json').exists()
@@ -4059,6 +4504,14 @@ def status(run_root: Path) -> dict:
             'stop_reason': _recorded_stop_reason(root),
             'protected_capture': 'unavailable',
             'provider_request_count': None, 'monetary_spend': None}
+    if 'setup_only' in plan:
+        frozen = controls / 'setup-output/receipt.json'
+        result['setup'] = {'original_source_manifest_sha256': plan['source_manifest_sha256'],
+                           'max_workspace_bytes': plan['setup_only']['max_workspace_bytes'],
+                           'frozen_proposal_receipt_sha256': _sha(frozen) if frozen.exists() else None,
+                           'pending_dispatches': _unresolved_dispatches(root),
+                           'target_build_executed': False}
+    return result
 
 
 def _load_review_module(root: Path):
@@ -4644,11 +5097,20 @@ def _parser() -> argparse.ArgumentParser:
     prepare_cmd = commands.add_parser('prepare', help='provider-free sealed run preparation')
     for name in ('run-root', 'source', 'brief', 'scope-file', 'scope-sha256', 'relay',
                  'relay-sha256', 'runtime-ca', 'runtime-ca-sha256',
-                 'image-id', 'target-image-id', 'platform'):
+                 'image-id', 'platform'):
         prepare_cmd.add_argument('--' + name, required=True)
+    prepare_cmd.add_argument('--target-image-id')
     prepare_cmd.add_argument('--target-port', type=int)
     prepare_cmd.add_argument('--target-command')
     prepare_cmd.add_argument('--source-only', action='store_true')
+    prepare_cmd.add_argument('--setup-only', action='store_true',
+                             help='bounded pre-runtime source setup; no target executor')
+    prepare_cmd.add_argument('--setup-engagement-id')
+    prepare_cmd.add_argument('--setup-operator-id')
+    prepare_cmd.add_argument('--setup-scope-signature')
+    prepare_cmd.add_argument('--setup-allowed-signers')
+    prepare_cmd.add_argument('--setup-trusted-fingerprint')
+    prepare_cmd.add_argument('--setup-max-workspace-bytes', type=int, default=64 * 1024 * 1024)
     prepare_cmd.add_argument('--source-runtime', help='runtime probe JSON; replaces the optional Go preset')
     prepare_cmd.add_argument('--build-command', help='absolute path to a JSON argv array')
     prepare_cmd.add_argument('--go-toolchain', help='exact Go version, for example go1.26.4')
@@ -4670,6 +5132,19 @@ def _parser() -> argparse.ArgumentParser:
     start_cmd.add_argument('--approval', required=True)
     start_cmd.add_argument('--provider-key-file', help='private external host file; never copied into the run')
     start_cmd.add_argument('--provider-tls-key', help='private external key for the pinned runtime CA certificate')
+    setup_turn_cmd = commands.add_parser('setup-turn', help='one bounded native source setup turn')
+    setup_turn_cmd.add_argument('--run-root', required=True)
+    setup_resume_cmd = commands.add_parser('setup-resume', help='continue an acknowledged setup session')
+    setup_resume_cmd.add_argument('--run-root', required=True)
+    setup_resume_cmd.add_argument('--session', required=True)
+    setup_resume_cmd.add_argument('--prompt-file', required=True)
+    setup_freeze_cmd = commands.add_parser('setup-freeze', help='freeze recipe and threat model for host review')
+    setup_freeze_cmd.add_argument('--run-root', required=True)
+    setup_template_cmd = commands.add_parser('setup-approval-template',
+                                             help='provider-free exact unsigned setup approval')
+    setup_template_cmd.add_argument('--run-root', required=True)
+    setup_template_cmd.add_argument('--approved-at', required=True)
+    setup_template_cmd.add_argument('--expires-at', required=True)
     source_cmd = commands.add_parser('source-execute', help='offline source execution and two clean replays')
     source_cmd.add_argument('--run-root', required=True)
     source_cmd.add_argument('--command-file', help='optional experiment argv; default is the pinned build command')
@@ -4740,6 +5215,37 @@ def main() -> int:
                            provider_tls_key=Path(args.provider_tls_key) if args.provider_tls_key else None)
         elif args.command == 'source-execute':
             result = source_execute(Path(args.run_root), Path(args.command_file) if args.command_file else None)
+        elif args.command in ('setup-turn', 'setup-resume'):
+            root = _private_root(Path(args.run_root))
+            if 'setup_only' not in _verified_plan(root):
+                _fail('setup_mode_required')
+            if args.command == 'setup-turn':
+                sessions = native_api(root, 'researcher', 'session.list', '--param', 'limit=100',
+                                      '--param', 'order=asc')
+                if sessions.get('items', sessions.get('data')) != []:
+                    _fail('setup_store_not_fresh')
+                created = native_api(root, 'researcher', 'session.create', '--data',
+                                     '{"title":"bounded source setup"}')
+                session = (created.get('data') or {}).get('id')
+                prompt = _file(_controls(root) / 'BRIEF.md', private=True).read_text()
+                role = 'researcher'
+            else:
+                session = args.session
+                if not SESSION_RE.fullmatch(session):
+                    _fail('native_session_id_invalid')
+                prompt = _file(Path(args.prompt_file), private=True).read_text()
+                role = 'resume'
+                existing = native_api(root, role, 'session.get', '--param', 'sessionID=' + session)
+                if (existing.get('data') or {}).get('id') != session:
+                    _fail('setup_resume_session_invalid')
+            if not isinstance(session, str) or not SESSION_RE.fullmatch(session):
+                _fail('native_session_id_invalid')
+            result = invoke_native(root, role, session, prompt,
+                                   continuity='fresh_setup' if role == 'researcher' else 'setup_resume')
+        elif args.command == 'setup-freeze':
+            result = setup_freeze(Path(args.run_root))
+        elif args.command == 'setup-approval-template':
+            result = setup_approval_template(Path(args.run_root), args.approved_at, args.expires_at)
         elif args.command == 'stop':
             result = stop(Path(args.run_root))
         elif args.command == 'recover-start':
@@ -4759,6 +5265,8 @@ def main() -> int:
                                             args.review_effect_request_id)
         elif args.command in ('research', 'resume', 'reconstruct'):
             root = Path(args.run_root)
+            if 'setup_only' in _plan(_private_root(root)):
+                _fail('setup_command_required')
             role = 'researcher' if args.command == 'research' else 'resume'
             continuity = {'research': 'fresh_research', 'resume': 'native_history',
                           'reconstruct': 'fresh_context_from_workspace'}[args.command]

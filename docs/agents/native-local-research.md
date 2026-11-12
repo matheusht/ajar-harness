@@ -12,6 +12,10 @@ procedure described below.
 
 ## Start and resume
 
+For a new authorized source without a target runtime recipe, use the bounded
+[native setup turn](native-setup.md) first. It produces a proposal for host
+review and ends before target build or research approval.
+
 For source with no application listener, use
 [source mode](native-source-sdk.md). Its environment and paid-provider
 requirements differ from the service profile below. Source implementation is

@@ -46,8 +46,8 @@
         "exit": 0,
         "result": {
           "live_approval_required": true,
-          "plan_sha256": "c395d0a18609f1418e8442441e602381f62397caf20e11efa1bc6b8d7d706320",
-          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-e2e-uhw46oel/run",
+          "plan_sha256": "18ff07b062d38602d86fba27cd55369d07992b22b11764591d7756b10a84befe",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-e2e-_6xt4paq/run",
           "source_files": 3,
           "status": "prepared_provider_free"
         }
@@ -121,10 +121,26 @@
       "passed": true
     },
     {
+      "name": "frozen setup refuses another first turn before native dispatch",
+      "observed": {
+        "code": "setup_output_already_frozen",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "frozen setup refuses resume before native dispatch",
+      "observed": {
+        "code": "setup_output_already_frozen",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
       "name": "local Docker source and cleanup boundary",
       "observed": {
         "cleanup_absent": true,
-        "container_id": "423dcc86d42da0c61d3075f209ad38a2a2342c5de7ba71b7531ce099254df8a1",
+        "container_id": "7b31c0e744484b7d636425c1f6a2a41eeca5717abdfd26c4438a06b086262395",
         "network": "none",
         "passed": true,
         "readonly_root": true,
@@ -140,14 +156,14 @@
   ],
   "classification": "synthetic signed authority, Docker shim, and local boundary probe",
   "inputs": {
-    "cli_sha256": "fad30f0fa07b9daa42a786a0b8f21a94fab129aabb369170d556920ef7c6f3f7",
+    "cli_sha256": "317a36705965a10cc1448e61828933097c7724fe05f3f75ed83061b293929b09",
     "goal_sha256": "70d300cd9ddba9327d19fa3dc9fd058c7a3a663b594fa21a58d61a716c078354",
     "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
-    "runtime_ca_sha256": "86bdd8b93f936a050305a95dab1b75bec05698644beb59c8f1550d5ff376a855",
-    "scenario_sha256": "3bf01ed7cae1e75a6fb67f88e7ace186c573d7798864b20904f96afd29f3a6d8",
-    "scope_sha256": "b892633bac0da07c8ef2dd25d0229912e924464f06142b473802922ab94b00c5",
-    "scope_signature_sha256": "c045c303ec37f5d08fc021a0096a88fd3c0d596d3c25e23a5501f2b13670d441",
-    "setup_approval_sha256": "4756103405ec40a934907bae0f90418737e0e6cd2a0109368eae8b3e69f5eb82",
+    "runtime_ca_sha256": "22c8a9a87540e5a6a7c213cb90532635b0f03bc33117b1ec80d2cbbafea57757",
+    "scenario_sha256": "6b175702a2def202d198002196468c4c205c195a5060718fccf14f5fdf5d6480",
+    "scope_sha256": "38003e097c787f4df24db012b8742eb1de0b8ac1730dd52e41ec83e3dc023b1e",
+    "scope_signature_sha256": "43d02d8b0a31fa172ee939c1a5d4d0609ee1f4e2d696fd9414f7e992d7b429b0",
+    "setup_approval_sha256": "6de7b03cdbe5af23fd53b200168fe55271f750900cccd8607f9ce1b4783e4f75",
     "source": {
       "main.py": "04bd88d6c082b8266c28d044f590138f128c64029cf7bed48bb33087479672e1",
       "pkg/__init__.py": "8ad85b90108ebaad552b841d21e7895a651a7e49cf21a46d48ae04332ee827c0",

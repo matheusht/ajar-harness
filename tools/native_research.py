@@ -618,7 +618,10 @@ def _filesystem_snapshot(root: Path, plan: dict) -> dict:
         if package is not None:
             expected = package.get('files')
             dispatch_id = package.get('dispatch_id')
+            setup_dispatches = _setup_dispatches(root)
             if (not isinstance(dispatch_id, str) or not re.fullmatch(r'[0-9a-f]{32}', dispatch_id)
+                    or not setup_dispatches
+                    or setup_dispatches[-1]['dispatch_id'] != dispatch_id
                     or package.get('kind') != 'native-setup-output-v1'
                     or package.get('status') != 'frozen_proposal'
                     or package.get('plan_sha256') != _sha(root / 'plan.json')
@@ -2712,6 +2715,8 @@ def native_api(run_root: Path, role: str, *parts: str) -> dict:
             or len(parts) > 12 or any(not isinstance(part, str) or len(part) > 4096 for part in parts)):
         _fail('native_api_call_not_allowed')
     with _turn_lock(root):
+        if 'setup_only' in _plan(root):
+            _setup_output_open(root)
         _approval_active(root)
         if not run_active(root):
             _fail('native_run_closed_before_dispatch')
@@ -2864,6 +2869,11 @@ def _setup_dispatches(root: Path) -> list[dict]:
     return rows
 
 
+def _setup_output_open(root: Path) -> None:
+    if (_controls(root) / 'setup-output').exists():
+        _fail('setup_output_already_frozen')
+
+
 def _research_context(root: Path, continuity: str, *, pool: dict | None = None) -> dict | None:
     """Project current authority into advice; never treat notes as authority."""
     plan = _plan(root)
@@ -2974,6 +2984,8 @@ def invoke_native(run_root: Path, role: str, session_id: str, prompt: str,
               'review_target_id': target_id,
               'review_target_source_sha256': source_digest}
     with _turn_lock(root):
+        if setup_only:
+            _setup_output_open(root)
         _approval_active(root)
         if _unresolved_dispatches(root):
             _fail('prior_dispatch_unknown_effect')

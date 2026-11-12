@@ -337,6 +337,20 @@ def main():
               code == 2 and accepted.get('code') == 'docker_command_failed' and marker.exists()
               and (run_root / 'controls/setup-approval-receipt.json').exists(),
               {'exit': code, 'code': accepted.get('code'), 'docker_called': marker.exists()})
+        frozen = run_root / 'controls/setup-output'
+        frozen.mkdir()
+        (frozen / 'receipt.json').write_text('{"kind":"native-setup-output-v1"}\n')
+        prompt = base / 'resume.md'
+        prompt.write_text('Continue the harmless setup.\n')
+        turn_code, frozen_turn = cli(env, 'setup-turn', '--run-root', str(run_root))
+        resume_code, frozen_resume = cli(env, 'setup-resume', '--run-root', str(run_root),
+                                         '--session', 'ses_fixture', '--prompt-file', str(prompt))
+        check('frozen setup refuses another first turn before native dispatch',
+              turn_code == 2 and frozen_turn.get('code') == 'setup_output_already_frozen',
+              {'exit': turn_code, 'code': frozen_turn.get('code')})
+        check('frozen setup refuses resume before native dispatch',
+              resume_code == 2 and frozen_resume.get('code') == 'setup_output_already_frozen',
+              {'exit': resume_code, 'code': frozen_resume.get('code')})
         boundary = (None if args.skip_docker_boundary else
                     boundary_probe(source, args.boundary_image))
         if boundary is not None:

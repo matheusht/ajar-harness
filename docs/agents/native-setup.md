@@ -195,7 +195,9 @@ The host freezes only these two validated files, the native event trace hash,
 approval, source pins, dispatch receipt, and remaining connection/byte/time
 allowance under `controls/setup-output/`. `setup-freeze` stages bytes first;
 a missing or invalid proposal remains in `controls/setup-staging/` and can be
-revised with `setup-resume` on the same active run. The frozen proposal is not
+revised with `setup-resume` on the same active run. After `setup-freeze` commits
+the host receipt, further setup turns are refused; a revised proposal needs a
+separate reviewed protocol. The frozen proposal is not
 an executed build or security result. Complete only when `status` reports a
 stopped run with `final.cleanup.status=complete`, exact absent resource IDs,
 and a pinned setup output receipt. If cleanup is unresolved, retain the run

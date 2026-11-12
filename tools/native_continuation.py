@@ -1147,6 +1147,28 @@ def _review_projection(identity: str, plan_sha: str, next_sha: str, selected_sha
     return projection
 
 
+def _publish_review_projection(path: Path, projection: dict) -> str:
+    target = path.parent
+    if target.resolve() != target:
+        _fail('source_review_projection_changed')
+    target.mkdir(parents=True, mode=0o700, exist_ok=True)
+    entry = target.stat(follow_symlinks=False)
+    if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
+            or entry.st_mode & 0o077):
+        _fail('source_review_projection_changed')
+    temporary = path.with_name('.' + path.name + '-' + os.urandom(16).hex() + '.tmp')
+    try:
+        runner._write_json(temporary, projection, once=True)
+        digest = runner._sha(runner._file(temporary, private=True))
+        os.link(temporary, path)
+        if (runner._sha(runner._file(path, private=True)) != digest
+                or _read_private(path) != projection):
+            _fail('source_review_projection_changed')
+        return digest
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
                             next_sha: str, projection: dict | None = None) -> None:
     identity, role = previous.get('review_id'), previous.get('role')
@@ -1315,15 +1337,7 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
                                                         selected_sha, receipt_path, receipt,
                                                         previous.get('patch_request_sha256'))
                         _verified_cached_review(root, state, nxt, previous, next_sha, projection)
-                        target = path.parent
-                        if target.resolve() != target:
-                            _fail('source_review_projection_changed')
-                        target.mkdir(parents=True, mode=0o700, exist_ok=True)
-                        entry = target.stat(follow_symlinks=False)
-                        if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid != os.getuid()
-                                or entry.st_mode & 0o077):
-                            _fail('source_review_projection_changed')
-                        runner._write_json(path, projection, once=True)
+                        _publish_review_projection(path, projection)
                     candidate = {**previous, 'projection_sha256': runner._sha(
                         runner._file(path, private=True))}
                 _verified_cached_review(root, state, nxt, candidate, next_sha)
@@ -1416,14 +1430,12 @@ def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
         module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
     except (ValueError, UnicodeError):
         _fail('source_review_projection_unsafe')
-    target = root / 'controls/research/reviews' / identity
-    target.mkdir(parents=True, mode=0o700)
-    path = target / 'RESULTS.json'
-    runner._write_json(path, projection, once=True)
+    path = root / 'controls/research/reviews' / identity / 'RESULTS.json'
+    projection_sha = _publish_review_projection(path, projection)
     phase = ('captured' if result['status'] == 'reviewed'
              and receipt['assessment']['status'] == 'candidate_for_operator_review'
              else 'incomplete')
-    state['review_action'].update(phase=phase, projection_sha256=runner._sha(path))
+    state['review_action'].update(phase=phase, projection_sha256=projection_sha)
     _save_state(root, state)
     _event(root, {'at': _now(), 'event': 'source_review_captured',
                   'review_id': identity, 'projection_sha256': state['review_action']['projection_sha256']})

@@ -254,16 +254,11 @@ def _review(root: Path, state: dict, nxt: dict, result_sha: str,
     if decision not in ('raise', 'retain'):
         _fail('closeout_review_did_not_accept_result')
     if ((state.get('last_strong_lead') is True
+         or state.get('dismissed_strong_lead') is True
          or reviewed_checkpoint.get('strong_lead') is True)
-            and nxt.get('strong_lead') is False):
-        leads = outcome.get('lead_dispositions')
-        if (not isinstance(leads, list) or not leads
-                or any(not isinstance(item, dict)
-                       or item.get('decision') not in ('retain', 'narrow', 'reject')
-                       or not all(isinstance(item.get(key), str) and item[key].strip()
-                                  for key in ('basis_examined', 'uncertain_condition', 'next_check'))
-                       for item in leads)):
-            _fail('closeout_strong_lead_review_missing')
+            and nxt.get('strong_lead') is False
+            and not continuation._valid_lead_dispositions(outcome)):
+        _fail('closeout_strong_lead_review_missing')
     return {'decision': decision, 'review_id': identity,
             'input_id': receipt['input_id'], 'receipt_sha256': runner._sha(receipt_path),
             'packet_request_sha256': pin['files']['REQUEST.json'],

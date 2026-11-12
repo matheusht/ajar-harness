@@ -1,0 +1,115 @@
+{
+  "allowance_charged_tunnel_bytes": 30,
+  "allowance_run_identity": {
+    "nonce": "synthetic-joined"
+  },
+  "allowance_used_tunnels": 1,
+  "closeout_result_sha256": "9c9541f99852fdd4085bbd82ffedb2e79b922a747c56f1492c79fe79ec7637e3",
+  "environment": {
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "event_trace": [
+    {
+      "event": "dispatch_started",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "source_action_prepared",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "source_review_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_review_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "agent_closeout_reopen",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "stopped",
+      "invocation": null,
+      "status": "stopped_incomplete"
+    }
+  ],
+  "expected_closeout": "stopped_incomplete",
+  "fresh_reviews": 1,
+  "kind": "native-engagement-joined-synthetic-e2e-v1",
+  "lead_disposition": "missing",
+  "limits": "Synthetic native turns, source receipts, reviewer, owner, and cleanup; no live provider, target service, or real owner teardown.",
+  "owner_stops": 1,
+  "plan_sha256": "3ca5522de80dc6ee06f1cae0fb63e2e6f85089b3d2b0f975f88ac5fffeb87990",
+  "provider_calls": 0,
+  "review_projection_sha256": "0f1aedb8e36e240928241a32509bcaa3cee26f2a31157ee017e83eeaef3e42fc",
+  "scenario_sha256": "b170ac4d2a0e0a86b4ec967aecd5853ad7427e6bf7b4c0274175a9478192930f",
+  "source_actions": 1,
+  "source_terminal_sha256": "aa498501c91a452d8cabbfa5619b0124f11820b4cdc7619cfbabed2d37f944d5",
+  "status": "passed",
+  "target_service_calls": 0,
+  "transition_checks": 48,
+  "transition_evidence_sha256": "f2e0756a737e3e90b19b84cde305c6627f3b8055513a3a8c0ec806ab9692f05d",
+  "turns": [
+    "research",
+    "resume",
+    "resume"
+  ]
+}

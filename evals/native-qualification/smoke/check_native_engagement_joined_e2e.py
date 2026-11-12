@@ -27,7 +27,11 @@ def main() -> int:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    variants = parser.add_mutually_exclusive_group()
+    variants.add_argument('--missing-disposition', action='store_true')
+    variants.add_argument('--missing-disposition-continue', action='store_true')
     args = parser.parse_args()
+    missing_disposition = args.missing_disposition or args.missing_disposition_continue
     with tempfile.TemporaryDirectory(prefix='native-engagement-joined-') as temporary:
         base = Path(temporary).resolve()
         transition_output = base / 'transition.json'
@@ -70,8 +74,8 @@ def main() -> int:
             turns.append(command)
             if len(turns) == 1:
                 assert command == 'research' and prompt is None
-                runner._write_json(root / 'researcher/NEXT.json', source_check.checkpoint(
-                    action=source_check.ACTION))
+                runner._write_json(root / 'researcher/NEXT.json', {
+                    **source_check.checkpoint(action=source_check.ACTION), 'strong_lead': True})
             elif len(turns) == 2:
                 assert command == 'resume' and prompt is not None
                 action_paths = list((controls / 'research/source-actions').glob('*/RESULTS.json'))
@@ -82,10 +86,22 @@ def main() -> int:
                     'next': None, 'proposed_stop': False,
                     'host_action': {'kind': continuation.SOURCE_REVIEW_ACTION_KIND,
                                     'claim': 'The synthetic source branch has no proven security effect.'}})
-            else:
-                assert len(turns) == 3 and command == 'resume' and prompt is not None
+            elif len(turns) == 3:
+                assert command == 'resume' and prompt is not None
                 review_paths = list((controls / 'research/reviews').glob('*/RESULTS.json'))
                 assert len(review_paths) == 1 and review_paths[0].parent.name in prompt.read_text()
+                runner._write_json(root / 'researcher/NEXT.json', {
+                    'kind': continuation.NEXT_KIND, **final_fields,
+                    'next': (None if args.missing_disposition else {
+                        'question': 'Does the denied control remain denied?',
+                        'test': 'repeat the local denied-control check',
+                        'prediction': 'the control remains denied',
+                        'disconfirming': 'the control becomes reachable',
+                        'authority': 'same checked approval'}),
+                    'proposed_stop': args.missing_disposition, 'host_action': None})
+            else:
+                assert len(turns) == 4 and command == 'resume' and prompt is not None
+                assert continuation._next(root)['next']['test'] == 'repeat the local denied-control check'
                 runner._write_json(root / 'researcher/NEXT.json', {
                     'kind': continuation.NEXT_KIND, **final_fields,
                     'next': None, 'proposed_stop': True, 'host_action': None})
@@ -97,13 +113,20 @@ def main() -> int:
 
         def fake_review(run_root, packet, pin, role, module):
             assert module.verify_packet(packet, pin)
+            unfinished = json.loads((packet / 'UNFINISHED.json').read_text())
+            assert unfinished['checkpoint']['strong_lead'] is False
             review_calls.append(role)
             evidence = controls / 'source-evidence' / role / 'RESULTS.json'
             evidence.parent.mkdir(parents=True, exist_ok=True)
             runner._write_json(evidence, {'kind': 'synthetic-source-review-evidence-v1',
                                           'input_id': pin['input_id']}, once=True)
             evidence.chmod(0o444)
-            outcome = {'decision': 'retain', 'next_check': 'Check the original actor entry'}
+            outcome = {'decision': 'retain', 'next_check': 'Check the original actor entry',
+                       'lead_dispositions': ([] if missing_disposition else [{
+                           'decision': 'narrow',
+                           'basis_examined': 'the captured source check and contrary output',
+                           'uncertain_condition': 'original actor entry is still untested',
+                           'next_check': 'check original actor rights'}])}
             receipt = {'kind': 'native-source-review-v1', 'status': 'reviewed',
                        'assessment': {'status': 'candidate_for_operator_review',
                                       'decision': 'retain', 'outcome': outcome},
@@ -144,23 +167,46 @@ def main() -> int:
             stack.enter_context(patch.object(runner, 'stop', side_effect=fake_stop))
             stack.enter_context(patch.object(runner, '_docker', side_effect=fake_docker))
             outcome = continuation.continue_run(
-                root, max_invocations=4, closeout_wait_seconds=0, invoke=invoke,
+                root, max_invocations=3 if missing_disposition else 5,
+                closeout_wait_seconds=0, invoke=invoke,
                 status_fn=lambda _root: {'status': 'active', 'allowance': {'active': True}})
-        assert outcome['status'] == 'complete_internal_candidate', outcome
-        assert turns == ['research', 'resume', 'resume'] and len(action_calls) == 1, (turns, action_calls)
-        assert review_calls == ['reviewer-1'] and stop_calls == ['stop'], (review_calls, stop_calls)
+        expected = ('closure_review_required' if args.missing_disposition_continue else
+                    'stopped_incomplete' if args.missing_disposition else
+                    'complete_internal_candidate')
+        assert outcome['status'] == expected, outcome
+        expected_turns = ['research', 'resume', 'resume'] + ([] if missing_disposition else ['resume'])
+        assert turns == expected_turns and len(action_calls) == 1, (turns, action_calls)
+        assert review_calls == ['reviewer-1']
+        assert stop_calls == ([] if args.missing_disposition_continue else ['stop']), stop_calls
         state = continuation._state(root)
         assert state['source_action']['phase'] == 'captured'
         assert state['review_action']['phase'] == 'captured'
+        assert (controls / 'closeout/request.json').exists() is not missing_disposition
+        assert bool(list((controls / 'closeout').glob('feedback-*.json'))) is args.missing_disposition
+        if args.missing_disposition_continue:
+            assert runner._read_json(controls / 'continuation/closure-request.json')[
+                'reason'] == 'strong_lead_abandoned'
+        events = [json.loads(line) for line in
+                  (controls / 'continuation/events.jsonl').read_text().splitlines()]
+        assert any(row.get('event') == 'source_review_captured' for row in events)
+        assert any(row.get('event') == 'closure_request' for row in events) is args.missing_disposition_continue
+        assert allowance(root)['charged_tunnel_bytes'] == 10 * len(turns)
         result = {'kind': 'native-engagement-joined-synthetic-e2e-v1', 'status': 'passed',
+                  'expected_closeout': expected,
+                  'lead_disposition': 'missing' if missing_disposition else 'narrow',
                   'transition_checks': len(first['checks']),
                   'plan_sha256': runner._sha(root / 'plan.json'),
                   'transition_evidence_sha256': runner._sha(transition_output),
                   'source_terminal_sha256': state['source_action']['terminal_sha256'],
                   'review_projection_sha256': state['review_action']['projection_sha256'],
-                  'closeout_result_sha256': outcome['record_sha256'],
+                  'closeout_result_sha256': outcome.get('record_sha256'),
                   'turns': turns, 'source_actions': len(action_calls),
                   'fresh_reviews': len(review_calls), 'owner_stops': len(stop_calls),
+                  'allowance_run_identity': allowance(root)['run_identity'],
+                  'allowance_used_tunnels': allowance(root)['used_tunnels'],
+                  'allowance_charged_tunnel_bytes': allowance(root)['charged_tunnel_bytes'],
+                  'event_trace': [{'event': row['event'], 'invocation': row.get('invocation'),
+                                   'status': row.get('status')} for row in events],
                   'provider_calls': 0, 'target_service_calls': 0,
                   'environment': {'platform': platform.system().lower(),
                                   'python': platform.python_version()},

@@ -124,6 +124,26 @@ def main():
               second.get('status') == 'closed'
               and [json.loads(line)['command'] for line in
                    (base / 'calls.jsonl').read_text().splitlines()] == calls)
+        manual = base / 'manual-dismissal'
+        (manual / 'controls').mkdir(parents=True, mode=0o700)
+        manual.chmod(0o700)
+        (manual / 'researcher').mkdir(mode=0o700)
+        runner._write_json(manual / 'plan.json', {'kind': 'continuation-smoke'}, once=True)
+        manual_state = continuation._state(manual)
+        manual_state.update(invocations=1, last_strong_lead=True)
+        continuation._save_state(manual, manual_state)
+        runner._write_json(manual / 'researcher/NEXT.json', {
+            'kind': continuation.NEXT_KIND,
+            'last_result': {'state': 'refuted', 'unresolved': 'the prior lead'},
+            'capabilities': [], 'coverage': [], 'next': None,
+            'host_action': {'kind': continuation.SOURCE_REVIEW_ACTION_KIND,
+                            'claim': 'Review the dismissed lead'},
+            'proposed_stop': False, 'strong_lead': False})
+        manual_outcome = run_controller(manual, fake)
+        check('manual dismissal still requires legacy closure review',
+              manual_outcome['status'] == 'closure_review_required'
+              and runner._read_json(manual / 'controls/continuation/closure-request.json')
+                  ['reason'] == 'strong_lead_abandoned')
         print(json.dumps({'checks': checks, 'status': 'passed',
                           'limits': 'Synthetic subprocess only; no native model, provider, or target.'},
                          indent=2))

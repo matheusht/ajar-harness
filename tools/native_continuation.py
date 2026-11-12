@@ -238,6 +238,7 @@ def _state(root: Path) -> dict:
         value = {'kind': STATE_KIND, 'plan_sha256': plan_sha, 'invocations': 0,
                  'session_id': None, 'last_pool': None, 'stop_reason': None,
                  'pending': None, 'last_strong_lead': None,
+                 'dismissed_strong_lead': False,
                  'applied_closure_review_sha256': None, 'source_action': None,
                  'review_action': None, 'last_reopen': None}
         _write_private(path, value)
@@ -249,6 +250,7 @@ def _state(root: Path) -> dict:
     for key in ('pending', 'last_strong_lead', 'applied_closure_review_sha256',
                 'source_action', 'review_action', 'last_reopen'):
         value.setdefault(key, None)
+    value.setdefault('dismissed_strong_lead', False)
     return value
 
 
@@ -1221,6 +1223,37 @@ def _verified_cached_review(root: Path, state: dict, nxt: dict, previous: dict,
         module.validate_public_bytes((json.dumps(projection, sort_keys=True) + '\n').encode())
 
 
+def _valid_lead_dispositions(outcome: object) -> bool:
+    leads = outcome.get('lead_dispositions') if isinstance(outcome, dict) else None
+    return (isinstance(leads, list) and bool(leads)
+            and all(isinstance(item, dict)
+                    and item.get('decision') in ('retain', 'narrow', 'reject')
+                    and all(isinstance(item.get(key), str) and item[key].strip()
+                            for key in ('basis_examined', 'uncertain_condition', 'next_check'))
+                    for item in leads))
+
+
+def _review_disposes_lead(root: Path, state: dict, nxt: dict) -> bool:
+    review = state.get('review_action') or {}
+    if (review.get('phase') != 'captured'
+            or review.get('after_invocations') != state['invocations']):
+        return False
+    try:
+        _verified_cached_review(root, state, nxt, review, _next_hash(root))
+        receipt = _read_private(root / 'controls' / ('review-' + review['role'] + '.json'))
+    except (ContinuationError, runner.NativeResearchError, OSError, ValueError,
+            TypeError, KeyError, AttributeError, RuntimeError):
+        return False
+    assessment, material = receipt.get('assessment'), receipt.get('material')
+    outcome = assessment.get('outcome') if isinstance(assessment, dict) else None
+    return (isinstance(material, dict) and material.get('status') == 'captured'
+            and receipt.get('same_original_allowance') is True
+            and material.get('input_id') == receipt.get('input_id')
+            and material.get('outcome') == outcome
+            and isinstance(outcome, dict) and outcome.get('decision') in ('raise', 'retain')
+            and _valid_lead_dispositions(outcome))
+
+
 def _agent_review(root: Path, state: dict, nxt: dict) -> dict:
     next_sha = _next_hash(root)
     previous = state.get('review_action')
@@ -1496,6 +1529,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
     status_fn = status_fn or (lambda _root: _status(runner_path, root))
     with _lease(root):
         state = _state(root)
+        checked_setup = 'checked_setup' in _read_private(root / 'plan.json')
         if (root / 'controls/closeout/stop-request.json').exists():
             closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
                                      forced_stop_reason='closeout_readback')
@@ -1619,7 +1653,9 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     return _finish(root, state, 'closure_review_required',
                                    request=str(cont / 'closure-request.json'))
             if (state.get('last_strong_lead') is True and nxt.get('strong_lead') is False
-                    and reopen_check is None):
+                    and reopen_check is None
+                    and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
+                             == SOURCE_REVIEW_ACTION_KIND)):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1659,7 +1695,9 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                                    request=str(cont / 'closure-request.json'))
             if (state['invocations'] and state.get('last_strong_lead') is True
                     and nxt is not None and nxt.get('strong_lead') is False
-                    and reopen_check is None):
+                    and reopen_check is None
+                    and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
+                             == SOURCE_REVIEW_ACTION_KIND)):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1671,6 +1709,14 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     outcome = _agent_review(root, state, nxt)
                     if outcome['status'] != 'captured':
                         return _finish(root, state, 'review_incomplete', review_action=outcome)
+                    if (checked_setup and state.get('last_strong_lead') is True
+                            and nxt.get('strong_lead') is False
+                            and _review_disposes_lead(root, state, nxt)):
+                        state['dismissed_strong_lead'] = True
+                        state['last_strong_lead'] = False
+                        _save_state(root, state)
+                        _event(root, {'at': _now(), 'event': 'strong_lead_disposition_reviewed',
+                                      'review_id': state['review_action']['review_id']})
                 else:
                     outcome = _source_action(root, state, nxt)
                     if outcome and outcome['status'] in ('unknown_effect', 'evidence_changed',
@@ -1791,21 +1837,26 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
             if nxt is None:
                 return _finish(root, state, 'next_brief_missing')
             if (state.get('last_strong_lead') is True and nxt.get('strong_lead') is False
-                    and not nxt.get('proposed_stop')):
+                    and not nxt.get('proposed_stop')
+                    and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
+                             == SOURCE_REVIEW_ACTION_KIND)):
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
                               'request_sha256': runner._sha(cont / 'closure-request.json')})
                 return _finish(root, state, 'closure_review_required',
                                request=str(cont / 'closure-request.json'))
-            state['last_strong_lead'] = nxt.get('strong_lead')
+            # Keep an unresolved lead pending until closeout checks its fresh disposition.
+            if not (checked_setup and state.get('last_strong_lead') is True
+                    and nxt.get('strong_lead') is False):
+                state['last_strong_lead'] = nxt.get('strong_lead')
             next_sha = _next_hash(root)
             result_state = nxt['last_result']['state']
             _save_state(root, state)
             _event(root, {'at': _now(), 'event': 'next',
                           'invocation': state['invocations'],
                           'result_state': result_state,
-                          'strong_lead': state['last_strong_lead'],
+                          'strong_lead': nxt.get('strong_lead'),
                           'next_sha256': next_sha})
             if nxt.get('proposed_stop'):
                 closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,

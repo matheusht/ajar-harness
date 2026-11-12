@@ -711,6 +711,17 @@ def main():
             check('retried checked package passes public readback',
                   retry_verify_code == 0 and retry_verified.get('receipt', {}).get('status') == 'ready',
                   {'exit': retry_verify_code, 'code': retry_verified.get('code')})
+            ready_journal_hash = sha(crash_journal / 'journal.json')
+            archived_before = len(list((crash_controls / 'setup-build-attempts').iterdir()))
+            shutil.rmtree(crash_controls / 'setup-checked')
+            lost_checked_code, lost_checked = cli(BUILDER, 'setup-build',
+                '--run-root', str(crash_root), '--approval', str(retry_approval),
+                '--dependency-catalog', str(catalog))
+            check('ready build cannot repeat after checked package loss',
+                  lost_checked_code == 2 and lost_checked.get('code') == 'build_already_dispatched'
+                  and sha(crash_journal / 'journal.json') == ready_journal_hash
+                  and len(list((crash_controls / 'setup-build-attempts').iterdir())) == archived_before,
+                  {'exit': lost_checked_code, 'code': lost_checked.get('code')})
         linked_template_args = list(template_args)
         linked_template_args[linked_template_args.index('--run-root') + 1] = str(linked_root)
         linked_template_code, linked_template = cli(BUILDER, *linked_template_args)

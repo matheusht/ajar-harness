@@ -698,6 +698,8 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         journal_dir = controls / 'setup-build'
         if (controls / 'setup-checked').exists() or (controls / 'setup-checked').is_symlink():
             fail('build_already_dispatched')
+        if journal_dir.exists() and read_json(journal_dir / 'journal.json').get('status') == 'ready':
+            fail('build_already_dispatched')
         authority = verify_authority(setup, approval_path, catalog)
         amendment = authority['scope_amendment']
         if journal_dir.exists():

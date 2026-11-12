@@ -338,9 +338,11 @@ line needs no patch action. An unrequested patch is rejected.
 The host copies the pinned original source, applies the exact diff there, and
 records the full original and patched byte and mode manifests, the diff hash,
 goal, plan, approval, actor, initial state, and remaining allowance. It never
-applies the diff to `original/`. The diff and both manifests enter the immutable
-fresh-review packet. Unsafe paths, symlinks, binary patches, changed originals,
+applies the diff to `original/`. The diff and both manifest hashes enter the
+immutable fresh-review packet; full manifests remain in protected host records.
+Unsafe paths, symlinks, binary patches, changed originals,
 or a diff that does not reproduce the patched manifest stop before review.
+An applicable mode-only diff counts as a nonempty patch.
 
 The independent reviewer writes `source-check.json` with kind
 `native-paired-source-check-v1`, the packet `input_id`, distinct `effect`,
@@ -349,6 +351,9 @@ are frozen separately from the patch and must have identical bytes on both
 copies. The host runs each command on three clean original copies and three
 clean patched copies under the same offline source executor. Every execution
 receipt labels its variant; a patched run cannot count as original replay.
+The host compares exit status, streams, changed or missing output files, and
+file modes across all replays. It recomputes output deltas from saved input and
+output manifests at readback.
 The reviewer reads and hashes the paired result, checks the material fix link,
 and states limits. Its checked link must bind the evidence hash, diff hash,
 original effect, changed line, and patched result. A changed effect with stable

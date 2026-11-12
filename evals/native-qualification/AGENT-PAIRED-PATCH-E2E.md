@@ -15,11 +15,14 @@ original-target replay. A goal without that line may close without this action.
 | Missing, empty, unsafe, oversized, or changed diff; diff escaping the tree | Reject before review and preserve the reason. |
 | Original target differs from its plan manifest | Reject before applying the diff. |
 | Patched tree differs from the exact applied diff or either saved manifest changes | No checked-fix result or cached readback. |
+| Diff changes only a file mode | Accept the nonempty patch and pin both mode maps. |
 | Reviewer check file is missing effect, causal control, ordinary function, or connected-path command | No host checks. |
 | Patch changes a reviewer check script, or a command changes that script during execution | Reject the check instead of crediting a passing test. |
 | Original and patched checks run different commands, source inputs, actor, or initial-state envelope | Reject the pair. |
 | Review is interrupted after dispatch, a receipt is missing, or execution status is unknown | Hold incomplete; never automatically retry the effect or consume another reviewer slot. |
-| Effect is not differentiated, normal or connected behavior regresses, or reviewer does not bind the effect/fix link to the diff | Keep fix unproven; retain the observations and limits. |
+| Effect changes only an output file with unchanged streams | Count the material effect if the file delta differs and the other paths hold. |
+| Normal or connected output bytes or modes differ despite identical streams | Keep fix unproven; retain the observations and limits. |
+| Output delta summary disagrees with the saved input/output manifests, or the reviewer does not bind the effect/fix link to the diff | Keep fix unproven. |
 | Stop or cleanup is missing, uncertain, or reports surviving resources | Do not mark the engagement complete. |
 
 ## Contained scenario
@@ -46,6 +49,11 @@ original-target replay. A goal without that line may close without this action.
    cleanup receipt and verify closeout holds; complete the synthetic cleanup
    and verify closeout succeeds without another stop. A second fixture without
    the opt-in line must close without a patch check.
+5. Replay three additional source variants: a fix visible only in an output
+   file, a normal-path file regression with unchanged streams, and a
+   normal-path mode regression with unchanged streams and normal output file
+   bytes. Accept only the file-only effect. Apply a mode-only diff separately and verify
+   unchanged content manifests with different pinned modes.
 
 Run from the repository root:
 
@@ -56,8 +64,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_agent_p
 
 Expected output is JSON with `status: passed`, all four reviewer commands,
 `before`/`after` for the effect, matching `control`/`normal`/`connected` output
-across the pair, 8 command executions with 3 clean replays each, denied cases,
-the bound patch request, execution receipts and hashes, verified cleanup
+across the pair, 8 command executions with 3 clean replays each in the main
+scenario plus 24 executions for the three variants, denied cases,
+the bound patch request, execution receipts and hashes, file/mode variant
+observations, verified cleanup
 receipts for patch and no-patch closeout,
 and `provider_calls: 0`, `target_calls: 0`.
 The command uses disposable source trees and synthetic provider/Docker receipts.

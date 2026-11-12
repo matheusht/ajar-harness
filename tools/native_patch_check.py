@@ -119,10 +119,10 @@ def freeze_patch(root: Path, nxt: dict, next_sha: str, plan: dict,
     _apply(patched, data)
     original_manifest = runner._inventory(root / 'original')
     patched_manifest = runner._inventory(patched)
-    if original_manifest == patched_manifest:
-        _fail('patch_diff_empty')
     original_modes = runner._file_modes(root / 'original', original_manifest)
     patched_modes = runner._file_modes(patched, patched_manifest)
+    if original_manifest == patched_manifest and original_modes == patched_modes:
+        _fail('patch_diff_empty')
     runner._write_json(area / 'original-manifest.json', original_manifest, once=True)
     runner._write_json(area / 'patched-manifest.json', patched_manifest, once=True)
     runner._write_json(area / 'original-modes.json', original_modes, once=True)
@@ -195,7 +195,8 @@ def verify_patch(root: Path, request: dict, plan: dict, module) -> dict:
                 or runner._file_modes(replay, patched) != patched_modes):
             _fail('patch_diff_does_not_explain_bytes')
     return {'request': request, 'original_manifest': original,
-            'patched_manifest': patched, 'area': area}
+            'patched_manifest': patched, 'original_modes': original_modes,
+            'patched_modes': patched_modes, 'area': area}
 
 
 def review_input(root: Path, request: dict, original_input: Path,
@@ -206,6 +207,8 @@ def review_input(root: Path, request: dict, original_input: Path,
     if runner._inventory(original_input) != input_manifest:
         _fail('patch_review_input_changed')
     runner._verify_source_original(pair['original_manifest'], input_manifest)
+    if runner._file_modes(original_input, pair['original_manifest']) != pair['original_modes']:
+        _fail('patch_review_input_mode_changed')
     scripts = {name: digest for name, digest in input_manifest.items()
                if name not in pair['original_manifest']}
     if not scripts or set(scripts) & set(pair['patched_manifest']):
@@ -256,6 +259,19 @@ def verify_review_evidence(root: Path, role: str, receipt: dict) -> dict:
         _fail('patch_approval_changed')
     originals = runner._inventory(root / 'controls' / ('source-review-' + role) / 'input')
     patched = runner._inventory(pair['area'] / 'review-input-patched')
+    input_modes = patch.get('input_modes')
+    if (not isinstance(input_modes, dict) or set(input_modes) != {'original', 'patched'}
+            or input_modes['original'] != runner._file_modes(
+                root / 'controls' / ('source-review-' + role) / 'input', originals)
+            or input_modes['patched'] != runner._file_modes(
+                pair['area'] / 'review-input-patched', patched)
+            or any(input_modes['original'].get(name) != mode
+                   for name, mode in pair['original_modes'].items())
+            or any(input_modes['patched'].get(name) != mode
+                   for name, mode in pair['patched_modes'].items())
+            or any(input_modes['original'].get(name) != input_modes['patched'].get(name)
+                   for name in scripts)):
+        _fail('patch_review_input_mode_changed')
     if (any(originals.get(name) != digest or patched.get(name) != digest
             for name, digest in scripts.items())
             or any(originals.get(name) != digest for name, digest in pair['original_manifest'].items())
@@ -295,12 +311,17 @@ def verify_review_evidence(root: Path, role: str, receipt: dict) -> dict:
                     or observed.get('input_manifest_sha256') != runner._sha(execution / 'input-manifest.json')
                     or runner._read_json(execution / 'input-manifest.json') != source
                     or runner._inventory(execution / 'input') != source
+                    or runner._file_modes(execution / 'input', source) != input_modes[variant]
                     or [row.get('role') for row in observed.get('runs', [])] != list(runner.CAPTURE_TARGETS)):
                 _fail('patch_review_execution_changed')
             for row in observed['runs']:
                 folder = execution / row['role']
                 output = runner._read_json(folder / 'files.json')
                 summarized = case.get('outputs', {}).get(row['role'])
+                output_modes = runner._file_modes(folder / 'files', output)
+                actual_summary = runner._source_output_summary(
+                    source, output, input_modes[variant], output_modes)
+                checked_modes = pair['original_modes'] if variant == 'original' else pair['patched_modes']
                 if (not isinstance(summarized, dict)
                         or row.get('output_manifest_sha256') != runner._sha(folder / 'files.json')
                         or runner._inventory(folder / 'files') != output
@@ -308,6 +329,10 @@ def verify_review_evidence(root: Path, role: str, receipt: dict) -> dict:
                         or any(output.get(file) != digest for file, digest in
                                (pair['original_manifest'] if variant == 'original' else
                                 pair['patched_manifest']).items())
+                        or any(output_modes.get(file) != mode
+                               for file, mode in checked_modes.items())
+                        or any(summarized.get(key) != value
+                               for key, value in actual_summary.items())
                         or summarized.get('manifest_sha256') != row['output_manifest_sha256']):
                     _fail('patch_review_output_changed')
                 manifest_name = summarized.get('manifest_path', '').removeprefix('/source-evidence/')
@@ -324,15 +349,25 @@ def verify_review_evidence(root: Path, role: str, receipt: dict) -> dict:
     def signature(variant: str, name: str):
         return [(row['exit_code'], row['stdout_sha256'], row['stderr_sha256'])
                 for row in evidence['cases'][variant][name]['receipt']['runs']]
+    def deltas(variant: str, name: str):
+        outputs = evidence['cases'][variant][name]['outputs']
+        return [{key: outputs[role][key] for key in
+                 ('changed_files', 'missing_files', 'changed_modes')}
+                for role in runner.CAPTURE_TARGETS]
     stable = all(evidence['cases'][variant][name]['receipt'].get('replay_output_equal') is True
                  and len(set(signature(variant, name))) == 1
+                 and all(item == deltas(variant, name)[0]
+                         for item in deltas(variant, name)[1:])
                  for variant in ('original', 'patched')
                  for name in ('effect', 'control', 'normal', 'connected'))
-    preserved = all(signature('original', name)[0] == signature('patched', name)[0]
-                    and signature('original', name)[0][0] == 0
+    preserved = all(signature('original', name) == signature('patched', name)
+                    and all(row[0] == 0 for row in signature('original', name))
+                    and deltas('original', name) == deltas('patched', name)
                     for name in ('normal', 'connected'))
-    control_held = signature('original', 'control')[0] == signature('patched', 'control')[0]
-    effect_changed = signature('original', 'effect')[0] != signature('patched', 'effect')[0]
+    control_held = (signature('original', 'control') == signature('patched', 'control')
+                    and deltas('original', 'control') == deltas('patched', 'control'))
+    effect_changed = (signature('original', 'effect') != signature('patched', 'effect')
+                      or deltas('original', 'effect') != deltas('patched', 'effect'))
     if evidence.get('paired_observation') != {
             'status': 'differential_with_normal_paths_preserved' if
                 stable and preserved and control_held and effect_changed else 'unproven',

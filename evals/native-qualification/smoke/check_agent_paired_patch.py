@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import difflib
 import hashlib
 import json
 from pathlib import Path
@@ -35,13 +36,38 @@ CHECKS = {'effect': 'python3 app.py effect\n',
           'control': 'python3 app.py control\n',
           'normal': 'python3 app.py normal\n',
           'connected': 'python3 app.py connected\n'}
+MODE_DIFF = 'diff --git a/app.py b/app.py\nold mode 100644\nnew mode 100755\n'
+
+
+def source_diff(before: str, after: str) -> str:
+    return 'diff --git a/app.py b/app.py\n' + ''.join(difflib.unified_diff(
+        before.splitlines(keepends=True), after.splitlines(keepends=True),
+        fromfile='a/app.py', tofile='b/app.py'))
+
+
+FILE_ONLY_APP = ("from pathlib import Path\nimport sys\nvalue = 'before'\n"
+                 "mode = sys.argv[1]\nif mode == 'effect':\n"
+                 "    Path('effect.out').write_text(value)\nprint(mode)\n")
+NORMAL_FILE_APP = ("from pathlib import Path\nimport sys\nvalue = 'before'\n"
+                   "mode = sys.argv[1]\nif mode == 'effect':\n"
+                   "    print(value)\nelif mode == 'normal':\n"
+                   "    Path('normal.out').write_text(value)\n"
+                   "    print('normal')\nelse:\n    print(mode)\n")
+NORMAL_MODE_APP = ("from pathlib import Path\nimport sys\nvalue = 'before'\n"
+                   "mode = sys.argv[1]\nif mode == 'effect':\n"
+                   "    print(value)\nelif mode == 'normal':\n"
+                   "    Path('normal.out').write_text('stable')\n"
+                   "    Path('normal.out').chmod(0o600 if value == 'before' else 0o644)\n"
+                   "    print('normal')\nelse:\n    print(mode)\n")
 
 
 def fixture(base: Path, *, patch_goal: bool = True,
-            last_state: str = 'inconclusive') -> Path:
+            last_state: str = 'inconclusive', app_source: str = APP,
+            diff: str = DIFF) -> Path:
     root = source_check.fixture(base)
     for name in ('original', 'researcher/project', 'reviewer-1/project', 'reviewer-2/project'):
-        (root / name / 'app.py').write_text(APP)
+        (root / name / 'app.py').write_text(app_source)
+        (root / name / 'app.py').chmod(0o644)
     plan = runner._read_json(root / 'plan.json')
     source = runner._inventory(root / 'original')
     plan['source_sha256'] = source
@@ -55,7 +81,7 @@ def fixture(base: Path, *, patch_goal: bool = True,
     brief.chmod(0o600)
     plan['brief_sha256'] = runner._sha(brief)
     runner._write_json(root / 'plan.json', plan)
-    (root / 'researcher/PATCH.diff').write_text(DIFF)
+    (root / 'researcher/PATCH.diff').write_text(diff)
     (root / 'researcher/PATCH.diff').chmod(0o600)
     (root / 'researcher/project/RESULT.md').write_text(
         closeout_check.result_text('paired patch check') +
@@ -96,6 +122,16 @@ def main() -> None:
         assert pair['original_manifest'] == plan['source_sha256']
         assert pair['patched_manifest']['app.py'] != plan['source_sha256']['app.py']
         assert runner._inventory(root / 'original') == plan['source_sha256']
+        mode_root = fixture(base / 'mode-only-diff', diff=MODE_DIFF)
+        mode_plan = runner._read_json(mode_root / 'plan.json')
+        mode_request = paired.freeze_patch(mode_root, continuation._next(mode_root),
+            continuation._next_hash(mode_root), mode_plan, ALLOWANCE,
+            runner._load_review_module(mode_root))
+        mode_pair = paired.verify_patch(mode_root, mode_request, mode_plan,
+                                        runner._load_review_module(mode_root))
+        assert mode_pair['original_manifest'] == mode_pair['patched_manifest']
+        assert (runner._file_modes(mode_root / 'original', mode_pair['original_manifest']) !=
+                runner._file_modes(mode_pair['area'] / 'patched', mode_pair['patched_manifest']))
         reviewer = root / 'reviewer-1/project'
         for name, content in CHECKS.items():
             (reviewer / (name + '.sh')).write_text(content)
@@ -280,6 +316,69 @@ def main() -> None:
             receipt = runner._read_json(paired_run / 'controls/review-reviewer-1.json')
             assert continuation._agent_review(paired_run, paired_state, paired_next)['status'] == 'captured'
             assert review_calls == ['reviewer-1']
+            baseline_executions = executions.copy()
+            baseline_review_calls = review_calls.copy()
+            variant_observations = {}
+            for case, app_source, expected_candidate, expected_preserved in (
+                    ('file-only-effect', FILE_ONLY_APP, True, True),
+                    ('normal-file-regression', NORMAL_FILE_APP, False, False),
+                    ('normal-mode-regression', NORMAL_MODE_APP, False, False)):
+                executions.clear()
+                review_calls.clear()
+                variant = fixture(base / case, last_state='supported', app_source=app_source,
+                    diff=source_diff(app_source, app_source.replace("value = 'before'",
+                                                                     "value = 'after'")))
+                (variant / 'controls/source-evidence/reviewer-1').mkdir(parents=True, mode=0o700)
+                variant_result = continuation._agent_review(
+                    variant, continuation._state(variant), continuation._next(variant))
+                assert variant_result['status'] == 'captured' and review_calls == ['reviewer-1']
+                variant_receipt = runner._read_json(variant / 'controls/review-reviewer-1.json')
+                variant_evidence = paired.verify_review_evidence(variant, 'reviewer-1', variant_receipt)
+                assert variant_evidence['paired_observation']['effect_changed'] is True, case
+                assert variant_evidence['paired_observation']['normal_and_connected_preserved'] is expected_preserved, case
+                assert (variant_receipt['patch_assessment'] == 'checked_fix_candidate') is expected_candidate, case
+                assert len(executions) == 8, case
+                source_case = variant_evidence['cases']['original']
+                patched_case = variant_evidence['cases']['patched']
+                if case == 'file-only-effect':
+                    assert (source_case['effect']['outputs']['target']['stdout'] ==
+                            patched_case['effect']['outputs']['target']['stdout'])
+                    assert (source_case['effect']['outputs']['target']['changed_files']['effect.out'] !=
+                            patched_case['effect']['outputs']['target']['changed_files']['effect.out'])
+                if case == 'normal-file-regression':
+                    assert (source_case['normal']['outputs']['target']['stdout'] ==
+                            patched_case['normal']['outputs']['target']['stdout'])
+                    assert (source_case['normal']['outputs']['target']['changed_files']['normal.out'] !=
+                            patched_case['normal']['outputs']['target']['changed_files']['normal.out'])
+                if case == 'normal-mode-regression':
+                    assert (source_case['normal']['outputs']['target']['changed_files'] ==
+                            patched_case['normal']['outputs']['target']['changed_files'])
+                    assert (source_case['normal']['outputs']['target']['changed_modes'] !=
+                            patched_case['normal']['outputs']['target']['changed_modes'])
+                variant_observations[case] = {
+                    'assessment': variant_receipt['patch_assessment'],
+                    'observation': variant_evidence['paired_observation'],
+                    'original_effect_delta': source_case['effect']['outputs']['target']['changed_files'],
+                    'patched_effect_delta': patched_case['effect']['outputs']['target']['changed_files'],
+                    'original_normal_delta': source_case['normal']['outputs']['target']['changed_files'],
+                    'patched_normal_delta': patched_case['normal']['outputs']['target']['changed_files'],
+                    'original_normal_modes': source_case['normal']['outputs']['target']['changed_modes'],
+                    'patched_normal_modes': patched_case['normal']['outputs']['target']['changed_modes']}
+                if case in ('normal-file-regression', 'normal-mode-regression'):
+                    evidence_file = variant / 'controls/source-evidence/reviewer-1/RESULTS.json'
+                    falsified = copy.deepcopy(variant_evidence)
+                    key = 'changed_files' if case == 'normal-file-regression' else 'changed_modes'
+                    falsified['cases']['patched']['normal']['outputs']['target'][key] = (
+                        copy.deepcopy(source_case['normal']['outputs']['target'][key]))
+                    evidence_file.chmod(0o600)
+                    runner._write_json(evidence_file, falsified)
+                    rebound = copy.deepcopy(variant_receipt)
+                    rebound['evidence_sha256'] = runner._sha(evidence_file)
+                    denial(lambda: paired.verify_review_evidence(variant, 'reviewer-1', rebound),
+                           'patch_review_output_changed')
+                    denied.append('falsified_' + key + '_summary')
+            executions[:] = baseline_executions
+            review_calls[:] = baseline_review_calls
         evidence = json.loads((paired_run / 'controls/source-evidence/reviewer-1/RESULTS.json').read_bytes())
         assert receipt['status'] == 'reviewed' and receipt['patch_assessment'] == 'checked_fix_candidate'
         assert paired.verify_review_evidence(paired_run, 'reviewer-1', receipt) == evidence
@@ -406,10 +505,20 @@ def main() -> None:
                           'denied': denied, 'review_calls': review_calls,
                           'commands': {name: ['sh', name + '.sh'] for name in CHECKS},
                           'observed_stdout': observed,
+                          'variant_observations': variant_observations,
+                          'mode_only_patch': {
+                              'request_sha256': runner._sha(mode_pair['area'] / 'request.json'),
+                              'original_modes': runner._file_modes(
+                                  mode_root / 'original', mode_pair['original_manifest']),
+                              'patched_modes': runner._file_modes(
+                                  mode_pair['area'] / 'patched', mode_pair['patched_manifest'])},
                           'patch_request': request,
                           'execution_receipts': execution_receipts,
                           'paired_executions': len(executions),
                           'synthetic_source_replays': len(executions) * len(runner.CAPTURE_TARGETS),
+                          'variant_paired_executions': 8 * len(variant_observations),
+                          'variant_source_replays': 8 * len(variant_observations) *
+                              len(runner.CAPTURE_TARGETS),
                           'cost': {'provider_calls': 0, 'target_calls': 0,
                                    'monetary_spend': 'not metered; synthetic local fixture'},
                           'checked_closeout_sha256': close['record_sha256'],

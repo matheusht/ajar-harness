@@ -3944,6 +3944,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
         if owner_role not in ('researcher', 'reviewer-1', 'reviewer-2'):
             _fail('source_owner_invalid')
         checked_source = plan['source_sha256']
+        checked_modes = None
         patch_sha = None
         if paired_request is not None:
             if owner_role == 'researcher' or source_snapshot is None or source_variant not in ('original', 'patched'):
@@ -3954,6 +3955,7 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
             if Path(paired_request) != patch['area'] / 'request.json':
                 _fail('source_patch_request_invalid')
             checked_source = patch['original_manifest'] if source_variant == 'original' else patch['patched_manifest']
+            checked_modes = patch['original_modes'] if source_variant == 'original' else patch['patched_modes']
             patch_sha = _sha(paired_request)
         elif source_variant != 'original':
             _fail('source_patch_request_invalid')
@@ -3966,6 +3968,8 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                 _fail('source_execution_input_changed')
             if owner_role.startswith('reviewer-'):
                 _verify_source_original(checked_source, inventory)
+                if checked_modes is not None and _file_modes(source_snapshot, checked_source) != checked_modes:
+                    _fail('source_review_original_mode_changed')
         identity = execution_id or uuid.uuid4().hex
         if not re.fullmatch(r'[0-9a-f]{32}', identity):
             _fail('source_execution_id_invalid')
@@ -3996,6 +4000,8 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                     _verify_inventory(directory / 'input', expected_input)
             if owner_role.startswith('reviewer-'):
                 _verify_source_original(checked_source, inventory)
+                if checked_modes is not None and _file_modes(directory / 'input', checked_source) != checked_modes:
+                    _fail('source_review_original_mode_changed')
             _write_json(directory / 'input-manifest.json', inventory, once=True)
             receipt['input_manifest_sha256'] = _sha(directory / 'input-manifest.json')
             _write_json(path, receipt)
@@ -4018,6 +4024,8 @@ def source_execute(run_root: Path, command_file: Path | None = None, *,
                 output_inventory = _inventory(work)
                 if owner_role.startswith('reviewer-'):
                     _verify_source_original(checked_source, output_inventory)
+                    if checked_modes is not None and _file_modes(work, checked_source) != checked_modes:
+                        _fail('source_review_original_mode_changed')
                 shutil.copytree(work, output / 'files', symlinks=True)
                 _verify_inventory(output / 'files', output_inventory)
                 _write_json(output / 'files.json', output_inventory, once=True)
@@ -5629,11 +5637,17 @@ def _source_evidence_read(raw: str, session: str, digest: str) -> bool:
     return read and hashed
 
 
-def _source_output_summary(before: dict[str, str], after: dict[str, str]) -> dict:
-    return {'file_count': len(after),
-            'changed_files': {name: digest for name, digest in after.items()
-                              if before.get(name) != digest},
-            'missing_files': sorted(set(before) - set(after))}
+def _source_output_summary(before: dict[str, str], after: dict[str, str],
+                           before_modes: dict[str, int] | None = None,
+                           after_modes: dict[str, int] | None = None) -> dict:
+    result = {'file_count': len(after),
+              'changed_files': {name: digest for name, digest in after.items()
+                                if before.get(name) != digest},
+              'missing_files': sorted(set(before) - set(after))}
+    if before_modes is not None and after_modes is not None:
+        result['changed_modes'] = {name: mode for name, mode in after_modes.items()
+                                   if before_modes.get(name) != mode}
+    return result
 
 
 def _publish_source_manifest(path: Path, manifest: dict[str, str], public_bytes) -> str:
@@ -5730,7 +5744,10 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         evidence['patch'] = {'request': patch_request,
                              'request_sha256': _sha(patch_area / 'request.json'),
                              'reviewer_scripts': scripts,
-                             'patched_input_manifest': patched_inventory}
+                             'patched_input_manifest': patched_inventory,
+                             'input_modes': {variant: _file_modes(snapshot, source_inventory)
+                                             for variant, (snapshot, source_inventory)
+                                             in variants.items()}}
         evidence['cases'] = {'original': {}, 'patched': {}}
     for name in checks:
         command = destination / (name + '.json')
@@ -5754,6 +5771,9 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
                     or any(not isinstance(row, dict) for row in captured['runs'])
                     or {row.get('role') for row in captured['runs']} != set(CAPTURE_TARGETS)):
                 _fail('source_review_execution_binding_changed')
+            source_modes = _file_modes(path.parent / 'input', source_inventory) if patch_request else None
+            if patch_request and source_modes != evidence['patch']['input_modes'][variant]:
+                _fail('source_review_input_mode_changed')
             outputs = {}
             for row in captured['runs']:
                 folder = path.parent / row['role']
@@ -5770,7 +5790,10 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
                 if manifest_digest != row['output_manifest_sha256']:
                     _fail('source_review_output_changed')
                 manifest_paths[manifest_path] = manifest_digest
-                outputs[row['role']] = {**_source_output_summary(source_inventory, output_inventory),
+                output_modes = _file_modes(folder / 'files', output_inventory) if patch_request else None
+                outputs[row['role']] = {**_source_output_summary(
+                                            source_inventory, output_inventory,
+                                            source_modes, output_modes),
                                         'manifest_path': '/source-evidence/' + manifest_path.name,
                                         'manifest_sha256': manifest_digest}
                 for stream in ('stdout', 'stderr'):
@@ -5791,14 +5814,24 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
             receipt = evidence['cases'][variant][name]['receipt']
             return [(row['exit_code'], row['stdout_sha256'], row['stderr_sha256'])
                     for row in receipt['runs']]
+        def deltas(variant, name):
+            outputs = evidence['cases'][variant][name]['outputs']
+            return [{key: outputs[role][key] for key in
+                     ('changed_files', 'missing_files', 'changed_modes')}
+                    for role in CAPTURE_TARGETS]
         replays_stable = all(evidence['cases'][variant][name]['receipt']['replay_output_equal'] is True
                              and len(set(signature(variant, name))) == 1
+                             and all(item == deltas(variant, name)[0]
+                                     for item in deltas(variant, name)[1:])
                              for variant in variants for name in checks)
-        preserved = all(signature('original', name)[0] == signature('patched', name)[0]
-                        and signature('original', name)[0][0] == 0
+        preserved = all(signature('original', name) == signature('patched', name)
+                        and all(row[0] == 0 for row in signature('original', name))
+                        and deltas('original', name) == deltas('patched', name)
                         for name in ('normal', 'connected'))
-        control_held = signature('original', 'control')[0] == signature('patched', 'control')[0]
-        effect_changed = signature('original', 'effect')[0] != signature('patched', 'effect')[0]
+        control_held = (signature('original', 'control') == signature('patched', 'control')
+                        and deltas('original', 'control') == deltas('patched', 'control'))
+        effect_changed = (signature('original', 'effect') != signature('patched', 'effect')
+                          or deltas('original', 'effect') != deltas('patched', 'effect'))
         evidence['paired_observation'] = {
             'status': 'differential_with_normal_paths_preserved' if
                 replays_stable and preserved and control_held and effect_changed else 'unproven',
@@ -5820,8 +5853,8 @@ def _source_review(root: Path, packet: Path, pin: dict, role: str, module) -> di
         'when assessing a changed or missing file. '
         'Compare the host effect and control results and the three replays. '
         + ('For the patch, compare the same effect, control, normal, and connected commands '
-           'on original and patched copies. Explain the material fix link and any changed '
-           'ordinary behavior. ' if patch_request else '') +
+           'on original and patched copies, including changed files and modes. Explain the '
+           'material fix link and any changed ordinary behavior. ' if patch_request else '') +
         'Nonzero exits are '
         'observations, not proof of a security defect. Explain limitations and any weak control. '
         'Return the same review JSON schema required by /handoff/PROMPT.txt. '

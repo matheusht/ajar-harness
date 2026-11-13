@@ -4694,6 +4694,8 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
         _fail('unexpected_provider_credentials')
     if (controls / 'resources.json').exists() or (controls / 'native-state/RUN.json').exists():
         _fail('run_already_started_or_ambiguous')
+    if 'autonomous_engagement' in plan and (controls / 'native-state/STOP_REQUEST').exists():
+        _fail('native_stop_before_start')
     _approval(root, plan, approval_path)
     runtime_duration = plan['limits']['duration_seconds']
     research_deadline = (datetime.strptime(plan['checked_research_scope']['expires_at'],
@@ -4921,7 +4923,10 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
 def stop(run_root: Path) -> dict:
     root = _private_root(Path(run_root))
     controls = _controls(root)
-    if not (controls / 'native-state/RUN.json').exists() and not (controls / 'resources.json').exists():
+    preactivation = (not (controls / 'native-state/RUN.json').exists()
+                     and not (controls / 'resources.json').exists())
+    if preactivation and (not (root / 'plan.json').exists()
+                          or 'autonomous_engagement' not in _plan(root)):
         return {'status': 'not_active', 'run_root': str(root)}
     cont = controls / 'continuation'
     cont.mkdir(mode=0o700, parents=True, exist_ok=True)

@@ -3303,16 +3303,18 @@ def allowance_snapshot(run_root: Path) -> dict:
     run = native.snapshot(_controls(root) / 'native-state')
     pool = _provider_snapshot(root)
     config = pool['config']
-    planned_limits = _plan(root)['limits']
+    plan = _plan(root)
+    planned_limits = plan['limits']
     planned = planned_limits['duration_seconds']
     linked = (_controls(root) / 'approval.json').exists() and _read_json(
         _controls(root) / 'approval.json').get('kind') == 'native-setup-approval-v2'
+    shortened = linked or 'autonomous_engagement' in plan
     if (config.get('authority') != AUTHORITY or config.get('producer_manifest_sha256') != run['manifest_sha256']
             or config.get('max_connections') != planned_limits['max_connections']
             or config.get('max_bytes') != planned_limits['max_bytes']
             or type(config.get('native_run_duration')) is not int
             or config.get('duration') != config['native_run_duration']
-            or (not 1 <= config['native_run_duration'] <= planned if linked else
+            or (not 1 <= config['native_run_duration'] <= planned if shortened else
                 config['native_run_duration'] != planned)):
         _fail('shared_allowance_identity_mismatch')
     return {'run_identity': {key: run[key] for key in
@@ -4750,6 +4752,10 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
             runtime_duration = min(runtime_duration, int(research_deadline.timestamp() - time.time()) - 5)
             if runtime_duration < 30:
                 _fail('research_scope_window_exhausted')
+        if 'autonomous_engagement' in plan:
+            runtime_duration = min(runtime_duration, int(deadline.timestamp() - time.time()) - 5)
+            if runtime_duration < 30:
+                _fail('engagement_allowance_exhausted')
         proxy_args = ['--state-dir', str(controls / 'provider'),
                       '--capability-file', str(capability_path),
                       '--max-connections', str(plan['limits']['max_connections']),
@@ -4841,6 +4847,9 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
                   'provider_request_count': None, 'monetary_spend': None}
         print(json.dumps(result, sort_keys=True), flush=True)
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
+            if 'autonomous_engagement' in plan and time.time() >= deadline.timestamp():
+                native_module.request_stop(controls / 'native-state', 'operator_stop')
+                break
             if setup_grant and setup_grant.get('kind') == 'native-setup-approval-v2' and time.time() >= deadline.timestamp():
                 native_module.request_stop(controls / 'native-state', 'operator_stop')
                 break

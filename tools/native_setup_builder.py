@@ -308,11 +308,19 @@ def verify_v1_stop_provenance(root: Path, plan: dict, snapshot: dict,
         fail('build_setup_provider_ledger_changed')
     config = pool['config']
     after = receipt.get('pool_after')
+    duration = config.get('native_run_duration')
+    scoped = 'autonomous_engagement' in plan
     if (not isinstance(after, dict)
             or config.get('producer_manifest_sha256') != manifest_sha
             or config.get('max_connections') != plan['limits']['max_connections']
             or config.get('max_bytes') != plan['limits']['max_bytes']
-            or config.get('native_run_duration') != plan['limits']['duration_seconds']
+            or type(duration) is not int
+            or (not 1 <= duration <= plan['limits']['duration_seconds'] if scoped else
+                duration != plan['limits']['duration_seconds'])
+            or config.get('duration') != duration
+            or (scoped and pool['created'] + duration > datetime.strptime(
+                read_json(controls / 'approval.json')['absolute_deadline'],
+                '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
             or config.get('authority') != nr.AUTHORITY
             or after.get('used_tunnels') != pool['used_tunnels']
             or after.get('charged_tunnel_bytes') != pool['charged_tunnel_bytes']

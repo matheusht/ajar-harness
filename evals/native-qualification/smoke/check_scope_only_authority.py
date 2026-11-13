@@ -9,9 +9,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from check_native_setup_e2e import RELAY, ROOT, cli, run, sha
 
@@ -178,6 +181,113 @@ def main() -> int:
                   and derived.get('plan_sha256') == sha(root / 'plan.json')
                   and derived.get('limits') == item['boundary']['setup']['limits'],
                   {'exit': code, 'code': result.get('code'), 'authority': derived.get('kind')})
+            provider = root / 'controls/provider/tunnel.sqlite3'
+            provider.parent.mkdir(exist_ok=True)
+            ids = ['a' * 64, 'b' * 64]
+            manifest = root / 'controls/producer-manifest.json'
+            manifest.write_text(json.dumps({'producers': [{'id': value} for value in ids]}) + '\n')
+            manifest_sha = sha(manifest)
+            duration = plan['limits']['duration_seconds'] - 10
+            config = {'authority': runner.AUTHORITY, 'producer_manifest_sha256': manifest_sha,
+                      'max_connections': plan['limits']['max_connections'],
+                      'max_bytes': plan['limits']['max_bytes'],
+                      'native_run_duration': duration, 'duration': duration}
+            with sqlite3.connect(provider) as db:
+                db.execute('CREATE TABLE pool(config TEXT, created REAL, bytes INTEGER)')
+                db.execute('CREATE TABLE tunnels(phase TEXT, uploaded INTEGER, downloaded INTEGER)')
+                db.execute('INSERT INTO pool VALUES(?,?,?)',
+                           (json.dumps(config), datetime.now(timezone.utc).timestamp(), 0))
+            identity = {'manifest_sha256': manifest_sha, 'nonce': 'synthetic', 'ids': ids,
+                        'deadline_monotonic': 100, 'created_monotonic': 0}
+            native = SimpleNamespace(snapshot=lambda _state: identity,
+                                     active=lambda _state: True)
+            with patch.object(runner, '_activate_controls', return_value=(native, None)):
+                try:
+                    snapshot = runner.allowance_snapshot(root)
+                    shortened = snapshot['hard_limits']['duration_seconds'] == duration
+                except runner.NativeResearchError:
+                    shortened = False
+            check('scope-derived activation accepts a bounded shortened duration', shortened,
+                  {'planned': plan['limits']['duration_seconds'], 'actual': duration})
+            state = root / 'controls/native-state'
+            state.mkdir(exist_ok=True)
+            (state / 'RUN.json').write_text(json.dumps({'ids': ids,
+                                                       'manifest_sha256': manifest_sha}) + '\n')
+            revoked = state / 'REVOKED'
+            revoked.write_text(json.dumps({'ids': ids, 'manifest_sha256': manifest_sha,
+                                           'producers_verified_stopped': True}) + '\n')
+            resources = [{'kind': 'container', 'name': 'synthetic-' + str(i), 'id': value}
+                         for i, value in enumerate(ids)]
+            resources.append({'kind': 'network', 'name': 'synthetic-network', 'id': 'c' * 64})
+            (root / 'controls/resources.json').write_text(json.dumps({'resources': resources}) + '\n')
+            cleanup = {'resources': [{'kind': row['kind'], 'name': row['name']}
+                                     for row in resources]}
+            snapshot = {'native_stop': {'manifest_sha256': manifest_sha,
+                                        'revoked_sha256': sha(revoked),
+                                        'producer_ids_sha256': hashlib.sha256(json.dumps(
+                                            ids, separators=(',', ':')).encode()).hexdigest()}}
+            receipt = {'pool_after': {'used_tunnels': 0, 'charged_tunnel_bytes': 0,
+                                      'provider_deadline_unix':
+                                      datetime.now(timezone.utc).timestamp() + duration,
+                                      'run_identity': {'manifest_sha256': manifest_sha, 'ids': ids}}}
+            with sqlite3.connect(provider) as db:
+                created = db.execute('SELECT created FROM pool').fetchone()[0]
+            receipt['pool_after']['provider_deadline_unix'] = created + duration
+            with patch.object(runner, '_docker', return_value=subprocess.CompletedProcess([], 0, b'', b'')):
+                try:
+                    builder.verify_v1_stop_provenance(root, plan, snapshot, cleanup, receipt)
+                    builder_accepted = True
+                except (runner.NativeResearchError, builder.BuildError) as error:
+                    builder_accepted = False
+                    builder_error = str(error)
+            check('scope-derived stopped setup accepts the shortened provider record',
+                  builder_accepted, {'actual': duration,
+                                     'code': None if builder_accepted else builder_error})
+            config['duration'] = config['native_run_duration'] = plan['limits']['duration_seconds'] + 1
+            with sqlite3.connect(provider) as db:
+                db.execute('UPDATE pool SET config=?', (json.dumps(config),))
+            with patch.object(runner, '_activate_controls', return_value=(native, None)):
+                try:
+                    runner.allowance_snapshot(root)
+                    overlong_rejected = False
+                except runner.NativeResearchError as error:
+                    overlong_rejected = str(error) == 'shared_allowance_identity_mismatch'
+            check('scope-derived activation rejects a duration above the plan',
+                  overlong_rejected, {'actual': config['duration']})
+        delayed = fixture(Path(raw).resolve() / 'delayed')
+        if delayed['prepare_code'] == 0:
+            deadline = datetime.strptime(delayed['boundary']['expires_at'],
+                                         '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            clock = [datetime.now(timezone.utc).timestamp()]
+            reached_native = []
+            def delayed_preseal(*_args):
+                clock[0] = deadline.timestamp() - 20
+                return {}
+            def native_constructor(*_args):
+                reached_native.append(True)
+                raise RuntimeError('native constructor reached after deadline window closed')
+            fake_native = SimpleNamespace(NativeRun=native_constructor)
+            fake_manifest = delayed['root'] / 'controls/producer-manifest.json'
+            fake_manifest.write_text('{}\n')
+            with (patch.object(runner.shutil, 'which', return_value=str(delayed['base'] / 'bin/docker')),
+                  patch.object(runner.time, 'time', side_effect=lambda: clock[0]),
+                  patch.object(runner, '_image'), patch.object(runner, '_save_resources'),
+                  patch.object(runner, '_preseal', side_effect=delayed_preseal),
+                  patch.object(runner, '_created_manifest', return_value=fake_manifest),
+                  patch.object(runner, '_activate_controls', return_value=(fake_native, None)),
+                  patch.object(runner, '_origin_stop', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_capture_stop', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_origin_cleanup', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_cleanup_resources', return_value={'status': 'complete'}),
+                  patch.object(runner, '_capture_cleanup', return_value={'status': 'not_configured'})):
+                try:
+                    runner._start_owned(delayed['root'], None)
+                    code = 'unexpected_start'
+                except (runner.NativeResearchError, RuntimeError) as error:
+                    code = str(error)
+            check('preseal delay exhausts authority before native activation',
+                  code == 'engagement_allowance_exhausted' and not reached_native,
+                  {'code': code, 'native_constructor_reached': bool(reached_native)})
         prestop = fixture(Path(raw).resolve() / 'prestop')
         if prestop['prepare_code'] == 0:
             code, result = cli(prestop['env'], 'stop', '--run-root', str(prestop['root']))

@@ -38,6 +38,8 @@ class Phases:
         self.crashed = False
         self.resumes = 0
         self.prepare_checked_durations = []
+        self.fresh_checked_verifications = 0
+        self.historical_checked_verifications = 0
 
     def owner(self, _root, _script, run_root, _inputs):
         phase = run_root.name
@@ -112,7 +114,8 @@ class Phases:
             return 0, {'status': 'stop_requested'}
         if name == 'native_setup_builder.py' and action == 'setup-build':
             self.builds += 1
-            if self.stop_at in ('build_unknown', 'build_cleanup_unresolved'):
+            if self.stop_at in ('build_unknown', 'build_cleanup_unresolved',
+                                'adopted_after_expiry', 'cleanup_unresolved_after_expiry'):
                 return 2, {'status': 'unknown_effect', 'code': 'build_action_unknown_effect'}
             checked = self.receipt()
             write(setup / 'controls/setup-checked/receipt.json', checked)
@@ -122,7 +125,18 @@ class Phases:
             return 0, {'status': 'ready'}
         if name == 'native_setup_builder.py' and action == 'setup-build-status':
             if '--verify-checked' in args:
+                if self.stop_at in ('ready_after_expiry', 'adopted_after_expiry'):
+                    if '--historical' not in args:
+                        self.fresh_checked_verifications += 1
+                        return 2, {'status': 'refused', 'code': 'checked_setup_grant_expired'}
+                    self.historical_checked_verifications += 1
                 return 0, {'receipt': self.receipt()}
+            if self.stop_at == 'adopted_after_expiry':
+                return ((0, {'status': 'ready'}) if self.reconciles
+                        else (2, {'status': 'unknown_effect'}))
+            if self.stop_at == 'cleanup_unresolved_after_expiry':
+                return ((0, {'status': 'blocked_reconciled'}) if self.reconciles
+                        else (2, {'status': 'cleanup_unresolved'}))
             if self.stop_at == 'build_cleanup_unresolved':
                 return ((2, {'status': 'cleanup_unresolved'}) if self.reconciles < 3
                         else (0, {'status': 'blocked_reconciled'}))
@@ -132,6 +146,13 @@ class Phases:
                 else (0, {'status': 'ready'})
         if name == 'native_setup_builder.py' and action == 'setup-build-reconcile':
             self.reconciles += 1
+            if self.stop_at == 'adopted_after_expiry':
+                write(setup / 'controls/setup-checked/receipt.json', self.receipt())
+                return 0, {'status': 'ready',
+                           'cleanup': {'status': 'complete', 'absent': True}}
+            if self.stop_at == 'cleanup_unresolved_after_expiry':
+                return 0, {'status': 'blocked_reconciled',
+                           'cleanup': {'status': 'complete', 'absent': True}}
             if self.stop_at == 'build_cleanup_unresolved' and self.reconciles < 3:
                 return 2, {'status': 'cleanup_unresolved',
                            'cleanup': {'status': 'unresolved', 'absent': False}}
@@ -299,6 +320,17 @@ def scenario(base: Path, name: str) -> dict:
         assert result['status'] == 'stopped_incomplete', result
         assert len(fake.prepare_checked_durations) == 1
         assert fake.statuses['research'] == 'prepared'
+    elif name in ('ready_after_expiry', 'adopted_after_expiry'):
+        assert result['status'] == 'stopped_incomplete', result
+        assert result['cleanup']['build']['absent'] is True
+        assert fake.builds == 1 and fake.fresh_checked_verifications >= 1
+        assert fake.historical_checked_verifications >= 1
+        assert 'native_research.py:prepare-checked' not in fake.calls
+    elif name == 'cleanup_unresolved_after_expiry':
+        assert result['status'] == 'stopped_incomplete', result
+        assert result['cleanup']['build']['absent'] is True
+        assert fake.builds == 1 and fake.reconciles >= 1
+        assert 'native_research.py:prepare-checked' not in fake.calls
     elif name == 'research_incomplete':
         assert result['status'] == 'stopped_incomplete', result
         assert driver._state(root)['phase'] == 'incomplete'
@@ -331,7 +363,9 @@ def main() -> int:
                    'build_crash', 'build_cleanup_unresolved', 'scope_drift',
                    'inputs_drift', 'cleanup_missing', 'freeze_revision',
                    'resume_crash_uuid_order', 'resume_unknown', 'research_incomplete',
-                   'prepare_allowance_drift', 'prepare_partial_plan')}
+                   'prepare_allowance_drift', 'prepare_partial_plan',
+                   'ready_after_expiry', 'adopted_after_expiry',
+                   'cleanup_unresolved_after_expiry')}
     report = {'status': 'passed', 'kind': 'native-scope-only-phase-driver-e2e-v1',
               'command': ('PYTHONDONTWRITEBYTECODE=1 python3 '
                           'evals/native-qualification/smoke/check_scope_only_phase_driver_e2e.py '

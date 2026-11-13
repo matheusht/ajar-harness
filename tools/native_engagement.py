@@ -344,9 +344,11 @@ def _checked_receipt(setup_root: Path, scope_sha: str) -> dict:
     return receipt
 
 
-def _verify_checked(command, setup: Path) -> None:
-    code, result = command(BUILDER, 'setup-build-status', '--run-root', str(setup),
-                           '--verify-checked', timeout=60)
+def _verify_checked(command, setup: Path, *, historical: bool = False) -> None:
+    args = ['setup-build-status', '--run-root', str(setup), '--verify-checked']
+    if historical:
+        args.append('--historical')
+    code, result = command(BUILDER, *args, timeout=60)
     if (code != 0 or result.get('receipt', {}).get('status') != 'ready'
             or result['receipt'].get('kind') != 'native-setup-checked-v1'):
         fail('checked_setup_verification_failed')
@@ -501,13 +503,13 @@ def _build_cleanup(setup: Path, command) -> dict:
     if code == 0 and status == 'not_dispatched':
         return {'status': 'not_dispatched', 'absent': True}
     if code == 0 and status == 'ready':
-        _verify_checked(command, setup)
+        _verify_checked(command, setup, historical=True)
         return {'status': 'ready', 'absent': True}
     if status in ('blocked', 'blocked_reconciled', 'unknown_effect', 'cleanup_unresolved'):
         code, current = command(BUILDER, 'setup-build-reconcile', '--run-root',
                                 str(setup), timeout=90)
         if code == 0 and current.get('status') == 'ready':
-            _verify_checked(command, setup)
+            _verify_checked(command, setup, historical=True)
             return {'status': 'ready', 'absent': True}
         cleanup = current.get('cleanup') or {}
         if (code == 0 and current.get('status') == 'blocked_reconciled'

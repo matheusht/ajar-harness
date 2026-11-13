@@ -1,5 +1,29 @@
 {
   "checks": {
+    "adopted_after_expiry": {
+      "build_dispatches": 1,
+      "build_reconciles": 1,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
     "build_cleanup_unresolved": {
       "build_dispatches": 1,
       "build_reconciles": 3,
@@ -92,6 +116,29 @@
       ],
       "phase": "incomplete",
       "status": "cleanup_unverified"
+    },
+    "cleanup_unresolved_after_expiry": {
+      "build_dispatches": 1,
+      "build_reconciles": 2,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
     },
     "freeze_invalid": {
       "build_dispatches": 0,
@@ -199,6 +246,28 @@
         "native_research.py:prepare-checked",
         "native_research.py:status",
         "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "ready_after_expiry": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-status"
       ],
       "phase": "incomplete",
       "status": "stopped_incomplete"

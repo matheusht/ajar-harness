@@ -1,0 +1,242 @@
+{
+  "checks": {
+    "build_crash": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "complete",
+      "status": "complete_internal_candidate"
+    },
+    "build_unknown": {
+      "build_dispatches": 1,
+      "build_reconciles": 1,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile",
+        "native_research.py:status",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "cleanup_missing": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "cleanup_unverified"
+    },
+    "freeze_invalid": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:setup-resume",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:setup-resume",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:stop",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "freeze_revision": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:setup-resume",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "complete",
+      "status": "complete_internal_candidate"
+    },
+    "inputs_drift": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:stop"
+      ],
+      "phase": "emergency_hold",
+      "status": "rejected"
+    },
+    "research_incomplete": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "resume_unknown": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:setup-resume",
+        "native_research.py:status",
+        "native_research.py:stop",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "scope_drift": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:status",
+        "native_research.py:stop",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "setup_unknown": {
+      "build_dispatches": 0,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:status",
+        "native_research.py:stop",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
+    "success": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "complete",
+      "status": "complete_internal_candidate"
+    }
+  },
+  "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_scope_only_phase_driver_e2e.py --output \"$PWD/evals/native-qualification/setup-evidence/scope-only-phase-driver-synthetic-e2e.json\"",
+  "docker_calls": 0,
+  "expected": "status passed; no unknown effect retried; stopped outcomes retain cleanup state",
+  "human_phase_signatures": 0,
+  "inputs": "generated disposable source, scope, manifest, and simulated phase receipts",
+  "kind": "native-scope-only-phase-driver-e2e-v1",
+  "limitation": "phase commands and owner are simulated; no authority or live effect qualified",
+  "provider_calls": 0,
+  "requirements": "Python 3; no Docker, provider, or target service required",
+  "status": "passed",
+  "target_calls": 0
+}

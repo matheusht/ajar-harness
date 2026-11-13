@@ -40,10 +40,12 @@ def result_text(outcome: str) -> str:
 
 def setup(base: Path, *, outcome: str, review: bool = True,
           review_decision: str = 'raise', lead_disposition: bool = True,
-          lead_decision: str | None = None) -> Path:
+          lead_decision: str | None = None, scope_only: bool = False) -> Path:
     root = source_check.fixture(base)
     plan = runner._read_json(root / 'plan.json')
     plan['checked_setup'] = {'kind': 'synthetic-checked-setup'}
+    if scope_only:
+        plan['autonomous_engagement'] = {'kind': 'synthetic-scope-only'}
     plan['source_effect_envelope'] = runner.CHECKED_SOURCE_EFFECT_ENVELOPE
     runner._write_json(root / 'plan.json', plan)
     source_check.source_action(root, '1' * 32, 'before\n', 1)
@@ -386,6 +388,57 @@ def bridge_cases(base: Path) -> dict:
     return observed
 
 
+def scope_only_missing_disposition(base: Path) -> dict:
+    root = setup(base, outcome='bounded_negative', lead_disposition=False,
+                 scope_only=True)
+    proposal = continuation._next(root)
+    calls = []
+
+    def invoke(*_args):
+        calls.append('invoke')
+        runner._write_json(root / 'researcher/NEXT.json', {
+            **proposal, 'proposed_stop': False,
+            'next': {'question': 'Does the original actor have access?',
+                     'test': 'check original actor rights',
+                     'prediction': 'the actor cannot reach the effect',
+                     'disconfirming': 'the actor can reach the effect',
+                     'authority': 'same signed scope'}})
+        return 0, {'status': 'acknowledged', 'session_id': 'ses_fixture',
+                   'dispatch_id': 'f' * 32,
+                   'pool_before': {'used_tunnels': 0, 'charged_tunnel_bytes': 0,
+                                   'active': True},
+                   'pool_after': {'used_tunnels': 1, 'charged_tunnel_bytes': 10,
+                                  'active': True}}
+
+    def stop(run_root):
+        calls.append('stop')
+        write_final(run_root)
+        return {'status': 'stop_requested', 'run_root': str(run_root)}
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(runner, '_verified_plan',
+            side_effect=lambda run_root, **kw: runner._read_json(run_root / 'plan.json')))
+        stack.enter_context(patch.object(runner, '_approval_active'))
+        stack.enter_context(patch.object(runner, 'run_active', return_value=True))
+        stack.enter_context(patch.object(runner, 'allowance_snapshot', return_value=ALLOWANCE))
+        stack.enter_context(patch.object(runner, '_unresolved_dispatches', return_value=[]))
+        stack.enter_context(patch.object(runner, '_docker',
+            side_effect=lambda *argv, **kw: subprocess.CompletedProcess(
+                argv, 0, stdout=(b'synthetic-daemon-A\n' if argv[0] == 'info' else b''),
+                stderr=b'')))
+        stack.enter_context(patch.object(runner, 'stop', side_effect=stop))
+        response = continuation.continue_run(root, max_invocations=3,
+            closeout_wait_seconds=0, invoke=invoke,
+            status_fn=lambda _root: {'status': 'active', 'allowance': {'active': True}})
+    assert response['status'] == 'stopped_incomplete', response
+    assert calls == ['invoke', 'stop'], calls
+    assert not (root / 'controls/continuation/closure-request.json').exists()
+    assert not (root / 'controls/continuation/closure-review.json').exists()
+    assert runner._read_json(root / 'controls/closeout/result.json')['cleanup'][
+        'resource_absence'] is True
+    return {'status': response['status'], 'calls': calls}
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix='agent-closeout-') as temp:
         base = Path(temp).resolve()
@@ -527,6 +580,8 @@ def main() -> None:
             observed[case] = {'status': response['status'], 'stop_calls': len(stop_calls),
                               'record_sha256': response.get('record_sha256')}
         observed['continuation_bridge'] = bridge_cases(base)
+        observed['scope_only_missing_disposition'] = scope_only_missing_disposition(
+            base / 'scope_only_missing_disposition')
         print(json.dumps({'status': 'passed', 'cases': observed,
                           'source_sha256': runner._sha(ROOT / 'tools/native_closeout.py'),
                           'continuation_sha256': runner._sha(ROOT / 'tools/native_continuation.py'),

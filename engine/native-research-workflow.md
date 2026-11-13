@@ -20,6 +20,11 @@ and `SETUP_TRACE.json` before the first research action. They are frozen setup
 inputs, not findings. Record any correction in `/workspace/RESEARCH.md` or a
 new research artifact; do not overwrite the original threat model or treat the
 setup build as evidence of a security effect.
+For a signed full-engagement scope, carry the internal investigation through
+the remaining allowance without requesting another human plan or approval.
+The host derives phase authority from that initial scope, arranges fresh review,
+and verifies owner stop. A limit or uncertain effect ends incomplete until
+protected readback resolves it.
 
 1. **Ground the case.** Check the target and source version, build and service
    state, available actors, permitted effects, and remaining allowance against
@@ -33,6 +38,10 @@ setup build as evidence of a security effect.
    an ordinary note/script; link existing evidence instead of transcribing it
    again. Pick a test that separates it from a serious alternative. Keep the
    earlier statement when the explanation changes so the change is traceable.
+   For a correction to the initial threat model, name the old assumption, the
+   protected observation's receipt ID and hash, the revised condition, a serious
+   alternative, and the next test that separates them. The correction guides
+   research; it does not change scope.
 
 3. **Run and observe.** Use the permitted entry path and ordinary tools. Save
    the command or script, inputs, source/build conditions, response, and relevant
@@ -41,7 +50,7 @@ setup build as evidence of a security effect.
    your own text or edited logs cannot establish an effect. A denial is evidence
    about that request; a setup failure or missing response is not a security
    result. If an effect may have occurred but its result is unknown, request
-   operator-controlled readback or an authorized reset before any retry.
+   host-controlled readback or an authorized reset before any retry.
 
 4. **Revise the investigation.** Compare the result with the prediction. Keep
    supported conditions, narrow or refute contradicted ones, and choose and run
@@ -148,7 +157,7 @@ setup build as evidence of a security effect.
    A proposed final closure, negative conclusion, or abandonment of a strong lead
    needs a fresh review with a concrete reason; budget or operator stop is immediate
    and bypasses that review. State the remaining uncertainty, not a claim that no
-   effect exists. Have the operator verify actual cleanup and remaining effects; a saved status
+   effect exists. Have the host verify actual cleanup and remaining effects; a saved status
    cannot perform cleanup. If no effects or owned resources remain, no extra
    ceremony is needed. Learning remains optional under current memory permissions.
    A local result is not external delivery or a legacy accepted finding; those

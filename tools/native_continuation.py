@@ -1568,6 +1568,14 @@ def _agent_closeout(root: Path, state: dict, *, wait_seconds: int,
                    **{key: value for key, value in result.items() if key != 'status'})
 
 
+def _scope_only_lead_stop(root: Path, state: dict, wait_seconds: int) -> dict:
+    result = _agent_closeout(root, state, wait_seconds=wait_seconds,
+                             forced_stop_reason='lead_disposition_missing')
+    if result is None:
+        _fail('continuation_closeout_unavailable')
+    return result
+
+
 def continue_run(run_root: Path, *, runner_path: Path | None = None,
                  max_invocations: int = 24, invocation_timeout: int = 3700,
                  invoke=None, status_fn=None, resume_after_stop: bool = False,
@@ -1586,7 +1594,9 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
     status_fn = status_fn or (lambda _root: _status(runner_path, root))
     with _lease(root):
         state = _state(root)
-        checked_setup = 'checked_setup' in _read_private(root / 'plan.json')
+        plan = _read_private(root / 'plan.json')
+        checked_setup = 'checked_setup' in plan
+        scope_only = 'autonomous_engagement' in plan
         if (root / 'controls/closeout/stop-request.json').exists():
             closed = _agent_closeout(root, state, wait_seconds=closeout_wait_seconds,
                                      forced_stop_reason='closeout_readback')
@@ -1648,7 +1658,7 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                 return closed
             reopen_check, reopen_before_sha = closed['next_check'], closed['next_sha256']
             reopen_before_result_sha = closed['result_sha256']
-        closure = None if reopen_check else _closure(
+        closure = None if reopen_check or scope_only else _closure(
             root, state.get('applied_closure_review_sha256'))
         if closure is not None:
             if closure['review'] is None:
@@ -1720,6 +1730,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     and reopen_check is None
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
                              in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
+                if scope_only:
+                    return _scope_only_lead_stop(root, state, closeout_wait_seconds)
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1762,6 +1774,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     and reopen_check is None
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
                              in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
+                if scope_only:
+                    return _scope_only_lead_stop(root, state, closeout_wait_seconds)
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,
@@ -1917,6 +1931,8 @@ def continue_run(run_root: Path, *, runner_path: Path | None = None,
                     and not nxt.get('proposed_stop')
                     and not (checked_setup and (nxt.get('host_action') or {}).get('kind')
                              in (SOURCE_REVIEW_ACTION_KIND, SOURCE_PATCH_ACTION_KIND))):
+                if scope_only:
+                    return _scope_only_lead_stop(root, state, closeout_wait_seconds)
                 request = _closure_request(root, state, nxt, reason='strong_lead_abandoned')
                 _event(root, {'at': _now(), 'event': 'closure_request',
                               'invocation': state['invocations'], 'request': request,

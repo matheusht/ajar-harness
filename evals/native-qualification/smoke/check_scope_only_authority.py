@@ -317,6 +317,56 @@ def main() -> int:
             check('preseal delay exhausts authority before native activation',
                   code == 'engagement_allowance_exhausted' and not reached_native,
                   {'code': code, 'native_constructor_reached': bool(reached_native)})
+        starting = fixture(Path(raw).resolve() / 'starting')
+        if starting['prepare_code'] == 0:
+            deadline = datetime.strptime(starting['boundary']['expires_at'],
+                                         '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            clock = [datetime.now(timezone.utc).timestamp()]
+            timer_callbacks, stop_calls = [], []
+            class FakeTimer:
+                def __init__(self, _interval, callback):
+                    timer_callbacks.append(callback)
+                def start(self):
+                    pass
+                def cancel(self):
+                    pass
+                def join(self, _timeout=None):
+                    pass
+            class FakeRun:
+                def __init__(self, *_args):
+                    self.process = None
+                def start(self):
+                    clock[0] = deadline.timestamp()
+                    for callback in timer_callbacks:
+                        callback()
+                    raise RuntimeError('synthetic_start_held_at_deadline')
+                def close(self):
+                    return {'status': 'not_started'}
+            fake_native = SimpleNamespace(NativeRun=FakeRun,
+                                          request_stop=lambda _state, reason: stop_calls.append(reason))
+            fake_manifest = starting['root'] / 'controls/producer-manifest.json'
+            fake_manifest.write_text('{}\n')
+            with (patch.object(runner.shutil, 'which', return_value=str(starting['base'] / 'bin/docker')),
+                  patch.object(runner.time, 'time', side_effect=lambda: clock[0]),
+                  patch.object(runner.threading, 'Timer', FakeTimer),
+                  patch.object(runner, '_image'), patch.object(runner, '_save_resources'),
+                  patch.object(runner, '_preseal', return_value={}),
+                  patch.object(runner, '_created_manifest', return_value=fake_manifest),
+                  patch.object(runner, '_activate_controls', return_value=(fake_native, None)),
+                  patch.object(runner, '_origin_stop', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_capture_stop', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_origin_cleanup', return_value={'status': 'not_configured'}),
+                  patch.object(runner, '_cleanup_resources', return_value={'status': 'complete'}),
+                  patch.object(runner, '_capture_cleanup', return_value={'status': 'not_configured'})):
+                try:
+                    runner._start_owned(starting['root'], None)
+                except RuntimeError as error:
+                    held = str(error) == 'synthetic_start_held_at_deadline'
+                else:
+                    held = False
+            check('signed deadline requests stop while native startup is held',
+                  held and stop_calls == ['operator_stop'],
+                  {'held': held, 'stop_calls': stop_calls})
         prestop = fixture(Path(raw).resolve() / 'prestop')
         if prestop['prepare_code'] == 0:
             code, result = cli(prestop['env'], 'stop', '--run-root', str(prestop['root']))

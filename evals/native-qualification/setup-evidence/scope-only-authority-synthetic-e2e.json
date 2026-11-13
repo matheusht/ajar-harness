@@ -6,8 +6,8 @@
         "exit": 0,
         "result": {
           "live_approval_required": false,
-          "plan_sha256": "31694084d8e11b4aaec85b50b653c96570ca4cb7536f310ca403b64064c103c6",
-          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/scope-only-authority-mjn_wjnf/run",
+          "plan_sha256": "e6ed4dca35301a399d9013a879f8b417b11b1877d308d6bef49e0191b2dac6be",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/scope-only-authority-2pw1gtxf/run",
           "source_files": 1,
           "status": "prepared_provider_free"
         }
@@ -18,15 +18,15 @@
       "name": "host plan marks full-engagement scope",
       "observed": {
         "marker": {
-          "allowed_signers_sha256": "328b963b787d6a32e70b168f746aea7e17d99ea85a5cb6266bac36a3560a4298",
+          "allowed_signers_sha256": "727848a40aa5b8af151ed3c8a40c8e951b1bdd53928cba342843da40fc79dd9c",
           "engagement_id": "scope-only-fixture",
-          "expires_at": "2026-11-13T15:15:05Z",
-          "issued_at": "2026-11-13T14:45:05Z",
+          "expires_at": "2026-11-13T15:20:46Z",
+          "issued_at": "2026-11-13T14:50:46Z",
           "kind": "native-engagement-scope-v1",
           "operator_id": "synthetic-operator",
-          "scope_sha256": "13df232f679c1a8b92ce5189aea2717b88a15dc654a9723b89b7c97568417e45",
-          "signature_sha256": "a23dc7f96dc1b430d9f9e7882a8a87790f3eaddcfc7d47dad22252e6bf44358e",
-          "trusted_fingerprint": "sha256:66539717d7b0db8ae23b32873c3b694a33c1ce7b32b6ac212fb0a3c8cb7bfb09"
+          "scope_sha256": "03aeac1c7d84b2380fdb4f5a3c3d03ad2e718fe0094fc142033c19e19f17fe89",
+          "signature_sha256": "2465ae2bdc10b860e7cc825dd0e147fecdeec2903071035d1dcd449bf8cff845",
+          "trusted_fingerprint": "sha256:fdf0ecd85a3c26d9f5f40bad3ab6dca518d13068b321dc22becebed187a05463"
         }
       },
       "passed": true
@@ -87,6 +87,16 @@
       "observed": {
         "code": "engagement_allowance_exhausted",
         "native_constructor_reached": false
+      },
+      "passed": true
+    },
+    {
+      "name": "signed deadline requests stop while native startup is held",
+      "observed": {
+        "held": true,
+        "stop_calls": [
+          "operator_stop"
+        ]
       },
       "passed": true
     },

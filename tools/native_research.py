@@ -4750,6 +4750,8 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
     _save_resources(root, nonce, rows)
     native = None
     gateway = None
+    expiry_timer = None
+    expiry_stop_failed = []
     result = {'status': 'start_incomplete', 'run_root': str(root)}
     try:
         bindings = _preseal(root, plan, nonce, rows, port, capability)
@@ -4791,6 +4793,17 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
                                     verify_source=True)
         if (controls / 'native-state/STOP_REQUEST').exists():
             _fail('native_stop_before_start')
+        if 'autonomous_engagement' in plan:
+            if time.time() >= deadline.timestamp():
+                _fail('engagement_allowance_exhausted')
+            def stop_at_deadline():
+                try:
+                    native_module.request_stop(controls / 'native-state', 'operator_stop')
+                except Exception:
+                    expiry_stop_failed.append(True)
+            expiry_timer = threading.Timer(max(0, deadline.timestamp() - time.time()), stop_at_deadline)
+            expiry_timer.daemon = True
+            expiry_timer.start()
         old_proxy = os.environ.get('HTTPS_PROXY')
         try:
             if gateway is not None:
@@ -4801,6 +4814,8 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
                 os.environ.pop('HTTPS_PROXY', None)
             else:
                 os.environ['HTTPS_PROXY'] = old_proxy
+        if 'autonomous_engagement' in plan and (expiry_stop_failed or time.time() >= deadline.timestamp()):
+            _fail('engagement_allowance_exhausted')
         if (ready['proxy_info'].get('authority') != AUTHORITY
                 or ready['proxy_info'].get('port') != port
                 or ready['proxy_info'].get('host') != '127.0.0.1'
@@ -4859,6 +4874,8 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
                   'provider_request_count': None, 'monetary_spend': None}
         print(json.dumps(result, sort_keys=True), flush=True)
         while native_module.active(controls / 'native-state') and native.process.poll() is None:
+            if expiry_stop_failed:
+                _fail('engagement_deadline_stop_unresolved')
             if 'autonomous_engagement' in plan and time.time() >= deadline.timestamp():
                 native_module.request_stop(controls / 'native-state', 'operator_stop')
                 break
@@ -4870,6 +4887,9 @@ def _start_owned(run_root: Path, approval_path: Path | None, *, provider_key_fil
                 break
             time.sleep(.2)
     finally:
+        if expiry_timer is not None:
+            expiry_timer.cancel()
+            expiry_timer.join(1)
         if gateway is not None:
             gateway.close()
         if native is not None:

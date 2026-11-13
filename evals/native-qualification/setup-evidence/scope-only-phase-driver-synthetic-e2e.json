@@ -1,5 +1,32 @@
 {
   "checks": {
+    "build_cleanup_unresolved": {
+      "build_dispatches": 1,
+      "build_reconciles": 3,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
     "build_crash": {
       "build_dispatches": 1,
       "build_reconciles": 0,
@@ -27,7 +54,7 @@
     },
     "build_unknown": {
       "build_dispatches": 1,
-      "build_reconciles": 1,
+      "build_reconciles": 2,
       "calls": [
         "native_research.py:prepare",
         "setup:start",
@@ -41,7 +68,9 @@
         "native_setup_builder.py:setup-build-status",
         "native_setup_builder.py:setup-build-reconcile",
         "native_research.py:status",
-        "native_research.py:status"
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build-status",
+        "native_setup_builder.py:setup-build-reconcile"
       ],
       "phase": "incomplete",
       "status": "stopped_incomplete"
@@ -151,6 +180,34 @@
       ],
       "phase": "incomplete",
       "status": "stopped_incomplete"
+    },
+    "resume_crash_uuid_order": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:status",
+        "native_research.py:setup-resume",
+        "native_research.py:status",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "complete",
+      "status": "complete_internal_candidate"
     },
     "resume_unknown": {
       "build_dispatches": 0,

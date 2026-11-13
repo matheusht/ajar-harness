@@ -398,6 +398,15 @@ def _terminal(root: Path, state: dict, command) -> dict:
             'closeout_sha256': state['closeout_sha256']}
 
 
+def _latest_setup_dispatch(current: dict) -> dict:
+    identity = (current.get('setup') or {}).get('last_dispatch_id')
+    rows = [row for row in current.get('dispatches', [])
+            if row.get('dispatch_id') == identity]
+    if not isinstance(identity, str) or len(rows) != 1:
+        fail('setup_dispatch_readback_unavailable')
+    return rows[0]
+
+
 def _recover_pending(root: Path, state: dict, command) -> None:
     pending = state['pending']
     if pending is None:
@@ -416,16 +425,18 @@ def _recover_pending(root: Path, state: dict, command) -> None:
         current = _status(command, setup)
         rows = current.get('dispatches', [])
         if (len(rows) == pending['before_dispatches'] + 1
-                and rows[-1].get('status') == 'acknowledged'):
+                and (latest := _latest_setup_dispatch(current)).get('role') == 'researcher'
+                and latest.get('status') == 'acknowledged'):
             _advance(root, state, 'setup_turn_done',
-                     setup_session_id=rows[-1].get('session_id'))
+                     setup_session_id=latest.get('session_id'))
             return
     elif action == 'setup_resume':
         current = _status(command, setup)
         rows = current.get('dispatches', [])
         if (len(rows) == pending['before_dispatches'] + 1
-                and rows[-1].get('status') == 'acknowledged'
-                and rows[-1].get('session_id') == state.get('setup_session_id')):
+                and (latest := _latest_setup_dispatch(current)).get('role') == 'resume'
+                and latest.get('status') == 'acknowledged'
+                and latest.get('session_id') == state.get('setup_session_id')):
             _advance(root, state, 'setup_turn_done')
             return
     elif action == 'setup_freeze':
@@ -483,20 +494,37 @@ def _recover_pending(root: Path, state: dict, command) -> None:
     fail('engagement_pending_effect_unresolved')
 
 
+def _build_cleanup(setup: Path, command) -> dict:
+    code, current = command(BUILDER, 'setup-build-status', '--run-root', str(setup),
+                            timeout=30)
+    status = current.get('status')
+    if code == 0 and status == 'not_dispatched':
+        return {'status': 'not_dispatched', 'absent': True}
+    if code == 0 and status == 'ready':
+        _verify_checked(command, setup)
+        return {'status': 'ready', 'absent': True}
+    if status in ('blocked', 'blocked_reconciled', 'unknown_effect', 'cleanup_unresolved'):
+        code, current = command(BUILDER, 'setup-build-reconcile', '--run-root',
+                                str(setup), timeout=90)
+        if code == 0 and current.get('status') == 'ready':
+            _verify_checked(command, setup)
+            return {'status': 'ready', 'absent': True}
+        cleanup = current.get('cleanup') or {}
+        if (code == 0 and current.get('status') == 'blocked_reconciled'
+                and cleanup.get('status') == 'complete'
+                and cleanup.get('absent') is True):
+            return {'status': 'blocked_reconciled', 'absent': True}
+    fail('build_cleanup_unresolved')
+
+
 def _halt(root: Path, state: dict, command, reason: str) -> dict:
     cleanup = None
+    build_cleanup = None
     setup, research = root / 'setup', root / 'research'
     target = (research if state['phase'] in ('research_active', 'complete') or
               (state['pending'] or {}).get('action') in ('research_start', 'research_continue')
               else setup)
     try:
-        if ((state['pending'] or {}).get('action') == 'setup_build'
-                and not (state['pending'] or {}).get('reconcile_attempted')):
-            code, build_state = command(BUILDER, 'setup-build-status', '--run-root',
-                                        str(setup), timeout=30)
-            if build_state.get('status') in ('unknown_effect', 'cleanup_unresolved'):
-                command(BUILDER, 'setup-build-reconcile', '--run-root', str(setup),
-                        timeout=90)
         if (target / 'plan.json').exists():
             current = _status(command, target)
             first_status = current['status']
@@ -535,9 +563,17 @@ def _halt(root: Path, state: dict, command, reason: str) -> dict:
                 cleanup = _stopped(command, setup, seconds=150)
     except (DriverError, OSError, ValueError):
         cleanup = {'status': 'unverified'}
+    if (state['pending'] or {}).get('action') == 'setup_build':
+        try:
+            build_cleanup = _build_cleanup(setup, command)
+        except (DriverError, OSError, ValueError, KeyError, TypeError):
+            build_cleanup = {'status': 'unverified', 'absent': False}
+    cleanup_status = cleanup.get('status') if isinstance(cleanup, dict) else 'unverified'
+    if build_cleanup is not None and build_cleanup.get('absent') is not True:
+        cleanup_status = 'unverified'
     state.update(phase='incomplete', error=reason,
-                 cleanup={'status': cleanup.get('status') if isinstance(cleanup, dict)
-                          else 'unverified'})
+                 cleanup={'status': cleanup_status,
+                          **({'build': build_cleanup} if build_cleanup is not None else {})})
     _write(root / 'state.json', state)
     return {'status': 'stopped_incomplete' if state['cleanup']['status'] in
             ('stopped_complete', 'stopped_incomplete', 'not_started') else 'cleanup_unverified',
@@ -565,6 +601,9 @@ def drive(root: Path, *, command=_command, spawn_owner=_spawn_owner) -> dict:
                 'kind': 'native-engagement-emergency-hold-v1',
                 'reason': 'driver_state_or_inputs_changed', 'stop_requests': stops})
             fail('engagement_state_or_inputs_changed')
+        if (state['phase'] == 'incomplete'
+                and (state.get('cleanup') or {}).get('status') == 'unverified'):
+            return _halt(root, state, command, state.get('error') or 'engagement_cleanup_unverified')
         if state['phase'] in ('complete', 'incomplete'):
             return {'status': state['phase'], 'engagement_root': str(root),
                     'reason': state.get('error')}

@@ -58,7 +58,8 @@ class Phases:
             phase = Path(args[args.index('--run-root') + 1]).name
             absent = self.stop_at != 'cleanup_missing'
             return 0, {'status': self.statuses[phase],
-                       'dispatches': list(self.dispatches),
+                       'dispatches': sorted(self.dispatches,
+                                            key=lambda row: row['dispatch_id']),
                        'final': ({'status': 'stopped_complete',
                                   'native_stop': {'status': 'stopped'},
                                   'cleanup': {'status': 'complete',
@@ -66,13 +67,17 @@ class Phases:
                                  if self.statuses[phase] == 'stopped_complete' else None),
                        'setup': {'frozen_proposal_receipt_sha256':
                                  'a' * 64 if (setup / 'controls/setup-output/receipt.json').exists()
-                                 else None}}
+                                 else None,
+                                 'last_dispatch_id': (self.dispatches[-1]['dispatch_id']
+                                                      if self.dispatches else None)}}
         if name == 'native_research.py' and action == 'setup-turn':
             if self.stop_at == 'setup_unknown':
-                self.dispatches.append({'status': 'unknown_effect',
+                self.dispatches.append({'dispatch_id': 'f' * 32,
+                                        'role': 'researcher', 'status': 'unknown_effect',
                                         'session_id': 'ses_synthetic'})
                 return 2, {'status': 'unknown_effect', 'code': 'native_turn_exit_unknown_effect'}
-            self.dispatches.append({'status': 'acknowledged',
+            self.dispatches.append({'dispatch_id': 'f' * 32,
+                                    'role': 'researcher', 'status': 'acknowledged',
                                     'session_id': 'ses_synthetic'})
             if self.stop_at in ('scope_drift', 'inputs_drift') and not self.crashed:
                 self.crashed = True
@@ -81,15 +86,21 @@ class Phases:
         if name == 'native_research.py' and action == 'setup-resume':
             self.resumes += 1
             if self.stop_at == 'resume_unknown':
-                self.dispatches.append({'status': 'unknown_effect',
+                self.dispatches.append({'dispatch_id': '0' * 32,
+                                        'role': 'resume', 'status': 'unknown_effect',
                                         'session_id': 'ses_synthetic'})
                 return 2, {'status': 'unknown_effect', 'code': 'native_turn_exit_unknown_effect'}
-            self.dispatches.append({'status': 'acknowledged',
+            self.dispatches.append({'dispatch_id': '0' * 32,
+                                    'role': 'resume', 'status': 'acknowledged',
                                     'session_id': 'ses_synthetic'})
+            if self.stop_at == 'resume_crash_uuid_order' and not self.crashed:
+                self.crashed = True
+                raise KeyboardInterrupt('synthetic crash after acknowledged setup resume')
             return 0, {'status': 'acknowledged', 'session_id': 'ses_synthetic'}
         if name == 'native_research.py' and action == 'setup-freeze':
             if self.stop_at in ('freeze_invalid', 'resume_unknown') or (
-                    self.stop_at == 'freeze_revision' and self.resumes == 0):
+                    self.stop_at in ('freeze_revision', 'resume_crash_uuid_order')
+                    and self.resumes == 0):
                 return 2, {'status': 'rejected', 'code': 'setup_output_missing_changed_or_oversize'}
             write(setup / 'controls/setup-output/receipt.json',
                   {'kind': 'native-setup-output-v1'})
@@ -100,7 +111,7 @@ class Phases:
             return 0, {'status': 'stop_requested'}
         if name == 'native_setup_builder.py' and action == 'setup-build':
             self.builds += 1
-            if self.stop_at == 'build_unknown':
+            if self.stop_at in ('build_unknown', 'build_cleanup_unresolved'):
                 return 2, {'status': 'unknown_effect', 'code': 'build_action_unknown_effect'}
             checked = self.receipt()
             write(setup / 'controls/setup-checked/receipt.json', checked)
@@ -111,11 +122,23 @@ class Phases:
         if name == 'native_setup_builder.py' and action == 'setup-build-status':
             if '--verify-checked' in args:
                 return 0, {'receipt': self.receipt()}
+            if self.stop_at == 'build_cleanup_unresolved':
+                return ((2, {'status': 'cleanup_unresolved'}) if self.reconciles < 3
+                        else (0, {'status': 'blocked_reconciled'}))
+            if self.stop_at == 'build_unknown' and self.reconciles:
+                return 0, {'status': 'blocked_reconciled'}
             return (2, {'status': 'unknown_effect'}) if self.stop_at == 'build_unknown' \
                 else (0, {'status': 'ready'})
         if name == 'native_setup_builder.py' and action == 'setup-build-reconcile':
             self.reconciles += 1
-            return 2, {'status': 'blocked_reconciled'}
+            if self.stop_at == 'build_cleanup_unresolved' and self.reconciles < 3:
+                return 2, {'status': 'cleanup_unresolved',
+                           'cleanup': {'status': 'unresolved', 'absent': False}}
+            if self.stop_at == 'build_cleanup_unresolved':
+                return 0, {'status': 'blocked_reconciled',
+                           'cleanup': {'status': 'complete', 'absent': True}}
+            return 0, {'status': 'blocked_reconciled',
+                       'cleanup': {'status': 'complete', 'absent': True}}
         if name == 'native_research.py' and action == 'prepare-checked':
             write(research / 'plan.json', {'autonomous_engagement': {'kind': 'scope-only'},
                                            'checked_setup': {'kind': 'checked'},
@@ -188,17 +211,25 @@ def scenario(base: Path, name: str) -> dict:
     driver._initialize(root, inputs_path)
     fake = Phases(root, scope, stop_at=name if name != 'success' else None)
     fake.inputs = inputs
-    if name == 'build_crash':
+    if name in ('build_crash', 'resume_crash_uuid_order'):
         try:
             driver.drive(root, command=fake, spawn_owner=fake.owner)
         except KeyboardInterrupt:
             pass
         else:
             raise AssertionError('synthetic crash not reached')
-        assert driver._state(root)['pending']['action'] == 'setup_build'
+        assert driver._state(root)['pending']['action'] == (
+            'setup_build' if name == 'build_crash' else 'setup_resume')
         result = driver.drive(root, command=fake, spawn_owner=fake.owner)
         assert fake.builds == 1, fake.calls
         assert result['status'] == 'complete_internal_candidate', result
+    elif name == 'build_cleanup_unresolved':
+        first = driver.drive(root, command=fake, spawn_owner=fake.owner)
+        assert first['status'] == 'cleanup_unverified', first
+        assert fake.builds == 1 and fake.reconciles == 2, fake.calls
+        result = driver.drive(root, command=fake, spawn_owner=fake.owner)
+        assert result['status'] == 'stopped_incomplete', result
+        assert fake.builds == 1 and fake.reconciles == 3, fake.calls
     elif name in ('scope_drift', 'inputs_drift'):
         try:
             driver.drive(root, command=fake, spawn_owner=fake.owner)
@@ -230,7 +261,10 @@ def scenario(base: Path, name: str) -> dict:
             fake.calls.index('native_research.py:prepare-checked')
     elif name == 'build_unknown':
         assert result['status'] == 'stopped_incomplete', result
-        assert fake.builds == 1 and fake.reconciles == 1
+        assert fake.builds == 1 and fake.reconciles == 2
+        assert 'native_research.py:prepare-checked' not in fake.calls
+    elif name == 'build_cleanup_unresolved':
+        assert result['status'] == 'stopped_incomplete'
         assert 'native_research.py:prepare-checked' not in fake.calls
     elif name in ('setup_unknown', 'freeze_invalid'):
         assert result['status'] == 'stopped_incomplete', result
@@ -240,6 +274,9 @@ def scenario(base: Path, name: str) -> dict:
         assert result['status'] == 'stopped_incomplete', result
         assert fake.resumes == 1 and fake.builds == 0
     elif name == 'freeze_revision':
+        assert result['status'] == 'complete_internal_candidate', result
+        assert fake.resumes == 1 and fake.builds == 1
+    elif name == 'resume_crash_uuid_order':
         assert result['status'] == 'complete_internal_candidate', result
         assert fake.resumes == 1 and fake.builds == 1
     elif name == 'research_incomplete':
@@ -271,8 +308,9 @@ def main() -> int:
         base = Path(temporary)
         checks = {name: scenario(base / name, name) for name in
                   ('success', 'setup_unknown', 'freeze_invalid', 'build_unknown',
-                   'build_crash', 'scope_drift', 'inputs_drift', 'cleanup_missing',
-                   'freeze_revision', 'resume_unknown', 'research_incomplete')}
+                   'build_crash', 'build_cleanup_unresolved', 'scope_drift',
+                   'inputs_drift', 'cleanup_missing', 'freeze_revision',
+                   'resume_crash_uuid_order', 'resume_unknown', 'research_incomplete')}
     report = {'status': 'passed', 'kind': 'native-scope-only-phase-driver-e2e-v1',
               'command': ('PYTHONDONTWRITEBYTECODE=1 python3 '
                           'evals/native-qualification/smoke/check_scope_only_phase_driver_e2e.py '

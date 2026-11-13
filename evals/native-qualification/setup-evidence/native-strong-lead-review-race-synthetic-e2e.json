@@ -1,0 +1,29 @@
+{
+  "changed_receipt_sha256": "63e8587696bec15690ba2a51c29759a725207a27c9b202c0a7427ee6c98a9bbd",
+  "environment": {
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "events": [
+    "source_action_captured",
+    "source_action_captured",
+    "source_review_dispatched",
+    "source_review_captured",
+    "source_review_cached_evidence_changed",
+    "stopped",
+    "stopped"
+  ],
+  "first_status": "review_incomplete",
+  "invocations": 1,
+  "kind": "native-strong-lead-review-race-synthetic-e2e-v1",
+  "limits": "Synthetic cached review and in-memory checked-setup marker; no Docker, provider, target, or real owner teardown.",
+  "provider_calls": 0,
+  "retry_status": "review_incomplete",
+  "review_phase": "incomplete",
+  "review_projection_sha256": "d55773a2719615efa3a9596691eabd10c49b22c2abb9011ccecdbe1474ecb557",
+  "scenario_sha256": "391883ae39e0f656ffec757e39c243db6dd2637c153edac32d6e369a898c2cd9",
+  "status": "passed",
+  "target_service_calls": 0,
+  "valid_missing_disposition_status": "closure_review_required",
+  "valid_missing_disposition_turns": 1
+}

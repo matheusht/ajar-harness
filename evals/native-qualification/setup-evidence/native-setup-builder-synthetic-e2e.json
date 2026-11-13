@@ -1,0 +1,538 @@
+{
+  "artifacts": {
+    "adopted_journal_sha256": "acabbe93b0e1259ccd89f86db5a27abf5065274f2bbc74f26010d2dcbbb25944",
+    "adopted_receipt_sha256": "31d29aeca37bf956abffa0621e2baf018d4b58021df1f63325e970a875be7189",
+    "checked_receipt_sha256": "0d64b84c2f59bb04966b9839351402d33155be208d54c923da8f294b3c15a44f",
+    "journal_sha256": "d254f635fcc8dbb7b77e89df714c877c1525e9001c18f0f4cb32cb90f06862fe"
+  },
+  "checks": [
+    {
+      "name": "active provider tunnel refuses offline build approval",
+      "observed": {
+        "code": "build_setup_provider_accounting_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "provider byte sum mismatch refuses offline build approval",
+      "observed": {
+        "code": "build_setup_provider_accounting_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "missing native stop proof rejects before template or build",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "missing catalog dependency rejects before build",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed build authority rejects before dispatch",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed source rejects before dispatch",
+      "observed": {
+        "code": "source_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "source mode changed after signing rejects before dispatch",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "public offline build reaches checked ready receipt",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "f128a2ed74361dd0689ab1f5a091a9b5baf21056f2d7f0c529d53eff4e86edd9",
+            "container_name": "lrh-setup-build-f475040725af4e29994b",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-l15zco8x/run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "0d64b84c2f59bb04966b9839351402d33155be208d54c923da8f294b3c15a44f",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "output and dependency bytes are saved and pinned",
+      "observed": {
+        "output_sha256": "f1761bcdd8c9642732bc621617841662135295fe36f09a8124e137910661847c"
+      },
+      "passed": true
+    },
+    {
+      "name": "executable dependency and output retain usable modes",
+      "observed": {
+        "dependency_mode": "0o700",
+        "output_mode": "0o700"
+      },
+      "passed": true
+    },
+    {
+      "name": "builder pins Docker daemon and inspects boundary before start",
+      "observed": {
+        "actions": [
+          "container_create",
+          "container_inspect_prestart",
+          "container_start",
+          "source_copy"
+        ],
+        "daemon_pinned": true
+      },
+      "passed": true
+    },
+    {
+      "name": "mounted source and dependencies are read back before build",
+      "observed": {
+        "actions": [
+          "container_create",
+          "container_inspect_prestart",
+          "container_start",
+          "source_copy",
+          "source_readback",
+          "dependency_readback",
+          "runtime_version",
+          "dependency_probe",
+          "target_build",
+          "output_read_1:out/result.txt",
+          "output_read_2:out/result.txt",
+          "container_remove"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "name": "status reports completed cleanup",
+      "observed": {
+        "exit": 0,
+        "status": "ready"
+      },
+      "passed": true
+    },
+    {
+      "name": "public readback verifies archived checked package",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "dependency mode drift invalidates checked package",
+      "observed": {
+        "code": "build_catalog_mode_changed_or_unsafe",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "output mode drift invalidates checked package",
+      "observed": {
+        "code": "checked_receipt_or_bytes_changed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "original source mode drift invalidates checked package",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "a dispatched build is never automatically retried",
+      "observed": {
+        "code": "build_already_dispatched",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "injected exit lands after checked rename before ready journal",
+      "observed": {
+        "checked_receipt_sha256": "31d29aeca37bf956abffa0621e2baf018d4b58021df1f63325e970a875be7189",
+        "exit": 73,
+        "journal_status": "pending",
+        "stderr": "",
+        "stdout": ""
+      },
+      "passed": true
+    },
+    {
+      "name": "uncommitted checked package is not verified ready",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "visible checked package blocks a repeated build",
+      "observed": {
+        "code": "build_already_dispatched",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "dangling checked path blocks a repeated build",
+      "observed": {
+        "code": "build_already_dispatched",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds changed_receipt",
+      "observed": {
+        "code": "checked_receipt_or_bytes_changed",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds uncertain_journal",
+      "observed": {
+        "code": "checked_adoption_journal_invalid",
+        "exit": 2,
+        "journal_status": "unknown_effect",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds failed_acknowledgement",
+      "observed": {
+        "code": "checked_build_journal_invalid",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds wrong_daemon",
+      "observed": {
+        "code": "build_docker_daemon_changed",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds daemon_unavailable",
+      "observed": {
+        "code": "docker_command_failed",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds missing_native_stop",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "checked adoption holds resource_present",
+      "observed": {
+        "code": "checked_build_container_still_present",
+        "exit": 2,
+        "journal_status": "pending",
+        "status": "refused"
+      },
+      "passed": true
+    },
+    {
+      "name": "reconcile adopts exact checked package without a second build",
+      "observed": {
+        "exit": 0,
+        "journal_status": "ready",
+        "status": "ready"
+      },
+      "passed": true
+    },
+    {
+      "name": "adopted package passes public readback",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "crashed pending build cannot be automatically repeated",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "wrong Docker daemon cannot settle cleanup",
+      "observed": {
+        "exit": 2,
+        "result": {
+          "cleanup": {
+            "code": "build_docker_daemon_changed",
+            "container_id": "f0878deeb72ba7a68cdf93bb36c872162ee00efcbe45e21cf6a48bd9fe282991",
+            "container_name": "lrh-setup-build-893fc6adaf694df58891",
+            "status": "unresolved"
+          },
+          "journal_sha256": "b115712145932b434c895103b794557d033b34899119e7c549b99dc7e21b82f0",
+          "kind": "native-setup-build-reconciliation-v1",
+          "pending_action": "container_create",
+          "retry_requires_new_approval": true,
+          "security_result": null,
+          "status": "cleanup_unresolved",
+          "uncertain_actions": [
+            "container_create"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "crashed pending action gets exact blocked cleanup readback",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "build_duration_charged_upper_bound_seconds": 30,
+          "cleanup": {
+            "absent": true,
+            "container_id": "f0878deeb72ba7a68cdf93bb36c872162ee00efcbe45e21cf6a48bd9fe282991",
+            "container_name": "lrh-setup-build-893fc6adaf694df58891",
+            "status": "complete"
+          },
+          "journal_sha256": "5ad240e00b79f7b6ef50f83a8d8631fa08c7bd99a42a70f6cdb3f6baa65e35f7",
+          "kind": "native-setup-build-reconciliation-v1",
+          "pending_action": "container_create",
+          "retry_requires_new_approval": true,
+          "security_result": null,
+          "setup_cumulative_used": {
+            "bytes": 0,
+            "connections": 0
+          },
+          "status": "blocked_reconciled",
+          "uncertain_actions": [
+            "container_create"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "old build approval cannot retry reconciled effect",
+      "observed": {
+        "code": "build_authority_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "fresh approval template binds prior uncertain spend",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "approval": {
+            "approved_at": "2026-11-12T22:02:33Z",
+            "approved_by": "synthetic-operator",
+            "cumulative_build_duration_charged_upper_bound_seconds": 30,
+            "cumulative_setup_used": {
+              "bytes": 0,
+              "connections": 0
+            },
+            "dependency_catalog_tree_sha256": "98c71d5f44ac2d2048dc6efd06f3e3166596b951e72f3d1059c78b4237db186f",
+            "duration_seconds": 30,
+            "effect_class": "owned-disposable-offline-target-build",
+            "expires_at": "2026-11-12T23:02:33Z",
+            "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+            "kind": "native-setup-build-approval-v1",
+            "max_workspace_bytes": 8388608,
+            "memory_bytes": 67108864,
+            "network_class": "none",
+            "outputs": [
+              "out/result.txt"
+            ],
+            "prior_build_attempts": [
+              "4ff14c0680dbfb00ba38b5eb7e8831beb2e21d3b804b9e1d00875e211ad423db"
+            ],
+            "scope_amendment_sha256": "a589f2ea53bb53329746e73d3382a2cb9e2e24bdd30adb36fe1e91726e303134",
+            "setup_approval_sha256": "2fcfd6336bb71ba81662e3436deb7caabd0d3d66f927abfbff2f9a8dfaed794f",
+            "setup_chain_sha256": "3b8cc5f490f0dc5756adc2e832a8dd8c6a721dd453d53d24518a769f579b5882",
+            "setup_plan_sha256": "4060b4c9db94202fd0ed035bd2419e56feb7f54c2a9f3003bfbeabd91d0adeeb"
+          },
+          "kind": "native-setup-build-template-v1",
+          "scope_amendment": {
+            "cumulative_build_duration_charged_upper_bound_seconds": 30,
+            "cumulative_setup_used": {
+              "bytes": 0,
+              "connections": 0
+            },
+            "dependencies": {
+              "data.txt": {
+                "mode": 448,
+                "sha256": "c3039e9d479a3b6b868cc4c31ec97d84bcddcde9290f7a6f2ab99743d626ad64"
+              }
+            },
+            "dependency_catalog_tree_sha256": "98c71d5f44ac2d2048dc6efd06f3e3166596b951e72f3d1059c78b4237db186f",
+            "duration_seconds": 30,
+            "effect_class": "owned-disposable-offline-target-build",
+            "engagement_id": "fixture-202",
+            "expires_at": "2026-11-12T23:02:33Z",
+            "goal_sha256": "220449a9e93b81f26f49aaf3f8fdff9d8a3a9ae7428eb138956d8eb61be05842",
+            "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+            "kind": "native-setup-build-scope-v1",
+            "max_workspace_bytes": 8388608,
+            "memory_bytes": 67108864,
+            "network_class": "none",
+            "operator_id": "synthetic-operator",
+            "outputs": [
+              "out/result.txt"
+            ],
+            "platform": "linux/arm64",
+            "prior_build_attempts": [
+              "4ff14c0680dbfb00ba38b5eb7e8831beb2e21d3b804b9e1d00875e211ad423db"
+            ],
+            "recipe_sha256": "19996186ad27deec203c0e5785d8541daf71b23284222f4d6813bdf7e74d3944",
+            "setup_chain_sha256": "3b8cc5f490f0dc5756adc2e832a8dd8c6a721dd453d53d24518a769f579b5882",
+            "setup_output_receipt_sha256": "9d4a0c92c2be87a1143f56a57445d6a6c45cfb79bbd18e922ae2196f34cb9791",
+            "setup_scope_sha256": "c2bec308dc29be8879cb854da0f04e9ac805feb1b8ec528a7f6c03f4c189b35e",
+            "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976",
+            "source_mode_sha256": "01edc2ae2641669cd97531ce06d332c20f10ec5e34057fd5cbe58d7c02220eee",
+            "threat_model_sha256": "8429fcacfebc9d8bc6d286ec59d6678b624e919146f825806fe0eba52069aaa6"
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "fresh signed retry reaches checked package with prior attempt archived",
+      "observed": {
+        "archived": 1,
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "6a8c7610d7c89ac15be7f2cf96bff4a27e0c66f4002cc53af039dae309bdd06a",
+            "container_name": "lrh-setup-build-c4354aa7fdaa4cea9496",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-l15zco8x/crash-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "c4de56b391370b045b80a99d42bebd4ccf4410cb04ffb73f79f22381c725ebd4",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "retried checked package passes public readback",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "ready build cannot repeat after checked package loss",
+      "observed": {
+        "code": "build_already_dispatched",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "linked setup chain permits a separately signed build template",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "linked setup chain produces checked offline build",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "cleanup": {
+            "absent": true,
+            "container_id": "d52e8758da7e1da9c5e03574226cab9eb2a92844d990e03193c203d4fd1a2c75",
+            "container_name": "lrh-setup-build-30aa4c031c4d42c79d9b",
+            "status": "complete"
+          },
+          "kind": "native-setup-checked-v1",
+          "receipt_path": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-builder-e2e-l15zco8x/linked-run/controls/setup-checked/receipt.json",
+          "receipt_sha256": "8a460172f3594bc2e560845a403ef63116f4f855fbbfdd01e7a15063ad7e6eb1",
+          "status": "ready"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "linked checked package passes public readback",
+      "observed": {
+        "code": null,
+        "exit": 0
+      },
+      "passed": true
+    }
+  ],
+  "classification": "synthetic setup turn, stop, and pending host crash; real local offline Docker build",
+  "fixture_roots": null,
+  "inputs": {
+    "build_authority_sha256": "9cf9bbc1b95ea518457dbc46ac9f1e0093d1050b5abd24129e1347cc391066cc",
+    "builder_sha256": "0c18bf8d7e353476670f3c5e5cca219904f05dd9ea0a24ea50bb02fa895ae70e",
+    "catalog_manifest_sha256": "9600ea91559a5c7fca060ded4dbe76cc9b8305b61afb1e514bb7c79bd010e4c5",
+    "frozen_setup_receipt_sha256": "9d4a0c92c2be87a1143f56a57445d6a6c45cfb79bbd18e922ae2196f34cb9791",
+    "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+    "scenario_sha256": "5337111510790c1d76ae23062c153da65da3af048a719f31cfe4a10181e5a0b2",
+    "scope_sha256": "c2bec308dc29be8879cb854da0f04e9ac805feb1b8ec528a7f6c03f4c189b35e",
+    "setup_approval_sha256": "2fcfd6336bb71ba81662e3436deb7caabd0d3d66f927abfbff2f9a8dfaed794f",
+    "source_manifest_sha256": "3ee9b17da4d0dcb58fefdf55386b4df60c084e826c3ab9cc0871ae10ab8c5976"
+  },
+  "kind": "native-setup-builder-synthetic-e2e-v1",
+  "limits": "No real host kill, native model turn, provider qualification, engagement, or research run.",
+  "passed": true,
+  "provider_executed": false,
+  "target_service_executed": false
+}

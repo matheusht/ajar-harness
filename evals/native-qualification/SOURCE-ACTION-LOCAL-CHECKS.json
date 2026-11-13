@@ -1,0 +1,227 @@
+{
+  "adopted": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "f41923b7efc3c6ffe4306306b5338573",
+      "request_sha256": "431c55d96af004a5a54264e257984e3c4128ebee7fe0419f324bf3845af56d84",
+      "source_receipt_sha256": "a9b43a6e589b66d909d99e1c54e5342e58e427fada8dc5be34e2dc28d9ef5150",
+      "terminal_sha256": "2d434243cdf511ce0ac23dd4b4ffa6de0318259273935f39f2a02f00e5050db8"
+    },
+    "first_status": "synthetic_crash_after_capture",
+    "late_receipt_status": null,
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "captured_event_gap": {
+    "first_action_id": "36dd03faaba8526585b956dc84cbd881",
+    "first_captured_events": 1,
+    "source_batches": 3,
+    "status": "recovered_captured_event"
+  },
+  "check_sha256": "aeac226b429d2b728d4a3b8ea540bd425dbe7d29ca333a5ccbdb0ed7fe5712ff",
+  "command": [
+    "sh",
+    "check.sh"
+  ],
+  "continuation_sha256": "738d843a32b0240cc54490b267a544605519d531d6c888d3e27223e1ef8eedf2",
+  "docker": {
+    "cleanup": "all_fixture_containers_absent",
+    "evidence": {
+      "action_id": "829819c04673c7db7c6dced0314e3274",
+      "request_sha256": "d977dbcb0f197c86ffca53c4c3d3218bd5a31064a7a724a60bd662e2c1b51f88",
+      "source_receipt_sha256": "5b47ea691d35cc38b6b88121f2b46b64380076b7925ebfea102ba5735128dd9e",
+      "terminal_sha256": "f9d0505124ba0f55933f30da23353817e49e3354a7d06e63d6d324932102197b"
+    },
+    "first_status": "cleanup_pending",
+    "late_receipt_status": null,
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "environment": {
+    "docker": "29.3.1",
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "expected": {
+    "changed_receipt_auto_adoptions": 0,
+    "clean_executor_runs": 3,
+    "source_batches_per_request": 1,
+    "unknown_effect_auto_retries": 0
+  },
+  "happy": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "d9260c0b6f63ab356461f723d9876c77",
+      "request_sha256": "56c734c9e5cf4abd1238245b7a8f7857f2b166ef259e138bdb94450aaaa04208",
+      "source_receipt_sha256": "dc7b03417cb80a5930080baa5ddd4907edc248cb665ff1b9a6c0b3603e164eca",
+      "terminal_sha256": "ccecd3e991e7942d1e87083ff9f55260278e9ea56a36c6697126fb43968765d0"
+    },
+    "first_status": "cleanup_pending",
+    "late_receipt_status": null,
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "image_id": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+  "late_capture": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "70959e75b0eed9da8dd49f9f5d3c9b9f",
+      "request_sha256": "1aef7e1fc87681595c264aca00eb11d433902ed1d935559a26523aa51af15bc9",
+      "source_receipt_sha256": null,
+      "terminal_sha256": null
+    },
+    "first_status": "synthetic_crash_after_dispatch",
+    "late_receipt_status": "cleanup_pending",
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research"
+    ]
+  },
+  "limits": "Synthetic native turns and authority; Docker source executor only when requested. No provider or target qualification.",
+  "native_tool_trace": null,
+  "orphan_dispatch_event": {
+    "reason": "dispatch_event",
+    "source_batches": 0,
+    "status": "reconciliation_required"
+  },
+  "orphan_execution": {
+    "reason": "execution",
+    "source_batches": 0,
+    "status": "reconciliation_required"
+  },
+  "orphan_incomplete": {
+    "aborted_orphan": "b7c3c86777221588b9f05b9aaf995bc9",
+    "new_action_id": "8f45340642c88072d770fada9bfce4d4",
+    "source_batches": 1,
+    "status": "recovered_pre_dispatch"
+  },
+  "orphan_malformed_journal": {
+    "reason": "malformed_journal",
+    "source_batches": 0,
+    "status": "reconciliation_required"
+  },
+  "orphan_prepared": {
+    "first_status": "synthetic_crash_before_prepared_state",
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "prepared": {
+    "first_status": "synthetic_crash_before_dispatch",
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "prior_authority_record": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "5f9ce119b069e9a0363f7f9341779058",
+      "request_sha256": "b99f00663dbd85a6a98e7c99b890aa5ca0a1775dfe9d868dc5fc058c814eb3cc",
+      "source_receipt_sha256": "1bed01a73ad4897314705bfa7619db8cae4e595fd71411b9143b2ca393a6f07a",
+      "terminal_sha256": "f25d025ba0468d58f4f7ad57957a78ec2189322146272edef2bc2425c0cc9c16"
+    },
+    "first_status": "cleanup_pending",
+    "late_receipt_status": null,
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research",
+      "resume"
+    ]
+  },
+  "provider_cost": null,
+  "rejected": [
+    "malformed",
+    "duplicate_key",
+    "oversized",
+    "symlink",
+    "invalid_argv",
+    "stale_next",
+    "swapped_command",
+    "swapped_source",
+    "swapped_request",
+    "missing_envelope",
+    "expired_approval",
+    "exhausted",
+    "stopped",
+    "concurrent"
+  ],
+  "second_orphan_incomplete": {
+    "first_action_id": "c255cc00768a103c15631301ec651840",
+    "orphan_action_id": "606e52cdcbf71513490231e47b362a12",
+    "orphan_quarantined": true,
+    "second_action_id": "a57defeb7e5c59cb91484a9ad5f9c167",
+    "source_batches": 2,
+    "status": "recovered_second_action"
+  },
+  "second_orphan_prepared": {
+    "first_action_id": "eeb273846d76a45f363563ae2b969e6e",
+    "orphan_action_id": "fce4ada143289efdb4dad08b2b4c4cb9",
+    "orphan_quarantined": false,
+    "second_action_id": "fce4ada143289efdb4dad08b2b4c4cb9",
+    "source_batches": 2,
+    "status": "recovered_second_action"
+  },
+  "source_sha256": "5eeb56017851421ed8648bd1ab5570ca73b73b6001f6fe2788eb0328146878ba",
+  "status": "passed",
+  "tampered_receipt": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "2d887a210854cd62e08739efd902c144",
+      "evidence_change_reason": "source_action_receipt_mismatch",
+      "observed_bad_receipt_sha256": "65fe6e235df565d25a619e799d344d6deea50f026c4dd5b7ef7807eeaeb972ca",
+      "request_sha256": "2996396a1694ef703a2202049c94b082a7464820ecaa60b514e8582ca1804d04",
+      "source_receipt_sha256": null,
+      "terminal_sha256": null
+    },
+    "first_status": "synthetic_crash_after_capture",
+    "late_receipt_status": null,
+    "replacement_status": "cleanup_pending",
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research"
+    ]
+  },
+  "uncertain": {
+    "cleanup": "temporary_files_removed",
+    "evidence": {
+      "action_id": "04365f369f900d3bd812c6da9b879b6a",
+      "request_sha256": "434910768e4c3950afd9f2c1b9cc1b54f3460e4850ea4723f6a2c7deaa1d4925",
+      "source_receipt_sha256": null,
+      "terminal_sha256": null
+    },
+    "first_status": "synthetic_crash_after_dispatch",
+    "late_receipt_status": null,
+    "replacement_status": null,
+    "second_status": "cleanup_pending",
+    "source_batches": 1,
+    "turns": [
+      "research"
+    ]
+  }
+}

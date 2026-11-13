@@ -1,0 +1,22 @@
+{
+  "checks": {
+    "changed_catalog_refused": true,
+    "changed_initial_threat_model_refused": true,
+    "changed_output_refuses_prior_authority": true,
+    "changed_signed_scope_refused": true,
+    "changed_source_pin_refused": true,
+    "deadline_cannot_be_renewed": true,
+    "derived_from_initial_scope": true,
+    "different_build_image_refused": true,
+    "later_build_approval_refused": true,
+    "public_build_accepts_scope_only_authority": true,
+    "signed_attempt_limit_refused": true,
+    "synthetic_stopped_setup_verified": true,
+    "unsafe_output_refused": true
+  },
+  "docker_shim_calls": 1,
+  "provider_calls": 0,
+  "real_docker_calls": 0,
+  "status": "passed",
+  "target_service_calls": 0
+}

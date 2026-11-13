@@ -1,0 +1,178 @@
+{
+  "checks": [
+    {
+      "name": "public source identity matches signed manifest",
+      "observed": {
+        "exit": 0,
+        "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
+      },
+      "passed": true
+    },
+    {
+      "name": "signed but incomplete scope refuses before run creation",
+      "observed": {
+        "code": "setup_scope_incomplete",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "unsigned scope refuses before run creation",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "source disk cap refuses before copy",
+      "observed": {
+        "code": "setup_source_limit_exceeded",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "signed source digest rejects changed export before copy",
+      "observed": {
+        "code": "setup_signed_source_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "signed scope and source prepare without Docker contact",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "live_approval_required": true,
+          "plan_sha256": "18ff07b062d38602d86fba27cd55369d07992b22b11764591d7756b10a84befe",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-setup-e2e-_6xt4paq/run",
+          "source_files": 3,
+          "status": "prepared_provider_free"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "original source matches all frozen pins",
+      "observed": {
+        "source_file_count": 3,
+        "source_manifest_sha256": "8b911733302518b25242e1aa51bc2c37f15c7adabfb5ce20258ac2194d947607"
+      },
+      "passed": true
+    },
+    {
+      "name": "latest turn follows durable order, not reversed UUID order",
+      "observed": {
+        "exit": 0,
+        "last_dispatch_id": "00000000000000000000000000000001"
+      },
+      "passed": true
+    },
+    {
+      "name": "missing setup approval rejects before effect",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "docker_called": false,
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "unmetered requested monetary cap fails closed",
+      "observed": {
+        "code": "setup_monetary_cap_unenforceable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "unsupported effect class rejects before effect",
+      "observed": {
+        "code": "setup_approval_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed archived scope rejects before effect",
+      "observed": {
+        "code": "run_input_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "changed frozen source rejects before effect",
+      "observed": {
+        "code": "source_pin_mismatch",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "valid setup approval reaches Docker only after signature checks",
+      "observed": {
+        "code": "docker_command_failed",
+        "docker_called": true,
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "frozen setup refuses another first turn before native dispatch",
+      "observed": {
+        "code": "setup_output_already_frozen",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "frozen setup refuses resume before native dispatch",
+      "observed": {
+        "code": "setup_output_already_frozen",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "local Docker source and cleanup boundary",
+      "observed": {
+        "cleanup_absent": true,
+        "container_id": "7b31c0e744484b7d636425c1f6a2a41eeca5717abdfd26c4438a06b086262395",
+        "network": "none",
+        "passed": true,
+        "readonly_root": true,
+        "source_mount_readonly": true,
+        "source_readable": true,
+        "source_write_denied": true,
+        "status": "checked",
+        "workspace_tmpfs": "rw,nosuid,nodev,size=8388608",
+        "workspace_write_succeeded": true
+      },
+      "passed": true
+    }
+  ],
+  "classification": "synthetic signed authority, Docker shim, and local boundary probe",
+  "inputs": {
+    "cli_sha256": "317a36705965a10cc1448e61828933097c7724fe05f3f75ed83061b293929b09",
+    "goal_sha256": "70d300cd9ddba9327d19fa3dc9fd058c7a3a663b594fa21a58d61a716c078354",
+    "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
+    "runtime_ca_sha256": "22c8a9a87540e5a6a7c213cb90532635b0f03bc33117b1ec80d2cbbafea57757",
+    "scenario_sha256": "6b175702a2def202d198002196468c4c205c195a5060718fccf14f5fdf5d6480",
+    "scope_sha256": "38003e097c787f4df24db012b8742eb1de0b8ac1730dd52e41ec83e3dc023b1e",
+    "scope_signature_sha256": "43d02d8b0a31fa172ee939c1a5d4d0609ee1f4e2d696fd9414f7e992d7b429b0",
+    "setup_approval_sha256": "6de7b03cdbe5af23fd53b200168fe55271f750900cccd8607f9ce1b4783e4f75",
+    "source": {
+      "main.py": "04bd88d6c082b8266c28d044f590138f128c64029cf7bed48bb33087479672e1",
+      "pkg/__init__.py": "8ad85b90108ebaad552b841d21e7895a651a7e49cf21a46d48ae04332ee827c0",
+      "pkg/message.py": "15ee639d05cf4da1d5ff0e61361e79c3a04f48892cdaf2c452b3fc118dd68209"
+    }
+  },
+  "kind": "native-setup-synthetic-e2e-v1",
+  "limits": "No native model turn, live relay, interruption recovery, or full start cleanup.",
+  "passed": true,
+  "provider_or_model_executed": false,
+  "target_executed": false
+}

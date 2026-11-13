@@ -1,0 +1,60 @@
+{
+  "baseline_passed": true,
+  "checks": [
+    {
+      "name": "public prepare seals an unsigned fixture without setup approval",
+      "observed": {
+        "code": null,
+        "exit": 0,
+        "status": "prepared_provider_free"
+      },
+      "passed": true
+    },
+    {
+      "name": "all source files are frozen and pinned",
+      "observed": {
+        "source_file_count": 3,
+        "source_manifest_sha256": "e43650ad4bca364276f2002ce9cd42e94791e08c868cd9a0ec25c774c9d8d449"
+      },
+      "passed": true
+    },
+    {
+      "name": "public status has no active allowance",
+      "observed": {
+        "exit": 0,
+        "status": "prepared"
+      },
+      "passed": true
+    },
+    {
+      "name": "start rejects missing research approval before any effect",
+      "observed": {
+        "code": "regular_file_unavailable",
+        "docker_shim_called": false,
+        "exit": 2
+      },
+      "passed": true
+    }
+  ],
+  "docker_daemon_contacted": false,
+  "inputs": {
+    "build_command_sha256": "853c31c3c86053c36c8a98df2ed45e6d45434558e8527bb4c927abf8d3b1d94a",
+    "ca_sha256": "a555c8df1c9dbea55c7cd850bd218c9d21712aec3adb6ed3a50753854ce591d1",
+    "cli_sha256": "1f987410cd9ced4413d5b88cdd4f002e262322bf3638b622cef632506e55f1e3",
+    "goal_sha256": "b14d57b0172060ff9fde4fee9137794c3f278eb53af6cf469825832187eaa446",
+    "relay_sha256": "33ef7484c2a2415915af399689e91e9efee8000b2c685a6b2b72eb4eddedf895",
+    "runtime_sha256": "a51414651678d3515efb845b762e8b2bf1bc981a3281f92ac26f159a2776bc1f",
+    "scenario_sha256": "fa018a79f432e0393f5ea2dd68cd7a70f86e5cc7736605bcb83d18ddc7a529c1",
+    "scope_sha256": "112f79a4cb852abfe7a9c23003a60805e72b7e5dc48d042f40aa2cfbc74739e5",
+    "setup_approval": "absent",
+    "source": {
+      "main.py": "04bd88d6c082b8266c28d044f590138f128c64029cf7bed48bb33087479672e1",
+      "pkg/__init__.py": "2a5c1928e4009416028da0d5f37298e7fe865b2c2ccfadc39c9abf76339957c7",
+      "pkg/message.py": "15ee639d05cf4da1d5ff0e61361e79c3a04f48892cdaf2c452b3fc118dd68209"
+    }
+  },
+  "issue_202_acceptance": "blocked_unimplemented",
+  "kind": "agent-led-setup-current-boundary-v1",
+  "limits": "Tests public provider-free prepare/status/start refusal only; does not test signed setup authority, agent proposal, host build, shared allowance, interruption, or cleanup.",
+  "model_or_target_executed": false
+}

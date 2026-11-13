@@ -1,0 +1,110 @@
+{
+  "allowance_charged_tunnel_bytes": 30,
+  "allowance_run_identity": {
+    "nonce": "synthetic-joined"
+  },
+  "allowance_used_tunnels": 1,
+  "closeout_result_sha256": null,
+  "environment": {
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "event_trace": [
+    {
+      "event": "dispatch_started",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "source_action_prepared",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "source_review_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_review_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "closure_request",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "stopped",
+      "invocation": null,
+      "status": "closure_review_required"
+    }
+  ],
+  "expected_closeout": "closure_review_required",
+  "fresh_reviews": 1,
+  "kind": "native-engagement-joined-synthetic-e2e-v1",
+  "lead_disposition": "missing",
+  "limits": "Synthetic native turns, source receipts, reviewer, owner, and cleanup; no live provider, target service, or real owner teardown.",
+  "owner_stops": 0,
+  "plan_sha256": "6f38b225f80a77b7147f3fdada38dddc84307a316808eb2caceccffd38dbede2",
+  "provider_calls": 0,
+  "review_projection_sha256": "6e35823055fb1815e038b1a264a2a8747b496ad24b35fa41731e1fc88d79068b",
+  "scenario_sha256": "b170ac4d2a0e0a86b4ec967aecd5853ad7427e6bf7b4c0274175a9478192930f",
+  "source_actions": 1,
+  "source_terminal_sha256": "79f890f21a15d7755b26e6ef3f81dc9c4e87a4269a08290d0357d4c3085bcf3e",
+  "status": "passed",
+  "target_service_calls": 0,
+  "transition_checks": 48,
+  "transition_evidence_sha256": "c443ead18b0bf881347a665a3c7f8708a2cd30e720b73a14e42b8da1f38eaece",
+  "turns": [
+    "research",
+    "resume",
+    "resume"
+  ]
+}

@@ -12,6 +12,10 @@ procedure described below.
 
 ## Start and resume
 
+For a new authorized source without a target runtime recipe, use the bounded
+[native setup turn](native-setup.md) first. It produces a proposal for host
+review and ends before target build or research approval.
+
 For source with no application listener, use
 [source mode](native-source-sdk.md). Its environment and paid-provider
 requirements differ from the service profile below. Source implementation is
@@ -99,8 +103,9 @@ not add monetary accounting or reconciled provider billing.
 
 `NEXT.json` is the checkpoint-level handoff. It records one of `supported`,
 `refuted`, `blocked`, or `inconclusive`, what the result rules out, useful
-capabilities and coverage, and the next brief or a stop proposal. An explicit stop
-proposal or a `strong_lead` change from true to false produces
+capabilities and coverage, and the next brief or a stop proposal. Outside the
+checked-setup source-only closeout route, an explicit stop proposal or a `strong_lead`
+change from true to false produces
 `closure_review_required`; a fresh reviewer or operator writes
 `controls/continuation/closure-review.json` with mode `0600`:
 
@@ -112,7 +117,28 @@ proposal or a `strong_lead` change from true to false produces
  "test": "required when decision is reopen; the concrete discriminating test"}
 ```
 
-A reopen also requires a concrete next brief in `researcher/NEXT.json`; the
+For a checked-setup source-only run, the agent saves
+`researcher/project/RESULT.md`, requests a fresh source review of those exact
+bytes, then sets `proposed_stop: true` with no next test or host action.
+`continue` invokes closeout itself: accepted review stops the native owner and
+checks the final receipt and exact resource absence. A reviewer `reopen`
+decision becomes the next agent prompt in the same run; the agent must revise
+`NEXT.json` and obtain fresh review after a material change. User, allowance
+and unknown-effect stops immediately request owner stop and preserve incomplete
+evidence. A missing result prompts the agent to complete it. A changed result
+prompts a fresh review request. If the next turn leaves both the result and
+checkpoint unchanged, the host stops with an incomplete result. Cleanup
+readback checks the Docker daemon identity pinned before resource creation.
+`complete_internal_candidate` grants no filing or deployment authority.
+
+For approved source-only runs, `NEXT.json` may instead request one typed
+[source check](native-source-sdk.md#researcher-requested-source-check). The host
+freezes the source and command, executes under the offline envelope, and makes a
+hash-only protected result visible to the next native turn. A missing envelope
+stops for an authority decision; an older plan cannot be changed in place to
+grant it. The result does not establish a security effect.
+
+In the older closure path, a reopen also requires a concrete next brief in `researcher/NEXT.json`; the
 review's `test` is recorded in the closure review, and the researcher must put the
 concrete next test in `NEXT.json` before the reopen continues. Budget or operator
 stop is immediate and bypasses review. A refutation can close a lead; a blocked

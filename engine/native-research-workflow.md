@@ -15,6 +15,16 @@ and closure rules do not apply when a reference links to their domain reasoning.
 Resolve a missing permission boundary before a target action. These paths are
 the current integration's layout; another runtime can use the same ordinary
 files under its own workspace root and must supply its own enforced run limits.
+When `/research/checked-setup/` is present, read `INITIAL_THREAT_MODEL.md`
+and `SETUP_TRACE.json` before the first research action. They are frozen setup
+inputs, not findings. Record any correction in `/workspace/RESEARCH.md` or a
+new research artifact; do not overwrite the original threat model or treat the
+setup build as evidence of a security effect.
+For a signed full-engagement scope, carry the internal investigation through
+the remaining allowance without requesting another human plan or approval.
+The host derives phase authority from that initial scope, arranges fresh review,
+and verifies owner stop. A limit or uncertain effect ends incomplete until
+protected readback resolves it.
 
 1. **Ground the case.** Check the target and source version, build and service
    state, available actors, permitted effects, and remaining allowance against
@@ -28,6 +38,10 @@ files under its own workspace root and must supply its own enforced run limits.
    an ordinary note/script; link existing evidence instead of transcribing it
    again. Pick a test that separates it from a serious alternative. Keep the
    earlier statement when the explanation changes so the change is traceable.
+   For a correction to the initial threat model, name the old assumption, the
+   protected observation's receipt ID and hash, the revised condition, a serious
+   alternative, and the next test that separates them. The correction guides
+   research; it does not change scope.
 
 3. **Run and observe.** Use the permitted entry path and ordinary tools. Save
    the command or script, inputs, source/build conditions, response, and relevant
@@ -36,7 +50,7 @@ files under its own workspace root and must supply its own enforced run limits.
    your own text or edited logs cannot establish an effect. A denial is evidence
    about that request; a setup failure or missing response is not a security
    result. If an effect may have occurred but its result is unknown, request
-   operator-controlled readback or an authorized reset before any retry.
+   host-controlled readback or an authorized reset before any retry.
 
 4. **Revise the investigation.** Compare the result with the prediction. Keep
    supported conditions, narrow or refute contradicted ones, and choose and run
@@ -81,9 +95,23 @@ files under its own workspace root and must supply its own enforced run limits.
    }
    ```
 
-   Set `next` to `null` only with `"proposed_stop": true`. Coverage status is one
-   of `tested`, `blocked`, `out_of_scope`, or `untested`. Changing a strong lead
-   from `true` to `false` is an abandonment decision and needs fresh review.
+   Set `next` to `null` only for a stop proposal or a typed host action.
+   Coverage status is one of `tested`, `blocked`, `out_of_scope`, or
+   `untested`. Changing a strong lead from `true` to `false` is an abandonment
+   decision and needs fresh review.
+
+   In an approved source-only run, a host check request is the other reason for
+   `next: null`. Keep `proposed_stop: false` and add exactly one typed
+   `host_action`, for example
+   `{"kind":"native-source-execute-v1","command":["sh","check.sh"]}`.
+   Put the chosen script in the source workspace first. The host checks the
+   approved offline effect envelope and shared allowance, freezes the command
+   and source, and runs one protected batch. The following native turn reads
+   `/research/source-actions/<id>/RESULTS.json` and updates `NEXT.json` from the
+   result. The projection exposes exit codes and hashes, while raw output stays
+   host-protected. A matching replay output is only a reproducibility result;
+   it cannot establish a security effect. See
+   [native source research](../docs/agents/native-source-sdk.md#researcher-requested-source-check).
 
 
 5. **Follow real connections.** When one step appears to enable another, record
@@ -129,10 +157,23 @@ files under its own workspace root and must supply its own enforced run limits.
    A proposed final closure, negative conclusion, or abandonment of a strong lead
    needs a fresh review with a concrete reason; budget or operator stop is immediate
    and bypasses that review. State the remaining uncertainty, not a claim that no
-   effect exists. Have the operator verify actual cleanup and remaining effects; a saved status
+   effect exists. Have the host verify actual cleanup and remaining effects; a saved status
    cannot perform cleanup. If no effects or owned resources remain, no extra
    ceremony is needed. Learning remains optional under current memory permissions.
    A local result is not external delivery or a legacy accepted finding; those
    actions retain their separate authority and validation. A no-finding or
    unavailable run establishes neither target safety nor full coverage. Keep
    credentials, cookies, tokens and signed URLs out of durable notes and results.
+
+   For a checked-setup source-only run, write `/workspace/project/RESULT.md` with
+   nonempty `## Supported effects`, `## Controls`, `## Contrary evidence`,
+   `## Tested paths`, `## Untested paths`, `## Assistance`,
+   `## Unfinished leads`, and `## Limits` sections. Request a fresh
+   `native-source-review-v1` host action after the final result draft and the
+   final claim, coverage, capabilities, and lead state in `NEXT.json` are saved.
+   Keep those fields, the result, and source bytes unchanged after that review. Then set
+   `proposed_stop: true`, `next: null`, and `host_action: null` in `NEXT.json`.
+   The continuation host checks that exact review, requests owner stop, and
+   reads back cleanup and exact resource absence. An unavailable review holds
+   the claim; an operator, allowance, or unknown-effect stop ends the run as
+   incomplete without another review experiment.

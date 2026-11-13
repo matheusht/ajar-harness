@@ -74,6 +74,16 @@ Preparation copies and pins inputs. It starts no container or model session.
 Source mode has no listener, target URL or TCP readiness probe. The existing
 service profile retains its target command and port.
 
+New source plans pin `native-offline-source-effect-v1`. The live approval signs
+the exact plan, including this class. Before a requested action, the host reads
+back all three executors: network `none`, only the writable owned `/target`
+copy and read-only offline `/modules` mount, read-only container root, non-root
+user, dropped capabilities, no privilege gain, and finite CPU, memory and
+process limits. This class permits an agent-selected argv and script only inside
+those disposable copies. An older source plan without this envelope can still
+use its manual `source-execute` path, but cannot dispatch a researcher-requested
+host action. A matching scope hash or a sentence in `NEXT.json` is not a grant.
+
 ## Other runtimes
 
 Use `--source-runtime /absolute/private/runtime.json` instead of `--go-toolchain`.
@@ -161,6 +171,7 @@ old executor processes, restores original source, clears private caches, and
 starts the same sealed container ID under the existing run authority. It then
 copies the new captured input. Earlier inputs, output bytes and receipts remain
 in their own evidence directories. Do not reset or unpause executors manually.
+
 Each command has at most the original run duration; the shared deadline can end
 it earlier. Each
 stdout/stderr stream is limited to 1 MiB. Credential-like output is withheld,
@@ -174,8 +185,118 @@ IDs, exit codes and output hashes. Matching replay output is a reproducibility
 observation. It does not prove a security claim. Verify the causal link and a
 counterexample/control separately.
 
-Use the normal frozen-packet `review` flow. Include the exact claim, relevant
-receipts, original source, changed inputs, controls, failures and limits. A fresh
+## Researcher-requested source check
+
+In a newly prepared source-only run with the approved offline envelope, the
+researcher may choose a command and script in its ordinary source workspace,
+then put one typed request in `/workspace/NEXT.json`:
+
+```json
+{
+  "kind": "native-continuation-next-v1",
+  "last_result": {"state": "inconclusive", "rules_out": "none", "unresolved": "entry path"},
+  "capabilities": [], "coverage": [], "strong_lead": false,
+  "proposed_stop": false, "next": null,
+  "host_action": {"kind": "native-source-execute-v1", "command": ["sh", "check.sh"]}
+}
+```
+
+`continue` checks live approval, shared allowance, the source-only plan and
+actual executor isolation. It freezes the command and current source copy,
+assigns an action ID, saves the request and frozen hashes, then marks dispatch
+before calling the existing `source_execute` executor once. A captured result
+appears at read-only `/research/source-actions/<id>/RESULTS.json` for the next
+native turn. The projection shows exit codes and output hashes; raw stdout,
+stderr and files remain withheld because a generic regex cannot establish
+that arbitrary target output is safe to expose. The full protected source
+receipt and immutable action terminal stay under `controls/`. The controller
+prompts the next turn to read this result and revise `NEXT.json`.
+A duplicate request cannot start another batch.
+
+After a crash, `continue` may adopt a captured source receipt only when the
+pending action ID, exact command, frozen input manifest, plan and receipt bytes
+match. A prepared action can dispatch after those checks. Missing, corrupt or
+unknown post-dispatch results stop for readback. Missing or unfinished receipts
+use `unknown_effect`; a later exact captured receipt can be adopted without
+another execution. An observed invalid captured receipt records its hash and
+reason as `evidence_changed`. Replacing those bytes does not resume the run;
+the operator must reconcile the evidence outside this controller before any
+new effect. A crash before the
+prepared state is saved can recover one complete frozen request only when no
+executor directory or dispatch event exists. An incomplete freeze is moved to
+`controls/continuation/aborted-source-actions/<id>/` with an abort receipt,
+then a fresh ID is prepared if the same run remains active. Any executor
+directory, dispatch event, or ambiguous journal stops for reconciliation.
+Earlier captured action directories are checked against their terminal receipts
+and capture history before a later action's orphan is recovered. If a crash
+saved captured state but interrupted its journal event, the controller verifies
+the terminal, receipt and projection, then restores the event before replacing
+that state with a new action.
+An action outside the offline class
+records `authority_required` separately from research help. The source request
+does not grant a service or external effect.
+
+An older plan without the class stops as `authority_required`. Count that as a
+human authority intervention and retain the blocked run; the immutable plan
+and approval cannot be upgraded in place. Prepare and approve a new run if the
+operator grants the class.
+
+The projection always says `security_effect: unproven`. Three matching runs
+establish repeated output. The original entry path, starting state, actor
+permission, protected effect and causal control still need independent evidence
+and fresh review.
+
+## Researcher-requested fresh source review
+
+The same active source-only run may request one fresh review with a separate
+`host_action` in `/workspace/NEXT.json`:
+
+```json
+{"kind": "native-source-review-v1", "claim": "The after branch may preserve the harmless note."}
+```
+
+Set `next` to `null` and `proposed_stop` to `false` as in the source-check
+example. This is one typed request, with no agent-selected evidence paths. The
+host checks the current signed plan and approval, shared allowance, unresolved
+effects, original source, and an empty reviewer handoff and session store before
+creating a packet. It then freezes the claim, original and current source,
+research note and checkpoint, and independently enumerates every protected
+researcher source-action receipt. Raw output, including adverse batches, enters
+the existing six-role packet only when it is present, hash-bound and safe to
+disclose. An unfinished action or missing, unsafe or oversized required evidence
+holds the request incomplete before a reviewer session starts.
+An optional `researcher/project/RESULT.md` is frozen with the current source
+and repeated in the unfinished role with its hash and agent-statement label.
+For checked-setup agent-owned closeout, the researcher writes this result before requesting
+review. Before that request, write the final claim, coverage, capabilities, and
+lead state in `NEXT.json`. After review, propose a stop while leaving those
+reviewed fields, the result, and source bytes unchanged. The continuation host
+then checks the exact result, evidence and review, requests the existing owner
+stop, and verifies cleanup and resource absence. A reviewer decision to reopen
+puts its concrete next check in a new agent prompt under the same approval and
+remaining allowance. User, allowance and unknown-effect stops bypass a new
+review and preserve an incomplete result and teardown receipt. The contained
+workflow is in [AGENT-CLOSEOUT-E2E](../../evals/native-qualification/AGENT-CLOSEOUT-E2E.md).
+If a stop proposal has no valid `RESULT.md`, the controller prompts one agent
+turn to repair it. A stale review prompts the agent to request a new review.
+Unchanged result and checkpoint bytes after that turn stop the run incomplete.
+
+The existing fresh source reviewer and host effect/control path consumes this
+packet. A completed internal assessment is returned to the same run at read-only
+`/research/reviews/<review_id>/RESULTS.json` on the next native turn. The
+projection binds the plan, `NEXT.json`, observer selection, packet request and
+protected reviewer receipt by hash. It always says `security_effect: unproven`
+and `filing_or_escalation_authorized: false`. An uncertain or unfinished review
+does not automatically dispatch again or use the other reviewer slot. The
+cached readback rechecks the protected receipt and host evidence, sealed packet,
+observer selection, source-action corpus and live researcher source; a changed
+or missing binding holds the review incomplete.
+The contained request-to-readback scenario and its limits are in
+[AGENT-REQUESTED-REVIEW-E2E](../../evals/native-qualification/AGENT-REQUESTED-REVIEW-E2E.md).
+
+Both manual and researcher-requested reviews use the frozen-packet `review`
+flow. The packet includes the exact claim, relevant receipts, original source,
+changed inputs, controls, failures and limits. A fresh
 reviewer receives the pinned packet and a clean source copy. It adds scripts and
 writes `/workspace/source-check.json` with `kind: native-source-check-v1`, the
 packet `input_id`, separate `effect` and `control` argv arrays, and a `rationale`.
@@ -199,6 +320,52 @@ or open filing. The original-file checks establish the starting and ending bytes
 they cannot exclude temporary source changes made by a script. The operator must
 inspect the scripts and causal control. Host execution is labeled as such; it is
 not claimed as a native tool action directly observed on a target service.
+
+## Conditional paired patch check
+
+When the frozen goal explicitly contains `Patch goal: required`, the researcher
+may write a regular UTF-8 `/workspace/PATCH.diff` and request one paired check:
+
+```json
+{"kind": "native-patch-check-v1", "claim": "The proposed diff removes the observed effect."}
+```
+
+Put this object in `host_action` in `NEXT.json`, with `next: null` and
+`proposed_stop: false`. Write the candidate `project/RESULT.md` before this
+request if the same review should support closeout. A goal without the opt-in
+line needs no patch action. An unrequested patch is rejected.
+
+The host copies the pinned original source, applies the exact diff there, and
+records the full original and patched byte and mode manifests, the diff hash,
+goal, plan, approval, actor, initial state, and remaining allowance. It never
+applies the diff to `original/`. The diff and both manifest hashes enter the
+immutable fresh-review packet; full manifests remain in protected host records.
+Unsafe paths, symlinks, binary patches, changed originals,
+or a diff that does not reproduce the patched manifest stop before review.
+An applicable mode-only diff counts as a nonempty patch.
+
+The independent reviewer writes `source-check.json` with kind
+`native-paired-source-check-v1`, the packet `input_id`, distinct `effect`,
+`control`, `normal`, and `connected` argv arrays, and a rationale. Its scripts
+are frozen separately from the patch and must have identical bytes on both
+copies. The host runs each command on three clean original copies and three
+clean patched copies under the same offline source executor. Every execution
+receipt labels its variant; a patched run cannot count as original replay.
+The host compares exit status, streams, changed or missing output files, and
+file modes across all replays. It recomputes output deltas from saved input and
+output manifests at readback.
+The reviewer reads and hashes the paired result, checks the material fix link,
+and states limits. Its checked link must bind the evidence hash, diff hash,
+original effect, changed line, and patched result. A changed effect with stable
+replays, preserved normal and connected outputs, and an unchanged control can
+become a **checked-fix candidate**
+for internal operator review. It is not a confirmed security result or external
+filing authority. Any mismatch stays unproven. A supported closeout under a
+patch goal requires this exact reviewed candidate and the normal stop/cleanup
+readback. A blocked or dry ending may close without a patch.
+
+The contained scenario and its synthetic limits are in
+[AGENT-PAIRED-PATCH-E2E](../../evals/native-qualification/AGENT-PAIRED-PATCH-E2E.md).
 Stop with the normal `stop` command and inspect the final stop/cleanup receipt.
 
 ## Verification status

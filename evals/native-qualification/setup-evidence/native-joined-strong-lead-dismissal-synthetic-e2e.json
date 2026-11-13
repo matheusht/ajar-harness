@@ -1,0 +1,131 @@
+{
+  "allowance_charged_tunnel_bytes": 40,
+  "allowance_run_identity": {
+    "nonce": "synthetic-joined"
+  },
+  "allowance_used_tunnels": 1,
+  "closeout_result_sha256": "b4abf10bdb7f87e3a1c5d63934807cc60ad274062dc419234df1deb16f0c1019",
+  "environment": {
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "event_trace": [
+    {
+      "event": "dispatch_started",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 1,
+      "status": null
+    },
+    {
+      "event": "source_action_prepared",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_action_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 2,
+      "status": null
+    },
+    {
+      "event": "source_review_dispatched",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "source_review_captured",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "strong_lead_disposition_reviewed",
+      "invocation": null,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 3,
+      "status": null
+    },
+    {
+      "event": "dispatch_started",
+      "invocation": 4,
+      "status": null
+    },
+    {
+      "event": "invocation",
+      "invocation": 4,
+      "status": null
+    },
+    {
+      "event": "next",
+      "invocation": 4,
+      "status": null
+    },
+    {
+      "event": "stopped",
+      "invocation": null,
+      "status": "complete_internal_candidate"
+    }
+  ],
+  "expected_closeout": "complete_internal_candidate",
+  "fresh_reviews": 1,
+  "kind": "native-engagement-joined-synthetic-e2e-v1",
+  "lead_disposition": "narrow",
+  "limits": "Synthetic native turns, source receipts, reviewer, owner, and cleanup; no live provider, target service, or real owner teardown.",
+  "owner_stops": 1,
+  "plan_sha256": "425428f83477eb801703312750090a532748bd1bfaec6089cb44601f6844ab5c",
+  "provider_calls": 0,
+  "review_projection_sha256": "4a0162eeb8420fa181e21a686f126652ce00d2545111e894786f7dba94f7fc39",
+  "scenario_sha256": "b170ac4d2a0e0a86b4ec967aecd5853ad7427e6bf7b4c0274175a9478192930f",
+  "source_actions": 1,
+  "source_terminal_sha256": "4e364d67187ba262eef2e09dc7656c858c2e2c1ccdd48d3cbf47897619748e1e",
+  "status": "passed",
+  "target_service_calls": 0,
+  "transition_checks": 48,
+  "transition_evidence_sha256": "aa6ea8f92db49fee8905a163985bc7ca7510226d6b356ba6ff321a228b78fff3",
+  "turns": [
+    "research",
+    "resume",
+    "resume",
+    "resume"
+  ]
+}

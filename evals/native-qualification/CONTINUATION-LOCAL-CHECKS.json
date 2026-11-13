@@ -1,0 +1,58 @@
+{
+  "checks": [
+    {
+      "name": "first run stopped for closure review",
+      "pass": true
+    },
+    {
+      "name": "research, failed resume, reconstruction order",
+      "pass": true
+    },
+    {
+      "name": "checkpoint records the reconstruction session",
+      "pass": true
+    },
+    {
+      "name": "failed resume was not counted as a dispatch",
+      "pass": true
+    },
+    {
+      "name": "closure request was produced",
+      "pass": true
+    },
+    {
+      "name": "review cannot accept a changed stop proposal",
+      "pass": true
+    },
+    {
+      "name": "accepted closure returns without another invocation",
+      "pass": true
+    },
+    {
+      "name": "applied reopen permits a new next brief",
+      "pass": true
+    },
+    {
+      "name": "manual dismissal still requires legacy closure review",
+      "pass": true
+    },
+    {
+      "name": "legacy source-only closure uses accepted manual review",
+      "pass": true
+    },
+    {
+      "name": "checked patch dismissal reaches independent review",
+      "pass": true
+    },
+    {
+      "name": "accepted checked closure uses owner stop and cleanup path",
+      "pass": true
+    },
+    {
+      "name": "legacy forced stop still checks owner cleanup",
+      "pass": true
+    }
+  ],
+  "status": "passed",
+  "limits": "Synthetic subprocess, owner stop, and Docker readback; no native model, provider, Docker daemon, or target."
+}

@@ -710,20 +710,34 @@ def drive(root: Path, *, command=_command, spawn_owner=_spawn_owner) -> dict:
                     _advance(root, state, 'built')
                 elif phase == 'built':
                     checked = _checked_receipt(setup, state['scope_sha256'])
-                    limits = _research_limits(scope, checked)
                     _pending(root, state, 'research_prepare')
-                    _call(command, NATIVE, ['prepare-checked', '--run-root', str(research),
-                                           '--checked-setup-root', str(setup),
-                                           '--scope-file', str(setup / 'controls/scope.md'),
-                                           '--scope-sha256', state['scope_sha256'],
-                                           '--research-scope-signature',
-                                           str(setup / 'controls/setup-scope.sig'),
-                                           '--research-allowed-signers',
-                                           str(setup / 'controls/setup-allowed-signers'),
-                                           '--max-connections', str(limits['max_connections']),
-                                           '--max-bytes', str(limits['max_bytes']),
-                                           '--duration-seconds', str(limits['duration_seconds'])],
-                          timeout=180, statuses=('prepared_provider_free',))
+                    cushion = 0
+                    for attempt in range(3):
+                        limits = _research_limits(scope, checked)
+                        duration = limits['duration_seconds'] - cushion
+                        if duration < 30:
+                            fail('engagement_residual_exhausted')
+                        started = time.monotonic()
+                        try:
+                            _call(command, NATIVE, ['prepare-checked', '--run-root', str(research),
+                                                   '--checked-setup-root', str(setup),
+                                                   '--scope-file', str(setup / 'controls/scope.md'),
+                                                   '--scope-sha256', state['scope_sha256'],
+                                                   '--research-scope-signature',
+                                                   str(setup / 'controls/setup-scope.sig'),
+                                                   '--research-allowed-signers',
+                                                   str(setup / 'controls/setup-allowed-signers'),
+                                                   '--max-connections', str(limits['max_connections']),
+                                                   '--max-bytes', str(limits['max_bytes']),
+                                                   '--duration-seconds', str(duration)],
+                                  timeout=180, statuses=('prepared_provider_free',))
+                        except DriverError as error:
+                            if (str(error) != 'engagement_research_allowance_mismatch'
+                                    or attempt == 2 or research.exists() or research.is_symlink()):
+                                raise
+                            cushion += max(20, int(time.monotonic() - started) + 10)
+                            continue
+                        break
                     _advance(root, state, 'research_prepared')
                 elif phase == 'research_prepared':
                     _pending(root, state, 'research_start')

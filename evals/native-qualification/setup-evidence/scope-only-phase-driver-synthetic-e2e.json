@@ -157,6 +157,52 @@
       "phase": "emergency_hold",
       "status": "rejected"
     },
+    "prepare_allowance_drift": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "native_research.py:prepare-checked",
+        "research:start",
+        "native_research.py:status",
+        "native_research.py:continue",
+        "native_closeout.py:--run-root",
+        "native_research.py:status"
+      ],
+      "phase": "complete",
+      "status": "complete_internal_candidate"
+    },
+    "prepare_partial_plan": {
+      "build_dispatches": 1,
+      "build_reconciles": 0,
+      "calls": [
+        "native_research.py:prepare",
+        "setup:start",
+        "native_research.py:status",
+        "native_research.py:status",
+        "native_research.py:setup-turn",
+        "native_research.py:setup-freeze",
+        "native_research.py:stop",
+        "native_research.py:status",
+        "native_setup_builder.py:setup-build",
+        "native_setup_builder.py:setup-build-status",
+        "native_research.py:prepare-checked",
+        "native_research.py:status",
+        "native_research.py:status"
+      ],
+      "phase": "incomplete",
+      "status": "stopped_incomplete"
+    },
     "research_incomplete": {
       "build_dispatches": 1,
       "build_reconciles": 0,

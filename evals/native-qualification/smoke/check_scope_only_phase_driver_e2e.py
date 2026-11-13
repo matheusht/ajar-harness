@@ -37,6 +37,7 @@ class Phases:
         self.reconciles = 0
         self.crashed = False
         self.resumes = 0
+        self.prepare_checked_durations = []
 
     def owner(self, _root, _script, run_root, _inputs):
         phase = run_root.name
@@ -140,6 +141,17 @@ class Phases:
             return 0, {'status': 'blocked_reconciled',
                        'cleanup': {'status': 'complete', 'absent': True}}
         if name == 'native_research.py' and action == 'prepare-checked':
+            duration = int(args[args.index('--duration-seconds') + 1])
+            self.prepare_checked_durations.append(duration)
+            if self.stop_at == 'prepare_allowance_drift':
+                if (len(self.prepare_checked_durations) == 1 or
+                        duration > self.prepare_checked_durations[0] - 20):
+                    return 2, {'status': 'rejected',
+                               'code': 'engagement_research_allowance_mismatch'}
+            if self.stop_at == 'prepare_partial_plan':
+                write(research / 'plan.json', {'kind': 'partial-research-plan'})
+                return 2, {'status': 'rejected',
+                           'code': 'engagement_research_allowance_mismatch'}
             write(research / 'plan.json', {'autonomous_engagement': {'kind': 'scope-only'},
                                            'checked_setup': {'kind': 'checked'},
                                            'scope_sha256': driver._sha(Path(self.inputs['scope_file']))})
@@ -279,6 +291,14 @@ def scenario(base: Path, name: str) -> dict:
     elif name == 'resume_crash_uuid_order':
         assert result['status'] == 'complete_internal_candidate', result
         assert fake.resumes == 1 and fake.builds == 1
+    elif name == 'prepare_allowance_drift':
+        assert result['status'] == 'complete_internal_candidate', result
+        assert len(fake.prepare_checked_durations) == 2
+        assert fake.prepare_checked_durations[1] <= fake.prepare_checked_durations[0] - 20
+    elif name == 'prepare_partial_plan':
+        assert result['status'] == 'stopped_incomplete', result
+        assert len(fake.prepare_checked_durations) == 1
+        assert fake.statuses['research'] == 'prepared'
     elif name == 'research_incomplete':
         assert result['status'] == 'stopped_incomplete', result
         assert driver._state(root)['phase'] == 'incomplete'
@@ -310,7 +330,8 @@ def main() -> int:
                   ('success', 'setup_unknown', 'freeze_invalid', 'build_unknown',
                    'build_crash', 'build_cleanup_unresolved', 'scope_drift',
                    'inputs_drift', 'cleanup_missing', 'freeze_revision',
-                   'resume_crash_uuid_order', 'resume_unknown', 'research_incomplete')}
+                   'resume_crash_uuid_order', 'resume_unknown', 'research_incomplete',
+                   'prepare_allowance_drift', 'prepare_partial_plan')}
     report = {'status': 'passed', 'kind': 'native-scope-only-phase-driver-e2e-v1',
               'command': ('PYTHONDONTWRITEBYTECODE=1 python3 '
                           'evals/native-qualification/smoke/check_scope_only_phase_driver_e2e.py '

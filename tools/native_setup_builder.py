@@ -86,6 +86,15 @@ def safe_path(value: object) -> str:
     return value
 
 
+def checked_outputs(value: object, *, maximum: int = 64) -> list[str]:
+    if not isinstance(value, list) or not 1 <= len(value) <= maximum:
+        fail('build_outputs_invalid')
+    outputs = [safe_path(path) for path in value]
+    if len(set(outputs)) != len(outputs):
+        fail('build_output_duplicate')
+    return outputs
+
+
 def utc(value: object) -> datetime:
     if not isinstance(value, str) or not re.fullmatch(
             r'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', value):
@@ -206,13 +215,19 @@ def frozen_setup(run_root: Path) -> dict:
         nr._setup_approval(root, plan, controls / 'approval.json', allow_expired=True)
         verify_v1_stop_provenance(root, plan, host_snapshot, cleanup, receipt)
     recipe = read_json(frozen / 'recipe.json')
-    if (set(recipe) != {'kind', 'runtime', 'build_command', 'offline_dependencies'}
-            or recipe['kind'] != 'native-setup-recipe-v1'
+    scope_only = 'autonomous_engagement' in plan
+    recipe_keys = {'kind', 'runtime', 'build_command', 'offline_dependencies'}
+    if scope_only:
+        recipe_keys.add('outputs')
+    if (set(recipe) != recipe_keys
+            or recipe['kind'] != ('native-setup-recipe-v2' if scope_only else 'native-setup-recipe-v1')
             or not isinstance(recipe['offline_dependencies'], list)
             or len(recipe['offline_dependencies']) > 256
             or any(not isinstance(item, str) or not 1 <= len(item) <= 256
                    for item in recipe['offline_dependencies'])):
         fail('build_recipe_invalid')
+    if scope_only:
+        checked_outputs(recipe.get('outputs'))
     nr._validate_source_runtime(recipe['runtime'])
     nr._validate_argv(recipe['build_command'])
     threat = nr._file(frozen / 'THREAT_MODEL.md', private=True)
@@ -328,7 +343,9 @@ def verify_v1_stop_provenance(root: Path, plan: dict, snapshot: dict,
 
 def check_setup_fresh(setup: dict) -> None:
     approval = read_json(setup['controls'] / 'approval.json')
-    scope = read_json_from_scope(setup['controls'] / 'scope.md')
+    scope = (nr._engagement_scope(setup['root'], setup['plan'])
+             if 'autonomous_engagement' in setup['plan'] else
+             read_json_from_scope(setup['controls'] / 'scope.md'))
     if (datetime.now(timezone.utc) >= utc(approval['expires_at'])
             or datetime.now(timezone.utc) >= utc(scope['expires_at'])):
         fail('checked_setup_grant_expired')
@@ -374,15 +391,32 @@ def prior_build_attempts(setup: dict, *, ignore_current: bool = False) -> dict:
                 or not isinstance(cleanup, dict) or cleanup != journal.get('cleanup')
                 or cleanup.get('status') != 'complete'
                 or cleanup.get('absent') is not True
-                or receipt.get('retry_requires_new_approval') is not True
+                or receipt.get('retry_requires_new_approval') is not
+                ('autonomous_engagement' not in setup['plan'])
                 or type(receipt.get('build_duration_charged_upper_bound_seconds')) is not int
                 or receipt.get('setup_cumulative_used') != setup['chain']['cumulative_used']
                 or not isinstance(authority.get('approval'), dict)
                 or receipt['build_duration_charged_upper_bound_seconds'] !=
                 authority['approval'].get('duration_seconds')):
             fail('build_prior_attempt_unsettled')
-        for record in (authority.get('scope_amendment'), authority['approval']):
-            verify_build_signature(setup, record)
+        if authority.get('kind') == 'native-setup-build-derived-authority-v1':
+            if 'autonomous_engagement' not in setup['plan']:
+                fail('build_prior_authority_route_mismatch')
+            amendment = authority.get('scope_amendment')
+            if not isinstance(amendment, dict):
+                fail('build_prior_authority_invalid')
+            previous_catalog = {
+                'tree': {'tree_sha256': amendment.get('dependency_catalog_tree_sha256')},
+                'selected': amendment.get('dependencies')}
+            expected = derived_build_authority(
+                setup, previous_catalog, approved_at=authority['approval'].get('derived_at'),
+                historical=True,
+                prior_override={'receipts': receipts, 'charged_seconds': charged})
+            if authority != expected:
+                fail('build_prior_authority_mismatch')
+        else:
+            for record in (authority.get('scope_amendment'), authority['approval']):
+                verify_build_signature(setup, record)
         checked_setup = dict(setup, docker_daemon_id=daemon_id)
         if inspect_container(checked_setup, journal['container_name']) is not None:
             fail('build_prior_container_present')
@@ -412,6 +446,8 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
              output_paths: list[str], approved_at: str, expires_at: str,
              *, require_fresh: bool = True, ignore_current: bool = False) -> dict:
     setup = frozen_setup(run_root)
+    if 'autonomous_engagement' in setup['plan']:
+        fail('build_scope_only_uses_initial_grant')
     if require_fresh:
         check_setup_fresh(setup)
     root, controls, plan, recipe = (setup[key] for key in ('root', 'controls', 'plan', 'recipe'))
@@ -475,6 +511,116 @@ def template(run_root: Path, image_id: str, catalog_path: Path,
             'scope_amendment': amendment, 'approval': approval}
 
 
+def engagement_deadline(boundary: dict) -> datetime:
+    return min(utc(boundary['expires_at']),
+               utc(boundary['issued_at']) +
+               timedelta(seconds=boundary['limits']['duration_seconds']))
+
+
+def engagement_allowance(setup: dict) -> dict:
+    boundary = nr._engagement_scope(setup['root'], setup['plan'], allow_expired=True)
+    used = setup['chain']['cumulative_used']
+    total = boundary['limits']
+    remaining_connections = total['max_connections'] - used['connections']
+    remaining_bytes = total['max_bytes'] - used['bytes']
+    if remaining_connections < 0 or remaining_bytes < 0:
+        fail('build_engagement_allowance_exhausted')
+    return {
+        'autonomous_engagement_scope_sha256': setup['plan']['scope_sha256'],
+        'remaining_engagement_allowance': {
+            'connections': remaining_connections, 'bytes': remaining_bytes,
+            'absolute_deadline': engagement_deadline(boundary).strftime('%Y-%m-%dT%H:%M:%SZ')}}
+
+
+def derived_build_authority(setup: dict, catalog: dict, *, approved_at: str | None = None,
+                            historical: bool = False, ignore_current: bool = False,
+                            prior_override: dict | None = None) -> dict:
+    """Narrow the initial signed engagement to one frozen offline build."""
+    root, controls, plan, recipe = (setup[key] for key in ('root', 'controls', 'plan', 'recipe'))
+    if 'autonomous_engagement' not in plan:
+        fail('build_scope_only_grant_missing')
+    boundary = nr._engagement_scope(root, plan, allow_expired=historical)
+    build = boundary['build']
+    if (recipe.get('kind') != 'native-setup-recipe-v2'
+            or set(recipe) != {'kind', 'runtime', 'build_command', 'offline_dependencies', 'outputs'}
+            or plan['source_manifest_sha256'] != boundary['source_manifest_sha256']
+            or plan['brief_sha256'] != boundary['goal_sha256']
+            or plan['scope_sha256'] != setup['plan']['autonomous_engagement']['scope_sha256']
+            or build['effect_class'] != EFFECT_CLASS or build['network_class'] != NETWORK_CLASS
+            or not nr.IMAGE_RE.fullmatch(str(build['image_id']))
+            or catalog['tree']['tree_sha256'] != build['dependency_catalog_tree_sha256']):
+        fail('build_signed_scope_or_recipe_mismatch')
+    outputs = checked_outputs(recipe['outputs'], maximum=build['max_output_paths'])
+    if (type(build['duration_seconds']) is not int
+            or not 5 <= build['duration_seconds'] <= 600
+            or type(build['memory_bytes']) is not int
+            or not 64 * 1024 * 1024 <= build['memory_bytes'] <= 1024 * 1024 * 1024
+            or type(build['max_workspace_bytes']) is not int
+            or not 8 * 1024 * 1024 <= build['max_workspace_bytes'] <= 128 * 1024 * 1024
+            or type(build['max_attempts']) is not int
+            or not 1 <= build['max_attempts'] <= 16):
+        fail('build_signed_limits_invalid')
+    used = setup['chain']['cumulative_used']
+    total = boundary['limits']
+    if (used['connections'] > total['max_connections']
+            or used['bytes'] > total['max_bytes']):
+        fail('build_engagement_allowance_exhausted')
+    prior = (prior_override if prior_override is not None else
+             prior_build_attempts(setup, ignore_current=ignore_current))
+    if len(prior['receipts']) >= build['max_attempts']:
+        fail('build_attempt_limit_exhausted')
+    now = datetime.now(timezone.utc)
+    approved = utc(approved_at) if approved_at is not None else now.replace(microsecond=0)
+    deadline = engagement_deadline(boundary)
+    if (approved < utc(boundary['issued_at']) or approved >= deadline
+            or (not historical and now >= deadline)):
+        fail('build_engagement_deadline_expired')
+    amendment = {
+        'kind': 'native-setup-build-derived-scope-v1',
+        'engagement_id': boundary['engagement_id'],
+        'operator_id': boundary['operator_id'],
+        'source_manifest_sha256': plan['source_manifest_sha256'],
+        'source_mode_sha256': digest(source_modes(root / 'original', plan['source_sha256'])),
+        'initial_scope_sha256': plan['scope_sha256'],
+        'goal_sha256': plan['brief_sha256'],
+        'setup_output_receipt_sha256': sha(controls / 'setup-output/receipt.json'),
+        'setup_chain_sha256': setup['chain']['chain_sha256'],
+        'cumulative_setup_used': used,
+        'prior_build_attempts': prior['receipts'],
+        'cumulative_build_duration_charged_upper_bound_seconds': prior['charged_seconds'],
+        'recipe_sha256': sha(controls / 'setup-output/recipe.json'),
+        'threat_model_sha256': sha(controls / 'setup-output/THREAT_MODEL.md'),
+        'effect_class': EFFECT_CLASS, 'network_class': NETWORK_CLASS,
+        'image_id': build['image_id'], 'platform': plan['platform'],
+        'dependency_catalog_tree_sha256': catalog['tree']['tree_sha256'],
+        'dependencies': catalog['selected'], 'outputs': outputs,
+        'max_workspace_bytes': build['max_workspace_bytes'],
+        'memory_bytes': build['memory_bytes'],
+        'duration_seconds': build['duration_seconds'],
+        'absolute_deadline': deadline.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'expires_at': deadline.strftime('%Y-%m-%dT%H:%M:%SZ')}
+    approval = {
+        'kind': 'native-setup-build-derived-approval-v1',
+        'phase': 'build', 'scope_amendment_sha256': digest(amendment),
+        'initial_scope_sha256': plan['scope_sha256'],
+        'setup_plan_sha256': sha(root / 'plan.json'),
+        'setup_approval_sha256': sha(controls / 'approval.json'),
+        'setup_chain_sha256': setup['chain']['chain_sha256'],
+        'cumulative_setup_used': used,
+        'prior_build_attempts': prior['receipts'],
+        'cumulative_build_duration_charged_upper_bound_seconds': prior['charged_seconds'],
+        'effect_class': EFFECT_CLASS, 'network_class': NETWORK_CLASS,
+        'image_id': build['image_id'],
+        'dependency_catalog_tree_sha256': catalog['tree']['tree_sha256'],
+        'max_workspace_bytes': build['max_workspace_bytes'],
+        'memory_bytes': build['memory_bytes'],
+        'duration_seconds': build['duration_seconds'],
+        'outputs': outputs, 'derived_at': approved.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'expires_at': deadline.strftime('%Y-%m-%dT%H:%M:%SZ')}
+    return {'kind': 'native-setup-build-derived-authority-v1',
+            'scope_amendment': amendment, 'approval': approval}
+
+
 def read_json_from_scope(path: Path) -> dict:
     text = nr._file(path, private=True).read_text()
     sections = re.findall(r'^```native-setup-scope-v1\s*\n(.*?)^```\s*$',
@@ -491,6 +637,17 @@ def verify_authority(setup: dict, path: Path, catalog: dict,
                      *, historical: bool = False, adopting: bool = False) -> dict:
     controls, plan = setup['controls'], setup['plan']
     authority = read_json(nr._file(path, private=True))
+    if 'autonomous_engagement' in plan:
+        if (set(authority) != {'kind', 'scope_amendment', 'approval'}
+                or authority['kind'] != 'native-setup-build-derived-authority-v1'
+                or not isinstance(authority['approval'], dict)):
+            fail('build_authority_invalid')
+        expected = derived_build_authority(
+            setup, catalog, approved_at=authority['approval'].get('derived_at'),
+            historical=historical, ignore_current=adopting)
+        if authority != expected:
+            fail('build_authority_mismatch')
+        return authority
     if (set(authority) != {'kind', 'scope_amendment', 'approval'}
             or authority['kind'] != 'native-setup-build-authority-v1'):
         fail('build_authority_invalid')
@@ -690,7 +847,7 @@ def output_command(identifier: str, path: str) -> list[str]:
     return ['container', 'exec', identifier, 'sh', '-c', script]
 
 
-def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict:
+def setup_build(run_root: Path, approval_path: Path | None, catalog_path: Path) -> dict:
     setup = frozen_setup(run_root)
     controls, recipe, plan = (setup[key] for key in ('controls', 'recipe', 'plan'))
     catalog = catalog_snapshot(catalog_path, recipe)
@@ -700,7 +857,15 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             fail('build_already_dispatched')
         if journal_dir.exists() and read_json(journal_dir / 'journal.json').get('status') == 'ready':
             fail('build_already_dispatched')
-        authority = verify_authority(setup, approval_path, catalog)
+        scope_only = 'autonomous_engagement' in plan
+        if scope_only:
+            if approval_path is not None:
+                fail('build_scope_only_disallows_later_approval')
+            authority = derived_build_authority(setup, catalog)
+        else:
+            if approval_path is None:
+                fail('build_approval_required')
+            authority = verify_authority(setup, approval_path, catalog)
         amendment = authority['scope_amendment']
         if journal_dir.exists():
             prior = prior_build_attempts(setup)
@@ -721,7 +886,10 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         setup['docker_daemon_id'] = daemon_id
         inspect_image(setup, amendment['image_id'])
         journal_dir.mkdir(mode=0o700)
-        shutil.copy2(approval_path, journal_dir / 'authority.json')
+        if scope_only:
+            write_json(journal_dir / 'authority.json', authority, once=True)
+        else:
+            shutil.copy2(approval_path, journal_dir / 'authority.json')
         (journal_dir / 'authority.json').chmod(0o600)
         nonce = uuid.uuid4().hex
         name = 'lrh-setup-build-' + nonce[:20]
@@ -737,9 +905,11 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
         stage.mkdir(mode=0o700)
         problem = None
         deadline = time.monotonic() + amendment['duration_seconds']
-        absolute_expiry = min(utc(amendment['expires_at']),
-                              utc(read_json(controls / 'approval.json')['expires_at']),
-                              utc(read_json_from_scope(controls / 'scope.md')['expires_at']))
+        absolute_expiry = utc(amendment['expires_at'])
+        if not scope_only:
+            absolute_expiry = min(absolute_expiry,
+                                  utc(read_json(controls / 'approval.json')['expires_at']),
+                                  utc(read_json_from_scope(controls / 'scope.md')['expires_at']))
         def remaining(maximum: int) -> int:
             seconds = int(deadline - time.monotonic())
             seconds = min(seconds, int((absolute_expiry - datetime.now(timezone.utc)).total_seconds()))
@@ -889,6 +1059,13 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
             nr._verify_inventory(setup['root'] / 'original', plan['source_sha256'], setup_limit=True)
             if digest(source_modes(setup['root'] / 'original', plan['source_sha256'])) != amendment['source_mode_sha256']:
                 fail('build_source_mode_changed_during_execution')
+            if (sha(controls / 'setup-output/recipe.json') != amendment['recipe_sha256']
+                    or sha(controls / 'setup-output/THREAT_MODEL.md') != amendment['threat_model_sha256']
+                    or sha(controls / 'setup-output/receipt.json') != amendment['setup_output_receipt_sha256']
+                    or sha(controls / 'scope.md') != plan['scope_sha256']):
+                fail('build_frozen_input_changed_during_execution')
+            if scope_only:
+                nr._engagement_scope(setup['root'], plan)
             current_catalog = catalog_snapshot(catalog_path, recipe)
             if current_catalog['tree'] != catalog['tree']:
                 fail('build_catalog_changed_during_execution')
@@ -958,6 +1135,8 @@ def setup_build(run_root: Path, approval_path: Path, catalog_path: Path) -> dict
                        'absolute_deadline': setup['chain']['absolute_deadline']},
                    'cleanup': cleanup, 'security_result': None,
                    'target_service_executed': False}
+        if scope_only:
+            receipt.update(engagement_allowance(setup))
         write_json(stage / 'receipt.json', receipt, once=True)
         os.rename(stage, checked)
         journal['status'] = 'ready'
@@ -1066,16 +1245,30 @@ def reconcile(run_root: Path) -> dict:
             return {'kind': 'native-setup-build-reconciliation-v1',
                     'status': 'cleanup_unresolved', 'pending_action': pending_action,
                     'uncertain_actions': pending, 'cleanup': cleanup,
-                    'journal_sha256': sha(journal_path), 'retry_requires_new_approval': True,
+                    'journal_sha256': sha(journal_path),
+                    'retry_requires_new_approval': 'autonomous_engagement' not in setup['plan'],
                     'security_result': None}
         authority = read_json(authority_path)
         approval = authority.get('approval') if isinstance(authority, dict) else None
         amendment = authority.get('scope_amendment') if isinstance(authority, dict) else None
-        verify_build_signature(setup, amendment)
-        verify_build_signature(setup, approval)
-        if approval.get('scope_amendment_sha256') != digest({
-                key: value for key, value in amendment.items() if key != 'operator_signature'}):
-            fail('build_reconciliation_authority_invalid')
+        scope_only = 'autonomous_engagement' in setup['plan']
+        if scope_only:
+            if not isinstance(amendment, dict) or not isinstance(approval, dict):
+                fail('build_reconciliation_authority_invalid')
+            previous_catalog = {
+                'tree': {'tree_sha256': amendment.get('dependency_catalog_tree_sha256')},
+                'selected': amendment.get('dependencies')}
+            expected = derived_build_authority(
+                setup, previous_catalog, approved_at=approval.get('derived_at'),
+                historical=True, ignore_current=True)
+            if authority != expected:
+                fail('build_reconciliation_authority_invalid')
+        else:
+            verify_build_signature(setup, amendment)
+            verify_build_signature(setup, approval)
+            if approval.get('scope_amendment_sha256') != digest({
+                    key: value for key, value in amendment.items() if key != 'operator_signature'}):
+                fail('build_reconciliation_authority_invalid')
         duration = approval.get('duration_seconds') if isinstance(approval, dict) else None
         if type(duration) is not int or not 5 <= duration <= 600:
             fail('build_reconciliation_authority_invalid')
@@ -1085,7 +1278,8 @@ def reconcile(run_root: Path) -> dict:
                    'journal_sha256': sha(journal_path),
                    'build_duration_charged_upper_bound_seconds': duration,
                    'setup_cumulative_used': setup['chain']['cumulative_used'],
-                   'retry_requires_new_approval': True, 'security_result': None}
+                   'retry_requires_new_approval': not scope_only,
+                   'security_result': None}
         write_json(receipt_path, receipt, once=True)
         return receipt
 
@@ -1210,6 +1404,8 @@ def _verify_checked(run_root: Path, *, require_fresh: bool = True,
             'absolute_deadline': chain['absolute_deadline']},
         'cleanup': journal['cleanup'], 'security_result': None,
         'target_service_executed': False}
+    if 'autonomous_engagement' in setup['plan']:
+        expected.update(engagement_allowance(setup))
     if receipt != expected:
         fail('checked_receipt_or_bytes_changed')
     return {'receipt': receipt, 'recipe': recipe,
@@ -1240,7 +1436,7 @@ def main() -> int:
     template_command.add_argument('--expires-at', required=True)
     build_command = commands.add_parser('setup-build')
     build_command.add_argument('--run-root', type=Path, required=True)
-    build_command.add_argument('--approval', type=Path, required=True)
+    build_command.add_argument('--approval', type=Path)
     build_command.add_argument('--dependency-catalog', type=Path, required=True)
     status_command = commands.add_parser('setup-build-status')
     status_command.add_argument('--run-root', type=Path, required=True)

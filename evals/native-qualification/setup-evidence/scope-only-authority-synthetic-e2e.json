@@ -6,8 +6,8 @@
         "exit": 0,
         "result": {
           "live_approval_required": false,
-          "plan_sha256": "e6ed4dca35301a399d9013a879f8b417b11b1877d308d6bef49e0191b2dac6be",
-          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/scope-only-authority-2pw1gtxf/run",
+          "plan_sha256": "572cfed627dc55fe751768525f1cc46469847cab83a82f34e769c6318233c170",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/scope-only-authority-pl_p2zzs/run",
           "source_files": 1,
           "status": "prepared_provider_free"
         }
@@ -18,15 +18,15 @@
       "name": "host plan marks full-engagement scope",
       "observed": {
         "marker": {
-          "allowed_signers_sha256": "727848a40aa5b8af151ed3c8a40c8e951b1bdd53928cba342843da40fc79dd9c",
+          "allowed_signers_sha256": "b25d2711c21cff08d54e4eb18ee64084043ee7675aebdd7fec206744e53abb41",
           "engagement_id": "scope-only-fixture",
-          "expires_at": "2026-11-13T15:20:46Z",
-          "issued_at": "2026-11-13T14:50:46Z",
+          "expires_at": "2026-11-13T15:26:29Z",
+          "issued_at": "2026-11-13T14:56:29Z",
           "kind": "native-engagement-scope-v1",
           "operator_id": "synthetic-operator",
-          "scope_sha256": "03aeac1c7d84b2380fdb4f5a3c3d03ad2e718fe0094fc142033c19e19f17fe89",
-          "signature_sha256": "2465ae2bdc10b860e7cc825dd0e147fecdeec2903071035d1dcd449bf8cff845",
-          "trusted_fingerprint": "sha256:fdf0ecd85a3c26d9f5f40bad3ab6dca518d13068b321dc22becebed187a05463"
+          "scope_sha256": "4980a8ff9a3e77b2565898de7df914e73a8246a92d7d87f8212b675dfa9a39d1",
+          "signature_sha256": "d30488362c0e4a44daf56da72fc3524cd054158062d8ab2574e7be87ec58cf80",
+          "trusted_fingerprint": "sha256:ba04f0fa638cfe6638d9bd0054b0e27f9e30ea5e78967b3f750bc87711577945"
         }
       },
       "passed": true
@@ -96,6 +96,16 @@
         "held": true,
         "stop_calls": [
           "operator_stop"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "name": "slow checked verification narrows scope-only research duration",
+      "observed": {
+        "code": "prepared",
+        "selected_duration": [
+          59
         ]
       },
       "passed": true

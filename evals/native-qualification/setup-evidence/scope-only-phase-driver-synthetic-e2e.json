@@ -219,7 +219,6 @@
         "native_setup_builder.py:setup-build",
         "native_setup_builder.py:setup-build-status",
         "native_research.py:prepare-checked",
-        "native_research.py:prepare-checked",
         "research:start",
         "native_research.py:status",
         "native_research.py:continue",

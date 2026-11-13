@@ -367,6 +367,54 @@ def main() -> int:
             check('signed deadline requests stop while native startup is held',
                   held and stop_calls == ['operator_stop'],
                   {'held': held, 'stop_calls': stop_calls})
+        preparing = fixture(Path(raw).resolve() / 'preparing')
+        if preparing['prepare_code'] == 0:
+            deadline = datetime.strptime(preparing['boundary']['expires_at'],
+                                         '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            clock = [deadline.timestamp() - 75]
+            receipt = {'setup_plan_sha256': sha(preparing['root'] / 'plan.json'),
+                       'goal_sha256': sha(preparing['root'] / 'controls/BRIEF.md'),
+                       'cumulative_setup_used': {'connections': 0, 'bytes': 0},
+                       'autonomous_engagement_scope_sha256': sha(preparing['scope']),
+                       'remaining_engagement_allowance': {
+                           'connections': preparing['boundary']['limits']['max_connections'],
+                           'bytes': preparing['boundary']['limits']['max_bytes'],
+                           'absolute_deadline': preparing['boundary']['expires_at']},
+                       'image_id': preparing['boundary']['build']['image_id'],
+                       'platform': preparing['boundary']['platform'], 'dependencies': []}
+            checked = {'receipt': receipt, 'recipe': {
+                'runtime': {'version_command': ['true']}, 'build_command': ['true']},
+                'source_dir': str(preparing['source']),
+                'dependency_dir': str(preparing['catalog'])}
+            research_root = preparing['base'] / 'research'
+            selected = []
+            def slow_verify(*_args, **_kwargs):
+                clock[0] += 11
+                return checked
+            def capture_prepare(args):
+                selected.append(args.duration_seconds)
+                path = research_root / 'controls/checked-setup/package/receipt.json'
+                path.parent.mkdir(mode=0o700, parents=True)
+                path.write_text('{}\n')
+                return {'status': 'prepared_provider_free'}
+            prepare_args = argparse.Namespace(
+                scope_file=str(preparing['scope']), scope_sha256=sha(preparing['scope']),
+                checked_setup_root=str(preparing['root']), run_root=str(research_root),
+                max_connections=receipt['remaining_engagement_allowance']['connections'],
+                max_bytes=receipt['remaining_engagement_allowance']['bytes'],
+                duration_seconds=60, research_scope_signature=str(preparing['signature']),
+                research_allowed_signers=str(preparing['signers']))
+            with (patch.object(runner.time, 'time', side_effect=lambda: clock[0]),
+                  patch.object(builder, 'verify_checked', side_effect=slow_verify),
+                  patch.object(runner, 'prepare', side_effect=capture_prepare)):
+                try:
+                    runner.prepare_checked(prepare_args)
+                    prepare_code = 'prepared'
+                except runner.NativeResearchError as error:
+                    prepare_code = str(error)
+            check('slow checked verification narrows scope-only research duration',
+                  prepare_code == 'prepared' and selected == [59],
+                  {'code': prepare_code, 'selected_duration': selected})
         prestop = fixture(Path(raw).resolve() / 'prestop')
         if prestop['prepare_code'] == 0:
             code, result = cli(prestop['env'], 'stop', '--run-root', str(prestop['root']))

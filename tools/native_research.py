@@ -1118,8 +1118,9 @@ def prepare_checked(args: argparse.Namespace) -> dict:
             _fail('engagement_checked_allowance_mismatch')
         if (limits['max_connections'] != residual['max_connections']
                 or limits['max_bytes'] != residual['max_bytes']
-                or limits['duration_seconds'] > remaining):
+                or remaining < 30):
             _fail('engagement_research_allowance_mismatch')
+        limits['duration_seconds'] = min(limits['duration_seconds'], remaining)
         scope_proof = None
     else:
         scope_proof = _verify_research_scope(
@@ -1150,7 +1151,7 @@ def prepare_checked(args: argparse.Namespace) -> dict:
                  '--model', setup_plan['model'], '--provider-route', setup_plan['provider_route'],
                  '--max-connections', str(args.max_connections),
                  '--max-bytes', str(args.max_bytes),
-                 '--duration-seconds', str(args.duration_seconds)]
+                 '--duration-seconds', str(limits['duration_seconds'])]
         if receipt.get('dependencies'):
             words.extend(('--module-cache', checked['dependency_dir']))
         prepared_args = _parser().parse_args(words)

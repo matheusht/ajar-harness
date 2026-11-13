@@ -165,10 +165,7 @@ class Phases:
             duration = int(args[args.index('--duration-seconds') + 1])
             self.prepare_checked_durations.append(duration)
             if self.stop_at == 'prepare_allowance_drift':
-                if (len(self.prepare_checked_durations) == 1 or
-                        duration > self.prepare_checked_durations[0] - 20):
-                    return 2, {'status': 'rejected',
-                               'code': 'engagement_research_allowance_mismatch'}
+                self.prepared_duration = duration - 1
             if self.stop_at == 'prepare_partial_plan':
                 write(research / 'plan.json', {'kind': 'partial-research-plan'})
                 return 2, {'status': 'rejected',
@@ -314,8 +311,8 @@ def scenario(base: Path, name: str) -> dict:
         assert fake.resumes == 1 and fake.builds == 1
     elif name == 'prepare_allowance_drift':
         assert result['status'] == 'complete_internal_candidate', result
-        assert len(fake.prepare_checked_durations) == 2
-        assert fake.prepare_checked_durations[1] <= fake.prepare_checked_durations[0] - 20
+        assert len(fake.prepare_checked_durations) == 1
+        assert fake.prepared_duration < fake.prepare_checked_durations[0]
     elif name == 'prepare_partial_plan':
         assert result['status'] == 'stopped_incomplete', result
         assert len(fake.prepare_checked_durations) == 1

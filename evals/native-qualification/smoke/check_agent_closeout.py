@@ -39,7 +39,8 @@ def result_text(outcome: str) -> str:
 
 
 def setup(base: Path, *, outcome: str, review: bool = True,
-          review_decision: str = 'raise', lead_disposition: bool = True) -> Path:
+          review_decision: str = 'raise', lead_disposition: bool = True,
+          lead_decision: str | None = None) -> Path:
     root = source_check.fixture(base)
     plan = runner._read_json(root / 'plan.json')
     plan['checked_setup'] = {'kind': 'synthetic-checked-setup'}
@@ -75,7 +76,8 @@ def setup(base: Path, *, outcome: str, review: bool = True,
                           'decision': review_decision,
                           'outcome': {'decision': review_decision,
                                       'next_check': 'Compare original actor rights with a denied control',
-                                      'lead_dispositions': ([{'decision': 'retain',
+                                      'lead_dispositions': ([{'decision': lead_decision or (
+                                                             'retain' if outcome == 'supported' else 'narrow'),
                                                              'basis_examined': 'before and after host batches',
                                                              'uncertain_condition': 'original actor permission',
                                                              'next_check': 'check original actor rights'}]
@@ -400,6 +402,7 @@ def main() -> None:
             ('missing_review', 'supported', False, 'raise', 'review_required'),
             ('dismissed_lead', 'bounded_negative', False, 'raise', 'review_required'),
             ('weak_dismissal', 'bounded_negative', True, 'retain', 'review_required'),
+            ('retained_dismissal', 'bounded_negative', True, 'retain', 'review_required'),
             ('blocked', 'blocked', False, 'raise', 'stopped_incomplete'),
             ('blocked_missing_result', 'blocked', False, 'raise', 'stopped_incomplete'),
             ('unknown_effect', 'supported', True, 'raise', 'stopped_incomplete'),
@@ -417,7 +420,8 @@ def main() -> None:
             ('target_safety_claim', 'supported', True, 'raise', 'result_invalid')):
             root = setup(base / case, outcome=outcome, review=review,
                          review_decision=decision,
-                         lead_disposition=case != 'weak_dismissal')
+                         lead_disposition=case != 'weak_dismissal',
+                         lead_decision='retain' if case == 'retained_dismissal' else None)
             if case == 'stale_result':
                 (root / 'researcher/project/RESULT.md').write_text(result_text(outcome) +
                     '\nAdditional changed claim.\n')

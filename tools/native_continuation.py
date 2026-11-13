@@ -1281,7 +1281,7 @@ def _valid_lead_dispositions(outcome: object) -> bool:
     leads = outcome.get('lead_dispositions') if isinstance(outcome, dict) else None
     return (isinstance(leads, list) and bool(leads)
             and all(isinstance(item, dict)
-                    and item.get('decision') in ('retain', 'narrow', 'reject')
+                    and item.get('decision') in ('narrow', 'reject')
                     and all(isinstance(item.get(key), str) and item[key].strip()
                             for key in ('basis_examined', 'uncertain_condition', 'next_check'))
                     for item in leads))

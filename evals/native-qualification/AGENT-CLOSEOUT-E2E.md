@@ -14,6 +14,7 @@ engagement complete. External filing and deployment are separate actions.
 | Old review applied after the final result, source, effect receipt, or claim changed | Reject stale review and request a fresh check on the new bytes. |
 | Final checkpoint changes its claim, coverage, or lead state after review | Reject the unreviewed final fields before accepted closeout. |
 | Strong lead dismissed without fresh review and contrary evidence | Keep the lead unfinished or reopen with a concrete next test. |
+| Reviewer retains a strong lead while the agent marks it dismissed | Refuse accepted closeout; a retained lead remains unfinished. |
 | Pending/unknown host or native effect | Stop dispatch; retain the effect and cleanup obligation as unresolved. |
 | Agent labels untested paths safe or a bounded negative as full coverage | Return a bounded result that states the tested paths and limits. |
 | Budget, operator, or safety stop | Stop immediately without a new review experiment; keep draft and unfinished work. |
@@ -69,6 +70,6 @@ The checked-in result of this run is
 [AGENT-CLOSEOUT-E2E-RESULT.json](AGENT-CLOSEOUT-E2E-RESULT.json). That map checks
 automatic acceptance after an agent turn, autonomous reopen with a second fresh
 review, stale-review refusal, immediate user/allowance/unknown-effect stop,
-delayed cleanup readback, wrong-daemon refusal, stop-request replay, agent repair of a missing result, fresh review after a changed result, and a no-change reopen ending. The redirected JSON is
+delayed cleanup readback, wrong-daemon refusal, stop-request replay, agent repair of a missing result, fresh review after a changed result, a retained-lead dismissal refusal, and a no-change reopen ending. The redirected JSON is
 the saved local result. It is control-flow evidence only; the cleanup receipt
 and resource absence in these cases are simulated.

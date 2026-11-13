@@ -178,6 +178,19 @@ def main() -> int:
                   and derived.get('plan_sha256') == sha(root / 'plan.json')
                   and derived.get('limits') == item['boundary']['setup']['limits'],
                   {'exit': code, 'code': result.get('code'), 'authority': derived.get('kind')})
+        prestop = fixture(Path(raw).resolve() / 'prestop')
+        if prestop['prepare_code'] == 0:
+            code, result = cli(prestop['env'], 'stop', '--run-root', str(prestop['root']))
+            stop_path = prestop['root'] / 'controls/native-state/STOP_REQUEST'
+            check('scope-only stop persists before activation',
+                  code == 0 and result.get('status') == 'stop_requested'
+                  and stop_path.is_file(),
+                  {'exit': code, 'status': result.get('status'), 'stop_file': stop_path.is_file()})
+            code, result = cli(prestop['env'], 'start', '--run-root', str(prestop['root']))
+            check('preactivation stop prevents resource creation',
+                  code == 2 and not prestop['docker_marker'].exists()
+                  and not (prestop['root'] / 'controls/resources.json').exists(),
+                  {'exit': code, 'code': result.get('code')})
         result = {'status': 'passed' if checks and all(row['passed'] for row in checks) else 'failed',
                   'checks': checks, 'provider_calls': 0, 'target_service_calls': 0}
         args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')

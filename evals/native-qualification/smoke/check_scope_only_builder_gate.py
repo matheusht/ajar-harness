@@ -171,6 +171,17 @@ def main() -> None:
                         for key in ('scope_amendment', 'approval'))
                 and builder.verify_authority(setup, path, catalog) == authority)
 
+            try:
+                builder.setup_build(root, None, catalog_root)
+            except builder.BuildError as error:
+                checks['public_build_accepts_scope_only_authority'] = (
+                    str(error) == 'build_docker_daemon_unavailable'
+                    and item['docker_marker'].exists()
+                    and not (controls / 'setup-build').exists())
+            else:
+                checks['public_build_accepts_scope_only_authority'] = False
+            item['docker_marker'].unlink(missing_ok=True)
+
             changed_catalog = deepcopy(catalog)
             changed_catalog['tree']['tree_sha256'] = '0' * 64
             refused('changed_catalog_refused',
@@ -226,7 +237,7 @@ def main() -> None:
 
     result = {'status': 'passed' if all(checks.values()) else 'failed',
               'checks': checks, 'provider_calls': 0, 'target_service_calls': 0,
-              'docker_calls': 0}
+              'real_docker_calls': 0, 'docker_shim_calls': 1}
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     if result['status'] != 'passed':
         raise SystemExit(1)

@@ -120,7 +120,7 @@ def _allowance(root: Path, plan: dict) -> dict:
     runner._approval_active(root)
     snapshot = runner.allowance_snapshot(root)
     limits = snapshot.get('hard_limits')
-    if (snapshot.get('active') is not True or limits != plan['limits']
+    if (snapshot.get('active') is not True or not runner.allowance_limits_match(plan, limits)
             or not isinstance(snapshot.get('run_identity'), dict)
             or type(snapshot.get('used_tunnels')) is not int
             or type(snapshot.get('charged_tunnel_bytes')) is not int

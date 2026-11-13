@@ -3328,6 +3328,18 @@ def allowance_snapshot(run_root: Path) -> dict:
             'provider_request_count': None, 'monetary_spend': None}
 
 
+def allowance_limits_match(plan: dict, limits: object) -> bool:
+    expected = plan['limits']
+    if limits == expected:
+        return True
+    return ('autonomous_engagement' in plan and isinstance(limits, dict)
+            and set(limits) == set(expected)
+            and limits['max_connections'] == expected['max_connections']
+            and limits['max_bytes'] == expected['max_bytes']
+            and type(limits['duration_seconds']) is int
+            and 1 <= limits['duration_seconds'] <= expected['duration_seconds'])
+
+
 def _resources(root: Path) -> dict:
     record = _read_json(_controls(root) / 'resources.json')
     if any(row.get('id') is None for row in record.get('resources', [])):

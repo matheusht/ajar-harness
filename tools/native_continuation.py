@@ -441,7 +441,7 @@ def _source_preflight(root: Path, state: dict, next_sha: str) -> dict:
     allowance = runner.allowance_snapshot(root)
     limits = allowance.get('hard_limits') or plan['limits']
     if (allowance.get('active') is not True
-            or limits != plan['limits']
+            or not runner.allowance_limits_match(plan, limits)
             or not isinstance(allowance.get('run_identity'), dict)
             or type(allowance.get('used_tunnels')) is not int
             or type(allowance.get('charged_tunnel_bytes')) is not int
@@ -933,7 +933,7 @@ def _review_preflight(root: Path, state: dict) -> tuple[dict, dict, object, str]
         _fail('source_review_run_inactive_or_unresolved')
     allowance = runner.allowance_snapshot(root)
     limits = allowance.get('hard_limits')
-    if (allowance.get('active') is not True or limits != plan['limits']
+    if (allowance.get('active') is not True or not runner.allowance_limits_match(plan, limits)
             or not isinstance(allowance.get('run_identity'), dict)
             or type(allowance.get('used_tunnels')) is not int
             or type(allowance.get('charged_tunnel_bytes')) is not int

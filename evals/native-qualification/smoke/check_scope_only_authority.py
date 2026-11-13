@@ -22,6 +22,8 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from engagement_records import canonical_json_bytes  # noqa: E402
 import native_research as runner  # noqa: E402
 import native_setup_builder as builder  # noqa: E402
+import native_continuation as continuation  # noqa: E402
+import native_closeout as closeout  # noqa: E402
 
 NAMESPACE = 'llm-redteam-harness-native-engagement-v1'
 CHALLENGE = 'native-engagement-scope-challenge-v1'
@@ -209,6 +211,33 @@ def main() -> int:
                     shortened = False
             check('scope-derived activation accepts a bounded shortened duration', shortened,
                   {'planned': plan['limits']['duration_seconds'], 'actual': duration})
+            research_plan = dict(plan, source_only={}, checked_setup={}, source_sha256='a' * 64,
+                                 source_effect_envelope=runner.CHECKED_SOURCE_EFFECT_ENVELOPE)
+            active_allowance = {'active': True, 'hard_limits': {
+                **plan['limits'], 'duration_seconds': duration}, 'run_identity': identity,
+                'used_tunnels': 0, 'charged_tunnel_bytes': 0}
+            handoff = root / 'handoff/reviewer-1'
+            handoff.mkdir(mode=0o700, parents=True, exist_ok=True)
+            reviewer = SimpleNamespace(_sessions=lambda *_args: [])
+            with (patch.object(runner, '_verified_plan', return_value=research_plan),
+                  patch.object(runner, '_approval_active'),
+                  patch.object(runner, 'run_active', return_value=True),
+                  patch.object(runner, '_unresolved_dispatches', return_value=[]),
+                  patch.object(runner, 'allowance_snapshot', return_value=active_allowance),
+                  patch.object(runner, '_source_executor_envelope'),
+                  patch.object(runner, '_load_review_module', return_value=reviewer),
+                  patch.object(runner, '_verify_inventory')):
+                accepted = []
+                for action in (lambda: continuation._source_preflight(root, {}, 'a' * 64),
+                               lambda: continuation._review_preflight(root, {}),
+                               lambda: closeout._allowance(root, research_plan)):
+                    try:
+                        action()
+                        accepted.append(True)
+                    except (continuation.ContinuationError, closeout.CloseoutError):
+                        accepted.append(False)
+            check('shortened scoped allowance reaches source action, review and closeout',
+                  accepted == [True, True, True], {'accepted': accepted})
             state = root / 'controls/native-state'
             state.mkdir(exist_ok=True)
             (state / 'RUN.json').write_text(json.dumps({'ids': ids,
@@ -302,7 +331,12 @@ def main() -> int:
                   and not (prestop['root'] / 'controls/resources.json').exists(),
                   {'exit': code, 'code': result.get('code')})
         result = {'status': 'passed' if checks and all(row['passed'] for row in checks) else 'failed',
-                  'checks': checks, 'provider_calls': 0, 'target_service_calls': 0}
+                  'checks': checks, 'provider_calls': 0, 'target_service_calls': 0,
+                  'replay': ('PYTHONDONTWRITEBYTECODE=1 python3 '
+                             'evals/native-qualification/smoke/check_scope_only_authority.py '
+                             '--output /tmp/scope-only-authority.json'),
+                  'requirements': ['python3', 'ssh-keygen', 'openssl'],
+                  'expected': 'status passed; no real Docker, provider, or target calls'}
         args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
         print(json.dumps({'status': result['status'], 'checks': len(checks),
                           'result': str(args.output)}, sort_keys=True))

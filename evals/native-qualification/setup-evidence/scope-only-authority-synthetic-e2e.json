@@ -1,0 +1,121 @@
+{
+  "checks": [
+    {
+      "name": "initial signed scope prepares without a later approval",
+      "observed": {
+        "exit": 0,
+        "result": {
+          "live_approval_required": false,
+          "plan_sha256": "31694084d8e11b4aaec85b50b653c96570ca4cb7536f310ca403b64064c103c6",
+          "run_root": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/scope-only-authority-mjn_wjnf/run",
+          "source_files": 1,
+          "status": "prepared_provider_free"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "host plan marks full-engagement scope",
+      "observed": {
+        "marker": {
+          "allowed_signers_sha256": "328b963b787d6a32e70b168f746aea7e17d99ea85a5cb6266bac36a3560a4298",
+          "engagement_id": "scope-only-fixture",
+          "expires_at": "2026-11-13T15:15:05Z",
+          "issued_at": "2026-11-13T14:45:05Z",
+          "kind": "native-engagement-scope-v1",
+          "operator_id": "synthetic-operator",
+          "scope_sha256": "13df232f679c1a8b92ce5189aea2717b88a15dc654a9723b89b7c97568417e45",
+          "signature_sha256": "a23dc7f96dc1b430d9f9e7882a8a87790f3eaddcfc7d47dad22252e6bf44358e",
+          "trusted_fingerprint": "sha256:66539717d7b0db8ae23b32873c3b694a33c1ce7b32b6ac212fb0a3c8cb7bfb09"
+        }
+      },
+      "passed": true
+    },
+    {
+      "name": "missing archived scope refuses before Docker",
+      "observed": {
+        "code": "native_research_unavailable",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "setup start derives bounded host authority without operator key",
+      "observed": {
+        "authority": "native-scope-derived-approval-v1",
+        "code": "docker_command_failed",
+        "exit": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "scope-derived activation accepts a bounded shortened duration",
+      "observed": {
+        "actual": 110,
+        "planned": 120
+      },
+      "passed": true
+    },
+    {
+      "name": "shortened scoped allowance reaches source action, review and closeout",
+      "observed": {
+        "accepted": [
+          true,
+          true,
+          true
+        ]
+      },
+      "passed": true
+    },
+    {
+      "name": "scope-derived stopped setup accepts the shortened provider record",
+      "observed": {
+        "actual": 110,
+        "code": null
+      },
+      "passed": true
+    },
+    {
+      "name": "scope-derived activation rejects a duration above the plan",
+      "observed": {
+        "actual": 121
+      },
+      "passed": true
+    },
+    {
+      "name": "preseal delay exhausts authority before native activation",
+      "observed": {
+        "code": "engagement_allowance_exhausted",
+        "native_constructor_reached": false
+      },
+      "passed": true
+    },
+    {
+      "name": "scope-only stop persists before activation",
+      "observed": {
+        "exit": 0,
+        "status": "stop_requested",
+        "stop_file": true
+      },
+      "passed": true
+    },
+    {
+      "name": "preactivation stop prevents resource creation",
+      "observed": {
+        "code": "native_stop_before_start",
+        "exit": 2
+      },
+      "passed": true
+    }
+  ],
+  "expected": "status passed; no real Docker, provider, or target calls",
+  "provider_calls": 0,
+  "replay": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_scope_only_authority.py --output /tmp/scope-only-authority.json",
+  "requirements": [
+    "python3",
+    "ssh-keygen",
+    "openssl"
+  ],
+  "status": "passed",
+  "target_service_calls": 0
+}

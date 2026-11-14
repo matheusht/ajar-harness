@@ -25,7 +25,9 @@ from engagement_lease_owner import OwnedProcess, command_environment
 
 
 class EnvironmentUnavailable(RuntimeError):
-    pass
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
 
 
 def _workspace_path(path, *, directory=False):

@@ -71,6 +71,8 @@ def scenario(root, name):
         code, first = cli('run', '--inputs', inputs, '--engagement-root', engagement)
         require(code == 2 and first['status'] == 'blocked' and first.get('code') == 'worker_progress_unavailable',
                 'run did not enter real runner/boundary')
+        require(first['failures'] == {'lead-1': 'native_bundle_platform_mismatch'},
+                'public run hid the native prerequisite code')
         controller = Controller(engagement); before = controller.state()
         require(before['evidence_class'] == 'native' and len(before['dispatches']) == 1, 'run bypassed native dispatch journal')
         require(not marker.exists() and first['cleanup'] == 'verified'

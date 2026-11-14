@@ -37,7 +37,8 @@ def main():
     scenarios = ('single-owner', 'native-continuation', 'direction-stop', 'recovery',
                  'frozen-contract', 'unavailable-boundary', 'private-source-parallel',
                  'renewal', 'invocation-accounting', 'task-finish', 'receipt-double-count',
-                 'renewal-boundary', 'capture-admission')
+                 'renewal-boundary', 'capture-admission', 'native-prerequisite-code',
+                 'environment-prerequisite-code', 'unexpected-private-error')
     for scenario in scenarios:
         if args.scenario not in ('all', scenario):
             continue
@@ -70,6 +71,14 @@ def main():
                         peers.append(self)
 
                     def start(self):
+                        if scenario == 'native-prerequisite-code':
+                            from native_runtime_transport import RuntimeError as NativeFailure
+                            raise NativeFailure('native_bundle_platform_mismatch')
+                        if scenario == 'environment-prerequisite-code':
+                            from research_environment import EnvironmentUnavailable
+                            raise EnvironmentUnavailable('environment_grant_inactive')
+                        if scenario == 'unexpected-private-error':
+                            raise ValueError('private-exception-content')
                         calls.append(('start', self.context.worker['id']))
                         return {'session_id': self.session_id, 'owner_receipt': self.owner_receipt()}
 
@@ -126,6 +135,8 @@ def main():
                         self.closed = True
                         self.active = False
                         calls.append(('close', self.session_id))
+                        if scenario in ('native-prerequisite-code', 'environment-prerequisite-code', 'unexpected-private-error'):
+                            return {'execution_admitted': False, 'cleanup': 'verified'}
                         return {'runtime': {'session_id': self.session_id,
                             'owner_receipt_sha256': digest(canonical(self.owner_receipt())),
                             'process_exited': True, 'child_absence': 'verified', 'capabilities_revoked': True},
@@ -152,7 +163,16 @@ def main():
                     return result[0]
 
                 runner = Runner(c, boundary_factory=Peer)
-                if scenario == 'single-owner':
+                if scenario in ('native-prerequisite-code', 'environment-prerequisite-code', 'unexpected-private-error'):
+                    result = runner.run()
+                    expected = {'native-prerequisite-code': 'native_bundle_platform_mismatch',
+                        'environment-prerequisite-code': 'environment_grant_inactive',
+                        'unexpected-private-error': 'native_worker_unavailable'}[scenario]
+                    require(result['failures'] == {'lead-1': expected}, 'specific safe blocker lost or private error exposed')
+                    require(result['cleanup'] == 'verified' and c.state()['usage']['invocations'] == 0,
+                            'prerequisite refusal fabricated an invocation or cleanup')
+                    require('private-exception-content' not in json.dumps(result), 'private exception leaked')
+                elif scenario == 'single-owner':
                     with runner.ownership():
                         try:
                             with Runner(c, boundary_factory=Peer).ownership():

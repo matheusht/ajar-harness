@@ -28,6 +28,10 @@ from engagement_contract import ContractError, safe_publication
 class RuntimeError(Exception):
     """Stable failure code; never contains a native error body or prompt."""
 
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
 
 @dataclass(frozen=True)
 class HostOperation:

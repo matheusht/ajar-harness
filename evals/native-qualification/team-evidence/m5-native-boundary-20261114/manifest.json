@@ -1,0 +1,35 @@
+{
+  "base_head": "d032570f77160323cc70b9ee85a96dc8cca2da0f",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "d7130184455f9b79b787dbe592c628f32563b64a472d889bf36e8a74bd99b3e0",
+    "tools/engagement_controller.py": "0ca1a65f4150b94aac07d4b761aea9371b76ec1f9230827a8e23fcc4a1a5af03",
+    "tools/engagement_evidence.py": "05211d6e6b2aa0c85dc61775c9f8c170459313a0bac5f9e49cad708fee51d656",
+    "tools/engagement_runner.py": "3572e224579555566b9dd50d2a3b2ed0570e175f9d63d2ae0e59f30197cb126c",
+    "tools/research_environment.py": "9254dc37e062ea4d01810d068f9720fb0c8291d1da3e47e6d7d4d7664793c79a",
+    "tools/engagement_network.py": "978ec14335ce4a3d03314033a62210603f918984370f3df11a30f735dce7fdb3",
+    "tools/engagement_network_bridge.py": "ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/native_runtime_codex.py": "3448c33db74d4476b41548c4fe70fa236d96ac862e551f37f37037d409b10a58",
+    "tools/native_runtime_omp.py": "adf54fff3793072391d53a2ef487307a2278702708bb5828100ca092dc8fba54",
+    "tools/native_runtime_owner.py": "d0e9d7fb46be116b1fe3bbd510c55a90cf0466a6ab69d9011b5c68f671833fd8",
+    "tools/native_runtime_transport.py": "4cb761b54891f7bb2c2deffeb29baba763674e5a11122ac177aaa7cdb96856ab",
+    "tools/native_credentials.py": "9961b602ebedcdc4d414ff0747f0c774950d1e23f51a92a79deed19f4d22e437",
+    "evals/native-qualification/smoke/check_engagement_native_boundary_e2e.py": "7ae9d637edab6448d461e760ad7b608366866f45f733a8280e969d7365d8bf84",
+    "evals/native-qualification/smoke/check_environment_renewed_execute_e2e.py": "2ad1e49f672dbf13a3035910d4ded89ace07d82c1db8e0730e577bd733e623a8"
+  },
+  "receipts": {
+    "after.json": "23b027c3e68054e62d55b8ba38a73497094d2a6f6933105dd6b8bc78f1fb9c02",
+    "before-capture.json": "60709e8a91749a741f32cfb130457363ff96a857d8f619163dae291911cce47a",
+    "before-certificate-budget.json": "831e4cc1f961ce1328493890877d9706e8aad2dca00dbdb5869098642b9fc8a0",
+    "before-environment-selection.json": "e2a94875575c56e8a02dee082b6fe4fea6bbf6aef7470cdc510b93c755c30629",
+    "before-large-reply.json": "cd6be81e34a6fcecbc1bee95b64150e66ed3a1be8b89122395f0586f0bdb8834",
+    "before-module.json": "65ba392948631856185c2893387b1388b2e2d197255e0340581846c9c8765245",
+    "before-native-tools.json": "7d82b249f6c2221eb0157daeee2fe5933a64e543ddaddfaba33baab50091c298",
+    "before-preflight-fact.json": "569f838192cb5f7e843e2b42cd3a02cc293a3ef6f9a7a7799e53ccb0f3d456f2",
+    "before-publication-read.json": "6c34bb8c7687f6a48ccc66feba6d9edae9dd4476f1605b40fc6fcfa5f706938c",
+    "before-renewal.json": "1e145a2d71507be38bc77ef423425efd60eac522a1ac560bd8d9ae7b4012d633",
+    "before-sizing-review.json": "c93a569991b706ce89eb73cb6ae27eb978ac4e4e4943d787ebd993c9f9317c9a",
+    "before-startup-cleanup.json": "f96f31b02537f8daebce405f7d5cf82975bdd77f0ab653108ae458e59b44ed0b",
+    "before-status-reply.json": "4111055913fa2805850ca72ac6e9cd0eb5e1242288ecebd446328b69504b8d47",
+    "environment-integration.json": "570bab5b4d9e37b1f5b7118f5b0b176ca9fd009f845bc9ab406b6f7b8cde37db"
+  }
+}

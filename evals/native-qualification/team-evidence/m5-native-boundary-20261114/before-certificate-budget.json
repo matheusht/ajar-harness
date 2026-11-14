@@ -1,0 +1,8 @@
+{
+  "classification": "actual_local_certificate",
+  "budget_seconds": 432000,
+  "covers_signed_budget": false,
+  "checkend_exit": 1,
+  "output": "Certificate will expire",
+  "multi_day_soak": "not_run"
+}

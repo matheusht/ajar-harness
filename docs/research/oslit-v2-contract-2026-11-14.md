@@ -134,6 +134,20 @@ collections to declared practical cardinality limits, JSON nesting/total input
 bytes to a parser budget. Reject an unexpected field rather than ignore it. Native
 wire formats are adapter-private and must not leak into this signed contract.
 
+OMP profiles additionally require `tool_bundle` with exactly
+`{path, manifest_sha256, platform, bun_version}`. The path names a materialized
+regular-file tree; its manifest uses the same byte, size and mode binding as source
+inputs. Platform is `linux/amd64` or `linux/arm64`, and Bun version is an exact
+release number. Preflight freezes `runtimes/<id>.bundle-manifest.json`; staging
+rechecks every supplied byte. The support tree is not target access and grants no
+target permissions. Codex profiles reject this OMP-only field.
+
+The bridge separately verifies the fixed layout (`bin/bun`, the reviewed
+`native_runtime_omp_tools.mjs`, and `node_modules/@oh-my-pi/pi-coding-agent`), matching
+SDK/runtime versions and native platform compatibility. A manifest match proves
+input identity, not that the bundle can execute. Native dependencies for another
+OS do not qualify a Linux environment.
+
 M1 fixes the following exact shapes after coordination with the runtime and
 environment owners. They replace the descriptive field-table examples above:
 

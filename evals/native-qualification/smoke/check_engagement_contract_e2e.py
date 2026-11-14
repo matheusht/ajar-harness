@@ -242,6 +242,65 @@ def main() -> int:
             assert not any('operator_key' in name for name in frozen['frozen'])
             assert 'access/source-main.manifest.json' in frozen['frozen']
 
+            bundle = base / 'tool-bundle'
+            bundle.mkdir(mode=0o700)
+            bundle_files = {'bin/bun': b'harmless non-executable bundle fixture\n',
+                            'native_runtime_omp_tools.mjs': b'// fixture only\n',
+                            'node_modules/@oh-my-pi/pi-coding-agent/package.json':
+                                encoded({'name': '@oh-my-pi/pi-coding-agent', 'version': '18.20.0'})}
+            for name, data in bundle_files.items():
+                path = bundle / name
+                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                write(path, data)
+            bundle_manifest = {name: {'sha256': sha(data), 'mode': 0o600, 'size': len(data)}
+                               for name, data in sorted(bundle_files.items())}
+            omp = json.loads((fixture / 'runtime.json').read_bytes())
+            omp.update(kind='omp', version='18.20.0')
+            omp['protocol']['mode'] = 'stdio-jsonl'
+
+            def check_runtime(name, profile, expected=None, operation='inspect'):
+                reset()
+                write(fixture / 'runtime.json', encoded(profile))
+                scope = copy.deepcopy(original_scope)
+                scope['runtime_assignments'][0]['profile_sha256'] = sha((fixture / 'runtime.json').read_bytes())
+                resign_fixture(inputs_path, scope)
+                return check(name, operation, inputs_path, expected)
+
+            check_runtime('omp_missing_tool_bundle', omp, {'runtime_profile_invalid'})
+            omp['tool_bundle'] = {'path': str(bundle), 'manifest_sha256': sha(encoded(bundle_manifest)),
+                                  'platform': 'linux/arm64', 'bun_version': '1.4.4'}
+            bundle_report = check_runtime('omp_pinned_tool_bundle', omp, operation='load')
+            assert bundle_report['frozen_digests']['runtimes/runtime-main.bundle-manifest.json'] == sha(encoded(bundle_manifest))
+            assert set(original_inputs['access_files']) == {'source-main'}
+            for name, update in (
+                    ('omp_bundle_unknown_field', {'entrypoint': 'arbitrary.js'}),
+                    ('omp_bundle_platform_invalid', {'platform': 'darwin/arm64'}),
+                    ('omp_bundle_version_invalid', {'bun_version': 'latest'}),
+                    ('omp_bundle_path_relative', {'path': 'relative/tools'}),
+                    ('omp_bundle_digest_invalid', {'manifest_sha256': 'not-a-digest'})):
+                changed = copy.deepcopy(omp)
+                changed['tool_bundle'].update(update)
+                check_runtime(name, changed, {'runtime_profile_invalid', 'path_invalid'})
+            changed = copy.deepcopy(omp)
+            changed['tool_bundle'] = None
+            check_runtime('omp_bundle_null', changed, {'runtime_profile_invalid'})
+            codex = json.loads(original_files[fixture / 'runtime.json'])
+            codex['tool_bundle'] = omp['tool_bundle']
+            check_runtime('codex_cannot_claim_omp_tool_bundle', codex, {'runtime_profile_invalid'})
+            bun = bundle / 'bin/bun'
+            write(bun, b'changed bundle bytes\n')
+            check_runtime('omp_bundle_tamper', omp, {'digest_mismatch'})
+            write(bun, bundle_files['bin/bun'])
+            bun.chmod(0o700)
+            check_runtime('omp_bundle_mode_tamper', omp, {'digest_mismatch'})
+            bun.chmod(0o600)
+            bun.unlink()
+            bun.symlink_to(fixture / 'native-fixture')
+            check_runtime('omp_bundle_symlink', omp, {'path_invalid', 'file_unavailable', 'source_invalid'})
+            bun.unlink()
+            write(bun, bundle_files['bin/bun'])
+            reset()
+
             environment = json.loads((fixture / 'environment.json').read_bytes())
             known_hosts = fixture / 'known_hosts'
             write(known_hosts, b'lab.example.test ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixture\n')

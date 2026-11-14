@@ -14,9 +14,14 @@ atlas: "—"
 
 ## Use this alongside, not instead of, the general skill
 
-Write the report following `reporting.vulnerability-report-writing`'s canonical shape and worked
-template first. This card is about mapping that content onto HackerOne's specific form fields, which
-split things differently than the generic template assumes.
+Write the report following `reporting.vulnerability-report-writing`'s reader contract and canonical
+shape first, then package it with `reporting.report-packaging`. This card is about mapping that
+content onto HackerOne's specific form fields, which split things differently than the generic
+template assumes.
+
+The package's `report.md` is the Description textarea. `impact.md` is the Impact textarea.
+`metadata.json` carries the title, CWE, CVSS version/vector/score, affected versions and file
+links. Do not put paste instructions or form-field notes inside either paste-ready file.
 
 ## The form's actual field split (observed, not assumed)
 
@@ -37,11 +42,12 @@ HackerOne's "new report" flow is not one big text box. Confirmed field structure
    CWE-863 (Incorrect Authorization), not automatically CWE-1321 (commonly labeled "Prototype
    Pollution") unless something is actually written to `Object.prototype` — read the CWE's own
    definition before picking it to avoid a technically-inaccurate label, even if it "sounds right."
-4. **Description** — one large textarea. This is where the general skill's Summary, Vulnerability
-   Details, Steps to Reproduce, Supporting Material/References, Novelty check, and Suggested Fix all
-   go, as `##` sub-headers inside this single field. There is no separate field for most of those.
-5. **Impact** — a genuinely separate textarea from Description. Do not blend them. Impact-specific
-   content (the attacker scenario, the CVSS reasoning) goes here and only here.
+4. **Description** — one large textarea. This is `report.md`: Summary, At a glance, Affected/tested,
+   Root cause, Reproduction, Evidence, Boundaries, Novelty, Fix. A package copy may carry an H1
+   title; the Description paste range begins at `## Summary`. There is no `# Description` heading
+   and no paste instruction inside it.
+5. **Impact** — a genuinely separate textarea. This is `impact.md`. It starts at `## Impact` and
+   contains the full argument and severity rationale. Do not blend it into `report.md`.
 6. **CVSS calculator** — a structured, metric-by-metric widget (this program uses CVSS 4.0), not free
    text. It computes the score from the vector you select. Work out your vector from the general
    skill's per-metric reasoning, enter it here, and read the actual computed number back before you
@@ -65,6 +71,18 @@ HackerOne's "new report" flow is not one big text box. Confirmed field structure
    convey.
 9. **Review and Submit** — the platform states editing after submission is not possible. Treat this
    as the trigger for the "proofread the actual submission" step in the general skill, not optional.
+
+## Package handoff before you open the form
+
+1. Run the package's `run.sh` from a clean state and save the literal output.
+2. Confirm the `report.md` paste range starts at `## Summary` and `impact.md` at `## Impact`.
+3. Count the title in `metadata.json`; it must be ≤150 characters.
+4. Confirm `metadata.json` has the CWE, CVSS version, vector, computed score, affected versions,
+   file links, and artifact hash.
+5. Confirm the zip has one top-level folder and no `build/`, `.gradle/`, `node_modules/`, caches,
+   absolute paths, credentials, or editor files.
+6. Open the form, paste `report.md` into Description and `impact.md` into Impact. Do not paste the
+   package README or metadata.
 
 ## Verify GitHub links before submitting them
 

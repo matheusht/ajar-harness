@@ -1,0 +1,22 @@
+package: btc-psbt-sighash-override
+command: sh poc/stage.sh
+host: darwin/arm64
+go: go1.26.4
+build: go build -trimpath -buildvcs=false
+note: three package runs compared; stdout byte-identical, exit 0 on every run
+note: stdout hash 35abd6f32cefc948c84b186e2fd224f8795b58607143acb34e1742cf2185ecce is identical across the three runs
+note: poc/build-meta.txt records the original two-run build identity; this file records three full stage runs
+
+run=1 exit=0 stdout_sha256=35abd6f32cefc948c84b186e2fd224f8795b58607143acb34e1742cf2185ecce
+run=2 exit=0 stdout_sha256=35abd6f32cefc948c84b186e2fd224f8795b58607143acb34e1742cf2185ecce
+run=3 exit=0 stdout_sha256=35abd6f32cefc948c84b186e2fd224f8795b58607143acb34e1742cf2185ecce
+
+per-stage result (identical in all three runs)
+S1 reach the signer              proven  deterministic by construction
+S2 collapse the digest           proven  deterministic; legacy and v0-witness arms only
+S3 verify on rebuilt tx          proven  deterministic; control 0x01 fails checksig
+S4 MPC digest/sign round trip    proven  deterministic; local stand-in signer key
+S5 consumer credits              argued  not run; no live consumer in scope
+
+taproot: error branch of S2 (digest call returns an error, input comes back unsigned); not a demonstrated path
+stdout contains 8 arm headers and 27 CELL lines, all reproduced by every run

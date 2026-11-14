@@ -71,7 +71,8 @@ def run(base):
         raw = binary + b'\0' * 492
         return {'kind': 'native-tool-installation-lock-v1', 'codex_version': '0.166.0',
                 'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {platform: {
-                    'codex': asset(name + '-codex', tar({'codex': binary}), member='codex'),
+                    'codex': asset(name + '-codex', tar({'codex': binary, 'codex-resources/bwrap': binary, 'codex-package.json': json.dumps({'version': '0.166.0',
+                        'target': ('aarch64' if machine == 183 else 'x86_64') + '-unknown-linux-musl'}).encode()}), member='codex'),
                     'bun': asset(name + '-bun', zipped.getvalue(), member='bun/bun'),
                     'model_omp': asset(name + '-omp', raw, format='raw', size=len(raw))}}, 'packages': []}
 
@@ -153,7 +154,7 @@ def run(base):
                     assert document['base_image'] == BASE and document['platform'] == platform
                     assert document['lock_sha256'] == sha(pin.read_bytes())
                     expected = {'bin/model', *HELPERS}
-                    if runtime == 'codex':expected |= {'bin/bun', 'native_runtime_codex_exec.mjs'}
+                    if runtime == 'codex':expected |= {'bin/bun', 'native_runtime_codex_exec.mjs', 'codex-package.json', 'codex-resources/bwrap'}
                     manifest = document['runtime_manifest']
                     assert set(manifest) == expected
                     executable = document['profile_fields']['executable']
@@ -162,10 +163,11 @@ def run(base):
                     for relative in expected:
                         path = destination / 'runtime' / relative
                         assert manifest[relative]['sha256'] == sha(path.read_bytes())
-                        assert stat.S_IMODE(path.stat().st_mode) == (0o555 if relative.startswith('bin/') else 0o444)
+                        assert stat.S_IMODE(path.stat().st_mode) == (0o555 if (relative.startswith('bin/') or relative == 'codex-resources/bwrap') else 0o444)
                     assert stat.S_IMODE(destination.stat().st_mode) == 0o700
                     assert all(stat.S_IMODE(path.stat().st_mode) == 0o755 for path in
                                (destination / 'runtime', destination / 'runtime/bin'))
+                    if runtime == 'codex':assert stat.S_IMODE((destination / 'runtime/codex-resources').stat().st_mode) == 0o755
                     dockerfile = (destination / 'Dockerfile').read_text()
                     assert dockerfile.splitlines()[0] == 'FROM ' + BASE
                     assert 'COPY --chown=0:0 runtime/ /runtime/' in dockerfile
@@ -174,7 +176,7 @@ def run(base):
                     assert set(path.name for path in destination.iterdir()) == {'runtime', 'Dockerfile', '.dockerignore'}
                     assert '.model' not in set(path.name for path in destination.iterdir())
                     assert document['context_manifest_sha256'].startswith('sha256:')
-                    for helper_name in expected - {'bin/model', 'bin/bun'}:
+                    for helper_name in expected - {'bin/model', 'bin/bun', 'codex-package.json', 'codex-resources/bwrap'}:
                         assert (destination / 'runtime' / helper_name).read_bytes() == (tools / helper_name).read_bytes()
                 assert not any(folder.glob('.oslit-download-*')), 'temporary acquisition left behind'
                 checks.append({'name': name, 'status': 'passed'})

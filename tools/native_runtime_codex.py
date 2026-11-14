@@ -298,6 +298,8 @@ class NativeExecutor:
         self.token = secrets.token_urlsafe(32)
         self.closed = False
         self.failure = None
+        self.transport_diagnostic = None
+        self.diagnostic_lock = threading.Lock()
         self.executor = self.bridge = None
         self.threads = []
         if not callable(launcher) or not callable(dispatch_guard) or not Path(cwd).is_absolute():
@@ -362,11 +364,14 @@ class NativeExecutor:
     def _copy(self, source, destination, admit):
         import json
         from contextlib import nullcontext
+        phase = 'read'
         try:
             while not self.closed:
+                phase = 'read'
                 line = source.stdout.readline(2 * 1048576 + 1)
                 if not line:
                     break
+                phase = 'frame'
                 if len(line) > 2 * 1048576 or not line.endswith(b'\n'):
                     raise RuntimeError('native_executor_frame_oversized')
                 if admit:
@@ -380,20 +385,34 @@ class NativeExecutor:
                 else:
                     payload = json.loads(line)
                     if payload.get('id') == self.initialize_id and 'result' in payload:
+                        phase = 'identity'
                         info = payload['result'].get('environmentInfo', {})
-                        if (info.get('executorVersion') != self.expected_version or
-                                self.expected_platform is not None and info.get('platformOs') != self.expected_platform):
+                        phase = 'identity_version'
+                        if info.get('executorVersion') != self.expected_version:
+                            raise RuntimeError('native_executor_identity_mismatch')
+                        phase = 'identity_platform'
+                        if self.expected_platform is not None and info.get('platformOs') != self.expected_platform:
                             raise RuntimeError('native_executor_identity_mismatch')
                         self.ready = {'version': info['executorVersion'], 'platform': info.get('platformOs')}
                     output = json.dumps({'frame': line.decode().rstrip('\n')}).encode() + b'\n'
+                phase = 'admission'
                 with self.guard() if admit else nullcontext():
                     if self.closed:
                         break
+                    phase = 'write'
                     write_pipe(destination.stdin, output)
         except Exception:
+            with self.diagnostic_lock:
+                if self.transport_diagnostic is None:
+                    self.transport_diagnostic = {'direction': 'to_executor' if admit else 'from_executor',
+                                                 'phase': phase, 'outcome': 'exception'}
             self.failure = 'native_executor_transport_failed'
         finally:
             if not self.closed:
+                with self.diagnostic_lock:
+                    if self.transport_diagnostic is None:
+                        self.transport_diagnostic = {'direction': 'to_executor' if admit else 'from_executor',
+                                                     'phase': 'read', 'outcome': 'eof'}
                 self.failure = self.failure or 'native_executor_transport_closed'
                 # Losing either pipe revokes the host endpoint immediately.
                 try:self.bridge.stdin.close()

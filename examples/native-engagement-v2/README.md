@@ -1,0 +1,51 @@
+# Unsigned v2 engagement templates
+
+These examples grant no authority. They contain placeholders and no signature,
+operator key, allowed-signers file or working account credential. Copy one access
+mode into a private input directory and follow the [operator guide](../../docs/agents/engagement.md).
+Every `REPLACE_` occurrence must be resolved before signing.
+
+| Directory | Supplied access | Initial configuration |
+| --- | --- | --- |
+| `source/` | Read-only source tree, pinned by the complete file manifest | Codex; local Docker; offline native tools |
+| `binary/` | Pinned Linux binary | Codex; local Docker; offline native tools |
+| `application/` | Exact application URL/version, no account binding | Codex; local Docker; scoped target proxy |
+| `combined/` | Source, binary and application access together | Codex; local Docker; scoped target proxy |
+
+Each directory includes complete inputs, scope, goal, runtime, native config and
+environment fields. The initial `read-inputs` effect covers every supplied input
+in its selected environment, so the lead can receive the combined source/binary
+assignment. Local execution is a separate effect. The sample authorizes neither
+external writes nor an impact artifact. Add permitted setup/acquisition routes,
+effects or a different scope ceiling only through the operator's signed decision.
+For acquisition, update the signed routes, environment capabilities and native
+network policy together; source/binary configs start with tool networking disabled.
+For application access, replace the target host in the access identity, target
+route and native domain allowlist together. Application configs allow local proxy
+bindings and rely on the isolated lab's network namespace for containment.
+
+Select the provider/model combination actually available in the pinned runtime.
+The examples use the OpenAI API credential **reference** `env_OPENAI_API_KEY` and
+its provider route; no value belongs in a template. Replace the model in both the
+runtime profile and native config. Selecting a runtime does not establish model
+availability, billing authority or provider qualification.
+
+`optional/runtime-omp.json` and `optional/omp-settings.json` replace the Codex
+profile/config when choosing OMP. Update `inputs.runtime_profiles`, its scope
+profile hash, bundle reference and any provider/model routes together. One
+engagement may admit either runtime or both; an unused profile is not required.
+`optional/environment-ssh-docker.json` replaces the local Docker profile when
+choosing an authorized SSH lab. Pin independently verified host keys and reference
+the operator's private SSH identity; the input bundle contains no private key.
+
+`linux/arm64` is a template choice. Match the binary identity, tool bundle and lab
+platform to the selected environment. Replace all image, executable, config,
+schema, source, profile, goal, signer and bundle pins with hashes of actual bytes.
+The source manifest includes file modes and sizes as well as digests. Keep final
+input files private and stable after signing.
+
+Application account references are currently reported as
+`target_account_binding_unavailable`; these examples use no account. Linux host
+model ownership is currently unsupported. macOS with an isolated Linux tool lab
+is the development route, and still requires actual environment containment and
+cleanup evidence before a live engagement can be described as qualified.

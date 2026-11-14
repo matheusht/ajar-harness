@@ -1,0 +1,15 @@
+{
+  "kind": "native-engagement-inputs-v2",
+  "scope_file": "/REPLACE_PRIVATE_ROOT/application/scope.md",
+  "scope_signature": "/REPLACE_PRIVATE_ROOT/application/scope.sig",
+  "allowed_signers": "/REPLACE_PRIVATE_ROOT/application/allowed_signers",
+  "trusted_fingerprint": "sha256:REPLACE_TRUSTED_OPERATOR_FINGERPRINT_HEX",
+  "goal_file": "/REPLACE_PRIVATE_ROOT/application/goal.md",
+  "access_files": {},
+  "runtime_profiles": {
+    "runtime-main": "/REPLACE_PRIVATE_ROOT/application/runtime-codex.json"
+  },
+  "environment_profiles": {
+    "lab-main": "/REPLACE_PRIVATE_ROOT/application/environment.json"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "status": "failed",
+  "classification": "materialized_unsigned_templates_with_fixture_signatures",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "checks": [
+    {
+      "check": "source",
+      "status": "failed",
+      "error": "[Errno 2] No such file or directory: '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/examples/native-engagement-v2/source/scope.md'"
+    },
+    {
+      "check": "binary",
+      "status": "failed",
+      "error": "[Errno 2] No such file or directory: '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/examples/native-engagement-v2/binary/scope.md'"
+    },
+    {
+      "check": "application",
+      "status": "failed",
+      "error": "[Errno 2] No such file or directory: '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/examples/native-engagement-v2/application/scope.md'"
+    },
+    {
+      "check": "combined",
+      "status": "failed",
+      "error": "[Errno 2] No such file or directory: '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/examples/native-engagement-v2/combined/scope.md'"
+    }
+  ]
+}

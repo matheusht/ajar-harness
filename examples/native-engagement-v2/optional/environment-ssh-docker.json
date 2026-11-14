@@ -1,0 +1,20 @@
+{
+  "kind": "research-environment-profile-v2",
+  "transport": "ssh-docker",
+  "docker_binary": "/REPLACE_REMOTE_DOCKER_EXECUTABLE",
+  "docker_endpoint": "unix:///REPLACE_REMOTE_DOCKER_SOCKET",
+  "daemon_id": null,
+  "image_id": "sha256:REPLACE_REMOTE_IMAGE_ID",
+  "platform": "linux/arm64",
+  "uid": 1000,
+  "gid": 1000,
+  "ssh": {
+    "host": "lab.example.invalid",
+    "port": 22,
+    "user": "REPLACE_REMOTE_USER",
+    "known_hosts_file": "/REPLACE_PRIVATE_ROOT/known_hosts",
+    "known_hosts_sha256": "sha256:REPLACE_KNOWN_HOSTS_SHA256",
+    "identity_file": "/REPLACE_PRIVATE_SSH_IDENTITY",
+    "python_binary": "/REPLACE_REMOTE_PYTHON_EXECUTABLE"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "kind": "codex",
+  "version": "0.166.0",
+  "executable": {
+    "path": "/REPLACE_CODEX_EXECUTABLE",
+    "sha256": "sha256:REPLACE_CODEX_EXECUTABLE_SHA256"
+  },
+  "protocol": {
+    "mode": "stdio-jsonrpc",
+    "schema_file": "/REPLACE_NATIVE_SCHEMA",
+    "schema_sha256": "sha256:REPLACE_NATIVE_SCHEMA_SHA256"
+  },
+  "config_file": "/REPLACE_PRIVATE_ROOT/source/codex.toml",
+  "config_sha256": "sha256:REPLACE_NATIVE_CONFIG_SHA256",
+  "provider": "openai",
+  "model": "REPLACE_PERMITTED_MODEL",
+  "credential_ref": "env_OPENAI_API_KEY",
+  "required_capabilities": [
+    "startup",
+    "fresh_session",
+    "steer",
+    "interrupt",
+    "usage_tokens",
+    "native_tools",
+    "child_inventory"
+  ],
+  "tool_bundle": {
+    "path": "/REPLACE_CODEX_TOOL_BUNDLE",
+    "manifest_sha256": "sha256:REPLACE_TOOL_BUNDLE_MANIFEST_SHA256",
+    "platform": "linux/arm64"
+  }
+}

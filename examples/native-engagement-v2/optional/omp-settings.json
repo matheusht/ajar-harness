@@ -1,0 +1,5 @@
+{
+  "plan": {"enabled": false},
+  "tools": {"xdev": false},
+  "autolearn": {"enabled": false}
+}

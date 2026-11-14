@@ -1,0 +1,12 @@
+{
+  "kind": "research-environment-profile-v2",
+  "transport": "docker",
+  "docker_binary": "/REPLACE_DOCKER_EXECUTABLE",
+  "docker_endpoint": "unix:///REPLACE_DOCKER_SOCKET",
+  "daemon_id": null,
+  "image_id": "sha256:REPLACE_IMAGE_ID",
+  "platform": "linux/arm64",
+  "uid": 1000,
+  "gid": 1000,
+  "ssh": null
+}

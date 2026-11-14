@@ -172,6 +172,35 @@ class BoundedReader:
         return value
 
 
+def read_runtime_archive(stream, expected):
+    expected_directories = {'runtime', 'runtime/bin'}
+    if 'codex-resources/bwrap' in expected:
+        expected_directories.add('runtime/codex-resources')
+    seen, directories, observed = set(), set(), {}
+    with tarfile.open(fileobj=stream, mode='r|*') as archive:
+        for row in archive:
+            name = row.name.rstrip('/')
+            if row.isdir():
+                if name not in expected_directories or name in directories or (row.mode, row.uid, row.gid) != (0o755, 0, 0):
+                    raise RuntimeError('runtime_directory_mismatch')
+                directories.add(name); continue
+            relative = name.removeprefix('runtime/')
+            if not name.startswith('runtime/') or not row.isfile() or relative not in expected or relative in seen:
+                raise RuntimeError('runtime_entry_mismatch')
+            wanted = expected[relative]
+            if (row.size, row.mode, row.uid, row.gid) != (wanted['size'], wanted['mode'], 0, 0):
+                raise RuntimeError('runtime_metadata_mismatch')
+            checksum = hashlib.sha256()
+            with archive.extractfile(row) as stream:
+                while chunk := stream.read(1024 * 1024):checksum.update(chunk)
+            actual = 'sha256:' + checksum.hexdigest()
+            if actual != wanted['sha256']:raise RuntimeError('runtime_content_mismatch')
+            seen.add(relative); observed[relative] = {**wanted, 'uid': row.uid, 'gid': row.gid}
+    if set(expected) != seen or directories != expected_directories:
+        raise RuntimeError('runtime_manifest_mismatch')
+    return observed
+
+
 def verify_image(fixture, result):
     """Read back bytes and ownership from a stopped, never-started owned probe."""
     response = call(fixture, 'container', 'create', '--name', fixture.probe_name,
@@ -194,40 +223,21 @@ def verify_image(fixture, result):
           and config['NanoCpus'] == 1000000000 and config['PidsLimit'] == 32
           and config.get('CapDrop') == ['ALL'] and 'no-new-privileges' in config.get('SecurityOpt', []))
     expected = fixture.context_receipt['runtime_manifest']
-    seen, directories, observed = set(), set(), {}
+    observed = {}
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen([fixture.docker, '--host', fixture.endpoint, 'cp', fixture.probe_id + ':/runtime', '-'],
                                    stdout=subprocess.PIPE, stderr=errors)
         timer = threading.Timer(60, process.kill); timer.start()
         try:
             bounded = BoundedReader(process.stdout, sum(row['size'] for row in expected.values()) + 1024 * 1024)
-            with tarfile.open(fileobj=bounded, mode='r|*') as archive:
-                for row in archive:
-                    name = row.name.rstrip('/')
-                    if row.isdir():
-                        if name not in ('runtime', 'runtime/bin') or name in directories or (row.mode, row.uid, row.gid) != (0o755, 0, 0):
-                            raise RuntimeError('runtime_directory_mismatch')
-                        directories.add(name); continue
-                    relative = name.removeprefix('runtime/')
-                    if not name.startswith('runtime/') or not row.isfile() or relative not in expected or relative in seen:
-                        raise RuntimeError('runtime_entry_mismatch')
-                    wanted = expected[relative]
-                    if (row.size, row.mode, row.uid, row.gid) != (wanted['size'], wanted['mode'], 0, 0):
-                        raise RuntimeError('runtime_metadata_mismatch')
-                    checksum = hashlib.sha256()
-                    with archive.extractfile(row) as stream:
-                        while chunk := stream.read(1024 * 1024):checksum.update(chunk)
-                    actual = 'sha256:' + checksum.hexdigest()
-                    if actual != wanted['sha256']:raise RuntimeError('runtime_content_mismatch')
-                    seen.add(relative); observed[relative] = {**wanted, 'uid': row.uid, 'gid': row.gid}
+            observed = read_runtime_archive(bounded, expected)
             if process.wait(timeout=5) != 0:raise RuntimeError('runtime_readback_failed')
         finally:
             timer.cancel()
             if process.poll() is None:process.kill()
             process.wait()
             process.stdout.close()
-    check(result, 'runtime files match complete manifest and root ownership', set(expected) == seen
-          and directories == {'runtime', 'runtime/bin'})
+    check(result, 'runtime files match complete manifest and root ownership', set(expected) == set(observed))
     result['runtime_readback'] = observed
     after = inspect(fixture, 'container', fixture.probe_id)
     check(result, 'readback did not start the probe', after['State']['Status'] == 'created'

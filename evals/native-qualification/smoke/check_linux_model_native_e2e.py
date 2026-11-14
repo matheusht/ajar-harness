@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -253,7 +254,9 @@ def tool_bundle(fixture, result):
     destination = fixture.directory / 'tool-bundle'
     if fixture.runtime == 'codex':
         (destination / 'bin').mkdir(parents=True, mode=0o700)
-        os.link(fixture.context_receipt['profile_fields']['executable']['path'], destination / 'bin/codex')
+        executable = Path(fixture.context_receipt['profile_fields']['executable']['path'])
+        os.link(executable, destination / 'bin/codex')
+        shutil.copyfile(executable.parent.parent / 'codex-package.json', destination / 'codex-package.json')
         bundle = {'path': str(destination), 'manifest_sha256': digest(canonical(source_manifest(destination))),
                   'platform': fixture.platform}
         result['tool_installation'] = {'reused_verified_model_bytes': True, 'tool_bundle': bundle}

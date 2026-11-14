@@ -71,7 +71,8 @@ def run(base):
         raw = binary + b'\0' * 492
         return {'kind': 'native-tool-installation-lock-v1', 'codex_version': '0.166.0',
                 'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {platform: {
-                    'codex': asset(name + '-codex', tar({'codex': binary}), member='codex'),
+                    'codex': asset(name + '-codex', tar({'codex': binary, 'codex-package.json': json.dumps({'version': '0.166.0',
+                        'target': ('aarch64' if machine == 183 else 'x86_64') + '-unknown-linux-musl'}).encode()}), member='codex'),
                     'bun': asset(name + '-bun', zipped.getvalue(), member='bun/bun'),
                     'model_omp': asset(name + '-omp', raw, format='raw', size=len(raw))}}, 'packages': []}
 
@@ -153,7 +154,7 @@ def run(base):
                     assert document['base_image'] == BASE and document['platform'] == platform
                     assert document['lock_sha256'] == sha(pin.read_bytes())
                     expected = {'bin/model', *HELPERS}
-                    if runtime == 'codex':expected |= {'bin/bun', 'native_runtime_codex_exec.mjs'}
+                    if runtime == 'codex':expected |= {'bin/bun', 'native_runtime_codex_exec.mjs', 'codex-package.json'}
                     manifest = document['runtime_manifest']
                     assert set(manifest) == expected
                     executable = document['profile_fields']['executable']
@@ -174,7 +175,7 @@ def run(base):
                     assert set(path.name for path in destination.iterdir()) == {'runtime', 'Dockerfile', '.dockerignore'}
                     assert '.model' not in set(path.name for path in destination.iterdir())
                     assert document['context_manifest_sha256'].startswith('sha256:')
-                    for helper_name in expected - {'bin/model', 'bin/bun'}:
+                    for helper_name in expected - {'bin/model', 'bin/bun', 'codex-package.json'}:
                         assert (destination / 'runtime' / helper_name).read_bytes() == (tools / helper_name).read_bytes()
                 assert not any(folder.glob('.oslit-download-*')), 'temporary acquisition left behind'
                 checks.append({'name': name, 'status': 'passed'})

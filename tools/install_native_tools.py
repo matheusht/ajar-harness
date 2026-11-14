@@ -129,6 +129,19 @@ def unpack(archive, destination, budget, *, member=None, package=False):
     if not found:raise InstallError('archive_member_missing')
 
 
+def unpack_codex_metadata(archive, destination, budget, platform, version):
+    path = destination / 'codex-package.json'
+    unpack(archive, path, budget, member='codex-package.json')
+    try:
+        metadata = json.loads(path.read_bytes())
+        target = {'linux/arm64': 'aarch64', 'linux/amd64': 'x86_64'}[platform] + '-unknown-linux-musl'
+        if metadata.get('version') != version or metadata.get('target') != target:
+            raise InstallError('native_package_identity_mismatch')
+    except (ValueError, AttributeError, UnicodeError):
+        raise InstallError('native_package_identity_mismatch') from None
+    path.chmod(0o444)
+
+
 def inspector(kind, bundle):
     module = importlib.import_module('native_runtime_' + kind)
     return module.inspect_tool_bundle({'kind': kind, 'version': module.Runtime.version, 'tool_bundle': bundle})
@@ -166,13 +179,15 @@ def install(args):
     try:
         with tempfile.TemporaryDirectory(prefix='.oslit-download-', dir=destination.parent) as temporary:
             archive = Path(temporary) / 'archive'
-            def acquire(row, output, *, package=False):
+            def acquire(row, output, *, package=False, codex=False):
                 archives.append(download(row, archive))
                 unpack(archive, output, budget, member=None if package else row['member'], package=package)
+                if codex:
+                    unpack_codex_metadata(archive, destination, budget, args.platform, lock['codex_version'])
                 archive.unlink()
             platform = lock['platforms'][args.platform]
             if args.runtime == 'codex':
-                acquire(platform['codex'], destination / 'bin/codex')
+                acquire(platform['codex'], destination / 'bin/codex', codex=True)
             else:
                 acquire(platform['bun'], destination / 'bin/bun')
                 cpu = 'arm64' if args.platform == 'linux/arm64' else 'x64'
@@ -229,6 +244,8 @@ def model_image_context(args):
                         write_member(stream, output, row['size'], True, budget)
                 else:
                     unpack(archive, output, budget, member=row['member'])
+                    if args.runtime == 'codex' and name == 'model':
+                        unpack_codex_metadata(archive, runtime, budget, args.platform, lock['codex_version'])
                 archive.unlink()
                 with output.open('rb') as stream:header = stream.read(20)
                 if (len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or

@@ -886,3 +886,16 @@ they do not qualify the joined native workflow, live providers or research.
 The [delivery state](oslit-v2-delivery-2026-11-14.md) and
 [implementation record](../research/oslit-implementation-2026-11-14.md) now state
 that distinction. Documentation and evidence update only; no runtime rerun.
+
+## [2026-11-14] verify | Actual loopback SSH environment
+
+The hosted run at `1ec66d6d` passed 26 checks using real OpenSSH to the same
+disposable host's Docker daemon. Killing the owned SSH client was followed by
+a stopped container within 0.6111 seconds; all three environment cleanups passed,
+and listener cleanup verified process and temporary-file removal. The
+[SSH evidence](../../evals/native-qualification/team-evidence/real-docker-20261114/ssh-manifest.json)
+preserves source hashes and the preceding fixture authentication failure.
+This establishes transport composition, while separate remote-host/partition
+behavior, joined native execution and research acceptance remain unverified.
+The current implementation and delivery pages now distinguish these boundaries.
+Documentation/evidence only; no additional runtime or conformance run.

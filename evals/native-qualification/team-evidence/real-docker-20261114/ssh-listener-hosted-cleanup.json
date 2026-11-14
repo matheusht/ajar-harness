@@ -1,0 +1,6 @@
+{
+  "kind": "loopback-ssh-fixture-cleanup-v1",
+  "listener_stopped": true,
+  "fixture_removed": true,
+  "fixture_sha256": "sha256:ac75e91d4c152b4ff3474148e71a0ed552782d72de3a21195f780b8ea9eec2a7"
+}

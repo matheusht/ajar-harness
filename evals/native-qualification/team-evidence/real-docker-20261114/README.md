@@ -107,3 +107,16 @@ removed and observed absent. The [guardian manifest](guardian-manifest.json)
 binds both unchanged hosted receipts to their exact sources. These establish the
 bounded lease fix; they do not establish a joined model workflow or research
 acceptance.
+
+The [loopback SSH run](https://github.com/matheusht/redteam-harness/actions/runs/43589913441)
+at `1ec66d6d` passed all 26 checks through actual OpenSSH and Docker, with three
+clean environment cleanup readbacks. After the owned SSH client was killed, the
+container was observed stopped within 0.6111 seconds. Listener cleanup confirmed
+its process stopped and temporary fixture directory removed. Local Docker's 25
+checks and the guardian's 30 checks also passed in that run. The
+[SSH manifest](ssh-manifest.json) preserves the actual receipts and prior startup
+failure: the fixture disabled PAM, causing OpenSSH to reject the runner's locked
+account before key authentication. The corrected private listener uses the host's
+PAM account policy while retaining key-only authentication and strict host
+pinning. No account or persistent SSH configuration was changed. This is actual
+transport evidence on one host, not a separate remote-host or partition test.

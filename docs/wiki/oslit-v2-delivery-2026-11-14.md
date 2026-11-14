@@ -70,7 +70,7 @@ peers; the joined Docker workflow remains unverified.
 | M0 — contracts | Design/contracts and failure scenarios have local review; their assumptions still need the integrated execution evidence required by the plan. |
 | M1 — one state owner | Final public workflow integration must preserve sole ownership, revocation and exact cleanup across the combined runtime/environment path. |
 | M2 — runtimes/team | Actual native tools have local evidence, but the full joined protected workflow and Linux model-host boundary remain unqualified. Linux model-host execution is currently unsupported. |
-| M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual SSH, the joined workflow, complete setup repair and remote application reset/replay remain unverified. |
+| M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual loopback SSH passed 26 checks at `1ec66d6d`. Separate remote-host/partition checks, the joined workflow, complete setup repair and remote application reset/replay remain open. |
 | M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence; the joined native workflow remains unverified. Remote application reset/replay, fresh impact-artifact approval and an artifact cleanup ledger remain open. Existing operator review and artifact gates remain active. |
 | M5 — long operation/usage | No actual multiday soak or sustained host restart result; provider request totals, billed spend and monetary caps remain unavailable. Report missing usage dimensions explicitly. |
 | M6 — delivery | Final integrated verification, hosted CI and an operator-install-to-cleanup release-candidate handoff remain open. Broader caller retirement waits for parity evidence. |
@@ -89,7 +89,8 @@ passing environment scenario or permission to reduce the agreed delivery scope.
 A later disposable GitHub-hosted Ubuntu run supplied actual Docker lifecycle
 evidence, reproduced watcher loss and verified its container-local fix. It did not use
 the operator's development daemon or a separate SSH host. Keep this bounded
-execution proof separate from the simulated transport checks and from the still
+execution proof, including the later loopback SSH run, separate from simulated
+transport checks and from the still
 unimplemented Linux model-host boundary.
 
 ## Repeatable portable checks

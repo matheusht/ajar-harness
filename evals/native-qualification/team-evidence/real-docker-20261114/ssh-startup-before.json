@@ -1,0 +1,141 @@
+{
+  "kind": "environment-real-docker-e2e-v2",
+  "classification": "actual_loopback_ssh_docker_environment",
+  "checks": [
+    {
+      "name": "image is an exact Linux content identity",
+      "passed": true
+    },
+    {
+      "name": "actual SSH connection reaches the selected daemon",
+      "passed": false
+    }
+  ],
+  "observations": [],
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "unverified": [
+    "separate remote host",
+    "network partition",
+    "native model host",
+    "joined controller workflow",
+    "research acceptance"
+  ],
+  "environment": {
+    "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "image_digests": [
+      "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39"
+    ],
+    "platform": "linux/amd64",
+    "docker_version": {
+      "Client": {
+        "Platform": {
+          "Name": "Docker Engine - Community"
+        },
+        "Version": "28.0.4",
+        "ApiVersion": "1.48",
+        "DefaultAPIVersion": "1.48",
+        "GitCommit": "b8034c0",
+        "GoVersion": "go1.23.7",
+        "Os": "linux",
+        "Arch": "amd64",
+        "BuildTime": "Tue Mar 25 15:07:16 2025",
+        "Context": "default"
+      },
+      "Server": {
+        "Platform": {
+          "Name": "Docker Engine - Community"
+        },
+        "Components": [
+          {
+            "Name": "Engine",
+            "Version": "28.0.4",
+            "Details": {
+              "ApiVersion": "1.48",
+              "Arch": "amd64",
+              "BuildTime": "Tue Mar 25 15:07:16 2025",
+              "Experimental": "false",
+              "GitCommit": "6430e49",
+              "GoVersion": "go1.23.7",
+              "KernelVersion": "7.0.0-1014-aws",
+              "MinAPIVersion": "1.24",
+              "Os": "linux"
+            }
+          },
+          {
+            "Name": "containerd",
+            "Version": "v2.4.2",
+            "Details": {
+              "GitCommit": "b7a25261e029d68978bbf290df0a62fc819b3c51"
+            }
+          },
+          {
+            "Name": "runc",
+            "Version": "1.5.2",
+            "Details": {
+              "GitCommit": "v1.5.2-0-g29dd3dc2"
+            }
+          },
+          {
+            "Name": "docker-init",
+            "Version": "0.19.0",
+            "Details": {
+              "GitCommit": "de40ad0"
+            }
+          }
+        ],
+        "Version": "28.0.4",
+        "ApiVersion": "1.48",
+        "MinAPIVersion": "1.24",
+        "GitCommit": "6430e49",
+        "GoVersion": "go1.23.7",
+        "Os": "linux",
+        "Arch": "amd64",
+        "KernelVersion": "7.0.0-1014-aws",
+        "BuildTime": "2025-03-25T15:07:16.000000000+00:00"
+      }
+    }
+  },
+  "ssh": {
+    "host": "127.0.0.1",
+    "port": 39173,
+    "user": "runner",
+    "known_hosts_sha256": "sha256:cc476e45ecbeeaa44126fd6d57b195c8443220269e8ae0a751e3fba13aea7e6a"
+  },
+  "ssh_preflight": {
+    "returncode": 255,
+    "status": "settled",
+    "output": "runner@127.0.0.1: Permission denied (publickey).\r\n"
+  },
+  "status": "failed",
+  "error": "AssertionError: actual SSH connection reaches the selected daemon",
+  "cleanup": [
+    {
+      "status": "unresolved",
+      "code": "EnvironmentUnavailable: docker_daemon_unavailable",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "fd9b912f31734a9995f0bd68873c3c63",
+        "container_id": null,
+        "container_name": "oslit-fd9b912f31734a9995f0bd68873c3c63",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-fd9b912f31734a9995f0bd68873c3c63-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-fd9b912f31734a9995f0bd68873c3c63:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:cf885a61b039bf2afabe7398b48a79abee9a741274fac089b181973c9126ca23",
+        "access": [],
+        "support_inputs": []
+      }
+    }
+  ],
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:5b10884ede202dd412e7b6327a411eaf544853ff95e18100dc5b00df05e3e906",
+    "tools/research_environment.py": "sha256:90dfe464594e42180382a080c853703a396a301199efa8022b451ad9f8dead6e",
+    "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+    "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+  }
+}

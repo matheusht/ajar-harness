@@ -1,0 +1,44 @@
+{
+  "kind": "hosted-loopback-ssh-evidence-v1",
+  "head": "1ec66d6def4f40444ef71df5bda7ffc11371afab",
+  "run_id": 43589913441,
+  "run_url": "https://github.com/matheusht/redteam-harness/actions/runs/43589913441",
+  "conclusion": "success",
+  "receipts": [
+    {
+      "file": "ssh-hosted.json",
+      "sha256": "sha256:13d074cce3c9749597252db128a6f2b6509cd9e4d82773dafc72ed2013079da1",
+      "checks": 26,
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:5b10884ede202dd412e7b6327a411eaf544853ff95e18100dc5b00df05e3e906",
+        "tools/research_environment.py": "sha256:90dfe464594e42180382a080c853703a396a301199efa8022b451ad9f8dead6e",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+      }
+    },
+    {
+      "file": "ssh-listener-hosted-cleanup.json",
+      "sha256": "sha256:566a205fe67a63a536c2847c4c32a82134516ed38f5351adf240b4f981c39e50",
+      "checks": 0,
+      "source_sha256": {
+        "evals/native-qualification/smoke/run_environment_loopback_ssh_e2e.sh": "sha256:ac75e91d4c152b4ff3474148e71a0ed552782d72de3a21195f780b8ea9eec2a7"
+      }
+    }
+  ],
+  "before": {
+    "head": "886aa4cf4589e690faf621eecbc7829cb5e21d53",
+    "run_id": 43589553536,
+    "receipt": "ssh-startup-before.json",
+    "sha256": "sha256:8879e0780935948089f4a6fe935f75048612ac6efd75422e074e3ca71deedb18",
+    "job_log_observations": [
+      "2026-11-14T11:21:04.1292493Z User runner not allowed because account is locked",
+      "2026-11-14T11:21:04.1297882Z User runner not allowed because account is locked"
+    ]
+  },
+  "limits": [
+    "SSH listener and Docker daemon share one disposable host",
+    "No network partition or separate remote-host result",
+    "No joined native model/controller workflow",
+    "No live provider or research acceptance"
+  ]
+}

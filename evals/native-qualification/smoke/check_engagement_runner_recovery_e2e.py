@@ -92,6 +92,7 @@ def run_case(repository, fixture, scenario, subcase=None):
                 self.entered = threading.Event()
                 self.lock = threading.Lock()
                 self.terminal_emitted = False
+                self.resume_readbacks = 0
                 previous = peers.get(context.worker['id'])
                 if previous is not None:
                     require(scenario == 'late-assignment' and previous.closed,
@@ -107,6 +108,12 @@ def run_case(repository, fixture, scenario, subcase=None):
 
             def start(self):
                 return {'session_id': self.session_id, 'owner_receipt': self.owner_receipt()}
+
+            def resume(self, session_id):
+                require(session_id == self.session_id and not self.active and not self.closed,
+                        'native resume requires the same idle live session')
+                self.resume_readbacks += 1
+                return {'session_id': self.session_id}
 
             def invoke(self, prompt, invocation_id):
                 self.context.authorize()
@@ -233,6 +240,21 @@ def run_case(repository, fixture, scenario, subcase=None):
                 require(safe, 'late assignment stranded the worker or left the live grant stale')
                 require(controller.state()['tasks']['task-1']['status'] == 'assigned', 'task was lost')
             else:
+                if subcase == 'task-result':
+                    require(until(lambda: controller.state()['workers']['worker-2'].get('outcome_pending')),
+                            'task result never reached the journal')
+                    # Give the runner time to observe the result without native completion.
+                    time.sleep(.1)
+                    pending = snapshot()
+                    row['before_native_completion'] = pending
+                    require(thread.is_alive() and pending['worker_status'] == 'active'
+                            and pending['task_status'] == 'assigned' and pending['outcome_pending']
+                            and pending['dispatch_statuses'] == ['pending']
+                            and pending['invocation_statuses'] == ['pending']
+                            and pending['usage']['reserved_worker_seconds'] > 0
+                            and pending['usage']['native_invocations_observed'] == 0,
+                            'task result falsely settled an incomplete native invocation')
+                    peers['worker-2'].terminal('completed')
                 if subcase == 'operator-stop':
                     stopped = cli('stop')
                     require(controller.state()['status'] == 'stopped', 'operator stop did not persist')
@@ -243,6 +265,12 @@ def run_case(repository, fixture, scenario, subcase=None):
                 require(not thread.is_alive(), 'runner did not quiesce the finished or stopped worker')
                 row['observed'] = snapshot()
                 state = controller.state()
+                if subcase == 'task-result' or scenario == 'outcome-recovery':
+                    row['native_resume_readbacks'] = peers['worker-2'].resume_readbacks
+                    require(row['native_resume_readbacks'] == 1,
+                            'completed specialist did not read back the same idle native session')
+                    require(not runner.failures or scenario == 'outcome-recovery',
+                            'completed specialist left a runner failure')
                 if subcase == 'operator-stop':
                     stop_status = cli('status')
                     row['stop_cleanup'] = stop_status['cleanup']
@@ -263,6 +291,10 @@ def run_case(repository, fixture, scenario, subcase=None):
                         and usage['reserved_worker_seconds'] > 0)
                     require(recorded or unknown, 'terminal usage was discarded behind a settled dispatch')
                     if recorded:
+                        if subcase == 'task-result':
+                            require(invocation['status'] == 'completed' and
+                                    state['tasks']['task-1']['status'] == 'completed',
+                                    'native completion did not finalize the accepted task result')
                         grant = {key: dispatch[key] for key in GRANT_KEYS}
                         before = controller.state()['usage']
                         controller.record_invocation_observed(grant, invocation['invocation_id'],

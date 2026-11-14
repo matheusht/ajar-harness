@@ -97,7 +97,7 @@ file. Inspect hashes local input bytes without contacting application endpoints.
 
 Each runtime profile has exactly:
 `{kind, version, executable, protocol, config_file, config_sha256, provider, model,
-credential_ref, required_capabilities}`. Kind is `codex` or `omp`; executable is
+credential_ref, required_capabilities, tool_bundle}`. Kind is `codex` or `omp`; executable is
 `{path, sha256}`; protocol is `{mode, schema_file, schema_sha256}` with mode
 `stdio-jsonrpc` or `stdio-jsonl`. Paths are local absolute regular files. The
 credential reference is an opaque host lookup name or null, never a token or
@@ -134,17 +134,19 @@ collections to declared practical cardinality limits, JSON nesting/total input
 bytes to a parser budget. Reject an unexpected field rather than ignore it. Native
 wire formats are adapter-private and must not leak into this signed contract.
 
-OMP profiles additionally require `tool_bundle` with exactly
-`{path, manifest_sha256, platform, bun_version}`. The path names a materialized
+Each runtime's `tool_bundle` contains `{path, manifest_sha256, platform}`; OMP
+additionally requires `bun_version`. The path names a materialized
 regular-file tree; its manifest uses the same byte, size and mode binding as source
 inputs. Platform is `linux/amd64` or `linux/arm64`, and Bun version is an exact
-release number. Preflight freezes `runtimes/<id>.bundle-manifest.json`; staging
+release number for OMP. Preflight freezes `runtimes/<id>.bundle-manifest.json`; staging
 rechecks every supplied byte. The support tree is not target access and grants no
-target permissions. Codex profiles reject this OMP-only field.
+target permissions. Codex bundles reject OMP-only fields.
 
 The bridge separately verifies the fixed layout (`bin/bun`, the reviewed
 `native_runtime_omp_tools.mjs`, and `node_modules/@oh-my-pi/pi-coding-agent`), matching
-SDK/runtime versions and native platform compatibility. A manifest match proves
+SDK/runtime versions and native platform compatibility. Codex's fixed bundle has
+`bin/codex` for its native execution server in the isolated environment; the
+separate host executable owns the model session. A manifest match proves
 input identity, not that the bundle can execute. Native dependencies for another
 OS do not qualify a Linux environment.
 

@@ -364,10 +364,9 @@ def _url(value, code):
 def validate_runtime_profile(profile: dict) -> dict:
     code = 'runtime_profile_invalid'
     _require(type(profile) is dict, code)
-    extra = ('tool_bundle',) if profile.get('kind') == 'omp' else ()
     _object(profile, ('kind', 'version', 'executable', 'protocol', 'config_file',
                       'config_sha256', 'provider', 'model', 'credential_ref',
-                      'required_capabilities', *extra), code)
+                      'required_capabilities', 'tool_bundle'), code)
     _require(profile['kind'] in ('codex', 'omp'), code)
     for key in ('version', 'provider', 'model'):
         _text(profile[key], code, limit=256)
@@ -383,11 +382,12 @@ def validate_runtime_profile(profile: dict) -> dict:
     if profile['credential_ref'] is not None:
         _identifier(profile['credential_ref'], code)
     _strings(profile['required_capabilities'], code, allowed=RUNTIME_CAPABILITIES)
+    extra = ('bun_version',) if profile['kind'] == 'omp' else ()
+    bundle = _object(profile['tool_bundle'], ('path', 'manifest_sha256', 'platform', *extra), code)
+    _path(bundle['path'])
+    _digest(bundle['manifest_sha256'], code)
+    _require(bundle['platform'] in ('linux/arm64', 'linux/amd64'), code)
     if profile['kind'] == 'omp':
-        bundle = _object(profile['tool_bundle'], ('path', 'manifest_sha256', 'platform', 'bun_version'), code)
-        _path(bundle['path'])
-        _digest(bundle['manifest_sha256'], code)
-        _require(bundle['platform'] in ('linux/arm64', 'linux/amd64'), code)
         _require(type(bundle['bun_version']) is str and
                  re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)',
                               bundle['bun_version']) is not None, code)
@@ -667,11 +667,10 @@ def load_inputs(path: Path, *, now: datetime | None = None,
         schema = _pinned_file(profile['protocol']['schema_file'], profile['protocol']['schema_sha256'])
         frozen.update({f'runtimes/{identity}.json': raw, f'runtimes/{identity}.config': config,
                        f'runtimes/{identity}.schema': schema})
-        if profile['kind'] == 'omp':
-            bundle = profile['tool_bundle']
-            manifest = canonical(source_manifest(Path(bundle['path'])))
-            _require(digest(manifest) == bundle['manifest_sha256'], 'digest_mismatch')
-            frozen[f'runtimes/{identity}.bundle-manifest.json'] = manifest
+        bundle = profile['tool_bundle']
+        manifest = canonical(source_manifest(Path(bundle['path'])))
+        _require(digest(manifest) == bundle['manifest_sha256'], 'digest_mismatch')
+        frozen[f'runtimes/{identity}.bundle-manifest.json'] = manifest
         runtime_profiles[identity] = profile
     environment_profiles = {}
     _require(set(inputs['environment_profiles']) == {row['profile_id'] for row in scope['environments']},

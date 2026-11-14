@@ -74,6 +74,11 @@ def make_fixture(root: Path) -> Path:
     binary = root / 'native-fixture'
     write(binary, b'#!/bin/sh\nexit 91\n')
     binary.chmod(0o700)
+    bundle = root / 'native-bundle'
+    (bundle / 'bin').mkdir(mode=0o700, parents=True)
+    write(bundle / 'bin/codex', binary.read_bytes())
+    bundle_manifest = {'bin/codex': {'sha256': sha(binary.read_bytes()),
+                                   'mode': 0o600, 'size': binary.stat().st_size}}
     config = root / 'runtime-config.json'
     schema = root / 'runtime-schema.json'
     write(config, encoded({'fixture': True}))
@@ -84,7 +89,9 @@ def make_fixture(root: Path) -> Path:
                             'schema_sha256': sha(schema.read_bytes())},
                'config_file': str(config), 'config_sha256': sha(config.read_bytes()),
                'provider': 'fixture', 'model': 'fixture-model', 'credential_ref': None,
-               'required_capabilities': ['startup', 'fresh_session', 'native_tools']}
+               'required_capabilities': ['startup', 'fresh_session', 'native_tools'],
+               'tool_bundle': {'path': str(bundle), 'manifest_sha256': sha(encoded(bundle_manifest)),
+                               'platform': 'linux/arm64'}}
     runtime_file = root / 'runtime.json'
     write(runtime_file, encoded(runtime))
     environment = {'kind': 'research-environment-profile-v2', 'transport': 'docker',
@@ -175,6 +182,8 @@ try:
         result = {'status':'canonical','value':c.canonical(json.loads(path.read_bytes())).decode()}
     elif op == 'environment':
         result = {'status':'verified', 'profile':c.validate_environment_profile(c.read_json(path))}
+    elif op == 'runtime':
+        result = {'status':'verified', 'profile':c.validate_runtime_profile(c.read_json(path))}
     print(json.dumps(result, allow_nan=False))
 except c.ContractError as error:
     print(json.dumps({'status':'refused','code':error.code}))
@@ -236,6 +245,13 @@ def main() -> int:
                   {'environment_profile_invalid'})
             write(environment_probe, encoded(environment))
             check('environment_requires_no_unused_host_workspace', 'environment', environment_probe)
+            runtime_probe = base / 'runtime-probe.json'
+            codex_profile = json.loads((fixture / 'runtime.json').read_bytes())
+            missing_bundle = {key: value for key, value in codex_profile.items() if key != 'tool_bundle'}
+            write(runtime_probe, encoded(missing_bundle))
+            check('codex_missing_tool_bundle', 'runtime', runtime_probe, {'runtime_profile_invalid'})
+            write(runtime_probe, encoded(codex_profile))
+            check('codex_native_bundle_shape', 'runtime', runtime_probe)
             report = check('signed_source_no_deadline_after_three_days', 'inspect', inputs_path)
             assert report['status'] == 'verified_inputs' and report['capabilities_verified'] is False
             frozen = check('freeze_safe_contract_only', 'load', inputs_path)
@@ -257,6 +273,7 @@ def main() -> int:
             omp = json.loads((fixture / 'runtime.json').read_bytes())
             omp.update(kind='omp', version='18.20.0')
             omp['protocol']['mode'] = 'stdio-jsonl'
+            omp.pop('tool_bundle')
 
             def check_runtime(name, profile, expected=None, operation='inspect'):
                 reset()

@@ -71,6 +71,72 @@ def diagnostic_transport(observations, known_secrets):
     return ObservedTransport
 
 
+def environment_diagnostics(controller, known_secrets):
+    with controller.lock():
+        events = [event for event in controller._events() if event['type'] == 'evidence_recorded'
+                  and event['payload'].get('action') == 'environment_observation']
+    selected = events[:128]
+    for event in selected:
+        safe_publication(canonical(event), known_secrets=known_secrets)
+    return {'events': selected, 'truncated': len(events) > len(selected)}
+
+
+class ExecutorDiagnostics:
+    """Fixture-local stderr observer for the fixed uncredentialed exec-server only."""
+    def __init__(self, module):
+        self.module = module
+        self.captures = []
+
+    def __getattr__(self, name):
+        return getattr(self.module, name)
+
+    def Popen(self, command, *args, **kwargs):
+        selected = (isinstance(command, list) and command[-6:] == [
+            '/input/native-runtime/bin/codex', 'exec-server', '--listen', 'stdio',
+            '--linux-sandbox-pid-namespace', 'isolate'] and kwargs.get('stderr') == self.module.DEVNULL)
+        if not selected:
+            return self.module.Popen(command, *args, **kwargs)
+        process = self.module.Popen(command, *args, **dict(kwargs, stderr=self.module.PIPE))
+        capture = {'process': process, 'content': bytearray(), 'bytes': 0, 'complete': False}
+        def drain():
+            try:
+                while chunk := process.stderr.read(4096):
+                    capture['bytes'] += len(chunk)
+                    available = max(0, 8192 - len(capture['content']))
+                    capture['content'].extend(chunk[:available])
+                capture['complete'] = True
+            except (OSError, ValueError):
+                pass
+            finally:
+                process.stderr.close()
+        thread = threading.Thread(target=drain, daemon=True)
+        capture['thread'] = thread
+        self.captures.append(capture)
+        thread.start()
+        return process
+
+    def finish(self, known_secrets):
+        observations = []
+        for capture in self.captures:
+            capture['thread'].join(timeout=1)
+            complete = not capture['thread'].is_alive() and capture['complete']
+            oversized = capture['bytes'] > 8192
+            if not complete:
+                message = '[incomplete diagnostic withheld]'
+            elif oversized:
+                message = '[oversized diagnostic withheld]'
+            else:
+                try:
+                    message = safe_publication(bytes(capture['content']), known_secrets=known_secrets).decode(
+                        'utf-8', errors='replace')[:2048]
+                except ContractError:
+                    message = '[diagnostic redacted]'
+            observations.append({'role': 'codex_exec_server', 'returncode': capture['process'].poll(),
+                'bytes': capture['bytes'], 'complete': complete, 'truncated': oversized,
+                'stderr': message})
+        return observations
+
+
 PROBE = r'''import json, os, pathlib, socket, sys
 host_file, provider_port, model_pid, lab_port = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 result = {'input_read': pathlib.Path('/input/source-main/main.py').read_text() == 'HARMLESS_SOURCE\n',
@@ -310,13 +376,17 @@ def run_native(root, fixture, result):
     from engagement_runner import Runner, WorkerContext
     from engagement_native_boundary import NativeBoundary, recover_boundary
     import native_runtime_codex
+    import research_environment
     bundle = tool_bundle(fixture, result)
     secret = 'fake-oslit-linux-provider-' + uuid.uuid4().hex
     provider = Provider(root / 'provider-tls', fixture.runtime, secret)
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
     os.environ['OPENAI_API_KEY'], os.environ['SSL_CERT_FILE'] = secret, str(provider.ca)
-    boundary = context = runner = None
+    boundary = context = runner = controller = None
     original_transport = native_runtime_codex.Transport
+    original_subprocess = research_environment.subprocess
+    executor_diagnostics = ExecutorDiagnostics(original_subprocess)
+    research_environment.subprocess = executor_diagnostics
     result['native_request_errors'] = []
     native_runtime_codex.Transport = diagnostic_transport(result['native_request_errors'], (secret.encode(),))
     started = time.monotonic()
@@ -436,6 +506,21 @@ def run_native(root, fixture, result):
               and not current['resource_holds'])
     finally:
         native_runtime_codex.Transport = original_transport
+        research_environment.subprocess = original_subprocess
+        known_secrets = [secret.encode()]
+        if boundary is not None and boundary.native_owner is not None and fixture.runtime == 'codex':
+            native = boundary.native_owner
+            if native.token is not None:
+                known_secrets.append(native.token.encode())
+            result['native_executor_state'] = {'failure': native.failure, 'ready': native.ready,
+                'executor_returncode': native.executor.poll() if native.executor is not None else None,
+                'bridge_returncode': native.bridge.poll() if native.bridge is not None else None}
+        if controller is not None:
+            try:
+                result['environment_operation_diagnostics'] = environment_diagnostics(controller, tuple(known_secrets))
+            except Exception as error:
+                result['environment_operation_diagnostics'] = {'status': 'unavailable', 'error': error_code(error)}
+                result['status'] = 'failed'
         if boundary is not None:
             result['recovery_identities'] = {}
             readers = {
@@ -462,13 +547,14 @@ def run_native(root, fixture, result):
             except Exception as error:
                 result['boundary_cleanup_error'] = error_code(error)
                 result['status'] = 'failed'
+        result['native_executor_stderr'] = executor_diagnostics.finish(tuple(known_secrets))
         provider.close()
         for name, value in original.items():
             if value is None:os.environ.pop(name, None)
             else:os.environ[name] = value
         result['controlled_provider_requests'] = len(provider.requests)
         result['controlled_provider_errors'] = provider.errors
-        safe_publication(canonical(result), known_secrets=(secret.encode(),))
+        safe_publication(canonical(result), known_secrets=tuple(known_secrets))
 
 
 def main():

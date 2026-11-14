@@ -1,0 +1,11 @@
+{
+  "base": "6e53fe9b",
+  "source_sha256": "sha256:6d8570ba6b49292011a07378ba6f9d947cb51d4e9d98e63a42ccfd703f21db2a",
+  "scenario_sha256": "sha256:97a06a89793908b69392b2a75b113b0b3fce33ac356c04e596d78d1271e9bc3c",
+  "production_files_changed": false,
+  "before_cases_failed": 9,
+  "after_cases_passed": 9,
+  "prior_request_diagnostic_cases_passed": 5,
+  "verification": "real controller journal with simulated environment observations and actual inert subprocesses only",
+  "actual_native_or_docker_execution": "not_run"
+}

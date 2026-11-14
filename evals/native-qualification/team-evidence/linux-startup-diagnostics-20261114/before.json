@@ -1,0 +1,54 @@
+{
+  "classification": "real_journal_with_simulated_observations_and_actual_inert_processes",
+  "docker": "not_run",
+  "native_execution": "not_run",
+  "provider_calls": 0,
+  "checks": [
+    {
+      "name": "exact_journal_timestamps_and_outcomes",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "known_secret_event_refused",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "corrupt_journal_refused",
+      "passed": false,
+      "error": "AssertionError"
+    },
+    {
+      "name": "stderr_safe",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "stderr_sensitive",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "stderr_provider_secret",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "stderr_bridge_secret",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "stderr_large",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "stderr_unselected",
+      "passed": false,
+      "error": "AttributeError"
+    }
+  ],
+  "status": "failed"
+}

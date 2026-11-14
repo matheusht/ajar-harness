@@ -856,3 +856,20 @@ their JSON receipts by checked revision. Its Linux job is configured coverage,
 not an observed hosted pass. Documentation checks cover local destinations, root
 instruction equality and structural conformance; execution receipts remain
 separate from this documentation update.
+
+## 2026-11-14 — Current capture, recovery and hosted Docker evidence
+
+Updated the v2 guide, delivery state and examples for reviewed escalation,
+resource-selected capture, private target-account binding and eligible specialist
+session retention through `9a26c93d`. Independent review and 900 structural checks
+passed for that documentation checkpoint. The delivery state distinguishes those
+changes from the actual environment proof below.
+
+The [hosted Docker lifecycle](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md)
+passed 21 checks at `41a0be16`, including actual containment, artifact readback,
+revocation and cleanup. The subsequent watcher-loss scenario at `fd8674b1`
+reproduced a lease defect after a verified SIGKILL; the fixture cleaned all owned
+resources. Both receipts bind exact source hashes and hosted run links. This is
+actual Docker evidence on the disposable Ubuntu runner, separate from the seven
+portable CI workflows and from the still unimplemented Linux model-host path.
+The original M0–M6 scope and operator-owned fresh-target acceptance remain open.

@@ -19,8 +19,8 @@ subsequently connected to the real runner by the public CLI delivery unit.
 | M0 contracts and failure cases | Design checkpoint reviewed; concrete contracts and runnable failure scenarios retained | Validate assumptions through the integrated workflow required by the plan |
 | M1 one state owner | Signed authority, journal, public workflow and preserved v1 readers implemented | Final joined sole-owner/recovery/cleanup verification |
 | M2 runtimes and team | Codex/OMP adapters, native tools and team controls implemented with local native and simulated evidence | Complete protected workflow qualification; Linux model-host support |
-| M3 environments | All access descriptors, owned environment/network controls and target account binding implemented | Actual Docker/SSH containment, remote loss/cleanup and application reset/replay |
-| M4 research evidence and recovery | Evidence/review, obligations, replacement and closeout mechanics implemented and locally checked | Joined execution proof and higher-rung artifact/review controls; existing gates remain active |
+| M3 environments | All access descriptors, environment/network controls and target account binding implemented; the hosted Docker lifecycle passed | Fix and verify reproduced watcher-loss lease defect; actual SSH, joined workflow and application reset/replay |
+| M4 research evidence and recovery | Evidence/review, declared prior-rung admission, protected capture, obligations, replacement and closeout mechanics implemented and locally checked | Joined execution proof and impact-artifact approval/cleanup controls; existing gates remain active |
 | M5 accounting and long operation | Shared accounting, delayed settlement, optional deadline and renewable-worker mechanics implemented | Actual sustained operation/restart and provider request/billing completeness |
 | M6 delivery | Installation, preflight, examples, guide, export, frozen methodology and CI selection implemented | Final integrated checks, hosted CI and release-candidate handoff |
 | Fresh-target research acceptance | Operator-owned; not run | The agreed fresh-target test and native-agent comparison |
@@ -59,6 +59,24 @@ workflow governs this assignment. No shared worktree reset is permitted.
   remains unavailable; code and local checks can proceed independently.
 - The development volume has approximately 4.6 GiB free. No new VM or large image
   was installed. Existing runtimes and user data remain protected.
+
+## Hosted environment verification
+
+The later [actual Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md)
+uses a disposable GitHub-hosted Ubuntu runner. It provides real Docker execution
+without changing the unavailable development daemon or requiring an operator SSH
+host. The lifecycle run at `41a0be16` passed 21 checks, including immutable input,
+unprivileged execution, network isolation, artifact readback, child revocation and
+cleanup. This does not establish the joined native/controller workflow.
+
+A failure-first watcher-loss scenario at `fd8674b1` then reproduced a lifetime
+defect: killing the host watcher left its container running beyond the lease.
+The fixture cleaned up all owned resources. The next implementation unit moves
+lease enforcement into the container and must pass this unchanged failure case.
+The [saved manifest](../../evals/native-qualification/team-evidence/real-docker-20261114/hosted-manifest.json)
+records exact source hashes and run links. Missing Linux model-host support remains
+an implementation task; the hosted runner is a path to verifying it, not proof
+that it already exists.
 
 ## Historical verification checkpoints
 

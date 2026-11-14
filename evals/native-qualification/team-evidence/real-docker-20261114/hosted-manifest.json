@@ -1,0 +1,46 @@
+{
+  "classification": "actual_Docker_environment_on_hosted_Ubuntu",
+  "runs": [
+    {
+      "run_id": 43586543880,
+      "url": "https://github.com/matheusht/redteam-harness/actions/runs/43586543880",
+      "head": "41a0be16005c15cf9b1e724f2a81fea7f1493f62",
+      "receipt": "lifecycle-hosted.json",
+      "sha256": "sha256:ed102756d8b89fd9c19f8dc410302fa6cd0063d95c997d0aab994037a1329536",
+      "status": "passed",
+      "passing_checks": 21,
+      "total_checks": 21,
+      "cleanup": [
+        "clean",
+        "clean"
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:97a6ce5cb1a55781f837bcd6d6fcfe2c7462fa36979e3f6beb441ca4d4290a4a",
+        "tools/research_environment.py": "sha256:d1ce275fa07782d83e6065511bd27409354a83f3f2888ea8922cf215c95bfa21",
+        "tools/engagement_lease_owner.py": "sha256:9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+      }
+    },
+    {
+      "run_id": 43586949490,
+      "url": "https://github.com/matheusht/redteam-harness/actions/runs/43586949490",
+      "head": "fd8674b19e34689047b02730b80367f9c654dbdd",
+      "receipt": "watcher-loss-before.json",
+      "sha256": "sha256:bf7740ebe38552cb714564b242eaaa015a5a1a8c95d5e906cf1289a5bc2d9275",
+      "status": "failed",
+      "passing_checks": 24,
+      "total_checks": 25,
+      "cleanup": [
+        "clean",
+        "clean",
+        "clean"
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:4fc419fe148b561b5251ea3a6a5aa727036453b2372162d63fcd37fd0509c305",
+        "tools/research_environment.py": "sha256:d1ce275fa07782d83e6065511bd27409354a83f3f2888ea8922cf215c95bfa21",
+        "tools/engagement_lease_owner.py": "sha256:9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+      }
+    }
+  ]
+}

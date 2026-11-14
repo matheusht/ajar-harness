@@ -46,3 +46,27 @@ Adding the workflow is not evidence that it passed. No hosted result is recorded
 in this initial scenario commit. This scenario does not qualify the native model
 host, the joined controller workflow, SSH transport, a live provider or research
 acceptance.
+
+## Hosted observations on 14 November 2026
+
+The [lifecycle run](https://github.com/matheusht/redteam-harness/actions/runs/43586543880)
+at `41a0be16` passed all 21 checks and both cleanup readbacks. This includes actual
+staging, filesystem/network restrictions, artifact publication, a detached child,
+revocation and receipt-based cleanup. Earlier runs exposed a fixture error:
+`docker top` requires the PID column. The corrected fixture requests `pid,args`
+and retains the child-process assertion.
+
+The [watcher-loss run](https://github.com/matheusht/redteam-harness/actions/runs/43586949490)
+at `fd8674b1` passed 24 checks and failed the required lease-expiry check. The
+owned watcher exited with `-SIGKILL`, but its container was still running after
+6.0799 seconds despite a four-second lease. All three final cleanup readbacks
+were clean. This is a reproduced production lifetime-control defect, not a
+passing lease test. Container-local enforcement remains to be implemented and
+verified after this checkpoint.
+
+The [manifest](hosted-manifest.json) binds these saved JSON observations to their
+hosted run, exact commit and source hashes. Both runs used Docker 28.0.4 on the
+GitHub-hosted Ubuntu 24.04 runner with image
+`python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39`.
+These observations do not establish SSH transport, native model containment,
+the joined controller workflow, live provider behavior or research acceptance.

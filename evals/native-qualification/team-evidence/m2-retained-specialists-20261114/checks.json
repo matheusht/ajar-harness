@@ -1,0 +1,80 @@
+{
+  "base": "33d6cb2f38599794c5c900bbd9c4953a53debf4d",
+  "checks": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_retained_specialist_e2e.py --output /tmp/after.json",
+      "result": "after.json",
+      "passed_scenarios": 26,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_retained_specialist_e2e.py": "sha256:271a5e015838ccb9860a39b156b0c6bb9e3042e2380baf3f9f9dba1b21ae6b50"
+      }
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_lifecycle_edges_e2e.py --output /tmp/lifecycle.json",
+      "result": "lifecycle.json",
+      "passed_scenarios": 5,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_lifecycle_edges_e2e.py": "sha256:0f65752d02a9b96f0ac516d020a38dcafc219d14c85f761c004d792bd9c7c253"
+      }
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_runner_e2e.py --output /tmp/runner.json",
+      "result": "runner.json",
+      "passed_scenarios": 13,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_runner_e2e.py": "sha256:7c4010ed10ccad1f01b42450e5e1efd44e317994c8f1cd96761a6c0847c21a65"
+      }
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_coordination_e2e.py --output /tmp/coordination.json",
+      "result": "coordination.json",
+      "passed_scenarios": 10,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_coordination_e2e.py": "sha256:e2227cd2ff259d4ed2fe0a1a0f141d87004be3ee4449437aa85cb554c5a9d26b"
+      }
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_evidence_e2e.py --output /tmp/evidence.json",
+      "result": "evidence.json",
+      "passed_scenarios": 16,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_evidence_e2e.py": "sha256:93ba2d0c3c5c1623a9864e271c4b631b96781ce54c38840406758b8debafe761"
+      }
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_engagement_network_journal_e2e.py --output /tmp/network.json",
+      "result": "network.json",
+      "passed_scenarios": 8,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+        "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+        "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+        "evals/native-qualification/smoke/check_engagement_network_journal_e2e.py": "sha256:ee1a5151ae62ac0dd0c5d3b17b2d1299355ea73f3244998733ec0f7c5a43c03d"
+      }
+    }
+  ],
+  "native_checks": {
+    "native-codex.json": "check_codex_native_tools.py --retain-session",
+    "native-omp.json": "check_omp_provider_boundary.py --retain-session --omp-sdk /tmp/oslit-implementation/omp-sdk18.20/node_modules/@oh-my-pi/pi-coding-agent"
+  },
+  "limits": [
+    "controller native peers simulated",
+    "native tool contexts separately observed with owned fake providers",
+    "no Docker or SSH qualification"
+  ]
+}

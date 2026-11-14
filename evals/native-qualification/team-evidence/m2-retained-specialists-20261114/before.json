@@ -1,0 +1,144 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "native_containment": "not_exercised",
+  "scenarios": [
+    {
+      "scenario": "same-authority",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "retained-pipes",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "no-outcome",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "no-next-task",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "pending-execution",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "dispatched-execution",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "unknown-stdio",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "pending-capture",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "pending-network",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "unknown-network",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "settled-application",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "pending-invocation",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "failed-invocation",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "changed-resources",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "changed-profile",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "priority-preserved",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "fresh-reviewer",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "stop",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "expired-lease",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "retired-worker",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "same-owner-readback",
+      "status": "fail",
+      "error": "ControllerError: worker_stale"
+    },
+    {
+      "scenario": "atomic-grant-publication",
+      "status": "fail",
+      "error": "AttributeError: 'Controller' object has no attribute 'continue_specialist'"
+    },
+    {
+      "scenario": "runner-same-session",
+      "status": "fail",
+      "error": "AssertionError: related tasks did not retain actual boundary session"
+    },
+    {
+      "scenario": "runner-delayed-completion",
+      "status": "fail",
+      "error": "AssertionError: related tasks did not retain actual boundary session"
+    },
+    {
+      "scenario": "runner-changed-session",
+      "status": "fail",
+      "error": "AssertionError: native session readback was not attempted"
+    },
+    {
+      "scenario": "runner-unsettled-tools",
+      "status": "fail",
+      "error": "AssertionError: native session readback was not attempted"
+    }
+  ],
+  "status": "fail",
+  "source_sha256": {
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_runner.py": "sha256:7e66234c8a957027ff8153bed74888578651b396944032038913190499bb2e9f",
+    "evals/native-qualification/smoke/check_engagement_retained_specialist_e2e.py": "sha256:271a5e015838ccb9860a39b156b0c6bb9e3042e2380baf3f9f9dba1b21ae6b50"
+  }
+}

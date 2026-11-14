@@ -96,6 +96,13 @@ class WorkerContext:
             self.grant = self.controller.renew_dispatch(self.grant, seconds=seconds)
             return self.grant
 
+    def continue_specialist(self):
+        with self.controller.lock():
+            continued = self.controller.continue_specialist(self.grant)
+            if continued is not None:
+                self.grant = continued
+            return continued is not None
+
     def submit(self, request):
         result = self.controller.submit(self.principal, request)
         self.runner.changed.set()
@@ -355,7 +362,7 @@ class Runner:
                             raise RunnerError('native_dispatch_unknown')
                         if event['event'] == 'completed':
                             completed = event
-                    if c.state()['workers'][worker['id']].get('outcome_pending'):
+                    if worker['role'] != 'specialist' and c.state()['workers'][worker['id']].get('outcome_pending'):
                         break
                 if completed:
                     c.record_invocation_observed(context.grant, invocation,
@@ -367,6 +374,15 @@ class Runner:
                         self._claim_waiting()
                 state = c.state()
                 if state['workers'][worker['id']].get('outcome_pending'):
+                    if worker['role'] == 'specialist' and completed and completed['status'] == 'completed':
+                        session = state['workers'][worker['id']]['session_id']
+                        resumed = boundary.runtime.resume(session)
+                        if resumed.get('session_id') != session:
+                            raise RunnerError('native_session_changed')
+                        if context.continue_specialist():
+                            first = True
+                            self.changed.set()
+                            continue
                     break
                 if worker['role'] == 'lead' and state['replacement_required']:
                     break

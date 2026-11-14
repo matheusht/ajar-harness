@@ -1,0 +1,77 @@
+{
+  "status": "passed",
+  "evidence": "actual_codex_native_tools_with_simulated_model",
+  "checks": [
+    "native_shell_read_write",
+    "native_apply_patch",
+    "outside_and_symlink_denied",
+    "provider_key_absent_from_tools",
+    "cross_process_inspection_denied",
+    "provider_endpoint_denied",
+    "spawn_mcp_web_routes_refused",
+    "revoked_dispatch",
+    "no_key_persistence",
+    "owned_runtime_stop"
+  ],
+  "tls_proxy_verified": false,
+  "provider_requests": 9,
+  "external_provider_calls": 0,
+  "identity": {
+    "session_id": "01a1d98a-77e3-78c0-b6c6-f20ab8b58abd",
+    "runtime": "codex",
+    "model": "gpt-6.1-sol",
+    "provider": "oslit-fixture",
+    "history": "ephemeral"
+  },
+  "owner_receipt": {
+    "kind": "native-runtime-owner-v1",
+    "runtime": "codex",
+    "session_id": "01a1d98a-77e3-78c0-b6c6-f20ab8b58abd",
+    "profile_sha256": "sha256:9eaddb8d558b534472afff95628062779f37b5e3fa373d961a55bf7dd8f9e2e8",
+    "boundary": "darwin-no-fork-v1",
+    "process": {
+      "pid": 52986,
+      "pgid": 52986,
+      "uid": 501,
+      "started_seconds": 1794651092,
+      "started_microseconds": 862832
+    },
+    "bridge_process": {
+      "pid": 52982,
+      "pgid": 52982,
+      "uid": 501,
+      "started_seconds": 1794651092,
+      "started_microseconds": 641882
+    }
+  },
+  "close": {
+    "process_exited": true,
+    "exit_code": 0,
+    "lab_cleanup": "not_observed",
+    "child_absence": "verified",
+    "session_id": "01a1d98a-77e3-78c0-b6c6-f20ab8b58abd",
+    "capabilities_revoked": true,
+    "boundary": "darwin-no-fork-v1"
+  },
+  "retained_session": {
+    "session_id": "01a1d98a-77e3-78c0-b6c6-f20ab8b58abd",
+    "same_owner": true,
+    "prior_context_observed": true,
+    "native_tool_readback": "first_turn_files_read_in_second_turn"
+  },
+  "unverified": [
+    "Linux/Docker/SSH",
+    "live_provider_credentials",
+    "research_qualification"
+  ],
+  "source_hashes": {
+    "evals/native-qualification/smoke/check_codex_native_tools.py": "sha256:260ab823df88267c58e5ba28b166714cdd0715468b312b62d02de46271cb363f",
+    "tools/native_runtime_codex.py": "sha256:6f6c6dc4a591f4f13c449a2f5408790b2253e166695d27d8da01dfcb3265a479",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+    "tools/native_runtime_omp.py": "sha256:f3f01c71e517adcd539b06fb533ffac464785f3c5edf7584e0538d4600645e9a",
+    "tools/native_runtime_owner.py": "sha256:d0e9d7fb46be116b1fe3bbd510c55a90cf0466a6ab69d9011b5c68f671833fd8",
+    "tools/native_runtime_transport.py": "sha256:ccd6f346d837dd4a16fac62e7f75dc668fe90bd36eb3159048513a7d6b5b309d",
+    "tools/native_runtime_omp_tools.mjs": "sha256:d443923e21bf2477a08f87fe3f19ab414028bc9a793341f49bd6729252bba4c9",
+    "tools/native_credentials.py": "sha256:9961b602ebedcdc4d414ff0747f0c774950d1e23f51a92a79deed19f4d22e437"
+  }
+}

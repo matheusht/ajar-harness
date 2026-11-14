@@ -1,0 +1,28 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "scenario": "startup",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown_effect",
+      "status": "pass"
+    },
+    {
+      "scenario": "continuous_review",
+      "status": "pass"
+    },
+    {
+      "scenario": "partial_cleanup",
+      "status": "pass"
+    },
+    {
+      "scenario": "checkpoint_alias",
+      "status": "pass"
+    }
+  ],
+  "status": "pass"
+}

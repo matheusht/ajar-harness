@@ -5,6 +5,8 @@ Extends the failure-first native tool boundary scenarios through the real model
 loop: private model environment, separate SDK tools, native proxy/private trust,
 no direct egress, native command/read success, credential/process/file denial,
 revocation, no persisted key, and kernel-bound owner cleanup. No real provider.
+Optional retained-session scenario observes native context and the same SDK owner
+across a second invocation, which reads the first invocation's workspace artifact.
 """
 from __future__ import annotations
 import argparse
@@ -26,7 +28,7 @@ ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT/'tools'))
 def sha(path):return 'sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(root,sdk):
+def run(root,sdk,*,retain_session=False):
     from native_runtime_omp import Runtime, ToolOwner, sdk_tree_digest
     from native_runtime_transport import RuntimeError
     from native_credentials import HostCredentialResolver
@@ -58,6 +60,9 @@ def run(root,sdk):
                     "printf '\\nEND_PS\\n'",'printf NATIVE_OMP_DONE'])
                 delta={'role':'assistant','tool_calls':[{'index':0,'id':'fixture-native-call','type':'function',
                     'function':{'name':'bash','arguments':json.dumps({'command':command,'timeout':5})}}]};finish='tool_calls'
+            elif retain_session and seq==3:
+                delta={'role':'assistant','tool_calls':[{'index':0,'id':'retained-native-call','type':'function',
+                    'function':{'name':'bash','arguments':json.dumps({'command':'cat written.txt inside.txt','timeout':5})}}]};finish='tool_calls'
             else:delta={'role':'assistant','content':'Fixture complete.'};finish='stop'
             self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
             for item in ({'delta':delta,'finish_reason':None},{'delta':{},'finish_reason':finish}):
@@ -110,6 +115,20 @@ def run(root,sdk):
         assert 'OUTSIDE_PRIVATE_MARKER' not in result and fake not in result
         ps=result.split('BEGIN_PS',1)[1].split('END_PS',1)[0]
         assert str(runtime[0].transport.process.pid) not in ps, 'native SDK could inspect model process'
+        retained = None
+        if retain_session:
+            tool_pid = owner.transport.process.pid
+            resumed = runtime[0].resume(identity['session_id'])
+            assert resumed['session_id'] == identity['session_id'] and runtime[0].owner_receipt() == receipt
+            runtime[0].invoke('Continue the related task using the earlier context and files.','retained-task')
+            deadline=time.monotonic()+30
+            while runtime[0].active and time.monotonic()<deadline:runtime[0].observe(.1)
+            assert not runtime[0].active and len(requests)==4, 'retained OMP tool turn did not settle'
+            assert 'Run the native boundary fixture.' in json.dumps(requests[2]), 'retained native conversation missing'
+            assert 'NATIVE_OMP_WRITE' in json.dumps(list(owner.results.values())), 'retained SDK did not read earlier artifact'
+            assert owner.transport.process.pid == tool_pid and owner.transport.process.poll() is None
+            retained={'session_id':resumed['session_id'],'same_owner':True,'prior_context_observed':True,
+                'native_tool_readback':'first_turn_file_read_in_second_turn'}
         active[0]=False
         try:runtime[0].invoke('must refuse','revoked');raise AssertionError('revoked OMP dispatch')
         except RuntimeError as error:assert str(error)=='fixture_revoked'
@@ -120,6 +139,7 @@ def run(root,sdk):
             'checks':['native_read_write','separate_tool_environment','provider_key_absent_from_tools','outside_file_denied',
                 'model_process_inspection_denied','TLS_proxy_private_trust','revoked_dispatch','no_key_persistence','owned_model_stop'],
             'provider_requests':len(requests),'external_provider_calls':0,'identity':identity,'owner_receipt':receipt,'close':closed,
+            'retained_session':retained,
             'bun_version':subprocess.check_output([str(bun),'--version'],text=True).strip(),
             'unverified':['Linux/Docker/SSH','SDK_engine_Bun1.4.4_compatibility','live_provider','research_qualification']}
     finally:
@@ -127,7 +147,7 @@ def run(root,sdk):
         owner.close();gate.close();server.shutdown();server.server_close();thread.join(timeout=2)
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--omp-sdk',type=Path,required=True);p.add_argument('--output',type=Path,required=True);args=p.parse_args()
-    with tempfile.TemporaryDirectory(prefix='omp-provider-boundary-') as d:result=run(Path(d).resolve(),args.omp_sdk)
+    p=argparse.ArgumentParser();p.add_argument('--omp-sdk',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--retain-session',action='store_true');args=p.parse_args()
+    with tempfile.TemporaryDirectory(prefix='omp-provider-boundary-') as d:result=run(Path(d).resolve(),args.omp_sdk,retain_session=args.retain_session)
     result['source_hashes']={str(p.relative_to(ROOT)):sha(p) for p in [Path(__file__),*(ROOT/'tools').glob('native_runtime_*'),ROOT/'tools/native_credentials.py'] if p.is_file()}
     args.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps({'status':result['status'],'checks':len(result['checks'])}))

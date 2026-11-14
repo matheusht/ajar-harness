@@ -1,0 +1,203 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "scenario": "reviewed-closure",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "reviewer-1",
+          1
+        ]
+      ],
+      "endings": [
+        [
+          "reviewer-1",
+          1
+        ],
+        [
+          "lead-1",
+          1
+        ]
+      ],
+      "ending": "closed",
+      "invocations": 2
+    },
+    {
+      "scenario": "specialist-next-task",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "specialist-1",
+          1
+        ],
+        [
+          "specialist-1",
+          2
+        ]
+      ],
+      "endings": [
+        [
+          "specialist-1",
+          1
+        ],
+        [
+          "specialist-1",
+          2
+        ],
+        [
+          "lead-1",
+          1
+        ]
+      ],
+      "ending": "stopped",
+      "invocations": 7
+    },
+    {
+      "scenario": "review-replacement",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "lead-1",
+          2
+        ],
+        [
+          "lead-1",
+          3
+        ]
+      ],
+      "endings": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "lead-1",
+          2
+        ],
+        [
+          "lead-1",
+          3
+        ]
+      ],
+      "ending": "stopped",
+      "invocations": 4
+    },
+    {
+      "scenario": "resume-clean-stop",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          2
+        ]
+      ],
+      "endings": [
+        [
+          "lead-1",
+          2
+        ]
+      ],
+      "ending": "stopped",
+      "invocations": 2
+    },
+    {
+      "scenario": "lead-task-handoff",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "lead-1",
+          2
+        ],
+        [
+          "lead-1",
+          3
+        ]
+      ],
+      "endings": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "lead-1",
+          2
+        ],
+        [
+          "lead-1",
+          3
+        ]
+      ],
+      "ending": "stopped",
+      "invocations": 3
+    },
+    {
+      "scenario": "capture-parent-lease",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale-closure",
+      "status": "pass",
+      "starts": [
+        [
+          "lead-1",
+          1
+        ],
+        [
+          "reviewer-1",
+          1
+        ]
+      ],
+      "endings": [
+        [
+          "reviewer-1",
+          1
+        ],
+        [
+          "lead-1",
+          1
+        ]
+      ],
+      "ending": "stopped",
+      "invocations": 3
+    },
+    {
+      "scenario": "coordinator-exit",
+      "status": "pass",
+      "result": [
+        {
+          "code": "fixture_coordinator_crash"
+        }
+      ]
+    },
+    {
+      "scenario": "prompt-budget",
+      "status": "pass",
+      "prompt_bytes": 413189
+    },
+    {
+      "scenario": "prompt-wire",
+      "status": "pass",
+      "prompt_bytes": 413692
+    }
+  ],
+  "status": "pass"
+}

@@ -4,6 +4,8 @@
 The boundary scenarios are specified in check_codex_native_environment.py before
 bridge implementation. This complete workflow exercises those same scenarios
 with the actual model/tool loop. Fake markers only; never uses real credentials.
+Optional retained-session scenario: read back the same native thread with its
+selected executor, then run another tool turn using earlier context and files.
 """
 from __future__ import annotations
 import argparse
@@ -27,7 +29,7 @@ ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT/'tools'))
 def sha(path):return 'sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(root, *, tls_proxy=False):
+def run(root, *, tls_proxy=False, retain_session=False):
     from native_runtime_codex import Runtime, NativeExecutor, _DISABLED_FEATURES
     from native_credentials import HostCredentialResolver
     from native_runtime_transport import RuntimeError
@@ -69,6 +71,9 @@ def run(root, *, tls_proxy=False):
                 name={4:'spawn_agent',5:'mcp__fixture__escape',6:'web.run'}[seq]
                 item={'id':'fc_alternate_'+str(seq),'type':'function_call','call_id':'alternate-'+str(seq),
                     'name':name,'arguments':json.dumps({'prompt':'harmless denial probe','search_query':[{'q':'fixture'}]})}
+            elif retain_session and seq == 8:
+                item={'id':'fc_retained','type':'function_call','call_id':'retained','name':'exec_command',
+                    'arguments':json.dumps({'cmd':'cat shell-written.txt native-patch.txt', 'max_output_tokens':1000})}
             else:
                 item={'id':'msg_done','type':'message','role':'assistant','content':[{'type':'output_text','text':'Fixture complete.'}]}
             response={'id':'fixture-'+str(seq),'object':'response','status':'completed','output':[item],
@@ -167,10 +172,25 @@ env_key = "OPENAI_API_KEY"
         assert not escapes, 'native tool reached provider endpoint'
         for call_id in ('alternate-4','alternate-5','alternate-6'):
             assert any(x.get('call_id')==call_id and str(x.get('output','')).startswith('unsupported call:') for x in outputs), call_id
+        retained = None
+        if retain_session:
+            resumed = runtime[0].resume(identity['session_id'])
+            assert resumed['session_id'] == identity['session_id'] and runtime[0].owner_receipt() == receipt
+            runtime[0].invoke('Continue the related task using the earlier context and files.','retained-task')
+            deadline=time.monotonic()+30
+            while runtime[0].active and time.monotonic()<deadline:events.extend(runtime[0].observe(.1))
+            assert not runtime[0].active and len(requests)==9, 'retained native tool turn did not settle'
+            assert ('Run the native boundary fixture.' in json.dumps(requests[7]) or
+                    requests[7].get('previous_response_id') == 'fixture-7'), 'retained native conversation missing'
+            second_outputs=[x for r in requests[7:] for x in r.get('input',[]) if x.get('call_id')=='retained']
+            assert any('SHELL_WRITE_PROOF' in str(x.get('output','')) and 'NATIVE_PATCH_PROOF' in str(x.get('output',''))
+                for x in second_outputs), 'retained native executor could not read earlier artifacts'
+            retained={'session_id':resumed['session_id'],'same_owner':True,'prior_context_observed':True,
+                'native_tool_readback':'first_turn_files_read_in_second_turn'}
         allowed[0]=False
         try:runtime[0].invoke('must refuse','after-revoke');raise AssertionError('revoked runtime dispatched')
         except RuntimeError as error:assert str(error)=='fixture_revoked'
-        assert len(requests)==7
+        assert len(requests)==(9 if retain_session else 7)
         close=runtime[0].close();runtime[0]=None
         assert close['child_absence']=='verified' and close['capabilities_revoked']
         assert not any(fake.encode() in p.read_bytes() for p in app_state.rglob('*') if p.is_file()),'provider key persisted'
@@ -179,6 +199,7 @@ env_key = "OPENAI_API_KEY"
                 'provider_key_absent_from_tools','cross_process_inspection_denied','provider_endpoint_denied',
                 'spawn_mcp_web_routes_refused','revoked_dispatch','no_key_persistence','owned_runtime_stop'],
             'tls_proxy_verified':tls_proxy,'provider_requests':len(requests),'external_provider_calls':0,'identity':identity,'owner_receipt':receipt,'close':close,
+            'retained_session':retained,
             'unverified':['Linux/Docker/SSH','live_provider_credentials','research_qualification']}
     finally:
         if runtime[0]:runtime[0].close()
@@ -188,7 +209,7 @@ env_key = "OPENAI_API_KEY"
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);parser.add_argument('--tls-proxy',action='store_true');args=parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix='codex-native-tools-') as name:result=run(Path(name).resolve(),tls_proxy=args.tls_proxy)
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);parser.add_argument('--tls-proxy',action='store_true');parser.add_argument('--retain-session',action='store_true');args=parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix='codex-native-tools-') as name:result=run(Path(name).resolve(),tls_proxy=args.tls_proxy,retain_session=args.retain_session)
     result['source_hashes']={str(p.relative_to(ROOT)):sha(p) for p in [Path(__file__),*(ROOT/'tools').glob('native_runtime_*'),ROOT/'tools/native_credentials.py'] if p.is_file()}
     args.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps({'status':result['status'],'checks':len(result['checks'])}))

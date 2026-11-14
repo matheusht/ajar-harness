@@ -6,6 +6,7 @@ principal; a native session ID or submitted role never establishes identity.
 from __future__ import annotations
 
 import base64
+import copy
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -407,6 +408,14 @@ class Controller:
         elif kind == 'task_outcome_finalized':
             worker = state['workers'][payload['worker_id']]
             self._reduce_request(state, worker['id'], 'task_result', worker.pop('outcome_pending')['payload'])
+        elif kind == 'specialist_continued':
+            worker = state['workers'][payload['grant']['worker_id']]
+            self._reduce_request(state, worker['id'], 'task_result', worker.pop('outcome_pending')['payload'])
+            self._reduce_request(state, worker['id'], 'claim', {'task_id': payload['grant']['assignment']['task_id'],
+                                                             'worker_id': worker['id']})
+            dispatch = state['dispatches'][payload['grant']['dispatch_id']]
+            dispatch.setdefault('prior_grants', []).append(payload['previous'])
+            dispatch.update(payload['grant'])
         elif kind == 'runtime_stop_observed':
             state['workers'][payload['worker_id']].update(status='stopped', stop_receipt=payload['receipt'])
             state['evidence_objects'][payload['receipt']] = True
@@ -766,6 +775,12 @@ class Controller:
             state = self.state()
             dispatch = self.bind_grant(state, grant)
             worker = state['workers'][grant['worker_id']]
+            if worker['status'] == 'active':
+                self._authorize(state, grant)
+                sha = digest(canonical(receipt))
+                if sha != worker.get('runtime_owner_sha256') or sha not in dispatch.get('runtime_owner_receipts', []):
+                    fail('worker_stale')
+                return {'status': 'recorded', 'receipt': sha}
             if worker['generation'] != grant['generation'] or worker['status'] != 'preparing':
                 fail('worker_stale')
             if not isinstance(receipt, dict):
@@ -935,6 +950,58 @@ class Controller:
             if task is None:
                 return {'status': 'no_ready_task'}
             return self._host('task_claimed', {'task_id': task['task_id'], 'worker_id': worker_id})
+
+    def continue_specialist(self, grant):
+        """Keep an idle native owner for the next task without changing its authority."""
+        with self.lock():
+            state = self.state()
+            self._authorize(state, grant)
+            worker = state['workers'][grant['worker_id']]
+            outcome = worker.get('outcome_pending')
+            if (worker['role'] != 'specialist' or worker['status'] != 'active' or not outcome
+                    or outcome['payload']['disposition'] != 'completed' or not worker.get('runtime_owner_sha256')
+                    or not worker.get('session_id') or worker['profile_id'] != grant['profile_id']):
+                return None
+            dispatch = state['dispatches'][grant['dispatch_id']]
+            invocations = [state['invocations'][name] for name in dispatch.get('invocations', [])]
+            if (not invocations or invocations[-1]['status'] != 'completed'
+                    or any(row['status'] == 'pending' for row in invocations)):
+                return None
+            owned = {name for name, row in state['dispatches'].items()
+                if row['worker_id'] == worker['id'] and row['generation'] == worker['generation']}
+            if any(name != grant['dispatch_id'] and state['dispatches'][name]['status'] != 'settled' for name in owned):
+                return None
+            for operation in state['network_operations'].values():
+                if operation['grant']['dispatch_id'] in owned and (operation.get('result') or {}).get('status') != 'settled':
+                    return None
+            for operation in state['environment_operations'].values():
+                if operation['grant']['dispatch_id'] not in owned:
+                    continue
+                environment = state['environments'][operation['identity']['nonce']]
+                if environment['identity']['unsettled'] or environment.get('cleanup') == 'unresolved':
+                    return None
+                result = operation.get('result') or {}
+                if result.get('status') == 'settled':
+                    continue
+                role = operation.get('intent', {}).get('role')
+                if (operation['operation'] == 'launch_stdio' and result.get('status') == 'dispatched'
+                        and role in ('native_tools', 'network_proxy') and result.get('role') == role
+                        and (operation['grant']['dispatch_id'] == grant['dispatch_id'] or
+                             environment.get('cleanup') == 'verified')):
+                    continue
+                return None
+            projected = copy.deepcopy(state)
+            self._reduce_request(projected, worker['id'], 'task_result', outcome['payload'])
+            projected_worker = projected['workers'][worker['id']]
+            tasks = sorted(projected['tasks'].values(), key=lambda row: (-row['priority'], row['created_order']))
+            task = next((row for row in tasks if self._eligible(projected, row, projected_worker)), None)
+            if task is None or set(task['resources']) != set(grant['resources']):
+                return None
+            self._reduce_request(projected, worker['id'], 'claim', {'task_id': task['task_id'], 'worker_id': worker['id']})
+            self._dispatch_resources(projected, projected_worker, grant['resources'])
+            continued = dict(grant, assignment=projected_worker['assignment'])
+            self._host('specialist_continued', {'previous': grant, 'grant': continued})
+            return continued
 
     def authorize_dispatch(self, grant):
         state = self.state()
@@ -1416,7 +1483,7 @@ class Controller:
             for event in events[start:start + limit]:
                 item = {key: event[key] for key in ('sequence', 'sha256', 'at', 'type', 'actor')}
                 if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested', 'evidence_recorded',
-                                     'task_claimed', 'worker_resumed', 'closure_stopping'):
+                                     'task_claimed', 'worker_resumed', 'specialist_continued', 'closure_stopping'):
                     item['payload'] = event['payload']
                 size = len(canonical(item))
                 if updates and page_bytes + size > 512 * 1024:

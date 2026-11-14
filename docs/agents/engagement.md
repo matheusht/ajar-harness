@@ -9,8 +9,8 @@ The field and authority contract is recorded in [Decision 0014](../decisions/001
 Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
 claiming support or readiness. The complete M0–M6 engineering assignment remains
 unfinished. The repository impact-artifact and escalation-review gates still
-apply: a signed ceiling does not supply fresh artifact confirmation, an artifact
-cleanup ledger or review of the preceding escalation rung.
+apply: a signed ceiling and the internal evidence-review checks do not replace
+operator review, fresh artifact confirmation or an artifact cleanup ledger.
 
 ## Prepare the host and tool lab
 
@@ -160,6 +160,39 @@ each request observation to its account, effect, grant and environment. Provider
 traffic uses a separate gateway. Known credential and cookie values reflected in
 responses are withheld; this is not recognition of every possible transformed
 secret. Retain the [account workflow's exact limits and receipts](../../evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md).
+The [native-boundary integration](../../evals/native-qualification/team-evidence/m5-boundary-integration-20261114/README.md)
+checks these bindings with the real controller and owned HTTP receivers while
+native/container peers are simulated. Actual target identity and Docker/SSH
+containment remain separate verification requirements.
+
+## Capture effects and escalation
+
+`engagement_capture` runs a pinned probe in a separate reserved lab over a nonempty
+subset of the worker's resources. For source/binary-only capture, optional
+`effect_id` selects a signed local execution effect; omission uses the initial
+read effect. Setup requires exactly one account-free `read` effect at
+`source_only` or `self` covering the selected resources and environment. Capture
+with application resources rejects this local selector. Its target requests use
+`X-OSLit-Effect` to select a signed effect; omission requires exactly one compatible
+effect. The host strips that selector before forwarding.
+
+An application capture records `clean_start:false` and
+`remote_application_reset_unverified`. A fresh client lab does not reset the
+application, so this capture cannot establish clean independent remote replay or
+the confirmed predecessor required for escalation. A source-only subset of
+combined access can use its separately created local input as a clean start.
+See the [capture evidence and limits](../../evals/native-qualification/team-evidence/m5-application-capture-20261114/README.md).
+
+Before a new `stored` or `cross_user` intent, the controller requires an accepted
+current escalation review of the independently confirmed preceding claim and
+exact next signed effect. The frozen worker protocol describes the request and
+review evidence. Reopened claims, superseded instruments or a replacement review
+request invalidate the old transition's admission. Matching late observations
+and owned cleanup remain recordable. Generic `artifact_create` is unsupported;
+the repository's operator review and fresh artifact-approval gates remain active.
+The [source capture workflow](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md)
+checks declared adjacent rungs using harmless local probes and simulated native,
+container and reviewer behavior. It does not establish a security escalation.
 
 ## Inspect and run
 
@@ -184,11 +217,19 @@ python3 tools/native_engagement.py run --inputs /private/inputs/inputs.json \
 
 The controller freezes the contract, methodology and worker protocol at
 initialization and owns the append-only engagement journal. Native runtimes own
-conversation state during an active worker session. A later task or recovered
-worker reconstructs context from the published journal and frozen inputs; exact
-native conversation continuity across tasks is not established. Ordinary model-turn
+conversation state. An eligible specialist can keep its live session, workspace
+and resource ownership for the next ready task with the same resources and
+runtime authority after a completed invocation, idle native readback and no
+pending or unknown target/tool executions or auxiliary captures. The same owned
+native-tool and proxy services remain active.
+This reuse supplies no cleanup or clean-replay claim. Reviewers start fresh;
+incompatible work, failed readback and controller recovery use cleanup and
+reconstruction from published records and frozen inputs. The
+[retention evidence](../../evals/native-qualification/team-evidence/m2-retained-specialists-20261114/README.md)
+separates actual Codex/OMP continuity with fake provider replies from the simulated
+controller transition and the unverified joined Docker workflow. Ordinary model-turn
 completion does not finish an engagement. The lead can continue, create tasks and request allowed
-specialists; reviews use fresh context. Confirmation requires an observed effect,
+specialists. Confirmation requires an observed effect,
 a relevant control and clean independent reproduction. Broad work also needs an
 honest account of remaining paths and coverage limits.
 

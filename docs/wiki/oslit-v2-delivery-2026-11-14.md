@@ -5,7 +5,7 @@ checks. **The complete M0–M6 assignment is unfinished.** It is not a qualified
 adopted research workflow. The operator owns the future fresh-target test and
 comparison with a capable native agent.
 
-This page summarizes the candidate descended from `183199cc` and the linked
+This page summarizes the candidate through `9a26c93d` and the linked
 follow-up evidence. The [public CLI delivery unit](../../evals/native-qualification/team-evidence/m6-public-cli-20261114/README.md),
 integrated at `c56d562f`, connects inspect/run/resume/stop to the composed preflight
 and real runner; its deliberately unavailable native fixture does not establish a
@@ -21,8 +21,8 @@ historical observation.
 | --- | --- | --- |
 | Authority and one state owner | [Signed v2 inputs](../../tools/engagement_contract.py), [journal/controller](../../tools/engagement_controller.py), public `native_engagement.py` facade and preserved old-route readers | [Contract](../../evals/native-qualification/smoke/check_engagement_contract_e2e.py) and [team workflows](../../evals/native-qualification/smoke/check_engagement_team_e2e.py) exercise signed disposable inputs, durable events, authenticated requests, reservations and replay. Simulated workers do not establish native containment. |
 | Codex and OMP | Native tools, sessions, host operations, isolated model credential binding, owned startup/recovery receipts and separate provider/tool routes | [Actual native checks](../../evals/native-qualification/team-evidence/m2-native-boundary-20261114/README.md) used installed Codex 0.166.0 and OMP 18.20.0 against owned fake provider responses. These are native-process observations, not live model or provider qualification. |
-| Environments and accounts | Source/binary/application/combined descriptors, local or SSH Docker transport, lease ownership, exact resource readback, target account injection and separate cookie state | [Environment checks](../../evals/native-qualification/team-evidence/m3-environment-20261114/README.md), [renewed execution](../../evals/native-qualification/team-evidence/m3-renewed-execution-20261114/README.md) and [account checks](../../evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md) distinguish actual local sockets/processes from simulated Docker/SSH responses. Logical account selection does not prove which user a real target recognizes. |
-| Coordination and evidence | Versioned shared updates/instruments, independent review packets, strategy obligations, lead replacement, protected experiments and reviewed closure | [Evidence workflows](../../evals/native-qualification/smoke/check_engagement_evidence_e2e.py), [coordination workflows](../../evals/native-qualification/smoke/check_engagement_coordination_e2e.py) and [boundary composition](../../evals/native-qualification/team-evidence/m5-native-boundary-20261114/README.md) establish their local mechanics. Native/environment peers are simulated where explicitly stated. Protected source capture does not establish clean replay of a remote application's state. |
+| Environments and accounts | Source/binary/application/combined descriptors, local or SSH Docker transport, lease ownership, exact resource readback, target account injection and separate cookie state | [Environment checks](../../evals/native-qualification/team-evidence/m3-environment-20261114/README.md), [renewed execution](../../evals/native-qualification/team-evidence/m3-renewed-execution-20261114/README.md), [account checks](../../evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md) and [native-boundary account integration](../../evals/native-qualification/team-evidence/m5-boundary-integration-20261114/README.md) distinguish actual local sockets/processes from simulated native/container peers and Docker/SSH responses. Private host references bind logical accounts to request observations; they do not prove which user a real target recognizes. |
+| Coordination and evidence | Versioned shared updates/instruments, independent review packets, strategy obligations, lead replacement, protected experiments, current review for declared escalation and reviewed closure | [Evidence workflows](../../evals/native-qualification/smoke/check_engagement_evidence_e2e.py), [coordination workflows](../../evals/native-qualification/smoke/check_engagement_coordination_e2e.py), [declared escalation](../../evals/native-qualification/team-evidence/declared-escalation-20261114/README.md), [application capture](../../evals/native-qualification/team-evidence/m5-application-capture-20261114/README.md) and [source capture effects](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md) establish local composition and admission mechanics. Native/container peers and reviewer judgments are simulated where stated; local probes and owned HTTP receivers supply the stated execution observations. |
 | Usage and continued work | Shared invocation/worker-second reservations; late and duplicate settlement; optional overall deadline; renewable workers | [Actual native accounting](../../evals/native-qualification/team-evidence/native-usage-accounting-20261114/README.md) preserves per-invocation reported tokens, retries and interrupted partial usage against fake provider responses. Provider request totals and billed spend remain unavailable. Short renewal checks and clock scenarios are not multiday operation. |
 | Operator delivery | [Pinned installation](../agents/native-tool-installation.md), [input templates](../../examples/native-engagement-v2/README.md), [guide](../agents/engagement.md), preflight, export, portable methodology and CI selection | [Installation evidence](../../evals/native-qualification/team-evidence/m6-native-installation-20261114/README.md) and [guidance workflow](../../evals/native-qualification/smoke/check_engagement_guidance_e2e.py) cover their stated local boundaries. CI wiring is not a hosted CI result or a complete install-to-cleanup run. |
 
@@ -33,9 +33,35 @@ baseline for a fair comparison. Historical v2 records without frozen guidance
 remain readable and stoppable; active research cannot acquire new guidance by
 silently rewriting that history.
 
-An active native worker keeps its conversation context. Later tasks and recovered
-workers reconstruct context from published records and frozen inputs. Exact native
-conversation continuity across those boundaries is not established.
+Protected capture can select a nonempty subset of the worker's resources.
+Source/binary-only capture may name a signed local `effect_id`; application requests
+select their own effect through `X-OSLit-Effect`. Initial setup still requires
+exactly one account-free `read` effect at `source_only` or `self` covering the
+selected resources and environment. A capture containing application access records
+`clean_start:false` and `remote_application_reset_unverified`. It cannot provide
+the clean independent remote replay needed for claim confirmation or the next
+escalation rung. A source-only subset of combined access can have a separate clean
+local input without making a remote-reset claim.
+
+New `stored` and `cross_user` intents require a current accepted review of the
+independently confirmed predecessor and the exact next signed effect. Reopened
+claims, superseded instruments and replacement review requests invalidate that
+transition's admission. These internal checks preserve the repository's separate
+operator review and impact-artifact gates. Generic `artifact_create` remains
+unsupported. The harmless source fixture exercises adjacent declared rungs with
+simulated reviewer judgments; it is not a demonstrated security escalation.
+
+The [Q20 retention unit](../../evals/native-qualification/team-evidence/m2-retained-specialists-20261114/README.md)
+keeps an eligible specialist's live native session for the next ready task with
+the same resources and runtime authority. Reuse requires a completed invocation,
+idle native readback and no pending or unknown protected effects/captures. The
+session, workspace, ownership, lease and reservation continue; reuse asserts no
+cleanup or clean replay. Reviewers stay fresh. Incompatible next work, failed
+readback and controller recovery use cleanup and reconstruction from published
+records and frozen inputs. Actual Codex/OMP checks observed prior conversation
+and tool files across two invocations using owned fake provider responses. The
+controller transition was checked separately with simulated native/environment
+peers; the joined Docker workflow remains unverified.
 
 ## Remaining engineering and qualification gaps
 
@@ -45,7 +71,7 @@ conversation continuity across those boundaries is not established.
 | M1 — one state owner | Final public workflow integration must preserve sole ownership, revocation and exact cleanup across the combined runtime/environment path. |
 | M2 — runtimes/team | Actual native tools have local evidence, but the full joined protected workflow and Linux model-host boundary remain unqualified. Linux model-host execution is currently unsupported. |
 | M3 — environments | Actual Docker containment, actual SSH host/disconnect/cleanup, complete setup repair and remote application reset/replay remain unverified. Local fake transport checks cannot close these items. |
-| M4 — research/evidence | Local review/claim controls need the joined workflow's execution proof. A signed impact/escalation ceiling alone does not implement fresh artifact approval, an artifact cleanup ledger or prior-rung review. Existing repository gates remain active. |
+| M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence; the joined native workflow remains unverified. Remote application reset/replay, fresh impact-artifact approval and an artifact cleanup ledger remain open. Existing operator review and artifact gates remain active. |
 | M5 — long operation/usage | No actual multiday soak or sustained host restart result; provider request totals, billed spend and monetary caps remain unavailable. Report missing usage dimensions explicitly. |
 | M6 — delivery | Final integrated verification, hosted CI and an operator-install-to-cleanup release-candidate handoff remain open. Broader caller retirement waits for parity evidence. |
 

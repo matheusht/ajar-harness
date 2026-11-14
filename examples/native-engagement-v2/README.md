@@ -44,8 +44,16 @@ schema, source, profile, goal, signer and bundle pins with hashes of actual byte
 The source manifest includes file modes and sizes as well as digests. Keep final
 input files private and stable after signing.
 
-Application account references are currently reported as
-`target_account_binding_unavailable`; these examples use no account. Linux host
-model ownership is currently unsupported. macOS with an isolated Linux tool lab
-is the development route, and still requires actual environment containment and
-cleanup evidence before a live engagement can be described as qualified.
+These templates use no application account. For authenticated access, add the
+account IDs to the signed access/effects and configure the private host reference
+file described in [target account binding](../../docs/agents/engagement.md#bind-target-accounts-by-reference).
+Preflight checks the references without target contact. Request observations bind
+the configured logical account; a target-specific check must establish the user
+the application actually recognizes. Application capture records remote reset as
+unverified, so it cannot supply clean independent remote replay.
+
+Linux host model ownership is currently unsupported. macOS with an isolated Linux
+tool lab is the development route, and still requires actual environment
+containment and cleanup evidence before a live engagement can be described as
+qualified. The [dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md)
+keeps implementation, local checks and remaining qualification work separate.

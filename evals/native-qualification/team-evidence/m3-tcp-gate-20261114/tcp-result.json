@@ -1,0 +1,41 @@
+{
+  "kind": "environment-tcp-gate-e2e-v2",
+  "classification": "actual_local_loopback_tls_controls",
+  "checks": [
+    {
+      "name": "TCP proxy binds only ephemeral loopback",
+      "passed": true
+    },
+    {
+      "name": "ordinary HTTPS proxy client verifies both TLS legs",
+      "passed": true
+    },
+    {
+      "name": "one gate cannot acquire a second listener",
+      "passed": true
+    },
+    {
+      "name": "TCP listener preserves route denial",
+      "passed": true
+    },
+    {
+      "name": "active TCP transfer reaches its first chunk",
+      "passed": true
+    },
+    {
+      "name": "revocation interrupts loopback TLS transfer",
+      "passed": true
+    },
+    {
+      "name": "cleanup closes TCP listener",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "native model client proxy behavior",
+    "provider behavior",
+    "macOS sandbox containment"
+  ],
+  "status": "passed",
+  "source_sha256": "0cf071fe887b6b6e9cd67da6b432e35572549636a85d389dec4d6c0a538aead6"
+}

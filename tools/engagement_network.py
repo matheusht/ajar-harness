@@ -305,7 +305,14 @@ class NetworkGate:
         raise NetworkDenied('network_redirect_limit')
 
     def serve(self, endpoint: Path, *, certificate=None, private_key=None):
-        if self.server is not None or endpoint.exists() or endpoint.is_symlink():
+        self._serve(endpoint, certificate=certificate, private_key=private_key)
+
+    def serve_tcp(self, *, certificate=None, private_key=None):
+        self._serve(None, certificate=certificate, private_key=private_key)
+        return self.server.server_address[1]
+
+    def _serve(self, endpoint, *, certificate, private_key):
+        if self.server is not None or (endpoint is not None and (endpoint.exists() or endpoint.is_symlink())):
             raise NetworkDenied('network_endpoint_exists')
         context = None
         if certificate is not None or private_key is not None:
@@ -404,14 +411,17 @@ class NetworkGate:
                     with gate.lock:
                         gate.sockets.discard(connection)
                     connection.close(); slots.release()
-        class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        base = socketserver.TCPServer if endpoint is None else socketserver.UnixStreamServer
+        class Server(socketserver.ThreadingMixIn, base):
             daemon_threads = True
             block_on_close = False
-        self.server = Server(str(endpoint), Handler)
-        os.chmod(endpoint, 0o600)
+        address = ('127.0.0.1', 0) if endpoint is None else str(endpoint)
+        self.server = Server(address, Handler)
         self.endpoint = endpoint
-        info = endpoint.lstat()
-        self.endpoint_identity = info.st_dev, info.st_ino
+        if endpoint is not None:
+            os.chmod(endpoint, 0o600)
+            info = endpoint.lstat()
+            self.endpoint_identity = info.st_dev, info.st_ino
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -420,6 +430,7 @@ class NetworkGate:
         replaced = False
         if self.server:
             self.server.shutdown(); self.server.server_close(); self.thread.join()
+        if self.endpoint is not None:
             try:
                 info = self.endpoint.lstat()
             except FileNotFoundError:

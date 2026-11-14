@@ -1,0 +1,80 @@
+{
+  "kind": "environment-streaming-e2e-v2",
+  "classification": "actual_local_http_and_stdio_controls",
+  "checks": [
+    {
+      "name": "package streams before upstream completion with exact bytes",
+      "passed": true
+    },
+    {
+      "name": "host transfer memory stays below body size",
+      "passed": true
+    },
+    {
+      "name": "content type survives streaming",
+      "passed": true
+    },
+    {
+      "name": "declared-limit refuses clean oversized or incomplete success",
+      "passed": true
+    },
+    {
+      "name": "chunked-limit refuses clean oversized or incomplete success",
+      "passed": true
+    },
+    {
+      "name": "short refuses clean oversized or incomplete success",
+      "passed": true
+    },
+    {
+      "name": "ordinary chunked response completes exactly",
+      "passed": true
+    },
+    {
+      "name": "redirect and duplicate session headers survive without hop headers",
+      "passed": true
+    },
+    {
+      "name": "client follows session redirect with transient cookies",
+      "passed": true
+    },
+    {
+      "name": "cross-origin direct fetch strips credentials",
+      "passed": true
+    },
+    {
+      "name": "declared upload streams exact bytes",
+      "passed": true
+    },
+    {
+      "name": "chunked upload streams exact bytes",
+      "passed": true
+    },
+    {
+      "name": "declared upload cap rejects before forwarding",
+      "passed": true
+    },
+    {
+      "name": "chunked upload cap rejects excess bytes",
+      "passed": true
+    },
+    {
+      "name": "revocation scenario receives initial bytes",
+      "passed": true
+    },
+    {
+      "name": "midstream revocation prevents clean completion",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "Docker containment",
+    "SSH transport",
+    "external acquisition",
+    "provider behavior"
+  ],
+  "package_bytes": 6548736,
+  "host_tracemalloc_peak_bytes": 567355,
+  "status": "passed",
+  "source_sha256": "ced00e8ac34888cd53eb2ea23b3a5ba10ec65501b65fbc4646bdac1446aec01c"
+}

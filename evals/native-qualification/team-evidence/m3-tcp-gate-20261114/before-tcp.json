@@ -1,0 +1,13 @@
+{
+  "kind": "environment-tcp-gate-e2e-v2",
+  "classification": "actual_local_loopback_tls_controls",
+  "checks": [],
+  "unverified": [
+    "native model client proxy behavior",
+    "provider behavior",
+    "macOS sandbox containment"
+  ],
+  "status": "failed",
+  "error": "AttributeError: 'NetworkGate' object has no attribute 'serve_tcp'",
+  "source_sha256": "0cf071fe887b6b6e9cd67da6b432e35572549636a85d389dec4d6c0a538aead6"
+}

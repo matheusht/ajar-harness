@@ -1,0 +1,16 @@
+{
+  "kind": "environment-tcp-gate-checkpoint-v2",
+  "sources": {
+    "tools/engagement_network.py": "978ec14335ce4a3d03314033a62210603f918984370f3df11a30f735dce7fdb3",
+    "tools/engagement_network_bridge.py": "ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "evals/native-qualification/smoke/check_environment_tcp_gate_e2e.py": "0cf071fe887b6b6e9cd67da6b432e35572549636a85d389dec4d6c0a538aead6",
+    "evals/native-qualification/smoke/check_environment_streaming_e2e.py": "ced00e8ac34888cd53eb2ea23b3a5ba10ec65501b65fbc4646bdac1446aec01c",
+    "evals/native-qualification/smoke/check_environment_proxy_bridge_e2e.py": "0b68937e7457a4ea5ec05cfa1df7981e04539b8e0cdf508077fef0baeb705e6b"
+  },
+  "results": {
+    "streaming-regression.json": "233d839bcb2733101c6dbd058cf4f145c57850aec8b904de26f697ce1715cc96",
+    "tcp-result.json": "ebf0239a2c8ab4d6a2f138073cd8073ac76aa64d428849a04bb87087b1315ca9",
+    "bridge-regression.json": "588d0c1b447ef379988b80e09f2f0b2b13f96dc77ee8d8cc34ca1b2241d25ed5",
+    "before-tcp.json": "badbcb140460f285b3baf335369947eabf93883d6faba7b8880fbafbe6634de1"
+  }
+}

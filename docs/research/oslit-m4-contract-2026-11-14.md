@@ -20,7 +20,8 @@ Claims (`unconfirmed`, `supported`, `independently_confirmed`, `refuted`,
 `needs_review`), task/search state, and cleanup (`pending`, `verified`, `unresolved`)
 remain separate. A worker's success text, numeric score or zero exit status cannot
 confirm a claim. Supersession retains prior bytes. Instrument/experiment/claim or
-contrary-publication supersession invalidates dependent claim review; an unrelated
+contrary-publication supersession invalidates dependent claim, patch and closure
+review, including the fresh reviewer's check experiments; an unrelated
 publication does not invalidate every conclusion.
 
 ## Worker requests

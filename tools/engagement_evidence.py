@@ -403,14 +403,35 @@ def invalidate(state, supersedes):
     if not supersedes:
         return
     changed = set(supersedes)
-    for claim in state['claims'].values():
-        experiments = [state['experiments'][name] for name in (claim['effect'], claim['control'], claim['replay']) if name]
-        relevant = {claim['claim_id'], *claim['contrary'], *[row['experiment_id'] for row in experiments],
-            *[row['instrument_id'] for row in experiments]}
-        if relevant & changed:
-            claim['state'] = 'needs_review'
-            for review in state['reviews'].values():
-                if review['kind'] == 'claim' and review['subject_id'] == claim['claim_id']:
+    changed_bytes = {artifact['sha256'] for name in changed if name in state['publications']
+        for artifact in state['publications'][name]['artifacts']}
+
+    def experiment_dependencies(names):
+        rows = [state['experiments'][name] for name in names if name in state['experiments']]
+        identifiers = {value for row in rows for value in (row['experiment_id'], row['instrument_id'])}
+        byte_refs = {value for row in rows for value in (row['candidate_sha256'], row['probe_sha256'],
+            state['instruments'][row['instrument_id']]['artifact_sha256'])}
+        return identifiers, byte_refs
+
+    for collection, subject_key in (('claims', 'claim_id'), ('patches', 'patch_id'), ('closures', 'closure_id')):
+        for subject in state[collection].values():
+            subject_id = subject[subject_key]
+            reviews = [row for row in state['reviews'].values() if row['subject_id'] == subject_id
+                and row['kind'] == {'claims': 'claim', 'patches': 'patch', 'closures': 'closure'}[collection]]
+            experiments = [name for review in reviews for name in review.get('result', {}).get('evidence_refs', [])]
+            relevant = {subject_id}
+            if collection == 'claims':
+                experiments.extend(name for name in (subject['effect'], subject['control'], subject['replay']) if name)
+                relevant.update(subject['contrary'])
+            elif collection == 'patches':
+                relevant.add(subject['claim_id'])
+            else:
+                relevant.update(subject['claim_ids'])
+            experiment_ids, byte_refs = experiment_dependencies(experiments)
+            if (relevant | experiment_ids) & changed or byte_refs & changed_bytes:
+                subject['state'] = 'reopened' if collection == 'closures' else 'needs_review'
+                changed.add(subject_id)
+                for review in reviews:
                     review['status'] = 'stale'
 
 

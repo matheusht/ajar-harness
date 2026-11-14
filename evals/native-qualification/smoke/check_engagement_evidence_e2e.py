@@ -383,6 +383,8 @@ def patch(x):
     x.c.export(x.path / 'patch-export')
     require((x.path / 'patch-export/objects' / material['patched_manifest_sha256'][7:]).is_file(),
         'patch manifest not exported')
+    x.instrument('instrument-updated', reset='new-reset', supersedes=['instrument-1'])
+    require(x.c.state()['patches']['patch-1']['state'] == 'needs_review', 'accepted patch survived changed measurement')
 
 
 def unbound_execution(x):

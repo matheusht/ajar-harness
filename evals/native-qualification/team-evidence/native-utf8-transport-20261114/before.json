@@ -1,0 +1,27 @@
+{
+  "status": "failed",
+  "evidence": "controlled_protocol_subprocesses",
+  "provider_calls": 0,
+  "checks": [
+    {
+      "check": "wire_roundtrip_and_cap",
+      "status": "failed",
+      "error": "native_request_oversized"
+    },
+    {
+      "check": "codex_roundtrip",
+      "status": "failed",
+      "error": "native_request_oversized"
+    },
+    {
+      "check": "omp_roundtrip",
+      "status": "failed",
+      "error": "native_request_oversized"
+    },
+    {
+      "check": "public_and_pending_utf8_bytes",
+      "status": "failed",
+      "error": "native_publication_rejected"
+    }
+  ]
+}

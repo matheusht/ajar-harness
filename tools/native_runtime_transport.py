@@ -52,7 +52,7 @@ class PendingTool:
     def _wait(self):
         try:
             response = public(self.operation.wait())
-            if not isinstance(response, dict) or len(json.dumps(response).encode()) > MAX_MESSAGE:
+            if not isinstance(response, dict) or len(json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()) > MAX_MESSAGE:
                 raise RuntimeError('native_host_tool_result_invalid')
             self.response = response
         except Exception:
@@ -84,9 +84,9 @@ def identifier(value):
 
 def public(value):
     try:
-        encoded = json.dumps(value, allow_nan=False, separators=(',', ':')).encode()
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
         safe_publication(encoded)
-    except (ContractError, ValueError, TypeError):
+    except (ContractError, ValueError, TypeError, UnicodeError):
         raise RuntimeError('native_publication_rejected') from None
     return value
 
@@ -228,7 +228,7 @@ class Transport:
         return 'request-' + str(self.sequence)
 
     def send(self, value):
-        data = json.dumps(value, allow_nan=False, separators=(',', ':')).encode() + b'\n'
+        data = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode() + b'\n'
         if len(data) > MAX_FRAME:
             raise RuntimeError('native_request_oversized')
         if self.closed or self.process.poll() is not None:

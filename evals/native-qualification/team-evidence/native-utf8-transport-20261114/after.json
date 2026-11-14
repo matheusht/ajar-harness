@@ -1,0 +1,41 @@
+{
+  "status": "passed",
+  "evidence": "controlled_protocol_subprocesses",
+  "provider_calls": 0,
+  "checks": [
+    {
+      "check": "wire_roundtrip_and_cap",
+      "status": "passed",
+      "result": {
+        "bytes": 456072,
+        "sha256": "b232159ece7c7f714635a3b5a1cc410d83644fc369629ea79d0a28812b0a5915"
+      }
+    },
+    {
+      "check": "codex_roundtrip",
+      "status": "passed",
+      "result": {
+        "runtime": "codex",
+        "prompt_bytes": 453000,
+        "text_sha256": "b232159ece7c7f714635a3b5a1cc410d83644fc369629ea79d0a28812b0a5915"
+      }
+    },
+    {
+      "check": "omp_roundtrip",
+      "status": "passed",
+      "result": {
+        "runtime": "omp",
+        "prompt_bytes": 453000,
+        "text_sha256": "b232159ece7c7f714635a3b5a1cc410d83644fc369629ea79d0a28812b0a5915"
+      }
+    },
+    {
+      "check": "public_and_pending_utf8_bytes",
+      "status": "passed",
+      "result": {
+        "public_text_bytes": 6291456,
+        "pending_text_bytes": 4194304
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# build identity — btc-psbt-sighash-override PoC
+pin: coins/bitcoin @ 89c5153f4669b0d81658b37bae902b62d495d574 (shipped copy: poc/module/, files byte-identical)
+go: go version go1.26.4 darwin/arm64
+build: `go build -trimpath -buildvcs=false` — deterministic; two runs identical
+date: 2026-10-15
+
+SHA256 bin-singlebug = c9d3f3dfa07a2aa28ff309dc4556f264e536f09cd271be5372e654d0639232b1
+SHA256 bin-declare = 4f542ca4b9355550ec6fd1a9e3fd2490f2f0e21ac7f40bbe8270cf19ff733d39
+SHA256 bin-segwit = c6409cfd536d92a8c0a787163bfc58d067772978dde21fb263463488e325fba2
+SHA256 bin-redirect = ae70d8bd1af02aea2144c7fb3fbdae299c9640c2727777f874b7e95c7d84bfd2
+SHA256 bin-acp = 4db4886a579a900c862ff8e4cd74dd30350bd0c4eb2d821c2610ef7449576221
+SHA256 bin-panic = d6c1e134dec3ac722c07f6169c130ca5c5243a0d41e07b332a7e9865ab13c8a7
+SHA256 bin-mpc = 5c588eb36cd7513bc1b2eb110a0e2472c732d4cc75ad26a36343c168943e3fef
+SHA256 bin-accept = 958727c8c61e3c6134b8af0c6561b996f21a926246f4d3527217594056d90059
+
+expected.stdout = verbatim stdout of `sh poc/stage.sh` (eight arms).

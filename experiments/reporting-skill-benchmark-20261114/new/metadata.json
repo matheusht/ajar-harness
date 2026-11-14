@@ -1,0 +1,79 @@
+{
+  "title": "Output-blind sighash scopes in PSBT signing let a PSBT author reuse a victim signature",
+  "asset": "okx/go-wallet-sdk",
+  "component": "coins/bitcoin/psbt_tx.go",
+  "commit": "89c5153f4669b0d81658b37bae902b62d495d574",
+  "cwe": "CWE-347",
+  "cwe_secondary": ["CWE-682", "CWE-863", "CWE-1284"],
+  "cvss_version": "3.1",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:N/I:H/A:N",
+  "cvss_score": 7.7,
+  "cvss_score_sdk_boundary": 6.5,
+  "severity": "high",
+  "severity_condition": "High at chain level; Critical only if a deployed consumer trusts the verifier; no named consumer",
+  "chain": true,
+  "closed_at": "S4",
+  "fragile_stage": "S2",
+  "fragile_reason": "the digest value is input-type dependent; taproot errors at the digest level instead of collapsing",
+  "tested_versions": ["go1.26.4 darwin/arm64"],
+  "artifact": "btc-psbt-sighash-override-report.zip",
+  "stages": [
+    {
+      "id": "S1",
+      "primitive": "effective sighash with the SINGLE bit reaches the digest for an input index past the output count; no output-index guard",
+      "source_ref": "coins/bitcoin/psbt_tx.go:31-36, :667-668, :1643-1645",
+      "marker": "CELL A-returned_err_nil=true",
+      "control": "same PSBT declaring 0x01",
+      "class": "root",
+      "state": "proven"
+    },
+    {
+      "id": "S2",
+      "primitive": "32-byte digest with no outputs commitment: legacy constant 0100...00, v0-witness zero hash, or SIGHASH_NONE",
+      "source_ref": "coins/bitcoin/psbt_tx.go:728, :755, :1349, :1454, :1768; btcd txscript/sighash.go:110-115, :279-287, :567-572",
+      "marker": "CELL S-0x83 signer_digest=0100000000000000000000000000000000000000000000000000000000000000 (single-bug constant=true) attacker_tx_sig_valid=true err=<nil>",
+      "control": "CELL S-0x01 signer_digest=f6da778b2a846438df6f49a1b53de0fa3d89f8dda642813a52148763923942be (single-bug constant=false) attacker_tx_sig_valid=false err=<nil>",
+      "class": "consequence",
+      "state": "proven"
+    },
+    {
+      "id": "S3",
+      "primitive": "valid signature over an attacker-rebuilt transaction, accepted by btcd script engine under StandardVerifyFlags",
+      "source_ref": "coins/bitcoin/psbt_tx.go:670-673, :728-732, :1600-1609, :1768-1784",
+      "marker": "CELL A1-single-0x83 declared=0x83 script_engine_accepts_attacker_tx=true err=<nil>",
+      "control": "CELL A2-control-0x01 declared=0x01 script_engine_accepts_attacker_tx=false err=signature not empty on failed checksig",
+      "class": "consequence",
+      "state": "proven"
+    },
+    {
+      "id": "S4",
+      "primitive": "collapsed digest exported in SignHashList to an external signer; returned signature verifies on the attacker transaction",
+      "source_ref": "coins/bitcoin/psbt_tx.go:1395, :1438, :1473, :1528, :1546-1548",
+      "marker": "CELL M-direct-0x83 mpc_signed_attacker_tx_sig_valid=true",
+      "control": "CELL M-control-0x01 mpc_signed_attacker_tx_sig_valid=false",
+      "class": "consequence",
+      "state": "proven",
+      "state_note": "SDK hand-off and attach proven; external signer policy assumed"
+    },
+    {
+      "id": "S5",
+      "primitive": "a deployed consumer credits or settles on a signature this verifier accepted",
+      "source_ref": "not in this repository",
+      "marker": "none",
+      "control": "none",
+      "class": "consequence",
+      "state": "argued",
+      "blocker": "no live consumer in scope; funds movement not demonstrated"
+    }
+  ],
+  "files": [
+    "report.md",
+    "impact.md",
+    "chain.md",
+    "README.md",
+    "metadata.json",
+    "evidence/source-refs.md",
+    "evidence/reliability.txt",
+    "cleanup.md"
+  ]
+}

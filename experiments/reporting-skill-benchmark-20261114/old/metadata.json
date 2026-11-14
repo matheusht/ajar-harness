@@ -1,0 +1,13 @@
+{
+  "title": "PSBT signing accepts output-blind sighash scopes; the signature stays valid after the attacker rewrites the outputs",
+  "asset": "okx/go-wallet-sdk",
+  "component": "coins/bitcoin",
+  "commit": "89c5153f4669b0d81658b37bae902b62d495d574",
+  "cwe": "CWE-347",
+  "cvss_version": "3.1",
+  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:N/I:H/A:N",
+  "cvss_score": 7.7,
+  "severity": "high",
+  "tested_versions": ["go1.26.4 darwin/arm64"],
+  "artifact": "btc-psbt-sighash-override-poc.zip"
+}

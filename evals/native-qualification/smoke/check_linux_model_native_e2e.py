@@ -257,6 +257,8 @@ def tool_bundle(fixture, result):
         executable = Path(fixture.context_receipt['profile_fields']['executable']['path'])
         os.link(executable, destination / 'bin/codex')
         shutil.copyfile(executable.parent.parent / 'codex-package.json', destination / 'codex-package.json')
+        (destination / 'codex-resources').mkdir()
+        shutil.copy2(executable.parent.parent / 'codex-resources/bwrap', destination / 'codex-resources/bwrap')
         bundle = {'path': str(destination), 'manifest_sha256': digest(canonical(source_manifest(destination))),
                   'platform': fixture.platform}
         result['tool_installation'] = {'reused_verified_model_bytes': True, 'tool_bundle': bundle}

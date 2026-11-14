@@ -129,7 +129,7 @@ def unpack(archive, destination, budget, *, member=None, package=False):
     if not found:raise InstallError('archive_member_missing')
 
 
-def unpack_codex_metadata(archive, destination, budget, platform, version):
+def unpack_codex_package_support(archive, destination, budget, platform, version):
     path = destination / 'codex-package.json'
     unpack(archive, path, budget, member='codex-package.json')
     try:
@@ -140,6 +140,17 @@ def unpack_codex_metadata(archive, destination, budget, platform, version):
     except (ValueError, AttributeError, UnicodeError):
         raise InstallError('native_package_identity_mismatch') from None
     path.chmod(0o444)
+    helper = destination / 'codex-resources/bwrap'
+    unpack(archive, helper, budget, member='codex-resources/bwrap')
+    with helper.open('rb') as stream:header = stream.read(20)
+    machine = {'linux/arm64': 183, 'linux/amd64': 62}[platform]
+    if (len(header) != 20 or header[:6] != bytes([127, 69, 76, 70, 2, 1]) or
+            int.from_bytes(header[18:20], 'little') != machine):
+        raise InstallError('native_package_helper_platform_mismatch')
+    if not helper.stat().st_mode & 0o111:
+        raise InstallError('native_package_helper_not_executable')
+    helper.chmod(0o555)
+    helper.parent.chmod(0o755)
 
 
 def inspector(kind, bundle):
@@ -183,7 +194,7 @@ def install(args):
                 archives.append(download(row, archive))
                 unpack(archive, output, budget, member=None if package else row['member'], package=package)
                 if codex:
-                    unpack_codex_metadata(archive, destination, budget, args.platform, lock['codex_version'])
+                    unpack_codex_package_support(archive, destination, budget, args.platform, lock['codex_version'])
                 archive.unlink()
             platform = lock['platforms'][args.platform]
             if args.runtime == 'codex':
@@ -245,7 +256,7 @@ def model_image_context(args):
                 else:
                     unpack(archive, output, budget, member=row['member'])
                     if args.runtime == 'codex' and name == 'model':
-                        unpack_codex_metadata(archive, runtime, budget, args.platform, lock['codex_version'])
+                        unpack_codex_package_support(archive, runtime, budget, args.platform, lock['codex_version'])
                 archive.unlink()
                 with output.open('rb') as stream:header = stream.read(20)
                 if (len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or

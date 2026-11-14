@@ -285,7 +285,8 @@ def inspect_tool_bundle(profile, profile_id='runtime-main'):
     addon = root / ('node_modules/@oh-my-pi/pi-natives-linux-' + arch[0])
     try:
         data = json.loads((addon / 'package.json').read_bytes())
-        expected_main = './pi_natives.linux-' + arch[0] + '.node'
+        expected_main = ('./pi_natives.linux-x64-baseline.node' if arch[0] == 'x64'
+                         else './pi_natives.linux-arm64.node')
         if (data.get('name') != '@oh-my-pi/pi-natives-linux-' + arch[0] or
                 data.get('version') != profile['version'] or data.get('main') != expected_main or
                 not (addon / expected_main).is_file() or not (sdk / 'src/sdk.ts').is_file()):

@@ -1,0 +1,18 @@
+{
+  "base": "4bdd0bf2037620ddd85d957503bd5fcf1a1f8b71",
+  "sources": {
+    "tools/native_runtime_omp.py": "sha256:a738474311014e0693a6b561af9a666d9dd8b82da55e8004737cc23f9a771a72",
+    "evals/native-qualification/smoke/check_native_tool_install_e2e.py": "sha256:641667b94cf5241a3f40c6c7e93d02996a35467d6963e52f651a3c9e36223bb5",
+    "config/native-tool-lock.json": "sha256:95a1b7a9496932a7fc3ef43dea7a67dc2df62eb16fb1e0d4ad780ce78302392a"
+  },
+  "before_production_edit": {
+    "omp-amd64": "native_bundle_platform_unavailable",
+    "omp-amd64-wrong-main": "invalid install accepted"
+  },
+  "after": {
+    "installer_cases_passed": 14,
+    "offline_preflight_cases_passed": 7
+  },
+  "actual_native_execution": "not_run",
+  "docker": "not_run"
+}

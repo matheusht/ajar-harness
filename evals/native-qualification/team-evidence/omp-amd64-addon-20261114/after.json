@@ -1,0 +1,64 @@
+{
+  "status": "passed",
+  "classification": "engineering_archive_fixture",
+  "provider_calls": 0,
+  "linux_execution": "not_run",
+  "checks": [
+    {
+      "check": "codex",
+      "status": "passed"
+    },
+    {
+      "check": "omp",
+      "status": "passed"
+    },
+    {
+      "check": "checksum",
+      "status": "passed"
+    },
+    {
+      "check": "traversal",
+      "status": "passed"
+    },
+    {
+      "check": "link",
+      "status": "passed"
+    },
+    {
+      "check": "wrong-platform",
+      "status": "passed"
+    },
+    {
+      "check": "bun-version",
+      "status": "passed"
+    },
+    {
+      "check": "truncated",
+      "status": "passed"
+    },
+    {
+      "check": "existing",
+      "status": "passed"
+    },
+    {
+      "check": "receipt-alias",
+      "status": "passed"
+    },
+    {
+      "check": "omp-amd64",
+      "status": "passed"
+    },
+    {
+      "check": "omp-amd64-wrong-main",
+      "status": "passed"
+    },
+    {
+      "check": "omp-amd64-missing-addon",
+      "status": "passed"
+    },
+    {
+      "check": "omp-amd64-wrong-bun-arch",
+      "status": "passed"
+    }
+  ]
+}

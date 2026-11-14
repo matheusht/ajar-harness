@@ -42,10 +42,10 @@ def tar(files, *, link=None):
     return output.getvalue()
 
 
-def zip_bun():
+def zip_bun(machine=183, member='bun-linux-aarch64/bun'):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as archive:
-        archive.writestr('bun-linux-aarch64/bun', elf())
+        archive.writestr(member, elf(machine))
     return output.getvalue()
 
 
@@ -65,32 +65,49 @@ def run(base):
         data[path] = content
         return {'url': 'http://127.0.0.1:' + str(server.server_port) + path,
                 'integrity': 'sha256:' + hashlib.sha256(content).hexdigest(), **fields}
-    def lock():
+    def lock(platform='linux/arm64'):
+        arch, machine = ('arm64', 183) if platform == 'linux/arm64' else ('x64', 62)
+        bun_member = 'bun-linux-' + ('aarch64' if arch == 'arm64' else 'x64') + '/bun'
+        addon_main = 'pi_natives.linux-' + arch + ('-baseline' if arch == 'x64' else '') + '.node'
         return {'kind': 'native-tool-installation-lock-v1', 'codex_version': '0.166.0',
-            'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {'linux/arm64': {
-                'codex': artifact('/codex.tgz', tar({'codex-linux': elf()}), member='codex-linux'),
-                'bun': artifact('/bun.zip', zip_bun(), member='bun-linux-aarch64/bun')}},
+            'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {platform: {
+                'codex': artifact('/codex.tgz', tar({'codex-linux': elf(machine)}), member='codex-linux'),
+                'bun': artifact('/bun.zip', zip_bun(machine, bun_member), member=bun_member)}},
             'packages': [artifact('/sdk.tgz', tar({'package/package.json': json.dumps({
                 'name': '@oh-my-pi/pi-coding-agent', 'version': '18.20.0', 'engines': {'bun': '>=1.4.4'},
                 'scripts': {'postinstall': 'touch ' + str(base / 'SCRIPT_EXECUTED')}}).encode(),
                 'package/src/sdk.ts': b'// owned fixture only'}),
                 destination='node_modules/@oh-my-pi/pi-coding-agent', name='@oh-my-pi/pi-coding-agent', version='18.20.0'),
                 artifact('/addon.tgz', tar({'package/package.json': json.dumps({
-                    'name': '@oh-my-pi/pi-natives-linux-arm64', 'version': '18.20.0',
-                    'main': './pi_natives.linux-arm64.node'}).encode(), 'package/pi_natives.linux-arm64.node': elf()}),
-                destination='node_modules/@oh-my-pi/pi-natives-linux-arm64', name='@oh-my-pi/pi-natives-linux-arm64', version='18.20.0')]}
+                    'name': '@oh-my-pi/pi-natives-linux-' + arch, 'version': '18.20.0',
+                    'main': './' + addon_main}).encode(), 'package/' + addon_main: elf(machine)}),
+                destination='node_modules/@oh-my-pi/pi-natives-linux-' + arch,
+                name='@oh-my-pi/pi-natives-linux-' + arch, version='18.20.0')]}
     def cli(*arguments):
         process = subprocess.run([sys.executable, str(ROOT / 'tools/install_native_tools.py'), *arguments],
             capture_output=True, text=True, timeout=15)
         return process, json.loads(process.stdout) if process.stdout else {}
     rows = []
     try:
-        for name in ('codex', 'omp', 'checksum', 'traversal', 'link', 'wrong-platform', 'bun-version', 'truncated', 'existing', 'receipt-alias'):
+        for name in ('codex', 'omp', 'checksum', 'traversal', 'link', 'wrong-platform', 'bun-version',
+                     'truncated', 'existing', 'receipt-alias', 'omp-amd64', 'omp-amd64-wrong-main',
+                     'omp-amd64-missing-addon', 'omp-amd64-wrong-bun-arch'):
             root = base / name
             root.mkdir()
-            current = lock()
-            runtime = 'omp' if name in ('omp', 'traversal', 'link', 'bun-version') else 'codex'
+            platform = 'linux/amd64' if name.startswith('omp-amd64') else 'linux/arm64'
+            current = lock(platform)
+            runtime = 'omp' if name.startswith('omp') or name in ('traversal', 'link', 'bun-version') else 'codex'
             destination, receipt, pin = root / 'bundle', root / 'receipt.json', root / 'lock.json'
+            if name in ('omp-amd64-wrong-main', 'omp-amd64-missing-addon'):
+                main = 'pi_natives.linux-x64.node' if name.endswith('wrong-main') else 'pi_natives.linux-x64-baseline.node'
+                files = {'package/package.json': json.dumps({'name': '@oh-my-pi/pi-natives-linux-x64',
+                    'version': '18.20.0', 'main': './' + main}).encode()}
+                if name.endswith('wrong-main'):files['package/' + main] = elf(62)
+                current['packages'][1] = artifact('/addon-case.tgz', tar(files),
+                    **{k: current['packages'][1][k] for k in ('destination', 'name', 'version')})
+            if name == 'omp-amd64-wrong-bun-arch':
+                current['platforms'][platform]['bun'] = artifact('/wrong-bun.zip',
+                    zip_bun(183, 'bun-linux-x64/bun'), member='bun-linux-x64/bun')
             if name == 'checksum':current['platforms']['linux/arm64']['codex']['integrity'] = 'sha256:' + '0' * 64
             if name == 'traversal':current['packages'][0] = artifact('/bad.tgz', tar({'package/../../ESCAPE': b'no'}), **{k:current['packages'][0][k] for k in ('destination','name','version')})
             if name == 'link':current['packages'][0] = artifact('/link.tgz', tar({}, link='/tmp'), **{k:current['packages'][0][k] for k in ('destination','name','version')})
@@ -105,9 +122,9 @@ def run(base):
                 receipt = root / 'alias/receipt.json'
             pin.write_text(json.dumps(current))
             try:
-                result, document = cli('install', '--runtime', runtime, '--platform', 'linux/arm64',
+                result, document = cli('install', '--runtime', runtime, '--platform', platform,
                     '--destination', str(destination), '--receipt', str(receipt), '--lock', str(pin))
-                if name in ('codex', 'omp'):
+                if name in ('codex', 'omp', 'omp-amd64'):
                     assert result.returncode == 0, result.stdout + result.stderr
                     assert document['status'] == 'installed' and document['execution_verified'] is False
                     readback, report = cli('preflight', '--receipt', str(receipt))
@@ -123,7 +140,10 @@ def run(base):
                         'link': 'archive_entry_invalid', 'wrong-platform': 'native_bundle_platform_mismatch',
                         'bun-version': 'installation_version_unsupported', 'truncated': 'archive_download_failed',
                         'existing': 'installation_destination_exists',
-                        'receipt-alias': 'installation_receipt_inside_bundle'}[name]
+                        'receipt-alias': 'installation_receipt_inside_bundle',
+                        'omp-amd64-wrong-main': 'native_bundle_platform_unavailable',
+                        'omp-amd64-missing-addon': 'native_bundle_platform_unavailable',
+                        'omp-amd64-wrong-bun-arch': 'native_bundle_platform_mismatch'}[name]
                     assert document.get('error') == expected, result.stdout + result.stderr
                     assert not receipt.exists(), 'invalid receipt published'
                     if name == 'existing':assert (destination / 'keep').read_text() == 'untouched'

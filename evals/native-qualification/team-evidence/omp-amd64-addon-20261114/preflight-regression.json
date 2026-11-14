@@ -1,0 +1,41 @@
+{
+  "status": "passed",
+  "evidence": "offline_static_admission_only",
+  "cases": [
+    {
+      "case": "valid_static_fixture",
+      "status": "passed"
+    },
+    {
+      "case": "unsupported_bun",
+      "status": "passed",
+      "refused": "native_bundle_bun_unsupported"
+    },
+    {
+      "case": "wrong_bun_arch",
+      "status": "passed",
+      "refused": "native_bundle_platform_mismatch"
+    },
+    {
+      "case": "wrong_sdk",
+      "status": "passed",
+      "refused": "native_bundle_sdk_mismatch"
+    },
+    {
+      "case": "changed_sidecar",
+      "status": "passed",
+      "refused": "native_bundle_sidecar_mismatch"
+    },
+    {
+      "case": "nonexecutable_bun",
+      "status": "passed",
+      "refused": "native_bundle_bun_not_executable"
+    },
+    {
+      "case": "missing_platform_addon",
+      "status": "passed",
+      "refused": "native_bundle_platform_unavailable"
+    }
+  ],
+  "execution": "none"
+}

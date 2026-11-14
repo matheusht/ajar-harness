@@ -25,7 +25,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools'))
-from engagement_contract import canonical, digest, load_inputs, safe_publication, source_manifest
+from engagement_contract import ContractError, canonical, digest, load_inputs, safe_publication, source_manifest
 from check_engagement_contract_e2e import make_fixture, fixture_scope, resign_fixture, write
 from check_model_image_docker_e2e import prepare_image, verify_image, cleanup_image
 
@@ -171,6 +171,14 @@ def tool_bundle(fixture, result):
     installed = subprocess.run([sys.executable, str(ROOT / 'tools/install_native_tools.py'), 'install',
         '--runtime', fixture.runtime, '--platform', fixture.platform, '--destination', str(destination),
         '--receipt', str(receipt)], capture_output=True, timeout=600)
+    result['tool_installer'] = {'returncode': installed.returncode}
+    for name in ('stdout', 'stderr'):
+        content = getattr(installed, name)
+        try:
+            text = safe_publication(content[:2048]).decode('utf-8', 'replace')
+        except ContractError:
+            text = '[diagnostic redacted]'
+        result['tool_installer'].update({name: text, name + '_truncated': len(content) > 2048})
     check(result, 'pinned OMP SDK tool bundle installed', installed.returncode == 0)
     result['tool_installation'] = json.loads(receipt.read_bytes())
     return result['tool_installation']['profile_fields']['tool_bundle']
@@ -249,7 +257,7 @@ env_key = "OPENAI_API_KEY"
     scope['runtime_assignments'][0]['profile_sha256'] = digest(canonical(profile))
     scope['environments'][0]['profile_sha256'] = digest(canonical(environment))
     scope['environments'][0]['limits'].update(memory_bytes=1073741824, cpu_count=2, pids=128,
-                                            workspace_bytes=134217728, lease_seconds=LEASE)
+                                            workspace_bytes=1073741824, lease_seconds=LEASE)
     scope['limits']['max_worker_lease_seconds'] = LEASE
     scope['network']['provider'] = [{'protocol': 'https', 'host': PROVIDER_HOST,
         'port': provider.server.server_port, 'address_policy': {'public_only': False, 'cidrs': [PROVIDER_HOST + '/32']}}]

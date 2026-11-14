@@ -1,0 +1,31 @@
+{
+  "classification": "actual_owned_installer_cli_with_inert_fixture_outputs",
+  "native_execution": false,
+  "docker_calls": 0,
+  "downloads": 0,
+  "provider_calls": 0,
+  "source_sha256": "sha256:a2112a7352e8966d3f3ff64729420003b8c6b923af134b4ea7f940fb86b8792e",
+  "checks": [
+    {
+      "name": "failed_plain",
+      "passed": false,
+      "error": "KeyError"
+    },
+    {
+      "name": "failed_sensitive",
+      "passed": false,
+      "error": "KeyError"
+    },
+    {
+      "name": "failed_oversized",
+      "passed": false,
+      "error": "KeyError"
+    },
+    {
+      "name": "successful",
+      "passed": false,
+      "error": "KeyError"
+    }
+  ],
+  "status": "failed"
+}

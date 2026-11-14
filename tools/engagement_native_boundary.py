@@ -218,12 +218,9 @@ class NativeBoundary:
         self.operations = {}
         self.operation_lock = threading.Lock()
         self.state_dir = self.socket_dir = None
-        self.accesses = [copy.deepcopy(row) for row in self.scope['access'] if row['id'] in context.grant['resources']]
-        self.routes = _routes(self.scope, context.grant['resources'])
-        self.environment_id, self.environment_reference, self.environment_profile = self._select_environment()
-        self.profile = copy.deepcopy(context.contract.runtime_profiles[context.worker['profile_id']])
-        self.profile['config_file'] = str(self.controller.root / 'contract/runtimes' / (context.worker['profile_id'] + '.config'))
-        self.profile['protocol']['schema_file'] = str(self.controller.root / 'contract/runtimes' / (context.worker['profile_id'] + '.schema'))
+        self.accesses = []
+        self.routes = self.profile = None
+        self.environment_id = self.environment_reference = self.environment_profile = None
 
     def _select_environment(self):
         kinds = {row['kind'] for row in self.accesses}
@@ -324,6 +321,12 @@ class NativeBoundary:
 
     def start(self):
         self.context.authorize()
+        self.accesses = [copy.deepcopy(row) for row in self.scope['access'] if row['id'] in self.context.grant['resources']]
+        self.routes = _routes(self.scope, self.context.grant['resources'])
+        self.environment_id, self.environment_reference, self.environment_profile = self._select_environment()
+        self.profile = copy.deepcopy(self.context.contract.runtime_profiles[self.context.worker['profile_id']])
+        self.profile['config_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.config'))
+        self.profile['protocol']['schema_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.schema'))
         if any(access['kind'] == 'application' for access in self.accesses):
             try:
                 self.target_accounts = TargetAccountResolver(self._target_reference(), self.scope,

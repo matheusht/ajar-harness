@@ -1,0 +1,115 @@
+{
+  "status": "failed",
+  "classification": "public_cli_signed_fixture_real_runner_unavailable_native_boundary",
+  "external_provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "checks": [
+    {
+      "scenario": "inspect",
+      "status": "passed",
+      "result": {
+        "status": "blocked",
+        "blocked_codes": [
+          "docker_endpoint_unavailable",
+          "native_bundle_platform_mismatch",
+          "native_configuration_invalid",
+          "native_runtime_version_unsupported",
+          "provider_route_unavailable"
+        ]
+      }
+    },
+    {
+      "scenario": "run-resume",
+      "status": "passed",
+      "result": {
+        "run_status": "blocked",
+        "resume_status": "blocked",
+        "cleanup": "verified",
+        "dispatches": 2,
+        "usage_unchanged": true
+      }
+    },
+    {
+      "scenario": "setup-execute-only",
+      "status": "failed",
+      "error": "read-only setup refusal was lost behind cleanup/recovery failure"
+    },
+    {
+      "scenario": "setup-ambiguous-read",
+      "status": "failed",
+      "error": "read-only setup refusal was lost behind cleanup/recovery failure"
+    },
+    {
+      "scenario": "setup-elevated-only",
+      "status": "failed",
+      "error": "read-only setup refusal was lost behind cleanup/recovery failure"
+    },
+    {
+      "scenario": "setup-platform-mismatch",
+      "status": "failed",
+      "error": "read-only setup refusal was lost behind cleanup/recovery failure"
+    },
+    {
+      "scenario": "unknown-factory",
+      "status": "failed",
+      "error": "injected_boundary_requires_simulation"
+    },
+    {
+      "scenario": "stop-recovery",
+      "status": "passed",
+      "result": {
+        "status": "stopped",
+        "cleanup": "pending",
+        "failures": {
+          "lead-1": "recovery_effect_unresolved"
+        }
+      }
+    },
+    {
+      "scenario": "stop-owned",
+      "status": "passed",
+      "result": {
+        "status": "stopping",
+        "code": "runner_stop_pending",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "resume-owned",
+      "status": "passed",
+      "result": {
+        "status": "rejected",
+        "code": "engagement_already_running",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "no-simulation-switch",
+      "status": "passed",
+      "result": {
+        "rejected": true
+      }
+    },
+    {
+      "scenario": "v1-status",
+      "status": "passed",
+      "result": {
+        "status": "initialized",
+        "route": "v1"
+      }
+    }
+  ],
+  "unverified": [
+    "complete native run with Docker",
+    "live provider behavior",
+    "research qualification"
+  ],
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:a74ea87c97af538828abe9c39352f4585d99cd42f4e941ec2b7e86679ab61475",
+    "tools/engagement_runner.py": "sha256:7e66234c8a957027ff8153bed74888578651b396944032038913190499bb2e9f",
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/native_engagement.py": "sha256:9a6dbb603df3dab4b1a8daeb468ad84eb9e4dd21178c87003c80f39182e214d2",
+    "evals/native-qualification/smoke/check_engagement_public_cli_e2e.py": "sha256:dd01707ac9e96acaf85b7d687907d0f12c628da475c6970cc5b5f6f72296340b"
+  }
+}

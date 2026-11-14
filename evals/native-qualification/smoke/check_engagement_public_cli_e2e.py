@@ -59,6 +59,51 @@ def owner(root):
 def scenario(root, name):
     inputs, marker = inputs_fixture(root / 'inputs')
     engagement = root / 'engagement'
+    if name.startswith('setup-'):
+        scope = fixture_scope(inputs)
+        if name == 'setup-execute-only':
+            scope['effects'][0]['kind'] = 'execute'
+        elif name == 'setup-ambiguous-read':
+            scope['effects'].append(dict(scope['effects'][0], id='another-initial-read'))
+        elif name == 'setup-elevated-only':
+            scope['escalation_ceiling'] = 'stored'
+            scope['effects'][0]['rung'] = 'stored'
+        elif name == 'setup-platform-mismatch':
+            document = json.loads(inputs.read_bytes())
+            profile_path = Path(document['environment_profiles']['lab-main'])
+            profile = json.loads(profile_path.read_bytes())
+            profile['platform'] = 'linux/amd64'
+            write(profile_path, encoded(profile))
+            scope['environments'][0]['profile_sha256'] = sha(profile_path.read_bytes())
+        else:
+            raise AssertionError('unknown setup scenario')
+        resign_fixture(inputs, scope)
+        reports = []
+        for generation in range(1, 4):
+            arguments = ('run', '--inputs', inputs) if generation == 1 else ('resume',)
+            code, result = cli(*arguments, '--engagement-root', engagement)
+            state = Controller(engagement).state()
+            require(code == 2 and result.get('code') == 'worker_progress_unavailable'
+                    and result['failures'] == {'lead-1': 'native_environment_capability_unavailable'},
+                    'read-only setup refusal was lost behind cleanup/recovery failure')
+            require(result['cleanup'] == 'verified' and not state['resource_holds']
+                    and state['workers']['lead-1']['status'] == 'stopped'
+                    and state['workers']['lead-1']['generation'] == generation,
+                    'never-admitted setup left a hold or failed to resume fresh authority')
+            require(len(state['dispatches']) == generation and all(row['status'] == 'settled'
+                    and row.get('cancelled_receipt') and not row.get('runtime_owner_receipts')
+                    for row in state['dispatches'].values()), 'setup cancellation proof or history missing')
+            require(not marker.exists() and not state['environment_operations'] and not state['network_operations']
+                    and not state['invocations'] and state['usage']['invocations'] == 0
+                    and state['usage']['reserved_worker_seconds'] == 0 and state['usage']['worker_seconds'] == 0,
+                    'read-only setup refusal executed or charged work')
+            reports.append({'generation': generation, 'cleanup': result['cleanup'], 'dispatches': len(state['dispatches'])})
+        code, stopped = cli('stop', '--engagement-root', engagement)
+        code2, resumed = cli('resume', '--engagement-root', engagement)
+        require(code == code2 == 0 and stopped['status'] == resumed['status'] == 'stopped'
+                and resumed['cleanup'] == 'verified' and len(Controller(engagement).state()['dispatches']) == 3,
+                'stop/resume retried a cancelled engagement')
+        return {'attempts': reports, 'native_and_environment_effects': 0, 'usage': state['usage']}
     if name == 'inspect':
         code, result = cli('inspect', '--inputs', inputs)
         require(result.get('kind') == 'native-engagement-preflight-v2', 'inspect skipped composed preflight')
@@ -91,7 +136,28 @@ def scenario(root, name):
         require(code == 2 and repeat.get('code') == 'engagement_root_exists_or_invalid', 'run replaced existing journal')
         return {'run_status': first['status'], 'resume_status': resumed['status'], 'cleanup': resumed['cleanup'],
                 'dispatches': len(after['dispatches']), 'usage_unchanged': True}
-    controller = Controller.initialize(engagement, load_inputs(inputs))
+    controller = Controller.initialize(engagement, load_inputs(inputs),
+        evidence_class='engineering_simulation' if name == 'unknown-factory' else 'native')
+    if name == 'unknown-factory':
+        from engagement_runner import Runner
+        calls = []
+        def unavailable(context):
+            calls.append(context.grant['dispatch_id'])
+            raise ValueError('unverified constructor outcome')
+        result = Runner(controller, boundary_factory=unavailable).run()
+        first = controller.state()
+        require(result['status'] == 'blocked' and result['cleanup'] != 'verified'
+                and first['resource_holds'] and all(row['status'] == 'unknown'
+                    and not row.get('cancelled_receipt') for row in first['dispatches'].values()),
+                'unknown factory failure was treated as proven absence')
+        resumed = Runner(controller, boundary_factory=unavailable).run()
+        after = controller.state()
+        require(len(calls) == 1 and len(after['dispatches']) == 1 and after['usage'] == first['usage']
+                and after['resource_holds'] == first['resource_holds'] and resumed['cleanup'] != 'verified',
+                'unknown factory effect was retried, refunded or declared clean')
+        require(not marker.exists() and not after['environment_operations'], 'control fixture executed a runtime')
+        return {'classification': 'engineering_simulation_unknown_factory_control',
+                'dispatches': len(after['dispatches']), 'cleanup': resumed['cleanup'], 'hold_preserved': True}
     if name == 'stop-recovery':
         workspace = root / 'workspace'; workspace.mkdir(mode=0o700)
         grant = controller.prepare_worker_dispatch('lead-1', 1, workspace, seconds=30,
@@ -141,7 +207,9 @@ def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--output', type=Path, required=True); args = parser.parse_args()
     checks = []
     with tempfile.TemporaryDirectory(prefix='engagement-public-cli-') as directory:
-        for name in ['inspect', 'run-resume', 'stop-recovery', 'stop-owned', 'resume-owned', 'no-simulation-switch', 'v1-status']:
+        for name in ['inspect', 'run-resume', 'setup-execute-only', 'setup-ambiguous-read',
+                     'setup-elevated-only', 'setup-platform-mismatch', 'unknown-factory',
+                     'stop-recovery', 'stop-owned', 'resume-owned', 'no-simulation-switch', 'v1-status']:
             root = Path(directory).resolve() / name; root.mkdir(mode=0o700)
             try: checks.append({'scenario': name, 'status': 'passed', 'result': legacy(root) if name == 'v1-status' else scenario(root, name)})
             except Exception as error: checks.append({'scenario': name, 'status': 'failed', 'error': str(error)})
@@ -149,6 +217,9 @@ def main():
         'classification': 'public_cli_signed_fixture_real_runner_unavailable_native_boundary',
         'external_provider_calls': 0, 'target_calls': 0, 'docker_calls': 0, 'checks': checks,
         'unverified': ['complete native run with Docker', 'live provider behavior', 'research qualification']}
+    result['source_sha256'] = {name: sha((ROOT / name).read_bytes()) for name in [
+        'tools/engagement_native_boundary.py', 'tools/engagement_runner.py', 'tools/engagement_controller.py',
+        'tools/native_engagement.py', str(Path(__file__).relative_to(ROOT))]}
     args.output.write_text(json.dumps(result, indent=2) + '\n'); print(json.dumps(result, indent=2))
     return 0 if result['status'] == 'passed' else 1
 

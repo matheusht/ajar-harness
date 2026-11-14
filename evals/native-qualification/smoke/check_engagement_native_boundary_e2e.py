@@ -663,8 +663,17 @@ def environment_effect_selection(path):
     context = SimpleNamespace(controller=controller, contract=contract,
         worker=controller.state()['workers']['lead-1'], grant=grant, workspace=workspace,
         assignment=contract.scope['runtime_assignments'][0])
+    context.authorize = lambda: (controller.authorize_dispatch(grant) and grant)
     instance = boundary.NativeBoundary(context)
+    require(instance.environment_id is None, 'constructor selected a fallible environment before lifecycle ownership')
+    try:
+        instance.start()
+    except Exception as error:
+        require(getattr(error, 'code', None) == 'native_bundle_platform_mismatch', 'wrong unavailable fixture prerequisite')
+    else:
+        raise AssertionError('unavailable native fixture was executed')
     require(instance.environment_id == 'lab-main', 'selected an environment without a matching signed effect')
+    require(instance.finish()['cleanup'] == 'verified', 'read-only selection failure lacked unused cleanup proof')
 
 
 def native_host_tools(path):

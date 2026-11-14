@@ -73,10 +73,14 @@ class Environment:
     capability; this container has no direct network or administrative socket.
     """
 
-    def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None):
+    def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None,
+                 known_hosts_file=None):
         from engagement_contract import validate_environment_profile
         validate_environment_profile(profile)
         self.profile = json.loads(json.dumps(profile))
+        if known_hosts_file is not None and profile['transport'] != 'ssh-docker':
+            raise EnvironmentUnavailable('ssh_host_override_invalid')
+        self.known_hosts_file = known_hosts_file
         self.limits = dict(limits)
         if set(limits) != {'memory_bytes', 'cpu_count', 'pids', 'workspace_bytes', 'lease_seconds', 'output_bytes'}:
             raise EnvironmentUnavailable('environment_limits_invalid')
@@ -162,10 +166,14 @@ class Environment:
         self.observe(event)
 
     def _ssh(self, command):
+        from engagement_contract import read_bytes, ContractError
         ssh = self.profile['ssh']
-        known = Path(ssh['known_hosts_file'])
-        if (known.is_symlink() or not known.is_file() or
-                'sha256:' + hashlib.sha256(known.read_bytes()).hexdigest() != ssh['known_hosts_sha256']):
+        known = Path(self.known_hosts_file if self.known_hosts_file is not None else ssh['known_hosts_file'])
+        try:
+            content = read_bytes(known, max_bytes=1024 * 1024)
+        except (ContractError, OSError):
+            raise EnvironmentUnavailable('ssh_host_pin_changed') from None
+        if 'sha256:' + hashlib.sha256(content).hexdigest() != ssh['known_hosts_sha256']:
             raise EnvironmentUnavailable('ssh_host_pin_changed')
         return [shutil.which('ssh') or '/usr/bin/ssh', '-F', '/dev/null', '-T',
                 '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',

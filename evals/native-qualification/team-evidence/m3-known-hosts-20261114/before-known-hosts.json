@@ -1,0 +1,13 @@
+{
+  "kind": "environment-frozen-known-hosts-e2e-v2",
+  "classification": "simulated_ssh_and_docker_cli",
+  "checks": [],
+  "unverified": [
+    "SSH connection",
+    "remote host identity",
+    "remote lease owner"
+  ],
+  "status": "failed",
+  "error": "TypeError: Environment.__init__() got an unexpected keyword argument 'known_hosts_file'",
+  "source_sha256": "259e79739dc63d2b6920a9905e6979a0eb8328710cb50dc7f0fa92f2bb17e424"
+}

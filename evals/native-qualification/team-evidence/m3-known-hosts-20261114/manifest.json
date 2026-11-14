@@ -1,0 +1,18 @@
+{
+  "kind": "environment-known-hosts-checkpoint-v2",
+  "sources": {
+    "tools/research_environment.py": "9f90a49e6c6eeee03d9e64baee027537382a3b947248467b4545716a9f9f6562",
+    "tools/engagement_lease_owner.py": "9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+    "evals/native-qualification/smoke/check_environment_known_hosts_e2e.py": "259e79739dc63d2b6920a9905e6979a0eb8328710cb50dc7f0fa92f2bb17e424",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082"
+  },
+  "results": {
+    "transport-regression.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9",
+    "before-known-hosts.json": "7ec1bddf8682f67fc3fab782c64979169b5112c9e1f468bfd58bd84168d0f6f0",
+    "known-hosts-result.json": "04341092282a5da79a2f24b8bc6cc0a49b85066814ffe8ec59bc6c15ccf57022"
+  },
+  "external_dependency": {
+    "path": "/Users/matheusvsky/.codex/worktrees/setup-checked-adoption/llm-redteam-harness/tools/engagement_contract.py",
+    "sha256": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef"
+  }
+}

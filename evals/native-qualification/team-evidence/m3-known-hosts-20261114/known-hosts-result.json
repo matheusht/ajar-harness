@@ -1,0 +1,37 @@
+{
+  "kind": "environment-frozen-known-hosts-e2e-v2",
+  "classification": "simulated_ssh_and_docker_cli",
+  "checks": [
+    {
+      "name": "frozen transport reference leaves signed profile identity intact",
+      "passed": true
+    },
+    {
+      "name": "missing original path does not replace pinned frozen bytes",
+      "passed": true
+    },
+    {
+      "name": "all simulated SSH launches receive the frozen host-key file",
+      "passed": true
+    },
+    {
+      "name": "changed frozen bytes refuse before transport dispatch",
+      "passed": true
+    },
+    {
+      "name": "symlinked frozen reference refuses before transport dispatch",
+      "passed": true
+    },
+    {
+      "name": "cleanup retains exact signed resource identity",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "SSH connection",
+    "remote host identity",
+    "remote lease owner"
+  ],
+  "status": "passed",
+  "source_sha256": "259e79739dc63d2b6920a9905e6979a0eb8328710cb50dc7f0fa92f2bb17e424"
+}

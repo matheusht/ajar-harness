@@ -114,7 +114,8 @@ def inspect_engagement(inputs: Path) -> dict:
             if verified.environment_profiles[row['profile_id']]['platform'] == profile['tool_bundle']['platform']
             and initial_kinds <= set(row['capabilities'])
             and sum(row['profile_id'] in effect['environment_ids'] and not effect['account_refs']
-                    and effect['kind'] == 'read' and initial_resources <= set(effect['access_ids'])
+                    and effect['kind'] == 'read' and effect['rung'] in ('source_only', 'self')
+                    and initial_resources <= set(effect['access_ids'])
                     for effect in verified.scope['effects']) == 1]
         if not candidates:
             missing.append('native_environment_assignment_unavailable')

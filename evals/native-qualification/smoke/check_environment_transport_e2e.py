@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / 'tools'))
 
 FAKE_DOCKER = r'''#!PYTHON
-import json,sys,time,os
+import json,sys,time,os,subprocess
 from pathlib import Path
 root=Path(__file__).parent
 state=root/'state.json'
@@ -35,9 +35,14 @@ elif args[:2]==['image','inspect']:
 elif args[:2]==['container','create']:
  labels=dict(v.split('=',1) for i,v in enumerate(args) if i and args[i-1]=='--label')
  tmpfs=dict(v.split(':',1) for i,v in enumerate(args) if i and args[i-1]=='--tmpfs')
- x={'Id':('b' if get('--name').endswith('-stage') else 'a')*64,'Name':'/'+get('--name'),'Image':args[-3],
- 'Config':{'Labels':labels,'User':get('--user'),'Volumes':None},
+ image_index=next(i for i,value in enumerate(args) if value.startswith('sha256:'))
+ command=args[image_index+1:]
+ x={'Id':('b' if get('--name').endswith('-stage') else 'a')*64,'Name':'/'+get('--name'),'Image':args[image_index],
+ 'Path':get('--entrypoint'),'Args':command,
+ 'Config':{'Labels':labels,'User':get('--user'),'WorkingDir':get('--workdir'),'Volumes':None,'Entrypoint':[get('--entrypoint')],
+ 'Cmd':command,'OpenStdin':'--interactive' in args},
  'HostConfig':{'NetworkMode':get('--network'),'ReadonlyRootfs':'--read-only' in args,
+ 'Init':'--init' in args,
  'Privileged':False,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges=true'],
  'LogConfig':{'Type':'none'},'RestartPolicy':{'Name':'no'},
  'Memory':int(get('--memory')),'MemorySwap':int(get('--memory-swap')),
@@ -67,7 +72,13 @@ elif args[:2]==['image','ls']:
  if (root/'image.json').exists():print(json.loads((root/'image.json').read_text())['Id'])
 elif args[:2]==['container','start']:
  x=read();x['State']={'Running':True,'Status':'running'};write(x)
- while read() and read()['State']['Running']: time.sleep(.02)
+ child=subprocess.Popen([sys.executable,*x['Config']['Cmd']],stdin=sys.stdin.buffer,stdout=sys.stdout.buffer)
+ try:
+  while read() and read()['State']['Running'] and child.poll() is None:time.sleep(.02)
+ finally:
+  if child.poll() is None:child.terminate();child.wait(timeout=2)
+  x=read()
+  if x:x['State']={'Running':False,'Status':'exited'};write(x)
 elif args[:2]==['container','exec']:
  if args[-1]=='sleep': time.sleep(60)
  elif args[-1]=='fail':print('missing-fixture-dependency',file=sys.stderr);sys.exit(7)
@@ -181,6 +192,28 @@ def main():
             prepared=application.prepare([app_access],{})
             check('application-only preparation needs no fabricated source',prepared['status']=='ready' and prepared['inputs']=={})
             application.cleanup()
+            old=Environment(profile,limits,authorize,events.append)
+            old.prepare([access],{'echo':str(binary)});old.revoke()
+            receipt=old.receipt();state=json.loads((root/'state.json').read_text())
+            legacy=['/bin/sh','-c','while :; do sleep 3600; done']
+            state['Config']['Labels'].pop('io.oslit.guardian')
+            state['Config'].update(User='1000:1000',WorkingDir='/work',OpenStdin=False,Entrypoint=legacy[:1],Cmd=legacy[1:])
+            state.update(Path=legacy[0],Args=legacy[1:]);state['HostConfig']['Init']=True
+            (root/'state.json').write_text(json.dumps(state))
+            try:old.readback()
+            except EnvironmentUnavailable:pass
+            else:raise AssertionError('active owner fell back to a legacy guardian')
+            check('legacy configuration is never an active fallback',True)
+            recovered=Environment(profile,limits,authorize,events.append,receipt=receipt)
+            check('historical shell-init receipt remains readable',recovered.readback()['status']=='stopped')
+            damaged=json.loads(json.dumps(state));damaged['Args']=['-c','changed-command']
+            (root/'state.json').write_text(json.dumps(damaged))
+            try:recovered.cleanup()
+            except EnvironmentUnavailable:pass
+            else:raise AssertionError('changed historical configuration was accepted')
+            check('historical cleanup validates its original command', (root/'state.json').exists())
+            (root/'state.json').write_text(json.dumps(state));recovered.cleanup()
+            check('historical owner cleanup preserves receipt meaning',not (root/'state.json').exists())
             (source/'hello.py').write_text('changed\n')
             changed=Environment(profile,limits,authorize,events.append)
             try:changed.prepare([source_access],{'source':str(source)})

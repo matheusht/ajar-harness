@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timezone
 from contextlib import nullcontext
 
-from engagement_lease_owner import OwnedProcess, command_environment
+from engagement_lease_owner import OwnedProcess, command_environment, guardian_command
 
 
 class EnvironmentUnavailable(RuntimeError):
@@ -99,6 +99,7 @@ class Environment:
         self.stdio_processes = {}
         self.held = False
         self.retired = False
+        self.recovering = receipt is not None
         self.identity = {'kind': 'research-environment-receipt-v2', 'nonce': uuid.uuid4().hex,
                          'container_id': None, 'container_name': None,
                          'stage_container_id': None, 'stage_container_name': None,
@@ -313,11 +314,28 @@ class Environment:
     def _verify_configuration(self, info, *, stage=False):
         try:
             host = info['HostConfig']
+            config = info['Config']
             expected_tmpfs = self._tmpfs()
             expected_image = self.profile['image_id'] if stage else self.identity['prepared_image_id']
             expected_readonly = not stage
+            guarded = config['Labels'].get('io.oslit.guardian') == 'container-lease-v1'
+            if guarded:
+                command = guardian_command(self.identity['nonce'], self.limits['lease_seconds'])
+                expected_user, expected_init, expected_stdin = '0:0', False, True
+                expected_workdir = '/'
+            elif self.recovering and 'io.oslit.guardian' not in config['Labels']:
+                command = ['/bin/sh', '-c', 'while :; do sleep 3600; done']
+                expected_user = f"{self.profile['uid']}:{self.profile['gid']}"
+                expected_init, expected_stdin = True, False
+                expected_workdir = '/work'
+            else:
+                raise ValueError('guardian')
             if (info['Image'] != expected_image or
-                    info['Config']['User'] != f"{self.profile['uid']}:{self.profile['gid']}" or
+                    config['User'] != expected_user or host['Init'] is not expected_init or
+                    config['WorkingDir'] != expected_workdir or
+                    config['OpenStdin'] is not expected_stdin or
+                    config['Entrypoint'] != [command[0]] or config['Cmd'] != command[1:] or
+                    info['Path'] != command[0] or info['Args'] != command[1:] or
                     host['NetworkMode'] != 'none' or host['ReadonlyRootfs'] is not expected_readonly or
                     host['Privileged'] or set(host['CapDrop'] or []) != {'ALL'} or
                     not any(x in ('no-new-privileges', 'no-new-privileges=true') for x in host['SecurityOpt']) or
@@ -484,18 +502,21 @@ class Environment:
         except (ValueError, KeyError, TypeError):
             raise EnvironmentUnavailable('pinned_image_unavailable') from None
         with self._archive(accesses, access_files, {} if support_inputs is None else support_inputs) as archive:
+            guardian = guardian_command(self.identity['nonce'], self.limits['lease_seconds'])
             args = ['container', 'create', '--name', self.identity['stage_container_name'],
                     '--label', 'io.oslit.engagement=' + self.identity['nonce'],
                     '--label', 'io.oslit.profile=' + self.identity['profile_sha256'],
+                    '--label', 'io.oslit.guardian=container-lease-v1',
                     '--network', 'none', '--cap-drop', 'ALL',
                     '--security-opt', 'no-new-privileges=true', '--pids-limit', str(self.limits['pids']),
                     '--log-driver', 'none', '--restart', 'no', '--no-healthcheck',
                     '--memory', str(self.limits['memory_bytes']), '--memory-swap', str(self.limits['memory_bytes']),
-                    '--cpus', str(self.limits['cpu_count']), '--user', f"{self.profile['uid']}:{self.profile['gid']}",
-                    '--workdir', '/work', '--entrypoint', '/bin/sh', '--init']
+                    '--cpus', str(self.limits['cpu_count']), '--user', '0:0',
+                    '--workdir', '/', '--entrypoint', guardian[0], '--init=false', '--interactive']
             for path, options in self._tmpfs().items():
                 args.extend(['--tmpfs', path + ':' + options])
-            args.extend([self.profile['image_id'], '-c', 'while :; do sleep 3600; done'])
+            image_argument = len(args)
+            args.extend([self.profile['image_id'], *guardian[1:]])
             created = self._effect('create_stage', args)
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
@@ -516,7 +537,7 @@ class Environment:
                 self.held = True
                 raise EnvironmentUnavailable('environment_stage_cleanup_unobserved')
             args[args.index('--name') + 1] = self.identity['container_name']
-            args[-3] = self.identity['prepared_image_id']
+            args[image_argument] = self.identity['prepared_image_id']
             args.insert(2, '--read-only')
             created = self._effect('create', args)
             if created['status'] != 'settled' or created['returncode']:
@@ -529,7 +550,7 @@ class Environment:
                     'daemon_id': self.identity['daemon_id'], 'id': self.identity['container_id'],
                     'nonce': self.identity['nonce']}
         command = [self.profile['docker_binary'], '--host', self.profile['docker_endpoint'],
-                   'container', 'start', '--attach', self.identity['container_id']]
+                   'container', 'start', '--attach', '--interactive', self.identity['container_id']]
         owner_command = None
         if self.profile['transport'] == 'ssh-docker':
             source = Path(__file__).with_name('engagement_lease_owner.py').read_text()
@@ -538,7 +559,8 @@ class Environment:
         self._event('intent', 'start', operation_id)
         duration = min(duration, self._admit())
         self.owner = OwnedProcess(command, lease_seconds=duration, maximum_lease_seconds=self.limits['lease_seconds'],
-                                  docker_identity=identity, owner_command=owner_command)
+                                  docker_identity=identity, owner_command=owner_command,
+                                  guardian_nonce=self.identity['nonce'])
         try:
             with self.dispatch_guard():
                 with self.lock:
@@ -734,6 +756,7 @@ class Environment:
         info = self._inspect(absent_ok=True)
         if info is None:
             return {'status': 'absent', 'identity': self.receipt()}
+        self._verify_configuration(info)
         if self.owner:
             self.owner.revoke()
         info = self._inspect()
@@ -756,6 +779,7 @@ class Environment:
             raise EnvironmentUnavailable('environment_cleanup_unobserved')
         stage = self._inspect(stage=True, absent_ok=True)
         if stage is not None:
+            self._verify_configuration(stage, stage=True)
             if stage['State']['Running']:
                 killed = self._effect('stop_stage', ['container', 'kill', self.identity['stage_container_id']], cleanup=True)
                 if killed['status'] != 'settled' or killed['returncode']:

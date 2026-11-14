@@ -59,19 +59,38 @@ def main():
                 check('one native tool owner per environment',process.poll() is None)
                 relay=environment.launch_stdio(['stdio'],role='network_proxy')
                 check('distinct trusted relay role has its own private pipe',relay.stdout.readline()==b'env-leaked:False\n' and relay.pid!=process.pid)
+                model_pipes=[]
+                for role in ('model','model_provider_proxy','model_codex_bridge'):
+                    pipe=environment.launch_stdio(['stdio'],role=role);model_pipes.append(pipe)
+                    check(role+' receives a distinct private pipe',pipe.stdout.readline()==b'env-leaked:False\n'
+                          and pipe.pid not in [process.pid,relay.pid,*[p.pid for p in model_pipes[:-1]]])
+                    pipe.stdin.write((role+'\n').encode());pipe.stdin.flush()
+                    check(role+' keeps its own stdio messages',pipe.stdout.readline()==('reply:'+role+'\n').encode())
+                    recorded=len(events)
+                    try:environment.launch_stdio(['stdio'],role=role)
+                    except EnvironmentUnavailable:pass
+                    else:raise AssertionError('duplicate model pipe role accepted')
+                    check(role+' cannot be claimed twice',len(events)==recorded and pipe.poll() is None)
+                recorded=len(events)
                 try:environment.launch_stdio(['stdio'],role='model_selected')
                 except EnvironmentUnavailable:pass
                 else:raise AssertionError('unregistered pipe role accepted')
-                check('arbitrary pipe role is refused',relay.poll() is None)
+                check('arbitrary pipe role is refused before effects',len(events)==recorded and relay.poll() is None)
+                check('fixed model roles are attributed in launch observations',
+                      {e['role'] for e in events if e['operation']=='launch_stdio' and e['phase']=='intent'}==
+                      {'native_tools','network_proxy','model','model_provider_proxy','model_codex_bridge'})
                 active[0]=False
                 stopped=environment.revoke()
-                check('revocation closes all host pipes and observes worker stopped',process.poll() is not None and relay.poll() is not None and stopped['status']=='stopped')
+                check('revocation closes all host pipes and observes worker stopped',
+                      all(p.poll() is not None for p in [process,relay,*model_pipes]) and stopped['status']=='stopped')
                 try:environment.launch_stdio(['stdio'])
                 except EnvironmentUnavailable:pass
                 else:raise AssertionError('retired environment launched native process')
                 check('retired generation cannot recreate native pipe',process.poll() is not None)
                 process.stdin.close();process.stdout.close()
                 relay.stdin.close();relay.stdout.close()
+                for pipe in model_pipes:
+                    pipe.stdin.close();pipe.stdout.close()
             finally:
                 os.environ.pop('OSLIT_TEST_PRIVATE_VALUE',None)
                 environment.cleanup()

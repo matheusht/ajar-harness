@@ -1,0 +1,26 @@
+{
+  "classification": "signed_local_workflow",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "freeze_resume",
+      "status": "fail",
+      "error": "resume did not use frozen guidance"
+    },
+    {
+      "scenario": "tamper",
+      "status": "fail",
+      "error": "accepted forbidden operation: contract_changed"
+    },
+    {
+      "scenario": "missing",
+      "status": "fail",
+      "error": "accepted forbidden operation: research_guidance_unavailable"
+    },
+    {
+      "scenario": "portability",
+      "status": "pass"
+    }
+  ],
+  "status": "fail"
+}

@@ -1,0 +1,36 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "no_admission",
+      "status": "pass"
+    },
+    {
+      "scenario": "cancellation_fences",
+      "status": "pass"
+    },
+    {
+      "scenario": "environment_fence",
+      "status": "pass"
+    },
+    {
+      "scenario": "runner_cancel",
+      "status": "pass"
+    },
+    {
+      "scenario": "application_capture",
+      "status": "pass"
+    },
+    {
+      "scenario": "retention_fences",
+      "status": "pass"
+    },
+    {
+      "scenario": "request_provenance",
+      "status": "fail",
+      "error": "protected request provenance omitted"
+    }
+  ],
+  "status": "fail"
+}

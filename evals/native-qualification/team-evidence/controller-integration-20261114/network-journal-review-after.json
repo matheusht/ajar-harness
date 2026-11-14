@@ -1,0 +1,39 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "attribution",
+      "status": "pass"
+    },
+    {
+      "scenario": "scope_rejections",
+      "status": "pass"
+    },
+    {
+      "scenario": "binding_and_revocation",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown_holds",
+      "status": "pass"
+    },
+    {
+      "scenario": "lost_result",
+      "status": "pass"
+    },
+    {
+      "scenario": "anonymous_authority",
+      "status": "pass"
+    },
+    {
+      "scenario": "cleaned_environment",
+      "status": "pass"
+    },
+    {
+      "scenario": "different_dispatch",
+      "status": "pass"
+    }
+  ],
+  "status": "pass"
+}

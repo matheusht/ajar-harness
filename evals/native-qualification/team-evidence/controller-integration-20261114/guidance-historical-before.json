@@ -1,0 +1,28 @@
+{
+  "classification": "signed_local_workflow",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "freeze_resume",
+      "status": "pass"
+    },
+    {
+      "scenario": "tamper",
+      "status": "pass"
+    },
+    {
+      "scenario": "missing",
+      "status": "pass"
+    },
+    {
+      "scenario": "portability",
+      "status": "pass"
+    },
+    {
+      "scenario": "historical_stop",
+      "status": "fail",
+      "error": "research_guidance_unavailable"
+    }
+  ],
+  "status": "fail"
+}

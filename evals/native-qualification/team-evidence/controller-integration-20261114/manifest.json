@@ -1,0 +1,35 @@
+{
+  "kind": "controller-integration-evidence-v1",
+  "implementation_commits": [
+    "2d3efc7f",
+    "3b70b762",
+    "165a31a8"
+  ],
+  "integration_head": "c56d562fe4c9d52faabf4fa7733b23e408dce7d7",
+  "source_sha256": {
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+    "tools/engagement_runner.py": "sha256:7e66234c8a957027ff8153bed74888578651b396944032038913190499bb2e9f",
+    "engine/native-engagement-method.md": "sha256:338bf06d54c816fe2513ce48c8735d4ce2943ebdb90aaf3bfc939d113664f4b1",
+    "engine/native-engagement-protocol.md": "sha256:edeaa3fed19a5c294b748cc63e629442e4abb8aa56b661de53bb0b413a94833e",
+    "evals/native-qualification/smoke/check_engagement_network_journal_e2e.py": "sha256:ee1a5151ae62ac0dd0c5d3b17b2d1299355ea73f3244998733ec0f7c5a43c03d",
+    "evals/native-qualification/smoke/check_engagement_guidance_e2e.py": "sha256:e21df67729b7f3ac8d182f8803fd61d1ec464745b3de988ed61ca9ab6e76a01d",
+    "evals/native-qualification/smoke/check_engagement_admission_e2e.py": "sha256:f9992edbe700e31d18e9c8975fac8aeaeee9372d5d397acf602927a1a60a7691"
+  },
+  "files": {
+    "admission-before.json": "sha256:532aee2a06b72c3d91278323a39b46da2e0d3ab0b254c5961bba964946e0249b",
+    "admission-final-review.json": "sha256:33a841790c581841be5883b461648aa76bdf0b498e3ca4d8028c7eb244ae8f10",
+    "admission-provenance-before.json": "sha256:d034ad3cb6bc41865f2e8cdf1891bcc7f5b2da29e1131c99eacbdb16c573c444",
+    "admission-renewal-after.json": "sha256:d22a40e8729e39919f26f67e648f0336dc98c84d20e30418cb897966cc1f5c64",
+    "admission-renewal-before.json": "sha256:27f16fea790f0be09630913d2339cc328041d815117d70a2b2ed6015f34fce18",
+    "admission-target-before.json": "sha256:466dee309b9df536673aab8980ac472236c592b5bbbde505550841f466ef9142",
+    "guidance-before.json": "sha256:ac576672e76e7531cc20b8cc462d3dfcc017417a188d1a0c6184ebe4d365a510",
+    "guidance-fixed-review.md": "sha256:4da0f9735ff8f6e68cde537e2c284635bb6729aa7eaea83ebbee94671cd0fed2",
+    "guidance-historical-after.json": "sha256:c7b4296d0a89b9944465a28c5f7ec49cf4117deaad6d75cdb8a063f86689566a",
+    "guidance-historical-before.json": "sha256:b53e04ea87de029cd65006c5730f1a14fcf033c510d542cbe263c7c907601c9f",
+    "network-journal-before.json": "sha256:a595af929a6757866cb34994c850182fa57253570385395eed18171096fc9e03",
+    "network-journal-fixed-review.md": "sha256:d3865abffeab4b3889164b54a2b688a1792c48b173934b799657b0b5ac089bc5",
+    "network-journal-review-after.json": "sha256:29fbf4114fd6c505914db7535b3a3c8d14329f68fcc9442a54a17fe35dbc2a28",
+    "network-journal-review-before.json": "sha256:11661c737c14bbc53fd472f3f637317ed58f4f3c1f0f9b6bc2e8c0cd8d409d21"
+  }
+}

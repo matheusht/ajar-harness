@@ -1,0 +1,32 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "attribution",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'record_network_observation'"
+    },
+    {
+      "scenario": "scope_rejections",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'record_network_observation'"
+    },
+    {
+      "scenario": "binding_and_revocation",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'record_network_observation'"
+    },
+    {
+      "scenario": "unknown_holds",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'record_network_observation'"
+    },
+    {
+      "scenario": "lost_result",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'record_network_observation'"
+    }
+  ],
+  "status": "fail"
+}

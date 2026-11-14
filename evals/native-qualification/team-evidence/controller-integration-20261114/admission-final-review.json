@@ -1,0 +1,37 @@
+{
+  "reviewer": "m0_runtime_boundary",
+  "base_head": "183199cc46e86210773a972373aec0704d151f4f",
+  "snapshot_id": "c60bb92b70b6fffa4c3447883d240187c1d5c0b5ef4c6e9b066eddf57ab609e0",
+  "capture_id": "43e52a7e8b78be44ff6e381febb8cbfa44de2ee4ef3cb110d4326dfde26335be",
+  "scope": [
+    "tools/engagement_controller.py",
+    "tools/engagement_evidence.py",
+    "tools/engagement_runner.py",
+    "evals/native-qualification/smoke/check_engagement_admission_e2e.py"
+  ],
+  "standards": "pass",
+  "spec": "pass",
+  "unresolved_findings": [],
+  "checks": {
+    "admission": "9/9 pass",
+    "network_journal": "8/8 pass",
+    "evidence": "16/16 pass"
+  },
+  "check_receipts": [
+    "/tmp/oslit-implementation/admission-independent-result.json",
+    "/tmp/oslit-implementation/admission-independent-network.json",
+    "/tmp/oslit-implementation/admission-independent-evidence.json"
+  ],
+  "observations": [
+    "Pre- and post-review capture IDs match the exact final four-file snapshot.",
+    "Cancellation rejects any admitted owner, invocation, environment/network operation or child capture, and returns unused reservation while preserving history.",
+    "Application capture retention requires a current authorized parent and cannot claim remote reset; unsettled target operations block experiment publication.",
+    "Target request provenance is derived from protected observations and included in comparability.",
+    "WorkerContext authorize, deferred guard entry and renewal all acquire the same controller lock before reading/publishing the current grant. Boundary renewal remains outside that lock."
+  ],
+  "limits": [
+    "Protected runtime/environment facts are simulated; real NetworkGate watcher and signed journals exercised.",
+    "No external provider, Docker/SSH containment, target identity or research qualification established.",
+    "Public CLI integration and pending native boundary account/cancellation follow-up are outside this snapshot."
+  ]
+}

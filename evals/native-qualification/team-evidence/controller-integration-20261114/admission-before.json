@@ -1,0 +1,37 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "no_admission",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'cancel_preparation'"
+    },
+    {
+      "scenario": "cancellation_fences",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'cancel_preparation'"
+    },
+    {
+      "scenario": "environment_fence",
+      "status": "fail",
+      "error": "'Controller' object has no attribute 'cancel_preparation'"
+    },
+    {
+      "scenario": "runner_cancel",
+      "status": "fail",
+      "error": "'runtime'"
+    },
+    {
+      "scenario": "application_capture",
+      "status": "fail",
+      "error": "capture_resources_unavailable"
+    },
+    {
+      "scenario": "retention_fences",
+      "status": "fail",
+      "error": "receipt_invalid != receipt_retention_invalid"
+    }
+  ],
+  "status": "fail"
+}

@@ -1,0 +1,22 @@
+{
+  "kind": "model-image-packaging-evidence-v1",
+  "base_commit": "fd8674b1",
+  "classification": "engineering_fixture_only",
+  "source_sha256": {
+    "tools/install_native_tools.py": "sha256:126d35f3285166d471f8ade1070d3aca1795d0366b4de6cbc14de7a16cd8c944",
+    "config/native-tool-lock.json": "sha256:95a1b7a9496932a7fc3ef43dea7a67dc2df62eb16fb1e0d4ad780ce78302392a",
+    "evals/native-qualification/smoke/check_model_image_install_e2e.py": "sha256:9a018fb71f848cb97d5b5de9976d11bdd6890d518acd2e959548e88de028df18",
+    "evals/native-qualification/smoke/check_native_tool_install_e2e.py": "sha256:0c195bb58609b595d5f436307f184ce29d858a06a776f3821ba55a453de8a800",
+    "evals/native-qualification/team-evidence/model-image-packaging-20261114/before.json": "sha256:dda6f1420a34a2a30168490521ec4aa810fe548ebc8c1450180a0a48d22300bc",
+    "evals/native-qualification/team-evidence/model-image-packaging-20261114/after.json": "sha256:47708af9a078d16319f60585fdde9ebbd244eac25214563f638a1a1ba84991c8",
+    "evals/native-qualification/team-evidence/model-image-packaging-20261114/tool-regression.json": "sha256:ace4d3c9db1dcff17614385b4a999e376b879f539db097cbc0461077d78df198"
+  },
+  "commands": [
+    "python3 evals/native-qualification/smoke/check_model_image_install_e2e.py --output /tmp/model-image-packaging.json",
+    "python3 evals/native-qualification/smoke/check_native_tool_install_e2e.py --output /tmp/native-tool-packaging.json"
+  ],
+  "external_binary_downloads": 0,
+  "docker_calls": 0,
+  "provider_calls": 0,
+  "native_execution": "not_run"
+}

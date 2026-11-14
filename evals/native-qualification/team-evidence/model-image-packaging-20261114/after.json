@@ -1,0 +1,104 @@
+{
+  "status": "passed",
+  "classification": "engineering_model_packaging_fixture",
+  "checks": [
+    {
+      "name": "codex-arm64",
+      "status": "passed"
+    },
+    {
+      "name": "codex-amd64",
+      "status": "passed"
+    },
+    {
+      "name": "omp-arm64",
+      "status": "passed"
+    },
+    {
+      "name": "omp-amd64",
+      "status": "passed"
+    },
+    {
+      "name": "checksum",
+      "status": "passed"
+    },
+    {
+      "name": "raw-short",
+      "status": "passed"
+    },
+    {
+      "name": "raw-long",
+      "status": "passed"
+    },
+    {
+      "name": "raw-no-length",
+      "status": "passed"
+    },
+    {
+      "name": "raw-invalid-size",
+      "status": "passed"
+    },
+    {
+      "name": "raw-format",
+      "status": "passed"
+    },
+    {
+      "name": "truncated",
+      "status": "passed"
+    },
+    {
+      "name": "wrong-platform",
+      "status": "passed"
+    },
+    {
+      "name": "wrong-bun-platform",
+      "status": "passed"
+    },
+    {
+      "name": "missing-helper",
+      "status": "passed"
+    },
+    {
+      "name": "helper-link",
+      "status": "passed"
+    },
+    {
+      "name": "existing",
+      "status": "passed"
+    },
+    {
+      "name": "receipt-existing",
+      "status": "passed"
+    },
+    {
+      "name": "receipt-alias",
+      "status": "passed"
+    },
+    {
+      "name": "base-tag",
+      "status": "passed"
+    },
+    {
+      "name": "base-injection",
+      "status": "passed"
+    },
+    {
+      "name": "version",
+      "status": "passed"
+    },
+    {
+      "name": "archive-limit",
+      "status": "passed"
+    },
+    {
+      "name": "raw-over-general-limit",
+      "status": "passed"
+    }
+  ],
+  "acquisition": "owned localhost synthetic ELF fixtures",
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "native_execution": "not_run",
+  "fixture_request_count": 18,
+  "source_sha256": "sha256:126d35f3285166d471f8ade1070d3aca1795d0366b4de6cbc14de7a16cd8c944"
+}

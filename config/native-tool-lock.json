@@ -14,6 +14,12 @@
         "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64.zip",
         "integrity": "sha256:baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e",
         "member": "bun-linux-aarch64/bun"
+      },
+      "model_omp": {
+        "url": "https://github.com/can1357/oh-my-pi/releases/download/v18.20.0/omp-linux-arm64",
+        "integrity": "sha256:8b5e197db7c58b7ebabf83c6f03597f89bae3a766a84c6481b3a942a125f5e22",
+        "format": "raw",
+        "size": 244435960
       }
     },
     "linux/amd64": {
@@ -26,6 +32,12 @@
         "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip",
         "integrity": "sha256:bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c",
         "member": "bun-linux-x64/bun"
+      },
+      "model_omp": {
+        "url": "https://github.com/can1357/oh-my-pi/releases/download/v18.20.0/omp-linux-x64",
+        "integrity": "sha256:c8694be8c6e6a1f45e3636dd8a8e9eaa78878ad629a89000b403ec5e456d3f89",
+        "format": "raw",
+        "size": 287484080
       }
     }
   },

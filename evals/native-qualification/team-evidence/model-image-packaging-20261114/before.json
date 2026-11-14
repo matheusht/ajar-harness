@@ -1,0 +1,127 @@
+{
+  "status": "failed",
+  "classification": "engineering_model_packaging_fixture",
+  "checks": [
+    {
+      "name": "codex-arm64",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "codex-amd64",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "omp-arm64",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "omp-amd64",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "checksum",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-short",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-long",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-no-length",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-invalid-size",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-format",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "truncated",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "wrong-platform",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "wrong-bun-platform",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "missing-helper",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "helper-link",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "existing",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "receipt-existing",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "receipt-alias",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "base-tag",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "base-injection",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "version",
+      "status": "failed",
+      "error": "usage: install_native_tools.py [-h] {install,preflight} ...\ninstall_native_tools.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "archive-limit",
+      "status": "failed",
+      "error": "usage: scaled_limit.py [-h] {install,preflight} ...\nscaled_limit.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    },
+    {
+      "name": "raw-over-general-limit",
+      "status": "failed",
+      "error": "usage: scaled_limit.py [-h] {install,preflight} ...\nscaled_limit.py: error: argument command: invalid choice: 'model-image-context' (choose from 'install', 'preflight')\n"
+    }
+  ],
+  "acquisition": "owned localhost synthetic ELF fixtures",
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "native_execution": "not_run",
+  "fixture_request_count": 0,
+  "source_sha256": "sha256:d488bef05bdd9bd9eb85d0f6e4c2b2b0af578fc18752589f4e0f9df2fe4b9fdc"
+}

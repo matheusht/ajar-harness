@@ -73,12 +73,18 @@ def scenario(root, name):
                 'run did not enter real runner/boundary')
         controller = Controller(engagement); before = controller.state()
         require(before['evidence_class'] == 'native' and len(before['dispatches']) == 1, 'run bypassed native dispatch journal')
-        require(not marker.exists() and first['cleanup'] != 'verified', 'unavailable boundary was executed or declared clean')
+        require(not marker.exists() and first['cleanup'] == 'verified'
+                and before['workers']['lead-1']['status'] == 'stopped'
+                and all(row.get('cancelled_receipt') for row in before['dispatches'].values()),
+                'unadmitted preparation was executed or lacked cancellation proof')
         code, resumed = cli('resume', '--engagement-root', engagement)
         after = controller.state()
         require(code == 2 and resumed.get('code') == 'worker_progress_unavailable', 'resume skipped runner recovery')
-        require(after['usage'] == before['usage'] and len(after['dispatches']) == 1, 'resume repeated unresolved work')
-        require(resumed['failures'].get('lead-1') == 'recovery_effect_unresolved', 'unknown recovery hidden')
+        require(after['usage'] == before['usage'] and len(after['dispatches']) == 2
+                and all(row.get('cancelled_receipt') for row in after['dispatches'].values()),
+                'resume charged unused work or lost cancelled preparation history')
+        require(resumed['failures'] == first['failures'] and after['workers']['lead-1']['generation'] == 2,
+                'resume hid the unchanged prerequisite or reused stale authority')
         code, repeat = cli('run', '--inputs', inputs, '--engagement-root', engagement)
         require(code == 2 and repeat.get('code') == 'engagement_root_exists_or_invalid', 'run replaced existing journal')
         return {'run_status': first['status'], 'resume_status': resumed['status'], 'cleanup': resumed['cleanup'],

@@ -1,0 +1,16 @@
+{
+  "reviewer": "/root/m1_fixed_review",
+  "base_head": "4058524a95f0ea890998eccfcf7a4be30a30d2af",
+  "snapshot_id": "eafacaaeb141aa3e7738a4d43c007fbef83d1a8d6fed990e7c037e93881f4a49",
+  "capture_id": "57c3d0b1032e132a670610668ee28f0345c80b748abbe47ec741071122e0fbbd",
+  "standards": "pass",
+  "spec": "pass",
+  "unresolved_findings": [],
+  "scope": [
+    "tools/engagement_preflight.py",
+    "evals/native-qualification/smoke/check_engagement_preflight_e2e.py"
+  ],
+  "evidence": "Supplied 33/33 local signed-fixture cases verified; not independently rerun. Exact current HEAD and complete working patch match the frozen capture.",
+  "receipt_sha256": "sha256:883361297438b572101c3bb6a7e3480e8a4adab9d51ae38991995f96cd8be588",
+  "notes": "One initial source_only/self account-free read must cover initial resources/environment; higher signed reads do not create setup ambiguity. Multiple initial reads still refuse. This is prerequisites only, not higher-rung admission or native execution qualification."
+}

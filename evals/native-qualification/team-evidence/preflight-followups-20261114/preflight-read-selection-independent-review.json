@@ -1,0 +1,23 @@
+{
+  "reviewer": "m0_runtime_boundary",
+  "base_head": "33d6cb2f38599794c5c900bbd9c4953a53debf4d",
+  "capture_id": "8c973e76c5c841803daddba78cdaec345d9bc80656501df10eb9dcb542e96f0a",
+  "snapshot_id": "043b13e3af52aa0a3da254cc80572334e2ff7444ecbb6dfe63ec2a831114b9d3",
+  "scope": [
+    "tools/engagement_preflight.py",
+    "evals/native-qualification/smoke/check_engagement_preflight_e2e.py"
+  ],
+  "standards": "pass",
+  "spec": "pass",
+  "unresolved_findings": [],
+  "checks": {
+    "preflight": "31/31 pass"
+  },
+  "receipt": "/tmp/oslit-implementation/preflight-read-selection-independent-result.json",
+  "observations": [
+    "Captured exact two-file snapshot independently; IDs match supplied capture.",
+    "Environment selection counts exactly one account-free read effect covering initial resources, with existing platform/capability checks preserved.",
+    "Execute-only and ambiguous read fixtures refuse; read-plus-execute remains eligible. Rung admission remains in the controller.",
+    "Private signed fixtures prove no native executable, daemon or network dispatch; this is preflight parity only."
+  ]
+}

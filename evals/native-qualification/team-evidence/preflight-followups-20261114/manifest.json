@@ -1,0 +1,43 @@
+{
+  "classification": "signed_fixtures_and_simulated_workers_no_provider_or_target",
+  "units": {
+    "read_selection": {
+      "commit": "54107b212c360aa9549845f8503390712d1d74a7",
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_engagement_preflight_e2e.py": "sha256:43980e9247a92fc08b10281b0847f20190082c4d33bf0d7512b380db76b2bac0",
+        "tools/engagement_preflight.py": "sha256:928f465f1b8b9d971fad179d84852219fb09d507c7c11d6ada6694ef40c05d6e"
+      }
+    },
+    "initial_rung": {
+      "commit": "c3b314499f9be52320f502d8cc979101c84ebccd",
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_engagement_preflight_e2e.py": "sha256:d57c3c6ded8c4662efe60847b59352095d1615fc7d59e552e8c93c74646deedb",
+        "tools/engagement_preflight.py": "sha256:3cb5bff9a872330d9c8731ab8c651cfda80fc6bd114d1e905fdb033653695294"
+      }
+    },
+    "safe_prerequisite_codes": {
+      "commit": "e1c8899b2ab07c1b471884a2e3d8711220bc9dc4",
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_engagement_public_cli_e2e.py": "sha256:13982ac558f027b353fd33c4babd6460aa0ec27c397df22bc96fe12915a74d08",
+        "evals/native-qualification/smoke/check_engagement_runner_e2e.py": "sha256:7d22e131e56c47a212fbfe9bc880879f36714d357aca48f4aec51975a3d44834",
+        "tools/native_runtime_transport.py": "sha256:a148279b1b8586b4cc4f6a27755a048aaf8d2969abeec5bdaedd1d3e0b9be14d",
+        "tools/research_environment.py": "sha256:d1ce275fa07782d83e6065511bd27409354a83f3f2888ea8922cf215c95bfa21"
+      }
+    }
+  },
+  "receipts": {
+    "preflight-read-selection-before.json": "sha256:4911144bfdb81a2b3b0dcd61e11e1171bc1f61e7f01569e9431ed4b96571b322",
+    "preflight-read-selection-after.json": "sha256:0ea1e2c6f4c9cf7fd247eb2349471e836896f2adea91d12ca935e6c721c65f43",
+    "preflight-read-selection-independent-result.json": "sha256:0ea1e2c6f4c9cf7fd247eb2349471e836896f2adea91d12ca935e6c721c65f43",
+    "preflight-read-selection-independent-review.json": "sha256:913b7268030976d4d1d163c7026034e50a29faae9997f5c136768f8ffe8063e0",
+    "preflight-initial-rung-before.json": "sha256:b54740d9be65156e658a0a833e2f0f66eca57d6af4b039cd4e9ba6d9186c8f2d",
+    "preflight-initial-rung-after.json": "sha256:883361297438b572101c3bb6a7e3480e8a4adab9d51ae38991995f96cd8be588",
+    "preflight-initial-rung-independent-review.json": "sha256:821815ad36f16b38802caa172215a497125a1d0b933310bdc9e0b6eba883e8cf",
+    "prerequisite-code-before.json": "sha256:e3fe4937a163803ffe52a35c956fec2ae0f749ffe9895918679571ff1b7ff402",
+    "prerequisite-code-after.json": "sha256:4b60ae41d71b0a6229a2f11c3dceaf4fc4ac7a98e461a1780dca7e267cf151a9",
+    "prerequisite-code-independent-review.json": "sha256:ae20c18f0dd303de6b574bb71c284812486df7451e5da6978e1c63d44230a5ec",
+    "prerequisite-code-independent-cli.json": "sha256:e3241f4a9c139db414ba6155aec00b39d53a4711d3abe2244b029916644420bb",
+    "prerequisite-cli-before.json": "sha256:baf1da9c151ac9955e4240a2334ba686b17e0e6efc4b3db58ddb096201007e0f",
+    "prerequisite-cli-after.json": "sha256:fab0943be0cb02a351ce4bbf826657f0ed11b452f7f621dd88535bce025bfbf3"
+  }
+}

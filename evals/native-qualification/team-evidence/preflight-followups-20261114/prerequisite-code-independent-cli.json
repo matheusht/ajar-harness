@@ -1,0 +1,15 @@
+{
+  "classification": "public_cli_signed_fixture_real_runner_unavailable_native_boundary",
+  "status": "passed",
+  "scenario": "run-resume",
+  "result": {
+    "run_status": "blocked",
+    "resume_status": "blocked",
+    "cleanup": "verified",
+    "dispatches": 2,
+    "usage_unchanged": true
+  },
+  "external_provider_calls": 0,
+  "docker_calls": 0,
+  "target_calls": 0
+}

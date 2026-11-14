@@ -1,0 +1,75 @@
+{
+  "classification": "engineering_simulation",
+  "kind": "engagement-runner-check-v2",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "name": "single-owner",
+      "status": "pass"
+    },
+    {
+      "name": "native-continuation",
+      "status": "pass"
+    },
+    {
+      "name": "direction-stop",
+      "status": "pass"
+    },
+    {
+      "name": "recovery",
+      "status": "pass"
+    },
+    {
+      "name": "frozen-contract",
+      "status": "pass"
+    },
+    {
+      "name": "unavailable-boundary",
+      "status": "pass"
+    },
+    {
+      "name": "private-source-parallel",
+      "status": "pass"
+    },
+    {
+      "name": "renewal",
+      "status": "pass"
+    },
+    {
+      "name": "invocation-accounting",
+      "status": "pass"
+    },
+    {
+      "name": "task-finish",
+      "status": "pass"
+    },
+    {
+      "name": "receipt-double-count",
+      "status": "pass"
+    },
+    {
+      "name": "renewal-boundary",
+      "status": "pass"
+    },
+    {
+      "name": "capture-admission",
+      "status": "pass"
+    },
+    {
+      "error": "AssertionError: specific safe blocker lost or private error exposed",
+      "name": "native-prerequisite-code",
+      "status": "fail"
+    },
+    {
+      "error": "AssertionError: specific safe blocker lost or private error exposed",
+      "name": "environment-prerequisite-code",
+      "status": "fail"
+    },
+    {
+      "name": "unexpected-private-error",
+      "status": "pass"
+    }
+  ],
+  "status": "fail"
+}

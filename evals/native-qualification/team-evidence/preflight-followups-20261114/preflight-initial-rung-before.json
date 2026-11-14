@@ -1,0 +1,142 @@
+{
+  "status": "failed",
+  "classification": "signed_fixture_preflight_no_runtime_or_target",
+  "real_credentials_used": false,
+  "host_linux": "simulated_platform_branch",
+  "checks": [
+    {
+      "check": "local",
+      "status": "passed"
+    },
+    {
+      "check": "credential-missing",
+      "status": "passed"
+    },
+    {
+      "check": "credential-mismatch",
+      "status": "passed"
+    },
+    {
+      "check": "scope-tampered",
+      "status": "passed"
+    },
+    {
+      "check": "source-mutated",
+      "status": "passed"
+    },
+    {
+      "check": "version",
+      "status": "passed"
+    },
+    {
+      "check": "not-executable",
+      "status": "passed"
+    },
+    {
+      "check": "capability",
+      "status": "passed"
+    },
+    {
+      "check": "config",
+      "status": "passed"
+    },
+    {
+      "check": "bundle-platform",
+      "status": "passed"
+    },
+    {
+      "check": "environment-platform",
+      "status": "passed"
+    },
+    {
+      "check": "docker-missing",
+      "status": "passed"
+    },
+    {
+      "check": "ssh-prerequisites",
+      "status": "passed"
+    },
+    {
+      "check": "ssh-missing",
+      "status": "passed"
+    },
+    {
+      "check": "host-linux",
+      "status": "passed"
+    },
+    {
+      "check": "provider-missing",
+      "status": "passed"
+    },
+    {
+      "check": "target-account",
+      "status": "passed"
+    },
+    {
+      "check": "environment-effect",
+      "status": "passed"
+    },
+    {
+      "check": "openssl-missing",
+      "status": "passed"
+    },
+    {
+      "check": "methodology-missing",
+      "status": "passed"
+    },
+    {
+      "check": "protocol-missing",
+      "status": "passed"
+    },
+    {
+      "check": "socket-parent-missing",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-present",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-missing-secret",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-wrong-origin",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-public-file",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-source-overlap",
+      "status": "passed"
+    },
+    {
+      "check": "target-account-bundle-overlap",
+      "status": "passed"
+    },
+    {
+      "check": "environment-execute-only",
+      "status": "passed"
+    },
+    {
+      "check": "environment-ambiguous-read",
+      "status": "passed"
+    },
+    {
+      "check": "environment-read-and-execute",
+      "status": "passed"
+    },
+    {
+      "check": "environment-read-escalation",
+      "status": "failed",
+      "error": "{\"access_modes\": [\"source\"], \"blocked_codes\": [\"native_environment_assignment_unavailable\"], \"capabilities_verified\": false, \"engagement_id\": \"contract-fixture\", \"environments\": {\"lab-main\": {\"contacted_environment\": false, \"kind\": \"environment-inspection-v2\", \"missing\": [], \"platform\": \"linux/arm64\", \"qualified\": false, \"status\": \"prerequisites_present\", \"transport\": \"docker\", \"unverified\": [\"daemon\", \"worker_isolation\", \"cleanup\", \"network_routes\"]}}, \"expires_at\": null, \"goal_sha256\": \"sha256:259abf402948176dbdd954e04cc01756596d60db71e5be665b78bb3ee9ad8b3a\", \"hard_limits\": {\"invocations\": 10, \"worker_seconds\": 3600}, \"host\": {\"execution_verified\": false, \"methodology_sha256\": \"sha256:ac90160562c03e34b256e58701e2d3df4228f5afb47c15a3e1efec807998f162\", \"missing\": [], \"model_boundary\": \"darwin-no-fork-v1\", \"platform\": \"darwin\", \"protocol_sha256\": \"sha256:2570a3226d65365bfd985bfd9b340922f625b17a03f463ee95975abfff1f8c05\", \"status\": \"prerequisites_present\"}, \"kind\": \"native-engagement-preflight-v2\", \"runtime_and_target_contact\": false, \"runtimes\": {\"runtime-main\": {\"capabilities_verified\": false, \"credential\": {\"provider_validity\": \"unverified\", \"reference\": \"env_OPENAI_API_KEY\", \"status\": \"reference_available\"}, \"declared_version\": \"0.166.0\", \"initial_environment_candidates\": [], \"kind\": \"codex\", \"missing\": [\"native_environment_assignment_unavailable\"], \"model\": \"gpt-6.1-sol\", \"native_version_observed\": false, \"provider\": \"openai\", \"required_capabilities\": [\"startup\", \"fresh_session\", \"native_tools\"], \"status\": \"blocked\", \"tool_bundle\": {\"environment_command\": [\"/input/runtime-main/bin/codex\", \"exec-server\", \"--listen\", \"stdio\", \"--linux-sandbox-pid-namespace\", \"isolate\"], \"execution_verified\": false, \"manifest_sha256\": \"sha256:1d6010782906e34425cd6ff05f7f3800503ecc285746068a7222398f60ec9974\", \"platform\": \"linux/arm64\", \"status\": \"packaging_verified\"}}}, \"scope_sha256\": \"sha256:bc53fb8284a7a3331ab67d6b30422e2b5a736bc792e0e0760beea7642ca6ad7a\", \"signer_fingerprint\": \"sha256:4e5cbb1886e6667f2aa3bb176a00e55ecdc8bd16eb5f72cabdd545f77ba0d8f1\", \"status\": \"blocked\", \"target_accounts\": {\"access_ids\": [], \"status\": \"not_requested\", \"target_identity_verified\": false}, \"unbound_account_access\": [], \"unverified\": [\"native_runtime_startup\", \"provider_authentication_and_inference\", \"environment_daemon_and_image\", \"tool_containment_and_network_routes\", \"cleanup\", \"research_qualification\"], \"verified_inputs\": true}\n"
+    },
+    {
+      "check": "environment-escalated-only",
+      "status": "failed",
+      "error": "{\"access_modes\": [\"source\"], \"blocked_codes\": [], \"capabilities_verified\": false, \"engagement_id\": \"contract-fixture\", \"environments\": {\"lab-main\": {\"contacted_environment\": false, \"kind\": \"environment-inspection-v2\", \"missing\": [], \"platform\": \"linux/arm64\", \"qualified\": false, \"status\": \"prerequisites_present\", \"transport\": \"docker\", \"unverified\": [\"daemon\", \"worker_isolation\", \"cleanup\", \"network_routes\"]}}, \"expires_at\": null, \"goal_sha256\": \"sha256:259abf402948176dbdd954e04cc01756596d60db71e5be665b78bb3ee9ad8b3a\", \"hard_limits\": {\"invocations\": 10, \"worker_seconds\": 3600}, \"host\": {\"execution_verified\": false, \"methodology_sha256\": \"sha256:ac90160562c03e34b256e58701e2d3df4228f5afb47c15a3e1efec807998f162\", \"missing\": [], \"model_boundary\": \"darwin-no-fork-v1\", \"platform\": \"darwin\", \"protocol_sha256\": \"sha256:2570a3226d65365bfd985bfd9b340922f625b17a03f463ee95975abfff1f8c05\", \"status\": \"prerequisites_present\"}, \"kind\": \"native-engagement-preflight-v2\", \"runtime_and_target_contact\": false, \"runtimes\": {\"runtime-main\": {\"capabilities_verified\": false, \"credential\": {\"provider_validity\": \"unverified\", \"reference\": \"env_OPENAI_API_KEY\", \"status\": \"reference_available\"}, \"declared_version\": \"0.166.0\", \"initial_environment_candidates\": [\"lab-main\"], \"kind\": \"codex\", \"missing\": [], \"model\": \"gpt-6.1-sol\", \"native_version_observed\": false, \"provider\": \"openai\", \"required_capabilities\": [\"startup\", \"fresh_session\", \"native_tools\"], \"status\": \"prerequisites_present\", \"tool_bundle\": {\"environment_command\": [\"/input/runtime-main/bin/codex\", \"exec-server\", \"--listen\", \"stdio\", \"--linux-sandbox-pid-namespace\", \"isolate\"], \"execution_verified\": false, \"manifest_sha256\": \"sha256:1d6010782906e34425cd6ff05f7f3800503ecc285746068a7222398f60ec9974\", \"platform\": \"linux/arm64\", \"status\": \"packaging_verified\"}}}, \"scope_sha256\": \"sha256:96bec9ea870c5abe18f26721aba6c5cb60f5953d0d20c4e77d328c475d145057\", \"signer_fingerprint\": \"sha256:f17c567771e354172f62e878337699cd0f70e833dd0fceda4dc40737a7b4ebe2\", \"status\": \"ready_for_runtime_check\", \"target_accounts\": {\"access_ids\": [], \"status\": \"not_requested\", \"target_identity_verified\": false}, \"unbound_account_access\": [], \"unverified\": [\"native_runtime_startup\", \"provider_authentication_and_inference\", \"environment_daemon_and_image\", \"tool_containment_and_network_routes\", \"cleanup\", \"research_qualification\"], \"verified_inputs\": true}\n"
+    }
+  ]
+}

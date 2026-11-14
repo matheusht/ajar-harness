@@ -1,0 +1,31 @@
+{
+  "reviewer": "/root/m1_fixed_review",
+  "base_head": "957a92cee6777e4258916e32c6ca0531963f44f1",
+  "capture_id": "15de36fd0dd77fbb113b60a449371d6cb8af9797c9100f4144a25f6479ba71cb",
+  "snapshot_id": "67a2382663bf969e69a47785b10e53be507edd05ac7c9433d1eb048bdc83380c",
+  "standards": "pass",
+  "spec": "pass",
+  "unresolved_findings": [],
+  "scope": [
+    "tools/native_runtime_transport.py",
+    "tools/research_environment.py",
+    "evals/native-qualification/smoke/check_engagement_runner_e2e.py",
+    "evals/native-qualification/smoke/check_engagement_public_cli_e2e.py"
+  ],
+  "checks": {
+    "supplied_runner": "16/16 pass",
+    "supplied_public_cli": "7/7 pass",
+    "independent_public_cli": "run-resume passes using real unavailable native boundary"
+  },
+  "receipt_sha256": {
+    "prerequisite-code-after.json": "sha256:4b60ae41d71b0a6229a2f11c3dceaf4fc4ac7a98e461a1780dca7e267cf151a9",
+    "prerequisite-cli-after.json": "sha256:fab0943be0cb02a351ce4bbf826657f0ed11b452f7f621dd88535bce025bfbf3",
+    "prerequisite-code-independent-cli.json": "sha256:e3241f4a9c139db414ba6155aec00b39d53a4711d3abe2244b029916644420bb"
+  },
+  "notes": [
+    "Exact working patch and HEAD match capture before and after review.",
+    "Audited calls to both error classes across native/runtime/environment modules: constant stable codes, transport failure fields written only with stable codes, workspace helper code is regex restricted; no native prompt/error-body promotion found.",
+    "Unexpected ValueError keeps generic private-error fallback; public run/resume preserves exact native prerequisite and verified unused preparation cancellation without invocation charge.",
+    "No actual provider, Docker, SSH or research qualification is implied."
+  ]
+}

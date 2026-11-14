@@ -387,8 +387,11 @@ class NativeExecutor:
                     if payload.get('id') == self.initialize_id and 'result' in payload:
                         phase = 'identity'
                         info = payload['result'].get('environmentInfo', {})
-                        if (info.get('executorVersion') != self.expected_version or
-                                self.expected_platform is not None and info.get('platformOs') != self.expected_platform):
+                        phase = 'identity_version'
+                        if info.get('executorVersion') != self.expected_version:
+                            raise RuntimeError('native_executor_identity_mismatch')
+                        phase = 'identity_platform'
+                        if self.expected_platform is not None and info.get('platformOs') != self.expected_platform:
                             raise RuntimeError('native_executor_identity_mismatch')
                         self.ready = {'version': info['executorVersion'], 'platform': info.get('platformOs')}
                     output = json.dumps({'frame': line.decode().rstrip('\n')}).encode() + b'\n'

@@ -60,7 +60,14 @@ class TransportDiagnostics(unittest.TestCase):
 
     def test_identity(self):
         self.check_failure(json.dumps({'id': 1, 'result': {'environmentInfo': {
-            'executorVersion': SECRET, 'platformOs': 'linux'}}}).encode()+b'\n', phase='identity')
+            'executorVersion': SECRET, 'platformOs': 'linux'}}}).encode()+b'\n', phase='identity_version')
+
+    def test_platform_identity(self):
+        self.check_failure(json.dumps({'id': 1, 'result': {'environmentInfo': {
+            'executorVersion': '0.166.0', 'platformOs': SECRET}}}).encode()+b'\n', phase='identity_platform')
+
+    def test_identity_shape(self):
+        self.check_failure(b'{"id":1,"result":null}\n', phase='identity')
 
     def test_admission(self):
         def reject():

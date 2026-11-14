@@ -74,7 +74,10 @@ SECRET_PATTERNS = {
     "private_key": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "signed_url": re.compile(rb"[?&](?:x-amz-signature|signature|sig)=[A-Fa-f0-9%]{16,}", re.IGNORECASE),
     "password_assignment": re.compile(rb"(?:password|passwd|pwd)[\"']?\s*[:=]\s*[\"']?(?!/)[^\s,;\"']{8,}", re.IGNORECASE),
-    "provider_token": re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9_-]{20,})"),
+    "provider_token": re.compile(
+        rb"(?:gh[pousr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|"
+        rb"(?i:\b[\w-]*(?:api[_-]?key|(?:access[_-]?)?token|secret)[\"']?\s*[:=]\s*[\"']?)"
+        rb"[^\s,;\"']*sk-[A-Za-z0-9_-]{20,})"),
 }
 
 

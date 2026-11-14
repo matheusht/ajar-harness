@@ -1,0 +1,120 @@
+{
+  "status": "passed",
+  "classification": "actual_sdk_source_and_synthetic_secret_controls",
+  "sdk_files": [
+    {
+      "path": "node_modules/@oh-my-pi/pi-coding-agent/src/prompts/tools/task-specialization-advisory.md",
+      "sha256": "sha256:5192ed5563c88236f7d3893764defc45daed2f6493d8e025ad5c7f2c20edfc4d"
+    },
+    {
+      "path": "node_modules/@oh-my-pi/pi-coding-agent/src/prompts/tools/task-coordination-advisory.md",
+      "sha256": "sha256:760be870e6cf8d0d3943a1d6fe6f6e6d9a90d06286dc4c4d2429dffc844a06f2"
+    }
+  ],
+  "provider_calls": 0,
+  "real_credentials_used": false,
+  "checks": [
+    {
+      "check": "actual_sdk_manifest",
+      "status": "passed",
+      "expected": "accepted",
+      "observed": "accepted"
+    },
+    {
+      "check": "advisory_path",
+      "status": "passed",
+      "expected": "accepted",
+      "observed": "accepted"
+    },
+    {
+      "check": "advisory_publication",
+      "status": "passed",
+      "expected": "accepted",
+      "observed": "accepted"
+    },
+    {
+      "check": "standalone",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "quoted",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "punctuation",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "url_path",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "underscore_delimiter",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "credential_field",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "embedded_field",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "embedded_environment_assignment",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "embedded_access_assignment",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "encoded_json_key",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "known_embedding",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "github_key",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "aws_key",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    },
+    {
+      "check": "chunk_boundary",
+      "status": "passed",
+      "expected": "rejected",
+      "observed": "rejected"
+    }
+  ]
+}

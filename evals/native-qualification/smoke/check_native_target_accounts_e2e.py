@@ -73,7 +73,8 @@ def receiver():
 
 
 @contextmanager
-def composed(path, target, *, reference_place='private', missing=False, combined=False):
+def composed(path, target, *, reference_place='private', missing=False, combined=False,
+             environment_class=native.SimulatedEnvironment, proxy_class=native.SimulatedProxy):
     fixture = native.fixture.fixture
     inputs = fixture.make_fixture(path / 'input')
     scope = fixture.fixture_scope(inputs)
@@ -131,8 +132,8 @@ def composed(path, target, *, reference_place='private', missing=False, combined
         environment['OSLIT_FIXTURE_ACCOUNT_B'] = ''
     with ExitStack() as stack:
         stack.enter_context(patch.dict(os.environ, environment))
-        stack.enter_context(patch.object(boundary, 'Environment', native.SimulatedEnvironment))
-        stack.enter_context(patch.object(boundary, 'ProxyBridge', native.SimulatedProxy))
+        stack.enter_context(patch.object(boundary, 'Environment', environment_class))
+        stack.enter_context(patch.object(boundary, 'ProxyBridge', proxy_class))
         stack.enter_context(patch.object(boundary, '_inspect_bundle', bundle))
         stack.enter_context(patch.object(boundary, '_credential_resolver', lambda: lambda profile: SimpleNamespace(check=lambda: None, revoke=lambda: None)))
         stack.enter_context(patch.object(boundary.codex, 'Runtime', native.SimulatedRuntime))

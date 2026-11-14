@@ -113,10 +113,11 @@ TOOLS = [
          'max_bytes': {'type': 'integer', 'minimum': 1, 'maximum': 65536}}, ['sha256']),
     _tool('engagement_artifact', 'Freeze a file at a path relative to /work for publication; returns its publication path and digest.',
         {'path': {'type': 'string'}, 'max_bytes': {'type': 'integer', 'minimum': 1, 'maximum': 4194304}}, ['path', 'max_bytes']),
-    _tool('engagement_capture', 'Run a pinned probe and candidate from paths relative to /work with a registered instrument in a separately reserved clean lab. seconds bounds the operation while short reservations renew. Returns protected execution and output references.',
+    _tool('engagement_capture', 'Run a pinned probe and candidate from paths relative to /work with a registered instrument in a separately reserved lab. Optional resources selects a nonempty subset of current authority. A fresh lab does not reset a remote application. seconds bounds the operation while short reservations renew. Returns protected execution, target request and output references.',
         {'instrument_id': {'type': 'string'}, 'candidate_path': {'type': 'string'}, 'probe_path': {'type': 'string'},
          'interpreter': {'type': ['string', 'null']}, 'arguments': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 64},
          'conditions': {'type': 'object'}, 'seconds': {'type': 'integer', 'minimum': 1},
+         'resources': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]
 
@@ -208,6 +209,7 @@ class NativeBoundary:
         self.capture_lock = threading.Lock()
         self.capture_cancel = None
         self.capture_done = None
+        self.capture_application_active = False
         self.bootstrap = self.certificate = self.private_key = None
         self.credential_binding = None
         self.target_accounts = None
@@ -246,8 +248,8 @@ class NativeBoundary:
 
     def _effect(self, profile_id, grant):
         candidates = [row for row in self.scope['effects'] if profile_id in row['environment_ids']
-            and set(grant['resources']) <= set(row['access_ids']) and not row['account_refs']]
-        if not candidates:
+            and set(grant['resources']) <= set(row['access_ids']) and not row['account_refs'] and row['kind'] == 'read']
+        if len(candidates) != 1:
             raise BoundaryError('native_effect_grant_unavailable')
         return candidates[0]['id']
 
@@ -295,7 +297,7 @@ class NativeBoundary:
         with self.controller.lock():
             operation_id = observation['operation_id']
             if observation['phase'] == 'intent':
-                self.context.authorize()
+                self._authorize_target()
                 if self.environment is None or self.environment.identity is None:
                     raise BoundaryError('native_network_environment_unavailable')
                 admitted = copy.deepcopy(self.context.grant)
@@ -311,12 +313,19 @@ class NativeBoundary:
                 self.network_operations.pop(operation_id)
             return result
 
+    def _authorize_target(self):
+        with self.controller.lock():
+            grant = self.context.authorize()
+            if self.capture_application_active:
+                raise BoundaryError('native_capture_target_busy')
+            return grant
+
     def start(self):
         self.context.authorize()
         if any(access['kind'] == 'application' for access in self.accesses):
             try:
                 self.target_accounts = TargetAccountResolver(self._target_reference(), self.scope,
-                    self.context.authorize, self._observe_network, environment_profile_id=self.environment_id)
+                    self._authorize_target, self._observe_network, environment_profile_id=self.environment_id)
             except TargetAccountError as error:
                 raise BoundaryError(str(error)) from None
         bundle_id = 'native-runtime'
@@ -411,7 +420,8 @@ class NativeBoundary:
             if name == 'engagement_artifact':
                 return HostOperation(lambda: self._artifact(arguments), self.environment.revoke)
             if name == 'engagement_capture':
-                return self._accept_capture(arguments)
+                with self.context.guard():
+                    return self._accept_capture(arguments)
             if self.profile['kind'] == 'omp' and self.native_owner is not None:
                 return self.native_owner.host_call(name, arguments)
             raise BoundaryError('native_host_tool_unavailable')
@@ -494,9 +504,13 @@ class NativeBoundary:
         instrument = state['instruments'].get(arguments['instrument_id'])
         if instrument is None or instrument.get('superseded_by'):
             raise BoundaryError('native_capture_instrument_unavailable')
-        resources = [row['id'] for row in self.accesses if row['kind'] != 'application']
-        if not resources:
-            raise BoundaryError('native_capture_private_input_required')
+        resources = arguments.get('resources', self.context.grant['resources'])
+        if (not isinstance(resources, list) or not resources or any(not isinstance(name, str) for name in resources)
+                or len(resources) != len(set(resources)) or not set(resources) <= set(self.context.grant['resources'])):
+            raise BoundaryError('native_capture_resources_invalid')
+        application = any(row['id'] in resources and row['kind'] == 'application' for row in self.accesses)
+        if application and self.network_operations:
+            raise BoundaryError('native_capture_target_busy')
         if (arguments['patch_id'] is None) != (arguments['patch_arm'] is None):
             raise BoundaryError('native_capture_patch_invalid')
         if arguments['patch_id'] is not None:
@@ -510,6 +524,7 @@ class NativeBoundary:
         except Exception:
             self.capture_lock.release()
             raise
+        self.capture_application_active = application
         control = {'environment': None, 'cancelled': threading.Event(), 'done': threading.Event()}
         def cancel():
             control['cancelled'].set()
@@ -521,11 +536,13 @@ class NativeBoundary:
 
     def _capture(self, arguments, instrument, grant, control):
         started = time.monotonic()
-        environment = proxy = gate = directory = None
+        environment = proxy = gate = directory = target_accounts = None
         cleanup = None
         value = None
         failure = None
-        executions, operations = [], {}
+        executions, operations, network_operations = [], {}, {}
+        accesses = [row for row in self.accesses if row['id'] in grant['resources']]
+        applications = {row['id'] for row in accesses if row['kind'] == 'application'}
         renewal_stopped, prepared = threading.Event(), threading.Event()
         renewal_failure = []
         deadline = started + arguments['seconds']
@@ -556,6 +573,20 @@ class NativeBoundary:
                     executions.append(operation_id)
                 return self.controller.record_environment_observation(admitted, self.environment_id, observation,
                     effect_id=self._effect(self.environment_id, admitted))
+        def observe_network(observation):
+            with self.controller.lock():
+                operation_id = observation['operation_id']
+                if observation['phase'] == 'intent':
+                    admitted = authorize()
+                    nonce = environment.receipt()['nonce']
+                else:
+                    admitted, nonce = network_operations[operation_id]
+                result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation)
+                if observation['phase'] == 'intent':
+                    network_operations[operation_id] = (admitted, nonce)
+                else:
+                    network_operations.pop(operation_id)
+                return result
         def renew_capture():
             nonlocal grant
             renewal_window = grant['seconds']
@@ -611,7 +642,8 @@ class NativeBoundary:
             probe_sha = self.controller.store_object(probe['content'])
             support = {'capture': {'path': str(capture), 'manifest_sha256': digest(canonical(source_manifest(capture)))},
                 'bootstrap': {'path': str(self.bootstrap), 'manifest_sha256': digest(canonical(source_manifest(self.bootstrap)))}}
-            subjects = ['/input/' + name for name in grant['resources']]
+            subjects = [row['identity']['base_url'] if row['kind'] == 'application' else '/input/' + row['id']
+                for row in accesses]
             patch_manifest = None
             if arguments['patch_id'] is not None:
                 patch = self.controller.state()['patches'][arguments['patch_id']]
@@ -634,12 +666,15 @@ class NativeBoundary:
             environment = Environment(self.environment_profile, self.environment_reference['limits'], authorize,
                 observe, grant=grant, dispatch_guard=guard, **self._environment_options())
             control['environment'] = environment
-            accesses = [row for row in self.accesses if row['id'] in grant['resources']]
             authorize()
             environment.prepare(accesses, self.context.contract.inputs['access_files'], support_inputs=support)
             prepared.set()
+            if applications:
+                target_accounts = TargetAccountResolver(self._target_reference(), self.scope,
+                    authorize, observe_network, environment_profile_id=self.environment_id)
             routes = _routes(self.scope, grant['resources'])['lab']
-            gate = NetworkGate(routes, active, maximum_bytes=self.environment_reference['limits']['output_bytes'], dispatch_guard=guard)
+            gate = NetworkGate(routes, active, maximum_bytes=self.environment_reference['limits']['output_bytes'],
+                dispatch_guard=guard, request_binder=target_accounts.bind if target_accounts is not None else None)
             socket_path = self.socket_dir / ('capture-' + uuid.uuid4().hex[:12] + '.sock')
             gate.serve(socket_path, certificate=self.certificate, private_key=self.private_key)
             proxy = ProxyBridge(lambda command: environment.launch_stdio(command, role='network_proxy'),
@@ -660,14 +695,17 @@ class NativeBoundary:
             self.controller.record_experiment_execution(admitted, self.environment_id, operation_id, {
                 'instrument_id': arguments['instrument_id'], 'instrument_sha256': instrument['artifact_sha256'],
                 'candidate_sha256': candidate_sha, 'probe_sha256': probe_sha, 'conditions': arguments['conditions'],
-                'reset': instrument['reset'], 'clean_start': True})
+                'reset': instrument['reset'], 'clean_start': not applications})
             if patch_manifest is not None:
                 self.controller.record_patch_execution(admitted, self.environment_id, operation_id,
                     arguments['patch_id'], arguments['patch_arm'], patch_manifest)
             value = {'status': 'captured', 'dispatch_id': grant['dispatch_id'], 'operation_id': operation_id,
                 'instrument_id': arguments['instrument_id'], 'candidate_sha256': candidate_sha, 'probe_sha256': probe_sha,
                 'output_sha256': digest(raw_output), 'returncode': output['returncode'],
-                'environment_nonce': output['identity']['nonce'], 'clean_start': True}
+                'environment_nonce': output['identity']['nonce'], 'clean_start': not applications,
+                'limits': ['remote_application_reset_unverified'] if applications else [],
+                'network_request_ids': sorted(name for name, row in self.controller.state()['network_operations'].items()
+                    if row['grant']['dispatch_id'] == grant['dispatch_id'])}
         except Exception as error:
             failure = getattr(error, 'code', 'native_capture_unavailable')
         finally:
@@ -683,6 +721,8 @@ class NativeBoundary:
                         owned.close()
                     except Exception:
                         failure = failure or 'native_capture_transport_cleanup_unverified'
+            if target_accounts is not None:
+                target_accounts.close()
             if environment is not None:
                 try:
                     cleanup = environment.cleanup()
@@ -697,12 +737,19 @@ class NativeBoundary:
                 except Exception:
                     known = False
             try:
-                observation = {'status': 'settled' if known else 'unknown',
-                    'worker_seconds': min(grant['seconds'], max(0, math.ceil(time.monotonic() - started))) if known else grant['seconds'],
-                    'resources': {name: ('reset' if environment is not None else 'unchanged') if known else 'unknown' for name in grant['resources']},
-                    'usage': {'tokens': None, 'cost': None}, 'cleanup': 'verified' if known else 'unresolved'}
-                receipt = self.controller.store_receipt(grant, observation, adapter_id=grant['adapter_id'])
-                self.controller.adopt_receipt(grant['dispatch_id'], receipt, adapter_id=grant['adapter_id'])
+                with self.controller.lock():
+                    state = self.controller.state()
+                    retained = known and self._active() and not network_operations
+                    resources = {name: ('reset' if environment is not None else 'unchanged') if known else 'unknown'
+                        for name in grant['resources']}
+                    resources.update({name: 'retained' if retained and not state['resource_holds'].get(name) else 'unknown'
+                        for name in applications})
+                    observation = {'status': 'settled' if known else 'unknown',
+                        'worker_seconds': min(grant['seconds'], max(0, math.ceil(time.monotonic() - started))) if known else grant['seconds'],
+                        'resources': resources, 'usage': {'tokens': None, 'cost': None},
+                        'cleanup': 'verified' if known else 'unresolved'}
+                    receipt = self.controller.store_receipt(grant, observation, adapter_id=grant['adapter_id'])
+                    self.controller.adopt_receipt(grant['dispatch_id'], receipt, adapter_id=grant['adapter_id'])
             except Exception:
                 failure = failure or 'native_capture_settlement_unresolved'
             if known and directory is not None:
@@ -710,7 +757,9 @@ class NativeBoundary:
                     shutil.rmtree(directory)
                 except OSError:
                     failure = failure or 'native_capture_staging_cleanup_unverified'
-            self.capture_cancel = None
+            with self.controller.lock():
+                self.capture_application_active = False
+                self.capture_cancel = None
             control['done'].set()
             self.capture_lock.release()
         if failure:

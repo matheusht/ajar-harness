@@ -1,0 +1,50 @@
+{
+  "classification": "actual_owned_http_relay_probe_with_simulated_native_environment",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "application",
+      "status": "fail",
+      "error": "capture refused: {'code': 'native_capture_private_input_required', 'status': 'rejected'}"
+    },
+    {
+      "scenario": "combined-source",
+      "status": "fail",
+      "error": "'network_request_ids'"
+    },
+    {
+      "scenario": "invalid-resources",
+      "status": "fail",
+      "error": "invalid resource selection was not rejected"
+    },
+    {
+      "scenario": "parent-busy",
+      "status": "fail",
+      "error": "capture overlapped parent target request"
+    },
+    {
+      "scenario": "capture-busy",
+      "status": "fail",
+      "error": "capture request did not enter target"
+    },
+    {
+      "scenario": "revoked-capture",
+      "status": "fail",
+      "error": "capture request did not enter target"
+    }
+  ],
+  "status": "fail",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:f492a20dcc1f9321ea22d2671a2ec34c3c78af13e3ac96a1004534d6a6fa6c39",
+    "tools/engagement_network_bridge.py": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/engagement_network.py": "sha256:8624cdf213381dee7495d6e3c469cfb56b1ee0e8a0e0c753ceb8a4de98df9cb7",
+    "tools/target_accounts.py": "sha256:0d0a9fd566c26c7ff9ce1a97ec328889cb3cca660780ca2806df7f0ce93e01f7",
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+    "evals/native-qualification/smoke/check_native_application_capture_e2e.py": "sha256:55f14e33e3e73496fb28b27ddf9371c854b312a3af7291d6dd3dc61dbe10769c",
+    "evals/native-qualification/smoke/check_native_target_accounts_e2e.py": "sha256:99572ffef987df81c750d60ff4222afcf4c7d6210537e9d8bdac05ee9d63fb47"
+  }
+}

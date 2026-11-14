@@ -1,0 +1,88 @@
+{
+  "classification": "signed_simulated_execution_and_actual_local_http",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "status": "fail",
+  "scenarios": [
+    {
+      "scenario": "missing_predecessor",
+      "status": "fail",
+      "error": "accepted forbidden operation: effect_escalation_review_required"
+    },
+    {
+      "scenario": "supported_is_insufficient",
+      "status": "fail",
+      "error": "payload_invalid != escalation_prior_claim_unconfirmed"
+    },
+    {
+      "scenario": "accepted_transition",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "rung_skip",
+      "status": "fail",
+      "error": "payload_invalid != escalation_rung_invalid"
+    },
+    {
+      "scenario": "full_chain",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "account_context",
+      "status": "fail",
+      "error": "payload_invalid != escalation_context_invalid"
+    },
+    {
+      "scenario": "resource_context",
+      "status": "fail",
+      "error": "payload_invalid != escalation_context_invalid"
+    },
+    {
+      "scenario": "unrelated_claim",
+      "status": "fail",
+      "error": "payload_invalid != escalation_prior_claim_unconfirmed"
+    },
+    {
+      "scenario": "stale_material",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "stale_pending_review",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "review_evidence_required",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "reopened_claim",
+      "status": "fail",
+      "error": "payload_invalid"
+    },
+    {
+      "scenario": "application_gate",
+      "status": "fail",
+      "error": "accepted forbidden operation: effect_escalation_review_required"
+    },
+    {
+      "scenario": "artifact_gate",
+      "status": "fail",
+      "error": "accepted forbidden operation: artifact_effect_unsupported"
+    },
+    {
+      "scenario": "effect_selection",
+      "status": "fail",
+      "error": "ambiguous or invalid effect reached receiver"
+    }
+  ],
+  "unverified": [
+    "shared application reset",
+    "native semantic effect containment",
+    "artifact classes"
+  ]
+}

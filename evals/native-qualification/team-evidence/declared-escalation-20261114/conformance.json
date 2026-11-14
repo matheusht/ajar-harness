@@ -1,0 +1,12 @@
+{
+  "status": "preexisting_fixture_failure",
+  "checks": 900,
+  "failures": 1,
+  "paths": [
+    "evals/native-qualification/smoke/check_engagement_team_e2e.py",
+    "evals/native-qualification/smoke/check_engagement_contract_e2e.py"
+  ],
+  "cause": "synthetic credential shapes in inherited fixtures and generated fixture bytecode",
+  "resolution": "root integration already contains fixture cleanup a53bdf16; rerun integrated conformance before promotion",
+  "command": "/tmp/pr209-conformance-venv/bin/python tools/check-conformance.py"
+}

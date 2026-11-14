@@ -91,13 +91,24 @@ under a new ID with `supersedes`; rerun candidates before comparing measurements
 {"instrument_id":"instrument-1","candidate_path":"candidate.bin","probe_path":"probe.py","interpreter":"python3","arguments":[],"conditions":{"version":"observed-version"},"seconds":60,"patch_id":null,"patch_arm":null}
 ```
 
-The probe receives the frozen instrument path, candidate path, each selected input
-path, then `arguments`. An interpreter may be null for an executable probe. It must
+The optional `resources` field selects a nonempty, unique subset of public access
+IDs in the current grant; omission selects the whole grant. Source/binary subjects
+are `/input/<access_id>` paths, and application subjects are their signed base URLs.
+For source/binary-only capture, optional `effect_id` names the signed effect used
+for probe execution. It must cover the selected resources and environment without
+account references; higher rungs require the current transition review below.
+Omission uses the initial read effect. Preparation and cleanup use the unique
+initial account-free read effect. Application captures select actual request effects
+with `X-OSLit-Effect`, so they reject this capture-level selector.
+The probe receives the frozen instrument path, candidate path, each selected subject,
+then `arguments`. An interpreter may be null for an executable probe. It must
 be available in the signed environment. The host binds executed bytes, conditions,
 output and operation identity; a later assertion cannot replace this capture.
 The time limit bounds the operation while short grants renew within remaining
-allowance. Shared application state may lack clean-reset evidence: preserve that
-limit instead of asserting a clean replay. A capture refusal is not an experiment.
+allowance. Any application subject returns `clean_start:false` with
+`remote_application_reset_unverified`; a fresh local container does not establish a
+remote reset. Returned `network_request_ids` bind actual auxiliary target requests
+to protected account/effect observations. A capture refusal is not an experiment.
 
 After a successful settled capture, submit `experiment_record`:
 
@@ -119,7 +130,9 @@ effect, accounts and resources. Comparison ranks observations; it proves no clai
 
 For a scoped target HTTP request, select the public access/account IDs with
 `X-OSLit-Access: <access_id>` and `X-OSLit-Account: <account_ref>`. Omit the account
-selector for an anonymous request. Do not supply Authorization, Cookie or another
+selector for an anonymous request. Select a signed effect with
+`X-OSLit-Effect: <effect_id>` when several read/write effects fit that request;
+omission is accepted only when exactly one fits. Do not supply Authorization, Cookie or another
 authentication value yourself. The gateway strips selectors and binds private
 credentials to the exact signed origin and account. Redirects need independent
 admission. Target authentication never applies to provider or acquisition routes.
@@ -157,6 +170,32 @@ Dispositions are `accept`, `reject`, `reopen` or `unresolved`. Set checks to the
 observed; true flags alone do not supply evidence. Claim acceptance needs the
 reviewer's protected replay and all required contrary references. Material changes
 invalidate earlier review; a fresh reviewer and packet are required.
+
+For a declared internal escalation, use a fresh reviewer and submit:
+
+```json
+{"review_id":"transition-1","kind":"escalation","subject_id":"claim-1","reviewer_id":"reviewer-2","next_effect_id":"signed-stored-effect"}
+```
+
+`subject_id` names a current independently confirmed prior claim. The controller
+derives its protected preceding effect and freezes the original claim review,
+effect/control/replay, instruments, contrary evidence and next signed effect in the
+packet. Only adjacent `self` → `stored` → `cross_user` transitions qualify. The
+resource identities, environment and observed accounts must match that transition.
+The reviewer submits the existing `review_result` shape, citing every experiment
+and contrary reference in the packet. Boolean checks alone cannot authorize it.
+
+Each new effect rechecks the exact material and current authority. Reopening the
+prior claim or superseding its evidence blocks further admission, including from
+an active worker; matching late outcomes and owned cleanup remain recordable.
+A fresh review request for the same prior claim and next effect holds that
+transition immediately. It replaces earlier pending or accepted reviews; an older
+reviewer's late answer cannot restore admission. The new review must accept before
+effects resume. Reviews of other transitions retain their own decisions.
+An accepted transition does not change a claim, widen scope or prove semantic
+containment. Shared-application reset, generic artifact classes and route activation
+remain separate limits; current human gates apply, and generic `artifact_create`
+admission is unsupported.
 
 `strategy_challenge` takes `{"obligation_id":"challenge-1","kind":"contradiction","refs":["contrary-observation"],"resources":["source-main"],"reason":"State the concrete unresolved conflict."}`.
 Kinds are `contradiction`, `repetition`, `strong_lead_dismissal`. Repetition requires

@@ -1,0 +1,78 @@
+{
+  "classification": "signed_simulated_execution_and_actual_local_http",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "status": "fail",
+  "scenarios": [
+    {
+      "scenario": "missing_predecessor",
+      "status": "pass"
+    },
+    {
+      "scenario": "supported_is_insufficient",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted_transition",
+      "status": "pass"
+    },
+    {
+      "scenario": "rung_skip",
+      "status": "pass"
+    },
+    {
+      "scenario": "full_chain",
+      "status": "pass"
+    },
+    {
+      "scenario": "account_context",
+      "status": "pass"
+    },
+    {
+      "scenario": "resource_context",
+      "status": "pass"
+    },
+    {
+      "scenario": "malformed_effect",
+      "status": "fail",
+      "error": "cannot use 'list' as a dict key (unhashable type: 'list')"
+    },
+    {
+      "scenario": "unrelated_claim",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale_material",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale_pending_review",
+      "status": "pass"
+    },
+    {
+      "scenario": "review_evidence_required",
+      "status": "pass"
+    },
+    {
+      "scenario": "reopened_claim",
+      "status": "pass"
+    },
+    {
+      "scenario": "application_gate",
+      "status": "pass"
+    },
+    {
+      "scenario": "artifact_gate",
+      "status": "pass"
+    },
+    {
+      "scenario": "effect_selection",
+      "status": "pass"
+    }
+  ],
+  "unverified": [
+    "shared application reset",
+    "native semantic effect containment",
+    "artifact classes"
+  ]
+}

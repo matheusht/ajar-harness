@@ -311,7 +311,7 @@ class NetworkGate:
                     next_url = urljoin(url, location)
                     next_parsed, next_port, _ = self._destination(next_url)
                     if (next_parsed.scheme, next_parsed.hostname, next_port) != (parsed.scheme, parsed.hostname, port):
-                        headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie', 'x-oslit-access', 'x-oslit-account')}
+                        headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie', 'x-oslit-access', 'x-oslit-account', 'x-oslit-effect')}
                     if response.status == 303:
                         method, body = 'GET', b''
                     url = next_url

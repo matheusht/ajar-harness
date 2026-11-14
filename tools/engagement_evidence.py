@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from engagement_contract import canonical, digest, read_json
-from engagement_controller import GRANT_KEYS, Principal, fail, identifier, integer, keys
+from engagement_controller import ControllerError, GRANT_KEYS, Principal, fail, identifier, integer, keys
 
 REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'claim_propose',
             'strategy_challenge', 'review_request', 'review_result', 'review_response',
@@ -152,6 +152,7 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
                     fail('environment_observation_missing')
             else:
                 c._authorize(state, grant)
+                admit_effect(state, effect, profile_id=profile_id, access_ids=access_ids, account_refs=accounts)
         elif prior:
             if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['operation'] != op
                     or prior['effect_id'] != effect_id or prior['account_refs'] != accounts):
@@ -163,6 +164,7 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
             fail('environment_intent_missing')
         else:
             c._authorize(state, grant)
+            admit_effect(state, effect, profile_id=profile_id, access_ids=access_ids, account_refs=accounts)
         if phase == 'result' and observation.get('status') not in ('settled', 'unknown', 'unavailable', 'dispatched'):
             fail('environment_observation_invalid')
         for name in ('request_sha256', 'output_sha256', 'manifest_sha256'):
@@ -263,6 +265,8 @@ def record_network_observation(c, grant, profile_id, nonce, observation):
                     for row in state['environment_operations'].values())):
                 fail('network_environment_invalid')
             c._authorize(state, grant)
+            admit_effect(state, effect, profile_id=profile_id, access_ids=[access['id']],
+                         account_refs=[] if account is None else [account])
         else:
             if prior is None:
                 fail('network_intent_missing')
@@ -293,6 +297,85 @@ def related(left, right, purpose, *, independent=False):
     if right['candidate_sha256'] != left['candidate_sha256'] or right['probe_sha256'] != left['probe_sha256']:
         return False
     return not independent or (right['session_id'] != left['session_id'] and right['environment_nonce'] != left['environment_nonce'] and right['clean_start'])
+
+
+def escalation_material(state, claim_id, next_effect_id):
+    identifier(next_effect_id)
+    effects = {row['id']: row for row in state['scope']['effects']}
+    next_effect = effects.get(next_effect_id)
+    preceding = {'stored': 'self', 'cross_user': 'stored'}
+    if next_effect is None or next_effect['rung'] not in preceding or next_effect['kind'] == 'artifact_create':
+        fail('escalation_effect_invalid')
+    claim = state['claims'].get(claim_id)
+    review = state['reviews'].get((claim or {}).get('review_id'))
+    if (claim is None or claim['state'] != 'independently_confirmed' or claim.get('superseded_by')
+            or review is None or review['kind'] != 'claim' or review['subject_id'] != claim_id
+            or review['status'] != 'accepted'):
+        fail('escalation_prior_claim_unconfirmed')
+    effect = state['experiments'].get(claim['effect'])
+    control = state['experiments'].get(claim['control'])
+    replays = [state['experiments'][name] for name in review['result']['evidence_refs']]
+    if (not effect or not control or not related(effect, control, 'control') or
+            not any(row['worker_id'] == review['reviewer_id'] and related(effect, row, 'replay', independent=True)
+                    for row in replays)):
+        fail('escalation_prior_claim_unconfirmed')
+    names = {claim['effect'], claim['control'], *review['result']['evidence_refs']}
+    if claim['replay']:
+        names.add(claim['replay'])
+    experiments = [state['experiments'][name] for name in sorted(names)]
+    instruments = [state['instruments'][name] for name in sorted({row['instrument_id'] for row in experiments})]
+    if any(row.get('superseded_by') for row in [*experiments, *instruments]):
+        fail('escalation_prior_claim_unconfirmed')
+    bindings = effect.get('target_bindings', [])
+    observed_ids = {row['effect_id'] for row in bindings} if bindings else {effect['effect_id']}
+    prior = [effects[name] for name in sorted(observed_ids)
+             if name in effects and effects[name]['rung'] == preceding[next_effect['rung']]]
+    if not prior:
+        fail('escalation_rung_invalid')
+    if len(prior) != 1:
+        fail('escalation_prior_effect_ambiguous')
+    accounts = {row['account_ref'] for row in bindings if row['account_ref'] is not None} if bindings else set(effect['account_refs'])
+    resources = set(claim['resources'])
+    expected_inputs = [{key: row[key] for key in ('id', 'kind', 'identity')}
+                       for row in state['scope']['access'] if row['id'] in resources]
+    if (set(next_effect['access_ids']) != resources or set(effect['resources']) != resources
+            or sorted(effect['input_identity'], key=lambda row: row['id']) != sorted(expected_inputs, key=lambda row: row['id'])
+            or effect['environment_profile_id'] not in next_effect['environment_ids']
+            or set(next_effect['account_refs']) != accounts):
+        fail('escalation_context_invalid')
+    contrary = set(claim['contrary']) | set(review['result']['contrary_refs'])
+    return {'claim': claim, 'claim_review': review, 'experiments': experiments, 'instruments': instruments,
+        'contrary': {name: state['publications'][name] for name in sorted(contrary)},
+        'prior_effect': prior[0], 'next_effect': next_effect,
+        'permissions': [row for row in state['scope']['access'] if row['id'] in resources],
+        'environment': next(row for row in state['scope']['environments'] if row['profile_id'] == effect['environment_profile_id'])}
+
+
+def current_escalation(state, review):
+    try:
+        material = escalation_material(state, review['subject_id'], review['next_effect_id'])
+    except ControllerError:
+        return None
+    return material if digest(canonical(material)) == review['material_sha256'] else None
+
+
+def admit_effect(state, effect, *, profile_id, access_ids, account_refs):
+    """Called under the controller lock before each new protected effect."""
+    if effect['kind'] == 'artifact_create':
+        fail('artifact_effect_unsupported')
+    if effect['rung'] in ('source_only', 'self'):
+        return
+    for review in state['reviews'].values():
+        if (review['kind'] != 'escalation' or review['status'] != 'accepted'
+                or review['next_effect_id'] != effect['id']):
+            continue
+        material = current_escalation(state, review)
+        if (material is not None and profile_id == material['environment']['profile_id']
+                and set(access_ids) <= set(material['claim']['resources'])
+                and set(account_refs) <= set(effect['account_refs'])
+                and (account_refs or not effect['account_refs'])):
+            return
+    fail('effect_escalation_review_required')
 
 
 def dependencies(state, kind, subject):
@@ -398,9 +481,12 @@ def validate_request(c, state, worker, kind, data):
                     not comparable(rows[0], row) or any(rows[0][k] != row[k] for k in ('candidate_sha256', 'probe_sha256')) for row in rows[1:]):
                 fail('repetition_unproven')
     elif kind == 'review_request':
-        keys(data, ('review_id', 'kind', 'subject_id', 'reviewer_id'))
+        fields = {'review_id', 'kind', 'subject_id', 'reviewer_id'}
+        if data.get('kind') == 'escalation':
+            fields.add('next_effect_id')
+        keys(data, fields)
         unique(state, 'reviews', data['review_id'])
-        collection = {'claim': 'claims', 'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches'}.get(data['kind'])
+        collection = {'claim': 'claims', 'escalation': 'claims', 'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches'}.get(data['kind'])
         if collection is None or data['subject_id'] not in state[collection]:
             fail('review_subject_missing')
         reviewer = state['workers'].get(data['reviewer_id'])
@@ -408,7 +494,8 @@ def validate_request(c, state, worker, kind, data):
             fail('reviewer_not_fresh')
         if any(row['reviewer_id'] == reviewer['id'] for row in state['reviews'].values()):
             fail('reviewer_not_fresh')
-        material = dependencies(state, data['kind'], data['subject_id'])
+        material = (escalation_material(state, data['subject_id'], data['next_effect_id']) if data['kind'] == 'escalation'
+                    else dependencies(state, data['kind'], data['subject_id']))
         subject = state[collection][data['subject_id']]
         resources = subject.get('resources', [])
         packet = {'kind': 'engagement-review-packet-v2', 'scope_sha256': state['scope_sha256'],
@@ -419,9 +506,14 @@ def validate_request(c, state, worker, kind, data):
         sha = c.store_object(canonical(packet)); objects.append(sha)
         data = dict(data, packet_sha256=sha, resources=resources, status='pending',
             subject_version=digest(canonical(subject)))
+        if data['kind'] == 'escalation':
+            data['material_sha256'] = digest(canonical(material))
     elif kind == 'review_result':
         keys(data, ('review_id', 'packet_sha256', 'disposition', 'checks', 'evidence_refs', 'contrary_refs', 'reason'))
         review = state['reviews'].get(data['review_id'])
+        if (review is not None and review['kind'] == 'escalation' and review['status'] == 'stale'
+                and review['reviewer_id'] == worker['id']):
+            fail('review_stale')
         if (review is None or review['reviewer_id'] != worker['id'] or worker['role'] != 'reviewer'
                 or review['status'] != 'pending' or data['packet_sha256'] != review['packet_sha256']):
             fail('review_identity_invalid')
@@ -453,6 +545,14 @@ def validate_request(c, state, worker, kind, data):
                     fail('review_stale')
             elif review['kind'] == 'patch':
                 patch_checks(state, review, worker, data['evidence_refs'])
+            elif review['kind'] == 'escalation':
+                material = current_escalation(state, review)
+                if material is None:
+                    fail('review_stale')
+                if not {row['experiment_id'] for row in material['experiments']} <= set(data['evidence_refs']):
+                    fail('review_evidence_incomplete')
+                if not set(material['contrary']) <= set(data['contrary_refs']):
+                    fail('review_contrary_missing')
     elif kind == 'review_response':
         keys(data, ('obligation_id', 'action', 'refs', 'reason'))
         obligation = state['obligations'].get(data['obligation_id'])
@@ -524,6 +624,9 @@ def invalidate(state, supersedes):
                 changed.add(subject_id)
                 for review in reviews:
                     review['status'] = 'stale'
+    for review in state['reviews'].values():
+        if review['kind'] == 'escalation' and review['status'] in ('pending', 'accepted') and current_escalation(state, review) is None:
+            review['status'] = 'stale'
 
 
 def reduce_request(state, actor, kind, data):
@@ -536,6 +639,12 @@ def reduce_request(state, actor, kind, data):
     if kind in collections:
         collection, id_key = collections[kind]
         state[collection][data[id_key]] = dict(data, author=actor)
+        if kind == 'review_request' and data['kind'] == 'escalation':
+            for prior in state['reviews'].values():
+                if (prior['review_id'] != data['review_id'] and prior['kind'] == 'escalation'
+                        and prior['subject_id'] == data['subject_id'] and prior['next_effect_id'] == data['next_effect_id']
+                        and prior['status'] in ('pending', 'accepted')):
+                    prior['status'] = 'stale'
         for old in data.get('supersedes', []):
             state[collection][old]['superseded_by'] = data[id_key]
         invalidate(state, data.get('supersedes', []))

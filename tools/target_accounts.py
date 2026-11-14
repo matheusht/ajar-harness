@@ -92,7 +92,7 @@ class TargetAccountResolver:
             for name, reference in configured.items():
                 if (type(name) is not str or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or name.lower() in references or
                         name.lower() in _HOP_HEADERS | {'host', 'content-length', 'accept-encoding', 'expect',
-                                                        'x-oslit-access', 'x-oslit-account'} or
+                                                        'x-oslit-access', 'x-oslit-account', 'x-oslit-effect'} or
                         type(reference) is not str or not re.fullmatch(r'env_[A-Za-z_][A-Za-z0-9_]*', reference)):
                     _deny('target_account_headers_invalid')
                 references[name.lower()] = reference[4:]
@@ -154,11 +154,12 @@ class TargetAccountResolver:
                 normalized[name.lower()] = value
             access_id = normalized.pop('x-oslit-access', None)
             account_ref = normalized.pop('x-oslit-account', None)
+            effect_id = normalized.pop('x-oslit-effect', None)
             matching = [key for key, value in self.origins.items() if value == destination]
             if destination in self.providers:
                 _deny('target_account_provider_origin')
             if not matching:
-                if access_id is not None or account_ref is not None:
+                if access_id is not None or account_ref is not None or effect_id is not None:
                     _deny('target_account_origin_not_granted')
                 return None
             if account_ref is not None and access_id is None:
@@ -179,6 +180,12 @@ class TargetAccountResolver:
                 ((not row['account_refs']) if account_ref is None else account_ref in row['account_refs'])]
             if kind not in access['permissions'] or not effects:
                 _deny('target_account_effect_not_granted')
+            if effect_id is not None:
+                effects = [row for row in effects if row['id'] == effect_id]
+            if not effects:
+                _deny('target_account_effect_not_granted')
+            if len(effects) != 1:
+                _deny('target_account_effect_ambiguous')
             protected = {'authorization', 'cookie'}
             for pair, account in self.accounts.items():
                 if self.origins[pair[0]] == destination:

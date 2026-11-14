@@ -1,0 +1,38 @@
+{
+  "base": "c56d562fe4c9d52faabf4fa7733b23e408dce7d7",
+  "source_sha256": {
+    "tools/engagement_evidence.py": "62058504da2387bb9bda0945a52627f2c4906058c009dcbf0f1f248e09626e09",
+    "tools/target_accounts.py": "15cc24ab9d2eba93f77ed03e163415365c0c535fb5d5c245d12d60ad83fe3063",
+    "tools/engagement_network.py": "194b3fc6c1b8656ebaed32d04438945236d2451acbf38f7a072c3578ce46f1d4",
+    "engine/native-engagement-protocol.md": "128748adfa8c53e3acdb35a869675c91c10ccec1cd18103627585df4196b2b92",
+    "docs/research/oslit-v2-contract-2026-11-14.md": "2eb9ed7423365196979b2d34a6a753e6ed4e3f9fefc0e0fe68fb453b8b9a21d4",
+    "evals/native-qualification/smoke/check_engagement_escalation_e2e.py": "ce0429640a82e8515f477d2c360663a28fc5462501aab5092bbbb8167e1f1553"
+  },
+  "result_sha256": {
+    "accounts.json": "15bd114daa9f19d9cefd742d9ada2e9009da1c528d2f66e160ce3e22612a9551",
+    "admission.json": "d22a40e8729e39919f26f67e648f0336dc98c84d20e30418cb897966cc1f5c64",
+    "after.json": "98a4d6d5cf877c6c4e690653f6ed9511dbdb72fd38ef1e70e8d3ed3c910c23dc",
+    "before.json": "3bdb350d39c2405d706c4a0ff94c18fb5b8fee6314410640deba8fcd15de4c25",
+    "evidence.json": "01f88f52aafaa7e08fafcaa987814bd19028d6bdccdc7637b24087bf43a35d89",
+    "guidance.json": "c7b4296d0a89b9944465a28c5f7ec49cf4117deaad6d75cdb8a063f86689566a",
+    "malformed-before.json": "86c9eb910aefc23bc033b0c8a2044a5a09042c3b6a98b7933cb5e7cdcbb731da",
+    "network.json": "29fbf4114fd6c505914db7535b3a3c8d14329f68fcc9442a54a17fe35dbc2a28",
+    "review-before.json": "ab47090fded4450c7951948b691bd2821834174d07218959bfb479870408cd9a"
+  },
+  "checks": {
+    "escalation": 19,
+    "evidence": 16,
+    "accounts": 48,
+    "network": 8,
+    "admission": 9,
+    "guidance": 5
+  },
+  "classification": "signed_simulated_execution_and_actual_local_http",
+  "limits": [
+    "shared application clean reset unavailable",
+    "generic semantic effect containment unqualified",
+    "generic artifact admission unsupported",
+    "companion native capture integration separately checked",
+    "no external provider, target, Docker or SSH calls"
+  ]
+}

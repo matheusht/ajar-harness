@@ -1,0 +1,91 @@
+{
+  "classification": "signed_simulated_execution_and_actual_local_http",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "status": "fail",
+  "scenarios": [
+    {
+      "scenario": "missing_predecessor",
+      "status": "pass"
+    },
+    {
+      "scenario": "supported_is_insufficient",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted_transition",
+      "status": "pass"
+    },
+    {
+      "scenario": "rung_skip",
+      "status": "pass"
+    },
+    {
+      "scenario": "full_chain",
+      "status": "pass"
+    },
+    {
+      "scenario": "account_context",
+      "status": "pass"
+    },
+    {
+      "scenario": "resource_context",
+      "status": "pass"
+    },
+    {
+      "scenario": "malformed_effect",
+      "status": "pass"
+    },
+    {
+      "scenario": "unrelated_claim",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale_material",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale_pending_review",
+      "status": "pass"
+    },
+    {
+      "scenario": "review_evidence_required",
+      "status": "pass"
+    },
+    {
+      "scenario": "reopened_claim",
+      "status": "pass"
+    },
+    {
+      "scenario": "replaced_transition",
+      "status": "fail",
+      "error": "accepted forbidden operation: effect_escalation_review_required"
+    },
+    {
+      "scenario": "superseded_pending_review",
+      "status": "fail",
+      "error": "accepted forbidden operation: review_stale"
+    },
+    {
+      "scenario": "unrelated_transition_review",
+      "status": "pass"
+    },
+    {
+      "scenario": "application_gate",
+      "status": "pass"
+    },
+    {
+      "scenario": "artifact_gate",
+      "status": "pass"
+    },
+    {
+      "scenario": "effect_selection",
+      "status": "pass"
+    }
+  ],
+  "unverified": [
+    "shared application reset",
+    "native semantic effect containment",
+    "artifact classes"
+  ]
+}

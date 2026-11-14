@@ -54,6 +54,16 @@ def main():
             def __init__(self, path, scenario):
                 self.path = path
                 self.inputs = fixture.make_fixture(path / 'input')
+                if scenario == 'E06':
+                    scope = fixture.fixture_scope(self.inputs)
+                    scope['access'][0].update(kind='application', identity={
+                        'base_url': 'https://fixture.invalid', 'version': 'fixture'})
+                    scope['network']['target'] = [{'protocol': 'https', 'host': 'fixture.invalid',
+                        'port': 443, 'address_policy': {'public_only': True, 'cidrs': []}}]
+                    document = json.loads(self.inputs.read_text())
+                    document['access_files'] = {}
+                    self.inputs.write_bytes(fixture.encoded(document))
+                    fixture.resign_fixture(self.inputs, scope)
                 if scenario == 'E13':
                     scope = fixture.fixture_scope(self.inputs)
                     scope['limits']['hard']['worker_seconds'] = 100

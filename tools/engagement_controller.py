@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -240,9 +241,11 @@ class Controller:
         state = {'engagement_id': scope['engagement_id'], 'scope': scope,
                  'scope_sha256': initial['scope_sha256'], 'evidence_class': initial['evidence_class'],
                  'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {},
-                 'directions': [], 'dispatches': {}, 'resource_holds': {}, 'cleanup': 'pending',
+                 'directions': [], 'dispatches': {}, 'invocations': {}, 'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
-                           'tokens': {}, 'cost': None, 'missing': ['billed_cost', 'provider_requests']}}
+                           'tokens': {}, 'cost': None, 'known_estimated_cost': 0,
+                           'observed_token_dimensions': {}, 'cost_observations': 0,
+                           'missing': ['billed_cost', 'provider_requests']}}
         from engagement_evidence import initialize as initialize_evidence
         initialize_evidence(state)
         seen = set()
@@ -268,6 +271,11 @@ class Controller:
                 self.read_object(event['payload']['receipt'])
             elif event['type'] == 'effect_reconciled':
                 self.read_object(event['payload']['evidence'])
+        state['usage']['native_invocations_admitted'] = len(state['invocations'])
+        state['usage']['native_invocations_observed'] = sum(row['status'] not in ('pending', 'stopped_unobserved')
+                                                         for row in state['invocations'].values())
+        state['usage']['native_usage_incomplete'] = any(row['status'] in ('pending', 'stopped_unobserved')
+                                                       for row in state['invocations'].values())
         return state
 
     def state(self):
@@ -312,6 +320,36 @@ class Controller:
             state['dispatches'][payload['dispatch_id']] = dict(payload, status='pending', receipt=None)
             state['usage']['invocations'] += 1
             state['usage']['reserved_worker_seconds'] += payload['seconds']
+        elif kind == 'capture_intended':
+            grant = payload['grant']
+            state['dispatches'][grant['dispatch_id']] = dict(grant, status='pending', receipt=None,
+                parent_dispatch_id=payload['parent_dispatch_id'], session_id=payload['session_id'])
+            state['usage']['reserved_worker_seconds'] += grant['seconds']
+        elif kind == 'dispatch_renewed':
+            dispatch = state['dispatches'][payload['grant']['dispatch_id']]
+            dispatch.setdefault('prior_grants', []).append(payload['previous'])
+            state['usage']['reserved_worker_seconds'] += payload['grant']['seconds'] - dispatch['seconds']
+            dispatch.update(payload['grant'])
+        elif kind == 'invocation_intended':
+            dispatch = state['dispatches'][payload['dispatch_id']]
+            if dispatch.get('invocations'):
+                state['usage']['invocations'] += 1
+            dispatch.setdefault('invocations', []).append(payload['invocation_id'])
+            state['invocations'][payload['invocation_id']] = dict(payload, status='pending')
+        elif kind == 'invocation_observed':
+            invocation = state['invocations'][payload['invocation_id']]
+            invocation.update(payload['observation'])
+            self._accumulate_usage(state['usage'], payload['observation']['usage'])
+        elif kind == 'task_outcome_pending':
+            state['workers'][payload['worker_id']]['outcome_pending'] = payload['request']
+        elif kind == 'task_outcome_finalized':
+            worker = state['workers'][payload['worker_id']]
+            self._reduce_request(state, worker['id'], 'task_result', worker.pop('outcome_pending')['payload'])
+        elif kind == 'runtime_stop_observed':
+            state['workers'][payload['worker_id']].update(status='stopped', stop_receipt=payload['receipt'])
+            state['evidence_objects'][payload['receipt']] = True
+            if not state['environments'] and all(row['status'] == 'stopped' for row in state['workers'].values()):
+                state['cleanup'] = 'verified'
         elif kind == 'dispatch_observed':
             dispatch = state['dispatches'][payload['dispatch_id']]
             observation = payload['observation']
@@ -320,8 +358,8 @@ class Controller:
             if observation['status'] == 'settled':
                 state['usage']['reserved_worker_seconds'] -= dispatch['seconds']
                 state['usage']['worker_seconds'] += observation['worker_seconds']
-                for key, amount in (observation['usage'].get('tokens') or {}).items():
-                    state['usage']['tokens'][key] = state['usage']['tokens'].get(key, 0) + amount
+                if not dispatch.get('invocations'):
+                    self._accumulate_usage(state['usage'], observation['usage'])
             for resource, status in observation['resources'].items():
                 holds = state['resource_holds'].get(resource, [])
                 if status == 'unknown':
@@ -425,18 +463,32 @@ class Controller:
                 or len(values) != len(set(values)) or not set(values) <= allowed):
             fail('resources_invalid')
 
-    def _eligible(self, state, task):
+    def _shared(self, state, resources):
+        shared = {row['id'] for row in state['scope']['access'] if row['kind'] == 'application'}
+        return set(resources) & shared
+
+    def _held(self, state, worker, resources):
+        for resource in resources:
+            for dispatch_id in state['resource_holds'].get(resource, []):
+                dispatch = state['dispatches'][dispatch_id]
+                if self._shared(state, [resource]) or (dispatch['worker_id'] == worker['id'] and
+                                                       dispatch['generation'] == worker['generation']):
+                    return True
+        return False
+
+    def _eligible(self, state, task, worker):
         if task['status'] != 'ready':
             return False
         if any(state['tasks'][dependency]['status'] not in ('completed', 'reviewed_complete')
                for dependency in task['prerequisites']):
             return False
-        if any(resource in state['resource_holds'] for resource in task['resources']):
+        if self._held(state, worker, task['resources']):
             return False
         busy = {resource for other in state['tasks'].values() if other['status'] == 'assigned'
-                for resource in other['resources']}
+                for resource in self._shared(state, other['resources'])}
         pending = {resource for dispatch in state['dispatches'].values()
-                   if dispatch['status'] in ('pending', 'unknown') for resource in dispatch['resources']}
+                   if dispatch['status'] in ('pending', 'unknown') for resource in
+                   (dispatch['resources'] if dispatch['worker_id'] == worker['id'] else self._shared(state, dispatch['resources']))}
         return not set(task['resources']) & (busy | pending)
 
     def _dispatch_resources(self, state, worker, resources):
@@ -455,7 +507,7 @@ class Controller:
                     or not set(resources) <= set(task['resources'])):
                 fail('assignment_resource_forbidden')
         if any(task['status'] == 'assigned' and task['owner'] != worker['id']
-               and set(resources) & set(task['resources']) for task in state['tasks'].values()):
+               and self._shared(state, resources) & set(task['resources']) for task in state['tasks'].values()):
             fail('resource_owned')
 
     def _validate_request(self, state, worker, kind, data):
@@ -504,10 +556,10 @@ class Controller:
                 fail('worker_assignment_conflict')
             if kind == 'claim':
                 tasks = sorted(state['tasks'].values(), key=lambda task: (-task['priority'], task['created_order']))
-                task = next((task for task in tasks if self._eligible(state, task)), None)
+                task = next((task for task in tasks if self._eligible(state, task, assignee)), None)
             else:
                 task = state['tasks'].get(data['task_id'])
-                if task is not None and not self._eligible(state, task):
+                if task is not None and not self._eligible(state, task, assignee):
                     task = None
             if task is None:
                 fail('no_ready_task')
@@ -545,9 +597,6 @@ class Controller:
             if (task is None or task['owner'] != worker['id'] or task['generation'] != data['generation']
                     or worker['assignment'] != {'task_id': data['task_id'], 'generation': data['generation']}):
                 fail('assignment_stale')
-            if any(dispatch['worker_id'] == worker['id'] and dispatch['status'] in ('pending', 'unknown')
-                   for dispatch in state['dispatches'].values()):
-                fail('assignment_effect_unsettled')
             if data['disposition'] not in ('completed', 'blocked', 'deferred'):
                 fail('task_result_invalid')
             if not isinstance(data['result'], str) or not 1 <= len(data['result']) <= 65536:
@@ -588,9 +637,16 @@ class Controller:
                     return self._receipt(event)
             self._authority(state)
             worker = self._worker(state, principal)
+            if worker.get('outcome_pending'):
+                fail('worker_finishing')
             if request['expected_revision'] != state['revision']:
                 fail('revision_conflict')
             data = self._validate_request(state, worker, request['type'], request['payload'])
+            if request['type'] == 'task_result' and any(dispatch['worker_id'] == worker['id'] and
+                    dispatch['status'] in ('pending', 'unknown') for dispatch in state['dispatches'].values()):
+                event = self._append(events, principal, request['request_id'], request_sha,
+                    'task_outcome_pending', {'worker_id': worker['id'], 'request': request})
+                return self._receipt(event)
             event = self._append(events, principal, request['request_id'], request_sha,
                                  'request_accepted', {'type': request['type'], 'payload': data})
             return self._receipt(event)
@@ -664,18 +720,20 @@ class Controller:
             return self._host('worker_session_observed', {'worker_id': worker_id, 'generation': generation,
                 'session_id': session_id, 'reason': reason, 'runtime_owner_sha256': owner_sha})
 
-    def _grant(self, state, worker, *, seconds, resources, adapter_id):
+    def _grant(self, state, worker, *, seconds, resources, adapter_id, parent=None):
         limits, usage = state['scope']['limits'], state['usage']
         if not integer(seconds, 1, limits['max_worker_lease_seconds']):
             fail('reservation_invalid')
         self._dispatch_resources(state, worker, resources)
-        if any(resource in state['resource_holds'] for resource in resources):
+        if self._held(state, worker, resources):
             fail('resource_held')
-        if any(d['status'] in ('pending', 'unknown') and
-               (d['worker_id'] == worker['id'] or set(d['resources']) & set(resources))
+        if sum(d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()) >= limits['max_workers']:
+            fail('resource_exhausted')
+        if any(d['status'] in ('pending', 'unknown') and d['dispatch_id'] != parent and
+               (d['worker_id'] == worker['id'] or self._shared(state, d['resources']) & set(resources))
                for d in state['dispatches'].values()):
             fail('dispatch_conflict')
-        if (usage['invocations'] >= limits['hard']['invocations'] or
+        if ((parent is None and usage['invocations'] >= limits['hard']['invocations']) or
                 usage['worker_seconds'] + usage['reserved_worker_seconds'] + seconds > limits['hard']['worker_seconds']):
             fail('resource_exhausted')
         lease = self.clock() + timedelta(seconds=seconds)
@@ -685,6 +743,28 @@ class Controller:
             'assignment': worker['assignment'], 'profile_id': worker['profile_id'],
             'scope_sha256': state['scope_sha256'], 'seconds': seconds, 'resources': resources,
             'lease_expires_at': lease.isoformat(), 'adapter_id': identifier(adapter_id)}
+
+    def prepare_capture_dispatch(self, parent_grant, *, seconds, resources):
+        with self.lock():
+            state = self.state()
+            self._authorize(state, parent_grant)
+            parent = state['dispatches'][parent_grant['dispatch_id']]
+            if parent.get('parent_dispatch_id'):
+                fail('capture_parent_invalid')
+            self._resources(state, resources)
+            if self._shared(state, resources) or not set(resources) <= set(parent_grant['resources']):
+                fail('capture_resources_unavailable')
+            if any(d.get('parent_dispatch_id') == parent_grant['dispatch_id'] and
+                    d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()):
+                fail('capture_in_progress')
+            worker = self._worker(state, Principal('worker', parent_grant['worker_id'], parent_grant['generation']))
+            grant = self._grant(state, worker, seconds=seconds, resources=resources,
+                adapter_id=parent_grant['adapter_id'], parent=parent_grant['dispatch_id'])
+            grant['lease_expires_at'] = min(instant(grant['lease_expires_at']),
+                                           instant(parent_grant['lease_expires_at'])).isoformat()
+            self._host('capture_intended', {'grant': grant, 'parent_dispatch_id': parent_grant['dispatch_id'],
+                                            'session_id': worker['session_id']})
+            return grant
 
     def prepare_dispatch(self, worker_id, generation, *, seconds, resources, adapter_id):
         with self.lock():
@@ -756,14 +836,127 @@ class Controller:
             fail('worker_stale')
         if dispatch['status'] != 'pending':
             fail('dispatch_settled')
+        parent_id = dispatch.get('parent_dispatch_id')
+        if parent_id:
+            parent = state['dispatches'][parent_id]
+            self._authorize(state, {key: parent[key] for key in GRANT_KEYS})
         if worker['assignment'] != dispatch['assignment']:
             fail('assignment_stale')
         self._dispatch_resources(state, worker, grant['resources'])
         if self.clock() >= instant(dispatch['lease_expires_at']):
             fail('lease_expired')
-        if any(resource in state['resource_holds'] for resource in grant['resources']):
+        if self._held(state, worker, grant['resources']):
             fail('resource_held')
         return True
+
+    def bind_grant(self, state, grant):
+        keys(grant, GRANT_KEYS, 'dispatch_identity_invalid')
+        dispatch = state['dispatches'].get(grant['dispatch_id'])
+        if dispatch is None or grant not in [
+                {key: dispatch[key] for key in GRANT_KEYS}, *dispatch.get('prior_grants', [])]:
+            fail('dispatch_identity_invalid')
+        return dispatch
+
+    def renew_dispatch(self, grant, *, seconds):
+        with self.lock():
+            state = self.state()
+            self._authorize(state, grant)
+            limits, usage = state['scope']['limits'], state['usage']
+            if not integer(seconds, 1, limits['max_worker_lease_seconds']):
+                fail('reservation_invalid')
+            expiry = self.clock() + timedelta(seconds=seconds)
+            if state['scope'].get('expires_at'):
+                expiry = min(expiry, instant(state['scope']['expires_at']))
+            extra = max(0, math.ceil((expiry - instant(grant['lease_expires_at'])).total_seconds()))
+            if extra == 0:
+                return grant
+            if usage['worker_seconds'] + usage['reserved_worker_seconds'] + extra > limits['hard']['worker_seconds']:
+                fail('resource_exhausted')
+            renewed = dict(grant, seconds=grant['seconds'] + extra, lease_expires_at=expiry.isoformat())
+            self._host('dispatch_renewed', {'previous': grant, 'grant': renewed})
+            return renewed
+
+    def begin_invocation(self, grant):
+        with self.lock():
+            state = self.state()
+            self._authorize(state, grant)
+            dispatch = state['dispatches'][grant['dispatch_id']]
+            prior = dispatch.get('invocations', [])
+            if any(state['invocations'][identity]['status'] == 'pending' for identity in prior):
+                fail('invocation_unsettled')
+            if prior and state['usage']['invocations'] >= state['scope']['limits']['hard']['invocations']:
+                fail('resource_exhausted')
+            identity = uuid.uuid4().hex
+            self._host('invocation_intended', {'invocation_id': identity, 'dispatch_id': grant['dispatch_id'],
+                'grant': grant, 'session_id': state['workers'][grant['worker_id']]['session_id']})
+            return identity
+
+    def record_invocation_observed(self, grant, invocation_id, observation):
+        with self.lock():
+            state = self.state()
+            self.bind_grant(state, grant)
+            prior = state['invocations'].get(invocation_id)
+            if prior is None or prior['dispatch_id'] != grant['dispatch_id']:
+                fail('invocation_identity_invalid')
+            keys(observation, ('status', 'usage'), 'invocation_observation_invalid')
+            if observation['status'] not in ('completed', 'interrupted', 'failed', 'aborted', 'error', 'local_only', 'stopped_unobserved'):
+                fail('invocation_observation_invalid')
+            self._check_usage(observation['usage'])
+            if prior['status'] != 'pending':
+                if all(prior[key] == value for key, value in observation.items()):
+                    return {'status': 'recorded'}
+                fail('invocation_observation_conflict')
+            return self._host('invocation_observed', {'invocation_id': invocation_id, 'observation': observation})
+
+    @staticmethod
+    def _accumulate_usage(total, usage):
+        for key, amount in (usage['tokens'] or {}).items():
+            total['tokens'][key] = total['tokens'].get(key, 0) + amount
+            total['observed_token_dimensions'][key] = total['observed_token_dimensions'].get(key, 0) + 1
+        if usage['cost'] is not None:
+            total['known_estimated_cost'] += usage['cost']
+            total['cost_observations'] += 1
+
+    @staticmethod
+    def _check_usage(usage):
+        keys(usage, ('tokens', 'cost'), 'receipt_invalid')
+        tokens = usage['tokens']
+        if tokens is not None and (not isinstance(tokens, dict) or any(
+                key not in ('input', 'output', 'cached_input', 'cache_write', 'reasoning', 'total') or not integer(value)
+                for key, value in tokens.items())):
+            fail('receipt_invalid')
+        cost = usage['cost']
+        if cost is not None and (type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0):
+            fail('receipt_invalid')
+
+    def record_runtime_stopped(self, grant, readback):
+        with self.lock():
+            state = self.state()
+            self.bind_grant(state, grant)
+            worker = state['workers'][grant['worker_id']]
+            if (worker['generation'] != grant['generation'] or worker['status'] not in ('revoked', 'stopped')
+                    or worker.get('runtime_owner_sha256') is None
+                    or readback.get('owner_receipt_sha256') != worker['runtime_owner_sha256']
+                    or readback.get('session_id') != worker['session_id']
+                    or readback.get('process_exited') is not True or readback.get('child_absence') != 'verified'
+                    or readback.get('capabilities_revoked') is not True
+                    or any(row['worker_id'] == worker['id'] and row['generation'] == worker['generation']
+                           for row in state['environments'].values())):
+                fail('worker_stop_unverified')
+            sha = self.store_object(canonical(readback))
+            return self._host('runtime_stop_observed', {'worker_id': worker['id'], 'receipt': sha})
+
+    def finalize_worker_outcome(self, worker_id, generation):
+        with self.lock():
+            state = self.state()
+            worker = state['workers'][worker_id]
+            if (worker['generation'] != generation or worker['status'] != 'stopped' or
+                    any(d['worker_id'] == worker_id and d['status'] in ('pending', 'unknown')
+                        for d in state['dispatches'].values())):
+                fail('worker_outcome_unsettled')
+            if not worker.get('outcome_pending'):
+                return {'status': 'no_outcome'}
+            return self._host('task_outcome_finalized', {'worker_id': worker_id, 'generation': generation})
 
     def store_object(self, content):
         if type(content) is not bytes or len(content) > 4 * 1024 * 1024:
@@ -856,15 +1049,11 @@ class Controller:
                     or any(value not in ('unchanged', 'reset', 'unknown') for value in observation['resources'].values())
                     or observation['cleanup'] not in ('pending', 'verified', 'unresolved')):
                 fail('receipt_invalid')
-            keys(observation['usage'], ('tokens', 'cost'), 'receipt_invalid')
+            self._check_usage(observation['usage'])
+            if dispatch.get('invocations') and observation['usage'] != {'tokens': None, 'cost': None}:
+                fail('receipt_usage_already_recorded')
             tokens = observation['usage']['tokens']
-            if tokens is not None and (not isinstance(tokens, dict) or
-                    any(key not in ('input', 'output', 'cached_input', 'cache_write', 'reasoning', 'total') or not integer(value)
-                        for key, value in tokens.items())):
-                fail('receipt_invalid')
             cost = observation['usage']['cost']
-            if cost is not None and (type(cost) not in (int, float) or cost < 0):
-                fail('receipt_invalid')
             prior = dispatch.get('observation')
             if prior is not None:
                 previous_tokens = prior['usage']['tokens'] or {}

@@ -56,11 +56,7 @@ def unique(state, collection, value):
 
 
 def binding(c, state, grant):
-    keys(grant, GRANT_KEYS, 'dispatch_identity_invalid')
-    dispatch = state['dispatches'].get(grant['dispatch_id'])
-    if dispatch is None or canonical(grant) != canonical({key: dispatch[key] for key in GRANT_KEYS}):
-        fail('dispatch_identity_invalid')
-    return dispatch
+    return c.bind_grant(state, grant)
 
 
 def identity(c, state, grant, profile_id, value):

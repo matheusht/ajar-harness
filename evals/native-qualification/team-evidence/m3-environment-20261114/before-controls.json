@@ -1,0 +1,15 @@
+{
+  "kind": "environment-engineering-e2e-v2",
+  "checks": [],
+  "classification": "actual_local_harmless_controls",
+  "unverified": [
+    "Docker isolation",
+    "SSH host",
+    "native HTTPS proxy",
+    "provider behavior",
+    "fresh-target research"
+  ],
+  "status": "failed",
+  "error": "ModuleNotFoundError: No module named 'engagement_network'",
+  "source_sha256": "c22704dbe9b863894dee88f511fc5d7451091238b4320c473bf07df9baf13cfd"
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "environment-local-tls-e2e-v2",
+  "classification": "actual_local_harmless_tls",
+  "checks": [],
+  "unverified": [
+    "Docker or SSH network integration",
+    "provider behavior",
+    "research"
+  ],
+  "status": "failed",
+  "error": "TypeError: NetworkGate.__init__() got an unexpected keyword argument 'upstream_context'",
+  "source_sha256": "de807107d5c33b34b04996cd2572aa17df793ce2ab423aa5ad984ad93a45c8c8"
+}

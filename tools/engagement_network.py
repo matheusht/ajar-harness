@@ -1,0 +1,298 @@
+"""Per-worker network admission. Provider routes never enter this lab gateway."""
+from __future__ import annotations
+
+import http.client
+import copy
+import ipaddress
+import os
+from pathlib import Path
+import queue
+import re
+import socket
+import socketserver
+import ssl
+import threading
+from urllib.parse import urljoin, urlsplit
+
+
+class NetworkDenied(RuntimeError):
+    pass
+
+
+def _request(stream):
+    line = stream.readline(8193)
+    method, target, version = line.decode('ascii').rstrip('\r\n').split(' ')
+    if len(line) > 8192 or not line.endswith(b'\r\n') or version not in ('HTTP/1.0', 'HTTP/1.1'):
+        raise NetworkDenied('network_request_invalid')
+    headers, total = {}, 0
+    while True:
+        row = stream.readline(8193); total += len(row)
+        if not row.endswith(b'\r\n') or len(row) > 8192 or total > 16384:
+            raise NetworkDenied('network_headers_invalid')
+        if row == b'\r\n':
+            return method, target, headers
+        key, value = row.decode('ascii').rstrip('\r\n').split(':', 1)
+        key, value = key.lower(), value.strip()
+        if (not re.fullmatch('[a-z0-9-]+', key) or key in headers or
+                key in ('transfer-encoding', 'proxy-authorization', 'expect') or
+                any(ord(c) < 32 or ord(c) == 127 for c in value)):
+            raise NetworkDenied('network_headers_invalid')
+        headers[key] = value
+
+
+class NetworkGate:
+    def __init__(self, routes, authorize, *, maximum_bytes=1024 * 1024, dispatch_guard=None,
+                 upstream_context=None):
+        self.routes = copy.deepcopy(routes)
+        self.authorize = authorize
+        self.dispatch_guard = dispatch_guard
+        self.maximum_bytes = maximum_bytes
+        self.upstream_context = upstream_context or ssl.create_default_context()
+        if self.upstream_context.verify_mode != ssl.CERT_REQUIRED or not self.upstream_context.check_hostname:
+            raise NetworkDenied('network_tls_verification_required')
+        self.sockets = set()
+        self.lock = threading.Lock()
+        self.closed = threading.Event()
+        self.resolvers = threading.BoundedSemaphore(4)
+        self.server = None
+        self.endpoint = None
+        self.watcher = threading.Thread(target=self._watch, daemon=True)
+        self.watcher.start()
+
+    def _active(self):
+        try:
+            return not self.closed.is_set() and self.authorize() is True
+        except Exception:
+            return False
+
+    def _watch(self):
+        while not self.closed.wait(.05):
+            if not self._active():
+                self.closed.set()
+                self._close_sockets()
+
+    def _close_sockets(self):
+        with self.lock:
+            for peer in list(self.sockets):
+                try:
+                    peer.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                peer.close()
+
+    def _destination(self, url):
+        if self.dispatch_guard is None:
+            raise NetworkDenied('network_dispatch_guard_required')
+        if not self._active():
+            raise NetworkDenied('network_lease_inactive')
+        parsed = urlsplit(url)
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
+                parsed.username is not None or parsed.password is not None or parsed.fragment or
+                any(ord(c) < 32 or ord(c) == 127 for c in url)):
+            raise NetworkDenied('network_url_invalid')
+        try:
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        except ValueError as error:
+            raise NetworkDenied('network_port_invalid') from error
+        host = parsed.hostname.lower()
+        matching = [r for r in self.routes if
+                    r['protocol'] == parsed.scheme and r['host'] == host and r['port'] == port]
+        if len(matching) != 1:
+            raise NetworkDenied('network_destination_not_granted')
+        answers = queue.Queue(maxsize=1)
+        if not self.resolvers.acquire(blocking=False):
+            raise NetworkDenied('network_resolution_unavailable')
+        def resolve():
+            try:
+                answers.put(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+            except OSError:
+                answers.put(None)
+            finally:
+                self.resolvers.release()
+        threading.Thread(target=resolve, daemon=True).start()
+        try:
+            rows = answers.get(timeout=3)
+        except queue.Empty as error:
+            raise NetworkDenied('network_resolution_unavailable') from error
+        if not rows:
+            raise NetworkDenied('network_resolution_unavailable')
+        policy = matching[0]['address_policy']
+        addresses = list(dict.fromkeys(row[4][0] for row in rows))
+        networks = [ipaddress.ip_network(cidr, strict=True) for cidr in policy['cidrs']]
+        for value in addresses:
+            address = ipaddress.ip_address(value)
+            if ((policy['public_only'] and not address.is_global) or
+                    (not policy['public_only'] and not any(address in net for net in networks))):
+                raise NetworkDenied('network_resolved_address_not_granted')
+        if not self._active():
+            raise NetworkDenied('network_lease_inactive')
+        return parsed, port, addresses[0]
+
+    def fetch(self, url, *, method='GET', headers=None, body=b'', redirects=5):
+        if method not in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
+            raise NetworkDenied('network_method_invalid')
+        if not isinstance(body, bytes) or len(body) > self.maximum_bytes:
+            raise NetworkDenied('network_body_limit')
+        headers = dict(headers or {})
+        for name, value in headers.items():
+            if (not isinstance(name, str) or not isinstance(value, str) or
+                    any(ord(c) < 32 or ord(c) == 127 for c in name + value) or
+                    name.lower() in ('host', 'connection', 'proxy-authorization',
+                                     'transfer-encoding', 'content-length')):
+                raise NetworkDenied('network_header_invalid')
+        for attempt in range(redirects + 1):
+            parsed, port, address = self._destination(url)
+            peer = None
+            connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
+            try:
+                with self.dispatch_guard():
+                    if not self._active():
+                        raise NetworkDenied('network_lease_inactive')
+                    peer = socket.create_connection((address, port), timeout=5)
+                    with self.lock:
+                        self.sockets.add(peer)
+                    if parsed.scheme == 'https':
+                        wrapped = self.upstream_context.wrap_socket(peer, server_hostname=parsed.hostname)
+                        with self.lock:
+                            self.sockets.discard(peer); self.sockets.add(wrapped)
+                        peer = wrapped
+                    connection.sock = peer
+                    if not self._active():
+                        raise NetworkDenied('network_lease_inactive')
+                    path = (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
+                    connection.request(method, path, body=body, headers={**headers, 'Connection': 'close'})
+                response = connection.getresponse()
+                location = response.getheader('Location')
+                payload = response.read(self.maximum_bytes + 1)
+                if len(payload) > self.maximum_bytes:
+                    raise NetworkDenied('network_response_limit')
+                if not self._active():
+                    raise NetworkDenied('network_lease_inactive')
+                if response.status in (301, 302, 303, 307, 308) and location:
+                    if attempt == redirects:
+                        raise NetworkDenied('network_redirect_limit')
+                    next_url = urljoin(url, location)
+                    # Credentials never follow a change of scheme, host, or port.
+                    next_parsed = urlsplit(next_url)
+                    next_port = next_parsed.port or (443 if next_parsed.scheme == 'https' else 80)
+                    if (next_parsed.scheme, next_parsed.hostname, next_port) != (parsed.scheme, parsed.hostname, port):
+                        headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+                    if response.status == 303:
+                        method, body = 'GET', b''
+                    url = next_url
+                    continue
+                return {'status': response.status, 'body': payload,
+                        'host': parsed.hostname, 'port': port, 'peer_address': address,
+                        'content_type': response.getheader('Content-Type', 'application/octet-stream')}
+            finally:
+                with self.lock:
+                    self.sockets.discard(peer)
+                connection.close()
+                if peer:
+                    peer.close()
+        raise NetworkDenied('network_redirect_limit')
+
+    def serve(self, endpoint: Path, *, certificate=None, private_key=None):
+        if self.server is not None or endpoint.exists() or endpoint.is_symlink():
+            raise NetworkDenied('network_endpoint_exists')
+        context = None
+        if certificate is not None or private_key is not None:
+            if certificate is None or private_key is None:
+                raise NetworkDenied('network_tls_material_incomplete')
+            key_path = Path(private_key)
+            if key_path.is_symlink() or key_path.stat().st_mode & 0o077:
+                raise NetworkDenied('network_tls_key_not_private')
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.set_alpn_protocols(['http/1.1'])
+            context.load_cert_chain(str(certificate), str(private_key))
+        gate = self
+        slots = threading.BoundedSemaphore(8)
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                if not slots.acquire(blocking=False):
+                    return
+                connection = self.request
+                stream = None
+                connection.settimeout(5)
+                with gate.lock:
+                    gate.sockets.add(connection)
+                try:
+                    # Keep the first parser unbuffered so TLS bytes stay in the socket.
+                    stream = connection.makefile('rb', buffering=0)
+                    method, url, headers = _request(stream)
+                    if method == 'CONNECT':
+                        if context is None:
+                            raise NetworkDenied('native_https_proxy_unavailable')
+                        parsed, port, _ = gate._destination('https://' + url)
+                        authority = ('[' + parsed.hostname + ']' if ':' in parsed.hostname else parsed.hostname) + ':' + str(port)
+                        if url != authority or headers.get('host') != authority or parsed.path or headers.get('content-length', '0') != '0':
+                            raise NetworkDenied('network_connect_invalid')
+                        stream.close(); stream = None
+                        connection.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+                        wrapped = context.wrap_socket(connection, server_side=True)
+                        with gate.lock:
+                            gate.sockets.discard(connection); gate.sockets.add(wrapped)
+                        connection = wrapped
+                        stream = connection.makefile('rb')
+                        method, target, headers = _request(stream)
+                        hosts = {authority}
+                        if port == 443:
+                            hosts.add(parsed.hostname)
+                        if (headers.get('host') not in hosts or not target.startswith('/') or target.startswith('//')):
+                            raise NetworkDenied('network_inner_authority_changed')
+                        url = 'https://' + authority + target
+                    length_text = headers.pop('content-length', '0')
+                    if not length_text.isdecimal() or not 0 <= int(length_text) <= gate.maximum_bytes:
+                        raise NetworkDenied('network_body_limit')
+                    length = int(length_text)
+                    headers.pop('host', None); headers.pop('connection', None); headers.pop('proxy-connection', None)
+                    body = bytearray()
+                    while len(body) < length:
+                        chunk = stream.read(length - len(body))
+                        if not chunk:
+                            break
+                        body.extend(chunk)
+                    if len(body) != length:
+                        raise NetworkDenied('network_body_incomplete')
+                    result = gate.fetch(url, method=method, headers=headers, body=bytes(body))
+                    connection.sendall(f'HTTP/1.1 {result["status"]} Response\r\nContent-Length: {len(result["body"])}\r\nConnection: close\r\n\r\n'.encode() + result['body'])
+                except (OSError, ValueError, NetworkDenied, http.client.HTTPException):
+                    try:
+                        connection.sendall(b'HTTP/1.1 403 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                    except OSError:
+                        pass
+                finally:
+                    if stream:
+                        stream.close()
+                    with gate.lock:
+                        gate.sockets.discard(connection)
+                    connection.close(); slots.release()
+        class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+            daemon_threads = True
+            block_on_close = False
+        self.server = Server(str(endpoint), Handler)
+        os.chmod(endpoint, 0o600)
+        self.endpoint = endpoint
+        info = endpoint.lstat()
+        self.endpoint_identity = info.st_dev, info.st_ino
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.closed.set(); self._close_sockets()
+        replaced = False
+        if self.server:
+            self.server.shutdown(); self.server.server_close(); self.thread.join()
+            try:
+                info = self.endpoint.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (info.st_dev, info.st_ino) == self.endpoint_identity:
+                    self.endpoint.unlink()
+                else:
+                    replaced = True
+        self.watcher.join(timeout=1)
+        if replaced:
+            raise NetworkDenied('network_endpoint_identity_changed')

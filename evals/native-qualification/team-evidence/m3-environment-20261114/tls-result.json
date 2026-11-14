@@ -1,0 +1,33 @@
+{
+  "kind": "environment-local-tls-e2e-v2",
+  "classification": "actual_local_harmless_tls",
+  "checks": [
+    {
+      "name": "CONNECT terminates TLS and forwards admitted inner request",
+      "passed": true
+    },
+    {
+      "name": "inner Host cannot bypass CONNECT authority",
+      "passed": true
+    },
+    {
+      "name": "inner absolute URI cannot change destination",
+      "passed": true
+    },
+    {
+      "name": "upstream certificate validation remains enabled",
+      "passed": true
+    },
+    {
+      "name": "private test material stays in disposable directory",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "Docker or SSH network integration",
+    "provider behavior",
+    "research"
+  ],
+  "status": "passed",
+  "source_sha256": "38fd6149ea07132a64fb9568892e246c84b8fade3395a635ffd1097afd1b96ea"
+}

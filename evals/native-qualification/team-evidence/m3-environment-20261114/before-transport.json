@@ -1,0 +1,14 @@
+{
+  "kind": "environment-command-replay-v2",
+  "classification": "simulated_docker_cli",
+  "checks": [],
+  "unverified": [
+    "real Docker",
+    "SSH transport",
+    "network isolation",
+    "research"
+  ],
+  "status": "failed",
+  "error": "ImportError: cannot import name 'Environment' from 'research_environment' (/Users/matheusvsky/.codex/worktrees/oslit-v2-environments/llm-redteam-harness/tools/research_environment.py)",
+  "source_sha256": "bcc48cd8f2c40f1d7f8630eec860ec87df6e5e76147fae9a422ed57524abedd5"
+}

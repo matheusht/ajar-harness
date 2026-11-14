@@ -1,0 +1,19 @@
+{
+  "kind": "environment-command-replay-v2",
+  "classification": "simulated_docker_cli",
+  "checks": [
+    {
+      "name": "authorization precedes first environment effect",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "real Docker",
+    "SSH transport",
+    "network isolation",
+    "research"
+  ],
+  "status": "failed",
+  "error": "EnvironmentUnavailable: environment_stage_unknown",
+  "source_sha256": "0fa3c8b886e25fe8d204bfed8660432ea9a14be5d00efa74e0201149f102b928"
+}

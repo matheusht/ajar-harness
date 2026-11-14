@@ -1,0 +1,39 @@
+{
+  "kind": "environment-mechanics-evidence-v2",
+  "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+  "python": "3.14.6",
+  "source_base": "9d0883627c736819628f04f16f616155a047c6a2",
+  "dependency": {
+    "path": "tools/engagement_contract.py",
+    "sha256": "699bb051b0528eab0320eaed6064513000d3645e3eae6be07f3d96d4a09f3870",
+    "state": "coordinator working tree after obsolete workspace_root removal"
+  },
+  "checks": {
+    "actual_local_http_and_process": 18,
+    "actual_local_tls": 5,
+    "simulated_docker_cli": 22
+  },
+  "unverified": [
+    "real Docker execution and isolation",
+    "SSH host execution and cleanup",
+    "native tool IPC/container network integration",
+    "live provider behavior",
+    "fresh-target research"
+  ],
+  "files": {
+    "tools/research_environment.py": "11342e1dbf717f3f1d2a16c70d281f125aa774a15aeeb1a347ee4908b6d09018",
+    "tools/engagement_network.py": "148929f20f07d0285e0bd6c3378e27bfd2c5feb4ef8775779cb147ac3c663633",
+    "tools/engagement_lease_owner.py": "9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+    "evals/native-qualification/smoke/check_research_environment_e2e.py": "34cb5da33876570293cceb8348f2fe967c8571c3550e26651d0e33be67869485",
+    "evals/native-qualification/smoke/check_environment_tls_e2e.py": "38fd6149ea07132a64fb9568892e246c84b8fade3395a635ffd1097afd1b96ea",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/README.md": "779d39b02a21ed7c03047699a34b87a09c71587d3ab4c3182723dfb9d76b1e66",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/before-controls.json": "8f1d4aba1a1da8c23b1a0672c09745526bfe0d56d27ef80ca921b9ca880ebdc0",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/before-staging.json": "94275e4ed3ec7b5d8f2ba9971de6460642ba8d6dae0e51621845ee14d1a741d6",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/before-tls.json": "0d65165681b2d28cb3f1e13109f4d62587c1d23fe29a715d7845d53318850caa",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/before-transport.json": "2f90aa507360485970d9de0040125cc9cad94be363e6d96836d5253b4840d9db",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/controls-result.json": "b301f72aac1b744329e7520ed6f37d3160782236bb86da216213baca948def0c",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/tls-result.json": "76b35394ec7f3ae04b1e518a13a3d824a7e574a94000643857189c301575c5b5",
+    "evals/native-qualification/team-evidence/m3-environment-20261114/transport-result.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9"
+  }
+}

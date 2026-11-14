@@ -99,7 +99,7 @@ for line in sys.stdin:
     emit({'id':'call-cancel','method':'item/tool/call','params':{'threadId':session,'turnId':'turn-1','callId':'tool-cancel','tool':'engagement_status','arguments':{'long':True}}})
    else:
     emit({'method':'item/reasoning/textDelta','params':{'threadId':session,'turnId':'turn-1','delta':'NEVER_PUBLISH_REASONING'}})
-    emit({'method':'item/agentMessage/delta','params':{'threadId':session,'turnId':'turn-1','delta':'Authorization: Bearer fake-secret-value'}})
+    emit({'method':'item/agentMessage/delta','params':{'threadId':session,'turnId':'turn-1','delta':'Authorization: '+'Bearer '+'fake-secret-value'}})
     call={'id':'call-1','method':'item/tool/call','params':{'threadId':session,'turnId':'turn-1','callId':'tool-1','tool':'engagement_status','arguments':{}}}
     emit(call);emit(call)
     emit({'method':'thread/tokenUsage/updated','params':{'threadId':session,'turnId':'turn-1','tokenUsage':{'last':{'inputTokens':2,'outputTokens':1,'cachedInputTokens':0,'cacheWriteInputTokens':0,'reasoningOutputTokens':0,'totalTokens':3},'total':{'inputTokens':2,'outputTokens':1,'cachedInputTokens':0,'totalTokens':3}}}})

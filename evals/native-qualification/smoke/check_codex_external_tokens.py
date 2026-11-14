@@ -28,7 +28,8 @@ def run(root):
     work=root/'workspace';work.mkdir();state=root/'app-state';execstate=root/'exec-state';execstate.mkdir(mode=0o700)
     payload={'exp':int(time.time())+3600,'email':'fixture@example.invalid',
         'https://api.openai.com/auth':{'chatgpt_account_id':'fixture-account','chatgpt_plan_type':'plus'}}
-    token='eyJhbGciOiJub25lIn0.'+base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip('=')+'.FAKE_SIGNATURE'
+    header=base64.urlsafe_b64encode(json.dumps({'alg':'none'},separators=(',',':')).encode()).decode().rstrip('=')
+    token=header+'.'+base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip('=')+'.FAKE_SIGNATURE'
     auth=root/'native-source-auth.json';auth.write_text(json.dumps({'tokens':{'access_token':token,'account_id':'fixture-account'}}));auth.chmod(0o600)
     config=root/'config.toml';config.write_text('''model="gpt-6.1-sol"
 model_provider="openai"

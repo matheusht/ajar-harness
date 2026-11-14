@@ -15,14 +15,17 @@ operator review, fresh artifact confirmation or an artifact cleanup ledger.
 ## Prepare the host and tool lab
 
 Pin the repository revision and use a private, durable engagement directory. Keep
-the host awake during a run. The current protected model owner uses macOS
-`sandbox-exec` and Darwin process birth identity. Linux host ownership is blocked;
-a Linux tool container is a different process boundary.
+the host awake during a run. The protected model owner uses either macOS
+`sandbox-exec` with Darwin process birth identity or the optional signed Linux
+Docker model owner. The model container and target/tool lab are separate owners.
+The Linux implementation has contained checks; actual native startup, joined
+workflow recovery and sustained operation still need execution evidence.
 
 Runtime prerequisites are Python 3.11+ with its standard library, OpenSSH
 `ssh-keygen` for local signature verification, OpenSSL for private proxy trust,
 the selected pinned native CLI, and its signed config/protocol schema. Codex
-0.166.0 also uses host Bun for its private executor bridge. OMP 18.20.0 uses the
+0.166.0 uses host Bun on macOS or pinned image Bun for its private Linux executor
+bridge. OMP 18.20.0 uses the
 pinned Linux SDK bundle with Bun 1.4.4. Preserve the reviewed
 `engine/native-engagement-method.md` and `engine/native-engagement-protocol.md`
 from the pinned repository. `/tmp` must permit
@@ -52,6 +55,39 @@ codex app-server generate-json-schema --experimental --out /private/native-proto
 Pin the generated `codex_app_server_protocol.v2.schemas.json`. For OMP, pin the
 18.20.0 SDK's `src/modes/rpc/wire/rpc-wire.schema.json`. The config/schema pins record
 exact reviewed inputs; the native startup handshake remains a separate check.
+
+For a Linux model host, first prepare and verify a
+[model image](native-tool-installation.md#prepare-a-linux-model-image). Retain its
+host executable and tool-bundle paths. Add the following `model_host` object to
+that runtime profile, resolve the placeholders, then sign the complete profile:
+
+```json
+{
+  "kind": "linux-docker-model-v1",
+  "docker_binary": "/usr/bin/docker",
+  "docker_endpoint": "unix:///var/run/docker.sock",
+  "daemon_id": "REPLACE_OBSERVED_LOCAL_DAEMON_ID",
+  "image_id": "sha256:REPLACE_BUILT_MODEL_IMAGE_ID",
+  "platform": "linux/amd64",
+  "uid": 1000,
+  "gid": 1000,
+  "limits": {
+    "memory_bytes": 1073741824,
+    "cpu_count": 2,
+    "pids": 256,
+    "workspace_bytes": 1073741824
+  }
+}
+```
+
+The daemon must run on this Linux controller host with cgroup v2 and without
+rootless mode. A remote tool lab remains a separate choice. The model image ID is
+the inspected built image, not the Python base digest. The example limits are
+unsigned choices, not measured runtime requirements. OMP custom provider/model
+definitions may additionally use `model_catalog: {path, sha256}` pointing to a
+private nonsecret `models.yml`; settings still use `config_file`. Both are frozen
+at initialization. See the [runtime contract](../research/oslit-v2-contract-2026-11-14.md)
+for exact fields and retained compatibility.
 
 ## Fill and sign the inputs
 
@@ -286,12 +322,13 @@ The operator owns the future fresh-target acceptance test and comparison with a
 capable native agent. Engineering fixtures, local runtime controls, live provider
 behavior and research acceptance must remain distinct in every status report.
 
-## Linux service template — currently blocked
+## Linux service template — not yet verified
 
-This is an uninstalled example for the future supported Linux host owner. Current
-preflight reports `native_model_boundary_unsupported` on Linux; do not enable this
-unit as a workaround. Once that boundary and sustained recovery are verified, a
-standard service manager can own the same foreground `resume` command:
+This uninstalled example requires a signed Linux `model_host` profile and passing
+preflight. A profile without that field still requires the Darwin boundary. The
+service itself and sustained recovery remain unverified; it cannot substitute for
+the foreground startup, revocation and recovery checks. A standard service manager
+can own the same foreground `resume` command:
 
 ```ini
 [Unit]

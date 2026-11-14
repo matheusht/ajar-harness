@@ -95,7 +95,7 @@ no arbitrary target mutation. `access_files` must contain exactly the source/bin
 IDs, mapped to the supplied directory/file. Application descriptors need no local
 file. Inspect hashes local input bytes without contacting application endpoints.
 
-Each runtime profile has exactly:
+Each runtime profile requires:
 `{kind, version, executable, protocol, config_file, config_sha256, provider, model,
 credential_ref, required_capabilities, tool_bundle}`. Kind is `codex` or `omp`; executable is
 `{path, sha256}`; protocol is `{mode, schema_file, schema_sha256}` with mode
@@ -107,6 +107,28 @@ secret-bearing file content. Required capability strings are `startup`,
 observations, not a profile's self-attested proof; preflight compares installed
 adapter reports. Active revocation/readback belongs to the environment owner and
 cannot be supplied by the runtime's `interrupt` claim.
+
+Two optional fields have strict schemas. `model_host` selects the implemented
+local Linux container owner; omission retains the Darwin owner. It is exactly
+`{kind, docker_binary, docker_endpoint, daemon_id, image_id, platform, uid, gid,
+limits}`. Kind is `linux-docker-model-v1`; the Docker executable is an absolute
+path, the endpoint is a local `unix:///` socket, the daemon identity is explicit,
+and `image_id` is an inspected `sha256:` image ID. Platform is `linux/amd64` or
+`linux/arm64`; UID/GID are positive nonroot integers. Limits are exactly
+`{memory_bytes, cpu_count, pids, workspace_bytes}`, all positive, with integer
+values except CPU count. The signed worker lease maximum bounds this separate
+owner; it cannot extend authority. Host Linux, cgroup v2 and a non-rootless Docker
+daemon are implementation prerequisites. The controller itself need not be root.
+This model container is separate from the target/tool lab and has no target
+inputs or direct network access. Its actual startup remains a qualification check.
+
+OMP alone may also include `model_catalog: {path, sha256}` for its native
+`models.yml`, separate from `config_file` settings. The catalog must contain no
+credential values. Initialization freezes it as `runtimes/<id>.models.yml`, and
+recovery uses those bytes. The model owner stages only configuration, this optional
+catalog and public proxy trust. Credentials use the private host binding. Neither
+optional field changes a previously signed profile or makes a preflight result
+execution evidence.
 
 The scope's `profile_sha256` pins the entire safe profile document. Inspect also
 verifies executable/schema/config content pins. Initialization archives those safe

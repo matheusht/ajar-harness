@@ -52,8 +52,11 @@ the configured logical account; a target-specific check must establish the user
 the application actually recognizes. Application capture records remote reset as
 unverified, so it cannot supply clean independent remote replay.
 
-Linux host model ownership is currently unsupported. macOS with an isolated Linux
-tool lab is the development route, and still requires actual environment
-containment and cleanup evidence before a live engagement can be described as
-qualified. The [dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md)
-keeps implementation, local checks and remaining qualification work separate.
+These profiles omit `model_host` and therefore select the macOS model owner with
+an isolated Linux tool lab. For the implemented Linux owner, follow the
+[operator host setup](../../docs/agents/engagement.md#prepare-the-host-and-tool-lab)
+and add its exact signed `model_host` object before signing. OMP custom model
+definitions may use the optional pinned `model_catalog`. Actual Linux native
+startup and joined containment/recovery remain unverified. The
+[dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md) separates
+implementation, contained checks and qualification work.

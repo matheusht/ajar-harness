@@ -7,16 +7,23 @@ This record separates implementation from observed integration and research resu
 
 ## Delivery state
 
-| Unit | State | Required evidence |
+The complete M0–M6 engineering assignment remains unfinished. Read the
+[dated v2 delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) for the current
+source/evidence map and remaining completion boundaries. The verification entries
+below preserve earlier checkpoints; their original counts and limitations do not
+certify later code. In particular, the early M1 `run`/`resume` placeholder was
+subsequently connected to the real runner by the public CLI delivery unit.
+
+| Unit | Current candidate state | Remaining completion boundary |
 | --- | --- | --- |
-| M0 contracts and failure cases | Complete design checkpoint | ADR 0014, concrete v2 contract, native API findings and failure-first scenarios below |
-| M1 one state owner | Authority and journal implemented; integration pending | Signed authority, one journal, public workflow, preserved v1 readers |
-| M2 runtimes and team | Adapters and team controls in progress | Codex/OMP control and tools, authenticated workers, queue and revocation |
-| M3 environments | Environment and network controls in progress | Source/binary/application/combined setup; local and SSH resource enforcement |
-| M4 research evidence and recovery | Not started | Independent measurement review, review obligations, replacement and closeout |
-| M5 accounting and long operation | Not started | Shared accounting, restart, no implicit deadline and sustained harmless soak |
-| M6 delivery | Not started | Install/inspect/examples/guide/export/methodology/CI and operator handoff |
-| Fresh-target research acceptance | Operator-owned; not run | Independent positive result and comparison under the agreed conditions |
+| M0 contracts and failure cases | Design checkpoint reviewed; concrete contracts and runnable failure scenarios retained | Validate assumptions through the integrated workflow required by the plan |
+| M1 one state owner | Signed authority, journal, public workflow and preserved v1 readers implemented | Final joined sole-owner/recovery/cleanup verification |
+| M2 runtimes and team | Codex/OMP adapters, native tools and team controls implemented with local native and simulated evidence | Complete protected workflow qualification; Linux model-host support |
+| M3 environments | All access descriptors, owned environment/network controls and target account binding implemented | Actual Docker/SSH containment, remote loss/cleanup and application reset/replay |
+| M4 research evidence and recovery | Evidence/review, obligations, replacement and closeout mechanics implemented and locally checked | Joined execution proof and higher-rung artifact/review controls; existing gates remain active |
+| M5 accounting and long operation | Shared accounting, delayed settlement, optional deadline and renewable-worker mechanics implemented | Actual sustained operation/restart and provider request/billing completeness |
+| M6 delivery | Installation, preflight, examples, guide, export, frozen methodology and CI selection implemented | Final integrated checks, hosted CI and release-candidate handoff |
+| Fresh-target research acceptance | Operator-owned; not run | The agreed fresh-target test and native-agent comparison |
 
 ## Starting point and ownership
 
@@ -25,8 +32,8 @@ of [draft PR 209](https://github.com/matheusht/redteam-harness/pull/209). Existi
 planning edits belong to this assignment and are preserved. The implementation
 branch is `codex/oslit-team-contract`; dependent work will retain this ancestry.
 The coordinator owns integration, checks and publication. Writers use separate
-branches/worktrees. Runtime, contract and environment M0 investigations are
-read-only and do not change the shared source tree.
+branches/worktrees. The initial runtime, contract and environment M0 investigations were read-only.
+Subsequent implementation used bounded writers and independently reviewed units.
 
 The current [engineering workflow PR playbook](https://github.com/matheusht/engineering-workflow/blob/main/skills/pstack/poteto-mode/playbooks/opening-a-pr.md)
 requires verified checkpoint commits, independent review of the complete patch,
@@ -53,7 +60,10 @@ workflow governs this assignment. No shared worktree reset is permitted.
 - The development volume has approximately 4.6 GiB free. No new VM or large image
   was installed. Existing runtimes and user data remain protected.
 
-## Verification record
+## Historical verification checkpoints
+
+These entries describe their original checked revisions. Later source, local native
+checks and integration evidence are linked from the delivery state above.
 
 M0 delivers [ADR 0014](../decisions/0014-native-engagement-team.md),
 the [v2 contract](oslit-v2-contract-2026-11-14.md),
@@ -88,8 +98,8 @@ owned subprocess immediately after the event-directory fsync and reopens the
 journal through the public CLI. Follow-up review added a ninth scenario: a late
 receipt must preserve previously observed usage before releasing its reservation.
 It failed before the fix and passed afterward. These results establish local controller behavior,
-not live runtime containment or provider execution. Run/resume remains explicitly
-blocked until runtime/environment integration is complete.
+not live runtime containment or provider execution. At that M1 checkpoint, run/resume was explicitly blocked pending
+runtime/environment integration; it is not the current facade state.
 
 Failure scenarios are specified before implementation. New checks exercise the
 public CLI or the actual runtime/environment boundary and save commands, inputs,

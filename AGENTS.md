@@ -15,6 +15,7 @@ Pick the route from the work in front of you, then open its entry. One trigger p
 | Trigger | Route | Entry |
 | --- | --- | --- |
 | Repository engineering, research, documentation or planning | Ground the work in current code and sources; keep the requested scope; separate observed, proposed and implemented work. | This file, [layout](README.md#layout), [decisions](docs/decisions/README.md) |
+| Versioned v2 Codex/OMP engagement inputs or an existing v2 journal | Candidate team route; use its own signed contract and keep qualification gaps explicit. | [v2 operator guide](docs/agents/engagement.md), [dated delivery state](docs/wiki/oslit-v2-delivery-2026-11-14.md) |
 | New local source research through the candidate native route | Candidate source route implemented in this branch. #165 adoption, live qualification and integrated acceptance remain open; do not describe the route as merged, qualified or adopted. | [native local research](docs/agents/native-local-research.md), [status](docs/wiki/native-research-status.md) |
 | Existing queue/record engagement, or work assigned to that runtime | Decision 0005/0006 kernel, admitted readers, immutable history and the Docker queue. | [legacy entry](docs/agents/legacy-local-research.md) |
 | Attempt, negative-result or evidence-bundle records | `attempt-start` → `attempt-finish`; an exhausted lane uses `record-negative`; external evidence uses `register-bundle`. These are notebook records, not findings or coverage verdicts. | [research lifecycle](docs/research-lifecycle.md) |
@@ -42,8 +43,10 @@ cannot supply execution evidence. Keep claim state, unfinished search, and bound
 
 ## 1. Hard gates (refuse to proceed otherwise)
 
-1. **Scope gate** — `engagements/<target>/scope.md` must be filled and signed (surfaces, benign
-   objective set, escalation ceiling, impact-demo authorization y/n, accounts). No scope, no run.
+1. **Scope gate** — v2 verifies the signed scope file named by its inputs and freezes it under
+   the private engagement's `contract/`. Legacy/v1 keeps `engagements/<target>/scope.md`.
+   The applicable scope must be filled and signed (surfaces, benign objective set, escalation
+   ceiling, impact-demo authorization y/n, accounts). No scope, no run.
 2. **Safe-signal gate** — never run a vulnerability or source card whose front-matter lacks a
    benign `safe_signal`. The LLM-application examples are in
    [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the bootstrap's

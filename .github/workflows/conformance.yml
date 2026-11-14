@@ -29,6 +29,23 @@ jobs:
           python3 tools/q02_compare.py --self-test
           python3 tools/recovery-packet-test.py
           python3 tools/communication-packet-test.py
+      - name: Candidate v2 portable workflows (no model or external target)
+        run: |
+          mkdir -p "$RUNNER_TEMP/oslit-v2-checks"
+          python3 evals/native-qualification/smoke/check_engagement_contract_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/contract.json"
+          python3 evals/native-qualification/smoke/check_engagement_team_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/team.json"
+          python3 evals/native-qualification/smoke/check_engagement_evidence_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/evidence.json"
+          python3 evals/native-qualification/smoke/check_engagement_runner_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/runner.json"
+          python3 evals/native-qualification/smoke/check_engagement_coordination_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/coordination.json"
+          python3 evals/native-qualification/smoke/check_engagement_guidance_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/guidance.json"
+          python3 evals/native-qualification/smoke/check_target_accounts_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/target-accounts.json"
+      - name: Retain candidate v2 workflow receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oslit-v2-portable-${{ github.sha }}
+          path: ${{ runner.temp }}/oslit-v2-checks/*.json
+          if-no-files-found: warn
       - name: Decision 0005 engagement-record schema gate (self-test)
         run: python3 tools/run-engagement.py --self-test
       - name: Decision 0006 frozen old/new gate replay

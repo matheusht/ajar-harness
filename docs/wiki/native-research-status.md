@@ -1,5 +1,11 @@
 # Native research: implementation and evidence status
 
+For the newer candidate Codex/OMP team route, read the
+[14 November v2 delivery state](oslit-v2-delivery-2026-11-14.md) and
+[operator guide](../agents/engagement.md). The October assessment below describes
+its original route and revision; its fixed provider and 24-hour limits do not
+describe v2. Neither route is adopted by this pointer.
+
 Observed 23 October 2026 at source baseline
 `cf8b213aa9979297def3b71f8f63a05dcc7945d6`. This page is a dated source/evidence
 assessment, not a live tracker or a grant to run a target. At the readback,

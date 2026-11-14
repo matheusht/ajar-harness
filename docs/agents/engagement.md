@@ -6,6 +6,11 @@ qualification, adoption or research success. Existing native/legacy records keep
 their original contract. The signed scope defines authority; repository access and
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
+Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
+claiming support or readiness. The complete M0–M6 engineering assignment remains
+unfinished. The repository impact-artifact and escalation-review gates still
+apply: a signed ceiling does not supply fresh artifact confirmation, an artifact
+cleanup ledger or review of the preceding escalation rung.
 
 ## Prepare the host and tool lab
 
@@ -19,7 +24,8 @@ Runtime prerequisites are Python 3.11+ with its standard library, OpenSSH
 the selected pinned native CLI, and its signed config/protocol schema. Codex
 0.166.0 also uses host Bun for its private executor bridge. OMP 18.20.0 uses the
 pinned Linux SDK bundle with Bun 1.4.4. Preserve the reviewed
-`engine/native-engagement-method.md` from the pinned repository. `/tmp` must permit
+`engine/native-engagement-method.md` and `engine/native-engagement-protocol.md`
+from the pinned repository. `/tmp` must permit
 short private Unix-socket directories.
 
 The tool lab is either a local Docker endpoint or Docker reached through an
@@ -53,7 +59,8 @@ exact reviewed inputs; the native startup handshake remains a separate check.
    into a private directory. Replace every `REPLACE_` value, including the actual
    goal, resource budgets, selected model, access identities and absolute paths.
    Review permitted routes/effects, benign objectives, cleanup rights and the
-   escalation ceiling. Application account binding is currently unavailable.
+   escalation ceiling. For authenticated applications, configure the private
+   account references below; target account identity still needs an observation.
 2. Pin actual executable, native config, protocol schema, image and tool-bundle
    identities. Use the installation receipt's `profile_fields.tool_bundle`.
    Resolve executable symlinks and use their canonical absolute paths.
@@ -119,6 +126,41 @@ presence/expiry without login, refresh, copying or printing the credential. It
 does not prove that the provider will accept it. Target text and worker requests
 cannot add credential references or widen signed authority.
 
+## Bind target accounts by reference
+
+For an application with signed `account_refs`, create a mode-600 reference file
+outside the engagement directory, all worker workspaces, source/binary inputs and
+runtime bundles. Set `OSLIT_ACCOUNT_BINDINGS` to its absolute path in the controller
+host environment. The file contains environment-variable references, never values:
+
+```json
+{
+  "kind": "target-account-bindings-v1",
+  "bindings": [{
+    "access_id": "app-main",
+    "account_ref": "operator-account",
+    "origin": "https://target.example.invalid:443",
+    "headers": {"Authorization": "env_TARGET_ACCOUNT_AUTH"}
+  }]
+}
+```
+
+Supply `TARGET_ACCOUNT_AUTH` through the host's private environment. Its value is
+the complete authorized header value. The name, access ID, account reference and
+origin must match the reviewed configuration and signed scope. A configured
+`Cookie` header can likewise reference a host variable. The host keeps cookie jars
+separate by account and origin. Preflight checks presence and shape without target
+contact; it does not prove the identity the target recognizes.
+
+The worker selects a signed account using public `X-OSLit-Access` and
+`X-OSLit-Account` request headers. Omitting the account selects anonymous access
+and requires its own allowed effect. The target gateway strips these selectors,
+adds credentials for that exact origin, rejects worker auth overrides and binds
+each request observation to its account, effect, grant and environment. Provider
+traffic uses a separate gateway. Known credential and cookie values reflected in
+responses are withheld; this is not recognition of every possible transformed
+secret. Retain the [account workflow's exact limits and receipts](../../evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md).
+
 ## Inspect and run
 
 From the pinned repository, inspect the fully signed input set:
@@ -140,9 +182,12 @@ python3 tools/native_engagement.py run --inputs /private/inputs/inputs.json \
   --engagement-root /private/engagements/example
 ```
 
-The controller freezes the contract and owns the append-only engagement journal.
-Native runtimes own model conversation state. Ordinary model-turn completion does
-not finish an engagement. The lead can continue, create tasks and request allowed
+The controller freezes the contract, methodology and worker protocol at
+initialization and owns the append-only engagement journal. Native runtimes own
+conversation state during an active worker session. A later task or recovered
+worker reconstructs context from the published journal and frozen inputs; exact
+native conversation continuity across tasks is not established. Ordinary model-turn
+completion does not finish an engagement. The lead can continue, create tasks and request allowed
 specialists; reviews use fresh context. Confirmation requires an observed effect,
 a relevant control and clean independent reproduction. Broad work also needs an
 honest account of remaining paths and coverage limits.
@@ -170,14 +215,18 @@ python3 tools/native_engagement.py export --engagement-root /private/engagements
   --output /private/results/example-export
 ```
 
-`stop` records revocation; it is not proof that owned processes/resources are gone.
-Read status for cleanup and unresolved resource holds. After host/process loss,
+`stop` records revocation, then attempts owned recovery under the runner lock.
+When the active owner still holds that lock, the command reports `stopping` with
+`runner_stop_pending`; that owner remains responsible for shutdown. Read status
+for cleanup and unresolved resource holds. A terminal authority status alone is
+not proof that owned processes/resources are gone. After host/process loss,
 `resume` reconciles retained owner/environment receipts before admitting new work.
 Unknown effects retain their reservations and block redispatch until reconciled.
 An operator stop does not authorize restarting research; resume can finish recovery
 and cleanup under the retained terminal authority. A new investigation needs its
 own appropriate signed input. Preserve the original engagement directory and
-historical events.
+historical events. Historical v2 records without frozen guidance remain readable
+and stoppable, but cannot resume active research by silently using today's files.
 
 Export requires a new output directory and takes a snapshot at one journal
 revision. `manifest.json` has kind `engagement-result-bundle-v2` and a SHA-256 digest
@@ -185,7 +234,10 @@ for every exported file. `contract/` contains the frozen scope/signature, goal,
 profiles and input manifests; `events/` preserves the ordered journal; `objects/`
 contains referenced evidence/receipts. `result.json` includes per-claim acceptance,
 tasks, experiments, reviews, patches, closure/coverage obligations, directions,
-usage completeness, cleanup and resource holds. Inspect those states before
+usage completeness, cleanup and resource holds. Its `research_guidance` map pins
+`contract/methodology.md` and `contract/protocol.md`. Give a native comparison the
+exported portable `methodology.md`; the protocol file contains OSLit-specific
+worker operations. Inspect those states before
 calling the result complete. Export neither grants external-action authority nor
 publishes a report.
 

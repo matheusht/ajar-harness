@@ -835,3 +835,24 @@ boundaries and real-workflow verification, with autonomous execution. The
 [delivery record](../research/oslit-implementation-2026-11-14.md) tracks that work.
 The operator retains the fresh-target test and comparison. This assignment does
 not change old engagement authority or supply research acceptance evidence.
+
+## [2026-11-14] implementation | Candidate v2 delivery routing and evidence boundaries
+
+Added the [dated v2 delivery state](oslit-v2-delivery-2026-11-14.md) and an explicit
+root route to the [Codex/OMP operator guide](../agents/engagement.md). The guide now
+covers private target-account references, frozen methodology/protocol export,
+context reconstruction, pending owner stop and preserved historical records.
+The October source-route status remains dated to its original revision.
+
+The candidate is descended from `183199cc`; the linked source and saved receipts
+retain their own checked revisions. The complete M0–M6 assignment remains open.
+Actual Docker/SSH qualification, Linux model-host support, sustained multiday
+operation, billed provider usage, hosted CI and research acceptance are not
+inferred from local mechanics. Existing impact-artifact and escalation-review
+gates remain active where the v2 mechanisms do not implement and verify them.
+
+The conformance workflow adds seven portable provider-free v2 checks and retains
+their JSON receipts by checked revision. Its Linux job is configured coverage,
+not an observed hosted pass. Documentation checks cover local destinations, root
+instruction equality and structural conformance; execution receipts remain
+separate from this documentation update.

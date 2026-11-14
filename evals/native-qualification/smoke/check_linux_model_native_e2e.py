@@ -513,6 +513,7 @@ def run_native(root, fixture, result):
             if native.token is not None:
                 known_secrets.append(native.token.encode())
             result['native_executor_state'] = {'failure': native.failure, 'ready': native.ready,
+                'transport_diagnostic': native.transport_diagnostic,
                 'executor_returncode': native.executor.poll() if native.executor is not None else None,
                 'bridge_returncode': native.bridge.poll() if native.bridge is not None else None}
         if controller is not None:

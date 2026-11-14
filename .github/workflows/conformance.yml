@@ -32,6 +32,7 @@ jobs:
       - name: Candidate v2 portable workflows (no model or external target)
         run: |
           mkdir -p "$RUNNER_TEMP/oslit-v2-checks"
+          python3 evals/native-qualification/smoke/check_codex_transport_diagnostics.py
           python3 evals/native-qualification/smoke/check_engagement_contract_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/contract.json"
           python3 evals/native-qualification/smoke/check_engagement_team_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/team.json"
           python3 evals/native-qualification/smoke/check_engagement_evidence_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/evidence.json"

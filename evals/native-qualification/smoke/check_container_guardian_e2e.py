@@ -191,6 +191,17 @@ def main():
             p = Peer([docker, '--host', args.endpoint, 'container', 'start', '--attach', '--interactive', cid], nonce, 30)
             peers.append(p); p.ack(p.frame(30))
             info, = json.loads(call('container', 'inspect', cid).stdout)
+            host_pid = info['State']['Pid']
+            host_readback = {'controller_uid': os.getuid(), 'host_pid': host_pid}
+            for name, read in (
+                ('start_ticks', lambda: int(Path(f'/proc/{host_pid}/stat').read_text().rsplit(')', 1)[1].split()[19])),
+                ('pid_namespace_inode', lambda: os.stat(f'/proc/{host_pid}/ns/pid').st_ino),
+                ('cgroup', lambda: Path(f'/proc/{host_pid}/cgroup').read_text())):
+                try:
+                    host_readback[name] = read()
+                except OSError as error:
+                    host_readback[name] = {'unavailable': type(error).__name__}
+            result['host_process_readback'] = host_readback
             check('guardian is actual root PID 1 without Docker init', info['Config']['User'] == '0:0'
                   and info['HostConfig']['Init'] is False and info['Path'] == command[0])
             probe = r'''import json,os,signal,time

@@ -94,7 +94,7 @@ StrictModes yes
 AllowTcpForwarding no
 AllowAgentForwarding no
 X11Forwarding no
-LogLevel ERROR
+LogLevel VERBOSE
 EOF
 sudo -n install -d -m 0755 /run/sshd
 sudo -n "$sshd_binary" -t -f "$fixture_directory/sshd_config"

@@ -1,0 +1,22 @@
+{
+  "classification": "composed_source_capture_engineering_simulation",
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "external_target_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "invalid-selectors",
+      "status": "fail",
+      "error": "invalid effect selector was accepted"
+    }
+  ],
+  "status": "fail",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:cd38dcd0e3bcae55f6fe80b1de8ee32f2b516f835ee88fc2e617d3b9338ef0e0",
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_evidence.py": "sha256:62058504da2387bb9bda0945a52627f2c4906058c009dcbf0f1f248e09626e09",
+    "tools/engagement_runner.py": "sha256:7e66234c8a957027ff8153bed74888578651b396944032038913190499bb2e9f",
+    "evals/native-qualification/smoke/check_native_capture_effects_e2e.py": "sha256:760bdfb053192ae5c7c0f9ca06c348a02c91a1456526eaa8a92737895b4a7689"
+  }
+}

@@ -118,6 +118,7 @@ TOOLS = [
          'interpreter': {'type': ['string', 'null']}, 'arguments': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 64},
          'conditions': {'type': 'object'}, 'seconds': {'type': 'integer', 'minimum': 1},
          'resources': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True},
+         'effect_id': {'type': 'string', 'description': 'Optional signed local effect for source/binary capture execution; later rungs require current evidence review. Application requests select their own effect.'},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]
 
@@ -248,7 +249,8 @@ class NativeBoundary:
 
     def _effect(self, profile_id, grant):
         candidates = [row for row in self.scope['effects'] if profile_id in row['environment_ids']
-            and set(grant['resources']) <= set(row['access_ids']) and not row['account_refs'] and row['kind'] == 'read']
+            and set(grant['resources']) <= set(row['access_ids']) and not row['account_refs'] and row['kind'] == 'read'
+            and row['rung'] in ('source_only', 'self')]
         if len(candidates) != 1:
             raise BoundaryError('native_effect_grant_unavailable')
         return candidates[0]['id']
@@ -509,6 +511,13 @@ class NativeBoundary:
                 or len(resources) != len(set(resources)) or not set(resources) <= set(self.context.grant['resources'])):
             raise BoundaryError('native_capture_resources_invalid')
         application = any(row['id'] in resources and row['kind'] == 'application' for row in self.accesses)
+        effect_id = self._effect(self.environment_id, dict(self.context.grant, resources=resources))
+        if 'effect_id' in arguments:
+            effect = next((row for row in self.scope['effects'] if row['id'] == arguments['effect_id']), None)
+            if (application or effect is None or effect['kind'] == 'artifact_create' or effect['account_refs']
+                    or self.environment_id not in effect['environment_ids'] or not set(resources) <= set(effect['access_ids'])):
+                raise BoundaryError('native_capture_effect_invalid')
+            effect_id = effect['id']
         if application and self.network_operations:
             raise BoundaryError('native_capture_target_busy')
         if (arguments['patch_id'] is None) != (arguments['patch_arm'] is None):
@@ -525,7 +534,7 @@ class NativeBoundary:
             self.capture_lock.release()
             raise
         self.capture_application_active = application
-        control = {'environment': None, 'cancelled': threading.Event(), 'done': threading.Event()}
+        control = {'environment': None, 'cancelled': threading.Event(), 'done': threading.Event(), 'effect_id': effect_id}
         def cancel():
             control['cancelled'].set()
             environment = control['environment']
@@ -572,7 +581,8 @@ class NativeBoundary:
                 if observation['phase'] == 'intent' and observation['operation'] == 'execute':
                     executions.append(operation_id)
                 return self.controller.record_environment_observation(admitted, self.environment_id, observation,
-                    effect_id=self._effect(self.environment_id, admitted))
+                    effect_id=control['effect_id'] if observation['operation'] == 'execute'
+                    else self._effect(self.environment_id, admitted))
         def observe_network(observation):
             with self.controller.lock():
                 operation_id = observation['operation_id']

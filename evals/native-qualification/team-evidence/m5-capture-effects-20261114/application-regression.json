@@ -1,0 +1,44 @@
+{
+  "classification": "actual_owned_http_relay_probe_with_simulated_native_environment",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "application",
+      "status": "pass"
+    },
+    {
+      "scenario": "combined-source",
+      "status": "pass"
+    },
+    {
+      "scenario": "invalid-resources",
+      "status": "pass"
+    },
+    {
+      "scenario": "parent-busy",
+      "status": "pass"
+    },
+    {
+      "scenario": "capture-busy",
+      "status": "pass"
+    },
+    {
+      "scenario": "revoked-capture",
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:a74ea87c97af538828abe9c39352f4585d99cd42f4e941ec2b7e86679ab61475",
+    "tools/engagement_network_bridge.py": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/engagement_network.py": "sha256:194b3fc6c1b8656ebaed32d04438945236d2451acbf38f7a072c3578ce46f1d4",
+    "tools/target_accounts.py": "sha256:15cc24ab9d2eba93f77ed03e163415365c0c535fb5d5c245d12d60ad83fe3063",
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_evidence.py": "sha256:62058504da2387bb9bda0945a52627f2c4906058c009dcbf0f1f248e09626e09",
+    "evals/native-qualification/smoke/check_native_application_capture_e2e.py": "sha256:3f81407934deddbb13fe5c04fc89a784498c4ea902745730a5e23f3541b5fccd",
+    "evals/native-qualification/smoke/check_native_target_accounts_e2e.py": "sha256:99572ffef987df81c750d60ff4222afcf4c7d6210537e9d8bdac05ee9d63fb47"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "README.md": "sha256:386f08e9f884e6d5908fa5e796716e483823c38d754e5c3a0ef999ddba26dd97",
+  "after.json": "sha256:4a0b935ca7a54469bbce2598f10af9a441bd10063ca293f8f25f3e80c3de0439",
+  "application-regression.json": "sha256:651bd12805ae9a150c0cb76858c04ab91ff16449b32ec8b3efd61f31137bebc1",
+  "before.json": "sha256:06e2a1ffb25dd4852b3c42879c3890dbec1279de2a663c8d2f5807f5462d97ea",
+  "boundary-regression.json": "sha256:cc329fc0632e952ef54d8d039a912e4b1726366ee4ba0f54f0bf202e87948211",
+  "invalid-selector-before.json": "sha256:e875d605b16b191e0c69e6e24e4c064d3a2fce7c8718a0c4a1af4ede652116fa"
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "environment-native-pipe-evidence-v2",
+  "source_base": "dadb5ea48b5738734de2fb84ceeabe7b2dbfd26f",
+  "python": "3.14.6",
+  "classification": "simulated_docker_cli_with_actual_stdio",
+  "checks": 6,
+  "environment_command_regression": 22,
+  "contract_sha256": "699bb051b0528eab0320eaed6064513000d3645e3eae6be07f3d96d4a09f3870",
+  "files": {
+    "tools/research_environment.py": "b6dca1e42a4f2c73be64b6490e13fd46f8efa10d7b0dce72d7812a90df92b85b",
+    "evals/native-qualification/smoke/check_environment_stdio_e2e.py": "f2a73f8aea910b548a1fa5b02602b3ffa552b3774f45f9505cc48d6e43ea6066",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082",
+    "evals/native-qualification/team-evidence/m3-native-pipe-20261114/README.md": "25f032db69e9b26d36112d08b284cbb5b1f03d1d15fc97652f7ce67ea1d6898d",
+    "evals/native-qualification/team-evidence/m3-native-pipe-20261114/before.json": "b1de2b626de0575b6b3828fcb677dd682c9e73b2cdfa8bbc9d0d576954396ce8",
+    "evals/native-qualification/team-evidence/m3-native-pipe-20261114/result.json": "b55e788d41952bd83e3c505aa6faca215903ce77c9dce53e507abd9484649b70",
+    "evals/native-qualification/team-evidence/m3-native-pipe-20261114/transport-regression.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9"
+  }
+}

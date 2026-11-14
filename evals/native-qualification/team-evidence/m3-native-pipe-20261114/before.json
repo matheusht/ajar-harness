@@ -1,0 +1,14 @@
+{
+  "kind": "environment-native-pipe-replay-v2",
+  "classification": "simulated_docker_cli_with_actual_stdio",
+  "checks": [],
+  "unverified": [
+    "real Docker containment",
+    "SSH connection",
+    "native SDK in Linux image",
+    "native network bridge"
+  ],
+  "status": "failed",
+  "error": "AttributeError: 'Environment' object has no attribute 'launch_stdio'",
+  "source_sha256": "f2a73f8aea910b548a1fa5b02602b3ffa552b3774f45f9505cc48d6e43ea6066"
+}

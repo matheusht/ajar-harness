@@ -1,0 +1,102 @@
+{
+  "kind": "environment-command-replay-v2",
+  "classification": "simulated_docker_cli",
+  "checks": [
+    {
+      "name": "authorization precedes first environment effect",
+      "passed": true
+    },
+    {
+      "name": "binary-only preparation binds actual archive bytes",
+      "passed": true
+    },
+    {
+      "name": "stopped input staging creates a distinct immutable image",
+      "passed": true
+    },
+    {
+      "name": "prepared image input bytes are independently read back",
+      "passed": true
+    },
+    {
+      "name": "CLI requests network-none and bounded read-only worker",
+      "passed": true
+    },
+    {
+      "name": "execution is attributed and observed",
+      "passed": true
+    },
+    {
+      "name": "ordinary command failure retains bounded setup diagnosis",
+      "passed": true
+    },
+    {
+      "name": "receipt retains exact identity without second journal",
+      "passed": true
+    },
+    {
+      "name": "crash before ID acknowledgment reconciles name and nonce",
+      "passed": true
+    },
+    {
+      "name": "revocation is permitted after grant ends",
+      "passed": true
+    },
+    {
+      "name": "cleanup observes exact resource absence",
+      "passed": true
+    },
+    {
+      "name": "cleanup removes only the owned derived image",
+      "passed": true
+    },
+    {
+      "name": "wrong binary architecture is rejected before creation",
+      "passed": true
+    },
+    {
+      "name": "timed out command remains an unknown effect",
+      "passed": true
+    },
+    {
+      "name": "unknown execution holds further writes",
+      "passed": true
+    },
+    {
+      "name": "nonce mismatch cannot remove a resource",
+      "passed": true
+    },
+    {
+      "name": "combined preparation preserves each access identity",
+      "passed": true
+    },
+    {
+      "name": "source snapshot leaves supplied source unchanged",
+      "passed": true
+    },
+    {
+      "name": "application-only preparation needs no fabricated source",
+      "passed": true
+    },
+    {
+      "name": "changed signed source is rejected before creation",
+      "passed": true
+    },
+    {
+      "name": "failed image acknowledgment retains unresolved creation",
+      "passed": true
+    },
+    {
+      "name": "restart reconciles and removes exact partially acknowledged image",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "real Docker",
+    "SSH transport",
+    "network isolation",
+    "research"
+  ],
+  "status": "passed",
+  "source_sha256": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082"
+}

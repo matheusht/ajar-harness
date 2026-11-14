@@ -1,0 +1,38 @@
+{
+  "kind": "environment-native-pipe-replay-v2",
+  "classification": "simulated_docker_cli_with_actual_stdio",
+  "checks": [
+    {
+      "name": "tool pipe receives only restricted host environment",
+      "passed": true
+    },
+    {
+      "name": "same owned process serves consecutive native messages",
+      "passed": true
+    },
+    {
+      "name": "pipe launch is recorded without claiming command acceptance",
+      "passed": true
+    },
+    {
+      "name": "one native tool owner per environment",
+      "passed": true
+    },
+    {
+      "name": "revocation closes pipe process and observes worker stopped",
+      "passed": true
+    },
+    {
+      "name": "retired generation cannot recreate native pipe",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "real Docker containment",
+    "SSH connection",
+    "native SDK in Linux image",
+    "native network bridge"
+  ],
+  "status": "passed",
+  "source_sha256": "f2a73f8aea910b548a1fa5b02602b3ffa552b3774f45f9505cc48d6e43ea6066"
+}

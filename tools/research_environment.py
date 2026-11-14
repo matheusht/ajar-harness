@@ -82,6 +82,7 @@ class Environment:
         self.lock = threading.RLock()
         self.commands = set()
         self.owner = None
+        self.stdio_process = None
         self.held = False
         self.retired = False
         self.identity = {'kind': 'research-environment-receipt-v2', 'nonce': uuid.uuid4().hex,
@@ -175,9 +176,9 @@ class Environment:
              output_limit=4 * 1024 * 1024, dispatch=False, include_stderr=False):
         """Bound command time and output; discarded bytes never become observations."""
         try:
-            with self.lock:
-                guard = self.dispatch_guard() if dispatch and self.dispatch_guard else nullcontext()
-                with guard:
+            guard = self.dispatch_guard() if dispatch and self.dispatch_guard else nullcontext()
+            with guard:
+                with self.lock:
                     if dispatch:
                         self._admit()
                     process = subprocess.Popen(self._docker(args), stdin=input_file or subprocess.DEVNULL,
@@ -496,9 +497,8 @@ class Environment:
         self.owner = OwnedProcess(command, lease_seconds=duration, maximum_lease_seconds=self.limits['lease_seconds'],
                                   docker_identity=identity, owner_command=owner_command)
         try:
-            with self.lock:
-                guard = self.dispatch_guard() if self.dispatch_guard else nullcontext()
-                with guard:
+            with self.dispatch_guard():
+                with self.lock:
                     self._admit()
                     self.owner.start()
             until = time.monotonic() + min(duration, 5)
@@ -547,6 +547,44 @@ class Environment:
         result['identity'] = self.receipt()
         return result
 
+    def launch_stdio(self, argv):
+        """Launch one persistent native tool owner; its caller must bound the IPC frames."""
+        from engagement_contract import canonical, safe_publication
+        self._admit()
+        if self.stdio_process is not None:
+            raise EnvironmentUnavailable('native_tool_process_already_started')
+        if not self.owner or not self.owner.readback()['running']:
+            raise EnvironmentUnavailable('environment_worker_inactive')
+        if (not isinstance(argv, list) or not argv or len(argv) > 256 or
+                any(not isinstance(item, str) or not item or '\0' in item for item in argv)):
+            raise EnvironmentUnavailable('environment_command_invalid')
+        safe_publication(canonical(argv))
+        self._verify_configuration(self._inspect())
+        operation_id = uuid.uuid4().hex
+        self._event('intent', 'launch_stdio', operation_id, request_sha256=self._digest(argv))
+        with self.dispatch_guard():
+            with self.lock:
+                self._admit()
+                if self.stdio_process is not None:
+                    raise EnvironmentUnavailable('native_tool_process_already_started')
+                try:
+                    process = subprocess.Popen(self._docker(['container', 'exec', '--interactive', '--user',
+                        f"{self.profile['uid']}:{self.profile['gid']}", '--workdir', '/work',
+                        self.identity['container_id'], *argv]), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL, env=command_environment(), start_new_session=True)
+                except OSError:
+                    raise EnvironmentUnavailable('native_tool_process_unavailable') from None
+                self.stdio_process = process
+                self.commands.add(process)
+        try:
+            self._event('result', 'launch_stdio', operation_id, status='dispatched',
+                        native_acknowledgment='caller_required')
+        except Exception:
+            self.held = True
+            self.revoke()
+            raise
+        return process
+
     def readback(self):
         info = self._inspect(absent_ok=True)
         if info is None:
@@ -564,9 +602,8 @@ class Environment:
         self._verify_configuration(self._inspect())
         operation_id = uuid.uuid4().hex
         self._event('intent', 'renew', operation_id, seconds=seconds)
-        with self.lock:
-            guard = self.dispatch_guard() if self.dispatch_guard else nullcontext()
-            with guard:
+        with self.dispatch_guard():
+            with self.lock:
                 self.owner.renew(min(seconds, self._admit()))
         self._event('result', 'renew', operation_id, status='settled')
         return {'status': 'renewal_sent', 'seconds': seconds, 'identity': self.receipt()}
@@ -575,9 +612,10 @@ class Environment:
         with self.lock:
             self.retired = True
             for process in list(self.commands):
-                try: os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError: pass
-                process.wait(timeout=2)
+                if process.poll() is None:
+                    try: os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError: pass
+                    process.wait(timeout=2)
         info = self._inspect(absent_ok=True)
         if info is None:
             return {'status': 'absent', 'identity': self.receipt()}

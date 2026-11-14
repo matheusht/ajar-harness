@@ -1,0 +1,26 @@
+{
+  "classification": "simulated_docker_cli_with_actual_process_lease_owner",
+  "external_dependency_sha256": {
+    "engagement_contract.py": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef"
+  },
+  "python": "3.14.6",
+  "result_sha256": {
+    "README.md": "55bcae449070f48111aad239e1128b8cd8cdf6c606cd96e46b059c9726791f79",
+    "after.json": "2932274819d632ba802833d43884c6d10fa164804b7675436c983bcd7fba8a74",
+    "before.json": "b0a43c0c687bde275247b3bfc15d9b5e23322debbc482ec011b703c956426135",
+    "transport-regression.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9",
+    "workspace-regression.json": "e5bb0411dcfce67011a053e2f9cb6993b5a9d14b49534847d7ee8db9b07a36ca"
+  },
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_environment_renewed_execute_e2e.py": "2ad1e49f672dbf13a3035910d4ded89ace07d82c1db8e0730e577bd733e623a8",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082",
+    "evals/native-qualification/smoke/check_environment_workspace_e2e.py": "05f9345d89bb174709225df304af61dabaa323e1d519f57d3f4875b8a740e96e",
+    "tools/engagement_lease_owner.py": "9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+    "tools/research_environment.py": "9254dc37e062ea4d01810d068f9720fb0c8291d1da3e47e6d7d4d7664793c79a"
+  },
+  "unverified": [
+    "real Docker",
+    "SSH execution",
+    "research qualification"
+  ]
+}

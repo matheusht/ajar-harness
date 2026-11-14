@@ -209,6 +209,12 @@ class Environment:
         status = 'settled'
         deadline = time.monotonic() + max(.01, timeout)
         while not eof or process.poll() is None:
+            if dispatch:
+                try:
+                    self._admit()
+                except EnvironmentUnavailable:
+                    status = 'unknown'
+                    break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 status = 'unknown'
@@ -254,6 +260,8 @@ class Environment:
         # The journal write may have taken time or the grant may have been revoked.
         if not cleanup:
             remaining = min(remaining, self._admit())
+        if operation == 'execute':
+            remaining = timeout
         result = self._run(args, timeout=remaining, input_file=input_file,
                            output_limit=output_limit or 4 * 1024 * 1024, dispatch=not cleanup,
                            include_stderr=operation == 'execute')

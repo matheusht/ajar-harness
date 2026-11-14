@@ -1,0 +1,125 @@
+{
+  "kind": "environment-workspace-readback-e2e-v2",
+  "classification": "simulated_docker_transport_with_actual_filesystem_helper",
+  "checks": [
+    {
+      "name": "worker tree matches canonical source manifest with exact modes",
+      "passed": true
+    },
+    {
+      "name": "manifest callback binds exact path count and digest",
+      "passed": true
+    },
+    {
+      "name": "artifact returns actual bytes and explicit operation identity",
+      "passed": true
+    },
+    {
+      "name": "artifact callback retains digest and size without raw bytes",
+      "passed": true
+    },
+    {
+      "name": "empty regular artifact obeys zero byte limit",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path '/etc/passwd'",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path '../outside'",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path 'tree/../probe.py'",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path 'tree//probe.py'",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path './tree/probe.py'",
+      "passed": true
+    },
+    {
+      "name": "artifact rejects invalid path 'tree/\\x00bad'",
+      "passed": true
+    },
+    {
+      "name": "manifest rejects invalid workspace path /input",
+      "passed": true
+    },
+    {
+      "name": "manifest rejects invalid workspace path /work/",
+      "passed": true
+    },
+    {
+      "name": "manifest rejects invalid workspace path /work/../input",
+      "passed": true
+    },
+    {
+      "name": "manifest rejects invalid workspace path /work//tree",
+      "passed": true
+    },
+    {
+      "name": "manifest rejects invalid workspace path /work/tree/",
+      "passed": true
+    },
+    {
+      "name": "artifact refuses final symlink escape",
+      "passed": true
+    },
+    {
+      "name": "manifest refuses symlink entries",
+      "passed": true
+    },
+    {
+      "name": "artifact refuses parent directory symlink",
+      "passed": true
+    },
+    {
+      "name": "manifest refuses root directory symlink",
+      "passed": true
+    },
+    {
+      "name": "nonregular artifact fails without blocking",
+      "passed": true
+    },
+    {
+      "name": "artifact size bound rejects oversized file",
+      "passed": true
+    },
+    {
+      "name": "caller cannot expand admitted output bound",
+      "passed": true
+    },
+    {
+      "name": "sensitive artifact is withheld before callback persistence",
+      "passed": true
+    },
+    {
+      "name": "file mutation during read is refused",
+      "passed": true
+    },
+    {
+      "name": "tree addition during manifest scan is refused",
+      "passed": true
+    },
+    {
+      "name": "parent replacement during read is refused",
+      "passed": true
+    },
+    {
+      "name": "revoked grant prevents helper dispatch and publication",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "real Docker workspace",
+    "SSH workspace",
+    "earlier experiment byte identity"
+  ],
+  "status": "passed",
+  "source_sha256": "05f9345d89bb174709225df304af61dabaa323e1d519f57d3f4875b8a740e96e"
+}

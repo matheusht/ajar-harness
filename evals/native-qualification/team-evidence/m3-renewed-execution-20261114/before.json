@@ -1,0 +1,71 @@
+{
+  "classification": "simulated_docker_cli_with_actual_process_lease_owner",
+  "scenarios": [
+    {
+      "scenario": "renewed",
+      "operation_status": "unknown",
+      "returncode": -9,
+      "elapsed_seconds": 1.274,
+      "owner_renewals": 5,
+      "command_finished": false,
+      "environment_held": true,
+      "status": "failed",
+      "renewal_errors": []
+    },
+    {
+      "scenario": "expired",
+      "operation_status": "unknown",
+      "returncode": -9,
+      "elapsed_seconds": 0.511,
+      "owner_renewals": 0,
+      "command_finished": false,
+      "environment_held": true,
+      "status": "passed",
+      "renewal_errors": []
+    },
+    {
+      "scenario": "revoked",
+      "operation_status": "settled",
+      "returncode": 137,
+      "elapsed_seconds": 1.999,
+      "owner_renewals": 0,
+      "command_finished": false,
+      "environment_held": false,
+      "status": "failed",
+      "renewal_errors": []
+    },
+    {
+      "scenario": "timeout",
+      "operation_status": "unknown",
+      "returncode": -9,
+      "elapsed_seconds": 0.584,
+      "owner_renewals": 2,
+      "command_finished": false,
+      "environment_held": true,
+      "status": "passed",
+      "renewal_errors": []
+    },
+    {
+      "scenario": "owner-expired",
+      "operation_status": "settled",
+      "returncode": 137,
+      "elapsed_seconds": 1.995,
+      "owner_renewals": 0,
+      "command_finished": false,
+      "environment_held": false,
+      "status": "passed",
+      "renewal_errors": []
+    }
+  ],
+  "unverified": [
+    "Docker execution",
+    "SSH execution",
+    "research qualification"
+  ],
+  "status": "failed",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_environment_renewed_execute_e2e.py": "50727ffd3ccf146e422785d6d2d8bfa400651ee621220b14140f2fc109567c93",
+    "tools/research_environment.py": "9f90a49e6c6eeee03d9e64baee027537382a3b947248467b4545716a9f9f6562",
+    "tools/engagement_lease_owner.py": "9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e"
+  }
+}

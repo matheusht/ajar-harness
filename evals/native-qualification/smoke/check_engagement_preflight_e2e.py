@@ -33,7 +33,8 @@ def run(base, fixture_file):
         'docker-missing', 'ssh-prerequisites', 'ssh-missing', 'host-linux', 'provider-missing', 'target-account', 'environment-effect',
         'openssl-missing', 'methodology-missing', 'protocol-missing', 'socket-parent-missing',
         'target-account-present', 'target-account-missing-secret', 'target-account-wrong-origin', 'target-account-public-file',
-        'target-account-source-overlap', 'target-account-bundle-overlap')
+        'target-account-source-overlap', 'target-account-bundle-overlap',
+        'environment-execute-only', 'environment-ambiguous-read', 'environment-read-and-execute')
     for scenario in scenarios:
         root = base / scenario
         inputs = fixture.make_fixture(root)
@@ -115,6 +116,14 @@ def run(base, fixture_file):
         if scenario == 'provider-missing':
             scope['network']['provider'] = []
             expected = ['provider_route_unavailable']
+        if scenario == 'environment-execute-only':
+            scope['effects'][0]['kind'] = 'execute'
+            expected = ['native_environment_assignment_unavailable']
+        if scenario in ('environment-ambiguous-read', 'environment-read-and-execute'):
+            scope['effects'].append({**scope['effects'][0], 'id': 'second-effect',
+                'kind': 'read' if scenario == 'environment-ambiguous-read' else 'execute'})
+            if scenario == 'environment-ambiguous-read':
+                expected = ['native_environment_assignment_unavailable']
         references = None
         if scenario.startswith('target-account'):
             scope['access'].append({'id': 'app-main', 'kind': 'application',

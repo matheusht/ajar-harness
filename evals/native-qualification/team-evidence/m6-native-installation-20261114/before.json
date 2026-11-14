@@ -1,0 +1,53 @@
+{
+  "status": "failed",
+  "classification": "engineering_archive_fixture",
+  "provider_calls": 0,
+  "linux_execution": "not_run",
+  "checks": [
+    {
+      "check": "codex",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "omp",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "checksum",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "traversal",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "link",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "wrong-platform",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "bun-version",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "truncated",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    },
+    {
+      "check": "existing",
+      "status": "failed",
+      "error": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python: can't open file '/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/tools/install_native_tools.py': [Errno 2] No such file or directory\n"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "tools/install_native_tools.py": "sha256:d488bef05bdd9bd9eb85d0f6e4c2b2b0af578fc18752589f4e0f9df2fe4b9fdc",
+  "config/native-tool-lock.json": "sha256:0b976ec7eb98c686c372aa63667c8ebee476f973f196baa788a06cf787ccdee7",
+  "config/native-tool-sdk.bun.lock": "sha256:93cea0222429d40bbbd7d038de6bb633c5b2b444a6ad7fd7099702ff97332fe9",
+  "docs/agents/native-tool-installation.md": "sha256:0ace2f76dbec33aa9f5598c6db80119ffe9d77ece37b21c2941937c41201b0e8",
+  "evals/native-qualification/smoke/check_native_tool_install_e2e.py": "sha256:0c195bb58609b595d5f436307f184ce29d858a06a776f3821ba55a453de8a800",
+  "tools/native_runtime_codex.py": "sha256:3448c33db74d4476b41548c4fe70fa236d96ac862e551f37f37037d409b10a58",
+  "tools/native_runtime_omp.py": "sha256:adf54fff3793072391d53a2ef487307a2278702708bb5828100ca092dc8fba54",
+  "tools/native_runtime_omp_tools.mjs": "sha256:d443923e21bf2477a08f87fe3f19ab414028bc9a793341f49bd6729252bba4c9",
+  "tools/engagement_records.py": "sha256:eebb2ed208a9b0897ad44ae9c6a6dea01fd6dd18bb9fa7ba218fb28f633910a5",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/README.md": "sha256:cee9b349b7a54e7060cbeeeda8af56574206e7e24753b1014e9f6bd189425de0",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/after.json": "sha256:ace4d3c9db1dcff17614385b4a999e376b879f539db097cbc0461077d78df198",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/before.json": "sha256:fc021a26eddc761dd4829eb15c4405383d9837ba7fdcd334f0ae7da64afd80eb",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/codex-arm64.json": "sha256:3dc52ae5ab70f47a389366036fdf8870d8b596583954f9bfa74bae7276921f52",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/codex-preflight.json": "sha256:92361457daaba7a48f8c42f89b66914042e8d0790d83ad4a4c4932f48b60ea48",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/omp-arm64.json": "sha256:485f488c345e0ecc8aef90971819a6903665af2e55e948fc34a91c14d50de9c6",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/omp-preflight.json": "sha256:8c44044d3f2e96b33057eb86c0aa156c879961b102404868fcf23dd3c70cae44",
+  "evals/native-qualification/team-evidence/m6-native-installation-20261114/receipt-alias-before.json": "sha256:b3b5def2b958bc2af3cf5eafe72fd47b53a23dc9828cb14fbeaf98e91803db86"
+}

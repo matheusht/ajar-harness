@@ -27,6 +27,9 @@ cleanup() {
   outcome=$?
   set +e
   trap - EXIT
+  if [[ $outcome != 0 && -f "$fixture_directory/sshd.log" ]]; then
+    sudo -n tail -c 4096 "$fixture_directory/sshd.log" >&2
+  fi
   listener_stopped=false
   if [[ $listener_attempted == false ]]; then
     listener_stopped=true

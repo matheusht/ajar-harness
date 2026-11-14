@@ -122,6 +122,14 @@ def main():
             access = {'id': 'source', 'kind': 'source', 'account_refs': [], 'permissions': ['read', 'execute'],
                       'identity': {'manifest_sha256': 'sha256:' + hashlib.sha256(canonical(manifest)).hexdigest()}}
             environment = owned()
+            if args.loopback_ssh_profile:
+                diagnostic = environment._run(['info', '--format', '{{.ID}}'], timeout=10,
+                                              output_limit=4096, include_stderr=True)
+                raw = diagnostic.pop('output')
+                result['ssh_preflight'] = {**diagnostic, 'output': safe_publication(raw).decode('utf-8', errors='replace')}
+                check('actual SSH connection reaches the selected daemon',
+                      diagnostic['status'] == 'settled' and diagnostic['returncode'] == 0
+                      and raw.decode().strip() == daemon)
             try:
                 environment.prepare([access], {'source': str(source)})
             except EnvironmentUnavailable:

@@ -10,6 +10,7 @@ on:
       - tools/engagement_workspace.py
       - tools/engagement_contract.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
+      - evals/native-qualification/smoke/check_container_guardian_e2e.py
   pull_request:
     paths:
       - .github/workflows/oslit-environment.yml
@@ -18,6 +19,7 @@ on:
       - tools/engagement_workspace.py
       - tools/engagement_contract.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
+      - evals/native-qualification/smoke/check_container_guardian_e2e.py
 
 permissions:
   contents: read
@@ -42,6 +44,13 @@ jobs:
             --endpoint unix:///var/run/docker.sock \
             --image-id "$OSLIT_FIXTURE_IMAGE" \
             --output "$RUNNER_TEMP/oslit-docker/result.json"
+      - name: Verify the container lease owner and adopted children
+        if: ${{ !cancelled() && env.OSLIT_FIXTURE_IMAGE != '' }}
+        run: |
+          python3 evals/native-qualification/smoke/check_container_guardian_e2e.py \
+            --endpoint unix:///var/run/docker.sock \
+            --image-id "$OSLIT_FIXTURE_IMAGE" \
+            --output "$RUNNER_TEMP/oslit-docker/guardian.json"
       - name: Preserve actual environment observations
         if: always()
         uses: actions/upload-artifact@v4

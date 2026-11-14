@@ -39,6 +39,7 @@ jobs:
           python3 evals/native-qualification/smoke/check_engagement_coordination_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/coordination.json"
           python3 evals/native-qualification/smoke/check_engagement_guidance_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/guidance.json"
           python3 evals/native-qualification/smoke/check_target_accounts_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/target-accounts.json"
+          python3 evals/native-qualification/smoke/check_engagement_export_e2e.py -v
       - name: Retain candidate v2 workflow receipts
         if: always()
         uses: actions/upload-artifact@v4

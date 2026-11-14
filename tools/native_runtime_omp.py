@@ -152,6 +152,8 @@ class Runtime(Session):
         cost_after, cost_before = after.get('cost'), (self.stats_before or {}).get('cost')
         cost = None
         if type(cost_after) in (int, float) and type(cost_before) in (int, float):
+            if cost_after < 0 or cost_before < 0:
+                raise RuntimeError('native_usage_invalid')
             cost = cost_after - cost_before
         self._usage(values, {'input_tokens': 'input', 'output_tokens': 'output',
                              'cached_input_tokens': 'cacheRead', 'cache_write_input_tokens': 'cacheWrite',

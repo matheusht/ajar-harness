@@ -84,7 +84,8 @@ def main():
         fixture = SimpleNamespace(run_native=run_native)
         fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
-                                      'research_environment': SimpleNamespace(Environment=Environment)}):
+                                      'research_environment': SimpleNamespace(Environment=Environment),
+                                      'native_runtime_omp': SimpleNamespace(Transport=object)}):
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
         assert ('omp_loader_preflight' in result) == (runtime == 'omp')
@@ -100,7 +101,28 @@ def main():
         assert summary == {'status': 'settled', 'returncode': 1,
                            'ready_matches': ready, 'startup_failure_phase': phase}
         assert 'unpublished' not in str(summary)
-    print('passed: 19 offline loader-preflight cases; no native or provider calls')
+    class Failure(Exception):
+        code = 'native_transport_closed'
+    for operation, fail in [('catalog', False), ('catalog', True), ('other', True)]:
+        class Transport:
+            process = SimpleNamespace(poll=lambda: 139)
+            def request(self, operation):
+                if fail:
+                    raise Failure('unpublished native detail')
+                return {'unpublished': 'catalog-content'}
+        module, result = SimpleNamespace(Transport=Transport), {}
+        try:
+            with driver.observe_catalog(module, result):
+                returned = module.Transport().request(operation)
+                assert returned == {'unpublished': 'catalog-content'}
+        except Failure:
+            assert fail
+        assert module.Transport is Transport
+        expected = {} if operation != 'catalog' else {'omp_catalog_request': (
+            {'status': 'failed', 'failure': 'native_transport_closed', 'returncode_before_cleanup': 139}
+            if fail else {'status': 'returned'})}
+        assert result == expected and 'unpublished' not in str(result)
+    print('passed: 22 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

@@ -11,12 +11,15 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
+      - tools/native_credentials.py
       - tools/native_runtime_*.py
       - tools/native_runtime_codex_exec.mjs
       - tools/install_native_tools.py
       - config/native-tool-lock.json
+      - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
@@ -31,12 +34,15 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
+      - tools/native_credentials.py
       - tools/native_runtime_*.py
       - tools/native_runtime_codex_exec.mjs
       - tools/install_native_tools.py
       - config/native-tool-lock.json
+      - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
@@ -86,7 +92,7 @@ jobs:
           path: ${{ runner.temp }}/oslit-docker/*.json
           if-no-files-found: warn
 
-  model-image:
+  native-linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -102,18 +108,18 @@ jobs:
         run: |
           docker --host unix:///var/run/docker.sock pull \
             python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
-      - name: Build and inspect the pinned model image without starting it
+      - name: Exercise pinned native tools and recovery with a controlled provider
         run: |
-          python3 evals/native-qualification/smoke/check_model_image_docker_e2e.py \
+          python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-model-assets-${{ matrix.runtime }}" \
-            --output "$RUNNER_TEMP/oslit-model-image-${{ matrix.runtime }}/result.json"
-      - name: Preserve model-image observations without the large build assets
+            --output "$RUNNER_TEMP/oslit-native-${{ matrix.runtime }}/result.json"
+      - name: Preserve native observations without private or large build assets
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oslit-model-image-${{ matrix.runtime }}-${{ github.sha }}
-          path: ${{ runner.temp }}/oslit-model-image-${{ matrix.runtime }}/result.json
+          name: oslit-native-${{ matrix.runtime }}-${{ github.sha }}
+          path: ${{ runner.temp }}/oslit-native-${{ matrix.runtime }}/result.json
           if-no-files-found: warn

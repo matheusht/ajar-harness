@@ -134,6 +134,50 @@ collections to declared practical cardinality limits, JSON nesting/total input
 bytes to a parser budget. Reject an unexpected field rather than ignore it. Native
 wire formats are adapter-private and must not leak into this signed contract.
 
+M1 fixes the following exact shapes after coordination with the runtime and
+environment owners. They replace the descriptive field-table examples above:
+
+- `environments` contains signed references with exactly
+  `{profile_id, profile_sha256, capabilities, limits, cleanup}`. Each referenced
+  profile has `{kind: "research-environment-profile-v2", transport, docker_binary,
+  docker_endpoint, daemon_id, image_id, platform, workspace_root, uid, gid, ssh}`.
+  Transport is `docker` or `ssh-docker`; Docker endpoint is a canonical absolute
+  `unix://` socket reference. Daemon identity may be null only until setup observes
+  and pins it before effects. Image is digest-pinned. Platform is `linux/amd64` or
+  `linux/arm64`; uid is positive and gid nonnegative. Workspace root and executable
+  paths are canonical absolute paths. An offline parser does not prove they work.
+- Docker uses `ssh: null`. SSH uses exactly
+  `{host, port, user, known_hosts_file, known_hosts_sha256, identity_file,
+  python_binary}`. Known-host bytes are digest-pinned; the identity file is a
+  reference whose credential contents are never read or archived by preflight.
+  The adapter owns actual SSH host verification and credential availability.
+- Environment capabilities are a subset of `source`, `binary`, `application`,
+  `acquisition`, `network_proxy`, `shared_write`, `renewable_lease`. These request
+  capabilities; runtime evidence must establish their support. Limits are exactly
+  `{memory_bytes, cpu_count, pids, workspace_bytes, lease_seconds, output_bytes}`;
+  all are positive, all except CPU count are integers, and the lease fits the
+  signed maximum worker lease. Cleanup is exactly
+  `{owned_resources: true, owned_workspace: true}`.
+- Each network class contains `{protocol, host, port, address_policy}` rows.
+  Protocol is HTTP or HTTPS, hosts are exact normalized DNS/IP values and ports
+  are explicit. Address policy is `{public_only, cidrs}`: public-only routes use an
+  empty CIDR list; other routes use nonempty canonical IPv4/IPv6 CIDRs. Wildcards,
+  URL userinfo and duplicate destinations are rejected. Application access must
+  have a corresponding target route. Adapters enforce DNS, redirect and socket
+  policy; parsing a route does not establish that enforcement.
+- Effect rows are exactly `{id, kind, access_ids, environment_ids, account_refs,
+  rung, artifact_classes, cleanup_required}`. Kinds are `read`, `execute`, `write`,
+  `artifact_create`; rungs are `source_only`, `self`, `stored`, `cross_user` and
+  must fit the signed ceiling. IDs resolve to the signed access/environment set,
+  accounts/permissions fit each access, and environments request each access mode.
+  Mutation/artifact creation requires cleanup; artifact creation names classes.
+- Preflight returns `verified_inputs` with `capabilities_verified: false` and no
+  runtime/target contact. Safe frozen files include authority, profiles/configs/
+  schemas, known hosts and source manifests, never native credentials or source/
+  binary payloads. The controller/environment must freeze and recheck payload bytes
+  before use. Source inventory checks metadata again after its byte scan; its
+  observation cannot promise that an external directory remains immutable later.
+
 ## One journal and replay
 
 Private root layout:

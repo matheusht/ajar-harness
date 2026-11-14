@@ -39,6 +39,8 @@ def main():
         expected = [('execute', COMMAND[:-3] + ['--version'], 5)]
         if matches:
             expected.extend(('execute', COMMAND[:-3] + ['--eval', script], 5) for _, script in driver.PROBES)
+        if matches:
+            expected.append(('execute', COMMAND, 30))
         expected.append(('launch', COMMAND, 'native_tools'))
         assert environment.calls == expected
         assert result['omp_loader_preflight'] == {'status': status, 'returncode': code,
@@ -86,7 +88,19 @@ def main():
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
         assert ('omp_loader_preflight' in result) == (runtime == 'omp')
-    print('passed: 13 offline loader-preflight cases; no native or provider calls')
+    for output, ready, phase in [
+        ('unpublished error text', False, None),
+        ('{"type":"ready","sdkVersion":"18.20.0","bunVersion":"1.4.4","platform":"linux","arch":"x64"}', True, None),
+        ('{"type":"ready","sdkVersion":"wrong"}', False, None),
+        ('{"type":"startup_failed","phase":"tools","error":"unpublished detail"}', False, 'tools'),
+        ('{"type":"startup_failed","phase":"unpublished detail"}', False, None),
+        ('null\n[]\n{"type":"startup_failed","phase":[]}', False, None),
+    ]:
+        summary = driver.sidecar_outcome({'status': 'settled', 'returncode': 1, 'output': output})
+        assert summary == {'status': 'settled', 'returncode': 1,
+                           'ready_matches': ready, 'startup_failure_phase': phase}
+        assert 'unpublished' not in str(summary)
+    print('passed: 19 offline loader-preflight cases; no native or provider calls')
 
 
 if __name__ == '__main__':

@@ -27,3 +27,9 @@ environment inspectors, and checks credential references only in host memory.
 startup, provider validity, daemon/image state, network containment, cleanup and
 research qualification remain explicitly unverified. This command writes no
 engagement record and dispatches no research.
+
+A follow-up with the composed boundary's actual host requirements adds three
+failure-first cases: missing OpenSSL, missing methodology, and an unavailable
+private-socket parent. All 21 workflows pass. The fixture substitutes its own
+methodology and missing path; production reads the pinned repository methodology
+and `/tmp`, without creating runtime state. The methodology digest is reported.

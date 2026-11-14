@@ -30,7 +30,8 @@ def run(base, fixture_file):
     rows = []
     scenarios = ('local', 'credential-missing', 'credential-mismatch', 'scope-tampered',
         'source-mutated', 'version', 'not-executable', 'capability', 'config', 'bundle-platform', 'environment-platform',
-        'docker-missing', 'ssh-prerequisites', 'ssh-missing', 'host-linux', 'provider-missing', 'target-account', 'environment-effect')
+        'docker-missing', 'ssh-prerequisites', 'ssh-missing', 'host-linux', 'provider-missing', 'target-account', 'environment-effect',
+        'openssl-missing', 'methodology-missing', 'socket-parent-missing')
     for scenario in scenarios:
         root = base / scenario
         inputs = fixture.make_fixture(root)
@@ -105,6 +106,9 @@ def run(base, fixture_file):
                 identity.unlink()
                 expected = ['ssh_identity_reference_unavailable']
         if scenario == 'host-linux':expected = ['native_model_boundary_unsupported']
+        if scenario == 'openssl-missing':expected = ['native_proxy_certificate_tool_unavailable']
+        if scenario == 'methodology-missing':expected = ['native_methodology_unavailable']
+        if scenario == 'socket-parent-missing':expected = ['native_private_socket_directory_unavailable']
         if scenario == 'provider-missing':
             scope['network']['provider'] = []
             expected = ['provider_route_unavailable']
@@ -132,21 +136,29 @@ def run(base, fixture_file):
         if scenario == 'source-mutated':
             (Path(definitions['access_files']['source-main']) / 'main.py').write_text('changed')
             expected = ['digest_mismatch']
+        method = root / 'methodology.md'
+        if scenario != 'methodology-missing':fixture.write(method, b'Inspect the harmless fixture only.\n')
         code = '''
-import runpy,socket,sys
+import shutil,socket,sys
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 def denied(*a,**k):raise AssertionError('preflight contacted a network endpoint')
 socket.socket.connect=denied
 if sys.argv[3]=='host-linux':sys.platform='linux'
+if sys.argv[3]=='openssl-missing':
+ original=shutil.which
+ shutil.which=lambda name:None if name=='openssl' else original(name)
+import engagement_preflight as preflight
+preflight.METHODOLOGY=Path(sys.argv[4])
+if sys.argv[3]=='socket-parent-missing':preflight.SOCKET_PARENT=Path(sys.argv[4]).parent/'missing-directory'
 script=Path(sys.argv[1])/'engagement_preflight.py'
 sys.argv=[str(script),'--inputs',sys.argv[2]]
-runpy.run_path(str(script),run_name='__main__')
+raise SystemExit(preflight.main())
 '''
         env = dict(os.environ)
         env['OPENAI_API_KEY'] = '' if scenario == 'credential-missing' else fake
         try:
-            result = subprocess.run([sys.executable, '-c', code, str(ROOT / 'tools'), str(inputs), scenario],
+            result = subprocess.run([sys.executable, '-c', code, str(ROOT / 'tools'), str(inputs), scenario, str(method)],
                 capture_output=True, text=True, timeout=15, env=env)
             report = json.loads(result.stdout) if result.stdout else {}
             assert fake not in result.stdout + result.stderr, 'credential value emitted'

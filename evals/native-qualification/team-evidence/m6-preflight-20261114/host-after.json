@@ -1,0 +1,92 @@
+{
+  "status": "passed",
+  "classification": "signed_fixture_preflight_no_runtime_or_target",
+  "real_credentials_used": false,
+  "host_linux": "simulated_platform_branch",
+  "checks": [
+    {
+      "check": "local",
+      "status": "passed"
+    },
+    {
+      "check": "credential-missing",
+      "status": "passed"
+    },
+    {
+      "check": "credential-mismatch",
+      "status": "passed"
+    },
+    {
+      "check": "scope-tampered",
+      "status": "passed"
+    },
+    {
+      "check": "source-mutated",
+      "status": "passed"
+    },
+    {
+      "check": "version",
+      "status": "passed"
+    },
+    {
+      "check": "not-executable",
+      "status": "passed"
+    },
+    {
+      "check": "capability",
+      "status": "passed"
+    },
+    {
+      "check": "config",
+      "status": "passed"
+    },
+    {
+      "check": "bundle-platform",
+      "status": "passed"
+    },
+    {
+      "check": "environment-platform",
+      "status": "passed"
+    },
+    {
+      "check": "docker-missing",
+      "status": "passed"
+    },
+    {
+      "check": "ssh-prerequisites",
+      "status": "passed"
+    },
+    {
+      "check": "ssh-missing",
+      "status": "passed"
+    },
+    {
+      "check": "host-linux",
+      "status": "passed"
+    },
+    {
+      "check": "provider-missing",
+      "status": "passed"
+    },
+    {
+      "check": "target-account",
+      "status": "passed"
+    },
+    {
+      "check": "environment-effect",
+      "status": "passed"
+    },
+    {
+      "check": "openssl-missing",
+      "status": "passed"
+    },
+    {
+      "check": "methodology-missing",
+      "status": "passed"
+    },
+    {
+      "check": "socket-parent-missing",
+      "status": "passed"
+    }
+  ]
+}

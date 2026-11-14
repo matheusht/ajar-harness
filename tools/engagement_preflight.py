@@ -11,10 +11,13 @@ import shutil
 import sys
 import tomllib
 
-from engagement_contract import ContractError, digest, load_inputs
+from engagement_contract import ContractError, digest, load_inputs, read_bytes, safe_publication
 from native_credentials import HostCredentialResolver
 from native_runtime_transport import RuntimeError
 from research_environment import inspect_profile
+
+METHODOLOGY = Path(__file__).resolve().parents[1] / 'engine/native-engagement-method.md'
+SOCKET_PARENT = Path('/tmp')
 
 
 def inspect_engagement(inputs: Path) -> dict:
@@ -25,6 +28,15 @@ def inspect_engagement(inputs: Path) -> dict:
         host_missing.append('native_model_boundary_unsupported')
     elif not os.access('/usr/bin/sandbox-exec', os.X_OK):
         host_missing.append('native_model_sandbox_unavailable')
+    if not shutil.which('openssl'):
+        host_missing.append('native_proxy_certificate_tool_unavailable')
+    if not SOCKET_PARENT.is_dir() or not os.access(SOCKET_PARENT, os.W_OK | os.X_OK):
+        host_missing.append('native_private_socket_directory_unavailable')
+    methodology = None
+    try:
+        methodology = digest(safe_publication(read_bytes(METHODOLOGY, max_bytes=1024 * 1024)))
+    except (ContractError, OSError):
+        host_missing.append('native_methodology_unavailable')
     if any(profile['kind'] == 'codex' for profile in verified.runtime_profiles.values()) and not shutil.which('bun'):
         host_missing.append('native_executor_bridge_unavailable')
     blocked.update(host_missing)
@@ -101,7 +113,7 @@ def inspect_engagement(inputs: Path) -> dict:
         'access_modes': sorted({row['kind'] for row in verified.scope['access']}),
         'host': {'platform': sys.platform, 'status': 'blocked' if host_missing else 'prerequisites_present',
                  'model_boundary': 'darwin-no-fork-v1' if sys.platform == 'darwin' else 'unsupported',
-                 'missing': host_missing, 'execution_verified': False},
+                 'missing': host_missing, 'methodology_sha256': methodology, 'execution_verified': False},
         'runtimes': runtimes, 'environments': environments, 'blocked_codes': sorted(blocked),
         'unbound_account_access': account_access, 'hard_limits': verified.scope['limits']['hard'],
         'expires_at': verified.scope['expires_at'], 'runtime_and_target_contact': False,

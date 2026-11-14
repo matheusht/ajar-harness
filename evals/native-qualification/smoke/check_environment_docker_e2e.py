@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -166,6 +167,34 @@ def main():
             check('owned prepared image is absent and the base image remains',
                   call('image', 'inspect', identity['prepared_image_id'], required=False).returncode != 0
                   and call('image', 'inspect', image['Id'], required=False).returncode == 0)
+            active[0] = True
+            deadline[0] = time.monotonic() + 30
+            lost = Environment(profile, dict(limits, lease_seconds=4), authorize, events.append,
+                               dispatch_guard=nullcontext)
+            environments.append(lost)
+            lost.prepare([access], {'source': str(source)})
+            spawned = lost.execute(['/usr/local/bin/python3', '-c',
+                "import subprocess; p=subprocess.Popen(['/usr/local/bin/python3','-c','import time;time.sleep(45)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);print(p.pid)"],
+                timeout_seconds=2)
+            check('owner-loss fixture starts a detached child', spawned['status'] == 'settled' and spawned['returncode'] == 0)
+            watcher = lost.owner.process
+            fault = {'identity': lost.receipt(), 'lease_seconds': 4, 'watcher_pid': watcher.pid,
+                     'before': lost.readback()}
+            result['watcher_loss'] = fault
+            check('owner-loss fixture has a live owned watcher', watcher.poll() is None and fault['before']['running'])
+            fault_started = time.monotonic()
+            watcher.kill(); watcher.wait(timeout=2)
+            fault['watcher_returncode'] = watcher.returncode
+            check('owned watcher was terminated by the injected SIGKILL', watcher.returncode == -signal.SIGKILL)
+            while True:
+                fault['after'] = lost.readback()
+                fault['elapsed_seconds'] = time.monotonic() - fault_started
+                if not fault['after'].get('running') or fault['elapsed_seconds'] >= 6:
+                    break
+                time.sleep(.1)
+            check('container lease survives loss of the host watcher',
+                  not fault['after'].get('running') and fault['elapsed_seconds'] <= 6)
         result['status'] = 'passed'
     except Exception as error:
         result['status'] = 'failed'

@@ -18,6 +18,10 @@ The required observations were specified before changing production behavior:
 - Revocation stops the owned container and its detached child. Reconstructing
   the environment from its receipt cleans only its container and derived image.
   The base image and preexisting containers remain.
+- A second container has a four-second lease and a detached child. Killing its
+  owned host watcher must still leave the container stopped within six seconds.
+  The result records the fault and final readback; cleanup runs even if it remains
+  active. This case must fail before correcting a watcher-only lease mechanism.
 
 Use Python 3.11+ and Docker on a disposable Linux host. The image must include
 `/bin/sh` and `/usr/local/bin/python3`. The CI workflow resolves

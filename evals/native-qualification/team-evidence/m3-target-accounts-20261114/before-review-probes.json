@@ -1,0 +1,25 @@
+{
+  "header_name_reflection": {
+    "known_secret_reflected": true,
+    "http_status": 200
+  },
+  "latin1_cookie": {
+    "outcome": "returned",
+    "known_cookie_reflected": true,
+    "journal_status": "settled"
+  },
+  "cookie_capacity": [
+    {
+      "outcome": "returned",
+      "retained_cookie_count": 80
+    },
+    {
+      "outcome": "target_account_cookie_capacity",
+      "retained_cookie_count": 160
+    },
+    {
+      "outcome": "target_account_cookie_capacity",
+      "retained_cookie_count": 240
+    }
+  ]
+}

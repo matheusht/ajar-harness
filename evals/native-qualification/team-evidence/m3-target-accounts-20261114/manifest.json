@@ -1,0 +1,20 @@
+{
+  "kind": "target-account-evidence-v1",
+  "base_head": "dc4749da11eece97981a99217d009be5ef6da24c",
+  "files": {
+    "tools/target_accounts.py": "sha256:0d0a9fd566c26c7ff9ce1a97ec328889cb3cca660780ca2806df7f0ce93e01f7",
+    "tools/engagement_network.py": "sha256:8624cdf213381dee7495d6e3c469cfb56b1ee0e8a0e0c753ceb8a4de98df9cb7",
+    "evals/native-qualification/smoke/check_target_accounts_e2e.py": "sha256:21dcce50473207603810eaf7ae17e0e3fe62f4f93498e5a506eaa6d8daf3fd10",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md": "sha256:559f54f7859dfaa0d559e5f12b7c466c70e64e4bd2163112c14c97658a654e0b",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/after.json": "sha256:49a5f5894dfb344ae25f0068a2f1db08859a11b7f3726544dda268a4d25c3d3c",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/before-anonymous-cookie.json": "sha256:0b7c95cf649e1a5f5596d9c37288e0a8b26570e6132bdee77b2152e0028fb733",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/before-hop-header.json": "sha256:e504d76b94717ca3266b44005510d152185a7397cf225061c97f1f45f0959b68",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/before-module.json": "sha256:ce2873b9886fa09c8eb26312f344322519c9afce9b3168b7c3e07229b72796fd",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/before-review-probes.json": "sha256:75c8b552f99cfe443c768d877d8775bbb8ffcc9ff7374fb7e8a719b8b5a30a93",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/before-review.json": "sha256:6cb00723d26cc554a617f43d86796dab698b8dede9f7fe5a43749cbdb6da840d",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/proxy.json": "sha256:588d0c1b447ef379988b80e09f2f0b2b13f96dc77ee8d8cc34ca1b2241d25ed5",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/streaming.json": "sha256:4997fd1240d8313d8efa32af24be4080c437467d246dc8b3f2db3bb1dae05840",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/tcp.json": "sha256:ebf0239a2c8ab4d6a2f138073cd8073ac76aa64d428849a04bb87087b1315ca9",
+    "evals/native-qualification/team-evidence/m3-target-accounts-20261114/tls.json": "sha256:76b35394ec7f3ae04b1e518a13a3d824a7e574a94000643857189c301575c5b5"
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "kind": "target-accounts-e2e-v1",
+  "classification": "actual_local_http_with_scoped_grant_fixtures",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "checks": [
+    {
+      "name": "selected-alpha",
+      "passed": true
+    },
+    {
+      "name": "selected-beta",
+      "passed": true
+    },
+    {
+      "name": "anonymous-has-no-default-account",
+      "passed": true
+    },
+    {
+      "name": "selector-headers-never-reach-target",
+      "passed": true
+    },
+    {
+      "name": "wrong-account-before-effect",
+      "passed": true
+    },
+    {
+      "name": "wrong-access-before-effect",
+      "passed": true
+    },
+    {
+      "name": "wrong-origin-before-effect",
+      "passed": true
+    },
+    {
+      "name": "provider-origin-before-effect",
+      "passed": true
+    },
+    {
+      "name": "auth-override-before-effect",
+      "passed": true
+    },
+    {
+      "name": "anonymous-cookie-override-before-effect",
+      "passed": true
+    },
+    {
+      "name": "account-without-access-before-effect",
+      "passed": true
+    },
+    {
+      "name": "write-without-effect-before-effect",
+      "passed": true
+    },
+    {
+      "name": "signed-write-account",
+      "passed": true
+    },
+    {
+      "name": "current-resource-grant-required",
+      "passed": true
+    },
+    {
+      "name": "private-cookie-response-alpha",
+      "passed": true
+    },
+    {
+      "name": "account-cookie-rotation-alpha",
+      "passed": true
+    },
+    {
+      "name": "private-cookie-response-beta",
+      "passed": true
+    },
+    {
+      "name": "account-cookie-rotation-beta",
+      "passed": true
+    },
+    {
+      "name": "same-account-other-origin-cookie-isolation",
+      "passed": true
+    },
+    {
+      "name": "cross-origin-redirect-has-no-account",
+      "passed": true
+    },
+    {
+      "name": "reflect-secret-withheld",
+      "passed": true
+    },
+    {
+      "name": "reflect-outcome-unknown",
+      "passed": true
+    },
+    {
+      "name": "split-secret-withheld",
+      "passed": true
+    },
+    {
+      "name": "split-outcome-unknown",
+      "passed": true
+    },
+    {
+      "name": "reflect-cookie-secret-withheld",
+      "passed": true
+    },
+    {
+      "name": "reflect-cookie-outcome-unknown",
+      "passed": true
+    },
+    {
+      "name": "reflect-header-secret-withheld",
+      "passed": true
+    },
+    {
+      "name": "reflect-header-outcome-unknown",
+      "passed": true
+    },
+    {
+      "name": "anonymous-issued-cookie-withheld",
+      "passed": true
+    },
+    {
+      "name": "exact-request-provenance",
+      "passed": true
+    },
+    {
+      "name": "query-never-recorded",
+      "passed": true
+    },
+    {
+      "name": "secrets-never-in-observations",
+      "passed": true
+    },
+    {
+      "name": "observer-failure-before-connect",
+      "passed": true
+    },
+    {
+      "name": "binding-cannot-expand-origin",
+      "passed": true
+    },
+    {
+      "name": "binding-cannot-inject-hop-header",
+      "passed": false
+    }
+  ],
+  "unverified": [
+    "controller journal integration",
+    "Docker isolation",
+    "SSH",
+    "actual target user identity"
+  ],
+  "error": "AssertionError: binding-cannot-inject-hop-header",
+  "passed": false,
+  "source_sha256": {
+    "tools/target_accounts.py": "sha256:028d5b1126488f57d516337118578a36fe2ae4d044ce59f560f26a706af668e0",
+    "tools/engagement_network.py": "sha256:8624cdf213381dee7495d6e3c469cfb56b1ee0e8a0e0c753ceb8a4de98df9cb7",
+    "evals/native-qualification/smoke/check_target_accounts_e2e.py": "sha256:20748f17c7a22f293a167a56032582ff619df4ab9369e8f253f9b8740973056f"
+  }
+}

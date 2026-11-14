@@ -63,7 +63,8 @@ def _forward_headers(headers, *, request=False):
 
 class NetworkGate:
     def __init__(self, routes, authorize, *, maximum_bytes=1024 * 1024, dispatch_guard=None,
-                 upstream_context=None):
+                 upstream_context=None, request_binder=None):
+        self.request_binder = request_binder
         self.routes = copy.deepcopy(routes)
         self.authorize = authorize
         self.dispatch_guard = dispatch_guard
@@ -160,12 +161,18 @@ class NetworkGate:
                     name.lower() in _HOP_HEADERS | {'host', 'content-length'}):
                 raise NetworkDenied('network_header_invalid')
         parsed, port, address = self._destination(url)
-        peer = None
+        peer = binding = response = None
+        total = 0
+        status = 'unknown'
         connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
         try:
             with self.dispatch_guard():
                 if not self._active():
                     raise NetworkDenied('network_lease_inactive')
+                if self.request_binder is not None:
+                    binding = self.request_binder(method, url, headers)
+                    if binding is not None:
+                        headers = binding.headers
                 peer = socket.create_connection((address, port), timeout=5)
                 with self.lock:
                     self.sockets.add(peer)
@@ -185,15 +192,14 @@ class NetworkGate:
                 connection.putheader('Transfer-Encoding' if length is None else 'Content-Length',
                                      'chunked' if length is None else str(length))
                 connection.endheaders()
-            total = 0
             for chunk in chunks:
-                total += len(chunk)
-                if total > self.maximum_bytes:
+                if total + len(chunk) > self.maximum_bytes:
                     raise NetworkDenied('network_body_limit')
                 with self.dispatch_guard():
                     if not self._active():
                         raise NetworkDenied('network_lease_inactive')
                     connection.send((f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n') if length is None else chunk)
+                    total += len(chunk)
             if length is not None and total != length:
                 raise NetworkDenied('network_body_incomplete')
             with self.dispatch_guard():
@@ -204,13 +210,18 @@ class NetworkGate:
             response = connection.getresponse()
             if not self._active():
                 raise NetworkDenied('network_lease_inactive')
-            yield response, parsed, port, address
+            if binding is not None:
+                binding.accept_response(response)
+            yield response, parsed, port, address, binding
+            status = 'settled'
         finally:
             with self.lock:
                 self.sockets.discard(peer)
             connection.close()
             if peer:
                 peer.close()
+            if binding is not None:
+                binding.finish(status, response.status if response is not None else None, total)
 
     def _response_shape(self, response, method):
         lengths = response.headers.get_all('Content-Length', [])
@@ -225,7 +236,7 @@ class NetworkGate:
             raise NetworkDenied('network_response_limit')
         return length, no_body
 
-    def _payload(self, response, length, no_body, *, limit=None):
+    def _payload(self, response, length, no_body, *, limit=None, binding=None):
         total = 0
         if no_body:
             return
@@ -239,11 +250,17 @@ class NetworkGate:
             if not chunk:
                 if length is not None and total != length:
                     raise NetworkDenied('network_response_incomplete')
+                if binding is not None:
+                    tail = binding.filter_chunk(b'', final=True)
+                    if tail:
+                        yield tail
                 return
             total += len(chunk)
             if total > limit:
                 raise NetworkDenied('network_response_limit')
-            yield chunk
+            filtered = binding.filter_chunk(chunk) if binding is not None else chunk
+            if filtered:
+                yield filtered
 
     def _request_chunks(self, stream, length):
         total = 0
@@ -282,11 +299,11 @@ class NetworkGate:
         headers = dict(headers or {})
         for attempt in range(redirects + 1):
             chunks = (body[index:index + 16384] for index in range(0, len(body), 16384))
-            with self._exchange(url, method, headers, chunks, len(body)) as (response, parsed, port, address):
+            with self._exchange(url, method, headers, chunks, len(body)) as (response, parsed, port, address, binding):
                 length, no_body = self._response_shape(response, method)
                 if not no_body and length is not None and length > limit:
                     raise NetworkDenied('network_response_limit')
-                payload = b''.join(self._payload(response, length, no_body, limit=limit))
+                payload = b''.join(self._payload(response, length, no_body, limit=limit, binding=binding))
                 location = response.getheader('Location')
                 if response.status in (301, 302, 303, 307, 308) and location:
                     if attempt == redirects:
@@ -294,7 +311,7 @@ class NetworkGate:
                     next_url = urljoin(url, location)
                     next_parsed, next_port, _ = self._destination(next_url)
                     if (next_parsed.scheme, next_parsed.hostname, next_port) != (parsed.scheme, parsed.hostname, port):
-                        headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+                        headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie', 'x-oslit-access', 'x-oslit-account')}
                     if response.status == 303:
                         method, body = 'GET', b''
                     url = next_url
@@ -371,13 +388,13 @@ class NetworkGate:
                     length = None if encoding else int(length_text)
                     forwarded = dict(_forward_headers(list(headers.items()), request=True))
                     chunks = gate._request_chunks(stream, length)
-                    with gate._exchange(url, method, forwarded, chunks, length) as (response, _, _, _):
+                    with gate._exchange(url, method, forwarded, chunks, length) as (response, _, _, _, binding):
                         response_length, no_body = gate._response_shape(response, method)
                         location = response.getheader('Location')
                         if response.status in (301, 302, 303, 307, 308) and location:
                             gate._destination(urljoin(url, location))
                         lines = [f'HTTP/1.1 {response.status} Response']
-                        lines.extend(f'{key}: {value}' for key, value in _forward_headers(response.getheaders()))
+                        lines.extend(f'{key}: {value}' for key, value in _forward_headers(binding.response_headers if binding is not None else response.getheaders()))
                         if response_length is not None:
                             lines.append(f'Content-Length: {response_length}')
                         elif not no_body:
@@ -388,7 +405,7 @@ class NetworkGate:
                                 raise NetworkDenied('network_lease_inactive')
                             response_started = True
                             connection.sendall(('\r\n'.join(lines) + '\r\n\r\n').encode('latin-1'))
-                        for chunk in gate._payload(response, response_length, no_body):
+                        for chunk in gate._payload(response, response_length, no_body, binding=binding):
                             with gate.dispatch_guard():
                                 if not gate._active():
                                     raise NetworkDenied('network_lease_inactive')

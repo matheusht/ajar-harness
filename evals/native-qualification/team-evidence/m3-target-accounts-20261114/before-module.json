@@ -1,0 +1,19 @@
+{
+  "kind": "target-accounts-e2e-v1",
+  "classification": "actual_local_http_with_scoped_grant_fixtures",
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "checks": [],
+  "unverified": [
+    "controller journal integration",
+    "Docker isolation",
+    "SSH",
+    "actual target user identity"
+  ],
+  "error": "ModuleNotFoundError: No module named 'target_accounts'",
+  "passed": false,
+  "source_sha256": {
+    "tools/engagement_network.py": "sha256:978ec14335ce4a3d03314033a62210603f918984370f3df11a30f735dce7fdb3",
+    "evals/native-qualification/smoke/check_target_accounts_e2e.py": "sha256:7bb086a6769d508f3ab0f2eb62fe3eb63c5db7bd1354f5940e25492d3fa56c12"
+  }
+}

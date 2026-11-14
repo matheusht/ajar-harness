@@ -17,6 +17,8 @@ class Environment:
 
     def execute(self, argv, *, timeout_seconds):
         self.calls.append(('execute', argv, timeout_seconds))
+        if isinstance(self.observation, list):
+            return self.observation.pop(0)
         if isinstance(self.observation, Exception):
             raise self.observation
         return self.observation
@@ -34,10 +36,15 @@ def main():
         result = {}
         with observe_loader(Environment, result):
             assert environment.launch_stdio(COMMAND) == 'original-process'
-        assert environment.calls == [('execute', COMMAND[:-3] + ['--version'], 5),
-                                     ('launch', COMMAND, 'native_tools')]
-        assert result == {'omp_loader_preflight': {'status': status, 'returncode': code,
-                                                 'pinned_version_matches': matches}}
+        expected = [('execute', COMMAND[:-3] + ['--version'], 5)]
+        if matches:
+            expected.extend(('execute', COMMAND[:-3] + ['--eval', script], 5) for _, script in driver.PROBES)
+        expected.append(('launch', COMMAND, 'native_tools'))
+        assert environment.calls == expected
+        assert result['omp_loader_preflight'] == {'status': status, 'returncode': code,
+                                                 'pinned_version_matches': matches}
+        assert ('omp_import_preflight' in result) == matches
+        assert output not in str(result)
         assert Environment.launch_stdio is original
     for argv, role in [(COMMAND, 'model'), (COMMAND[:-1], 'native_tools'),
                        (['unexpected', *COMMAND[1:]], 'native_tools')]:
@@ -55,6 +62,18 @@ def main():
         raise AssertionError('Denied execution continued')
     assert len(environment.calls) == 1 and Environment.launch_stdio is original
     assert result == {'omp_loader_preflight': {'status': 'attempted'}}
+    for failed_phase in range(len(driver.PROBES)):
+        passed = {'output': '1.4.4', 'status': 'settled', 'returncode': 0}
+        failed = {'output': 'unpublished failure detail', 'status': 'settled', 'returncode': 133}
+        environment = Environment([passed] * (failed_phase + 1) + [failed])
+        result = {}
+        with observe_loader(Environment, result):
+            environment.launch_stdio(COMMAND)
+        rows = result['omp_import_preflight']
+        assert len(rows) == failed_phase + 1 and rows[-1]['phase'] == driver.PROBES[failed_phase][0]
+        assert rows[-1]['returncode'] == 133 and 'unpublished' not in str(result)
+        assert environment.calls[-1] == ('launch', COMMAND, 'native_tools')
+        assert Environment.launch_stdio is original
     for runtime in ('omp', 'codex'):
         result = {}
         environment = Environment({'output': '1.4.4\n', 'status': 'settled', 'returncode': 0})
@@ -67,7 +86,7 @@ def main():
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
         assert ('omp_loader_preflight' in result) == (runtime == 'omp')
-    print('passed: 9 offline loader-preflight cases; no native or provider calls')
+    print('passed: 13 offline loader-preflight cases; no native or provider calls')
 
 
 if __name__ == '__main__':

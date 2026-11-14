@@ -36,7 +36,7 @@ def main():
               'classification': 'engineering_simulation', 'scenarios': [],
               'provider_calls': 0, 'target_calls': 0,
               'requirements': 'Python 3 and ssh-keygen; no provider, Docker or SSH host',
-              'expected': 'Eight passed scenarios; refused operations leave journal and capacity unchanged',
+              'expected': 'All scenarios pass; refused operations leave journal and capacity unchanged',
               'python': sys.version.split()[0], 'platform': platform.platform(),
               'command': [sys.executable, str(Path(__file__).resolve()),
                           '--repository', str(repository), '--output', str(args.output)],
@@ -45,8 +45,8 @@ def main():
     try:
         from engagement_contract import ContractError, canonical, digest, load_inputs, source_manifest
         from engagement_controller import Controller, ControllerError, Principal, WorkerServer
-        spec = importlib.util.spec_from_file_location('authority_fixture',
-            Path(__file__).with_name('check_engagement_contract_e2e.py'))
+        fixture_path = repository / 'evals/native-qualification/smoke/check_engagement_contract_e2e.py'
+        spec = importlib.util.spec_from_file_location('authority_fixture', fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
 
@@ -277,6 +277,60 @@ Controller(root).direction('Committed immediately before fixture process death.'
                     and not root.exists() and before == after, status=response['status'],
                     code=response.get('code'), root_created=root.exists(), source_unchanged=before == after)
 
+        def usage_rollback(x):
+            def observed(status, seconds=10, tokens=None, cost=0.4):
+                return {'status': status, 'worker_seconds': seconds, 'resources': {},
+                        'usage': {'tokens': tokens, 'cost': cost}, 'cleanup': 'pending'}
+
+            def prepared(name):
+                directory = x.path / name
+                directory.mkdir(mode=0o700)
+                controller = Controller.initialize(directory / 'engagement', x.contract,
+                    evidence_class='engineering_simulation')
+                workspace = directory / 'worker'
+                workspace.mkdir(mode=0o700)
+                controller.record_worker_started('lead-1', 1, 'fixture-usage', workspace)
+                grant = controller.prepare_dispatch('lead-1', 1, seconds=60,
+                    resources=[], adapter_id='fixture-owner')
+                return controller, grant
+
+            def adopt(controller, grant, value):
+                receipt = controller.store_receipt(grant, value, adapter_id='fixture-owner')
+                return controller.adopt_receipt(grant['dispatch_id'], receipt, adapter_id='fixture-owner')
+
+            initial = observed('unknown', tokens={'input': 100, 'output': 20})
+            variations = {
+                'seconds_lowered': {'seconds': 9, 'tokens': {'input': 100, 'output': 20}},
+                'tokens_lowered': {'tokens': {'input': 99, 'output': 20}},
+                'known_token_omitted': {'tokens': {'output': 20}},
+                'known_tokens_unavailable': {'tokens': None},
+                'known_cost_lowered': {'tokens': {'input': 100, 'output': 20}, 'cost': 0.3},
+                'known_cost_unavailable': {'tokens': {'input': 100, 'output': 20}, 'cost': None}}
+            for status in ('unknown', 'settled'):
+                for name, changes in variations.items():
+                    controller, grant = prepared(status + '-' + name)
+                    adopt(controller, grant, initial)
+                    before = fingerprint(controller.root)
+                    response = x.attempt(lambda: adopt(controller, grant, observed(status, **changes)))
+                    usage = controller.state()['usage']
+                    x.check(status + ' ' + name + ' refused without releasing capacity',
+                        response['status'] == 'rejected' and fingerprint(controller.root) == before
+                        and usage['reserved_worker_seconds'] == 60 and usage['worker_seconds'] == 0,
+                        response=response, usage=usage)
+
+            controller, grant = prepared('valid-monotonic')
+            adopt(controller, grant, initial)
+            adopt(controller, grant, observed('unknown', 12, {'input': 110, 'output': 21}, 0.45))
+            terminal = observed('settled', 14, {'input': 120, 'output': 22}, 0.5)
+            response = x.attempt(lambda: adopt(controller, grant, terminal))
+            state = controller.state()
+            x.check('valid monotonic terminal receipt settles the original invocation',
+                response['status'] == 'accepted' and state['usage']['invocations'] == 1
+                and state['usage']['worker_seconds'] == 14 and state['usage']['reserved_worker_seconds'] == 0
+                and state['usage']['tokens'] == {'input': 120, 'output': 22}
+                and state['dispatches'][grant['dispatch_id']]['observation'] == terminal,
+                response=response, usage=state['usage'])
+
         def pagination(x):
             for number in range(66):
                 x.submit('publish', publication(f'large-{number}', 'x' * 65000))
@@ -326,7 +380,8 @@ Controller(root).direction('Committed immediately before fixture process death.'
 
         scenarios = [('ownership', ownership), ('workspaces', workspaces), ('crash', crash),
                      ('receipt_identity', receipt_identity), ('unknown_recovery', unknown_recovery),
-                     ('input_overlap', input_overlap), ('pagination', pagination), ('retries', retries)]
+                     ('input_overlap', input_overlap), ('pagination', pagination), ('retries', retries),
+                     ('usage_rollback', usage_rollback)]
         # Short paths keep AF_UNIX endpoints usable on macOS as well as Linux.
         with tempfile.TemporaryDirectory(prefix='m1-e2e-', dir='/tmp') as temporary:
             for index, (name, action) in enumerate(scenarios):
@@ -350,7 +405,7 @@ Controller(root).direction('Committed immediately before fixture process death.'
         result['status'] = 'passed' if all(row['status'] == 'passed' for row in result['scenarios']) else 'failed'
     except Exception as error:
         result.update(status='unavailable', error=type(error).__name__ + ': ' + str(error))
-    paths = [Path(__file__), Path(__file__).with_name('check_engagement_contract_e2e.py'),
+    paths = [Path(__file__), repository / 'evals/native-qualification/smoke/check_engagement_contract_e2e.py',
              *(repository / 'tools' / name for name in ('engagement_contract.py', 'engagement_controller.py',
                                                        'native_engagement.py'))]
     result['source_hashes'] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()

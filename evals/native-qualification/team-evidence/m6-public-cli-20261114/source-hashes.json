@@ -1,0 +1,7 @@
+{
+  "tools/native_engagement.py": "sha256:9a6dbb603df3dab4b1a8daeb468ad84eb9e4dd21178c87003c80f39182e214d2",
+  "tools/engagement_preflight.py": "sha256:45838c186c718ee6bc9988fa0a2c5b24489ecec8cbd74250b938936407396404",
+  "evals/native-qualification/smoke/check_engagement_public_cli_e2e.py": "sha256:bb43901f1344d0093fed6eec61c9bda48e31a4414038aaec2f0993c74734c4a8",
+  "evals/native-qualification/smoke/check_engagement_preflight_e2e.py": "sha256:81a222800a0848d6945bb329e1844c14d0bfd46fb256ff31f554bce2080604d8",
+  "evals/native-qualification/smoke/check_engagement_runner_recovery_e2e.py": "sha256:a5de30a82962f956a841e4266788e9b8d1773a24a4699dda5b8b8740ff6b2a4c"
+}

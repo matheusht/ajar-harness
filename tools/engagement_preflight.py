@@ -12,11 +12,13 @@ import sys
 import tomllib
 
 from engagement_contract import ContractError, digest, load_inputs, read_bytes, safe_publication
+from engagement_controller import overlap
 from native_credentials import HostCredentialResolver
 from native_runtime_transport import RuntimeError
 from research_environment import inspect_profile
 
 METHODOLOGY = Path(__file__).resolve().parents[1] / 'engine/native-engagement-method.md'
+PROTOCOL = Path(__file__).resolve().parents[1] / 'engine/native-engagement-protocol.md'
 SOCKET_PARENT = Path('/tmp')
 
 
@@ -32,11 +34,14 @@ def inspect_engagement(inputs: Path) -> dict:
         host_missing.append('native_proxy_certificate_tool_unavailable')
     if not SOCKET_PARENT.is_dir() or not os.access(SOCKET_PARENT, os.W_OK | os.X_OK):
         host_missing.append('native_private_socket_directory_unavailable')
-    methodology = None
-    try:
-        methodology = digest(safe_publication(read_bytes(METHODOLOGY, max_bytes=1024 * 1024)))
-    except (ContractError, OSError):
-        host_missing.append('native_methodology_unavailable')
+    guidance = {}
+    for name, path, code in (('methodology', METHODOLOGY, 'native_methodology_unavailable'),
+                             ('protocol', PROTOCOL, 'native_protocol_guidance_unavailable')):
+        try:
+            guidance[name] = digest(safe_publication(read_bytes(path, max_bytes=1024 * 1024)))
+        except (ContractError, OSError):
+            guidance[name] = None
+            host_missing.append(code)
     if any(profile['kind'] == 'codex' for profile in verified.runtime_profiles.values()) and not shutil.which('bun'):
         host_missing.append('native_executor_bridge_unavailable')
     blocked.update(host_missing)
@@ -49,8 +54,32 @@ def inspect_engagement(inputs: Path) -> dict:
         blocked.add('provider_route_unavailable')
     account_access = [row['id'] for row in verified.scope['access']
                       if row['kind'] == 'application' and row['account_refs']]
+    accounts = {'status': 'not_requested', 'access_ids': account_access, 'target_identity_verified': False}
     if account_access:
-        blocked.add('target_account_binding_unavailable')
+        from target_accounts import TargetAccountError, TargetAccountResolver
+        target_resolver = None
+        try:
+            reference = os.environ.get('OSLIT_ACCOUNT_BINDINGS') or None
+            if reference is not None:
+                reference = Path(reference)
+                try:
+                    if not reference.is_absolute():raise ValueError()
+                    resolved = reference.resolve(strict=True)
+                except (OSError, ValueError):
+                    raise TargetAccountError('target_account_references_unavailable') from None
+                protected = [Path(value) for value in verified.inputs['access_files'].values()]
+                protected.extend(Path(profile['tool_bundle']['path']) for profile in verified.runtime_profiles.values())
+                if any(overlap(resolved, path.resolve()) for path in protected):
+                    raise TargetAccountError('target_account_references_exposed')
+            target_resolver = TargetAccountResolver(reference,
+                verified.scope, lambda: {'resources': account_access}, lambda observation: None,
+                environment_profile_id=next(iter(verified.environment_profiles)))
+            accounts['status'] = 'references_available'
+        except TargetAccountError as error:
+            accounts.update(status='blocked', code=str(error))
+            blocked.add(str(error))
+        finally:
+            if target_resolver is not None:target_resolver.close()
     initial_kinds = {row['kind'] for row in verified.scope['access'] if row['kind'] != 'application'}
     initial_resources = {row['id'] for row in verified.scope['access'] if row['kind'] != 'application'}
     resolver = HostCredentialResolver()
@@ -113,9 +142,12 @@ def inspect_engagement(inputs: Path) -> dict:
         'access_modes': sorted({row['kind'] for row in verified.scope['access']}),
         'host': {'platform': sys.platform, 'status': 'blocked' if host_missing else 'prerequisites_present',
                  'model_boundary': 'darwin-no-fork-v1' if sys.platform == 'darwin' else 'unsupported',
-                 'missing': host_missing, 'methodology_sha256': methodology, 'execution_verified': False},
+                 'missing': host_missing, 'methodology_sha256': guidance['methodology'],
+                 'protocol_sha256': guidance['protocol'], 'execution_verified': False},
         'runtimes': runtimes, 'environments': environments, 'blocked_codes': sorted(blocked),
-        'unbound_account_access': account_access, 'hard_limits': verified.scope['limits']['hard'],
+        'target_accounts': accounts,
+        'unbound_account_access': account_access if accounts['status'] == 'blocked' else [],
+        'hard_limits': verified.scope['limits']['hard'],
         'expires_at': verified.scope['expires_at'], 'runtime_and_target_contact': False,
         'capabilities_verified': False,
         'unverified': ['native_runtime_startup', 'provider_authentication_and_inference',

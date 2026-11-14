@@ -1,0 +1,52 @@
+{
+  "kind": "engagement-team-check-v2",
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "id": "E04",
+      "status": "passed",
+      "revision": 9
+    },
+    {
+      "id": "E05",
+      "status": "passed",
+      "revision": 12
+    },
+    {
+      "id": "E06",
+      "status": "passed",
+      "revision": 12
+    },
+    {
+      "id": "E13",
+      "status": "passed",
+      "revision": 7
+    },
+    {
+      "id": "E14",
+      "status": "passed",
+      "revision": 6
+    },
+    {
+      "id": "E15",
+      "status": "passed",
+      "revision": "deliberately_corrupted"
+    }
+  ],
+  "status": "passed",
+  "source_hashes": {
+    "evals/native-qualification/smoke/check_engagement_team_e2e.py": "8f97bcd6ebfe8cc848afed0363fda2a625a0b12532b7df56f6aea150837e5f77",
+    "tools/engagement_controller.py": "f0ad803bf8cd4058152c4446b3e3892f632f08290c78e3d7628e487a806453b0",
+    "tools/native_engagement.py": "9a6dbb603df3dab4b1a8daeb468ad84eb9e4dd21178c87003c80f39182e214d2"
+  },
+  "unverified": [
+    "native role isolation",
+    "provider accounting",
+    "active tool revocation",
+    "Docker and SSH environments",
+    "multi-day soak",
+    "fresh-target research"
+  ]
+}

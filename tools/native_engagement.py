@@ -772,14 +772,16 @@ def _v2_route(argv: list[str]) -> bool:
 
 
 def _v2_main(argv: list[str]) -> int:
-    from engagement_contract import ContractError, inspect_inputs, load_inputs, read_json, read_bytes
+    from engagement_contract import ContractError, load_inputs, read_json, read_bytes
     from engagement_controller import Controller, ControllerError, worker_call
+    from engagement_preflight import inspect_engagement
+    from engagement_runner import Runner, RunnerError
 
     parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement.')
     commands = parser.add_subparsers(dest='command', required=True)
     inspect = commands.add_parser('inspect', help='verify inputs without model or target contact')
     inspect.add_argument('--inputs', type=Path, required=True)
-    run = commands.add_parser('run', help='initialize the signed v2 engagement')
+    run = commands.add_parser('run', help='initialize and run the signed v2 engagement')
     run.add_argument('--inputs', type=Path, required=True)
     run.add_argument('--engagement-root', type=Path, required=True)
     for name in ('resume', 'direction', 'stop', 'export'):
@@ -805,7 +807,7 @@ def _v2_main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == 'inspect':
-            result = inspect_inputs(args.inputs)
+            result = inspect_engagement(args.inputs)
         elif args.command in ('claim', 'submit'):
             request = (read_json(args.file) if args.command == 'submit' else
                        {'request_id': args.request_id, 'expected_revision': args.expected_revision,
@@ -824,13 +826,18 @@ def _v2_main(argv: list[str]) -> int:
                 result = controller.direction(read_bytes(args.file, max_bytes=65536).decode('utf-8'))
             elif args.command == 'stop':
                 controller.stop('operator_stop')
-                result = controller.status()
+                try:
+                    result = Runner(controller).run()
+                except RunnerError as error:
+                    if error.code != 'engagement_already_running':
+                        raise
+                    result = controller.status()
+                    result.update(status='stopping', code='runner_stop_pending')
             elif args.command == 'export':
                 result = controller.export(args.output)
             else:
-                result = controller.status()
-                result.update(status='blocked', code='runtime_environment_integration_pending')
-    except (ControllerError, ContractError) as error:
+                result = Runner(controller).run()
+    except (ControllerError, ContractError, RunnerError) as error:
         result = {'status': 'rejected', 'code': error.code}
     except (OSError, ValueError, KeyError, TypeError):
         result = {'status': 'rejected', 'code': 'engagement_input_unavailable'}

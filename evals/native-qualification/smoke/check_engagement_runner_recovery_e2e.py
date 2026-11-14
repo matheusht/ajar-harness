@@ -234,11 +234,22 @@ def run_case(repository, fixture, scenario, subcase=None):
                 require(controller.state()['tasks']['task-1']['status'] == 'assigned', 'task was lost')
             else:
                 if subcase == 'operator-stop':
-                    require(cli('stop')['status'] == 'stopped', 'operator stop did not persist')
+                    stopped = cli('stop')
+                    require(controller.state()['status'] == 'stopped', 'operator stop did not persist')
+                    require(stopped['status'] == 'stopped' or (stopped['status'] == 'stopping' and
+                        stopped.get('code') == 'runner_stop_pending'), 'busy-owner stop state was misreported')
+                    row['stop_response'] = stopped['status']
                 thread.join(5)
                 require(not thread.is_alive(), 'runner did not quiesce the finished or stopped worker')
                 row['observed'] = snapshot()
                 state = controller.state()
+                if subcase == 'operator-stop':
+                    stop_status = cli('status')
+                    row['stop_cleanup'] = stop_status['cleanup']
+                    require(state['workers']['worker-2']['status'] == 'stopped' and
+                        state['workers']['worker-2'].get('stop_receipt'), 'owned worker stop was not observed')
+                    require(stop_status['cleanup'] == state['cleanup'] and stop_status['cleanup'] != 'verified',
+                        'unowned fixture lead was incorrectly declared clean')
                 if scenario == 'terminal-accounting':
                     records = list(state['invocations'].values())
                     require(len(records) == 1 and len(invocations) == 1, 'fixture invocation was retried')

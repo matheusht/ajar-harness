@@ -1,0 +1,222 @@
+{
+  "classification": "engineering_simulation",
+  "kind": "engagement-runner-recovery-check-v2",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "name": "late-assignment",
+      "observed": {
+        "dispatch_statuses": [
+          "pending",
+          "pending"
+        ],
+        "invocation_statuses": [
+          "pending",
+          "pending"
+        ],
+        "outcome_pending": false,
+        "task_status": "assigned",
+        "usage": {
+          "cost": null,
+          "cost_observations": 0,
+          "invocations": 2,
+          "known_estimated_cost": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 2,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": true,
+          "observed_token_dimensions": {},
+          "reserved_worker_seconds": 120,
+          "tokens": {},
+          "worker_seconds": 0
+        },
+        "worker_status": "active"
+      },
+      "started_before_assignment": false,
+      "status": "pass"
+    },
+    {
+      "name": "terminal-accounting",
+      "status": "pass",
+      "subcases": [
+        {
+          "accounting": "recorded_exactly_once",
+          "cli_status": "active",
+          "name": "task-result",
+          "observed": {
+            "dispatch_statuses": [
+              "settled"
+            ],
+            "invocation_statuses": [
+              "interrupted"
+            ],
+            "outcome_pending": false,
+            "task_status": "completed",
+            "usage": {
+              "cost": null,
+              "cost_observations": 1,
+              "invocations": 1,
+              "known_estimated_cost": 0.5,
+              "missing": [
+                "billed_cost",
+                "provider_requests"
+              ],
+              "native_invocations_admitted": 1,
+              "native_invocations_observed": 1,
+              "native_usage_incomplete": false,
+              "observed_token_dimensions": {
+                "input": 1,
+                "output": 1,
+                "total": 1
+              },
+              "reserved_worker_seconds": 0,
+              "tokens": {
+                "input": 11,
+                "output": 7,
+                "total": 18
+              },
+              "worker_seconds": 1
+            },
+            "worker_status": "stopped"
+          },
+          "status": "pass"
+        },
+        {
+          "accounting": "recorded_exactly_once",
+          "cli_status": "stopped",
+          "name": "operator-stop",
+          "observed": {
+            "dispatch_statuses": [
+              "settled"
+            ],
+            "invocation_statuses": [
+              "interrupted"
+            ],
+            "outcome_pending": false,
+            "task_status": "assigned",
+            "usage": {
+              "cost": null,
+              "cost_observations": 1,
+              "invocations": 1,
+              "known_estimated_cost": 0.5,
+              "missing": [
+                "billed_cost",
+                "provider_requests"
+              ],
+              "native_invocations_admitted": 1,
+              "native_invocations_observed": 1,
+              "native_usage_incomplete": false,
+              "observed_token_dimensions": {
+                "input": 1,
+                "output": 1,
+                "total": 1
+              },
+              "reserved_worker_seconds": 0,
+              "tokens": {
+                "input": 11,
+                "output": 7,
+                "total": 18
+              },
+              "worker_seconds": 1
+            },
+            "worker_status": "stopped"
+          },
+          "status": "pass",
+          "stop_cleanup": "pending",
+          "stop_response": "stopping"
+        }
+      ]
+    },
+    {
+      "after_restart": {
+        "dispatch_statuses": [
+          "settled"
+        ],
+        "invocation_statuses": [
+          "completed"
+        ],
+        "outcome_pending": false,
+        "task_status": "completed",
+        "usage": {
+          "cost": null,
+          "cost_observations": 1,
+          "invocations": 1,
+          "known_estimated_cost": 0.5,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 1,
+          "native_invocations_observed": 1,
+          "native_usage_incomplete": false,
+          "observed_token_dimensions": {
+            "input": 1,
+            "output": 1,
+            "total": 1
+          },
+          "reserved_worker_seconds": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "total": 18
+          },
+          "worker_seconds": 1
+        },
+        "worker_status": "stopped"
+      },
+      "cli_status": "active",
+      "name": "outcome-recovery",
+      "observed": {
+        "dispatch_statuses": [
+          "settled"
+        ],
+        "invocation_statuses": [
+          "completed"
+        ],
+        "outcome_pending": true,
+        "task_status": "assigned",
+        "usage": {
+          "cost": null,
+          "cost_observations": 1,
+          "invocations": 1,
+          "known_estimated_cost": 0.5,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 1,
+          "native_invocations_observed": 1,
+          "native_usage_incomplete": false,
+          "observed_token_dimensions": {
+            "input": 1,
+            "output": 1,
+            "total": 1
+          },
+          "reserved_worker_seconds": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "total": 18
+          },
+          "worker_seconds": 1
+        },
+        "worker_status": "stopped"
+      },
+      "status": "pass"
+    }
+  ],
+  "script_sha256": "a5de30a82962f956a841e4266788e9b8d1773a24a4699dda5b8b8740ff6b2a4c",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_engagement_contract_e2e.py": "092cecf216cce899a9decc4cf3ebe66b60d4bdf6521db79141a9073caebc2a54",
+    "tools/engagement_contract.py": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef",
+    "tools/engagement_controller.py": "f0ad803bf8cd4058152c4446b3e3892f632f08290c78e3d7628e487a806453b0",
+    "tools/engagement_evidence.py": "5e08644029bb6ef5c6df3b37896de557b991b42a655de63abc7062016a5ec540",
+    "tools/engagement_runner.py": "4c73554be052bca34c33e91d441d3520e9111c0ceb264d409a8bc3464b45a1a4",
+    "tools/native_engagement.py": "9a6dbb603df3dab4b1a8daeb468ad84eb9e4dd21178c87003c80f39182e214d2"
+  },
+  "status": "pass"
+}

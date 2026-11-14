@@ -1,0 +1,83 @@
+{
+  "status": "passed",
+  "classification": "public_cli_signed_fixture_real_runner_unavailable_native_boundary",
+  "external_provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "checks": [
+    {
+      "scenario": "inspect",
+      "status": "passed",
+      "result": {
+        "status": "blocked",
+        "blocked_codes": [
+          "docker_endpoint_unavailable",
+          "native_bundle_platform_mismatch",
+          "native_configuration_invalid",
+          "native_runtime_version_unsupported",
+          "provider_route_unavailable"
+        ]
+      }
+    },
+    {
+      "scenario": "run-resume",
+      "status": "passed",
+      "result": {
+        "run_status": "blocked",
+        "resume_status": "blocked",
+        "cleanup": "pending",
+        "dispatches": 1,
+        "usage_unchanged": true
+      }
+    },
+    {
+      "scenario": "stop-recovery",
+      "status": "passed",
+      "result": {
+        "status": "stopped",
+        "cleanup": "pending",
+        "failures": {
+          "lead-1": "recovery_effect_unresolved"
+        }
+      }
+    },
+    {
+      "scenario": "stop-owned",
+      "status": "passed",
+      "result": {
+        "status": "stopping",
+        "code": "runner_stop_pending",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "resume-owned",
+      "status": "passed",
+      "result": {
+        "status": "rejected",
+        "code": "engagement_already_running",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "no-simulation-switch",
+      "status": "passed",
+      "result": {
+        "rejected": true
+      }
+    },
+    {
+      "scenario": "v1-status",
+      "status": "passed",
+      "result": {
+        "status": "initialized",
+        "route": "v1"
+      }
+    }
+  ],
+  "unverified": [
+    "complete native run with Docker",
+    "live provider behavior",
+    "research qualification"
+  ]
+}

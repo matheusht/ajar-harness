@@ -31,7 +31,9 @@ def run(base, fixture_file):
     scenarios = ('local', 'credential-missing', 'credential-mismatch', 'scope-tampered',
         'source-mutated', 'version', 'not-executable', 'capability', 'config', 'bundle-platform', 'environment-platform',
         'docker-missing', 'ssh-prerequisites', 'ssh-missing', 'host-linux', 'provider-missing', 'target-account', 'environment-effect',
-        'openssl-missing', 'methodology-missing', 'socket-parent-missing')
+        'openssl-missing', 'methodology-missing', 'protocol-missing', 'socket-parent-missing',
+        'target-account-present', 'target-account-missing-secret', 'target-account-wrong-origin', 'target-account-public-file',
+        'target-account-source-overlap', 'target-account-bundle-overlap')
     for scenario in scenarios:
         root = base / scenario
         inputs = fixture.make_fixture(root)
@@ -108,17 +110,43 @@ def run(base, fixture_file):
         if scenario == 'host-linux':expected = ['native_model_boundary_unsupported']
         if scenario == 'openssl-missing':expected = ['native_proxy_certificate_tool_unavailable']
         if scenario == 'methodology-missing':expected = ['native_methodology_unavailable']
+        if scenario == 'protocol-missing':expected = ['native_protocol_guidance_unavailable']
         if scenario == 'socket-parent-missing':expected = ['native_private_socket_directory_unavailable']
         if scenario == 'provider-missing':
             scope['network']['provider'] = []
             expected = ['provider_route_unavailable']
-        if scenario == 'target-account':
+        references = None
+        if scenario.startswith('target-account'):
             scope['access'].append({'id': 'app-main', 'kind': 'application',
                 'identity': {'base_url': 'https://target.example.invalid', 'version': None},
                 'account_refs': ['operator-account'], 'permissions': ['read']})
             scope['network']['target'] = [{'protocol': 'https', 'host': 'target.example.invalid', 'port': 443,
                 'address_policy': {'public_only': True, 'cidrs': []}}]
-            expected = ['target_account_binding_unavailable']
+            expected = ['target_account_binding_unavailable'] if scenario == 'target-account' else []
+            if scenario != 'target-account':
+                references = root / 'account-references.json'
+                document = {'kind': 'target-account-bindings-v1', 'bindings': [{
+                    'access_id': 'app-main', 'account_ref': 'operator-account',
+                    'origin': 'https://target.example.invalid:443',
+                    'headers': {'Authorization': 'env_OSLIT_PREFLIGHT_TARGET_KEY'}}]}
+                if scenario == 'target-account-wrong-origin':
+                    document['bindings'][0]['origin'] = 'https://wrong.example.invalid:443'
+                    expected = ['target_account_binding_invalid']
+                if scenario == 'target-account-missing-secret':expected = ['target_account_credential_unavailable']
+                if scenario == 'target-account-source-overlap':
+                    references = Path(definitions['access_files']['source-main']) / 'account-references.json'
+                    expected = ['target_account_references_exposed']
+                if scenario == 'target-account-bundle-overlap':
+                    references = bundle / 'account-references.json'
+                    expected = ['target_account_references_exposed']
+                fixture.write(references, fixture.encoded(document))
+                if scenario == 'target-account-source-overlap':
+                    scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(references.parent)))
+                if scenario == 'target-account-bundle-overlap':
+                    profile['tool_bundle']['manifest_sha256'] = digest(canonical(source_manifest(bundle)))
+                if scenario == 'target-account-public-file':
+                    references.chmod(0o644)
+                    expected = ['target_account_references_unavailable']
         profile['config_sha256'] = fixture.sha(config.read_bytes())
         fixture.write(profile_path, fixture.encoded(profile))
         fixture.write(environment_path, fixture.encoded(environment))
@@ -138,6 +166,8 @@ def run(base, fixture_file):
             expected = ['digest_mismatch']
         method = root / 'methodology.md'
         if scenario != 'methodology-missing':fixture.write(method, b'Inspect the harmless fixture only.\n')
+        protocol = root / 'protocol.md'
+        if scenario != 'protocol-missing':fixture.write(protocol, b'Use the authenticated fixture operations only.\n')
         code = '''
 import shutil,socket,sys
 from pathlib import Path
@@ -150,6 +180,7 @@ if sys.argv[3]=='openssl-missing':
  shutil.which=lambda name:None if name=='openssl' else original(name)
 import engagement_preflight as preflight
 preflight.METHODOLOGY=Path(sys.argv[4])
+preflight.PROTOCOL=Path(sys.argv[5])
 if sys.argv[3]=='socket-parent-missing':preflight.SOCKET_PARENT=Path(sys.argv[4]).parent/'missing-directory'
 script=Path(sys.argv[1])/'engagement_preflight.py'
 sys.argv=[str(script),'--inputs',sys.argv[2]]
@@ -157,8 +188,13 @@ raise SystemExit(preflight.main())
 '''
         env = dict(os.environ)
         env['OPENAI_API_KEY'] = '' if scenario == 'credential-missing' else fake
+        env.pop('OSLIT_ACCOUNT_BINDINGS', None)
+        env.pop('OSLIT_PREFLIGHT_TARGET_KEY', None)
+        if references is not None:
+            env['OSLIT_ACCOUNT_BINDINGS'] = str(references)
+            if scenario != 'target-account-missing-secret':env['OSLIT_PREFLIGHT_TARGET_KEY'] = 'Bearer ' + fake
         try:
-            result = subprocess.run([sys.executable, '-c', code, str(ROOT / 'tools'), str(inputs), scenario, str(method)],
+            result = subprocess.run([sys.executable, '-c', code, str(ROOT / 'tools'), str(inputs), scenario, str(method), str(protocol)],
                 capture_output=True, text=True, timeout=15, env=env)
             report = json.loads(result.stdout) if result.stdout else {}
             assert fake not in result.stdout + result.stderr, 'credential value emitted'
@@ -176,6 +212,11 @@ raise SystemExit(preflight.main())
                 assert result.returncode == 0 and report.get('status') == 'ready_for_runtime_check', result.stdout + result.stderr
                 assert report['runtime_and_target_contact'] is False and report['capabilities_verified'] is False
                 assert report['runtimes']['runtime-main']['credential']['status'] == 'reference_available'
+                if scenario == 'local':
+                    assert report['host']['protocol_sha256'] == fixture.sha(protocol.read_bytes())
+                if scenario == 'target-account-present':
+                    assert report['target_accounts']['status'] == 'references_available'
+                    assert report['unbound_account_access'] == [] and report['target_accounts']['target_identity_verified'] is False
                 if scenario == 'environment-effect':
                     assert report['runtimes']['runtime-main']['initial_environment_candidates'] == ['lab-other']
             rows.append({'check': scenario, 'status': 'passed'})

@@ -1,0 +1,54 @@
+{
+  "status": "failed",
+  "classification": "public_cli_signed_fixture_real_runner_unavailable_native_boundary",
+  "external_provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "checks": [
+    {
+      "scenario": "inspect",
+      "status": "failed",
+      "error": "inspect skipped composed preflight"
+    },
+    {
+      "scenario": "run-resume",
+      "status": "failed",
+      "error": "run did not enter real runner/boundary"
+    },
+    {
+      "scenario": "stop-recovery",
+      "status": "failed",
+      "error": "stop did not attempt owned recovery"
+    },
+    {
+      "scenario": "stop-owned",
+      "status": "failed",
+      "error": "active owner stop was not persisted and reported pending"
+    },
+    {
+      "scenario": "resume-owned",
+      "status": "failed",
+      "error": "resume acquired a second owner"
+    },
+    {
+      "scenario": "no-simulation-switch",
+      "status": "passed",
+      "result": {
+        "rejected": true
+      }
+    },
+    {
+      "scenario": "v1-status",
+      "status": "passed",
+      "result": {
+        "status": "initialized",
+        "route": "v1"
+      }
+    }
+  ],
+  "unverified": [
+    "complete native run with Docker",
+    "live provider behavior",
+    "research qualification"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "status": "passed",
+  "classification": "actual_native_startup_no_model",
+  "provider_requests": 0,
+  "checks": [
+    {
+      "check": "codex_rejected_publication",
+      "status": "passed"
+    },
+    {
+      "check": "omp_rejected_publication",
+      "status": "passed"
+    },
+    {
+      "check": "bridge_rejected_publication",
+      "status": "passed"
+    },
+    {
+      "check": "codex_accepted_stages",
+      "status": "passed"
+    },
+    {
+      "check": "omp_accepted_stages",
+      "status": "passed"
+    }
+  ]
+}

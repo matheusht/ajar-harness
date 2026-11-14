@@ -19,8 +19,11 @@ class Runtime(Session):
 
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
                  host_call=None, dispatch_guard=None, credential_resolver=None, protected_model=False,
-                 profile_sha256=None, provider_environment=None):
+                 profile_sha256=None, provider_environment=None, owner_observer=None):
         env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard)
+        if owner_observer is not None and (not protected_model or not callable(owner_observer)):
+            raise RuntimeError('native_owner_observer_invalid')
+        self.owner_observer = owner_observer
         if profile['protocol']['mode'] != 'stdio-jsonl':
             raise RuntimeError('native_protocol_mismatch')
         env['PI_CODING_AGENT_DIR'] = str(self.state_dir)
@@ -36,19 +39,19 @@ class Runtime(Session):
             provider_environment=provider_environment)
         try:
             self.transport = Transport(command, env, str(self.workspace), self._event, omp=True)
+            self._capture_owner()
             deadline = time.monotonic() + 15
             while not self.ready:
                 if time.monotonic() >= deadline:
                     raise RuntimeError('native_startup_timeout')
                 self.transport.receive(max(0, deadline - time.monotonic()))
             self.transport.request('negotiate_protocol', {'protocolVersion': 2})
-            self._capture_owner()
             if self.host_tools:
                 self.transport.request('set_host_tools', {'tools': [
                     {'name': t['name'], 'description': t['description'], 'parameters': t['inputSchema']}
                     for t in self.host_tools.values()]})
-        except Exception:
-            self.close()
+        except Exception as error:
+            self._startup_failed(error)
             raise
 
     def _read_state(self):
@@ -65,6 +68,7 @@ class Runtime(Session):
         state = self._read_state()
         self.session_id = identifier(state.get('sessionId'))
         self.sessions.add(self.session_id)
+        self._publish_owner()
         return {'session_id': self.session_id, 'runtime': self.kind, 'model': self.profile['model'],
                 'provider': self.profile['provider'], 'history': 'ephemeral'}
 

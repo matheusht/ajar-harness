@@ -71,8 +71,9 @@ def recover_runtime_owner(receipt):
             receipt.get('session_id') is not None and not isinstance(receipt.get('session_id'), str) or
             not re.fullmatch(r'sha256:[0-9a-f]{64}', str(receipt.get('profile_sha256')))):
         raise RuntimeError('native_owner_receipt_invalid')
-    identities = [receipt.get('process')]
-    if receipt.get('bridge_process') is not None:identities.append(receipt['bridge_process'])
+    identities = [receipt[key] for key in ('process', 'bridge_process') if receipt.get(key) is not None]
+    if not identities:
+        raise RuntimeError('native_owner_identity_invalid')
     for identity in identities:
         _validate_identity(identity)
         current = process_identity(identity['pid'])

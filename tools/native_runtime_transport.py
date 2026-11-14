@@ -358,6 +358,7 @@ class Session:
         self.model_identity = None
         self.profile_sha256 = None
         self.native_executor = None
+        self.owner_observer = None
         env = {k: os.environ[k] for k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SYSTEMROOT') if k in os.environ}
         env['NO_COLOR'] = '1'
         env['HOME'] = str(self.state_dir)
@@ -419,6 +420,19 @@ class Session:
             self.model_identity = process_identity(self.transport.process.pid)
             if self.model_identity is None:
                 raise RuntimeError('native_owner_process_missing')
+            self._publish_owner()
+
+    def _publish_owner(self):
+        if self.owner_observer is not None:
+            self.owner_observer(self.owner_receipt())
+
+    def _startup_failed(self, error):
+        error.owner_receipt = self.owner_receipt() if self.model_identity else None
+        try:
+            error.cleanup_result = self.close()
+        except Exception:
+            error.cleanup_result = {'process_exited': None, 'child_absence': 'unverified',
+                                    'capabilities_revoked': False}
 
     def owner_receipt(self):
         if not self.model_boundary or self.model_identity is None:

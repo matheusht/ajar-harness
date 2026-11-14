@@ -1,0 +1,32 @@
+{
+  "status": "failed",
+  "classification": "actual_native_startup_no_model",
+  "provider_requests": 0,
+  "checks": [
+    {
+      "check": "codex_rejected_publication",
+      "status": "failed",
+      "error": "TypeError: Runtime.__init__() got an unexpected keyword argument 'owner_observer'"
+    },
+    {
+      "check": "omp_rejected_publication",
+      "status": "failed",
+      "error": "TypeError: Runtime.__init__() got an unexpected keyword argument 'owner_observer'"
+    },
+    {
+      "check": "bridge_rejected_publication",
+      "status": "failed",
+      "error": "TypeError: NativeExecutor.__init__() got an unexpected keyword argument 'profile_sha256'"
+    },
+    {
+      "check": "codex_accepted_stages",
+      "status": "failed",
+      "error": "TypeError: Runtime.__init__() got an unexpected keyword argument 'owner_observer'"
+    },
+    {
+      "check": "omp_accepted_stages",
+      "status": "failed",
+      "error": "TypeError: Runtime.__init__() got an unexpected keyword argument 'owner_observer'"
+    }
+  ]
+}

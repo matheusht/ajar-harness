@@ -144,7 +144,7 @@ def main():
                   json.loads(artifact['content']) == probe['checks']
                   and artifact['output_sha256'] == 'sha256:' + hashlib.sha256(artifact['content']).hexdigest())
             check('input staging preserves the supplied source', source_manifest(source) == manifest)
-            processes = call('container', 'top', identity['container_id'], '-eo', 'args').stdout
+            processes = call('container', 'top', identity['container_id'], '-eo', 'pid,args').stdout
             check('detached child exists before revocation', 'time.sleep(45)' in processes)
             active[0] = False
             try:

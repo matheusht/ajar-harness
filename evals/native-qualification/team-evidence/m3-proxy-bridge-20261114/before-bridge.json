@@ -1,0 +1,14 @@
+{
+  "kind": "environment-proxy-bridge-e2e-v2",
+  "classification": "actual_local_socket_and_stdio_controls",
+  "checks": [],
+  "unverified": [
+    "Docker network-none containment",
+    "SSH transport",
+    "native client CA configuration",
+    "provider behavior"
+  ],
+  "status": "failed",
+  "error": "ModuleNotFoundError: No module named 'engagement_network_bridge'",
+  "source_sha256": "c72233766f1fdaed87a2114a596d215d9b993f21155619219c7dd733a37f1d66"
+}

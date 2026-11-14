@@ -1,0 +1,25 @@
+{
+  "kind": "environment-proxy-bridge-evidence-v2",
+  "source_base": "e748f4b93eb7f4a60063662ebf06baf797ec9cdc",
+  "python": "3.14.6",
+  "checks": {
+    "actual_local_bridge": 10,
+    "simulated_support_and_pipes": 9,
+    "simulated_docker_regression": 22
+  },
+  "contract_sha256": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef",
+  "files": {
+    "tools/research_environment.py": "1f5e359081625931457b1c8649dbc833b0fae7756dc1c7a4c051d6e65d115e33",
+    "tools/engagement_network.py": "148929f20f07d0285e0bd6c3378e27bfd2c5feb4ef8775779cb147ac3c663633",
+    "tools/engagement_network_bridge.py": "ea0fd8aaa03de3fcec8b77b4c026a1b37e95ad4ac8151ca6e31caf620b43d794",
+    "evals/native-qualification/smoke/check_environment_proxy_bridge_e2e.py": "0b68937e7457a4ea5ec05cfa1df7981e04539b8e0cdf508077fef0baeb705e6b",
+    "evals/native-qualification/smoke/check_environment_stdio_e2e.py": "ec799f18837e2858781c35679542ffa40537d2cbc95e332ebf30833c7aeead9c",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/README.md": "08969b24a8dc4495f3c2777119d97ad0fb79fec774fe88b91c8a70bfac18e06c",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/before-bridge.json": "1258bbbf7fa12dca5bfb3a32b76e791fc94620a626e57de9f04f1defb5ea39f0",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/before-support.json": "c89f30cbf3e93e6f0facc5434179bb5dd3c43f727c76cb76197ab653f5a30f03",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/bridge-result.json": "588d0c1b447ef379988b80e09f2f0b2b13f96dc77ee8d8cc34ca1b2241d25ed5",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/support-result.json": "4a149122e7c2c63e10c3904a0dd6670fcf9c68755a575f6802fd77a4f9645e00",
+    "evals/native-qualification/team-evidence/m3-proxy-bridge-20261114/transport-regression.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9"
+  }
+}

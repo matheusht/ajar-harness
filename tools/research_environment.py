@@ -82,7 +82,7 @@ class Environment:
         self.lock = threading.RLock()
         self.commands = set()
         self.owner = None
-        self.stdio_process = None
+        self.stdio_processes = {}
         self.held = False
         self.retired = False
         self.identity = {'kind': 'research-environment-receipt-v2', 'nonce': uuid.uuid4().hex,
@@ -90,7 +90,7 @@ class Environment:
                          'stage_container_id': None, 'stage_container_name': None,
                          'prepared_image_id': None, 'prepared_image_name': None, 'unsettled': [],
                          'daemon_id': profile['daemon_id'], 'image_id': profile['image_id'],
-                         'profile_sha256': self._digest(profile), 'access': []}
+                         'profile_sha256': self._digest(profile), 'access': [], 'support_inputs': []}
         self.identity['container_name'] = 'oslit-' + self.identity['nonce']
         self.identity['stage_container_name'] = self.identity['container_name'] + '-stage'
         self.identity['prepared_image_name'] = 'oslit-input-' + self.identity['nonce'] + ':latest'
@@ -339,22 +339,38 @@ class Environment:
                 for path, size in (('/work', self.limits['workspace_bytes']),
                                    ('/tmp', min(self.limits['workspace_bytes'], 64 * 1024 * 1024)))}
 
-    def _archive(self, accesses, access_files):
+    def _archive(self, accesses, access_files, support_inputs):
         from engagement_contract import canonical, read_bytes, source_manifest
         archive = tempfile.TemporaryFile()
         total = 0
         identities = []
+        support_identities = []
         self.expected_input = {}
         try:
+            if not isinstance(support_inputs, dict) or len(support_inputs) > 32:
+                raise EnvironmentUnavailable('support_inputs_invalid')
+            entries = [(access, False) for access in accesses]
+            files_by_id = dict(access_files)
+            access_ids = {access['id'] for access in accesses}
+            for identity, support in support_inputs.items():
+                if (identity in access_ids or not isinstance(support, dict) or
+                        set(support) != {'path', 'manifest_sha256'}):
+                    raise EnvironmentUnavailable('support_inputs_invalid')
+                entries.append(({'id': identity, 'kind': 'source',
+                                 'identity': {'manifest_sha256': support['manifest_sha256']}}, True))
+                files_by_id[identity] = support['path']
             with tarfile.open(fileobj=archive, mode='w|') as output:
-                for access in accesses:
+                for access, is_support in entries:
                     name = access['id']
                     if not re.fullmatch('[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', name):
                         raise EnvironmentUnavailable('access_identity_invalid')
-                    identities.append({'id': name, 'kind': access['kind'], 'identity': access['identity']})
+                    if is_support:
+                        support_identities.append({'id': name, **access['identity']})
+                    else:
+                        identities.append({'id': name, 'kind': access['kind'], 'identity': access['identity']})
                     if access['kind'] == 'application':
                         continue
-                    source = Path(access_files[name])
+                    source = Path(files_by_id[name])
                     if access['kind'] == 'source':
                         manifest = source_manifest(source)
                         digest = 'sha256:' + hashlib.sha256(canonical(manifest)).hexdigest()
@@ -383,6 +399,7 @@ class Environment:
                                                           'size': item.size}
             archive.seek(0)
             self.identity['access'] = identities
+            self.identity['support_inputs'] = support_identities
             return archive
         except Exception:
             archive.close()
@@ -425,22 +442,22 @@ class Environment:
             self.held = True
             raise
 
-    def prepare(self, accesses, access_files):
+    def prepare(self, accesses, access_files, *, support_inputs=None):
         self._admit()
         if self.identity['container_id']:
             raise EnvironmentUnavailable('environment_already_prepared')
-        with self._archive(accesses, access_files) as archive:
-            self._daemon()
-            image = self._run(['image', 'inspect', self.profile['image_id']])
-            try:
-                info, = json.loads(image['output'])
-                if (image['status'] != 'settled' or image['returncode'] or
-                        info['Id'] != self.profile['image_id'] or
-                        info['Os'] + '/' + info['Architecture'] != self.profile['platform'] or
-                        info['Config'].get('Volumes')):
-                    raise ValueError('image')
-            except (ValueError, KeyError, TypeError):
-                raise EnvironmentUnavailable('pinned_image_unavailable') from None
+        self._daemon()
+        image = self._run(['image', 'inspect', self.profile['image_id']])
+        try:
+            info, = json.loads(image['output'])
+            if (image['status'] != 'settled' or image['returncode'] or
+                    info['Id'] != self.profile['image_id'] or
+                    info['Os'] + '/' + info['Architecture'] != self.profile['platform'] or
+                    info['Config'].get('Volumes')):
+                raise ValueError('image')
+        except (ValueError, KeyError, TypeError):
+            raise EnvironmentUnavailable('pinned_image_unavailable') from None
+        with self._archive(accesses, access_files, {} if support_inputs is None else support_inputs) as archive:
             args = ['container', 'create', '--name', self.identity['stage_container_name'],
                     '--label', 'io.oslit.engagement=' + self.identity['nonce'],
                     '--label', 'io.oslit.profile=' + self.identity['profile_sha256'],
@@ -517,6 +534,7 @@ class Environment:
         self._event('result', 'start', operation_id, status='settled')
         return {'status': 'ready', 'identity': self.receipt(), 'workspace': '/work',
                 'inputs': {row['id']: '/input/' + row['id'] for row in accesses if row['kind'] != 'application'},
+                'support_inputs': {row['id']: '/input/' + row['id'] for row in self.identity['support_inputs']},
                 'direct_network': 'none', 'qualification': 'unverified'}
 
     def execute(self, argv, *, timeout_seconds):
@@ -547,12 +565,14 @@ class Environment:
         result['identity'] = self.receipt()
         return result
 
-    def launch_stdio(self, argv):
-        """Launch one persistent native tool owner; its caller must bound the IPC frames."""
+    def launch_stdio(self, argv, *, role='native_tools'):
+        """Launch a fixed host service role; model requests never select this role."""
         from engagement_contract import canonical, safe_publication
         self._admit()
-        if self.stdio_process is not None:
-            raise EnvironmentUnavailable('native_tool_process_already_started')
+        if role not in ('native_tools', 'network_proxy'):
+            raise EnvironmentUnavailable('host_pipe_role_invalid')
+        if role in self.stdio_processes:
+            raise EnvironmentUnavailable('host_pipe_already_started')
         if not self.owner or not self.owner.readback()['running']:
             raise EnvironmentUnavailable('environment_worker_inactive')
         if (not isinstance(argv, list) or not argv or len(argv) > 256 or
@@ -561,12 +581,12 @@ class Environment:
         safe_publication(canonical(argv))
         self._verify_configuration(self._inspect())
         operation_id = uuid.uuid4().hex
-        self._event('intent', 'launch_stdio', operation_id, request_sha256=self._digest(argv))
+        self._event('intent', 'launch_stdio', operation_id, request_sha256=self._digest(argv), role=role)
         with self.dispatch_guard():
             with self.lock:
                 self._admit()
-                if self.stdio_process is not None:
-                    raise EnvironmentUnavailable('native_tool_process_already_started')
+                if role in self.stdio_processes:
+                    raise EnvironmentUnavailable('host_pipe_already_started')
                 try:
                     process = subprocess.Popen(self._docker(['container', 'exec', '--interactive', '--user',
                         f"{self.profile['uid']}:{self.profile['gid']}", '--workdir', '/work',
@@ -574,11 +594,11 @@ class Environment:
                         stderr=subprocess.DEVNULL, env=command_environment(), start_new_session=True)
                 except OSError:
                     raise EnvironmentUnavailable('native_tool_process_unavailable') from None
-                self.stdio_process = process
+                self.stdio_processes[role] = process
                 self.commands.add(process)
         try:
             self._event('result', 'launch_stdio', operation_id, status='dispatched',
-                        native_acknowledgment='caller_required')
+                        role=role, native_acknowledgment='caller_required')
         except Exception:
             self.held = True
             self.revoke()

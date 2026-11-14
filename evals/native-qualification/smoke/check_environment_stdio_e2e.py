@@ -24,6 +24,7 @@ def main():
         result['checks'].append({'name':name,'passed':bool(condition)});assert condition,name
     try:
         from research_environment import Environment, EnvironmentUnavailable
+        from engagement_contract import canonical, source_manifest
         with tempfile.TemporaryDirectory(prefix='environment-pipe-replay-') as name:
             root=Path(name).resolve();docker=root/'docker'
             code=FAKE_DOCKER.replace("elif args[:2]==['container','exec']:\n",
@@ -39,7 +40,10 @@ def main():
                 return {'seconds_remaining':5}
             environment=Environment(profile,limits,authorize,events.append,dispatch_guard=nullcontext)
             application={'id':'app','kind':'application','identity':{'base_url':'https://target.invalid/','version':None},'account_refs':[],'permissions':['read']}
-            environment.prepare([application],{})
+            support=root/'support';support.mkdir();(support/'method.md').write_text('Safe operator methodology.\n')
+            support_digest='sha256:'+hashlib.sha256(canonical(source_manifest(support))).hexdigest()
+            prepared=environment.prepare([application],{},support_inputs={'runtime-code':{'path':str(support),'manifest_sha256':support_digest}})
+            check('pinned support tree is separate from target access',len(prepared['identity']['access'])==1 and prepared['support_inputs']=={'runtime-code':'/input/runtime-code'})
             try:
                 os.environ['OSLIT_TEST_PRIVATE_VALUE']='fixture-value'
                 process=environment.launch_stdio(['stdio'])
@@ -53,14 +57,21 @@ def main():
                 except EnvironmentUnavailable:pass
                 else:raise AssertionError('second owner accepted under existing environment')
                 check('one native tool owner per environment',process.poll() is None)
+                relay=environment.launch_stdio(['stdio'],role='network_proxy')
+                check('distinct trusted relay role has its own private pipe',relay.stdout.readline()==b'env-leaked:False\n' and relay.pid!=process.pid)
+                try:environment.launch_stdio(['stdio'],role='model_selected')
+                except EnvironmentUnavailable:pass
+                else:raise AssertionError('unregistered pipe role accepted')
+                check('arbitrary pipe role is refused',relay.poll() is None)
                 active[0]=False
                 stopped=environment.revoke()
-                check('revocation closes pipe process and observes worker stopped',process.poll() is not None and stopped['status']=='stopped')
+                check('revocation closes all host pipes and observes worker stopped',process.poll() is not None and relay.poll() is not None and stopped['status']=='stopped')
                 try:environment.launch_stdio(['stdio'])
                 except EnvironmentUnavailable:pass
                 else:raise AssertionError('retired environment launched native process')
                 check('retired generation cannot recreate native pipe',process.poll() is not None)
                 process.stdin.close();process.stdout.close()
+                relay.stdin.close();relay.stdout.close()
             finally:
                 os.environ.pop('OSLIT_TEST_PRIVATE_VALUE',None)
                 environment.cleanup()

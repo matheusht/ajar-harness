@@ -386,7 +386,7 @@ def validate_request(c, state, worker, kind, data):
                 fail('closure_incomplete')
             if state['scope']['patch_required'] and not any(row.get('state') == 'accepted' for row in state['patches'].values()):
                 fail('patch_required')
-        if any(d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()) or state['resource_holds']:
+        if any(d['status'] == 'unknown' for d in state['dispatches'].values()) or state['resource_holds']:
             fail('closure_effects_unsettled')
         data = dict(data, resources=[row['id'] for row in state['scope']['access']], state='pending')
     elif kind == 'patch_propose':

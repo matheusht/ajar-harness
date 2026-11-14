@@ -300,6 +300,7 @@ class Controller:
                 'profile_id': payload['lead_profile'], 'status': 'pending', 'assignment': None,
                 'workspace': None, 'session_id': None, 'cursor': None}
         elif kind == 'worker_preparing':
+            state['cleanup'] = 'pending'
             worker = state['workers'][payload['grant']['worker_id']]
             worker.update(status='preparing', workspace=payload['workspace'])
             grant = payload['grant']
@@ -325,6 +326,7 @@ class Controller:
                         if dispatch['dispatch_id'] not in holds:
                             holds.append(dispatch['dispatch_id'])
         elif kind == 'worker_started':
+            state['cleanup'] = 'pending'
             worker = state['workers'][payload['worker_id']]
             worker.update(status='active', session_id=payload['session_id'], workspace=payload['workspace'],
                           runtime_owner_sha256=payload.get('runtime_owner_sha256'))
@@ -332,6 +334,14 @@ class Controller:
                 state['evidence_objects'][payload['runtime_owner_sha256']] = True
         elif kind == 'request_accepted':
             self._reduce_request(state, event['actor']['id'], payload['type'], payload['payload'])
+        elif kind == 'task_claimed':
+            self._reduce_request(state, payload['worker_id'], 'claim', payload)
+        elif kind == 'worker_resumed':
+            worker = state['workers'][payload['worker_id']]
+            worker.setdefault('history', []).append({key: value for key, value in worker.items() if key != 'history'})
+            worker.update(generation=worker['generation'] + 1, status='pending', workspace=None,
+                          session_id=None, runtime_owner_sha256=None, resume_reason=payload['reason'])
+            worker.pop('stop_receipt', None)
         elif kind == 'dispatch_intended':
             state['dispatches'][payload['dispatch_id']] = dict(payload, status='pending', receipt=None)
             state['usage']['invocations'] += 1
@@ -395,18 +405,25 @@ class Controller:
                     del state['resource_holds'][resource]
         elif kind == 'direction_recorded':
             state['directions'].append(dict(payload, event_sequence=event['sequence']))
-        elif kind == 'stop_requested':
-            state['status'] = 'stopped'
+        elif kind in ('stop_requested', 'closure_stopping'):
+            state['status'] = 'closing' if kind == 'closure_stopping' else 'stopped'
             state['stop_reason'] = payload['reason']
+            if kind == 'closure_stopping':
+                state['closing_id'] = payload['closure_id']
             for worker in state['workers'].values():
                 if worker['status'] in ('pending', 'preparing', 'active'):
-                    worker['status'] = 'revoked'
+                    dispatched = any(row['worker_id'] == worker['id'] and row['generation'] == worker['generation']
+                                     for row in state['dispatches'].values())
+                    untouched = worker['status'] == 'pending' and not dispatched and not worker.get('runtime_owner_sha256')
+                    worker['status'] = 'stopped' if untouched else 'revoked'
             for dispatch in state['dispatches'].values():
                 if dispatch['status'] in ('pending', 'unknown'):
                     for resource in dispatch['resources']:
                         holds = state['resource_holds'].setdefault(resource, [])
                         if dispatch['dispatch_id'] not in holds:
                             holds.append(dispatch['dispatch_id'])
+            if not state['environments'] and all(row['status'] == 'stopped' for row in state['workers'].values()):
+                state['cleanup'] = 'verified'
         elif kind == 'evidence_recorded':
             from engagement_evidence import reduce_host
             reduce_host(state, payload)
@@ -430,6 +447,10 @@ class Controller:
         elif kind == 'task_create':
             state['tasks'][data['task_id']] = dict(data, status='ready', owner=None,
                 generation=0, created_order=len(state['tasks']))
+            for closure in state['closures'].values():
+                if closure['state'] == 'reviewed':
+                    closure['state'] = 'reopened'
+                    state['reviews'][closure['review_id']]['status'] = 'stale'
         elif kind == 'task_priority':
             state['tasks'][data['task_id']]['priority'] = data['priority']
         elif kind in ('claim', 'task_assign'):
@@ -503,7 +524,10 @@ class Controller:
         busy = {resource for other in state['tasks'].values() if other['status'] == 'assigned'
                 for resource in self._shared(state, other['resources'])}
         pending = {resource for dispatch in state['dispatches'].values()
-                   if dispatch['status'] in ('pending', 'unknown') for resource in
+                   if dispatch['status'] in ('pending', 'unknown') and not (
+                       dispatch['status'] == 'pending' and dispatch['worker_id'] == worker['id']
+                       and worker['assignment'] is None and dispatch.get('invocations')
+                       and not dispatch.get('parent_dispatch_id')) for resource in
                    (dispatch['resources'] if dispatch['worker_id'] == worker['id'] else self._shared(state, dispatch['resources']))}
         return not set(task['resources']) & (busy | pending)
 
@@ -848,6 +872,34 @@ class Controller:
                 return {'status': worker['status']}
             return self._host('worker_revoked', {'worker_id': worker_id, 'generation': generation, 'reason': reason})
 
+    def resume_worker(self, worker_id, generation, *, reason):
+        with self.lock():
+            state = self.state()
+            self._authority(state)
+            worker = state['workers'].get(worker_id)
+            if (worker is None or worker['generation'] != generation or worker['status'] != 'stopped'
+                    or not worker.get('stop_receipt') or worker.get('outcome_pending')
+                    or any(row['worker_id'] == worker_id and row['status'] != 'settled'
+                           for row in state['dispatches'].values())):
+                fail('worker_resume_unsettled')
+            if reason not in ('controller_resume', 'next_task', 'review_obligation'):
+                fail('worker_resume_reason_invalid')
+            return self._host('worker_resumed', {'worker_id': worker_id, 'generation': generation, 'reason': reason})
+
+    def claim_ready_task(self, worker_id, generation):
+        with self.lock():
+            state = self.state()
+            self._authority(state)
+            worker = state['workers'].get(worker_id)
+            if (worker is None or worker['generation'] != generation or worker['role'] != 'specialist'
+                    or worker['status'] != 'pending' or worker['assignment'] is not None):
+                fail('worker_assignment_conflict')
+            tasks = sorted(state['tasks'].values(), key=lambda task: (-task['priority'], task['created_order']))
+            task = next((row for row in tasks if self._eligible(state, row, worker)), None)
+            if task is None:
+                return {'status': 'no_ready_task'}
+            return self._host('task_claimed', {'task_id': task['task_id'], 'worker_id': worker_id})
+
     def authorize_dispatch(self, grant):
         state = self.state()
         return self._authorize(state, grant)
@@ -903,6 +955,9 @@ class Controller:
             expiry = self.clock() + timedelta(seconds=seconds)
             if state['scope'].get('expires_at'):
                 expiry = min(expiry, instant(state['scope']['expires_at']))
+            parent = state['dispatches'][grant['dispatch_id']].get('parent_dispatch_id')
+            if parent:
+                expiry = min(expiry, instant(state['dispatches'][parent]['lease_expires_at']))
             extra = max(0, math.ceil((expiry - instant(grant['lease_expires_at'])).total_seconds()))
             if extra == 0:
                 return grant
@@ -1236,6 +1291,16 @@ class Controller:
             return self._host('evidence_recorded', {'action': 'closure_finalized', 'data': {
                 'closure_id': closure_id}, '_objects': []})
 
+    def begin_closure(self, closure_id):
+        from engagement_evidence import current_closure
+        with self.lock():
+            state = self.state()
+            self._authority(state)
+            closure = state['closures'].get(closure_id)
+            if closure is None or closure['state'] != 'reviewed' or not current_closure(state, closure):
+                fail('closure_not_reviewed')
+            return self._host('closure_stopping', {'closure_id': closure_id, 'reason': 'reviewed_closure'})
+
     def direction(self, text):
         if not isinstance(text, str) or not 1 <= len(text) <= 65536:
             fail('direction_invalid')
@@ -1277,7 +1342,8 @@ class Controller:
             page_bytes = 0
             for event in events[start:start + limit]:
                 item = {key: event[key] for key in ('sequence', 'sha256', 'at', 'type', 'actor')}
-                if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested', 'evidence_recorded'):
+                if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested', 'evidence_recorded',
+                                     'task_claimed', 'worker_resumed', 'closure_stopping'):
                     item['payload'] = event['payload']
                 size = len(canonical(item))
                 if updates and page_bytes + size > 512 * 1024:

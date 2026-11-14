@@ -1,0 +1,532 @@
+{
+  "kind": "engagement-journal-recovery-e2e-v2",
+  "classification": "engineering_simulation",
+  "scenarios": [
+    {
+      "id": "ownership",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "cross-task resource refused before reservation",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "accepted",
+              "value": {
+                "dispatch_id": "0358849857014b7ab724d829c0e4ed90",
+                "worker_id": "other",
+                "generation": 1,
+                "assignment": {
+                  "task_id": "task-b",
+                  "generation": 1
+                },
+                "profile_id": "runtime-main",
+                "scope_sha256": "sha256:c60956a5dab216f43999c61da56b7ca5f92e639535cb27c890f1d0967efff346",
+                "seconds": 1,
+                "resources": [
+                  "source-main"
+                ],
+                "lease_expires_at": "2026-11-14T06:54:00.843962+00:00",
+                "adapter_id": "fixture-owner"
+              }
+            }
+          }
+        },
+        {
+          "name": "actual owner remains eligible",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "rejected",
+              "code": "dispatch_conflict"
+            }
+          }
+        }
+      ],
+      "commands": [],
+      "inputs": {
+        "scope_sha256": "sha256:c60956a5dab216f43999c61da56b7ca5f92e639535cb27c890f1d0967efff346",
+        "signer_fingerprint": "sha256:5d250fa797ecd0e3efdbaf5456a8513b82daa931da6eb293fa2b6c22d4093dc3",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    },
+    {
+      "id": "workspaces",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "nested workspace refused",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "accepted",
+              "value": {
+                "status": "accepted",
+                "revision": 4,
+                "event_sha256": "sha256:c8213237991127211ad3a2e51b8872bcfd25eecec1b0c5ab6efe33676f78631d",
+                "request_id": "4ec34f0076854f6689013d70151b8dae",
+                "result": {
+                  "worker_id": "nested-worker",
+                  "generation": 1,
+                  "session_id": "fixture-session-nested-worker",
+                  "workspace": "/private/tmp/m1-e2e-iyck1m02/1/workspaces/lead/nested"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "host publication cannot expose nested worker history",
+          "status": "failed",
+          "observed": {
+            "response": {
+              "event_sha256": "sha256:e47cc1fa18579117a8e56c36adce68b430b763af816925097387fdfe462bf6a3",
+              "request_id": "fixture-2",
+              "result": {
+                "payload": {
+                  "artifacts": [
+                    {
+                      "name": "nested/private-note.txt",
+                      "sha256": "sha256:fb363187b628497a80410c9f0ab78a13acc586c0b8e0ab93712f760485441df3",
+                      "size": 36
+                    }
+                  ],
+                  "body": "Harmless observation.",
+                  "kind": "observation",
+                  "publication_id": "cross-workspace",
+                  "refs": [],
+                  "subject": "fixture",
+                  "supersedes": []
+                },
+                "type": "publish"
+              },
+              "revision": 5,
+              "status": "accepted"
+            },
+            "leaked": true
+          }
+        },
+        {
+          "name": "ancestor workspace refused without mutation",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "accepted",
+              "value": {
+                "status": "accepted",
+                "revision": 7,
+                "event_sha256": "sha256:97b2cda4ff0e5620d561067e36a3880d78496d8aba9b88e9be8d1e796b5f3db6",
+                "request_id": "55407152eb5148fda2fd6468f15d0ad5",
+                "result": {
+                  "worker_id": "parent-worker",
+                  "generation": 1,
+                  "session_id": "fixture-parent",
+                  "workspace": "/private/tmp/m1-e2e-iyck1m02/1/workspaces"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "submit",
+            "--socket",
+            "/private/tmp/m1-e2e-iyck1m02/1/lead-1.sock",
+            "--file",
+            "/private/tmp/m1-e2e-iyck1m02/1/request.json"
+          ],
+          "returncode": 0,
+          "stdout_bytes": 494,
+          "status": "accepted",
+          "code": null
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:9c5dce2d8b0b35d1391518d2a9541915522e34430e85b9b08b2a46ee94355adc",
+        "signer_fingerprint": "sha256:fa5609fd36b96a59294ecc98cbe906d3da2ed4574e2e67cde4fbc40a1d2b3e90",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    },
+    {
+      "id": "crash",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "owned process dies after actual directory commit",
+          "status": "passed",
+          "observed": {
+            "returncode": 86
+          }
+        },
+        {
+          "name": "committed journal replays after process death",
+          "status": "failed",
+          "observed": {
+            "status": "rejected",
+            "code": "journal_corrupt",
+            "revision": null
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "status",
+            "--engagement-root",
+            "/private/tmp/m1-e2e-iyck1m02/2/engagement"
+          ],
+          "returncode": 2,
+          "stdout_bytes": 50,
+          "status": "rejected",
+          "code": "journal_corrupt"
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:c719d414ff5a557ecd6e0d69cda5847396941de2f2c747036787f17b3da31f19",
+        "signer_fingerprint": "sha256:7b175b19cee3836b369d32979710e1d9d65b5e918bb140bb00cb2e815be49e2c",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      },
+      "not_run": [
+        "append after recovery: replay failed"
+      ]
+    },
+    {
+      "id": "receipt_identity",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "incomplete grant cannot be stored",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "accepted",
+              "value": "/private/tmp/m1-e2e-iyck1m02/3/engagement/receipts/6e9927c19cab4e15beb4c369756d8772.json"
+            }
+          }
+        },
+        {
+          "name": "incomplete grant cannot settle or release capacity",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "accepted",
+              "value": {
+                "status": "adopted",
+                "receipt": "sha256:c6894f346352d202124d9a488df253b56ff70cb7bbbf773d63d5d1a50778f987"
+              }
+            }
+          }
+        }
+      ],
+      "commands": [],
+      "inputs": {
+        "scope_sha256": "sha256:0038d4225f296bac6177c7afc6157358fdda028d15e24a2c9ab206a808444346",
+        "signer_fingerprint": "sha256:b980a5d959136f7b283c02e54a7df6b6e4265ef8e7199ff56db8adad7525f70b",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    },
+    {
+      "id": "unknown_recovery",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "unknown execution conservatively holds capacity across restart",
+          "status": "passed",
+          "observed": {}
+        },
+        {
+          "name": "late protected terminal receipt preserves prior bytes",
+          "status": "failed",
+          "observed": {
+            "outcome": {
+              "status": "rejected",
+              "code": "receipt_conflict"
+            }
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "status",
+            "--engagement-root",
+            "/private/tmp/m1-e2e-iyck1m02/4/engagement"
+          ],
+          "returncode": 0,
+          "stdout_bytes": 1724,
+          "status": "active",
+          "code": null
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:a50733c6bc6661c0c8ef957d3224b2b51a0459444e9586f7f7a6fa9b5a262ed7",
+        "signer_fingerprint": "sha256:9ce5edc6ca68728dd34d63c72c2ef46cfaa5765539f878eb47c3f482d2d85e40",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      },
+      "not_run": [
+        "terminal settlement",
+        "duplicate settlement",
+        "preserved observation history",
+        "dispatch after settlement"
+      ]
+    },
+    {
+      "id": "input_overlap",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "overlapping root rejected before writing",
+          "status": "failed",
+          "observed": {
+            "status": "blocked",
+            "code": "runtime_environment_integration_pending",
+            "root_created": true,
+            "source_unchanged": false
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "run",
+            "--inputs",
+            "/private/tmp/m1-e2e-iyck1m02/5/input/inputs.json",
+            "--engagement-root",
+            "/private/tmp/m1-e2e-iyck1m02/5/input/source/controller"
+          ],
+          "returncode": 2,
+          "stdout_bytes": 990,
+          "status": "blocked",
+          "code": "runtime_environment_integration_pending"
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:29de1cca09bccc6954900b052e7301e93962078642b5133db10d53b2bcc59f68",
+        "signer_fingerprint": "sha256:107a7b2e8ec2070e1acca6e8fde8a5b936597272943e0c0d16a101204d449aa7",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    },
+    {
+      "id": "pagination",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "large-publication status remains readable",
+          "status": "failed",
+          "observed": {
+            "response": {
+              "code": "worker_response_invalid",
+              "status": "rejected"
+            }
+          }
+        },
+        {
+          "name": "all updates remain reachable exactly once without mutation",
+          "status": "failed",
+          "observed": {
+            "pages": 0,
+            "expected_events": 68,
+            "observed_events": 0,
+            "unique_events": 0
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "status",
+            "--socket",
+            "/private/tmp/m1-e2e-iyck1m02/6/lead-1.sock",
+            "--limit",
+            "2"
+          ],
+          "returncode": 2,
+          "stdout_bytes": 58,
+          "status": "rejected",
+          "code": "worker_response_invalid"
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:1429aeccd942352d81da4eaa88a86ddc916fd4995a6009083e579e041eab357d",
+        "signer_fingerprint": "sha256:7f5582e4da8feb49edd9d9f2616d537bc49db9ed451911e7241b3926f904891b",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    },
+    {
+      "id": "retries",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "accepted request replay survives stop without mutation",
+          "status": "failed",
+          "observed": {
+            "first": {
+              "event_sha256": "sha256:a9f1dc1ffc6433993c88adcf1b5c00540fa90150d02213fcf87721eb820989c7",
+              "request_id": "fixture-1",
+              "result": {
+                "payload": {
+                  "artifacts": [],
+                  "body": "Harmless observation.",
+                  "kind": "observation",
+                  "publication_id": "lost-acknowledgment",
+                  "refs": [],
+                  "subject": "fixture",
+                  "supersedes": []
+                },
+                "type": "publish"
+              },
+              "revision": 3,
+              "status": "accepted"
+            },
+            "retry": {
+              "code": "engagement_stopped",
+              "status": "rejected"
+            }
+          }
+        },
+        {
+          "name": "changed retry still conflicts after stop",
+          "status": "failed",
+          "observed": {
+            "response": {
+              "code": "engagement_stopped",
+              "status": "rejected"
+            }
+          }
+        },
+        {
+          "name": "old receipt cannot restore stopped capability",
+          "status": "passed",
+          "observed": {
+            "outcome": {
+              "status": "rejected",
+              "code": "engagement_stopped"
+            }
+          }
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "submit",
+            "--socket",
+            "/private/tmp/m1-e2e-iyck1m02/7/lead-1.sock",
+            "--file",
+            "/private/tmp/m1-e2e-iyck1m02/7/request.json"
+          ],
+          "returncode": 0,
+          "stdout_bytes": 366,
+          "status": "accepted",
+          "code": null
+        },
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "stop",
+            "--engagement-root",
+            "/private/tmp/m1-e2e-iyck1m02/7/engagement"
+          ],
+          "returncode": 0,
+          "stdout_bytes": 2361,
+          "status": "stopped",
+          "code": null
+        },
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "submit",
+            "--socket",
+            "/private/tmp/m1-e2e-iyck1m02/7/lead-1.sock",
+            "--file",
+            "/private/tmp/m1-e2e-iyck1m02/7/request.json"
+          ],
+          "returncode": 2,
+          "stdout_bytes": 53,
+          "status": "rejected",
+          "code": "engagement_stopped"
+        },
+        {
+          "argv": [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py",
+            "submit",
+            "--socket",
+            "/private/tmp/m1-e2e-iyck1m02/7/lead-1.sock",
+            "--file",
+            "/private/tmp/m1-e2e-iyck1m02/7/request.json"
+          ],
+          "returncode": 2,
+          "stdout_bytes": 53,
+          "status": "rejected",
+          "code": "engagement_stopped"
+        }
+      ],
+      "inputs": {
+        "scope_sha256": "sha256:feac44c5730281f58d1edb02d879d6837adf156a5658950b47d6100019f033a2",
+        "signer_fingerprint": "sha256:a8c2d74125199317720facba53578725bb59a93bc221b6a6663268e78c44b5a3",
+        "source": {
+          "manifest_sha256": "sha256:5ddfdcc02aa5aac6b5d8bab34b85cb19eb8c52f68cb1758e32be1d1e7451b207"
+        }
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "target_calls": 0,
+  "requirements": "Python 3 and ssh-keygen; no provider, Docker or SSH host",
+  "expected": "Eight passed scenarios; refused operations leave journal and capacity unchanged",
+  "python": "3.14.6",
+  "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/matheusvsky/.codex/worktrees/oslit-journal-regressions/llm-redteam-harness/evals/native-qualification/smoke/check_engagement_journal_recovery_e2e.py",
+    "--repository",
+    "/private/tmp/oslit-implementation/m1-review-snapshot",
+    "--output",
+    "evals/native-qualification/setup-evidence/engagement-journal-recovery-red.json"
+  ],
+  "unverified": [
+    "native isolation",
+    "live provider usage",
+    "Docker and SSH",
+    "multi-day operation",
+    "research acceptance"
+  ],
+  "status": "failed",
+  "source_hashes": {
+    "/Users/matheusvsky/.codex/worktrees/oslit-journal-regressions/llm-redteam-harness/evals/native-qualification/smoke/check_engagement_journal_recovery_e2e.py": "2380bd7828ea4128cddb5979f1c300be9f697f36044051e5628fdd49748ebc5e",
+    "/Users/matheusvsky/.codex/worktrees/oslit-journal-regressions/llm-redteam-harness/evals/native-qualification/smoke/check_engagement_contract_e2e.py": "be36dda5c3b07a169d11543b76f169bbacf3df5616ff53c863457ced738a56b1",
+    "/private/tmp/oslit-implementation/m1-review-snapshot/tools/engagement_contract.py": "abd1919ea3aab8f86203fa1a9c74e0b7da9499942f81985ffce7885cca49ee3a",
+    "/private/tmp/oslit-implementation/m1-review-snapshot/tools/engagement_controller.py": "26539762b2c7f126c516d756e2c88be30c47d36b18b8efe7fc0d53ba16eb4d2a",
+    "/private/tmp/oslit-implementation/m1-review-snapshot/tools/native_engagement.py": "98d93f6e0026fbcd8eaf9d985a1c5abc0eb8c356096e82639639020663291051"
+  }
+}

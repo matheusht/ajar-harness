@@ -566,3 +566,272 @@ Verification: `check-conformance.py` reports 898 checks, 0 failing;
 `--engineering-guidance` reports 12/12; changed-document local links and anchors
 resolve; `git diff --check` is clean. No application, controller, provider, target or
 hosted-CI run is part of this correction.
+
+## [2026-11-13] decisions | Record the harness grilling through Q14
+
+At the operator's request, saved the [Q1–Q14 decision record](../research/oslit-harness-grilling-2026-11-13.md)
+and linked it from the wiki index, product direction, and 12 November foundation
+brief. The source is the operator's current chat replies, including later
+corrections. The record covers the research goal, agent-owned environments,
+lead/specialist coordination, persistence and closure, real-target comparative
+evaluation, operator directions, experiment isolation, and lead-only spawning.
+Cross-engagement learning and specialist spawning remain deferred. The complete
+plan is still open and implementation remains on hold.
+
+Verification: an independent read-only comparison against the live Q1–Q14 replies
+found no blocking mismatch. Added source/version and setup-reproduction details,
+and retained real chaining evaluation without assuming every target contains a
+flaw. Local document destinations and whitespace checks pass. The system Python
+lacked the required validator; `tools/check-conformance.py` passed in the existing
+pinned Python environment with `jsonschema==4.26.0`: 900 checks, 0 failing.
+
+This is a documentation-only change. It adds no runtime behavior, authorizes no
+target execution, and supplies no new research-capability or adoption evidence.
+
+### Q15 — Ready-task ownership
+
+Added the operator's agreement that specialists claim ready tasks from the
+lead-prioritized queue, with one accountable owner per task; the lead may redirect
+or reassign work. The [decision record](../research/oslit-harness-grilling-2026-11-13.md#q15--specialists-claim-ready-work)
+now covers Q1–Q15. Removed the duplicated question count from the index link so
+the record remains the single source of its current coverage. Q16 and the
+complete implementation plan remain open. Documentation only; no runtime change
+or target run.
+
+### Q16 — Disagreement and independent review
+
+Recorded the operator's agreement to test competing explanations and preserve
+uncertainty, with independent review available during the investigation when
+needed and retained for final claims and closure. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q16--test-competing-explanations-review-when-needed)
+now covers Q1–Q16; Q17 remains open. Documentation only; implementation and
+target execution remain on hold.
+
+### Q17 — Reviewer context and evidence access
+
+Recorded the operator's agreement that a reviewer starts in a fresh context with
+an evidence packet including contrary evidence, can inspect the full knowledge
+base, and can run its own checks. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q17--fresh-reviewer-context-and-complete-evidence-access)
+now covers Q1–Q17; Q18 remains open. Documentation only; no implementation or
+target execution.
+
+### Q18 — Failure isolation and uncertain effects
+
+Recorded the operator's agreement to isolate failures, preserve affected work,
+check uncertain effects before retrying, and pause dependent tasks while
+unaffected work continues. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q18--isolate-failures-and-reconcile-uncertain-effects)
+now covers Q1–Q18; Q19 remains open. Documentation only; no implementation or
+target execution.
+
+### Q19 — Model choice and comparison boundaries
+
+Recorded the operator's agreement to allow different models when useful, retain
+the same model in the initial native-agent comparison, and evaluate mixed-model
+teams separately. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q19--flexible-model-choice-separate-comparative-experiments)
+now covers Q1–Q19; Q20 remains open. Documentation only; no implementation or
+target execution.
+
+### Q20 — Specialist continuity and handoff
+
+Recorded the operator's agreement to retain specialists while their context is
+useful, let the lead replace them, and save work so replacements can take over.
+Independent reviewers retain fresh contexts. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q20--retain-useful-specialist-context-and-preserve-handoffs)
+now covers Q1–Q20; Q21 remains open. Documentation only; no implementation or
+target execution.
+
+### Q21 — Native baseline capabilities
+
+Recorded the operator's agreement that the native baseline retains its normal
+capabilities, including delegation, with the same model and access. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q21--preserve-the-native-baselines-normal-capabilities)
+now covers Q1–Q21; Q22 remains open. Documentation only; no implementation or
+comparison run.
+
+### Q22 — Real positive evidence and honest negatives
+
+Recorded the operator's requirement for at least one independently reproduced
+real finding or chain plus improvement over the native agent, while preserving
+honest negative results. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q22--require-real-positive-evidence-and-retain-negative-results)
+now covers Q1–Q22; Q23 remains open. Documentation only; no implementation or
+target execution.
+
+### Q23 — Exploration and evidence integration
+
+Recorded the operator's agreement to allow exploration with incomplete
+intermediate capture when scope and cleanup stay enforced, while requiring
+inspectable evidence and independent reproduction before claim acceptance. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q23--allow-exploration-without-complete-intermediate-capture)
+now covers Q1–Q23; Q24 remains open. Documentation only; no implementation or
+target execution.
+
+### Q24 — Independent measurement validation
+
+Recorded the operator's agreement to allow tool reuse while requiring the
+reviewer to independently verify permissions, effects, and controls, with another
+probe when needed. Success messages alone do not establish a claim. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q24--independently-validate-the-measurement-not-just-its-output)
+now covers Q1–Q24; Q25 remains open. Documentation only; no implementation or
+target execution.
+
+### Q25 — Portable engagement contract and native capabilities
+
+Recorded the operator's agreement to standardize the engagement contract,
+preserve useful runtime-specific features, and keep research state portable. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q25--a-portable-engagement-contract-with-runtime-specific-capabilities)
+now covers Q1–Q25; Q26 remains open. Documentation only; no implementation or
+target execution.
+
+### Q26 — Evidence-triggered strategy review
+
+Recorded the operator's requirement for fresh strategy review when evidence
+shows stalled work or contradictions, with action or an evidence-backed
+rebuttal from the lead. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q26--require-strategy-review-when-evidence-challenges-progress)
+now covers Q1–Q26; Q27 remains open. Documentation only; no implementation or
+target execution.
+
+### Q27 — Autonomous lead replacement
+
+Recorded the operator's agreement to replace a lead autonomously when it
+repeatedly ignores review without an evidence-backed reason, preserving the
+work and one active lead. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q27--replace-a-lead-that-repeatedly-ignores-review)
+now covers Q1–Q27; Q28 remains open. Documentation only; no implementation or
+target execution.
+
+### Q28 — Equal comparison limits and actual usage
+
+Recorded the operator's agreement to use the same generous limits in the initial
+comparison, count all agent work, and report actual usage separately. Clarified
+the native baseline's meaning; its exact runtime and configuration remain open.
+The [decision record](../research/oslit-harness-grilling-2026-11-13.md#q28--equal-comparison-limits-and-separate-actual-usage)
+now covers Q1–Q28; Q29 remains open. Documentation only; no implementation or
+evaluation run.
+
+### Q29 — Shared research instructions and test ownership
+
+Recorded the operator's requirement to give the native baseline the same
+reusable research instructions and establish value beyond them. Also recorded
+the correction that the operator will provide the future fresh-target test;
+the assistant is not assigned to execute it or the comparison. The
+[decision record](../research/oslit-harness-grilling-2026-11-13.md#q29--share-reusable-research-instructions-with-the-baseline)
+now covers Q1–Q29. Documentation only; no implementation or evaluation run.
+
+The remaining-requirements review found sufficient direction to draft the
+engineering plan. Runtime integration, research environments, autonomy/recovery,
+and usable delivery remain design work for that plan; no additional mandatory
+interview question was identified. Plan approval and implementation remain open.
+
+## [2026-11-14] plan | Complete OSLit engineering design
+
+Drafted the [complete engineering plan](../research/oslit-engineering-plan-2026-11-14.md)
+against source `89bcede2c1e62573767017251e8734f211fa3573` and the operator's
+Q1–Q29 decisions. It covers runtime/model integration, all supplied target access
+modes, team coordination/review/recovery, and usable delivery. The plan maps
+existing code to keep, simplify, replace or delete, proposes one new-route state
+owner, identifies the initial-authority policy change, and specifies milestones,
+failure-first E2E scenarios and a complete requirement map.
+
+Current code inspection found an existing scope-driven setup-to-closeout path;
+the older foundation brief's missing-handoff observations remain historical.
+Official runtime documentation and local CLI version/help were inspected, without
+starting a runtime or provider session. Two architecture candidates and independent
+document review informed the synthesis. Review corrections clarified network
+enforcement, early aggregate-limit enforcement and lead replacement when review
+creation is ignored.
+
+The operator owns the later fresh-target test and native comparison. This is a
+proposed plan, not approval, implementation, qualification or adoption. No code,
+provider call, target run or engineering E2E was performed; only document/source
+checks were completed. Existing code and historical evidence were preserved.
+
+Draft checks: local links and the Q1–Q29/E01–E16/M0–M6 maps passed; independent
+review findings were corrected and rechecked; `git diff --check` passed.
+Structural conformance passed 900 checks with zero failures in the existing
+`/tmp/pr209-conformance-venv` environment matching `requirements-ci.txt`. The first
+system-Python attempt lacked the pinned validator dependencies. No proposed E2E
+scenario or operator-owned research test was run.
+
+## [2026-11-14] direction | Codex/OMP, multi-day work and architecture guidance
+
+The operator endorsed the complete plan's direction while rejecting OpenCode as a
+required runtime and a fixed 24-hour engagement limit. Recorded that correction
+in the [decision record](../research/oslit-harness-grilling-2026-11-13.md#14-november-clarification--runtimes-duration-and-architecture-guidance)
+and revised the [plan](../research/oslit-engineering-plan-2026-11-14.md): Codex/OMP
+supply native execution; OSLit adds missing engagement-wide coordination, evidence
+and recovery. Provider credentials remain separate from runtime selection. Runs
+can span days while authorized and resourced; operator deadlines are optional and
+short worker leases preserve failure/revocation control.
+
+Added a model-directed investigation example to section 7 and
+[architecture AGENTS.md](../decisions/AGENTS.md) in the existing decision directory.
+It captures founder intent, checks native features before adding mechanisms, and
+asks founder questions only for unresolved material product choices. Updated root
+mirrored pointers, architecture/decision indexes, current direction and the older
+brief's planning pointer. Historical architectural and execution observations remain
+dated; existing runtime gates and code are unchanged.
+
+Read current source, official Codex app-server docs, OMP docs pinned to
+`c308970263ae13744ea15ab67302e3dac840e266`, and local CLI help/version
+(`codex-cli 0.166.0`, `omp/18.20.0`). These establish interfaces, not successful
+integration. Independent runtime/design review passed after one stale status
+pointer was corrected. Local link destinations, the full Q/E/M maps and mirrored
+root instructions passed their checks.
+
+The first structural run reported 900 checks with one stale draft instruction
+pin caused by the new root pointer. Verified `execution_authorized: false` and
+refreshed only that `AGENTS.md` hash using `tools/overlay_pins.py repin --apply`.
+The draft remains unauthorized; no historical execution record was changed.
+No provider run, target experiment or new-workflow E2E was performed.
+
+Final checks: **900 structural checks, zero failures**, `git diff --check` clean,
+208 local document destinations checked, complete unique Q/E/M maps, and exact
+root instruction mirror. Results: `/tmp/oslit-engineering-plan/architecture-doc-checks.json`
+and `/tmp/oslit-engineering-plan/architecture-conformance-final.log`.
+
+## [2026-11-14] decision | Q30 and enforced native-tool coordination
+
+Recorded the operator's approval of scored search as a technique within a task,
+native-tool reuse with actual enforcement, a minimal extra interface and no code.
+[Q30](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)
+retains the motivating paper, its evidence limits, the alternatives considered,
+the chosen tradeoff and reasons to revisit it. The paper's sharing tools are
+design input, not causal proof of a swarm benefit or OSLit qualification.
+
+Updated the [plan](../research/oslit-engineering-plan-2026-11-14.md) with native
+research/messaging/waiting tools and three illustrative controller operations:
+status, claim and typed submit. Specified authenticated actor/role/assignment
+checks, alternate spawn and retired-worker wake controls, durable relevant updates,
+shared-target write leases, versioned instruments and local scorer provenance.
+The shared board is a journal-derived view. Scores remain experimental feedback;
+the lead's judgment and independent claim validation retain their roles.
+
+Expanded the existing milestones and failure scenarios rather than adding a new
+service or evaluator framework. The traceability map now covers Q1–Q30. Updated
+architecture guidance and wiki navigation/direction, including the requirement to
+preserve concise decision rationale. Independent reviews found two wording issues:
+old internal call names looked like extra tools, and deferred shared evaluators
+were not distinguished from permitted task-local instruments. Both were corrected.
+
+This is a documentation revision. Current runtime code, authority gates, historical
+records, study authorization and the operator-owned acceptance test are unchanged.
+
+Validation: independent document review findings corrected; Q1–Q30 decision/map
+coverage and E01–E16/M0–M6 identifiers complete and unique; local destinations and
+Q30 anchors resolved; root mirror unchanged. Structural conformance passed
+**900 checks, zero failures** and `git diff --check` passed. Results are in
+`/tmp/oslit-engineering-plan/q30-doc-checks.json` and
+`/tmp/oslit-engineering-plan/q30-conformance.log`. No live runtime behavior was tested.
+
+### Full implementation assignment
+
+The operator assigned the complete M0–M6 plan, native-tool reuse, enforced
+boundaries and real-workflow verification, with autonomous execution. The
+[delivery record](../research/oslit-implementation-2026-11-14.md) tracks that work.
+The operator retains the fresh-target test and comparison. This assignment does
+not change old engagement authority or supply research acceptance evidence.

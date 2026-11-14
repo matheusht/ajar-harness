@@ -102,6 +102,10 @@ then its source evidence. The LLM-domain benign examples are in
 
 ### Engineering conventions
 
+For changes to architecture, research behavior, runtime integration, state ownership
+or stopping rules, read [architecture guidance](docs/decisions/AGENTS.md) first.
+It records founder intent, native-feature reuse and when a material choice needs input.
+
 Use the installed `be-ambitious`, `wayfinder`, `grilling` and `writing-for-agents` skills when their
 triggers apply: pursue the strongest defensible version of the requested change, route the work
 explicitly, challenge it adversarially, and write for the agent that will read it. Run

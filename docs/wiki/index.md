@@ -10,6 +10,10 @@ This is curated topic coverage, not a complete repository ingestion or a live tr
 | Question | Page |
 | --- | --- |
 | What are the product north stars and engineering choices? | [Product and engineering direction](product-and-engineering-direction.md) |
+| What has the operator agreed in the November harness interview? | [Grilling decisions](../research/oslit-harness-grilling-2026-11-13.md) |
+| How would all 30 decisions be implemented, and what code would remain? | [Engineering plan and 14 November corrections](../research/oslit-engineering-plan-2026-11-14.md) |
+| Why use task-local scored search and a minimal shared interface? | [Q30 decision and rationale](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration) |
+| How should architecture changes preserve founder intent, and when should an agent ask? | [Architecture guidance](../decisions/AGENTS.md) |
 | What is implemented and what is actually qualified? | [Native research status](native-research-status.md) |
 | What did the October discussion and external research establish? | [Discussion record and research lessons](../research/research-direction-discussion-2026-10.md) |
 | What did the September offline engineering package deliver? | [Offline engineering evidence](engineering-evidence.md) |

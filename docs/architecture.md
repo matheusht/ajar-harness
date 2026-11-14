@@ -8,6 +8,11 @@ For current product choices and the native/legacy boundary, start with
 [native research status](wiki/native-research-status.md). The mechanisms and deferred
 phases below describe the original architecture; they are not the native task procedure.
 
+For architecture changes, read [architecture instructions](decisions/AGENTS.md)
+and the [November engineering plan](research/oslit-engineering-plan-2026-11-14.md).
+The endorsed direction uses Codex/OMP and permits multi-day research under valid
+authority and remaining resources; implementation and qualification remain pending.
+
 For the implemented record and review model, read the
 [record-kernel architecture](decision-0005-implementation-architecture.md). Follow the
 [decision index](decisions/README.md) for later decisions and supersession status; the three record

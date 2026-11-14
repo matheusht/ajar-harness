@@ -1,0 +1,175 @@
+{
+  "runtime": "codex",
+  "network": "OS sandbox denied all networking",
+  "provider_call_requested": false,
+  "exit": 0,
+  "events": [
+    {
+      "id": 1,
+      "result": {
+        "userAgent": "Codex Desktop/0.166.0 (Mac OS 26.5.0; arm64) dumb (oslit-m0; 0.1.0)",
+        "codexHome": "/private/tmp/oslit-implementation/m0-runtime/codex-isolated-control",
+        "platformOs": "macos"
+      }
+    },
+    {
+      "id": 2,
+      "result": {
+        "thread": {
+          "id": "01a1d8ad-b5c6-7e00-8c42-dec7abbcfaec",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+              "runtimeWorkspaceRoots": [
+                "/private/tmp/oslit-implementation/m0-runtime"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a1d8ad-b5c6-7e00-8c42-dec7abbcfaec",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": true,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": null,
+          "createdAt": 1794636625,
+          "updatedAt": 1794636625,
+          "recencyAt": 1794636625,
+          "status": {
+            "type": "idle"
+          },
+          "path": null,
+          "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+          "cliVersion": "0.166.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "model": "gpt-6.1-sol",
+        "modelProvider": "openai"
+      }
+    },
+    {
+      "id": 3,
+      "result": {
+        "thread": {
+          "id": "01a1d8ad-b5c6-7e00-8c42-dec7abbcfaec",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+              "runtimeWorkspaceRoots": [
+                "/private/tmp/oslit-implementation/m0-runtime"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a1d8ad-b5c6-7e00-8c42-dec7abbcfaec",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": true,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": null,
+          "createdAt": 1794636625,
+          "updatedAt": 1794636625,
+          "recencyAt": 1794636625,
+          "status": {
+            "type": "idle"
+          },
+          "path": null,
+          "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+          "cliVersion": "0.166.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        }
+      }
+    },
+    {
+      "error": {
+        "code": -32600,
+        "message": "no active turn to interrupt"
+      },
+      "id": 4
+    },
+    {
+      "id": 5,
+      "result": {
+        "thread": {
+          "id": "01a1d8ad-b662-7cf1-bec0-8d1c63d816b2",
+          "environments": [
+            {
+              "environmentId": "local",
+              "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+              "runtimeWorkspaceRoots": [
+                "/private/tmp/oslit-implementation/m0-runtime"
+              ]
+            }
+          ],
+          "extra": null,
+          "sessionId": "01a1d8ad-b662-7cf1-bec0-8d1c63d816b2",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "",
+          "ephemeral": true,
+          "section": null,
+          "sectionEnteredAt": null,
+          "projectId": null,
+          "historyMode": "paginated",
+          "modelProvider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": null,
+          "createdAt": 1794636625,
+          "updatedAt": 1794636625,
+          "recencyAt": 1794636625,
+          "status": {
+            "type": "idle"
+          },
+          "path": null,
+          "cwd": "/private/tmp/oslit-implementation/m0-runtime",
+          "cliVersion": "0.166.0",
+          "originator": "Codex Desktop",
+          "source": "vscode",
+          "canAcceptDirectInput": true,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": null,
+          "name": null,
+          "daybreakEnabled": null,
+          "turns": []
+        },
+        "model": "gpt-6.1-sol",
+        "modelProvider": "openai"
+      }
+    }
+  ],
+  "stderr_lines": 4
+}

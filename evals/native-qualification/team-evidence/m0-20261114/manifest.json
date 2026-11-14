@@ -1,0 +1,13 @@
+{
+  "codex_schema_aggregate_sha256": "1285d9e9d90f56591650b8f4cf7fb1d349c2f08468671d27c14846a97023a792",
+  "codex_binary_sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+  "omp_binary_sha256": "2b1309b06a743ae939708f939b63f75c7a436ed08c7953309f0e387e0c793ead",
+  "codex-control-result.json": {
+    "validated": true,
+    "sha256": "a9559015d70ed4da80399fd8fbe21eaf865023d59218e858bda41a09892acb4a"
+  },
+  "omp-control-result.json": {
+    "validated": true,
+    "sha256": "9daf6311e290281b4c6dabb7fc260855a9fdef8674659c604f239fb5585ef5ea"
+  }
+}

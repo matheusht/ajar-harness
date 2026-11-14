@@ -2,6 +2,18 @@
 
 **Status:** Engineering decision brief, 12 November 2026. The user confirmed the target-neutral destination. The implementation and complete workflow remain unqualified. Source readback used `f4ebb694`; the native runner and continuation files are byte-identical at the clean candidate base `1f1452f8` used for this brief. The user will provide a fresh target for evaluation. This brief defines the general workflow that must work before target-specific facts are known.
 
+**Later planning decisions:** Before designing the next harness improvement or its
+evaluation, read the [13 November grilling decisions](oslit-harness-grilling-2026-11-13.md).
+They record the operator's updated environment, agent-team, steering, and real-target
+acceptance requirements. The operator endorsed the plan's direction on 14 November
+with Codex/OMP and duration corrections, then assigned the full implementation;
+see the [delivery record](oslit-implementation-2026-11-14.md). The operator will
+provide the future fresh-target test separately. The dated source observations
+below remain historical.
+The [14 November engineering plan](oslit-engineering-plan-2026-11-14.md) grounds
+the proposed implementation in the newer scope-only driver and current source;
+it preserves this brief's historical observations without treating them as live gaps.
+
 ## Engineering goal
 
 Build a target-neutral workflow for authorized security research. A person supplies the target, a signed scope, a goal, and resources. The agent owns the whole internal engagement: it learns the target, prepares a usable environment, writes its threat model, maps reachable surfaces, chooses and revises experiments, asks for independent checks, decides when the search is covered or blocked, produces the result, and verifies cleanup. It makes and checks a patch when the goal and evidence call for one. It must carry material work across interruptions. No person supplies a flaw, test sequence, next research step, or patch hint during the run. Current human authority and review gates still apply, but the agent owns their handoff and resumes the run after they are settled. These decisions are recorded separately from research steering.

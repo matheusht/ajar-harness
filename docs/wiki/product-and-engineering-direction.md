@@ -1,12 +1,30 @@
 # Product and engineering direction
 
-Maintained synthesis, 23 October 2026. Read this before changing the harness's product
+Maintained synthesis, updated 14 November 2026. Read this before changing the harness's product
 scope, research workflow, runtime architecture, or engineering plan. Accepted
 [decision records](../decisions/README.md) retain their authority. The
 [discussion record](../research/research-direction-discussion-2026-10.md) attributes
 later operator choices and separates them from proposals. The
 [implementation status](native-research-status.md) owns the dated capability and
 qualification picture. A direction, implementation, and successful run are distinct facts.
+
+For the next harness redesign, agent-team coordination, or acceptance evaluation,
+read the [13 November operator decisions](../research/oslit-harness-grilling-2026-11-13.md).
+They update the planning requirements below. The operator will provide the future
+fresh-target test separately.
+The [14 November engineering plan](../research/oslit-engineering-plan-2026-11-14.md)
+supplies the architecture, source-grounded disposition map, delivery sequence and
+all-30 traceability. The operator endorsed its direction with two corrections:
+Codex and OMP are the intended runtimes, and research continues while authorized
+and resourced without a fixed 24-hour ceiling. The plan incorporates those corrections;
+implementation and qualification remain pending. For architecture changes, follow
+the [architecture instructions](../decisions/AGENTS.md), including when to ask the founder.
+
+[Q30](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)
+adds scored search as a technique within a task and minimal, enforced native-tool
+reuse. The record retains the paper's evidence limits, alternatives and rationale.
+The plan specifies durable relevant updates, versioned shared instruments and
+execution-enforced ownership/role/resource boundaries; these remain unimplemented.
 
 **Authority status:** this page is a maintained synthesis of operator choices, not an
 accepted ADR. It does not create or change a gate. A durable gate change needs a
@@ -54,12 +72,14 @@ scope, consequential review, escalation, and external-action requirements still 
 | Choice | Consequence for a change |
 | --- | --- |
 | Native research is the chosen direction for new local source work. | Develop one coherent native workflow. Keep the source default, live qualification, and scoped adoption separate; see the [cutover contract](../agents/native-cutover-contract.md). |
-| Model and provider independence is a product requirement. | Treat OpenCode as the current integration and qualification vehicle. Describe actual supported tuples precisely; generic source-runtime support does not prove generic agent/provider support. |
+| Model/provider access is distinct from agent runtime integration. | Codex and OMP are the selected new-route runtimes. Reuse their native execution, tools, sessions and delegation; add missing engagement behavior. OpenCode remains an existing compatibility route and optional provider source, not a required new runtime. Verify each actual runtime/provider combination. |
 | The researcher chooses the investigation. | Tools, cards, graphs, and prior results inform choices. Stages describe evidence maturity; they do not impose a fixed order or mandatory roster. |
+| Scored search serves a task; the engagement remains evidence-directed. | Use native instruments and local metrics where useful. No universal finding score or leaderboard determines priorities or acceptance. |
+| Native reuse must preserve enforceable boundaries. | Start with native tools and minimal status/claim/typed-submit operations. Verify actor identity, roles, updates, shared-target writes and instrument provenance; interface names alone enforce nothing. |
 | Ordinary working files carry native continuity. | Save scripts, results, interpretation, and unfinished work once and link them. Native history can help; it does not replace material state or independent evidence. |
 | Independent challenge covers consequential acceptance and strong-lead dismissal. | Bind review to the checked claim and evidence. A fresh context must inspect a material link; a model name, signature, or accepted file alone cannot prove that happened. |
 | Evidence properties survive process simplification. | Preserve authority, effect provenance, resource limits, uncertain-effect recovery, cleanup, and historical integrity while retiring unnecessary ceremony. |
-| Time and cost support research quality. | Avoid cheap-first product goals or repeated budget prompts inside an existing allowance. Honor configured outer limits, account for research and review, and preserve useful unfinished work when a limit ends the run. |
+| Multi-day research is a required capability. | Continue while authority and resources permit and the goal requires work. Honor an operator deadline when supplied; renewable short worker leases control failure, not total engagement age. Account for all roles and preserve unfinished work when a real limit ends the run. The existing v1 cap remains until replaced in code. |
 | Existing engagements retain their supported route. | Use the explicit [legacy procedure](../agents/legacy-local-research.md) for queue/record work. Preserve its callers and immutable history; native notes do not become canonical legacy findings. |
 
 The October operator choice to implement candidate default routing preceded the
@@ -78,7 +98,7 @@ proves neither superiority nor inferiority.
 | Harness improvement across runs | A methodology, tool, model, or implementation change improves results. | Protected evaluation, a justified baseline, full costs, retained negative results, and independent validation. This remains separate from ordinary research. |
 
 The October discussion's use of "hill climbing" primarily concerned adaptation
-within an investigation. It did not approve self-editing evaluators, training,
+within an investigation. It did not approve self-editing shared/acceptance evaluators, training,
 automatic methodology promotion, or a new harness-optimization service.
 [Decision 0004](../decisions/0004-epistemic-autonomy-complexity-budget.md) continues to
 govern evaluator integrity and the separate autonomous-learning metric.
@@ -136,7 +156,7 @@ synonym for target findings, continuity, or external acceptance.
 ## Open and deferred work
 
 The [current status page](native-research-status.md) records source and evidence
-limits. Multi-day reliability, outcome-sensitive adaptation, whole-run monetary
+limits. Multi-day reliability for the required long-operation capability, outcome-sensitive adaptation, whole-run monetary
 accounting, broader runtime/provider support, and comparative research benefit
 remain questions to prove. No permanent swarm, scheduler service, graph database,
 memory service, automatic external filing, or universal-coverage guarantee follows

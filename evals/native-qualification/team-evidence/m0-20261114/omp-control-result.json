@@ -1,0 +1,194 @@
+{
+  "runtime": "omp",
+  "network": "OS sandbox denied all networking",
+  "provider_call_requested": false,
+  "exit": 0,
+  "events": [
+    {
+      "id": "1",
+      "type": "response",
+      "command": "get_state",
+      "success": true,
+      "data": {
+        "model": {
+          "id": "us.anthropic.claude-opus-5-5",
+          "api": "bedrock-converse-stream",
+          "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+          "provider": "amazon-bedrock",
+          "supportsComputerUse": false,
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.22,
+            "cacheWrite": 5.5,
+            "input": 4.4,
+            "output": 22
+          },
+          "identity": {
+            "class": "anthropic",
+            "family": "opus",
+            "revision": "5.5.0"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 128000,
+          "name": "Claude Opus 5.5 (US)",
+          "promptCache": {
+            "long": 3600,
+            "short": 300
+          },
+          "thinking": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "mode": "anthropic-adaptive",
+            "prefixBinding": true,
+            "supportsDisplay": true
+          },
+          "tokenizer": "claude-v5",
+          "reasoning": true,
+          "requiresGlyphTokenization": true,
+          "compat": {
+            "promptCacheMaximumCheckpoints": 4,
+            "promptCacheMinimumTokens": 512,
+            "promptCacheMode": "explicit",
+            "streamIdleTimeoutMs": 600000,
+            "streamRevision": "possible",
+            "supportsForcedToolChoice": false,
+            "supportsLongPromptCacheRetention": true,
+            "supportsServerCompaction": true,
+            "supportsThinkingBindingControls": true,
+            "supportsSamplingParams": false
+          },
+          "int": 59.1
+        },
+        "isStreaming": false,
+        "sessionId": "01a1d8ad-b7a7-7667-b1b9-67966e7bd7d5",
+        "queuedMessageCount": 0,
+        "hasPendingAsyncWork": false,
+        "isSettled": true
+      }
+    },
+    {
+      "id": "2",
+      "type": "response",
+      "command": "new_session",
+      "success": true,
+      "data": {
+        "cancelled": false
+      }
+    },
+    {
+      "id": "3",
+      "type": "response",
+      "command": "get_state",
+      "success": true,
+      "data": {
+        "model": {
+          "id": "us.anthropic.claude-opus-5-5",
+          "api": "bedrock-converse-stream",
+          "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+          "provider": "amazon-bedrock",
+          "supportsComputerUse": false,
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.22,
+            "cacheWrite": 5.5,
+            "input": 4.4,
+            "output": 22
+          },
+          "identity": {
+            "class": "anthropic",
+            "family": "opus",
+            "revision": "5.5.0"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 128000,
+          "name": "Claude Opus 5.5 (US)",
+          "promptCache": {
+            "long": 3600,
+            "short": 300
+          },
+          "thinking": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "mode": "anthropic-adaptive",
+            "prefixBinding": true,
+            "supportsDisplay": true
+          },
+          "tokenizer": "claude-v5",
+          "reasoning": true,
+          "requiresGlyphTokenization": true,
+          "compat": {
+            "promptCacheMaximumCheckpoints": 4,
+            "promptCacheMinimumTokens": 512,
+            "promptCacheMode": "explicit",
+            "streamIdleTimeoutMs": 600000,
+            "streamRevision": "possible",
+            "supportsForcedToolChoice": false,
+            "supportsLongPromptCacheRetention": true,
+            "supportsServerCompaction": true,
+            "supportsThinkingBindingControls": true,
+            "supportsSamplingParams": false
+          },
+          "int": 59.1
+        },
+        "isStreaming": false,
+        "sessionId": "01a1d8ad-b8d4-7192-a2e5-d2cf040c760c",
+        "queuedMessageCount": 0,
+        "hasPendingAsyncWork": false,
+        "isSettled": true
+      }
+    },
+    {
+      "id": "4",
+      "type": "response",
+      "command": "get_session_stats",
+      "success": true,
+      "data": {
+        "sessionId": "01a1d8ad-b8d4-7192-a2e5-d2cf040c760c",
+        "assistantMessages": 0,
+        "totalMessages": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        },
+        "cost": 0,
+        "premiumRequests": 0
+      }
+    },
+    {
+      "id": "5",
+      "type": "response",
+      "command": "get_subagents",
+      "success": true,
+      "data": {
+        "subagents": []
+      }
+    },
+    {
+      "id": "6",
+      "type": "response",
+      "command": "abort",
+      "success": true
+    }
+  ],
+  "stderr_lines": 0
+}

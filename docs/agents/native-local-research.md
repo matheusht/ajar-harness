@@ -2,6 +2,10 @@
 
 The candidate native route is the default for new local source research.
 Runtime qualification and adoption remain unverified.
+This guide describes the existing versioned route, including its enforced time
+limits. The [November plan](../research/oslit-engineering-plan-2026-11-14.md) selects
+Codex/OMP and removes the fixed 24-hour ceiling for a future contract; that change
+has not been implemented or activated here.
 Read [product direction](../wiki/product-and-engineering-direction.md) for design
 choices and [dated status](../wiki/native-research-status.md) for capability claims.
 Actual runs still require permission, a frozen allowance and the enforced effect

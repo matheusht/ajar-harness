@@ -46,6 +46,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--endpoint', required=True, help='Explicit unix:// Docker endpoint; never uses the default context')
     parser.add_argument('--image-id', required=True, help='Already installed sha256 image ID with /bin/sh and /usr/local/bin/python3')
+    parser.add_argument('--loopback-ssh-profile', type=Path,
+                        help='Use an existing disposable SSH listener on 127.0.0.1 to reach this same daemon')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     result = {'kind': 'environment-real-docker-e2e-v2', 'classification': 'actual_docker_environment',
@@ -58,7 +60,7 @@ def main():
         assert value, name
 
     try:
-        from engagement_contract import canonical, safe_publication, source_manifest
+        from engagement_contract import canonical, read_json, safe_publication, source_manifest, validate_environment_profile
         from research_environment import Environment, EnvironmentUnavailable
         docker = shutil.which('docker')
         if not docker or not args.endpoint.startswith('unix://'):
@@ -85,6 +87,16 @@ def main():
                    'docker_binary': docker, 'docker_endpoint': args.endpoint, 'daemon_id': daemon,
                    'image_id': image['Id'], 'platform': result['environment']['platform'],
                    'uid': 1000, 'gid': 1000, 'ssh': None}
+        if args.loopback_ssh_profile:
+            ssh = read_json(args.loopback_ssh_profile)
+            if not isinstance(ssh, dict) or ssh.get('host') != '127.0.0.1':
+                raise RuntimeError('fixture_requires_loopback_ssh')
+            profile.update(transport='ssh-docker', ssh=ssh)
+            validate_environment_profile(profile)
+            result['classification'] = 'actual_loopback_ssh_docker_environment'
+            result['unverified'] = ['separate remote host', 'network partition', 'native model host',
+                                    'joined controller workflow', 'research acceptance']
+            result['ssh'] = {key: ssh[key] for key in ('host', 'port', 'user', 'known_hosts_sha256')}
         limits = {'memory_bytes': 256 * 1024 * 1024, 'workspace_bytes': 16 * 1024 * 1024,
                   'cpu_count': 1, 'pids': 32, 'lease_seconds': 60, 'output_bytes': 32768}
         active = [False]
@@ -180,6 +192,7 @@ def main():
             check('owner-loss fixture starts a detached child', spawned['status'] == 'settled' and spawned['returncode'] == 0)
             watcher = lost.owner.process
             fault = {'identity': lost.receipt(), 'lease_seconds': 4, 'watcher_pid': watcher.pid,
+                     'killed_process': 'ssh_client' if args.loopback_ssh_profile else 'host_watcher',
                      'before': lost.readback()}
             result['watcher_loss'] = fault
             check('owner-loss fixture has a live owned watcher', watcher.poll() is None and fault['before']['running'])

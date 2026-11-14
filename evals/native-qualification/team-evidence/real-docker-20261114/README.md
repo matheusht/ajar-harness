@@ -47,6 +47,30 @@ in this initial scenario commit. This scenario does not qualify the native model
 host, the joined controller workflow, SSH transport, a live provider or research
 acceptance.
 
+## Loopback SSH scenario
+
+The same lifecycle scenario can reach the selected daemon through an owned SSH
+listener on the same disposable Linux host. This exercises actual OpenSSH,
+strict host-key pinning, the remote watcher and Docker transport. It does not
+establish operation on a separate host or behavior during a network partition.
+The fault kills the local SSH client; the result identifies that process
+separately from the local-Docker case's host watcher.
+
+```sh
+bash evals/native-qualification/smoke/run_environment_loopback_ssh_e2e.sh \
+  sha256:REPLACE_WITH_INSTALLED_IMAGE_ID /tmp/oslit-ssh
+```
+
+The host needs OpenSSH client/server, Docker, Python 3.11+, a nonroot user and
+passwordless `sudo`. The fixture creates temporary keys and a loopback-only
+listener; it changes no user SSH configuration. Expected: exit zero, all checks
+in `ssh-result.json` pass, every environment cleanup is `clean`, and
+`ssh-listener-cleanup.json` records `listener_stopped:true` and
+`fixture_removed:true`. The listener and
+temporary keys are removed on exit. An unverified listener stop fails the run
+and retains its fixture directory for inspection. This is an executable
+scenario specification; its hosted result must be recorded separately.
+
 ## Hosted observations on 14 November 2026
 
 The [lifecycle run](https://github.com/matheusht/redteam-harness/actions/runs/43586543880)

@@ -11,6 +11,7 @@ on:
       - tools/engagement_contract.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
       - evals/native-qualification/smoke/check_container_guardian_e2e.py
+      - evals/native-qualification/smoke/run_environment_loopback_ssh_e2e.sh
   pull_request:
     paths:
       - .github/workflows/oslit-environment.yml
@@ -20,6 +21,7 @@ on:
       - tools/engagement_contract.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
       - evals/native-qualification/smoke/check_container_guardian_e2e.py
+      - evals/native-qualification/smoke/run_environment_loopback_ssh_e2e.sh
 
 permissions:
   contents: read
@@ -51,6 +53,11 @@ jobs:
             --endpoint unix:///var/run/docker.sock \
             --image-id "$OSLIT_FIXTURE_IMAGE" \
             --output "$RUNNER_TEMP/oslit-docker/guardian.json"
+      - name: Exercise the SSH transport through an owned loopback listener
+        if: ${{ !cancelled() && env.OSLIT_FIXTURE_IMAGE != '' }}
+        run: |
+          bash evals/native-qualification/smoke/run_environment_loopback_ssh_e2e.sh \
+            "$OSLIT_FIXTURE_IMAGE" "$RUNNER_TEMP/oslit-docker"
       - name: Preserve actual environment observations
         if: always()
         uses: actions/upload-artifact@v4

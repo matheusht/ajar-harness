@@ -5,6 +5,7 @@ import json
 import math
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from engagement_contract import canonical, digest, read_json
 from engagement_controller import GRANT_KEYS, Principal, fail, identifier, integer, keys
@@ -14,7 +15,7 @@ REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'c
             'closure_request', 'patch_propose'}
 LEAD_ONLY = {'review_request', 'review_response', 'closure_request'}
 COLLECTIONS = ('instruments', 'experiments', 'comparisons', 'claims', 'obligations', 'reviews',
-               'closures', 'patches', 'environment_operations', 'environments', 'support_inputs')
+               'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs')
 CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image'}
 OPERATIONS = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
     'execute', 'start', 'renew', 'launch_stdio', 'readback_input', 'stage_support', 'readback_support',
@@ -190,6 +191,89 @@ def record_environment_output(c, grant, profile_id, operation_id, output):
         sha = c.store_object(output)
         return c._host('evidence_recorded', {'action': 'environment_output',
             'data': {'operation_id': operation_id, 'output_sha256': sha}, '_objects': [sha]})
+
+
+def record_network_observation(c, grant, profile_id, nonce, observation):
+    with c.lock():
+        state = c.state()
+        binding(c, state, grant)
+        common = {'kind', 'phase', 'operation_id', 'access_id', 'effect_id', 'account_ref',
+                  'origin', 'method', 'path_sha256'}
+        phase = observation.get('phase') if isinstance(observation, dict) else None
+        keys(observation, common | ({'status', 'http_status', 'request_bytes', 'response_bytes'}
+                                   if phase == 'result' else set()), 'network_observation_invalid')
+        if (observation['kind'] != 'target-network-observation-v1' or phase not in ('intent', 'result')
+                or not isinstance(observation['method'], str)
+                or not re.fullmatch('[A-Z]{1,32}', observation['method'])
+                or not isinstance(observation['path_sha256'], str)
+                or not re.fullmatch('sha256:[0-9a-f]{64}', observation['path_sha256'])):
+            fail('network_observation_invalid')
+        opid = identifier(observation['operation_id'])
+        for name in ('access_id', 'effect_id'):
+            identifier(observation[name])
+        account = observation['account_ref']
+        if account is not None:
+            identifier(account)
+        origin = observation['origin']
+        try:
+            parsed = urlsplit(origin)
+            host = '[' + parsed.hostname + ']' if ':' in parsed.hostname else parsed.hostname
+            if (parsed.scheme not in ('http', 'https') or parsed.username is not None
+                    or parsed.password is not None or parsed.path or parsed.query or parsed.fragment
+                    or origin != f'{parsed.scheme}://{host}:{parsed.port}'):
+                fail('network_observation_invalid')
+        except (TypeError, ValueError, AttributeError):
+            fail('network_observation_invalid')
+        if phase == 'result':
+            if (observation['status'] not in ('settled', 'unknown')
+                    or (observation['http_status'] is not None and
+                        (type(observation['http_status']) is not int or not 100 <= observation['http_status'] <= 599))
+                    or any(type(observation[k]) is not int or observation[k] < 0
+                           for k in ('request_bytes', 'response_bytes'))):
+                fail('network_observation_invalid')
+        environment = state['environments'].get(nonce)
+        if (environment is None or environment['profile_id'] != profile_id
+                or environment['worker_id'] != grant['worker_id'] or environment['generation'] != grant['generation']):
+            fail('network_environment_invalid')
+        access = next((row for row in state['scope']['access'] if row['id'] == observation['access_id']), None)
+        effect = next((row for row in state['scope']['effects'] if row['id'] == observation['effect_id']), None)
+        permission = 'read' if observation['method'] in ('GET', 'HEAD', 'OPTIONS') else 'write'
+        if (access is None or access['kind'] != 'application' or effect is None
+                or access['id'] not in grant['resources']
+                or access['id'] not in {row['id'] for row in environment['identity']['access']}
+                or access['id'] not in effect['access_ids'] or profile_id not in effect['environment_ids']
+                or effect['kind'] != permission or permission not in access['permissions']
+                or (account is None and effect['account_refs'])
+                or (account is not None and (account not in access['account_refs'] or account not in effect['account_refs']))):
+            fail('network_effect_forbidden')
+        target = urlsplit(access['identity']['base_url'])
+        if (parsed.scheme, parsed.hostname, parsed.port) != (target.scheme, target.hostname,
+                target.port or (443 if target.scheme == 'https' else 80)):
+            fail('network_effect_forbidden')
+        document = {'grant': grant, 'profile_id': profile_id, 'environment_nonce': nonce, 'observation': observation}
+        sha = digest(canonical(document))
+        prior = state['network_operations'].get(opid)
+        if prior and sha in prior['receipts']:
+            return {'status': 'recorded', 'receipt': sha}
+        if phase == 'intent':
+            if prior:
+                fail('network_operation_conflict')
+            if (environment.get('stopped') or environment.get('cleanup') == 'verified' or not any(
+                    row['identity']['nonce'] == nonce and row['grant']['dispatch_id'] == grant['dispatch_id']
+                    for row in state['environment_operations'].values())):
+                fail('network_environment_invalid')
+            c._authorize(state, grant)
+        else:
+            if prior is None:
+                fail('network_intent_missing')
+            if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['environment_nonce'] != nonce
+                    or any(prior['intent'][key] != observation[key] for key in common - {'phase'})
+                    or (prior['result'] is not None and not
+                        (prior['result']['status'] == 'unknown' and observation['status'] == 'settled'))):
+                fail('network_operation_conflict')
+        sha = c.store_object(canonical(document))
+        return c._host('evidence_recorded', {'action': 'network_observation', 'data': {
+            **document, 'receipt_sha256': sha}, '_objects': [sha]})
 
 
 def comparable(left, right):
@@ -482,6 +566,13 @@ def reduce_host(state, payload):
     state['evidence_objects'].update({sha: True for sha in payload.get('_objects', [])})
     if action == 'support_inputs_registered':
         state['support_inputs'][data['grant']['dispatch_id']] = data['inputs']
+    elif action == 'network_observation':
+        observation = data['observation']
+        operation = state['network_operations'].setdefault(observation['operation_id'], {
+            'grant': data['grant'], 'profile_id': data['profile_id'],
+            'environment_nonce': data['environment_nonce'], 'receipts': [], 'result': None})
+        operation['receipts'].append(data['receipt_sha256'])
+        operation[observation['phase']] = observation
     elif action == 'environment_observation':
         observation, grant = data['observation'], data['grant']
         nonce, opid = observation['identity']['nonce'], observation['operation_id']

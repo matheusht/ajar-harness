@@ -287,6 +287,14 @@ class Controller:
                 holds = state['resource_holds'].setdefault(resource, [])
                 if grant['dispatch_id'] not in holds:
                     holds.append(grant['dispatch_id'])
+        for operation in state['network_operations'].values():
+            dispatch = state['dispatches'][operation['grant']['dispatch_id']]
+            result = operation['result']
+            if ((result and result['status'] == 'unknown') or
+                    (result is None and dispatch['status'] != 'pending')):
+                holds = state['resource_holds'].setdefault(operation['intent']['access_id'], [])
+                if dispatch['dispatch_id'] not in holds:
+                    holds.append(dispatch['dispatch_id'])
         return state
 
     def state(self):
@@ -1186,6 +1194,10 @@ class Controller:
         from engagement_evidence import record_environment_output
         return record_environment_output(self, grant, environment_profile_id, operation_id, output)
 
+    def record_network_observation(self, grant, environment_profile_id, environment_nonce, observation):
+        from engagement_evidence import record_network_observation
+        return record_network_observation(self, grant, environment_profile_id, environment_nonce, observation)
+
     def register_support_inputs(self, grant, inputs):
         from engagement_evidence import register_support_inputs
         return register_support_inputs(self, grant, inputs)
@@ -1398,6 +1410,7 @@ class Controller:
                 'status': state['status'], 'claim_acceptance': 'per_claim', 'tasks': state['tasks'],
                 'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
                 'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],
+                'network_operations': state['network_operations'],
                 'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
             for data in files.values():

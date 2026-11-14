@@ -1,0 +1,12 @@
+{
+  "README.md": "9478d20065c8d514afcdb9b999f3a96446947a8ead0fa466b60690cc190be27f",
+  "after.json": "0b371cd91aa18ea666ba79d45b0d2691458455a17daaa364870348e4cc43d0ca",
+  "application-capture.json": "365e2eeddca403488d02012e60cec4a224ab6c11b0e50dd7ac96fb537f1a14b3",
+  "before.json": "b31cfeea03a1b627e2a9e6fe5eaa477b96125ce331c21718d9dfa84b8ce31cba",
+  "boundary.json": "79c331ffdb57629bcd96ce2b50f342963e2399eef5d6d76bc994076ec9959fc4",
+  "identity-evolution-before.json": "651390cee87d8c575650485b59df064576806d5d7d22e810397b3e1f0195e7f4",
+  "public-cli.json": "3c84e168ac3392161da28f053fffb68f0c3eeaedb5407a987d9f96b609b0ef47",
+  "retained-specialist.json": "86ba08f7848e4f0ad0b48a377bd6b3fc3f0f3f9ea40cad1432b59d925ddf3d79",
+  "runner-fixture-mismatch.json": "15bd813e393b6685752250ebd4d973b9c570926f4d1c5defd522e2220b3027c5",
+  "source-capture.json": "ab15895ea3ba4769b8270b8fae171761de9275db6f67d6002e327814d427ba38"
+}

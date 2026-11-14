@@ -331,22 +331,31 @@ class Controller:
             state['workers'][payload['worker_id']].update(session_id=payload['session_id'], runtime_owner_sha256=payload.get('runtime_owner_sha256'))
             if payload.get('runtime_owner_sha256'):
                 state['evidence_objects'][payload['runtime_owner_sha256']] = True
-        elif kind == 'preparation_cancelled':
+        elif kind == 'preparation_setup_started':
+            state['dispatches'][payload['dispatch_id']]['setup_started_at'] = event['at']
+        elif kind == 'preparation_native_admitted':
+            state['dispatches'][payload['dispatch_id']]['native_admitted'] = True
+        elif kind in ('preparation_cancelled', 'preparation_settled'):
             dispatch = state['dispatches'][payload['dispatch_id']]
             sha = payload['receipt_sha256']
-            dispatch.update(status='settled', receipt=sha, cancelled_receipt=sha)
+            dispatch.update(status='settled', receipt=sha)
+            dispatch['cancelled_receipt' if kind == 'preparation_cancelled' else 'setup_receipt'] = sha
             worker = state['workers'][dispatch['worker_id']]
             worker.update(status='stopped', stop_receipt=sha)
             state['evidence_objects'][sha] = True
             state['usage']['reserved_worker_seconds'] -= dispatch['seconds']
             state['usage']['invocations'] -= 1
+            state['usage']['worker_seconds'] += payload.get('worker_seconds', 0)
+            for nonce in payload.get('environment_nonces', []):
+                state['environments'][nonce].update(stopped=True, cleanup='verified', cleanup_receipt=sha)
             for resource in dispatch['resources']:
                 holds = [value for value in state['resource_holds'].get(resource, []) if value != dispatch['dispatch_id']]
                 if holds:
                     state['resource_holds'][resource] = holds
                 else:
                     state['resource_holds'].pop(resource, None)
-            if not state['environments'] and all(row['status'] == 'stopped' for row in state['workers'].values()):
+            if (all(row.get('cleanup') == 'verified' for row in state['environments'].values())
+                    and all(row['status'] == 'stopped' for row in state['workers'].values())):
                 state['cleanup'] = 'verified'
         elif kind == 'runtime_preparation_owner':
             sha = payload['receipt_sha256']
@@ -1123,6 +1132,100 @@ class Controller:
         if cost is not None and (type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0):
             fail('receipt_invalid')
 
+    def record_preparation_setup(self, grant):
+        with self.lock():
+            state = self.state()
+            self._authorize(state, grant)
+            dispatch = state['dispatches'][grant['dispatch_id']]
+            if (not dispatch.get('preparation') or dispatch.get('native_admitted')
+                    or dispatch.get('invocations') or dispatch.get('runtime_owner_receipts')
+                    or state['workers'][grant['worker_id']].get('runtime_owner_sha256')
+                    or state['workers'][grant['worker_id']].get('session_id')
+                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())):
+                fail('preparation_already_admitted')
+            if dispatch.get('setup_started_at'):
+                return {'status': 'recorded'}
+            if any(row['grant']['dispatch_id'] == grant['dispatch_id'] for row in
+                   [*state['environment_operations'].values(), *state['network_operations'].values()]):
+                fail('preparation_already_admitted')
+            return self._host('preparation_setup_started', {'dispatch_id': grant['dispatch_id']})
+
+    def record_native_admission(self, grant):
+        with self.lock():
+            state = self.state()
+            self._authorize(state, grant)
+            dispatch = state['dispatches'][grant['dispatch_id']]
+            if not dispatch.get('preparation') or not dispatch.get('setup_started_at'):
+                fail('preparation_phase_missing')
+            if dispatch.get('native_admitted'):
+                return {'status': 'recorded'}
+            return self._host('preparation_native_admitted', {'dispatch_id': grant['dispatch_id']})
+
+    def preparation_without_native(self, grant):
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            worker = state['workers'][grant['worker_id']]
+            if (grant != {key: dispatch[key] for key in GRANT_KEYS} or not dispatch.get('preparation')
+                    or not dispatch.get('setup_started_at') or dispatch.get('native_admitted')
+                    or dispatch['status'] not in ('pending', 'unknown')
+                    or worker['generation'] != grant['generation'] or worker['profile_id'] != grant['profile_id']
+                    or worker['assignment'] != grant['assignment'] or worker['status'] not in ('preparing', 'revoked')
+                    or dispatch.get('invocations') or dispatch.get('runtime_owner_receipts')
+                    or worker.get('runtime_owner_sha256') or worker.get('session_id')
+                    or any(row['grant']['dispatch_id'] == grant['dispatch_id'] for row in state['network_operations'].values())
+                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] or
+                        (row['dispatch_id'] != grant['dispatch_id'] and row['worker_id'] == grant['worker_id']
+                         and row['generation'] == grant['generation'] and row['status'] != 'settled')
+                        for row in state['dispatches'].values())):
+                return False
+            from engagement_evidence import CLEANUP_OPERATIONS
+            setup = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
+                'start', 'readback_input', 'stage_support', 'readback_support'}
+            nonces = {row['identity']['nonce'] for row in state['environment_operations'].values()
+                      if row['grant']['dispatch_id'] == grant['dispatch_id']}
+            if any(row['identity']['nonce'] in nonces and row['grant']['dispatch_id'] != grant['dispatch_id']
+                   for row in state['environment_operations'].values()):
+                return False
+            return all(row['operation'] in setup for row in state['environment_operations'].values()
+                       if row['grant']['dispatch_id'] == grant['dispatch_id'])
+
+    def settle_preparation(self, grant, environments, *, worker_seconds):
+        from engagement_evidence import identity
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            if dispatch.get('setup_receipt'):
+                return {'status': 'settled', 'receipt': dispatch['setup_receipt']}
+            if (not self.preparation_without_native(grant) or
+                    state['workers'][grant['worker_id']]['status'] != 'revoked'):
+                fail('preparation_absence_unverified')
+            if not integer(worker_seconds, 0, grant['seconds']) or not isinstance(environments, list):
+                fail('preparation_cleanup_unverified')
+            expected = {row['identity']['nonce'] for row in state['environment_operations'].values()
+                        if row['grant']['dispatch_id'] == grant['dispatch_id']}
+            observed = set()
+            for row in environments:
+                keys(row, ('profile_id', 'environment', 'cleanup'), 'preparation_cleanup_unverified')
+                stopped, cleanup = row['environment'], row['cleanup']
+                if (not isinstance(stopped, dict) or not isinstance(cleanup, dict)
+                        or stopped.get('status') not in ('stopped', 'absent') or stopped.get('running', False) is not False
+                        or cleanup.get('status') != 'clean' or cleanup.get('owned_workspace') != 'container_removed'
+                        or stopped.get('identity') != cleanup.get('identity')):
+                    fail('preparation_cleanup_unverified')
+                value = stopped['identity']
+                identity(self, state, grant, row['profile_id'], value)
+                nonce = value['nonce']
+                if nonce not in expected or nonce in observed or value['unsettled']:
+                    fail('preparation_cleanup_unverified')
+                observed.add(nonce)
+            if observed != expected:
+                fail('preparation_cleanup_unverified')
+            sha = self.store_object(canonical({'kind': 'native-preparation-settled-v1', 'grant': grant,
+                'environments': environments, 'worker_seconds': worker_seconds, 'native_admitted': False}))
+            return self._host('preparation_settled', {'dispatch_id': grant['dispatch_id'],
+                'receipt_sha256': sha, 'worker_seconds': worker_seconds, 'environment_nonces': sorted(observed)})
+
     def cancel_preparation(self, grant, readback):
         keys(readback, ('execution_admitted', 'cleanup'), 'preparation_cancellation_invalid')
         if readback['execution_admitted'] is not False or readback['cleanup'] != 'verified':
@@ -1137,7 +1240,7 @@ class Controller:
             worker = state['workers'][grant['worker_id']]
             if (not dispatch.get('preparation') or dispatch['status'] not in ('pending', 'unknown')
                     or worker['generation'] != grant['generation'] or worker['status'] not in ('preparing', 'revoked')
-                    or dispatch.get('invocations') or dispatch.get('runtime_owner_receipts')
+                    or dispatch.get('invocations') or dispatch.get('runtime_owner_receipts') or dispatch.get('native_admitted')
                     or worker.get('runtime_owner_sha256') or worker.get('session_id')
                     or any(row['grant']['dispatch_id'] == grant['dispatch_id']
                            for row in [*state['environment_operations'].values(), *state['network_operations'].values()])

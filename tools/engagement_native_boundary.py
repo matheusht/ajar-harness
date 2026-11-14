@@ -365,11 +365,13 @@ class NativeBoundary:
             dispatch_guard=self.context.guard,
             request_binder=self.target_accounts.bind if self.target_accounts is not None else None)
         self.lab_gate.serve(self.socket_dir / 'lab.sock', certificate=certificate, private_key=key)
+        self.controller.record_preparation_setup(self.context.grant)
+        self.execution_admitted = True
         self.environment = Environment(self.environment_profile, self.environment_reference['limits'],
             self.context.authorize, self._observe, grant=self.context.grant,
             dispatch_guard=self.context.guard, **self._environment_options())
-        self.execution_admitted = True
         self.environment.prepare(self.accesses, self.context.contract.inputs['access_files'], support_inputs=support)
+        self.controller.record_native_admission(self.context.grant)
         self.proxy = ProxyBridge(lambda command: self.environment.launch_stdio(command, role='network_proxy'),
             _clean_environment() + ['python3', '-I', '-S', '/input/bootstrap/bridge.py', 'relay'],
             self.lab_gate, self._active, dispatch_guard=self.context.guard)
@@ -843,12 +845,23 @@ class NativeBoundary:
                     pass
             unused = (not self.execution_admitted and self.owner_receipt is None and self.runtime is None
                 and self.native_owner is None and self.environment is None and self.proxy is None)
+            pre_native = self.controller.preparation_without_native(self.context.grant)
+            owned = any(row['grant']['dispatch_id'] == self.context.grant['dispatch_id']
+                for row in self.controller.state()['environment_operations'].values())
+            if pre_native and owned and cleanup is not None and cleanup.get('status') == 'clean':
+                try:
+                    environment_readback = self.environment.revoke()
+                except Exception:
+                    environment_readback = None
             verified = (capture_closed and transports_closed and runtime_readback.get('process_exited') is True and
                 runtime_readback.get('child_absence') == 'verified' and
                 runtime_readback.get('capabilities_revoked') is True and self.owner_receipt is not None and
                 cleanup is not None and cleanup.get('status') == 'clean' and
                 environment_readback is not None and environment_readback.get('status') in ('stopped', 'absent'))
             verified = verified or (unused and capture_closed and transports_closed)
+            verified = verified or (pre_native and capture_closed and transports_closed and
+                (not owned or (cleanup is not None and cleanup.get('status') == 'clean'
+                    and environment_readback is not None and environment_readback.get('status') in ('stopped', 'absent'))))
             if verified:
                 for directory in (self.socket_dir, self.state_dir):
                     if directory is not None:
@@ -858,6 +871,9 @@ class NativeBoundary:
                             verified = False
             self.finished = {'runtime': runtime_readback, 'environment': environment_readback,
                 'execution_admitted': self.execution_admitted,
+                'setup_only': pre_native,
+                'setup_environments': [{'profile_id': self.environment_id, 'environment': environment_readback,
+                    'cleanup': cleanup}] if pre_native and owned else [],
                 'environment_cleanup': cleanup, 'cleanup': 'verified' if verified else 'unresolved',
                 'resources': {row['id']: ('unchanged' if unused else 'reset') if verified and (unused or row['kind'] != 'application')
                     else 'unknown' for row in self.accesses}}
@@ -867,26 +883,32 @@ class NativeBoundary:
 def recover_boundary(context, dispatch):
     c = context.controller
     state = c.state()
+    current = c.bind_grant(state, context.grant)
+    if current.get('setup_receipt'):
+        return {'status': 'settled'}
     worker = state['workers'][context.worker['id']]
     auxiliary = bool(dispatch.get('parent_dispatch_id'))
+    pre_native = not auxiliary and c.preparation_without_native(context.grant)
     runtime_readback = None
     if not auxiliary:
         owner_sha = worker.get('runtime_owner_sha256')
-        if not owner_sha:
+        if not owner_sha and not pre_native:
             return {'status': 'unknown', 'code': 'native_owner_receipt_unavailable'}
-        owner = json.loads(c.read_object(owner_sha))
-        if owner.get('session_id') != worker.get('session_id') or owner.get('profile_sha256') != context.assignment['profile_sha256']:
-            return {'status': 'unknown', 'code': 'native_owner_identity_changed'}
+        if owner_sha:
+            owner = json.loads(c.read_object(owner_sha))
+            if owner.get('session_id') != worker.get('session_id') or owner.get('profile_sha256') != context.assignment['profile_sha256']:
+                return {'status': 'unknown', 'code': 'native_owner_identity_changed'}
         c.revoke_worker(worker['id'], worker['generation'], reason='native-boundary-recovery')
     try:
-        if not auxiliary:
+        if not auxiliary and not pre_native:
             runtime_readback = _recover_owner(owner)
             runtime_readback['owner_receipt_sha256'] = owner_sha
         nonces = {row['identity']['nonce'] for row in state['environment_operations'].values()
             if row['grant']['dispatch_id'] == context.grant['dispatch_id']}
         environments = [row for nonce, row in state['environments'].items() if nonce in nonces]
-        if not environments:
+        if not environments and not pre_native:
             return {'status': 'unknown', 'code': 'native_environment_receipt_unavailable'}
+        setup_readbacks = []
         for row in environments:
             profile_id = row['profile_id']
             profile = read_json(c.root / 'contract/environments' / (profile_id + '.json'), private=True)
@@ -902,9 +924,18 @@ def recover_boundary(context, dispatch):
                 grant=context.grant, dispatch_guard=context.guard, receipt=row['identity'], **options)
             stopped = environment.revoke()
             cleanup = environment.cleanup()
+            if pre_native:
+                stopped = environment.revoke()
+                setup_readbacks.append({'profile_id': profile_id, 'environment': stopped, 'cleanup': cleanup})
+                continue
             if not auxiliary:
                 c.record_worker_stopped(context.grant, profile_id, {'runtime': runtime_readback, 'environment': stopped})
             c.record_environment_cleanup(context.grant, profile_id, cleanup)
+        if pre_native:
+            elapsed = min(context.grant['seconds'], max(0, math.ceil(
+                (c.clock() - instant(current['setup_started_at'])).total_seconds())))
+            c.settle_preparation(context.grant, setup_readbacks, worker_seconds=elapsed)
+            return {'status': 'settled'}
         observation = {'status': 'settled', 'worker_seconds': context.grant['seconds'],
             'resources': {name: 'reset' if next(r for r in context.contract.scope['access'] if r['id'] == name)['kind'] != 'application'
                 else 'unknown' for name in context.grant['resources']}, 'usage': {'tokens': None, 'cost': None}, 'cleanup': 'verified'}

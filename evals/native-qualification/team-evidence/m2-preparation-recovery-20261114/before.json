@@ -1,0 +1,155 @@
+{
+  "classification": "engineering_simulation_real_journal_runner_boundary",
+  "status": "failed",
+  "checks": [
+    {
+      "scenario": "in-process",
+      "status": "failed",
+      "error": "owned pre-native cleanup remained unresolved"
+    },
+    {
+      "scenario": "reopened",
+      "status": "failed",
+      "error": "recovery acceptance mismatch: {'status': 'unknown', 'code': 'native_owner_receipt_unavailable'}"
+    },
+    {
+      "scenario": "before-environment",
+      "status": "failed",
+      "error": "recovery acceptance mismatch: {'status': 'unknown', 'code': 'native_owner_receipt_unavailable'}"
+    },
+    {
+      "scenario": "unresolved-cleanup",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "identity-changed",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "native-admitted",
+      "status": "failed",
+      "error": "'Controller' object has no attribute 'record_native_admission'"
+    },
+    {
+      "scenario": "proxy-admission",
+      "status": "failed",
+      "error": "native admission marker missing before proxy construction"
+    },
+    {
+      "scenario": "missing-marker",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "late-marker",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "registration",
+      "status": "failed",
+      "error": "'Controller' object has no attribute 'record_preparation_setup'"
+    }
+  ],
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:b902196b26872f077a77d9033d3e4d5ca12fe09baae6a58d04d93a009d18b3b9",
+    "tools/engagement_controller.py": "sha256:274efb4956d207733d635697359f47df5725571cc75efbc2f323a777be825d93",
+    "tools/engagement_runner.py": "sha256:2172b4448c7aacb082f3577e053d0ce455bb9065eac0c6ac07b120904efeef3c",
+    "tools/engagement_evidence.py": "sha256:62058504da2387bb9bda0945a52627f2c4906058c009dcbf0f1f248e09626e09"
+  },
+  "unverified": [
+    "Docker/SSH cleanup",
+    "live provider behavior",
+    "native process containment",
+    "research acceptance"
+  ]
+}

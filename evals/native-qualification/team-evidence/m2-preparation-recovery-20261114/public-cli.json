@@ -1,0 +1,264 @@
+{
+  "status": "passed",
+  "classification": "public_cli_signed_fixture_real_runner_unavailable_native_boundary",
+  "external_provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "checks": [
+    {
+      "scenario": "inspect",
+      "status": "passed",
+      "result": {
+        "status": "blocked",
+        "blocked_codes": [
+          "docker_endpoint_unavailable",
+          "native_bundle_platform_mismatch",
+          "native_configuration_invalid",
+          "native_runtime_version_unsupported",
+          "provider_route_unavailable"
+        ]
+      }
+    },
+    {
+      "scenario": "run-resume",
+      "status": "passed",
+      "result": {
+        "run_status": "blocked",
+        "resume_status": "blocked",
+        "cleanup": "verified",
+        "dispatches": 2,
+        "usage_unchanged": true
+      }
+    },
+    {
+      "scenario": "setup-execute-only",
+      "status": "passed",
+      "result": {
+        "attempts": [
+          {
+            "generation": 1,
+            "cleanup": "verified",
+            "dispatches": 1
+          },
+          {
+            "generation": 2,
+            "cleanup": "verified",
+            "dispatches": 2
+          },
+          {
+            "generation": 3,
+            "cleanup": "verified",
+            "dispatches": 3
+          }
+        ],
+        "native_and_environment_effects": 0,
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        }
+      }
+    },
+    {
+      "scenario": "setup-ambiguous-read",
+      "status": "passed",
+      "result": {
+        "attempts": [
+          {
+            "generation": 1,
+            "cleanup": "verified",
+            "dispatches": 1
+          },
+          {
+            "generation": 2,
+            "cleanup": "verified",
+            "dispatches": 2
+          },
+          {
+            "generation": 3,
+            "cleanup": "verified",
+            "dispatches": 3
+          }
+        ],
+        "native_and_environment_effects": 0,
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        }
+      }
+    },
+    {
+      "scenario": "setup-elevated-only",
+      "status": "passed",
+      "result": {
+        "attempts": [
+          {
+            "generation": 1,
+            "cleanup": "verified",
+            "dispatches": 1
+          },
+          {
+            "generation": 2,
+            "cleanup": "verified",
+            "dispatches": 2
+          },
+          {
+            "generation": 3,
+            "cleanup": "verified",
+            "dispatches": 3
+          }
+        ],
+        "native_and_environment_effects": 0,
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        }
+      }
+    },
+    {
+      "scenario": "setup-platform-mismatch",
+      "status": "passed",
+      "result": {
+        "attempts": [
+          {
+            "generation": 1,
+            "cleanup": "verified",
+            "dispatches": 1
+          },
+          {
+            "generation": 2,
+            "cleanup": "verified",
+            "dispatches": 2
+          },
+          {
+            "generation": 3,
+            "cleanup": "verified",
+            "dispatches": 3
+          }
+        ],
+        "native_and_environment_effects": 0,
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        }
+      }
+    },
+    {
+      "scenario": "unknown-factory",
+      "status": "passed",
+      "result": {
+        "classification": "engineering_simulation_unknown_factory_control",
+        "dispatches": 1,
+        "cleanup": "pending",
+        "hold_preserved": true
+      }
+    },
+    {
+      "scenario": "stop-recovery",
+      "status": "passed",
+      "result": {
+        "status": "stopped",
+        "cleanup": "pending",
+        "failures": {
+          "lead-1": "recovery_effect_unresolved"
+        }
+      }
+    },
+    {
+      "scenario": "stop-owned",
+      "status": "passed",
+      "result": {
+        "status": "stopping",
+        "code": "runner_stop_pending",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "resume-owned",
+      "status": "passed",
+      "result": {
+        "status": "rejected",
+        "code": "engagement_already_running",
+        "owner_untouched": true
+      }
+    },
+    {
+      "scenario": "no-simulation-switch",
+      "status": "passed",
+      "result": {
+        "rejected": true
+      }
+    },
+    {
+      "scenario": "v1-status",
+      "status": "passed",
+      "result": {
+        "status": "initialized",
+        "route": "v1"
+      }
+    }
+  ],
+  "unverified": [
+    "complete native run with Docker",
+    "live provider behavior",
+    "research qualification"
+  ],
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:c4c93f619c2e156ddf35c7c94d7027e2a206530696c1db9fcb49711809e696f5",
+    "tools/engagement_runner.py": "sha256:9cd4dc75d1c2865153c560ab5448bcc9d9c6e0f406f9b1737d2be1a0139562ab",
+    "tools/engagement_controller.py": "sha256:afad3aae6b7f3ee017ee6fbfe24d162059ab683b65a8f3a126c7b02fa4460144",
+    "tools/native_engagement.py": "sha256:9a6dbb603df3dab4b1a8daeb468ad84eb9e4dd21178c87003c80f39182e214d2",
+    "evals/native-qualification/smoke/check_engagement_public_cli_e2e.py": "sha256:4a9ca8e994ed0e713e260aa20d5f463f89b779497d102d1c913b3305715af883"
+  }
+}

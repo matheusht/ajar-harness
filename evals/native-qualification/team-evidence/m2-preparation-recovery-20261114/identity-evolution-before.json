@@ -1,0 +1,4 @@
+{
+  "status": "failed",
+  "error": "recovery acceptance mismatch: {'status': 'unknown', 'code': 'preparation_cleanup_unverified'}"
+}

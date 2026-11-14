@@ -300,6 +300,10 @@ class Runner:
         if readback.get('execution_admitted') is False and readback.get('cleanup') == 'verified':
             c.cancel_preparation(context.grant, {'execution_admitted': False, 'cleanup': 'verified'})
             return True
+        if readback.get('setup_only') is True and readback.get('cleanup') == 'verified':
+            elapsed = min(context.grant['seconds'], max(0, math.ceil(time.monotonic() - started)))
+            c.settle_preparation(context.grant, readback['setup_environments'], worker_seconds=elapsed)
+            return True
         if pending and readback.get('cleanup') == 'verified':
             c.record_invocation_observed(context.grant, pending[-1], {
                 'status': terminal['status'] if terminal else 'stopped_unobserved',

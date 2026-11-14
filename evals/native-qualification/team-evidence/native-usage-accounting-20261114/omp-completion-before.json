@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "results": [
+    {
+      "runtime": "omp",
+      "status": "failed",
+      "error": "{\"invocation\": \"first\", \"completion_count\": 2, \"completed\": [{\"kind\": \"native-runtime-event-v1\", \"runtime\": \"omp\", \"session_id\": \"01a1d94f-c902-7785-b786-982965eb1560\", \"invocation_id\": \"first\", \"event\": \"completed\", \"status\": \"completed\", \"usage_available\": true, \"resource_settlement\": \"environment_readback_required\"}, {\"kind\": \"native-runtime-event-v1\", \"runtime\": \"omp\", \"session_id\": \"01a1d94f-c902-7785-b786-982965eb1560\", \"invocation_id\": \"first\", \"event\": \"completed\", \"status\": \"completed\", \"usage_available\": true, \"resource_settlement\": \"environment_readback_required\"}], \"usage\": {\"input_tokens\": 41, \"output_tokens\": 15, \"cached_input_tokens\": 10, \"cache_write_input_tokens\": 0, \"reasoning_output_tokens\": 4, \"total_tokens\": 66, \"monetary_spend\": null, \"estimated_cost\": 7.6e-05, \"provider_requests\": null, \"missing_dimensions\": [\"monetary_spend\", \"provider_requests\"], \"source\": \"native_runtime\"}, \"events\": [\"started\", \"text\", \"usage\", \"completed\", \"completed\"]}",
+      "error_type": "AssertionError"
+    }
+  ]
+}

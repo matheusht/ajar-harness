@@ -1,0 +1,30 @@
+{
+  "status": "failed",
+  "evidence": "controlled_protocol_subprocesses",
+  "provider_calls": 0,
+  "checks": [
+    {
+      "check": "duplicates",
+      "status": "passed",
+      "result": {
+        "total": 8,
+        "native_turn": "turn-1"
+      }
+    },
+    {
+      "check": "late",
+      "status": "failed",
+      "error": "stale turn replaced current turn"
+    },
+    {
+      "check": "rollback",
+      "status": "failed",
+      "error": "invalid cumulative update accepted"
+    },
+    {
+      "check": "missing",
+      "status": "failed",
+      "error": "invalid cumulative update accepted"
+    }
+  ]
+}

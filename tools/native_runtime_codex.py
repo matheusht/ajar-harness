@@ -160,14 +160,14 @@ class Runtime(Session):
             return
         if not self.active or params.get('threadId') != self.session_id:
             return
-        if method == 'turn/started':
-            self.native_turn = identifier(params.get('turn', {}).get('id'))
         turn = params.get('turnId') or params.get('turn', {}).get('id')
         if turn != self.native_turn:
             return
         if method == 'thread/tokenUsage/updated':
             total = params.get('tokenUsage', {}).get('total', {})
-            if any(type(v) is not int or v < self.before.get(k, 0) for k, v in total.items()):
+            previous = self.totals.get(self.session_id, {})
+            if (not isinstance(total, dict) or not set(previous).issubset(total)
+                    or any(type(v) is not int or v < previous.get(k, 0) for k, v in total.items())):
                 raise RuntimeError('native_usage_invalid')
             self.totals[self.session_id] = total
             self._usage({key: value - self.before.get(key, 0) for key, value in total.items()}, {

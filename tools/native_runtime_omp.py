@@ -124,7 +124,7 @@ class Runtime(Session):
         return {'requested': True, 'lab_cleanup': 'not_observed'}
 
     def _finish(self, status):
-        after = self.transport.request('get_session_stats')
+        after = self.transport.request('get_session_stats', defer_events=True)
         before_tokens = (self.stats_before or {}).get('tokens', {})
         tokens = after.get('tokens', {})
         values = {}
@@ -134,6 +134,9 @@ class Runtime(Session):
                 values[key] = a - b
             elif a is not None or b is not None:
                 raise RuntimeError('native_usage_invalid')
+        # OMP separates uncached input from cache reads/writes; the common total includes all three.
+        inputs = ('input', 'cacheRead', 'cacheWrite')
+        values['input'] = sum(values[key] for key in inputs) if all(key in values for key in inputs) else None
         cost_after, cost_before = after.get('cost'), (self.stats_before or {}).get('cost')
         cost = None
         if type(cost_after) in (int, float) and type(cost_before) in (int, float):

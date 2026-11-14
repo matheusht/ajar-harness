@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "evidence": "controlled_protocol_subprocesses",
+  "provider_calls": 0,
+  "checks": [
+    {
+      "check": "duplicates",
+      "status": "passed",
+      "result": {
+        "total": 8,
+        "native_turn": "turn-1"
+      }
+    },
+    {
+      "check": "late",
+      "status": "passed",
+      "result": {
+        "total": 9,
+        "native_turn": "turn-2"
+      }
+    },
+    {
+      "check": "rollback",
+      "status": "passed",
+      "result": {
+        "refusal": "native_usage_invalid",
+        "last_total": 8
+      }
+    },
+    {
+      "check": "missing",
+      "status": "passed",
+      "result": {
+        "refusal": "native_usage_invalid",
+        "last_total": 8
+      }
+    }
+  ]
+}

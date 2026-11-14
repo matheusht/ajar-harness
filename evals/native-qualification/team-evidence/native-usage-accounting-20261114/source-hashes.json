@@ -1,0 +1,7 @@
+{
+  "tools/native_runtime_codex.py": "sha256:6f6c6dc4a591f4f13c449a2f5408790b2253e166695d27d8da01dfcb3265a479",
+  "tools/native_runtime_omp.py": "sha256:f3f01c71e517adcd539b06fb533ffac464785f3c5edf7584e0538d4600645e9a",
+  "tools/native_runtime_transport.py": "sha256:ccd6f346d837dd4a16fac62e7f75dc668fe90bd36eb3159048513a7d6b5b309d",
+  "evals/native-qualification/smoke/check_native_usage_accounting_e2e.py": "sha256:7844d1fa137c037cd3947b6c94b8bca7710c46c8ea00554006506558db3372f7",
+  "evals/native-qualification/smoke/check_native_usage_events_e2e.py": "sha256:46e2da5d07acf6071c6e7f86ea29cb8ef52be8203888502380c57a14226297e9"
+}

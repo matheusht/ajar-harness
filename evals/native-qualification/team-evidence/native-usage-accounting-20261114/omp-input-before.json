@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "results": [
+    {
+      "runtime": "omp",
+      "status": "failed",
+      "error": "{\"runtime\": \"omp\", \"invocation\": \"first\", \"expected\": {\"input_tokens\": 51, \"output_tokens\": 15, \"cached_input_tokens\": 10, \"reasoning_output_tokens\": 4, \"total_tokens\": 66}, \"actual\": {\"input_tokens\": 41, \"output_tokens\": 15, \"cached_input_tokens\": 10, \"cache_write_input_tokens\": 0, \"reasoning_output_tokens\": 4, \"total_tokens\": 66, \"monetary_spend\": null, \"estimated_cost\": 7.6e-05, \"provider_requests\": null, \"missing_dimensions\": [\"monetary_spend\", \"provider_requests\"], \"source\": \"native_runtime\"}}",
+      "error_type": "AssertionError"
+    }
+  ]
+}

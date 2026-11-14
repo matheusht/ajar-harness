@@ -1,0 +1,383 @@
+{
+  "status": "passed",
+  "results": [
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "evidence": "actual_native_loopback_simulated_provider",
+      "identity": {
+        "session_id": "01a1d954-8db5-7a10-9972-1c25fb058d93",
+        "runtime": "codex",
+        "model": "fixture-model",
+        "provider": "oslit-fixture",
+        "history": "ephemeral"
+      },
+      "runtime_version": "0.166.0",
+      "executable": {
+        "path": "/Users/matheusvsky/.codex/packages/standalone/releases/0.166.0-aarch64-apple-darwin/bin/codex",
+        "sha256": "sha256:39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1"
+      },
+      "outcomes": [
+        {
+          "invocation": "first",
+          "expected": {
+            "input_tokens": 51,
+            "output_tokens": 15,
+            "cached_input_tokens": 10,
+            "reasoning_output_tokens": 4,
+            "total_tokens": 66
+          },
+          "usage": {
+            "input_tokens": 51,
+            "output_tokens": 15,
+            "cached_input_tokens": 10,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 4,
+            "total_tokens": 66,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        },
+        {
+          "invocation": "second",
+          "expected": {
+            "input_tokens": 68,
+            "output_tokens": 30,
+            "cached_input_tokens": 18,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 98
+          },
+          "usage": {
+            "input_tokens": 68,
+            "output_tokens": 30,
+            "cached_input_tokens": 18,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 98,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        },
+        {
+          "invocation": "abort",
+          "expected": {
+            "input_tokens": 41,
+            "output_tokens": 19,
+            "cached_input_tokens": 13,
+            "reasoning_output_tokens": 5,
+            "total_tokens": 60
+          },
+          "usage": {
+            "input_tokens": 41,
+            "output_tokens": 19,
+            "cached_input_tokens": 13,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 5,
+            "total_tokens": 60,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "interrupted"
+        },
+        {
+          "invocation": "after_abort",
+          "expected": {
+            "input_tokens": 43,
+            "output_tokens": 23,
+            "cached_input_tokens": 17,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 66
+          },
+          "usage": {
+            "input_tokens": 43,
+            "output_tokens": 23,
+            "cached_input_tokens": 17,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 66,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        }
+      ],
+      "requests": [
+        {
+          "invocation": "first",
+          "round": 1
+        },
+        {
+          "invocation": "first",
+          "round": 2
+        },
+        {
+          "invocation": "first",
+          "round": 3
+        },
+        {
+          "invocation": "second",
+          "round": 1
+        },
+        {
+          "invocation": "second",
+          "round": 2
+        },
+        {
+          "invocation": "second",
+          "round": 3
+        },
+        {
+          "invocation": "abort",
+          "round": 1
+        },
+        {
+          "invocation": "abort",
+          "round": 2
+        },
+        {
+          "invocation": "after_abort",
+          "round": 1
+        }
+      ],
+      "host_calls": [
+        {
+          "invocation": "first",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "first",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "second",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "abort",
+          "tool": "fixture_usage_probe"
+        }
+      ],
+      "external_provider_calls": 0,
+      "unverified": [
+        "live_provider_billing",
+        "research_qualification",
+        "Linux_native_execution"
+      ]
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "evidence": "actual_native_loopback_simulated_provider",
+      "identity": {
+        "session_id": "01a1d954-9bcf-7488-9f85-1a733287aab4",
+        "runtime": "omp",
+        "model": "fixture-model",
+        "provider": "oslit-fixture",
+        "history": "ephemeral"
+      },
+      "runtime_version": "18.20.0",
+      "executable": {
+        "path": "/Users/matheusvsky/.bun/bin/omp",
+        "sha256": "sha256:2b1309b06a743ae939708f939b63f75c7a436ed08c7953309f0e387e0c793ead"
+      },
+      "outcomes": [
+        {
+          "invocation": "first",
+          "expected": {
+            "input_tokens": 51,
+            "output_tokens": 15,
+            "cached_input_tokens": 10,
+            "reasoning_output_tokens": 4,
+            "total_tokens": 66
+          },
+          "usage": {
+            "input_tokens": 51,
+            "output_tokens": 15,
+            "cached_input_tokens": 10,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 4,
+            "total_tokens": 66,
+            "monetary_spend": null,
+            "estimated_cost": 7.6e-05,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        },
+        {
+          "invocation": "second",
+          "expected": {
+            "input_tokens": 68,
+            "output_tokens": 30,
+            "cached_input_tokens": 18,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 98
+          },
+          "usage": {
+            "input_tokens": 68,
+            "output_tokens": 30,
+            "cached_input_tokens": 18,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 98,
+            "monetary_spend": null,
+            "estimated_cost": 0.00011899999999999999,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        },
+        {
+          "invocation": "abort",
+          "expected": {
+            "input_tokens": 41,
+            "output_tokens": 19,
+            "cached_input_tokens": 13,
+            "reasoning_output_tokens": 5,
+            "total_tokens": 60
+          },
+          "usage": {
+            "input_tokens": 41,
+            "output_tokens": 19,
+            "cached_input_tokens": 13,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 5,
+            "total_tokens": 60,
+            "monetary_spend": null,
+            "estimated_cost": 7.25e-05,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "aborted"
+        },
+        {
+          "invocation": "after_abort",
+          "expected": {
+            "input_tokens": 43,
+            "output_tokens": 23,
+            "cached_input_tokens": 17,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 66
+          },
+          "usage": {
+            "input_tokens": 43,
+            "output_tokens": 23,
+            "cached_input_tokens": 17,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 7,
+            "total_tokens": 66,
+            "monetary_spend": null,
+            "estimated_cost": 8.05e-05,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          },
+          "completion": "completed"
+        }
+      ],
+      "requests": [
+        {
+          "invocation": "first",
+          "round": 1
+        },
+        {
+          "invocation": "first",
+          "round": 2
+        },
+        {
+          "invocation": "first",
+          "round": 3
+        },
+        {
+          "invocation": "second",
+          "round": 1
+        },
+        {
+          "invocation": "second",
+          "round": 2
+        },
+        {
+          "invocation": "second",
+          "round": 3
+        },
+        {
+          "invocation": "abort",
+          "round": 1
+        },
+        {
+          "invocation": "abort",
+          "round": 2
+        },
+        {
+          "invocation": "after_abort",
+          "round": 1
+        }
+      ],
+      "host_calls": [
+        {
+          "invocation": "first",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "first",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "second",
+          "tool": "fixture_usage_probe"
+        },
+        {
+          "invocation": "abort",
+          "tool": "fixture_usage_probe"
+        }
+      ],
+      "external_provider_calls": 0,
+      "unverified": [
+        "live_provider_billing",
+        "research_qualification",
+        "Linux_native_execution"
+      ]
+    }
+  ]
+}

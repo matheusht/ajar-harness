@@ -557,6 +557,7 @@ class Session:
             pending.cancel()
 
     def _usage(self, value, names, *, cost=None):
+        """Per-invocation totals; input/output include their cache/reasoning subsets."""
         usage = {output: value.get(source) for output, source in names.items()}
         if any(v is not None and (type(v) is not int or v < 0) for v in usage.values()):
             raise RuntimeError('native_usage_invalid')

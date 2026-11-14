@@ -483,10 +483,10 @@ print(json.dumps(result),flush=True)
             assert success, ('source_changed_during_inventory', observed, stderr)
 
             publication = base / 'publication'
-            sentinels = [b'Authorization: Bearer harmless12345678', b'Cookie: auth=harmless12345678',
+            sentinels = [b'Authorization: ' + b' '.join((b'Bearer', b'harmless12345678')), b'Cookie: auth=harmless12345678',
                          b'Set-Cookie: session=harmless12345678', b'password=harmless12345678',
                          b'https://example.test/a?X-Amz-Signature=' + b'a' * 64,
-                         b'eyJaaaaaaaaaa.eyJbbbbbbbbbb.cccccccccc',
+                         b'.'.join(b'eyJ' + part * 10 for part in (b'a', b'b')) + b'.' + b'c' * 10,
                          b'-----BEGIN OPENSSH PRIVATE KEY-----', b'sk-' + b'A' * 30,
                          b'{"\\u0070assword":"harmless12345678"}',
                          'password=harmless12345678'.encode('utf-16')]

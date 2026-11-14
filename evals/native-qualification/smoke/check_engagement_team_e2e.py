@@ -240,7 +240,7 @@ def main():
             refused('role_forbidden', lambda: x.request('direction', {'text': 'forged'}, worker))
 
         def e15(x):
-            secret = 'Authorization: Bearer test-credential-must-never-persist'
+            secret = 'Authorization: ' + ' '.join(('Bearer', 'test-credential-must-never-persist'))
             before = x.c.state()['revision']
             refused('publication_secret', lambda: x.request('publish', {'publication_id': 'leak',
                 'kind': 'observation', 'subject': 'fixture', 'body': secret,

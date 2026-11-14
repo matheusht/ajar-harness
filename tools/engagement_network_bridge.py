@@ -85,8 +85,13 @@ class _Channel:
             encoded = json.dumps(value, separators=(',', ':'), allow_nan=False).encode() + b'\n'
             if len(encoded) > MAX_FRAME:
                 raise ValueError('frame_size')
-            self.frames.put_nowait(encoded)
-        except (ValueError, queue.Full):
+            while not self.closed.is_set():
+                try:
+                    self.frames.put(encoded, timeout=.05)
+                    return
+                except queue.Full:
+                    continue
+        except ValueError:
             self.stop('bridge_output_overflow')
 
     def _write(self):

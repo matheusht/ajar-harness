@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import http.client
+from contextlib import contextmanager
 import copy
 import ipaddress
 import os
@@ -34,10 +35,30 @@ def _request(stream):
         key, value = row.decode('ascii').rstrip('\r\n').split(':', 1)
         key, value = key.lower(), value.strip()
         if (not re.fullmatch('[a-z0-9-]+', key) or key in headers or
-                key in ('transfer-encoding', 'proxy-authorization', 'expect') or
+                key in ('proxy-authorization', 'expect') or
                 any(ord(c) < 32 or ord(c) == 127 for c in value)):
             raise NetworkDenied('network_headers_invalid')
         headers[key] = value
+
+
+_HOP_HEADERS = {'connection', 'proxy-connection', 'keep-alive', 'proxy-authenticate',
+                'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'}
+
+
+def _forward_headers(headers, *, request=False):
+    blocked = _HOP_HEADERS | {'content-length'} | ({'host'} if request else set())
+    for key, value in headers:
+        if key.lower() == 'connection':
+            blocked |= {token.strip().lower() for token in value.split(',')}
+    total = 0
+    for key, value in headers:
+        total += len(key) + len(value) + 4
+        if (total > 16384 or len(key) + len(value) > 8192 or
+                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key) or
+                any(ord(c) < 32 or ord(c) == 127 for c in value)):
+            raise NetworkDenied('network_headers_invalid')
+        if key.lower() not in blocked:
+            yield key, value
 
 
 class NetworkGate:
@@ -128,53 +149,150 @@ class NetworkGate:
             raise NetworkDenied('network_lease_inactive')
         return parsed, port, addresses[0]
 
-    def fetch(self, url, *, method='GET', headers=None, body=b'', redirects=5):
+    @contextmanager
+    def _exchange(self, url, method, headers, chunks, length):
         if method not in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
             raise NetworkDenied('network_method_invalid')
-        if not isinstance(body, bytes) or len(body) > self.maximum_bytes:
-            raise NetworkDenied('network_body_limit')
-        headers = dict(headers or {})
         for name, value in headers.items():
             if (not isinstance(name, str) or not isinstance(value, str) or
-                    any(ord(c) < 32 or ord(c) == 127 for c in name + value) or
-                    name.lower() in ('host', 'connection', 'proxy-authorization',
-                                     'transfer-encoding', 'content-length')):
+                    not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
+                    any(ord(c) < 32 or ord(c) == 127 for c in value) or
+                    name.lower() in _HOP_HEADERS | {'host', 'content-length'}):
                 raise NetworkDenied('network_header_invalid')
-        for attempt in range(redirects + 1):
-            parsed, port, address = self._destination(url)
-            peer = None
-            connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
-            try:
+        parsed, port, address = self._destination(url)
+        peer = None
+        connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
+        try:
+            with self.dispatch_guard():
+                if not self._active():
+                    raise NetworkDenied('network_lease_inactive')
+                peer = socket.create_connection((address, port), timeout=5)
+                with self.lock:
+                    self.sockets.add(peer)
+                if parsed.scheme == 'https':
+                    wrapped = self.upstream_context.wrap_socket(peer, server_hostname=parsed.hostname)
+                    with self.lock:
+                        self.sockets.discard(peer); self.sockets.add(wrapped)
+                    peer = wrapped
+                connection.sock = peer
+                if not self._active():
+                    raise NetworkDenied('network_lease_inactive')
+                path = (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
+                connection.putrequest(method, path, skip_accept_encoding=True)
+                for name, value in headers.items():
+                    connection.putheader(name, value)
+                connection.putheader('Connection', 'close')
+                connection.putheader('Transfer-Encoding' if length is None else 'Content-Length',
+                                     'chunked' if length is None else str(length))
+                connection.endheaders()
+            total = 0
+            for chunk in chunks:
+                total += len(chunk)
+                if total > self.maximum_bytes:
+                    raise NetworkDenied('network_body_limit')
                 with self.dispatch_guard():
                     if not self._active():
                         raise NetworkDenied('network_lease_inactive')
-                    peer = socket.create_connection((address, port), timeout=5)
-                    with self.lock:
-                        self.sockets.add(peer)
-                    if parsed.scheme == 'https':
-                        wrapped = self.upstream_context.wrap_socket(peer, server_hostname=parsed.hostname)
-                        with self.lock:
-                            self.sockets.discard(peer); self.sockets.add(wrapped)
-                        peer = wrapped
-                    connection.sock = peer
-                    if not self._active():
-                        raise NetworkDenied('network_lease_inactive')
-                    path = (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
-                    connection.request(method, path, body=body, headers={**headers, 'Connection': 'close'})
-                response = connection.getresponse()
-                location = response.getheader('Location')
-                payload = response.read(self.maximum_bytes + 1)
-                if len(payload) > self.maximum_bytes:
-                    raise NetworkDenied('network_response_limit')
+                    connection.send((f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n') if length is None else chunk)
+            if length is not None and total != length:
+                raise NetworkDenied('network_body_incomplete')
+            with self.dispatch_guard():
                 if not self._active():
                     raise NetworkDenied('network_lease_inactive')
+                if length is None:
+                    connection.send(b'0\r\n\r\n')
+            response = connection.getresponse()
+            if not self._active():
+                raise NetworkDenied('network_lease_inactive')
+            yield response, parsed, port, address
+        finally:
+            with self.lock:
+                self.sockets.discard(peer)
+            connection.close()
+            if peer:
+                peer.close()
+
+    def _response_shape(self, response, method):
+        lengths = response.headers.get_all('Content-Length', [])
+        encodings = response.headers.get_all('Transfer-Encoding', [])
+        if (len(lengths) > 1 or (lengths and not lengths[0].isdecimal()) or
+                (encodings and encodings != ['chunked']) or (lengths and encodings) or
+                response.status == 101):
+            raise NetworkDenied('network_response_framing_invalid')
+        no_body = method == 'HEAD' or response.status in (204, 304) or 100 <= response.status < 200
+        length = int(lengths[0]) if lengths else None
+        if not no_body and length is not None and length > self.maximum_bytes:
+            raise NetworkDenied('network_response_limit')
+        return length, no_body
+
+    def _payload(self, response, length, no_body, *, limit=None):
+        total = 0
+        if no_body:
+            return
+        limit = self.maximum_bytes if limit is None else limit
+        while True:
+            if not self._active():
+                raise NetworkDenied('network_lease_inactive')
+            chunk = response.read1(16384)
+            if not self._active():
+                raise NetworkDenied('network_lease_inactive')
+            if not chunk:
+                if length is not None and total != length:
+                    raise NetworkDenied('network_response_incomplete')
+                return
+            total += len(chunk)
+            if total > limit:
+                raise NetworkDenied('network_response_limit')
+            yield chunk
+
+    def _request_chunks(self, stream, length):
+        total = 0
+        while length is None or total < length:
+            if not self._active():
+                raise NetworkDenied('network_lease_inactive')
+            if length is None:
+                row = stream.readline(129)
+                token = row.rstrip(b'\r\n').split(b';', 1)[0]
+                if len(row) > 128 or not row.endswith(b'\r\n') or not re.fullmatch(b'[0-9a-fA-F]+', token):
+                    raise NetworkDenied('network_body_framing_invalid')
+                remaining = int(token, 16)
+                if remaining == 0:
+                    # Trailers cannot silently add credentials or change framing.
+                    if stream.readline(3) != b'\r\n':
+                        raise NetworkDenied('network_body_trailers_unavailable')
+                    return
+            else:
+                remaining = length - total
+            if total + remaining > self.maximum_bytes:
+                raise NetworkDenied('network_body_limit')
+            while remaining:
+                chunk = stream.read(min(16384, remaining))
+                if not chunk:
+                    raise NetworkDenied('network_body_incomplete')
+                remaining -= len(chunk); total += len(chunk)
+                yield chunk
+            if length is None and stream.read(2) != b'\r\n':
+                raise NetworkDenied('network_body_framing_invalid')
+
+    def fetch(self, url, *, method='GET', headers=None, body=b'', redirects=5):
+        # This convenience API remains small; native clients use the streaming proxy.
+        limit = min(self.maximum_bytes, 1024 * 1024)
+        if not isinstance(body, bytes) or len(body) > limit:
+            raise NetworkDenied('network_body_limit')
+        headers = dict(headers or {})
+        for attempt in range(redirects + 1):
+            chunks = (body[index:index + 16384] for index in range(0, len(body), 16384))
+            with self._exchange(url, method, headers, chunks, len(body)) as (response, parsed, port, address):
+                length, no_body = self._response_shape(response, method)
+                if not no_body and length is not None and length > limit:
+                    raise NetworkDenied('network_response_limit')
+                payload = b''.join(self._payload(response, length, no_body, limit=limit))
+                location = response.getheader('Location')
                 if response.status in (301, 302, 303, 307, 308) and location:
                     if attempt == redirects:
                         raise NetworkDenied('network_redirect_limit')
                     next_url = urljoin(url, location)
-                    # Credentials never follow a change of scheme, host, or port.
-                    next_parsed = urlsplit(next_url)
-                    next_port = next_parsed.port or (443 if next_parsed.scheme == 'https' else 80)
+                    next_parsed, next_port, _ = self._destination(next_url)
                     if (next_parsed.scheme, next_parsed.hostname, next_port) != (parsed.scheme, parsed.hostname, port):
                         headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
                     if response.status == 303:
@@ -184,12 +302,6 @@ class NetworkGate:
                 return {'status': response.status, 'body': payload,
                         'host': parsed.hostname, 'port': port, 'peer_address': address,
                         'content_type': response.getheader('Content-Type', 'application/octet-stream')}
-            finally:
-                with self.lock:
-                    self.sockets.discard(peer)
-                connection.close()
-                if peer:
-                    peer.close()
         raise NetworkDenied('network_redirect_limit')
 
     def serve(self, endpoint: Path, *, certificate=None, private_key=None):
@@ -214,6 +326,7 @@ class NetworkGate:
                     return
                 connection = self.request
                 stream = None
+                response_started = False
                 connection.settimeout(5)
                 with gate.lock:
                     gate.sockets.add(connection)
@@ -242,23 +355,46 @@ class NetworkGate:
                         if (headers.get('host') not in hosts or not target.startswith('/') or target.startswith('//')):
                             raise NetworkDenied('network_inner_authority_changed')
                         url = 'https://' + authority + target
-                    length_text = headers.pop('content-length', '0')
+                    encoding = headers.get('transfer-encoding')
+                    length_text = headers.get('content-length', '0')
+                    if (encoding is not None and (encoding != 'chunked' or 'content-length' in headers)):
+                        raise NetworkDenied('network_body_framing_invalid')
                     if not length_text.isdecimal() or not 0 <= int(length_text) <= gate.maximum_bytes:
                         raise NetworkDenied('network_body_limit')
-                    length = int(length_text)
-                    headers.pop('host', None); headers.pop('connection', None); headers.pop('proxy-connection', None)
-                    body = bytearray()
-                    while len(body) < length:
-                        chunk = stream.read(length - len(body))
-                        if not chunk:
-                            break
-                        body.extend(chunk)
-                    if len(body) != length:
-                        raise NetworkDenied('network_body_incomplete')
-                    result = gate.fetch(url, method=method, headers=headers, body=bytes(body))
-                    connection.sendall(f'HTTP/1.1 {result["status"]} Response\r\nContent-Length: {len(result["body"])}\r\nConnection: close\r\n\r\n'.encode() + result['body'])
+                    length = None if encoding else int(length_text)
+                    forwarded = dict(_forward_headers(list(headers.items()), request=True))
+                    chunks = gate._request_chunks(stream, length)
+                    with gate._exchange(url, method, forwarded, chunks, length) as (response, _, _, _):
+                        response_length, no_body = gate._response_shape(response, method)
+                        location = response.getheader('Location')
+                        if response.status in (301, 302, 303, 307, 308) and location:
+                            gate._destination(urljoin(url, location))
+                        lines = [f'HTTP/1.1 {response.status} Response']
+                        lines.extend(f'{key}: {value}' for key, value in _forward_headers(response.getheaders()))
+                        if response_length is not None:
+                            lines.append(f'Content-Length: {response_length}')
+                        elif not no_body:
+                            lines.append('Transfer-Encoding: chunked')
+                        lines.append('Connection: close')
+                        with gate.dispatch_guard():
+                            if not gate._active():
+                                raise NetworkDenied('network_lease_inactive')
+                            response_started = True
+                            connection.sendall(('\r\n'.join(lines) + '\r\n\r\n').encode('latin-1'))
+                        for chunk in gate._payload(response, response_length, no_body):
+                            with gate.dispatch_guard():
+                                if not gate._active():
+                                    raise NetworkDenied('network_lease_inactive')
+                                connection.sendall((f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n') if response_length is None else chunk)
+                        if response_length is None and not no_body:
+                            with gate.dispatch_guard():
+                                if not gate._active():
+                                    raise NetworkDenied('network_lease_inactive')
+                                connection.sendall(b'0\r\n\r\n')
                 except (OSError, ValueError, NetworkDenied, http.client.HTTPException):
                     try:
+                        if response_started:
+                            return
                         connection.sendall(b'HTTP/1.1 403 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
                     except OSError:
                         pass

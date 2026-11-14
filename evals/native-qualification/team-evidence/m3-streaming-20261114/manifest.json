@@ -1,0 +1,23 @@
+{
+  "kind": "environment-streaming-checkpoint-v2",
+  "sources": {
+    "tools/engagement_network.py": "05c2b692487b880cc4e82acd4a40be7c7c573e546649252fc204cd2c219cba1d",
+    "tools/engagement_network_bridge.py": "ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/research_environment.py": "1f5e359081625931457b1c8649dbc833b0fae7756dc1c7a4c051d6e65d115e33",
+    "evals/native-qualification/smoke/check_environment_streaming_e2e.py": "ced00e8ac34888cd53eb2ea23b3a5ba10ec65501b65fbc4646bdac1446aec01c",
+    "evals/native-qualification/smoke/check_research_environment_e2e.py": "0b8556033e96768da8582ab5e981e14d179ccd6c3e9a297063c5e6aaca5bec62",
+    "evals/native-qualification/smoke/check_environment_tls_e2e.py": "38fd6149ea07132a64fb9568892e246c84b8fade3395a635ffd1097afd1b96ea",
+    "evals/native-qualification/smoke/check_environment_proxy_bridge_e2e.py": "0b68937e7457a4ea5ec05cfa1df7981e04539b8e0cdf508077fef0baeb705e6b"
+  },
+  "results": {
+    "bridge-regression.json": "588d0c1b447ef379988b80e09f2f0b2b13f96dc77ee8d8cc34ca1b2241d25ed5",
+    "before-streaming.json": "119749a6ccadd8dd0b01983e0136c908e53892ad3559ebcc5ff4c4d35eefa193",
+    "tls-regression.json": "76b35394ec7f3ae04b1e518a13a3d824a7e574a94000643857189c301575c5b5",
+    "controls-regression.json": "c10afe70fd4bc538fa2df29233131f9c840cc08e4bebc4ebbbe00dc8f9a25554",
+    "streaming-result.json": "68771c64db90e8bd1f3a69c264bc249d50788e83ed4cfcb01140533380094bd2"
+  },
+  "external_dependency": {
+    "path": "/Users/matheusvsky/.codex/worktrees/setup-checked-adoption/llm-redteam-harness/tools/engagement_contract.py",
+    "sha256": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef"
+  }
+}

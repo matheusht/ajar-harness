@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import http.server
 import json
 import os
@@ -81,18 +82,18 @@ def main():
                 gate.serve(endpoint)
                 with socket.socket(socket.AF_UNIX) as peer:
                     peer.connect(str(endpoint)); peer.sendall(f'GET {good} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n'.encode())
-                    reply = b''
-                    while chunk := peer.recv(4096): reply += chunk
-                check('ordinary HTTP proxy reaches real receiver', b'200' in reply and reply.endswith(b'allowed'))
+                    response = http.client.HTTPResponse(peer); response.begin()
+                    status, payload = response.status, response.read(); response.close()
+                check('ordinary HTTP proxy reaches real receiver', status == 200 and payload == b'allowed')
                 with socket.socket(socket.AF_UNIX) as peer:
                     peer.connect(str(endpoint))
                     peer.sendall(f'POST {good} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 6\r\n\r\nab'.encode())
                     time.sleep(.05)
                     try: peer.sendall(b'cdef')
                     except BrokenPipeError: pass
-                    reply = b''
-                    while chunk := peer.recv(4096): reply += chunk
-                check('fragmented request body reaches receiver completely', bodies == [b'abcdef'] and reply.endswith(b'accepted'))
+                    response = http.client.HTTPResponse(peer); response.begin()
+                    status, payload = response.status, response.read(); response.close()
+                check('fragmented request body reaches receiver completely', bodies == [b'abcdef'] and status == 200 and payload == b'accepted')
                 active[0] = False
                 before = len(hits)
                 try: gate.fetch(good)

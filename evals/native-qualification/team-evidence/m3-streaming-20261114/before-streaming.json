@@ -1,0 +1,19 @@
+{
+  "kind": "environment-streaming-e2e-v2",
+  "classification": "actual_local_http_and_stdio_controls",
+  "checks": [
+    {
+      "name": "package streams before upstream completion with exact bytes",
+      "passed": false
+    }
+  ],
+  "unverified": [
+    "Docker containment",
+    "SSH transport",
+    "external acquisition",
+    "provider behavior"
+  ],
+  "status": "failed",
+  "error": "AssertionError: package streams before upstream completion with exact bytes",
+  "source_sha256": "543dd6b8161bd0fcde4f3ef4277be7a16f05dcad4f45c2129d0826157d82da6d"
+}

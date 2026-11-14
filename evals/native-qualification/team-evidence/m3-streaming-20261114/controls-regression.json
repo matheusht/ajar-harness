@@ -1,0 +1,87 @@
+{
+  "kind": "environment-engineering-e2e-v2",
+  "checks": [
+    {
+      "name": "admitted receiver actually observed request",
+      "passed": true
+    },
+    {
+      "name": "denied host denied without forbidden receiver effect",
+      "passed": true
+    },
+    {
+      "name": "userinfo denied without forbidden receiver effect",
+      "passed": true
+    },
+    {
+      "name": "redirect denied without forbidden receiver effect",
+      "passed": true
+    },
+    {
+      "name": "address class checked before connect",
+      "passed": true
+    },
+    {
+      "name": "ordinary HTTP proxy reaches real receiver",
+      "passed": true
+    },
+    {
+      "name": "fragmented request body reaches receiver completely",
+      "passed": true
+    },
+    {
+      "name": "revoked generation denies subsequent effect",
+      "passed": true
+    },
+    {
+      "name": "retired network capability cannot revive",
+      "passed": true
+    },
+    {
+      "name": "proxy endpoint removed on cleanup",
+      "passed": true
+    },
+    {
+      "name": "socket cleanup preserves replaced filesystem object",
+      "passed": true
+    },
+    {
+      "name": "actual owned process starts",
+      "passed": true
+    },
+    {
+      "name": "renewal extends only worker lifetime",
+      "passed": true
+    },
+    {
+      "name": "revocation observes process exit",
+      "passed": true
+    },
+    {
+      "name": "retirement cannot renew",
+      "passed": true
+    },
+    {
+      "name": "unrenewed local owner expires",
+      "passed": true
+    },
+    {
+      "name": "controller loss stops owned process",
+      "passed": true
+    },
+    {
+      "name": "offline inspect reports missing binary without daemon contact",
+      "passed": true
+    }
+  ],
+  "classification": "actual_local_harmless_controls",
+  "unverified": [
+    "Docker isolation",
+    "SSH host",
+    "native HTTPS proxy",
+    "provider behavior",
+    "fresh-target research"
+  ],
+  "status": "passed",
+  "source_sha256": "0b8556033e96768da8582ab5e981e14d179ccd6c3e9a297063c5e6aaca5bec62"
+}

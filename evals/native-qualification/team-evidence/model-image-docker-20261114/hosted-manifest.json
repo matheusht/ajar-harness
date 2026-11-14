@@ -1,0 +1,43 @@
+{
+  "kind": "hosted-model-image-evidence-v1",
+  "source_head": "029324f112e95435ced437df993135f655ac0598",
+  "run_id": 43591473203,
+  "run_url": "https://github.com/matheusht/redteam-harness/actions/runs/43591473203",
+  "jobs": {
+    "codex": 132436919960,
+    "omp": 132436920115
+  },
+  "source_sha256": {
+    ".github/workflows/oslit-environment.yml": "sha256:c16841b0cf73ea705ce943db8aa677de10f52a1aa995ea1078fbf1e61ce7edb6",
+    "evals/native-qualification/smoke/check_model_image_docker_e2e.py": "sha256:76b27313c9228dadf672d5971bb9eddf51bec29ef8ed2107650622f8f7102a79",
+    "tools/install_native_tools.py": "sha256:126d35f3285166d471f8ade1070d3aca1795d0366b4de6cbc14de7a16cd8c944",
+    "config/native-tool-lock.json": "sha256:95a1b7a9496932a7fc3ef43dea7a67dc2df62eb16fb1e0d4ad780ce78302392a",
+    "tools/native_runtime_bootstrap.py": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4",
+    "tools/engagement_network_bridge.py": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533"
+  },
+  "receipts": {
+    "codex": {
+      "path": "hosted-codex.json",
+      "sha256": "sha256:53c61abeb74ab345436864b38b744fc8142b30cad4c09b3c8945fdce9ff524bd",
+      "classification": "actual_docker_model_packaging",
+      "checks_passed": 16,
+      "cleanup": "clean",
+      "native_execution": "not_started"
+    },
+    "omp": {
+      "path": "hosted-omp.json",
+      "sha256": "sha256:2e2b74e35b241874ee01b52956b29204259fa7f838171519fd5b5acb90a6d80b",
+      "classification": "actual_docker_model_packaging",
+      "checks_passed": 16,
+      "cleanup": "clean",
+      "native_execution": "not_started"
+    }
+  },
+  "limits": [
+    "Only Linux amd64 on this disposable GitHub-hosted Ubuntu runner.",
+    "Model images and stopped probes were real; no model process started.",
+    "Contexts/host executable stayed in disposable runner assets and were not uploaded.",
+    "Native startup, tool/provider isolation, recovery and research acceptance are separate evidence."
+  ]
+}

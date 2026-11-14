@@ -1,0 +1,462 @@
+{
+  "kind": "model-image-docker-e2e-v1",
+  "classification": "actual_docker_model_packaging",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "native Linux host matches requested architecture",
+      "passed": true
+    },
+    {
+      "name": "runtime and local Docker endpoint are explicit",
+      "passed": true
+    },
+    {
+      "name": "base is a registry digest",
+      "passed": true
+    },
+    {
+      "name": "artifact directory is new and canonical",
+      "passed": true
+    },
+    {
+      "name": "daemon reports an identity",
+      "passed": true
+    },
+    {
+      "name": "installed base has the exact digest and platform",
+      "passed": true
+    },
+    {
+      "name": "base has no inherited build or runtime effects",
+      "passed": true
+    },
+    {
+      "name": "production context installer completed",
+      "passed": true
+    },
+    {
+      "name": "retained executable comes from the prepared receipt",
+      "passed": true
+    },
+    {
+      "name": "built image has exact fresh identity and ownership",
+      "passed": true
+    },
+    {
+      "name": "built image matches requested platform",
+      "passed": true
+    },
+    {
+      "name": "model image has inert defaults and no inherited execution surfaces",
+      "passed": true
+    },
+    {
+      "name": "probe identity is exact and never started",
+      "passed": true
+    },
+    {
+      "name": "probe has no mounts or network and bounded unprivileged configuration",
+      "passed": true
+    },
+    {
+      "name": "runtime files match complete manifest and root ownership",
+      "passed": true
+    },
+    {
+      "name": "readback did not start the probe",
+      "passed": true
+    }
+  ],
+  "provider_calls": 0,
+  "native_execution": "not_run",
+  "identity": {
+    "nonce": "3c6fa8f0132048b0afa04cd59b46f095",
+    "tag": "oslit-model-check:3c6fa8f0132048b0afa04cd59b46f095",
+    "probe_name": "oslit-model-probe-3c6fa8f0132048b0afa04cd59b46f095",
+    "directory": "/home/runner/work/_temp/oslit-model-assets-codex",
+    "endpoint": "unix:///var/run/docker.sock",
+    "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+    "base_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "base_image": "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39",
+    "platform": "linux/amd64",
+    "image_id": "sha256:8873629b4be42fa0af50f882dbb95f64ee6330e1b69383234377ca0538878540",
+    "probe_id": "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046"
+  },
+  "commands": [
+    {
+      "arguments": [
+        "info",
+        "--format",
+        "{{.ID}}"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "version",
+        "--format",
+        "{{json .}}"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "inspect",
+        "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "ls",
+        "--all",
+        "--quiet",
+        "--no-trunc"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "ls",
+        "--all",
+        "--quiet",
+        "--no-trunc"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "build",
+        "--pull=false",
+        "--network",
+        "none",
+        "--platform",
+        "linux/amd64",
+        "--tag",
+        "oslit-model-check:3c6fa8f0132048b0afa04cd59b46f095",
+        "--label",
+        "io.oslit.model-image-fixture=3c6fa8f0132048b0afa04cd59b46f095",
+        "--iidfile",
+        "/home/runner/work/_temp/oslit-model-assets-codex/image-id",
+        "/home/runner/work/_temp/oslit-model-assets-codex/context"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "inspect",
+        "oslit-model-check:3c6fa8f0132048b0afa04cd59b46f095"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "create",
+        "--name",
+        "oslit-model-probe-3c6fa8f0132048b0afa04cd59b46f095",
+        "--label",
+        "io.oslit.model-image-fixture=3c6fa8f0132048b0afa04cd59b46f095",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        "1000:1000",
+        "--memory",
+        "268435456",
+        "--memory-swap",
+        "268435456",
+        "--cpus",
+        "1",
+        "--pids-limit",
+        "32",
+        "sha256:8873629b4be42fa0af50f882dbb95f64ee6330e1b69383234377ca0538878540"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "inspect",
+        "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "inspect",
+        "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "info",
+        "--format",
+        "{{.ID}}"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "ls",
+        "--all",
+        "--quiet",
+        "--no-trunc",
+        "--filter",
+        "label=io.oslit.model-image-fixture=3c6fa8f0132048b0afa04cd59b46f095"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "inspect",
+        "oslit-model-check:3c6fa8f0132048b0afa04cd59b46f095"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "inspect",
+        "sha256:8873629b4be42fa0af50f882dbb95f64ee6330e1b69383234377ca0538878540"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "inspect",
+        "oslit-model-probe-3c6fa8f0132048b0afa04cd59b46f095"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "inspect",
+        "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "rm",
+        "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "rm",
+        "sha256:8873629b4be42fa0af50f882dbb95f64ee6330e1b69383234377ca0538878540"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "image",
+        "ls",
+        "--all",
+        "--quiet",
+        "--no-trunc"
+      ],
+      "returncode": 0
+    },
+    {
+      "arguments": [
+        "container",
+        "ls",
+        "--all",
+        "--quiet",
+        "--no-trunc"
+      ],
+      "returncode": 0
+    }
+  ],
+  "docker_version": {
+    "Client": {
+      "Platform": {
+        "Name": "Docker Engine - Community"
+      },
+      "Version": "28.0.4",
+      "ApiVersion": "1.48",
+      "DefaultAPIVersion": "1.48",
+      "GitCommit": "b8034c0",
+      "GoVersion": "go1.23.7",
+      "Os": "linux",
+      "Arch": "amd64",
+      "BuildTime": "Tue Mar 25 15:07:16 2025",
+      "Context": "default"
+    },
+    "Server": {
+      "Platform": {
+        "Name": "Docker Engine - Community"
+      },
+      "Components": [
+        {
+          "Name": "Engine",
+          "Version": "28.0.4",
+          "Details": {
+            "ApiVersion": "1.48",
+            "Arch": "amd64",
+            "BuildTime": "Tue Mar 25 15:07:16 2025",
+            "Experimental": "false",
+            "GitCommit": "6430e49",
+            "GoVersion": "go1.23.7",
+            "KernelVersion": "7.0.0-1014-aws",
+            "MinAPIVersion": "1.24",
+            "Os": "linux"
+          }
+        },
+        {
+          "Name": "containerd",
+          "Version": "v2.4.2",
+          "Details": {
+            "GitCommit": "b7a25261e029d68978bbf290df0a62fc819b3c51"
+          }
+        },
+        {
+          "Name": "runc",
+          "Version": "1.5.2",
+          "Details": {
+            "GitCommit": "v1.5.2-0-g29dd3dc2"
+          }
+        },
+        {
+          "Name": "docker-init",
+          "Version": "0.19.0",
+          "Details": {
+            "GitCommit": "de40ad0"
+          }
+        }
+      ],
+      "Version": "28.0.4",
+      "ApiVersion": "1.48",
+      "MinAPIVersion": "1.24",
+      "GitCommit": "6430e49",
+      "GoVersion": "go1.23.7",
+      "Os": "linux",
+      "Arch": "amd64",
+      "KernelVersion": "7.0.0-1014-aws",
+      "BuildTime": "2025-03-25T15:07:16.000000000+00:00"
+    }
+  },
+  "installation": {
+    "kind": "native-model-image-context-receipt-v1",
+    "status": "prepared",
+    "runtime": "codex",
+    "version": "0.166.0",
+    "platform": "linux/amd64",
+    "base_image": "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39",
+    "lock_sha256": "sha256:95a1b7a9496932a7fc3ef43dea7a67dc2df62eb16fb1e0d4ad780ce78302392a",
+    "profile_fields": {
+      "executable": {
+        "path": "/home/runner/work/_temp/oslit-model-assets-codex/context/runtime/bin/model",
+        "sha256": "sha256:b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8"
+      }
+    },
+    "runtime_manifest": {
+      "bin/bun": {
+        "sha256": "sha256:10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235",
+        "mode": 365,
+        "size": 107308936
+      },
+      "bin/model": {
+        "sha256": "sha256:b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+        "mode": 365,
+        "size": 319346888
+      },
+      "engagement_network_bridge.py": {
+        "sha256": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+        "mode": 292,
+        "size": 12971
+      },
+      "native_runtime_bootstrap.py": {
+        "sha256": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4",
+        "mode": 292,
+        "size": 5308
+      },
+      "native_runtime_codex_exec.mjs": {
+        "sha256": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+        "mode": 292,
+        "size": 2031
+      }
+    },
+    "context_manifest_sha256": "sha256:ac66d03e9689cefe84b428568e6a5c631769b1f7c3d1a38a0a82094e97626907",
+    "archives": [
+      {
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-x86_64-unknown-linux-musl.tar.gz",
+        "integrity": "sha256:a0bf572d2f93f056c6712a6da348e96078dc84f3885fd7be67807ef389cb3978",
+        "compressed_bytes": 121764138
+      },
+      {
+        "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip",
+        "integrity": "sha256:bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c",
+        "compressed_bytes": 51794595
+      }
+    ],
+    "execution_verified": false,
+    "next_check": "build_and_verify_model_image"
+  },
+  "runtime_readback": {
+    "bin/bun": {
+      "sha256": "sha256:10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235",
+      "mode": 365,
+      "size": 107308936,
+      "uid": 0,
+      "gid": 0
+    },
+    "bin/model": {
+      "sha256": "sha256:b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+      "mode": 365,
+      "size": 319346888,
+      "uid": 0,
+      "gid": 0
+    },
+    "engagement_network_bridge.py": {
+      "sha256": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+      "mode": 292,
+      "size": 12971,
+      "uid": 0,
+      "gid": 0
+    },
+    "native_runtime_bootstrap.py": {
+      "sha256": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4",
+      "mode": 292,
+      "size": 5308,
+      "uid": 0,
+      "gid": 0
+    },
+    "native_runtime_codex_exec.mjs": {
+      "sha256": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+      "mode": 292,
+      "size": 2031,
+      "uid": 0,
+      "gid": 0
+    }
+  },
+  "cleanup": {
+    "status": "clean",
+    "removed": [
+      "93fcc28583089cb975fdf99f294cdb6becf9fcb637d07bce630813e13b094046",
+      "sha256:8873629b4be42fa0af50f882dbb95f64ee6330e1b69383234377ca0538878540"
+    ],
+    "retained_directory": "/home/runner/work/_temp/oslit-model-assets-codex"
+  },
+  "source_sha256": "sha256:76b27313c9228dadf672d5971bb9eddf51bec29ef8ed2107650622f8f7102a79"
+}

@@ -46,6 +46,31 @@ def error_code(error):
     return value if isinstance(value, str) and re.fullmatch('[a-z_]{1,100}', value) else type(error).__name__
 
 
+def diagnostic_transport(observations, known_secrets):
+    from native_runtime_transport import Transport
+
+    class ObservedTransport(Transport):
+        def request(self, operation, *args, **kwargs):
+            self.observed_operation = operation
+            try:
+                return super().request(operation, *args, **kwargs)
+            finally:
+                self.observed_operation = None
+
+        def receive(self, *args, **kwargs):
+            received = super().receive(*args, **kwargs)
+            for response in self.responses.values():
+                if 'error' in response and len(observations) < 8:
+                    try:
+                        message = safe_publication(canonical(response['error']), known_secrets=known_secrets).decode()[:2048]
+                    except ContractError:
+                        message = '[diagnostic redacted]'
+                    observations.append({'operation': self.observed_operation, 'error': message})
+            return received
+
+    return ObservedTransport
+
+
 PROBE = r'''import json, os, pathlib, socket, sys
 host_file, provider_port, model_pid, lab_port = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 result = {'input_read': pathlib.Path('/input/source-main/main.py').read_text() == 'HARMLESS_SOURCE\n',
@@ -284,12 +309,16 @@ def run_native(root, fixture, result):
     from engagement_controller import Controller
     from engagement_runner import Runner, WorkerContext
     from engagement_native_boundary import NativeBoundary, recover_boundary
+    import native_runtime_codex
     bundle = tool_bundle(fixture, result)
     secret = 'fake-oslit-linux-provider-' + uuid.uuid4().hex
     provider = Provider(root / 'provider-tls', fixture.runtime, secret)
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
     os.environ['OPENAI_API_KEY'], os.environ['SSL_CERT_FILE'] = secret, str(provider.ca)
     boundary = context = runner = None
+    original_transport = native_runtime_codex.Transport
+    result['native_request_errors'] = []
+    native_runtime_codex.Transport = diagnostic_transport(result['native_request_errors'], (secret.encode(),))
     started = time.monotonic()
     try:
         inputs = signed_inputs(root, fixture, provider, bundle)
@@ -406,6 +435,7 @@ def run_native(root, fixture, result):
         check(result, 'verified recovery releases dispatch reservation', current['usage']['reserved_worker_seconds'] == 0
               and not current['resource_holds'])
     finally:
+        native_runtime_codex.Transport = original_transport
         if boundary is not None:
             result['recovery_identities'] = {}
             readers = {

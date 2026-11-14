@@ -1,0 +1,31 @@
+{
+  "classification": "actual_inert_jsonl_process_only",
+  "checks": [
+    {
+      "name": "safe",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "sensitive",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "known_secret",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "large",
+      "passed": false,
+      "error": "AttributeError"
+    },
+    {
+      "name": "success",
+      "passed": false,
+      "error": "AttributeError"
+    }
+  ],
+  "status": "failed"
+}

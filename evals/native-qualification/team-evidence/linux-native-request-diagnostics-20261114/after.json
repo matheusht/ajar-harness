@@ -1,0 +1,26 @@
+{
+  "classification": "actual_inert_jsonl_process_only",
+  "checks": [
+    {
+      "name": "safe",
+      "passed": true
+    },
+    {
+      "name": "sensitive",
+      "passed": true
+    },
+    {
+      "name": "known_secret",
+      "passed": true
+    },
+    {
+      "name": "large",
+      "passed": true
+    },
+    {
+      "name": "success",
+      "passed": true
+    }
+  ],
+  "status": "passed"
+}

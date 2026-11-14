@@ -89,7 +89,7 @@ PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
-UsePAM no
+UsePAM yes
 StrictModes yes
 AllowTcpForwarding no
 AllowAgentForwarding no

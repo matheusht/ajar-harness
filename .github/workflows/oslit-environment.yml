@@ -1,0 +1,51 @@
+name: OSLit owned environment
+
+on:
+  push:
+    branches: [main, codex/oslit-team-contract]
+    paths:
+      - .github/workflows/oslit-environment.yml
+      - tools/research_environment.py
+      - tools/engagement_lease_owner.py
+      - tools/engagement_workspace.py
+      - tools/engagement_contract.py
+      - evals/native-qualification/smoke/check_environment_docker_e2e.py
+  pull_request:
+    paths:
+      - .github/workflows/oslit-environment.yml
+      - tools/research_environment.py
+      - tools/engagement_lease_owner.py
+      - tools/engagement_workspace.py
+      - tools/engagement_contract.py
+      - evals/native-qualification/smoke/check_environment_docker_e2e.py
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Select the disposable fixture image
+        run: |
+          docker --host unix:///var/run/docker.sock pull python:3.11-slim-bookworm
+          image_id=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' python:3.11-slim-bookworm)
+          printf 'OSLIT_FIXTURE_IMAGE=%s\n' "$image_id" >> "$GITHUB_ENV"
+      - name: Exercise the production environment with harmless inputs
+        run: |
+          python3 evals/native-qualification/smoke/check_environment_docker_e2e.py \
+            --endpoint unix:///var/run/docker.sock \
+            --image-id "$OSLIT_FIXTURE_IMAGE" \
+            --output "$RUNNER_TEMP/oslit-docker/result.json"
+      - name: Preserve actual environment observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oslit-docker-${{ github.sha }}
+          path: ${{ runner.temp }}/oslit-docker/*.json
+          if-no-files-found: warn

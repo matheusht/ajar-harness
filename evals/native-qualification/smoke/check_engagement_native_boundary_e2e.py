@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools'))
 from engagement_contract import canonical, digest
 from engagement_controller import ControllerError
+from engagement_runner import WorkerContext, frozen_inputs
 from native_runtime_codex import Runtime as CodexRuntime
 from native_runtime_omp import Runtime as OMPRuntime
 
@@ -224,11 +225,8 @@ def simulated_boundary(path, lease_seconds=30):
     workspace = x.workspace('lead-1')
     grant = x.c.prepare_worker_dispatch('lead-1', 1, workspace, seconds=lease_seconds,
         resources=['source-main'], adapter_id='fixture-adapter')
-    context = SimpleNamespace(controller=x.c, contract=x.contract, worker=x.c.state()['workers']['lead-1'],
-        grant=grant, workspace=workspace, assignment=x.contract.scope['runtime_assignments'][0], principal=x.lead)
-    context.authorize = lambda: (x.c.authorize_dispatch(context.grant) and context.grant)
-    context.guard = lambda: x.c.dispatch_guard(context.grant)
-    context.submit = lambda request: x.c.submit(context.principal, request)
+    runner = SimpleNamespace(controller=x.c, contract=frozen_inputs(x.c), changed=threading.Event())
+    context = WorkerContext(runner, x.c.state()['workers']['lead-1'], grant, workspace)
     def bundle(profile, identity):
         return {'support_input': {'path': profile['tool_bundle']['path'],
                     'manifest_sha256': profile['tool_bundle']['manifest_sha256']},
@@ -239,7 +237,6 @@ def simulated_boundary(path, lease_seconds=30):
     stack.enter_context(patch.object(boundary, 'ProxyBridge', SimulatedProxy))
     stack.enter_context(patch.object(boundary, '_inspect_bundle', bundle))
     stack.enter_context(patch.object(boundary, '_credential_resolver', lambda: lambda profile: SimpleNamespace(check=lambda: None, revoke=lambda: None)))
-    stack.enter_context(patch.object(boundary, '_methodology', lambda: b'Inspect the harmless fixture under signed authority.\n'))
     stack.enter_context(patch.object(boundary.codex, 'Runtime', SimulatedRuntime))
     stack.enter_context(patch.object(boundary.codex, 'NativeExecutor', SimulatedExecutor, create=True))
     SimulatedEnvironment.instances = []
@@ -409,7 +406,7 @@ def renewable_capture(path):
         def renew_parent():
             while not stopped.wait(.3):
                 try:
-                    context.grant = x.c.renew_dispatch(context.grant, seconds=3)
+                    context.renew(3)
                     instance.renew(2)
                 except Exception as error:
                     failures.append(type(error).__name__ + ': ' + str(error))
@@ -580,7 +577,70 @@ def preparation_without_execution(path):
         require(result.get('execution_admitted') is False, 'preflight failure lost its no-execution fact')
         require(instance.owner_receipt is None and not SimulatedEnvironment.instances,
             'preflight failure reached native or environment execution')
-        require(result['cleanup'] == 'unresolved', 'boundary invented process absence without controller cancellation')
+        require(result['cleanup'] == 'verified', 'unused preparation did not provide explicit cancellation cleanup')
+        require(result['runtime']['process_exited'] is False and result['runtime']['child_absence'] == 'not_observed',
+            'unused preparation invented process absence')
+        require(result['resources'] == {'source-main': 'unchanged'}, 'unused preparation claimed input reset')
+
+
+def frozen_guidance(path):
+    boundary, x, context, stack = simulated_boundary(path)
+    with stack, patch.object(boundary, '_methodology', return_value=b'Mutable repository text.\n', create=True):
+        instance = boundary.NativeBoundary(context)
+        try:
+            instance.start()
+            for name in ('methodology.md', 'protocol.md'):
+                require((instance.bootstrap / name).read_bytes() == context.contract.frozen_files[name],
+                    'worker did not receive frozen ' + name)
+        finally:
+            instance.finish()
+
+
+def missing_guidance(path):
+    boundary, x, context, stack = simulated_boundary(path)
+    with stack:
+        context.contract.frozen_files.pop('protocol.md')
+        instance = boundary.NativeBoundary(context)
+        try:
+            refused('native_engagement_guidance_unavailable', instance.start)
+            require(not instance.execution_admitted and not SimulatedEnvironment.instances, 'missing guidance reached execution')
+        finally:
+            result = instance.finish()
+        require(result['cleanup'] == 'verified', 'missing guidance preparation could not be cancelled')
+
+
+def unused_preparation_cleanup(path):
+    for mode in ('clean', 'directory-failure', 'gate-failure', 'admitted-without-owner'):
+        root = path / mode
+        root.mkdir(mode=0o700)
+        boundary, x, context, stack = simulated_boundary(root)
+        with stack:
+            instance = boundary.NativeBoundary(context)
+            instance.state_dir = root / 'staged'; instance.state_dir.mkdir(mode=0o700)
+            instance.socket_dir = root / 'sockets'; instance.socket_dir.mkdir(mode=0o700)
+            (instance.state_dir / 'private-material').write_bytes(b'fixture-private-key-placeholder')
+            closed = []
+            def close_gate():
+                closed.append(True)
+                if mode == 'gate-failure':
+                    raise OSError('fixture close failure')
+            instance.lab_gate = SimpleNamespace(close=close_gate)
+            instance.credential_binding = SimpleNamespace(revoke=lambda: closed.append('credentials'))
+            instance.execution_admitted = mode == 'admitted-without-owner'
+            if mode == 'directory-failure':
+                with patch.object(boundary.shutil, 'rmtree', side_effect=OSError('fixture remove failure')):
+                    result = instance.finish()
+            else:
+                result = instance.finish()
+            require(closed == [True, 'credentials'], 'preparation resources were not closed')
+            require(result['cleanup'] == ('verified' if mode == 'clean' else 'unresolved'),
+                'unused preparation cleanup overstated its observation')
+            require(result['runtime']['process_exited'] is False, 'missing owner became process absence proof')
+            if mode == 'clean':
+                require(not instance.state_dir.exists() and not instance.socket_dir.exists(), 'preparation directories remained')
+                require(instance.finish() == result, 'cancellation cleanup changed on retry')
+            elif mode == 'directory-failure':
+                require(instance.state_dir.exists(), 'failed cleanup directory disappeared')
 
 
 def environment_effect_selection(path):
@@ -777,12 +837,14 @@ def main():
         'renewable-capture': renewable_capture, 'cancelled-capture': cancelled_capture,
         'environment-effect-selection': environment_effect_selection,
         'preparation-without-execution': preparation_without_execution,
+        'unused-preparation-cleanup': unused_preparation_cleanup,
+        'frozen-guidance': frozen_guidance, 'missing-guidance': missing_guidance,
         'native-response-chunks': native_response_chunks, 'native-status-bounds': native_status_bounds}
     report = {'kind': 'engagement-native-boundary-e2e-v2', 'classification': 'engineering_simulation',
         'provider_calls': 0, 'docker_calls': 0, 'ssh_calls': 0, 'research_acceptance': 'not_run', 'scenarios': [],
         'source_sha256': {name: digest((ROOT / name).read_bytes()) for name in (
             'tools/engagement_controller.py', 'tools/engagement_evidence.py', 'tools/engagement_native_boundary.py',
-            'tools/research_environment.py', 'tools/engagement_network.py',
+            'tools/research_environment.py', 'tools/engagement_network.py', 'tools/engagement_runner.py',
             'evals/native-qualification/smoke/check_engagement_native_boundary_e2e.py')}}
     for name, operation in scenarios.items():
         if args.scenario not in ('all', name):

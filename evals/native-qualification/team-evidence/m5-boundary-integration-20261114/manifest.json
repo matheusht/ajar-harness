@@ -1,0 +1,15 @@
+{
+  "kind": "boundary-integration-evidence-manifest-v1",
+  "files": {
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/README.md": "sha256:cb18f615ae6b4be9856927706270dbda8ef5c0ab0b2c5438e94cdfc2ab2e96bc",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/account-after.json": "sha256:ccf1835ff7bad65aa72f08af017bdc7d0c0b10496afee67b2b57f0f58b58a195",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-account-integration.json": "sha256:0a704a8651472819ace18728d45b0b4a19f5e3aa10025f1e8fcb940b7d14392b",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-atomic-renewal-api.json": "sha256:2cdcbb713a60c711b63e6cfe3573e824bd654638bb5d84acc86ccc4faeb445de",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-frozen-guidance.json": "sha256:b2d401fc291143d0fdaf6066e02fdb4ba1e41b7b74e9a460f292de9d8eed375d",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-missing-guidance.json": "sha256:f6f2851afc35b89192fbf23df8304ab6efe23fdb41ba16de6f3ec8f0a450372e",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-preparation-cancellation.json": "sha256:f86a2659e98dc3fca15d1183d50f3d47588055542d8ce660f3e40e86e54ec7d9",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-renewal-review.json": "sha256:5ade729b009501b3c6caed8bf48088074e3608e325d99c261caca5ec95acdc25",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/before-unused-cleanup.json": "sha256:04669e705fa58cba23aedf8b6c5d49771aa7cab9360bfcae195013500f221948",
+    "evals/native-qualification/team-evidence/m5-boundary-integration-20261114/boundary-after.json": "sha256:16bf7e32f91f4096893bf3613e357de1e83b41123ddd3fa614afcb98576addb1"
+  }
+}

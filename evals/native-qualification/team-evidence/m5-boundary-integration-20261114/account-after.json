@@ -1,0 +1,48 @@
+{
+  "kind": "native-target-accounts-e2e",
+  "classification": "actual_owned_http_with_simulated_native_environment",
+  "external_provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "account-workflow",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewed-reply",
+      "status": "pass"
+    },
+    {
+      "scenario": "revoked-reply",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-record",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-workspace",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-input",
+      "status": "pass"
+    },
+    {
+      "scenario": "missing-credential",
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:f492a20dcc1f9321ea22d2671a2ec34c3c78af13e3ac96a1004534d6a6fa6c39",
+    "tools/target_accounts.py": "sha256:0d0a9fd566c26c7ff9ce1a97ec328889cb3cca660780ca2806df7f0ce93e01f7",
+    "tools/engagement_network.py": "sha256:8624cdf213381dee7495d6e3c469cfb56b1ee0e8a0e0c753ceb8a4de98df9cb7",
+    "tools/engagement_evidence.py": "sha256:95e44821166be8f718ca0fae85e351a5befdc9e91ec07cf94b976a1703cedd39",
+    "tools/engagement_controller.py": "sha256:069a25d933e7c3e5f810914730db1ace723da570adf35b0a78222c30cc1de729",
+    "tools/engagement_runner.py": "sha256:7e66234c8a957027ff8153bed74888578651b396944032038913190499bb2e9f",
+    "evals/native-qualification/smoke/check_native_target_accounts_e2e.py": "sha256:1db614517f39472e1bf15d81685647aeb8bb802d205f2e8a4164109f4bd4016f"
+  }
+}

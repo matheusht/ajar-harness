@@ -1,0 +1,48 @@
+{
+  "kind": "native-target-accounts-e2e",
+  "classification": "actual_owned_http_with_simulated_native_environment",
+  "external_provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "account-workflow",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewed-reply",
+      "status": "fail",
+      "error": "'WorkerContext' object has no attribute 'renew'"
+    },
+    {
+      "scenario": "revoked-reply",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-record",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-workspace",
+      "status": "pass"
+    },
+    {
+      "scenario": "reference-input",
+      "status": "pass"
+    },
+    {
+      "scenario": "missing-credential",
+      "status": "pass"
+    }
+  ],
+  "status": "fail",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:f492a20dcc1f9321ea22d2671a2ec34c3c78af13e3ac96a1004534d6a6fa6c39",
+    "tools/target_accounts.py": "sha256:0d0a9fd566c26c7ff9ce1a97ec328889cb3cca660780ca2806df7f0ce93e01f7",
+    "tools/engagement_network.py": "sha256:8624cdf213381dee7495d6e3c469cfb56b1ee0e8a0e0c753ceb8a4de98df9cb7",
+    "tools/engagement_evidence.py": "sha256:c5406c6b6f20dbbd7169b64d782d752b9faf2b2aa77915ff7c5564e7999b7e88",
+    "tools/engagement_controller.py": "sha256:c4bc955be12fd9614eb20bf28eba475f51311a14b40741491b152d8292af0530",
+    "evals/native-qualification/smoke/check_native_target_accounts_e2e.py": "sha256:71cf540444e9edf6901463559dab211050dc9503e2b77f98db93198eff63740a"
+  }
+}

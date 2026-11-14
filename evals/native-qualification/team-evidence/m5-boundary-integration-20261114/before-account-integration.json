@@ -1,0 +1,48 @@
+{
+  "kind": "native-target-accounts-e2e",
+  "classification": "actual_owned_http_with_simulated_native_environment",
+  "external_provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "account-workflow",
+      "status": "fail",
+      "error": "target_account_binding_unavailable"
+    },
+    {
+      "scenario": "renewed-reply",
+      "status": "fail",
+      "error": "target_account_binding_unavailable"
+    },
+    {
+      "scenario": "reference-record",
+      "status": "fail",
+      "error": "wrong reference isolation refusal"
+    },
+    {
+      "scenario": "reference-workspace",
+      "status": "fail",
+      "error": "wrong reference isolation refusal"
+    },
+    {
+      "scenario": "reference-input",
+      "status": "fail",
+      "error": "wrong reference isolation refusal"
+    },
+    {
+      "scenario": "missing-credential",
+      "status": "fail",
+      "error": "wrong missing credential refusal"
+    }
+  ],
+  "status": "fail",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:d7130184455f9b79b787dbe592c628f32563b64a472d889bf36e8a74bd99b3e0",
+    "tools/engagement_network.py": "sha256:978ec14335ce4a3d03314033a62210603f918984370f3df11a30f735dce7fdb3",
+    "tools/engagement_evidence.py": "sha256:c5406c6b6f20dbbd7169b64d782d752b9faf2b2aa77915ff7c5564e7999b7e88",
+    "tools/engagement_controller.py": "sha256:3d758b943b908025968f048d67eadc8b57c53d8ff5ad7d1f49e91fc831689066",
+    "evals/native-qualification/smoke/check_native_target_accounts_e2e.py": "sha256:8978d52bb4adeb78309798b9b786c6a331e14a99947df2412bedf14d9cf9c15c"
+  }
+}

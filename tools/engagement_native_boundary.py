@@ -23,11 +23,12 @@ from urllib.parse import urlsplit
 import uuid
 
 from engagement_contract import canonical, digest, read_bytes, read_json, source_manifest
-from engagement_controller import ControllerError, instant
+from engagement_controller import ControllerError, instant, overlap
 from engagement_network import NetworkGate
 from engagement_network_bridge import ProxyBridge
 from research_environment import Environment
 from native_runtime_transport import HostOperation, MAX_FRAME
+from target_accounts import TargetAccountError, TargetAccountResolver
 import native_runtime_codex as codex
 import native_runtime_omp as omp
 
@@ -52,12 +53,14 @@ def _inspect_bundle(profile, identity):
     return (codex if profile['kind'] == 'codex' else omp).inspect_tool_bundle(profile, identity)
 
 
-def _methodology():
-    path = Path(__file__).resolve().parents[1] / 'engine/native-engagement-method.md'
+def _guidance(contract):
     try:
-        return read_bytes(path, max_bytes=1024 * 1024)
-    except Exception:
-        raise BoundaryError('native_engagement_method_unavailable') from None
+        result = {name: contract.frozen_files[name] for name in ('methodology.md', 'protocol.md')}
+        if any(type(content) is not bytes or not 0 < len(content) <= 1024 * 1024 for content in result.values()):
+            raise ValueError()
+        return result
+    except (KeyError, AttributeError, ValueError):
+        raise BoundaryError('native_engagement_guidance_unavailable') from None
 
 
 def _origin(value):
@@ -207,6 +210,8 @@ class NativeBoundary:
         self.capture_done = None
         self.bootstrap = self.certificate = self.private_key = None
         self.credential_binding = None
+        self.target_accounts = None
+        self.network_operations = {}
         self.operations = {}
         self.operation_lock = threading.Lock()
         self.state_dir = self.socket_dir = None
@@ -266,16 +271,57 @@ class NativeBoundary:
         self.controller.record_runtime_preparation_owner(self.context.grant, receipt)
         self.owner_receipt = copy.deepcopy(receipt)
 
+    def _target_reference(self):
+        value = os.environ.get('OSLIT_ACCOUNT_BINDINGS')
+        if value is None:
+            return None
+        reference = Path(value)
+        try:
+            if not reference.is_absolute():
+                raise ValueError()
+            resolved = reference.resolve(strict=True)
+        except (OSError, ValueError):
+            raise BoundaryError('target_account_references_unavailable') from None
+        protected = [self.controller.root, self.context.workspace]
+        protected.extend(Path(value) for value in self.context.contract.inputs['access_files'].values())
+        protected.extend(Path(profile['tool_bundle']['path']) for profile in self.context.contract.runtime_profiles.values())
+        protected.extend(Path(worker['workspace']) for worker in self.controller.state()['workers'].values()
+            if worker.get('workspace'))
+        if any(overlap(resolved, path.resolve()) for path in protected):
+            raise BoundaryError('target_account_references_exposed')
+        return reference
+
+    def _observe_network(self, observation):
+        with self.controller.lock():
+            operation_id = observation['operation_id']
+            if observation['phase'] == 'intent':
+                self.context.authorize()
+                if self.environment is None or self.environment.identity is None:
+                    raise BoundaryError('native_network_environment_unavailable')
+                admitted = copy.deepcopy(self.context.grant)
+                nonce = self.environment.receipt()['nonce']
+            else:
+                if operation_id not in self.network_operations:
+                    raise BoundaryError('native_network_intent_missing')
+                admitted, nonce = self.network_operations[operation_id]
+            result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation)
+            if observation['phase'] == 'intent':
+                self.network_operations[operation_id] = (admitted, nonce)
+            else:
+                self.network_operations.pop(operation_id)
+            return result
+
     def start(self):
         self.context.authorize()
-        refs = sorted({ref for access in self.accesses for ref in access['account_refs']})
-        if refs:
-            error = BoundaryError('target_account_binding_unavailable')
-            error.account_refs = refs
-            raise error
+        if any(access['kind'] == 'application' for access in self.accesses):
+            try:
+                self.target_accounts = TargetAccountResolver(self._target_reference(), self.scope,
+                    self.context.authorize, self._observe_network, environment_profile_id=self.environment_id)
+            except TargetAccountError as error:
+                raise BoundaryError(str(error)) from None
         bundle_id = 'native-runtime'
         bundle = _inspect_bundle(self.profile, bundle_id)
-        method = _methodology()
+        guidance = _guidance(self.context.contract)
         self.credential_binding = _credential_resolver()(self.profile)
         self.credential_binding.check()
         workers = self.controller.root / 'workers'
@@ -290,7 +336,8 @@ class NativeBoundary:
         _write(bootstrap / 'bridge.py', read_bytes(Path(__file__).with_name('engagement_network_bridge.py')))
         _write(bootstrap / 'goal.md', self.context.contract.goal_bytes)
         _write(bootstrap / 'scope.md', read_bytes(self.controller.root / 'contract/scope.md', private=True))
-        _write(bootstrap / 'methodology.md', method)
+        for name, content in guidance.items():
+            _write(bootstrap / name, content)
         self.bootstrap, self.certificate, self.private_key = bootstrap, certificate, key
         support = {'bootstrap': {'path': str(bootstrap), 'manifest_sha256': digest(canonical(source_manifest(bootstrap)))}}
         self.controller.register_support_inputs(self.context.grant, support)
@@ -301,7 +348,8 @@ class NativeBoundary:
         provider_address = self.provider_gate.serve_tcp(certificate=certificate, private_key=key)
         provider_url = f'http://127.0.0.1:{provider_address}'
         self.lab_gate = NetworkGate(self.routes['lab'], self._active, maximum_bytes=maximum,
-            dispatch_guard=self.context.guard)
+            dispatch_guard=self.context.guard,
+            request_binder=self.target_accounts.bind if self.target_accounts is not None else None)
         self.lab_gate.serve(self.socket_dir / 'lab.sock', certificate=certificate, private_key=key)
         self.environment = Environment(self.environment_profile, self.environment_reference['limits'],
             self.context.authorize, self._observe, grant=self.context.grant,
@@ -690,6 +738,11 @@ class NativeBoundary:
                         gate.close()
                     except Exception:
                         transports_closed = False
+            if self.target_accounts is not None:
+                try:
+                    self.target_accounts.close()
+                except Exception:
+                    transports_closed = False
             runtime_readback = {'session_id': self.owner_receipt.get('session_id') if self.owner_receipt else None,
                 'process_exited': False, 'child_absence': 'not_observed', 'capabilities_revoked': True}
             if self.runtime is not None:
@@ -703,7 +756,10 @@ class NativeBoundary:
                 except Exception:
                     pass
             if self.credential_binding is not None:
-                self.credential_binding.revoke()
+                try:
+                    self.credential_binding.revoke()
+                except Exception:
+                    transports_closed = False
             if self.owner_receipt is not None:
                 runtime_readback['owner_receipt_sha256'] = digest(canonical(self.owner_receipt))
             if self.native_owner is not None:
@@ -723,20 +779,26 @@ class NativeBoundary:
                     cleanup = self.environment.cleanup()
                 except Exception:
                     pass
+            unused = (not self.execution_admitted and self.owner_receipt is None and self.runtime is None
+                and self.native_owner is None and self.environment is None and self.proxy is None)
             verified = (capture_closed and transports_closed and runtime_readback.get('process_exited') is True and
                 runtime_readback.get('child_absence') == 'verified' and
                 runtime_readback.get('capabilities_revoked') is True and self.owner_receipt is not None and
                 cleanup is not None and cleanup.get('status') == 'clean' and
                 environment_readback is not None and environment_readback.get('status') in ('stopped', 'absent'))
+            verified = verified or (unused and capture_closed and transports_closed)
+            if verified:
+                for directory in (self.socket_dir, self.state_dir):
+                    if directory is not None:
+                        try:
+                            shutil.rmtree(directory)
+                        except OSError:
+                            verified = False
             self.finished = {'runtime': runtime_readback, 'environment': environment_readback,
                 'execution_admitted': self.execution_admitted,
                 'environment_cleanup': cleanup, 'cleanup': 'verified' if verified else 'unresolved',
-                'resources': {row['id']: 'reset' if verified and row['kind'] != 'application' else 'unknown' for row in self.accesses}}
-            if verified:
-                if self.socket_dir is not None:
-                    shutil.rmtree(self.socket_dir)
-                if self.state_dir is not None:
-                    shutil.rmtree(self.state_dir)
+                'resources': {row['id']: ('unchanged' if unused else 'reset') if verified and (unused or row['kind'] != 'application')
+                    else 'unknown' for row in self.accesses}}
             return copy.deepcopy(self.finished)
 
 

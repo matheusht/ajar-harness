@@ -1,0 +1,24 @@
+{
+  "kind": "application-reset-hosted-evidence-v1",
+  "head": "9bd4b6b54287a3051e5b8cfdd2d4180d6b74f2f6",
+  "run_id": 43595436761,
+  "job_id": 132448803842,
+  "url": "https://github.com/matheusht/redteam-harness/actions/runs/43595436761",
+  "classification": "actual_docker_owned_counter",
+  "checks_passed": 9,
+  "source_sha256": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+    "evals/native-qualification/smoke/check_application_owner_e2e.py": "sha256:1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b",
+    "evals/native-qualification/smoke/check_application_owner_docker_e2e.py": "sha256:c20bc25c48ccba71635ea31cf012902d68248c4150a6f237e4e164b17d6b2777"
+  },
+  "artifact_sha256": "sha256:2dca9744f234c777391cca9e5242ff837a6bd9960de1b5ab483b9093f43b3ca0",
+  "unverified": [
+    "Joined Codex/OMP protected capture",
+    "Separate remote SSH host",
+    "Research acceptance"
+  ]
+}

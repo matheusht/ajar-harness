@@ -65,15 +65,43 @@ def observe_loader(environment_class, result):
         environment_class.launch_stdio = original
 
 
+@contextmanager
+def observe_catalog(runtime_module, result):
+    original = runtime_module.Transport
+
+    class ObservedTransport(original):
+        def request(self, operation, *args, **kwargs):
+            try:
+                response = super().request(operation, *args, **kwargs)
+            except Exception as error:
+                if operation == 'catalog':
+                    code = getattr(error, 'code', None)
+                    result['omp_catalog_request'] = {'status': 'failed',
+                        'failure': code if code in ('native_transport_closed', 'native_response_timeout',
+                            'native_protocol_invalid_or_overflow', 'native_request_rejected') else 'other',
+                        'returncode_before_cleanup': self.process.poll()}
+                raise
+            if operation == 'catalog':
+                result['omp_catalog_request'] = {'status': 'returned'}
+            return response
+
+    runtime_module.Transport = ObservedTransport
+    try:
+        yield
+    finally:
+        runtime_module.Transport = original
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
+    import native_runtime_omp
     original = fixture_module.run_native
 
     def run_native(root, fixture, result):
         if fixture.runtime != 'omp':
             return original(root, fixture, result)
-        with observe_loader(research_environment.Environment, result):
+        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result):
             return original(root, fixture, result)
 
     fixture_module.run_native = run_native

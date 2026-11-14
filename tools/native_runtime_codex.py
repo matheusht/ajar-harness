@@ -13,8 +13,10 @@ class Runtime(Session):
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
                  host_call=None, dispatch_guard=None, native_executor=None, credential_resolver=None,
                  protected_model=False, profile_sha256=None, provider_environment=None,
-                 owner_observer=None):
-        env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard)
+                 owner_observer=None, model_owner=None):
+        if model_owner is not None and command_prefix:
+            raise RuntimeError('native_model_boundary_override_refused')
+        env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard, model_owner)
         if owner_observer is not None and (not protected_model or not callable(owner_observer)):
             raise RuntimeError('native_owner_observer_invalid')
         self.owner_observer = owner_observer
@@ -23,7 +25,7 @@ class Runtime(Session):
         self.native_executor = native_executor
         if profile.get('credential_ref') is not None and native_executor is None:
             raise RuntimeError('native_credential_tool_boundary_unavailable')
-        env['CODEX_HOME'] = str(self.state_dir)
+        env['CODEX_HOME'] = str(self.process_state)
         self.authentication = 'not_requested'
         self.totals = {}
         self.before = {}
@@ -36,12 +38,14 @@ class Runtime(Session):
             raise RuntimeError('runtime_state_config_changed')
         config.write_bytes(content)
         config.chmod(0o400)
-        command = [*command_prefix, profile['executable']['path'], '--strict-config', 'app-server', '--stdio']
+        command = [*command_prefix, model_owner.paths.executable if model_owner else profile['executable']['path'],
+                   '--strict-config', 'app-server', '--stdio']
         command = self._model_command(command, env, protected_model=protected_model,
             profile_sha256=profile_sha256, credential_resolver=credential_resolver,
             provider_environment=provider_environment)
         try:
-            self.transport = Transport(command, env, str(self.workspace), self._event)
+            launcher = (lambda command: model_owner.launch_model(command, env, self.credential_binding)) if model_owner else None
+            self.transport = Transport(command, env, str(self.workspace), self._event, launcher=launcher)
             self._capture_owner()
             self.transport.request('initialize', {'clientInfo': {'name': 'oslit-runtime', 'version': '2'},
                                                   'capabilities': {'experimentalApi': True}})
@@ -78,7 +82,7 @@ class Runtime(Session):
     def fresh(self):
         self._idle()
         result = self.transport.request('thread/start', {
-            'ephemeral': True, 'cwd': str(self.workspace), 'model': self.profile['model'],
+            'ephemeral': True, 'cwd': str(self.process_workspace), 'model': self.profile['model'],
             'modelProvider': self.profile['provider'], 'approvalPolicy': 'never',
             **({'permissions': 'oslit-worker', 'environments': [self.native_executor.selection()],
                 'allowProviderModelFallback': False} if self.native_executor else {'sandbox': 'read-only'}),
@@ -275,7 +279,7 @@ class NativeExecutor:
     """
     def __init__(self, *, launcher, command, environment_id, cwd, dispatch_guard, bun='bun',
                  expected_platform=None, expected_version='0.166.0', owner_observer=None,
-                 profile_sha256=None):
+                 profile_sha256=None, model_owner=None):
         import json
         import secrets
         import select
@@ -290,6 +294,7 @@ class NativeExecutor:
         self.ready = None
         self.bridge_identity = None
         self.profile_sha256 = profile_sha256
+        self.model_owner = model_owner
         self.token = secrets.token_urlsafe(32)
         self.closed = False
         self.failure = None
@@ -301,18 +306,21 @@ class NativeExecutor:
             import re
             if not callable(owner_observer) or not re.fullmatch(r'sha256:[0-9a-f]{64}', str(profile_sha256)):
                 raise RuntimeError('native_owner_observer_invalid')
-        binary = shutil.which(bun)
-        if not binary:
+        binary = shutil.which(bun) if model_owner is None else None
+        if model_owner is None and not binary:
             raise RuntimeError('native_executor_bridge_unavailable')
         try:
             with self.guard():
                 self.executor = launcher(command)
             from native_runtime_owner import model_command, process_identity
-            self.bridge = subprocess.Popen(model_command([binary, str(Path(__file__).with_name('native_runtime_codex_exec.mjs'))]),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                env={'PATH': '/usr/bin:/bin'}, start_new_session=True)
-            self.bridge_identity = process_identity(self.bridge.pid)
-            if self.bridge_identity is None:raise RuntimeError('native_executor_bridge_startup_failed')
+            if model_owner is not None:
+                self.bridge = model_owner.launch_support('codex_bridge')
+            else:
+                self.bridge = subprocess.Popen(model_command([binary, str(Path(__file__).with_name('native_runtime_codex_exec.mjs'))]),
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    env={'PATH': '/usr/bin:/bin'}, start_new_session=True)
+                self.bridge_identity = process_identity(self.bridge.pid)
+                if self.bridge_identity is None:raise RuntimeError('native_executor_bridge_startup_failed')
             if owner_observer is not None:owner_observer(self.owner_receipt())
             self.bridge.stdin.write(json.dumps({'token': self.token}).encode() + b'\n')
             self.bridge.stdin.flush()
@@ -328,10 +336,12 @@ class NativeExecutor:
                 thread = threading.Thread(target=self._copy, args=(source, destination, admit), daemon=True)
                 self.threads.append(thread);thread.start()
         except Exception as error:
-            error.owner_receipt = self.owner_receipt() if self.bridge_identity and self.profile_sha256 else None
+            error.owner_receipt = self.owner_receipt() if (self.bridge_identity or model_owner) and self.profile_sha256 else None
             try:
                 error.cleanup_result = self.close()
-                if error.owner_receipt:
+                if model_owner is not None:
+                    error.cleanup_result.update(model_owner.revoke_and_verify())
+                elif error.owner_receipt:
                     from native_runtime_owner import recover_runtime_owner
                     error.cleanup_result.update(recover_runtime_owner(error.owner_receipt))
             except Exception:
@@ -340,6 +350,8 @@ class NativeExecutor:
             raise
 
     def owner_receipt(self):
+        if self.model_owner is not None:
+            return self.model_owner.receipt()
         from native_runtime_owner import BOUNDARY
         if not self.bridge_identity or not self.profile_sha256:
             raise RuntimeError('native_owner_receipt_unavailable')

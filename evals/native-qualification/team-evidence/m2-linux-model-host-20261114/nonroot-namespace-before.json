@@ -1,0 +1,128 @@
+{
+  "kind": "linux-model-host-contained-e2e-v1",
+  "classification": "signed_controller_and_controlled_subprocesses",
+  "status": "failed",
+  "checks": [
+    {
+      "name": "signed-profile",
+      "passed": true,
+      "details": {
+        "invalid_profiles_refused": 14,
+        "signed_drift_refused": true,
+        "legacy_shape_preserved": true
+      }
+    },
+    {
+      "name": "durable-owner-ledger",
+      "passed": true,
+      "details": {
+        "foreign_or_mutated_owner_refusals": 11,
+        "durable_before_native": true,
+        "active_idempotent": true,
+        "reopened_receipt": true
+      }
+    },
+    {
+      "name": "private-bootstrap",
+      "passed": true,
+      "details": {
+        "private_pipe_only": true,
+        "following_native_frame_preserved": true,
+        "refused": [
+          "executable-pin",
+          "config-pin",
+          "loader-env",
+          "public-key-collision",
+          "wrong-executable",
+          "unknown-field",
+          "oversized",
+          "truncated",
+          "malformed"
+        ]
+      }
+    },
+    {
+      "name": "owned-lifecycle",
+      "passed": true,
+      "details": {
+        "namespace_and_docker_simulated": true,
+        "intent_before_effect": true,
+        "model_inputs_separate": true,
+        "file_drift_prevents_launch": true,
+        "unverified_absence_held": true
+      }
+    },
+    {
+      "name": "nonroot-namespace-readback",
+      "passed": false,
+      "error": "PermissionError",
+      "code": "fixture-root-guardian-namespace-unreadable"
+    },
+    {
+      "name": "composed-boundary",
+      "passed": true,
+      "details": {
+        "signed_controller": true,
+        "native_and_container_simulated": true,
+        "image_check_before_credential_resolution": true,
+        "separate_stdio_provider_gate": true,
+        "both_owners_renewed": true,
+        "model_cleanup_failure_held": true,
+        "reopened_recovery": null
+      }
+    },
+    {
+      "name": "reopened-linux-recovery",
+      "passed": true,
+      "details": {
+        "signed_controller": true,
+        "native_and_container_simulated": true,
+        "image_check_before_credential_resolution": true,
+        "separate_stdio_provider_gate": true,
+        "both_owners_renewed": true,
+        "model_cleanup_failure_held": false,
+        "reopened_recovery": "settled"
+      }
+    },
+    {
+      "name": "reopened-linux-hold",
+      "passed": true,
+      "details": {
+        "signed_controller": true,
+        "native_and_container_simulated": true,
+        "image_check_before_credential_resolution": true,
+        "separate_stdio_provider_gate": true,
+        "both_owners_renewed": true,
+        "model_cleanup_failure_held": false,
+        "reopened_recovery": "held"
+      }
+    },
+    {
+      "name": "codex-container-paths",
+      "passed": true,
+      "details": {
+        "real_protocol_subprocess": true,
+        "container_identity_simulated": true,
+        "fresh_resume_completed": true
+      }
+    },
+    {
+      "name": "omp-container-paths",
+      "passed": true,
+      "details": {
+        "real_protocol_subprocess": true,
+        "container_identity_simulated": true,
+        "fresh_resume_completed": true
+      }
+    }
+  ],
+  "docker_calls": 0,
+  "provider_calls": 0,
+  "target_calls": 0,
+  "unverified": [
+    "real_linux_container_isolation",
+    "actual_native_model_startup",
+    "provider_inference",
+    "hosted_recovery"
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "classification": "engineering_simulation",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "native_containment": "not_exercised",
+  "scenarios": [
+    {
+      "scenario": "same-authority",
+      "status": "pass"
+    },
+    {
+      "scenario": "retained-pipes",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-outcome",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-next-task",
+      "status": "pass"
+    },
+    {
+      "scenario": "pending-execution",
+      "status": "pass"
+    },
+    {
+      "scenario": "dispatched-execution",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-stdio",
+      "status": "pass"
+    },
+    {
+      "scenario": "pending-capture",
+      "status": "pass"
+    },
+    {
+      "scenario": "pending-network",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-network",
+      "status": "pass"
+    },
+    {
+      "scenario": "settled-application",
+      "status": "pass"
+    },
+    {
+      "scenario": "pending-invocation",
+      "status": "pass"
+    },
+    {
+      "scenario": "failed-invocation",
+      "status": "pass"
+    },
+    {
+      "scenario": "changed-resources",
+      "status": "pass"
+    },
+    {
+      "scenario": "changed-profile",
+      "status": "pass"
+    },
+    {
+      "scenario": "priority-preserved",
+      "status": "pass"
+    },
+    {
+      "scenario": "fresh-reviewer",
+      "status": "pass"
+    },
+    {
+      "scenario": "stop",
+      "status": "pass"
+    },
+    {
+      "scenario": "expired-lease",
+      "status": "pass"
+    },
+    {
+      "scenario": "retired-worker",
+      "status": "pass"
+    },
+    {
+      "scenario": "same-owner-readback",
+      "status": "pass"
+    },
+    {
+      "scenario": "atomic-grant-publication",
+      "status": "pass"
+    },
+    {
+      "scenario": "runner-same-session",
+      "status": "pass"
+    },
+    {
+      "scenario": "runner-delayed-completion",
+      "status": "pass"
+    },
+    {
+      "scenario": "runner-changed-session",
+      "status": "pass"
+    },
+    {
+      "scenario": "runner-unsettled-tools",
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "source_sha256": {
+    "tools/engagement_controller.py": "sha256:59eaf118532e1175170d361adafcfcd21cb57b2dae704d7dffb7ff41990dfb67",
+    "tools/engagement_runner.py": "sha256:16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "evals/native-qualification/smoke/check_engagement_retained_specialist_e2e.py": "sha256:271a5e015838ccb9860a39b156b0c6bb9e3042e2380baf3f9f9dba1b21ae6b50"
+  }
+}

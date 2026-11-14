@@ -34,6 +34,8 @@ def frozen_inputs(controller):
         profile = read_json(root / 'runtimes' / (name + '.json'), private=True)
         profile['config_file'] = str(root / 'runtimes' / (name + '.config'))
         profile['protocol']['schema_file'] = str(root / 'runtimes' / (name + '.schema'))
+        if 'model_catalog' in profile:
+            profile['model_catalog']['path'] = str(root / 'runtimes' / (name + '.models.yml'))
         runtimes[name] = profile
     environments = {}
     for row in state['scope']['environments']:

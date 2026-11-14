@@ -26,9 +26,10 @@ def inspect_engagement(inputs: Path) -> dict:
     verified = load_inputs(Path(inputs))
     blocked = set()
     host_missing = []
-    if sys.platform != 'darwin':
+    legacy_profiles = [profile for profile in verified.runtime_profiles.values() if 'model_host' not in profile]
+    if legacy_profiles and sys.platform != 'darwin':
         host_missing.append('native_model_boundary_unsupported')
-    elif not os.access('/usr/bin/sandbox-exec', os.X_OK):
+    elif legacy_profiles and not os.access('/usr/bin/sandbox-exec', os.X_OK):
         host_missing.append('native_model_sandbox_unavailable')
     if not shutil.which('openssl'):
         host_missing.append('native_proxy_certificate_tool_unavailable')
@@ -42,7 +43,7 @@ def inspect_engagement(inputs: Path) -> dict:
         except (ContractError, OSError):
             guidance[name] = None
             host_missing.append(code)
-    if any(profile['kind'] == 'codex' for profile in verified.runtime_profiles.values()) and not shutil.which('bun'):
+    if any(profile['kind'] == 'codex' for profile in legacy_profiles) and not shutil.which('bun'):
         host_missing.append('native_executor_bridge_unavailable')
     blocked.update(host_missing)
     environments = {}
@@ -86,6 +87,11 @@ def inspect_engagement(inputs: Path) -> dict:
     runtimes = {}
     for identity, profile in verified.runtime_profiles.items():
         missing = []
+        model_host = None
+        if 'model_host' in profile:
+            from native_runtime_linux import inspect_model_host
+            model_host = inspect_model_host(profile)
+            missing.extend(model_host['missing'])
         adapter = importlib.import_module('native_runtime_' + profile['kind'])
         if profile['version'] != adapter.Runtime.version:
             missing.append('native_runtime_version_unsupported')
@@ -135,6 +141,7 @@ def inspect_engagement(inputs: Path) -> dict:
             'native_version_observed': False, 'provider': profile['provider'], 'model': profile['model'],
             'status': 'blocked' if missing else 'prerequisites_present', 'missing': sorted(set(missing)),
             'credential': credential, 'tool_bundle': bundle, 'initial_environment_candidates': candidates,
+            **({'model_host': model_host} if model_host is not None else {}),
             'required_capabilities': profile['required_capabilities'], 'capabilities_verified': False}
     return {'kind': 'native-engagement-preflight-v2',
         'status': 'blocked' if blocked else 'ready_for_runtime_check',
@@ -143,7 +150,8 @@ def inspect_engagement(inputs: Path) -> dict:
         'signer_fingerprint': verified.signer_fingerprint,
         'access_modes': sorted({row['kind'] for row in verified.scope['access']}),
         'host': {'platform': sys.platform, 'status': 'blocked' if host_missing else 'prerequisites_present',
-                 'model_boundary': 'darwin-no-fork-v1' if sys.platform == 'darwin' else 'unsupported',
+                 'model_boundary': 'per_signed_runtime_profile' if len(legacy_profiles) != len(verified.runtime_profiles)
+                                   else ('darwin-no-fork-v1' if sys.platform == 'darwin' else 'unsupported'),
                  'missing': host_missing, 'methodology_sha256': guidance['methodology'],
                  'protocol_sha256': guidance['protocol'], 'execution_verified': False},
         'runtimes': runtimes, 'environments': environments, 'blocked_codes': sorted(blocked),

@@ -1,0 +1,51 @@
+{
+  "base_commit": "259cdc2bbcf71af41178b653f5d1f508fb205292",
+  "classification": "signed_controller_and_controlled_subprocesses",
+  "evidence_sha256": {
+    "after.json": "sha256:93c38f91ae71a7b4b12a0c9832c13015427567fa90a84dadfa5471b9ba477119",
+    "before.json": "sha256:03ed0ba7edb291a43cc2835893e7f5b6c336fbc3e37be9859ce9d1bc0da19bfc",
+    "boundary-before.json": "sha256:f2cbbc90c0f6b751de0bb894e9d1619f8cea69dfcae88206672103cdf6a2dc72",
+    "catalog-before.json": "sha256:f76fb226a76460b59b0f6d4108ce9c90d19500b478a42cef5a5ce1951afe3607",
+    "check_engagement_contract_e2e.json": "sha256:5a07fa9800c868e21c0c193191be34699423f1cb1ff98e4269010992aabe256a",
+    "check_engagement_native_boundary_e2e.json": "sha256:8bd3d571f97096a3b6025553ef221706e871a81dff9a14fd3fc56ed80416a3a8",
+    "check_engagement_preflight_e2e.json": "sha256:883361297438b572101c3bb6a7e3480e8a4adab9d51ae38991995f96cd8be588",
+    "check_engagement_preparation_recovery_e2e.json": "sha256:744c7bc5e72b84b3be6547031b20335b410779a846bb9c203809768ff9de3d9f",
+    "check_engagement_retained_specialist_e2e.json": "sha256:5be25f4e484f2b45d48676b7bdee72afd59dadca418b02a080a0e127ebfc00b9",
+    "check_native_runtime_adapters.json": "sha256:a83e1308730a957c56e827d99d9dae32048c142448291aef508925d43d8afa58",
+    "nonroot-namespace-before.json": "sha256:84266c94182d08de79db28540549908e73bae380b6d6322746f91142f446404f",
+    "owner-downgrade-before.json": "sha256:eadf937df26caa9063f5390d04969ed919e9d8227721e940b0a744cf8253d14f"
+  },
+  "final_checks": {
+    "contract_admission": 75,
+    "linux_model_host_families": 14,
+    "native_boundary": 23,
+    "preflight": 33,
+    "preparation_recovery": 11,
+    "retained_specialist": 26,
+    "runtime_adapter_protocols": 2
+  },
+  "final_source_sha256": {
+    "evals/native-qualification/LINUX-MODEL-HOST-E2E.md": "sha256:d2eccd42611a24b2b616f85e1393c91b75ae689988c60b60a04e611f08325899",
+    "evals/native-qualification/smoke/check_linux_model_host_e2e.py": "sha256:6c299b7538bce0606d27dfa42fdec9dd0ea2b9d26e8c2b0014544582e8d33b70",
+    "tools/engagement_contract.py": "sha256:4184cef3a3bdf7b57a35358916a20d5cd2ae5ae055981185cc03ca10db99fc40",
+    "tools/engagement_controller.py": "sha256:59eaf118532e1175170d361adafcfcd21cb57b2dae704d7dffb7ff41990dfb67",
+    "tools/engagement_evidence.py": "sha256:e444d71c0386d4287327be054f6d8bfec465bbf2737b6feb516d9b2e2a258f5e",
+    "tools/engagement_native_boundary.py": "sha256:57654ddb60ec78017351926c89ff182f09c86c5de51c83ae4556c49539be4ec1",
+    "tools/engagement_preflight.py": "sha256:a2670bfadcb6c1856888457c03c4fa3ed17c7bae37e4806936c7805ed343719c",
+    "tools/engagement_runner.py": "sha256:16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "tools/native_runtime_bootstrap.py": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4",
+    "tools/native_runtime_codex.py": "sha256:dcbd81b2e45be28720eab350d7ce7c4f26d8ab31571c67d0e017ce91fdf3b42b",
+    "tools/native_runtime_linux.py": "sha256:44f7ffe66458ee3de54e13bbeb5244f4316a2291dbaaf5f20416a1bbc8642d91",
+    "tools/native_runtime_omp.py": "sha256:f44ddd874ed66ecca0822d9ef19095f6c1bbb12ade1dc3b4fdf2ed921b077f09",
+    "tools/native_runtime_owner.py": "sha256:c020a07159206e2c620e702825c3f8b1e2d816cb070c4bb9ce740b63175a63ca",
+    "tools/native_runtime_transport.py": "sha256:9afba0a16025ab1bb7fa872c64c6e6baa65de8383ef79f3e4ac7b47e9c80bd72"
+  },
+  "kind": "linux-model-host-contained-evidence-v1",
+  "unverified": [
+    "actual_linux_model_container_execution",
+    "native_model_distributions",
+    "provider_inference",
+    "hosted_model_recovery",
+    "research_acceptance"
+  ]
+}

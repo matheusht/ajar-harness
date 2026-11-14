@@ -795,6 +795,14 @@ class Controller:
             if not isinstance(receipt, dict):
                 fail('runtime_owner_invalid')
             sha = runtime_owner(self, state, worker, receipt.get('session_id'), receipt, preparing=True)
+            if worker.get('runtime_owner_sha256') and receipt.get('kind') == 'native-runtime-owner-v2':
+                from native_runtime_linux import require_monotonic_owner
+                from native_runtime_transport import RuntimeError as NativeRuntimeError
+                prior = json.loads(self.read_object(worker['runtime_owner_sha256']))
+                try:
+                    require_monotonic_owner(prior, receipt)
+                except (ValueError, KeyError, TypeError, NativeRuntimeError):
+                    fail('runtime_owner_changed')
             if sha in dispatch.get('runtime_owner_receipts', []):
                 return {'status': 'recorded', 'receipt': sha}
             if worker.get('runtime_owner_sha256'):

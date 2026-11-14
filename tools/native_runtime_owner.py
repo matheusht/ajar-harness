@@ -64,8 +64,13 @@ def _group_absent(pgid):
     return False
 
 
-def recover_runtime_owner(receipt):
+def recover_runtime_owner(receipt, *, profile=None, maximum_lease_seconds=None):
     """Revoke only the exact recorded owner. No credential store is changed."""
+    if isinstance(receipt, dict) and receipt.get('kind') == 'native-runtime-owner-v2':
+        from native_runtime_linux import recover_runtime_owner as recover_linux
+        if profile is None or maximum_lease_seconds is None:
+            raise RuntimeError('native_owner_profile_required')
+        return recover_linux(receipt, profile, maximum_lease_seconds=maximum_lease_seconds)
     if (not isinstance(receipt, dict) or receipt.get('kind') != 'native-runtime-owner-v1' or
             receipt.get('boundary') != BOUNDARY or receipt.get('runtime') not in ('codex', 'omp') or
             receipt.get('session_id') is not None and not isinstance(receipt.get('session_id'), str) or

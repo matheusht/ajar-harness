@@ -364,9 +364,10 @@ def _url(value, code):
 def validate_runtime_profile(profile: dict) -> dict:
     code = 'runtime_profile_invalid'
     _require(type(profile) is dict, code)
+    optional = tuple(name for name in ('model_host', 'model_catalog') if name in profile)
     _object(profile, ('kind', 'version', 'executable', 'protocol', 'config_file',
                       'config_sha256', 'provider', 'model', 'credential_ref',
-                      'required_capabilities', 'tool_bundle'), code)
+                      'required_capabilities', 'tool_bundle', *optional), code)
     _require(profile['kind'] in ('codex', 'omp'), code)
     for key in ('version', 'provider', 'model'):
         _text(profile[key], code, limit=256)
@@ -391,8 +392,37 @@ def validate_runtime_profile(profile: dict) -> dict:
         _require(type(bundle['bun_version']) is str and
                  re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)',
                               bundle['bun_version']) is not None, code)
+    if 'model_host' in profile:
+        validate_model_host(profile['model_host'])
+    if 'model_catalog' in profile:
+        _require(profile['kind'] == 'omp', code)
+        catalog = _object(profile['model_catalog'], ('path', 'sha256'), code)
+        _path(catalog['path'])
+        _digest(catalog['sha256'], code)
     safe_publication(canonical(profile))
     return profile
+
+
+def validate_model_host(host: dict) -> dict:
+    code = 'runtime_model_host_invalid'
+    _object(host, ('kind', 'docker_binary', 'docker_endpoint', 'daemon_id', 'image_id',
+                   'platform', 'uid', 'gid', 'limits'), code)
+    _require(host['kind'] == 'linux-docker-model-v1' and
+             host['platform'] in ('linux/amd64', 'linux/arm64'), code)
+    _path(host['docker_binary'])
+    _require(type(host['docker_endpoint']) is str and host['docker_endpoint'].startswith('unix:///'), code)
+    _path(host['docker_endpoint'][7:])
+    _text(host['daemon_id'], code, limit=256)
+    _digest(host['image_id'], code)
+    for name in ('uid', 'gid'):
+        _integer(host[name], code, maximum=2 ** 32 - 1)
+    limits = _object(host['limits'], ('memory_bytes', 'cpu_count', 'pids', 'workspace_bytes'), code)
+    for name in ('memory_bytes', 'pids', 'workspace_bytes'):
+        _integer(limits[name], code)
+    _require(type(limits['cpu_count']) in (int, float) and math.isfinite(limits['cpu_count'])
+             and limits['cpu_count'] > 0, code)
+    safe_publication(canonical(host))
+    return host
 
 
 def validate_environment_profile(profile: dict) -> dict:
@@ -667,6 +697,9 @@ def load_inputs(path: Path, *, now: datetime | None = None,
         schema = _pinned_file(profile['protocol']['schema_file'], profile['protocol']['schema_sha256'])
         frozen.update({f'runtimes/{identity}.json': raw, f'runtimes/{identity}.config': config,
                        f'runtimes/{identity}.schema': schema})
+        if 'model_catalog' in profile:
+            catalog = profile['model_catalog']
+            frozen[f'runtimes/{identity}.models.yml'] = _pinned_file(catalog['path'], catalog['sha256'], private=True)
         bundle = profile['tool_bundle']
         manifest = canonical(source_manifest(Path(bundle['path'])))
         _require(digest(manifest) == bundle['manifest_sha256'], 'digest_mismatch')

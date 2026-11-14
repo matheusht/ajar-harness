@@ -326,8 +326,11 @@ class Session:
     kind = ''
     version = ''
 
-    def _prepare(self, profile, state_dir, workspace, host_tools, host_call, dispatch_guard):
+    def _prepare(self, profile, state_dir, workspace, host_tools, host_call, dispatch_guard, model_owner=None):
         self.profile = profile
+        self.model_owner = model_owner
+        if ('model_host' in profile) != (model_owner is not None):
+            raise RuntimeError('native_model_owner_required')
         if profile['kind'] != self.kind or profile['version'] != self.version:
             raise RuntimeError('native_runtime_version_unsupported')
         self._check_pins()
@@ -363,9 +366,13 @@ class Session:
         self.profile_sha256 = None
         self.native_executor = None
         self.owner_observer = None
-        env = {k: os.environ[k] for k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SYSTEMROOT') if k in os.environ}
+        self.process_workspace = Path(model_owner.paths.workspace) if model_owner else self.workspace
+        self.process_state = Path(model_owner.paths.state) if model_owner else self.state_dir
+        self.process_config = model_owner.paths.config if model_owner else profile['config_file']
+        env = ({'PATH': '/runtime/bin:/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TMPDIR': '/tmp'}
+               if model_owner else {k: os.environ[k] for k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SYSTEMROOT') if k in os.environ})
         env['NO_COLOR'] = '1'
-        env['HOME'] = str(self.state_dir)
+        env['HOME'] = str(self.process_state)
         return env
 
     def _check_pins(self):
@@ -375,6 +382,9 @@ class Session:
         config = pinned(p['config_file'], p['config_sha256'], max_bytes=MAX_FRAME)
         try:
             safe_publication(config.read_bytes())
+            if 'model_catalog' in p:
+                catalog = p['model_catalog']
+                safe_publication(pinned(catalog['path'], catalog['sha256'], max_bytes=MAX_FRAME).read_bytes())
         except ContractError:
             raise RuntimeError('runtime_config_contains_secret') from None
 
@@ -397,16 +407,26 @@ class Session:
                 elif key == 'NO_PROXY':
                     if any(part not in ('', 'localhost', '127.0.0.1', '::1', '[::1]') for part in value.split(',')):
                         raise RuntimeError('native_provider_environment_invalid')
-                elif not Path(value).is_absolute() or not Path(value).is_file() or Path(value).resolve() != Path(value):
+                elif self.model_owner is not None and value != self.model_owner.paths.ca:
+                    raise RuntimeError('native_provider_environment_invalid')
+                elif self.model_owner is None and (not Path(value).is_absolute() or not Path(value).is_file() or Path(value).resolve() != Path(value)):
                     raise RuntimeError('native_provider_environment_invalid')
             env.update(provider_environment)
         if protected_model:
             from native_runtime_owner import BOUNDARY, model_command
             if not isinstance(profile_sha256, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', profile_sha256):
                 raise RuntimeError('native_owner_profile_pin_required')
-            command = model_command(command)
-            self.model_boundary = BOUNDARY
+            if self.model_owner is not None:
+                if self.model_owner.profile_sha256 != profile_sha256 or self.model_owner.boundary != 'linux-docker-model-v1':
+                    raise RuntimeError('native_owner_profile_pin_required')
+                self.model_owner.check_authority()
+                self.model_boundary = self.model_owner.boundary
+            else:
+                command = model_command(command)
+                self.model_boundary = BOUNDARY
             self.profile_sha256 = profile_sha256
+        elif self.model_owner is not None:
+            raise RuntimeError('native_model_owner_required')
         if credential_resolver is not None:
             from native_credentials import CredentialBinding
             binding = credential_resolver(self.profile)
@@ -415,11 +435,15 @@ class Session:
             if self.profile.get('credential_ref') is None and (binding.environment() or binding.login()):
                 raise RuntimeError('native_credential_binding_invalid')
             self.credential_binding = binding
-            env.update(binding.environment())
+            if self.model_owner is None:
+                env.update(binding.environment())
         return command
 
     def _capture_owner(self):
-        if self.model_boundary:
+        if self.model_owner is not None:
+            self.model_owner.check_authority()
+            self._publish_owner()
+        elif self.model_boundary:
             from native_runtime_owner import process_identity
             self.model_identity = process_identity(self.transport.process.pid)
             if self.model_identity is None:
@@ -431,7 +455,7 @@ class Session:
             self.owner_observer(self.owner_receipt())
 
     def _startup_failed(self, error):
-        error.owner_receipt = self.owner_receipt() if self.model_identity else None
+        error.owner_receipt = self.owner_receipt() if self.model_identity or self.model_owner else None
         try:
             error.cleanup_result = self.close()
         except Exception:
@@ -439,6 +463,8 @@ class Session:
                                     'capabilities_revoked': False}
 
     def owner_receipt(self):
+        if self.model_owner is not None:
+            return self.model_owner.receipt(self.session_id)
         if not self.model_boundary or self.model_identity is None:
             raise RuntimeError('native_owner_receipt_unavailable')
         return {'kind': 'native-runtime-owner-v1', 'runtime': self.kind, 'session_id': self.session_id,
@@ -454,7 +480,8 @@ class Session:
                 'resume': 'live_session_only', 'durable_resume': 'reconstruct_from_published_work',
                 'native_tools': 'environment_owned_native_executor' if native else 'withheld_until_isolated_tool_owner',
                 'execution_boundary': self.model_boundary or 'external_owner_required',
-                'child_inventory': 'children_prohibited' if self.model_boundary else 'unverified',
+                'child_inventory': 'contained_descendants' if self.model_owner else
+                                   ('children_prohibited' if self.model_boundary else 'unverified'),
                 'usage_cost_estimate': 'reported' if self.kind == 'omp' else 'unavailable',
                 'provider_inference': 'unverified'}
 
@@ -473,6 +500,7 @@ class Session:
             raise RuntimeError('native_execution_boundary_unavailable')
         with self.guard():
             self._check_pins()
+            if self.model_owner:self.model_owner.check_authority()
             if self.credential_binding:self.credential_binding.check()
             if self.native_executor:self.native_executor.check_authority()
             yield
@@ -591,7 +619,7 @@ class Session:
         return events
 
     def close(self):
-        receipt = self.owner_receipt() if self.model_identity else None
+        receipt = self.owner_receipt() if self.model_identity or self.model_owner else None
         self.closed = True
         self.active = False
         self._cancel_tools()
@@ -599,7 +627,9 @@ class Session:
         if self.credential_binding:self.credential_binding.revoke()
         result = self.transport.close() if self.transport else {
             'process_exited': True, 'exit_code': None, 'lab_cleanup': 'not_observed', 'child_absence': 'not_observed'}
-        if receipt:
+        if self.model_owner is not None:
+            result.update(self.model_owner.revoke_and_verify(self.session_id))
+        elif receipt:
             from native_runtime_owner import recover_runtime_owner
             result.update(recover_runtime_owner(receipt))
         return result

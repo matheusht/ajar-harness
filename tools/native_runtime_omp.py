@@ -19,26 +19,38 @@ class Runtime(Session):
 
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
                  host_call=None, dispatch_guard=None, credential_resolver=None, protected_model=False,
-                 profile_sha256=None, provider_environment=None, owner_observer=None):
-        env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard)
+                 profile_sha256=None, provider_environment=None, owner_observer=None, model_owner=None):
+        if model_owner is not None and command_prefix:
+            raise RuntimeError('native_model_boundary_override_refused')
+        env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard, model_owner)
         if owner_observer is not None and (not protected_model or not callable(owner_observer)):
             raise RuntimeError('native_owner_observer_invalid')
         self.owner_observer = owner_observer
         if profile['protocol']['mode'] != 'stdio-jsonl':
             raise RuntimeError('native_protocol_mismatch')
-        env['PI_CODING_AGENT_DIR'] = str(self.state_dir)
+        env['PI_CODING_AGENT_DIR'] = str(self.process_state)
+        if model_owner is None and 'model_catalog' in profile:
+            catalog = self.state_dir / 'models.yml'
+            content = Path(profile['model_catalog']['path']).read_bytes()
+            if catalog.is_symlink() or catalog.exists() and catalog.read_bytes() != content:
+                raise RuntimeError('runtime_state_config_changed')
+            if not catalog.exists():
+                descriptor = os.open(catalog, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, 'wb') as stream:
+                    stream.write(content)
         self.ready = False
         self.pending_completion = None
         self.stats_before = None
-        command = [*command_prefix, profile['executable']['path'], '--mode', 'rpc', '--no-ui',
+        command = [*command_prefix, model_owner.paths.executable if model_owner else profile['executable']['path'], '--mode', 'rpc', '--no-ui',
                    '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-context-files',
-                   '--no-title', '--no-lsp', '--no-pty', '--no-session', '--cwd', str(self.workspace),
-                   '--config', profile['config_file'], '--model', profile['provider'] + '/' + profile['model']]
+                   '--no-title', '--no-lsp', '--no-pty', '--no-session', '--cwd', str(self.process_workspace),
+                   '--config', self.process_config, '--model', profile['provider'] + '/' + profile['model']]
         command = self._model_command(command, env, protected_model=protected_model,
             profile_sha256=profile_sha256, credential_resolver=credential_resolver,
             provider_environment=provider_environment)
         try:
-            self.transport = Transport(command, env, str(self.workspace), self._event, omp=True)
+            launcher = (lambda command: model_owner.launch_model(command, env, self.credential_binding)) if model_owner else None
+            self.transport = Transport(command, env, str(self.workspace), self._event, omp=True, launcher=launcher)
             self._capture_owner()
             deadline = time.monotonic() + 15
             while not self.ready:

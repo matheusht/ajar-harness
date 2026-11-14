@@ -754,13 +754,35 @@ def reduce_host(state, payload):
 def runtime_owner(c, state, worker, session_id, receipt, *, preparing=False):
     if receipt is None:
         return None
+    assignment = next(row for row in state['scope']['runtime_assignments'] if row['profile_id'] == worker['profile_id'])
+    profile = read_json(c.root / 'contract/runtimes' / (worker['profile_id'] + '.json'), private=True)
+    if isinstance(receipt, dict) and receipt.get('kind') == 'native-runtime-owner-v2':
+        from native_runtime_linux import validate_receipt
+        from native_runtime_transport import RuntimeError as NativeRuntimeError
+        try:
+            owner = receipt['owner']
+            dispatch = state['dispatches'][owner['dispatch_id']]
+            if (receipt['session_id'] != session_id or dispatch['worker_id'] != worker['id']
+                    or dispatch['generation'] != worker['generation'] or dispatch['profile_id'] != worker['profile_id']
+                    or dispatch['scope_sha256'] != state['scope_sha256']):
+                raise ValueError()
+            validate_receipt(receipt, profile, profile_sha256=assignment['profile_sha256'],
+                maximum_lease_seconds=state['scope']['limits']['max_worker_lease_seconds'],
+                grant=dispatch, preparing=preparing)
+            sha = digest(canonical(receipt))
+            if not preparing and (worker.get('runtime_owner_sha256') != sha
+                                  or sha not in dispatch.get('runtime_owner_receipts', [])):
+                raise ValueError()
+        except (ValueError, KeyError, TypeError, NativeRuntimeError):
+            fail('runtime_owner_invalid')
+        return c.store_object(canonical(receipt))
+    if 'model_host' in profile:
+        fail('runtime_owner_invalid')
     required = {'kind', 'runtime', 'session_id', 'profile_sha256', 'boundary'}
     if (not isinstance(receipt, dict) or not required <= set(receipt)
             or not set(receipt) <= required | {'process', 'bridge_process'}
             or not {'process', 'bridge_process'} & set(receipt) or not preparing and 'process' not in receipt):
         fail('runtime_owner_invalid')
-    assignment = next(row for row in state['scope']['runtime_assignments'] if row['profile_id'] == worker['profile_id'])
-    profile = read_json(c.root / 'contract/runtimes' / (worker['profile_id'] + '.json'), private=True)
     if (receipt['kind'] != 'native-runtime-owner-v1' or receipt['runtime'] != profile['kind']
             or receipt['session_id'] != session_id or receipt['profile_sha256'] != assignment['profile_sha256']
             or receipt['boundary'] != 'darwin-no-fork-v1'):

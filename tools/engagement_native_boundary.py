@@ -28,6 +28,7 @@ from engagement_network import NetworkGate
 from engagement_network_bridge import ProxyBridge
 from research_environment import Environment
 from native_runtime_transport import HostOperation, MAX_FRAME
+from native_runtime_linux import LinuxModelOwner
 from target_accounts import TargetAccountError, TargetAccountResolver
 import native_runtime_codex as codex
 import native_runtime_omp as omp
@@ -44,8 +45,10 @@ def _credential_resolver():
     return HostCredentialResolver()
 
 
-def _recover_owner(receipt):
+def _recover_owner(receipt, *, profile=None, maximum_lease_seconds=None):
     from native_runtime_owner import recover_runtime_owner
+    if receipt.get('kind') == 'native-runtime-owner-v2':
+        return recover_runtime_owner(receipt, profile=profile, maximum_lease_seconds=maximum_lease_seconds)
     return recover_runtime_owner(receipt)
 
 
@@ -201,6 +204,7 @@ class NativeBoundary:
         self.controller = context.controller
         self.scope = context.contract.scope
         self.runtime = self.native_owner = self.environment = self.proxy = None
+        self.model_owner = self.model_proxy = None
         self.provider_gate = self.lab_gate = None
         self.owner_receipt = None
         self.execution_admitted = False
@@ -327,6 +331,8 @@ class NativeBoundary:
         self.profile = copy.deepcopy(self.context.contract.runtime_profiles[self.context.worker['profile_id']])
         self.profile['config_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.config'))
         self.profile['protocol']['schema_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.schema'))
+        if 'model_catalog' in self.profile:
+            self.profile['model_catalog']['path'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.models.yml'))
         if any(access['kind'] == 'application' for access in self.accesses):
             try:
                 self.target_accounts = TargetAccountResolver(self._target_reference(), self.scope,
@@ -336,8 +342,6 @@ class NativeBoundary:
         bundle_id = 'native-runtime'
         bundle = _inspect_bundle(self.profile, bundle_id)
         guidance = _guidance(self.context.contract)
-        self.credential_binding = _credential_resolver()(self.profile)
-        self.credential_binding.check()
         workers = self.controller.root / 'workers'
         workers.mkdir(mode=0o700, exist_ok=True)
         self.state_dir = Path(tempfile.mkdtemp(prefix=self.context.worker['id'] + '-', dir=workers))
@@ -359,8 +363,12 @@ class NativeBoundary:
         maximum = self.environment_reference['limits']['output_bytes']
         self.provider_gate = NetworkGate(self.routes['provider'], self._active,
             maximum_bytes=max(maximum, 8 * 1024 * 1024), dispatch_guard=self.context.guard)
-        provider_address = self.provider_gate.serve_tcp(certificate=certificate, private_key=key)
-        provider_url = f'http://127.0.0.1:{provider_address}'
+        provider_url = None
+        if 'model_host' in self.profile:
+            self.provider_gate.serve(self.socket_dir / 'provider.sock', certificate=certificate, private_key=key)
+        else:
+            provider_address = self.provider_gate.serve_tcp(certificate=certificate, private_key=key)
+            provider_url = f'http://127.0.0.1:{provider_address}'
         self.lab_gate = NetworkGate(self.routes['lab'], self._active, maximum_bytes=maximum,
             dispatch_guard=self.context.guard,
             request_binder=self.target_accounts.bind if self.target_accounts is not None else None)
@@ -371,28 +379,45 @@ class NativeBoundary:
             self.context.authorize, self._observe, grant=self.context.grant,
             dispatch_guard=self.context.guard, **self._environment_options())
         self.environment.prepare(self.accesses, self.context.contract.inputs['access_files'], support_inputs=support)
+        if 'model_host' in self.profile:
+            self.model_owner = LinuxModelOwner(self.profile, self.context.assignment['profile_sha256'],
+                self.context.grant, authorize=self.context.authorize, dispatch_guard=self.context.guard,
+                observe_owner=self._runtime_owner, maximum_lease_seconds=self.scope['limits']['max_worker_lease_seconds'],
+                support_directory=self.state_dir / 'model-input')
+            self.model_owner.prepare(config_bytes=read_bytes(self.profile['config_file']), ca_bytes=ca.read_bytes())
+        self.credential_binding = _credential_resolver()(self.profile)
+        self.credential_binding.check()
         self.controller.record_native_admission(self.context.grant)
         self.proxy = ProxyBridge(lambda command: self.environment.launch_stdio(command, role='network_proxy'),
             _clean_environment() + ['python3', '-I', '-S', '/input/bootstrap/bridge.py', 'relay'],
             self.lab_gate, self._active, dispatch_guard=self.context.guard)
         tool_environment = self.proxy.environment('/input/bootstrap/ca.pem')
-        model_environment = {'HTTP_PROXY': provider_url, 'HTTPS_PROXY': provider_url,
-            'NO_PROXY': 'localhost,127.0.0.1,::1', 'SSL_CERT_FILE': str(ca),
-            'CURL_CA_BUNDLE': str(ca), 'NODE_EXTRA_CA_CERTS': str(ca)}
+        if self.model_owner is not None:
+            self.model_proxy = ProxyBridge(lambda command: self.model_owner.launch_support('provider_relay'), [],
+                self.provider_gate, self._active, dispatch_guard=self.context.guard)
+            model_environment = self.model_proxy.environment(self.model_owner.paths.ca)
+        else:
+            model_environment = {'HTTP_PROXY': provider_url, 'HTTPS_PROXY': provider_url,
+                'NO_PROXY': 'localhost,127.0.0.1,::1', 'SSL_CERT_FILE': str(ca),
+                'CURL_CA_BUNDLE': str(ca), 'NODE_EXTRA_CA_CERTS': str(ca)}
         runtime_options = {'host_tools': TOOLS, 'host_call': self.host_call,
             'dispatch_guard': self.context.guard, 'protected_model': True,
             'profile_sha256': self.context.assignment['profile_sha256'],
             'credential_resolver': lambda profile: self.credential_binding, 'provider_environment': model_environment,
             'owner_observer': self._runtime_owner}
+        if self.model_owner is not None:
+            runtime_options['model_owner'] = self.model_owner
         if self.profile['kind'] == 'codex':
             self.native_owner = codex.NativeExecutor(launcher=lambda command: self.environment.launch_stdio(command, role='native_tools'),
                 command=_clean_environment(tool_environment) + bundle['command'],
                 environment_id=self.context.worker['id'] + '-' + str(self.context.worker['generation']),
                 cwd='/work', dispatch_guard=self.context.guard, expected_platform=bundle['expected_platform'],
                 expected_version=bundle['expected_version'], owner_observer=self._runtime_owner,
-                profile_sha256=self.context.assignment['profile_sha256'])
-            runtime_options.update(native_executor=self.native_owner,
-                command_prefix=_model_policy(provider_url, self.native_owner.url))
+                profile_sha256=self.context.assignment['profile_sha256'],
+                **({'model_owner': self.model_owner} if self.model_owner is not None else {}))
+            runtime_options.update(native_executor=self.native_owner)
+            if self.model_owner is None:
+                runtime_options['command_prefix'] = _model_policy(provider_url, self.native_owner.url)
             self.runtime = codex.Runtime(self.profile, self.state_dir / 'model', self.context.workspace, **runtime_options)
         else:
             self.native_owner = omp.ToolOwner(bundle['sdk_dir'], self.context.workspace, self.state_dir / 'native-tools',
@@ -400,7 +425,9 @@ class NativeBoundary:
                 command=_clean_environment(tool_environment, omp_state=True) + bundle['command'],
                 target_platform=self.profile['tool_bundle']['platform'], expected_ready=bundle['expected_ready'],
                 dispatch_guard=self.context.guard)
-            runtime_options.update(host_tools=[*self.native_owner.catalog, *TOOLS], command_prefix=_model_policy(provider_url))
+            runtime_options.update(host_tools=[*self.native_owner.catalog, *TOOLS])
+            if self.model_owner is None:
+                runtime_options['command_prefix'] = _model_policy(provider_url)
             self.runtime = omp.Runtime(self.profile, self.state_dir / 'model', self.context.workspace, **runtime_options)
         identity = self.runtime.fresh()
         self.owner_receipt = self.runtime.owner_receipt()
@@ -413,6 +440,8 @@ class NativeBoundary:
         if self.environment is None or self.finished is not None:
             raise BoundaryError('native_boundary_inactive')
         self.environment.grant = copy.deepcopy(self.context.grant)
+        if self.model_owner is not None:
+            self.model_owner.renew(self.context.grant, seconds)
         return self.environment.renew(seconds)
 
     def host_call(self, name, arguments):
@@ -814,11 +843,16 @@ class NativeBoundary:
                     runtime_readback.update(self.runtime.close())
                 except Exception:
                     pass
-            elif self.owner_receipt is not None:
+            elif self.owner_receipt is not None and self.model_owner is None:
                 try:
                     runtime_readback.update(_recover_owner(self.owner_receipt))
                 except Exception:
                     pass
+            if self.model_owner is not None:
+                try:
+                    runtime_readback.update(self.model_owner.revoke_and_verify(runtime_readback['session_id']))
+                except Exception:
+                    runtime_readback['child_absence'] = 'not_observed'
             if self.credential_binding is not None:
                 try:
                     self.credential_binding.revoke()
@@ -831,11 +865,12 @@ class NativeBoundary:
                     self.native_owner.close()
                 except Exception:
                     runtime_readback['child_absence'] = 'not_observed'
-            if self.proxy is not None:
-                try:
-                    self.proxy.close()
-                except Exception:
-                    pass
+            for proxy in (self.proxy, self.model_proxy):
+                if proxy is not None:
+                    try:
+                        proxy.close()
+                    except Exception:
+                        pass
             environment_readback = cleanup = None
             if self.environment is not None:
                 try:
@@ -901,7 +936,11 @@ def recover_boundary(context, dispatch):
         c.revoke_worker(worker['id'], worker['generation'], reason='native-boundary-recovery')
     try:
         if not auxiliary and not pre_native:
-            runtime_readback = _recover_owner(owner)
+            options = {}
+            if owner.get('kind') == 'native-runtime-owner-v2':
+                options = {'profile': context.contract.runtime_profiles[context.grant['profile_id']],
+                           'maximum_lease_seconds': context.contract.scope['limits']['max_worker_lease_seconds']}
+            runtime_readback = _recover_owner(owner, **options)
             runtime_readback['owner_receipt_sha256'] = owner_sha
         nonces = {row['identity']['nonce'] for row in state['environment_operations'].values()
             if row['grant']['dispatch_id'] == context.grant['dispatch_id']}

@@ -57,7 +57,7 @@ def main():
         assert value, name
 
     try:
-        from engagement_contract import canonical, source_manifest
+        from engagement_contract import canonical, safe_publication, source_manifest
         from research_environment import Environment, EnvironmentUnavailable
         docker = shutil.which('docker')
         if not docker or not args.endpoint.startswith('unix://'):
@@ -67,6 +67,8 @@ def main():
             response = subprocess.run([docker, '--host', args.endpoint, *arguments],
                                       capture_output=True, text=True, timeout=10)
             if required and response.returncode:
+                result['failed_command'] = {'arguments': list(arguments), 'returncode': response.returncode,
+                    'stderr': safe_publication(response.stderr[:2048].encode()).decode()}
                 raise RuntimeError('docker_fixture_command_failed:' + arguments[0])
             return response
 

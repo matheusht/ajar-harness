@@ -1,0 +1,19 @@
+{
+  "kind": "linux-model-provider-environment-evidence-v1",
+  "base_commit": "029324f112e95435ced437df993135f655ac0598",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:529d4e01bfa5773bc946ad8e68a5d7b14feacac80f281569cba8c153ff5f7274",
+    "evals/native-qualification/smoke/check_linux_model_host_e2e.py": "sha256:8db081810534d36a8d55f7bbf849db17ee91ee3d8a838c2d0ec482c254c3c936",
+    "tools/engagement_network_bridge.py": "sha256:ea2524e9edd43c8312958726094a0adfbea82c47a21fbd16c5b2e6916ef8e567",
+    "tools/native_runtime_transport.py": "sha256:9afba0a16025ab1bb7fa872c64c6e6baa65de8383ef79f3e4ac7b47e9c80bd72",
+    "tools/native_runtime_bootstrap.py": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4"
+  },
+  "evidence_sha256": {
+    "before.json": "sha256:db552d89590beafe2431f063e1adfd157013f0b9a88dbf1870664ca1d75fba0e",
+    "after.json": "sha256:93c38f91ae71a7b4b12a0c9832c13015427567fa90a84dadfa5471b9ba477119"
+  },
+  "classification": "contained_controller_and_actual_proxy_model_admission",
+  "docker_calls": 0,
+  "external_provider_calls": 0,
+  "research_acceptance": "not_run"
+}

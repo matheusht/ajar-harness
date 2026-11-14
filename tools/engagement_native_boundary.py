@@ -395,7 +395,8 @@ class NativeBoundary:
         if self.model_owner is not None:
             self.model_proxy = ProxyBridge(lambda command: self.model_owner.launch_support('provider_relay'), [],
                 self.provider_gate, self._active, dispatch_guard=self.context.guard)
-            model_environment = self.model_proxy.environment(self.model_owner.paths.ca)
+            model_environment = {key: value for key, value in self.model_proxy.environment(self.model_owner.paths.ca).items()
+                                 if key.isupper()}
         else:
             model_environment = {'HTTP_PROXY': provider_url, 'HTTPS_PROXY': provider_url,
                 'NO_PROXY': 'localhost,127.0.0.1,::1', 'SSL_CERT_FILE': str(ca),

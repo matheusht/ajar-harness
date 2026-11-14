@@ -436,6 +436,8 @@ def composed_boundary(root, *, recovery=None):
     import native_runtime_linux as linux
     from native_credentials import CredentialBinding
     from engagement_runner import WorkerContext, frozen_inputs
+    from engagement_network_bridge import ProxyBridge as ActualProxyBridge
+    from native_runtime_transport import Session
     from contextlib import ExitStack
     import threading
     inputs, profile = signed(root)
@@ -448,6 +450,7 @@ def composed_boundary(root, *, recovery=None):
     context = WorkerContext(runner, c.state()['workers']['lead-1'], grant, workspace)
     created, resolutions, proxies = [], [], []
     class Owner:
+        boundary = 'linux-docker-model-v1'
         def __init__(self, configured, profile_sha256, grant, **options):
             self.profile = configured; self.profile_sha256 = profile_sha256; self.grant = grant
             self.options = options; self.ready = False; self.renewals = []; self.failed_cleanup = False
@@ -465,6 +468,7 @@ def composed_boundary(root, *, recovery=None):
             self.current['profile_sha256'] = self.profile_sha256
             self.options['observe_owner'](self.current); self.ready = True
         def launch_support(self, role): raise AssertionError('simulated proxy must not launch real model')
+        def check_authority(self): require(self.ready, 'model owner not prepared')
         def receipt(self, session_id=None):
             if session_id is not None: self.current['session_id'] = session_id
             return copy.deepcopy(self.current)
@@ -474,13 +478,21 @@ def composed_boundary(root, *, recovery=None):
             return {'session_id': session_id or self.current['session_id'], 'process_exited': True,
                 'child_absence': 'verified', 'capabilities_revoked': True, 'boundary': 'linux-docker-model-v1'}
     class Runtime(fixtures.SimulatedRuntime):
+        def __init__(self, configured, state_dir, workspace, **options):
+            session = SimpleNamespace(profile=configured, model_owner=options['model_owner'])
+            Session._model_command(session, ['/runtime/bin/model'], {}, protected_model=True,
+                profile_sha256=options['profile_sha256'], credential_resolver=options['credential_resolver'],
+                provider_environment=options['provider_environment'])
+            super().__init__(configured, state_dir, workspace, **options)
         def fresh(self):
             result = super().fresh(); self.options['owner_observer'](self.owner_receipt()); return result
         def owner_receipt(self): return self.options['model_owner'].receipt(self.session_id)
         def close(self): return self.options['model_owner'].revoke_and_verify(self.session_id)
     class Proxy(fixtures.SimulatedProxy):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs); proxies.append(self)
+        environment = ActualProxyBridge.environment
+        def __init__(self, launcher, command, gate, authorize, **kwargs):
+            super().__init__(launcher, command, gate, authorize, **kwargs); proxies.append(self)
+            self.closed, self._active = threading.Event(), authorize
     def resolve():
         def value(configured):
             require(created and created[0].ready, 'credential resolution preceded model image verification')

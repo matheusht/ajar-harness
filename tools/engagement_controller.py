@@ -243,6 +243,8 @@ class Controller:
                  'directions': [], 'dispatches': {}, 'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
                            'tokens': {}, 'cost': None, 'missing': ['billed_cost', 'provider_requests']}}
+        from engagement_evidence import initialize as initialize_evidence
+        initialize_evidence(state)
         seen = set()
         for event in events:
             if event['engagement_id'] != state['engagement_id']:
@@ -256,6 +258,8 @@ class Controller:
             except (KeyError, TypeError, ValueError):
                 fail('journal_corrupt')
             state['revision'] = event['sequence']
+        for sha in state['evidence_objects']:
+            self.read_object(sha)
         for publication in state['publications'].values():
             for artifact in publication['artifacts']:
                 self.read_object(artifact['sha256'])
@@ -284,7 +288,9 @@ class Controller:
             state['usage']['invocations'] += 1
             state['usage']['reserved_worker_seconds'] += grant['seconds']
         elif kind == 'worker_session_observed':
-            state['workers'][payload['worker_id']]['session_id'] = payload['session_id']
+            state['workers'][payload['worker_id']].update(session_id=payload['session_id'], runtime_owner_sha256=payload.get('runtime_owner_sha256'))
+            if payload.get('runtime_owner_sha256'):
+                state['evidence_objects'][payload['runtime_owner_sha256']] = True
         elif kind == 'worker_revoked':
             worker = state['workers'][payload['worker_id']]
             worker.update(status='revoked', revoke_reason=payload['reason'])
@@ -296,7 +302,10 @@ class Controller:
                             holds.append(dispatch['dispatch_id'])
         elif kind == 'worker_started':
             worker = state['workers'][payload['worker_id']]
-            worker.update(status='active', session_id=payload['session_id'], workspace=payload['workspace'])
+            worker.update(status='active', session_id=payload['session_id'], workspace=payload['workspace'],
+                          runtime_owner_sha256=payload.get('runtime_owner_sha256'))
+            if payload.get('runtime_owner_sha256'):
+                state['evidence_objects'][payload['runtime_owner_sha256']] = True
         elif kind == 'request_accepted':
             self._reduce_request(state, event['actor']['id'], payload['type'], payload['payload'])
         elif kind == 'dispatch_intended':
@@ -344,6 +353,9 @@ class Controller:
                         holds = state['resource_holds'].setdefault(resource, [])
                         if dispatch['dispatch_id'] not in holds:
                             holds.append(dispatch['dispatch_id'])
+        elif kind == 'evidence_recorded':
+            from engagement_evidence import reduce_host
+            reduce_host(state, payload)
         elif kind == 'worker_stop_observed':
             state['workers'][payload['worker_id']]['status'] = 'stopped'
         elif kind == 'cleanup_observed':
@@ -352,6 +364,10 @@ class Controller:
             fail('journal_corrupt')
 
     def _reduce_request(self, state, actor, kind, data):
+        from engagement_evidence import REQUESTS, reduce_request
+        if kind in REQUESTS:
+            reduce_request(state, actor, kind, data)
+            return
         if kind == 'worker_request':
             state['workers'][data['worker_id']] = {'id': data['worker_id'], 'role': data['role'],
                 'generation': 1, 'profile_id': data['profile_id'], 'status': 'pending',
@@ -369,6 +385,8 @@ class Controller:
                                                                'generation': task['generation']}
         elif kind == 'publish':
             state['publications'][data['publication_id']] = dict(data, author=actor)
+            from engagement_evidence import invalidate
+            invalidate(state, data['supersedes'])
         elif kind == 'task_result':
             task = state['tasks'][data['task_id']]
             task.update(status=data['disposition'], result=data['result'], evidence_refs=data['evidence_refs'])
@@ -423,9 +441,12 @@ class Controller:
 
     def _dispatch_resources(self, state, worker, resources):
         self._resources(state, resources)
+        review = next((row for row in state['reviews'].values() if row['reviewer_id'] == worker['id'] and row['status'] == 'pending'), None)
+        if worker['role'] != 'reviewer' and any(row['state'] in ('pending', 'disputed') and set(resources) & set(row['resources']) for row in state['obligations'].values()):
+            fail('direction_held')
         assignment = worker['assignment']
         if assignment is None:
-            if resources and worker['role'] != 'lead':
+            if resources and worker['role'] != 'lead' and not (review and set(resources) <= set(review['resources'])):
                 fail('assignment_required')
         else:
             task = state['tasks'][assignment['task_id']]
@@ -438,6 +459,9 @@ class Controller:
             fail('resource_owned')
 
     def _validate_request(self, state, worker, kind, data):
+        from engagement_evidence import REQUESTS, validate_request
+        if kind in REQUESTS:
+            return validate_request(self, state, worker, kind, data)
         if kind in LEAD_TYPES and worker['role'] != 'lead':
             fail('role_forbidden')
         if kind not in SUBMIT_TYPES:
@@ -604,7 +628,7 @@ class Controller:
                event['payload']['session_id'] == session_id for event in events):
             fail('session_reused')
 
-    def record_worker_started(self, worker_id, generation, session_id, workspace):
+    def record_worker_started(self, worker_id, generation, session_id, workspace, *, owner_receipt=None):
         with self.lock():
             events = self._events()
             state = self._replay(events)
@@ -616,25 +640,29 @@ class Controller:
             if worker['workspace'] is not None and worker['workspace'] != str(workspace):
                 fail('worker_workspace_overlap')
             self._session(events, session_id)
+            from engagement_evidence import runtime_owner
+            owner_sha = runtime_owner(self, state, worker, session_id, owner_receipt)
             event = self._append(events, Principal('runtime', worker_id, generation), uuid.uuid4().hex,
                 digest(canonical([worker_id, generation, session_id])), 'worker_started',
                 {'worker_id': worker_id, 'generation': generation,
-                 'session_id': session_id, 'workspace': str(workspace)})
+                 'session_id': session_id, 'workspace': str(workspace), 'runtime_owner_sha256': owner_sha})
             return self._receipt(event)
 
-    def record_worker_session(self, worker_id, generation, session_id, *, reason):
+    def record_worker_session(self, worker_id, generation, session_id, *, reason, owner_receipt=None):
         with self.lock():
             events = self._events()
             state = self._replay(events)
             self._authority(state)
-            self._worker(state, Principal('worker', worker_id, generation))
+            worker = self._worker(state, Principal('worker', worker_id, generation))
             if any(d['worker_id'] == worker_id and d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()):
                 fail('session_dispatch_pending')
             self._session(events, session_id)
             if not isinstance(reason, str) or not 1 <= len(reason) <= 1024:
                 fail('session_invalid')
+            from engagement_evidence import runtime_owner
+            owner_sha = runtime_owner(self, state, worker, session_id, owner_receipt)
             return self._host('worker_session_observed', {'worker_id': worker_id, 'generation': generation,
-                'session_id': session_id, 'reason': reason})
+                'session_id': session_id, 'reason': reason, 'runtime_owner_sha256': owner_sha})
 
     def _grant(self, state, worker, *, seconds, resources, adapter_id):
         limits, usage = state['scope']['limits'], state['usage']
@@ -738,6 +766,8 @@ class Controller:
         return True
 
     def store_object(self, content):
+        if type(content) is not bytes or len(content) > 4 * 1024 * 1024:
+            fail('object_size_limit')
         try:
             safe_publication(content)
         except ContractError:
@@ -867,6 +897,106 @@ class Controller:
                 evidence, 'effect_reconciled', dict(data, evidence=evidence))
             return self._receipt(event)
 
+    def record_environment_observation(self, grant, environment_profile_id, observation, output=None, *, effect_id, account_refs=()):
+        from engagement_evidence import record_environment_observation
+        return record_environment_observation(self, grant, environment_profile_id, observation, output,
+            effect_id=effect_id, account_refs=account_refs)
+
+    def record_environment_output(self, grant, environment_profile_id, operation_id, output):
+        from engagement_evidence import record_environment_output
+        return record_environment_output(self, grant, environment_profile_id, operation_id, output)
+
+    def register_support_inputs(self, grant, inputs):
+        from engagement_evidence import register_support_inputs
+        return register_support_inputs(self, grant, inputs)
+
+    def record_experiment_execution(self, grant, environment_profile_id, operation_id, measurement):
+        from engagement_evidence import record_experiment_execution
+        return record_experiment_execution(self, grant, environment_profile_id, operation_id, measurement)
+
+    def record_patch_execution(self, grant, environment_profile_id, operation_id, patch_id, arm, manifest):
+        from engagement_evidence import record_patch_execution
+        return record_patch_execution(self, grant, environment_profile_id, operation_id, patch_id, arm, manifest)
+
+    def record_worker_stopped(self, grant, environment_profile_id, readback):
+        from engagement_evidence import record_worker_stopped
+        return record_worker_stopped(self, grant, environment_profile_id, readback)
+
+    def record_environment_cleanup(self, grant, environment_profile_id, readback):
+        from engagement_evidence import record_environment_cleanup
+        return record_environment_cleanup(self, grant, environment_profile_id, readback)
+
+    def record_obligation_delivery(self, obligation_id, worker_id, generation, *, dispatch_id):
+        with self.lock():
+            state = self.state()
+            worker = state['workers'].get(worker_id)
+            dispatch = state['dispatches'].get(dispatch_id)
+            if worker is None or worker['role'] != 'lead' or worker['generation'] != generation:
+                fail('worker_stale')
+            if dispatch is None or dispatch['worker_id'] != worker_id or dispatch['generation'] != generation:
+                fail('dispatch_identity_invalid')
+            obligation = state['obligations'].get(obligation_id)
+            if obligation is None:
+                fail('obligation_missing')
+            if dispatch_id in obligation['deliveries']:
+                return {'status': 'recorded'}
+            if dispatch['status'] != 'pending':
+                fail('delivery_after_completion')
+            return self._host('evidence_recorded', {'action': 'obligation_delivery', 'data': {
+                'obligation_id': obligation_id, 'worker_id': worker_id, 'generation': generation,
+                'dispatch_id': dispatch_id}, '_objects': []})
+
+    def record_decision_checkpoint(self, grant):
+        from engagement_evidence import binding
+        with self.lock():
+            state = self.state()
+            dispatch = binding(self, state, grant)
+            if grant['dispatch_id'] in state['decision_checkpoints']:
+                return {'status': 'recorded'}
+            if dispatch['status'] != 'settled':
+                fail('checkpoint_unsettled')
+            worker = state['workers'][grant['worker_id']]
+            if worker['role'] != 'lead' or worker['generation'] != grant['generation']:
+                fail('worker_stale')
+            delivered = [name for name, row in state['obligations'].items() if grant['dispatch_id'] in row['deliveries']]
+            if not delivered:
+                fail('obligation_not_delivered')
+            return self._host('evidence_recorded', {'action': 'decision_checkpoint', 'data': {
+                'dispatch_id': grant['dispatch_id'], 'obligations': delivered}, '_objects': []})
+
+    def replace_lead(self, worker_id, generation, *, profile_id=None):
+        with self.lock():
+            state = self.state()
+            self._authority(state)
+            worker = state['workers'].get(worker_id)
+            if worker is None or worker['role'] != 'lead' or worker['generation'] != generation:
+                fail('worker_stale')
+            if not state['replacement_required']:
+                fail('replacement_not_required')
+            if worker['status'] != 'stopped' or not worker.get('stop_receipt'):
+                fail('worker_not_stopped')
+            profile_id = profile_id or worker['profile_id']
+            if not any(row['profile_id'] == profile_id and 'lead' in row['roles'] for row in state['scope']['runtime_assignments']):
+                fail('runtime_assignment_forbidden')
+            return self._host('evidence_recorded', {'action': 'lead_replaced', 'data': {
+                'worker_id': worker_id, 'generation': generation, 'profile_id': profile_id}, '_objects': []})
+
+    def finalize_closure(self, closure_id):
+        with self.lock():
+            state = self.state()
+            closure = state['closures'].get(closure_id)
+            if closure is None or closure['state'] != 'reviewed':
+                fail('closure_not_reviewed')
+            from engagement_evidence import current_closure
+            if not current_closure(state, closure):
+                fail('closure_stale')
+            if any(row['status'] != 'stopped' for row in state['workers'].values()) or state['cleanup'] != 'verified':
+                fail('closure_cleanup_unverified')
+            if state['resource_holds'] or any(d['status'] != 'settled' for d in state['dispatches'].values()):
+                fail('closure_effects_unsettled')
+            return self._host('evidence_recorded', {'action': 'closure_finalized', 'data': {
+                'closure_id': closure_id}, '_objects': []})
+
     def direction(self, text):
         if not isinstance(text, str) or not 1 <= len(text) <= 65536:
             fail('direction_invalid')
@@ -908,7 +1038,7 @@ class Controller:
             page_bytes = 0
             for event in events[start:start + limit]:
                 item = {key: event[key] for key in ('sequence', 'sha256', 'at', 'type', 'actor')}
-                if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested'):
+                if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested', 'evidence_recorded'):
                     item['payload'] = event['payload']
                 size = len(canonical(item))
                 if updates and page_bytes + size > 512 * 1024:
@@ -918,7 +1048,10 @@ class Controller:
             summary_limit = min(limit, 25)
             fields = {'tasks': ('task_id', 'status', 'owner', 'generation', 'priority'),
                       'publications': ('publication_id', 'kind', 'subject', 'author'),
-                      'workers': ('id', 'role', 'generation', 'profile_id', 'status', 'assignment')}
+                      'workers': ('id', 'role', 'generation', 'profile_id', 'status', 'assignment'),
+                      'claims': ('claim_id', 'state'), 'reviews': ('review_id', 'kind', 'subject_id', 'reviewer_id', 'status', 'packet_sha256'),
+                      'obligations': ('obligation_id', 'kind', 'state', 'opportunities', 'resources'),
+                      'closures': ('closure_id', 'outcome', 'state'), 'patches': ('patch_id', 'claim_id', 'state')}
             summaries = {name: {key: {field: row[field] for field in selected}
                                 for key, row in list(state[name].items())[:summary_limit]}
                          for name, selected in fields.items()}
@@ -929,6 +1062,7 @@ class Controller:
                 **summaries, 'summary_counts': {name: len(state[name]) for name in fields},
                 'summaries_truncated': {name: len(state[name]) > summary_limit for name in fields},
                 'usage': state['usage'], 'resource_holds': state['resource_holds'], 'cleanup': state['cleanup'],
+                'replacement_required': state['replacement_required'],
                 'updates': updates, 'has_more': end < len(events),
                 'next_cursor': self._encode_cursor(state, events[end - 1]) if updates else since}
 
@@ -952,9 +1086,13 @@ class Controller:
                 if event['type'] in ('dispatch_observed', 'effect_reconciled'):
                     sha = event['payload']['receipt' if event['type'] == 'dispatch_observed' else 'evidence']
                     files['objects/' + sha[7:]] = self.read_object(sha)
+            for sha in state['evidence_objects']:
+                files['objects/' + sha[7:]] = self.read_object(sha)
             files['result.json'] = canonical({'engagement_id': state['engagement_id'],
                 'scope_sha256': state['scope_sha256'], 'evidence_class': state['evidence_class'],
-                'status': state['status'], 'claim_acceptance': 'not_established', 'tasks': state['tasks'],
+                'status': state['status'], 'claim_acceptance': 'per_claim', 'tasks': state['tasks'],
+                'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
+                'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],
                 'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
             for data in files.values():

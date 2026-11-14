@@ -142,7 +142,7 @@ def main():
             except Exception as error: checks.append({'scenario':name,'status':'failed','error':str(error)})
     result={'classification':'engineering_simulation_real_journal_runner_boundary', 'status':'passed' if all(r['status']=='passed' for r in checks) else 'failed', 'checks':checks,
         'provider_calls':0,'docker_calls':0,'ssh_calls':0,
-        'source_sha256':{name:digest((ROOT/name).read_bytes()) for name in ('tools/engagement_native_boundary.py','tools/engagement_controller.py','tools/engagement_runner.py','tools/engagement_evidence.py',str(Path(__file__).relative_to(ROOT)))},
+        'source_sha256':{name:digest((ROOT/name).read_bytes()) for name in ('tools/engagement_native_boundary.py','tools/engagement_controller.py','tools/engagement_runner.py','tools/engagement_evidence.py',str(Path(__file__).resolve().relative_to(ROOT)))},
         'unverified':['Docker/SSH cleanup','live provider behavior','native process containment','research acceptance']}
     args.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
     return 0 if result['status']=='passed' else 1

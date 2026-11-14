@@ -94,3 +94,16 @@ GitHub-hosted Ubuntu 24.04 runner with image
 `python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39`.
 These observations do not establish SSH transport, native model containment,
 the joined controller workflow, live provider behavior or research acceptance.
+
+The [guardian run](https://github.com/matheusht/redteam-harness/actions/runs/43588193742)
+at `3d0df8a2` passed the unchanged 25-check lifecycle/watcher scenario after
+container-local lease enforcement was added. The killed watcher exited with
+`-SIGKILL`; the next observed stopped container was 0.1657 seconds after the
+fault. All three cleanup readbacks were clean. The separate guardian scenario
+passed 30 checks, including actual root PID 1 with no effective capabilities,
+nonroot worker isolation from its signal/control channel, adopted-child reaping,
+separate worker/lease pipes and container stop on expiry. Its container was
+removed and observed absent. The [guardian manifest](guardian-manifest.json)
+binds both unchanged hosted receipts to their exact sources. These establish the
+bounded lease fix; they do not establish a joined model workflow or research
+acceptance.

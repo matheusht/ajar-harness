@@ -19,7 +19,7 @@ subsequently connected to the real runner by the public CLI delivery unit.
 | M0 contracts and failure cases | Design checkpoint reviewed; concrete contracts and runnable failure scenarios retained | Validate assumptions through the integrated workflow required by the plan |
 | M1 one state owner | Signed authority, journal, public workflow and preserved v1 readers implemented | Final joined sole-owner/recovery/cleanup verification |
 | M2 runtimes and team | Codex/OMP adapters, native tools and team controls implemented with local native and simulated evidence | Complete protected workflow qualification; Linux model-host support |
-| M3 environments | All access descriptors, environment/network controls and target account binding implemented; the hosted Docker lifecycle passed | Fix and verify reproduced watcher-loss lease defect; actual SSH, joined workflow and application reset/replay |
+| M3 environments | All access descriptors, environment/network controls and target account binding implemented; the hosted Docker lifecycle and watcher-loss fix passed | Actual SSH, joined workflow and application reset/replay |
 | M4 research evidence and recovery | Evidence/review, declared prior-rung admission, protected capture, obligations, replacement and closeout mechanics implemented and locally checked | Joined execution proof and impact-artifact approval/cleanup controls; existing gates remain active |
 | M5 accounting and long operation | Shared accounting, delayed settlement, optional deadline and renewable-worker mechanics implemented | Actual sustained operation/restart and provider request/billing completeness |
 | M6 delivery | Installation, preflight, examples, guide, export, frozen methodology and CI selection implemented | Final integrated checks, hosted CI and release-candidate handoff |
@@ -71,8 +71,13 @@ cleanup. This does not establish the joined native/controller workflow.
 
 A failure-first watcher-loss scenario at `fd8674b1` then reproduced a lifetime
 defect: killing the host watcher left its container running beyond the lease.
-The fixture cleaned up all owned resources. The next implementation unit moves
-lease enforcement into the container and must pass this unchanged failure case.
+The fixture cleaned up all owned resources. Container-local enforcement then
+passed this unchanged case at `3d0df8a2`: 25 lifecycle checks passed, the container
+was observed stopped 0.1657 seconds after watcher loss, and all cleanup readbacks
+were clean. A separate actual guardian scenario passed 30 checks for PID 1,
+worker separation, child reaping, private control and expiry. Its
+[manifest](../../evals/native-qualification/team-evidence/real-docker-20261114/guardian-manifest.json)
+preserves exact source hashes and hosted receipts.
 The [saved manifest](../../evals/native-qualification/team-evidence/real-docker-20261114/hosted-manifest.json)
 records exact source hashes and run links. Missing Linux model-host support remains
 an implementation task; the hosted runner is a path to verifying it, not proof

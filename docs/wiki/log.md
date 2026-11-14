@@ -873,3 +873,16 @@ resources. Both receipts bind exact source hashes and hosted run links. This is
 actual Docker evidence on the disposable Ubuntu runner, separate from the seven
 portable CI workflows and from the still unimplemented Linux model-host path.
 The original M0–M6 scope and operator-owned fresh-target acceptance remain open.
+
+## [2026-11-14] verify | Container-local lease fix
+
+The actual hosted run at `3d0df8a2` passed the unchanged watcher-loss scenario
+after the lease owner moved inside the container: 25 lifecycle checks and 30
+guardian checks passed, with owned cleanup verified. The earlier failure at
+`fd8674b1` remains preserved. The
+[source-bound receipts](../../evals/native-qualification/team-evidence/real-docker-20261114/guardian-manifest.json)
+establish actual container lifetime, child reaping and worker/control separation;
+they do not qualify the joined native workflow, live providers or research.
+The [delivery state](oslit-v2-delivery-2026-11-14.md) and
+[implementation record](../research/oslit-implementation-2026-11-14.md) now state
+that distinction. Documentation and evidence update only; no runtime rerun.

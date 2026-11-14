@@ -1,0 +1,1653 @@
+{
+  "kind": "environment-real-docker-e2e-v2",
+  "classification": "actual_docker_environment",
+  "checks": [
+    {
+      "name": "image is an exact Linux content identity",
+      "passed": true
+    },
+    {
+      "name": "no authorization creates no container",
+      "passed": true
+    },
+    {
+      "name": "production staging starts the exact owned environment",
+      "passed": true
+    },
+    {
+      "name": "actual container has bounded immutable configuration",
+      "passed": true
+    },
+    {
+      "name": "actual probe completes inside the production environment",
+      "passed": true
+    },
+    {
+      "name": "capabilities_dropped",
+      "passed": true
+    },
+    {
+      "name": "host_loopback_unreachable",
+      "passed": true
+    },
+    {
+      "name": "input_readonly",
+      "passed": true
+    },
+    {
+      "name": "no_admin_socket",
+      "passed": true
+    },
+    {
+      "name": "no_network_interface",
+      "passed": true
+    },
+    {
+      "name": "no_new_privileges",
+      "passed": true
+    },
+    {
+      "name": "root_readonly",
+      "passed": true
+    },
+    {
+      "name": "unprivileged",
+      "passed": true
+    },
+    {
+      "name": "published bytes come from the actual worker filesystem",
+      "passed": true
+    },
+    {
+      "name": "input staging preserves the supplied source",
+      "passed": true
+    },
+    {
+      "name": "detached child exists before revocation",
+      "passed": true
+    },
+    {
+      "name": "revocation stops the container and its detached child",
+      "passed": true
+    },
+    {
+      "name": "receipt-based recovery observes exact resource cleanup",
+      "passed": true
+    },
+    {
+      "name": "owned cleanup preserves all preexisting containers",
+      "passed": true
+    },
+    {
+      "name": "owned container and staging container are absent",
+      "passed": true
+    },
+    {
+      "name": "owned prepared image is absent and the base image remains",
+      "passed": true
+    },
+    {
+      "name": "owner-loss fixture starts a detached child",
+      "passed": true
+    },
+    {
+      "name": "owner-loss fixture has a live owned watcher",
+      "passed": true
+    },
+    {
+      "name": "owned watcher was terminated by the injected SIGKILL",
+      "passed": true
+    },
+    {
+      "name": "container lease survives loss of the host watcher",
+      "passed": true
+    }
+  ],
+  "observations": [
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create_stage",
+      "operation_id": "63b91a8acd744feb98f652986d98be19",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [
+          "create_stage"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:b5ef56d96df2869c7b19d1a3ba64348958192ad1ae9e25be748fff1ab5e8f9ba"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create_stage",
+      "operation_id": "63b91a8acd744feb98f652986d98be19",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:ec37278401fb320ae6c9a203aede7cd9884683d4060041059a12b5f273dc6982"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "stage_input",
+      "operation_id": "0362afdf189d470c921a564f6c02620d",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:28d3d89b6569edc4b2ac596db890b9054d3e91a53f053937a8560b8d1cadd9cc"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "stage_input",
+      "operation_id": "0362afdf189d470c921a564f6c02620d",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "snapshot_input",
+      "operation_id": "0d18ba1416414a4b88c36939369f308e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [
+          "snapshot_input"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:123d5abc99ebb5dd4ef476e7afb1edce7853f395d892fa893ad22ebd414ec336"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "snapshot_input",
+      "operation_id": "0d18ba1416414a4b88c36939369f308e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:6af5126143b281e2948b65ca00634487d52e26e2ad23e1a31ae2e5db901b50f3"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_stage",
+      "operation_id": "7c343e80d9c443d3bc31b6830b7db74c",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:28147f41b66d93e3d71f324da258fa065830ca8eb280edda5da5a688ef4334c5"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_stage",
+      "operation_id": "7c343e80d9c443d3bc31b6830b7db74c",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:ec37278401fb320ae6c9a203aede7cd9884683d4060041059a12b5f273dc6982"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create",
+      "operation_id": "fdedf750925149d99229a9b2f146cfba",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [
+          "create"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:517eef6621f20a684d82715b5a95c90f112c931b9a79730b9498833e466e2f95"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create",
+      "operation_id": "fdedf750925149d99229a9b2f146cfba",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": null,
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:42d5475ed2885faf2801a14b0672681ca5d6a3e1957f680138ab933352073cc2"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "readback_input",
+      "operation_id": "f74809fd5af64fc59de40387b4bc1b58",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "manifest_sha256": "sha256:e47e32afaab433f53db0c885d2305e030b0947c9bc6e0ff8f08d1d814e233ee6",
+      "files": 1
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "start",
+      "operation_id": "6a1389b840eb43cb954af54a2078cd79",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      }
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "start",
+      "operation_id": "6a1389b840eb43cb954af54a2078cd79",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "execute",
+      "operation_id": "0e68fa49be2a4fd79fba1b5b40d93ea1",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:d6927c8cc60b2bea1721c3bfbb2e775211e72e5b2d6393ba666b844444744281"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "execute",
+      "operation_id": "0e68fa49be2a4fd79fba1b5b40d93ea1",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:4bf6315a5f2b3e1377b3c644a8f2ad0042bab001be778104be51321e918c8704"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "read_artifact",
+      "operation_id": "e06144d3b97e4a5c825e21b0bd9e9330",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "path": "/work/result.json",
+      "output_sha256": "sha256:d7802b53553a2dee2b7c94a7ca4acb77f34746d1da38120e3494d4104e0479d2",
+      "bytes": 217
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove",
+      "operation_id": "f3328cce465c40e4b36ebf12846dd00f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:5f262d82435077a7a0cfcb09691bef62cc10f257299916f660261373e31c435e"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove",
+      "operation_id": "f3328cce465c40e4b36ebf12846dd00f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:42d5475ed2885faf2801a14b0672681ca5d6a3e1957f680138ab933352073cc2"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_input_image",
+      "operation_id": "8b32fd6b2d0b451d989894cf59689fae",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:90c09af1fbf83ca823521c278680d66c4dacdf5e6e368dfee07059b90691ca82"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_input_image",
+      "operation_id": "8b32fd6b2d0b451d989894cf59689fae",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:aadb21e9ad81cd129ac5acf25f1b58aa5e0eea13d8d09d4afea12d128a8b22d3"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create_stage",
+      "operation_id": "d9fa3f8fa79e4f00bc26ee3a9ae7d854",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [
+          "create_stage"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:f7a703095b35bda5bbdf85d8d686f64ff7c05f916244b0412ed224a84689c629"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create_stage",
+      "operation_id": "d9fa3f8fa79e4f00bc26ee3a9ae7d854",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:094a2812c568dba6d62ba1ae89b52c7998a767a7ab632cada1843ef4d9ca9f39"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "stage_input",
+      "operation_id": "fa7f395ec32d4022b38960f86f77a42e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:cb38a7eeed00a7496f93c191444cb0d1046d760fa0d60c923e6de100cb08bb1f"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "stage_input",
+      "operation_id": "fa7f395ec32d4022b38960f86f77a42e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "snapshot_input",
+      "operation_id": "18c6896812a8449a93939e340305b33d",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [
+          "snapshot_input"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:e30c0d1e6402a1addbd3933a874eb72089c5e5b79b58f61e12a68ac12db99827"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "snapshot_input",
+      "operation_id": "18c6896812a8449a93939e340305b33d",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:8bf1225d7df72af383773f49ea109ae23c8176752bee0f7c829cb40ab1bf1cc6"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_stage",
+      "operation_id": "a6493b66b5ea4f5da17d901353108383",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:41e0bb4132bd0c7a863d19fd5631cd5cb66ecff12d3a3f3b93974316ac209e58"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_stage",
+      "operation_id": "a6493b66b5ea4f5da17d901353108383",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:094a2812c568dba6d62ba1ae89b52c7998a767a7ab632cada1843ef4d9ca9f39"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create",
+      "operation_id": "279e915dcb934431948e4d8e64703061",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [
+          "create"
+        ],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:f72d3a3c279751cfdad061c6bd63576d1a9dc512733ec67f2d383be8dac3b99b"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create",
+      "operation_id": "279e915dcb934431948e4d8e64703061",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": null,
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:c70a7f3e3b73a0e58f372b83aba71c2f3ac703f6d678e045ccae985e660df577"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "readback_input",
+      "operation_id": "f31c09d1d82644f8b3f8ff381d2a8f72",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "manifest_sha256": "sha256:e47e32afaab433f53db0c885d2305e030b0947c9bc6e0ff8f08d1d814e233ee6",
+      "files": 1
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "start",
+      "operation_id": "ef570dfbf73d474b82b603c6a5b144ca",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      }
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "start",
+      "operation_id": "ef570dfbf73d474b82b603c6a5b144ca",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "execute",
+      "operation_id": "509a35a55dfb4f7083e6866e4dbadbe4",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:6e1e17213eb001546dacc036625ac3af6169d0580fd875443646ce046ec89f8c"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "execute",
+      "operation_id": "509a35a55dfb4f7083e6866e4dbadbe4",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:1a252402972f6057fa53cc172b52b9ffca698e18311facd0f3b06ecaaef79e17"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove",
+      "operation_id": "095d57573a2f43629c39c7add92788e1",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:c97b91262c8170452eca8184a8cdbb3d651bb028a3792f42bc8327002eced6cf"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove",
+      "operation_id": "095d57573a2f43629c39c7add92788e1",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:c70a7f3e3b73a0e58f372b83aba71c2f3ac703f6d678e045ccae985e660df577"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_input_image",
+      "operation_id": "9168581adb6f42e898a2619f97f9c014",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "request_sha256": "sha256:52295bd9af157baf3ff7453996605f8c110a24df3f8312e13d74e05cf52028b7"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_input_image",
+      "operation_id": "9168581adb6f42e898a2619f97f9c014",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:68df45388d20d43bd69988805a6c2d6e3843032ddf5a28240eba8052c88fa66a"
+    }
+  ],
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "unverified": [
+    "SSH transport",
+    "native model host",
+    "joined controller workflow",
+    "research acceptance"
+  ],
+  "environment": {
+    "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "image_digests": [
+      "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39"
+    ],
+    "platform": "linux/amd64",
+    "docker_version": {
+      "Client": {
+        "Platform": {
+          "Name": "Docker Engine - Community"
+        },
+        "Version": "28.0.4",
+        "ApiVersion": "1.48",
+        "DefaultAPIVersion": "1.48",
+        "GitCommit": "b8034c0",
+        "GoVersion": "go1.23.7",
+        "Os": "linux",
+        "Arch": "amd64",
+        "BuildTime": "Tue Mar 25 15:07:16 2025",
+        "Context": "default"
+      },
+      "Server": {
+        "Platform": {
+          "Name": "Docker Engine - Community"
+        },
+        "Components": [
+          {
+            "Name": "Engine",
+            "Version": "28.0.4",
+            "Details": {
+              "ApiVersion": "1.48",
+              "Arch": "amd64",
+              "BuildTime": "Tue Mar 25 15:07:16 2025",
+              "Experimental": "false",
+              "GitCommit": "6430e49",
+              "GoVersion": "go1.23.7",
+              "KernelVersion": "7.0.0-1014-aws",
+              "MinAPIVersion": "1.24",
+              "Os": "linux"
+            }
+          },
+          {
+            "Name": "containerd",
+            "Version": "v2.4.2",
+            "Details": {
+              "GitCommit": "b7a25261e029d68978bbf290df0a62fc819b3c51"
+            }
+          },
+          {
+            "Name": "runc",
+            "Version": "1.5.2",
+            "Details": {
+              "GitCommit": "v1.5.2-0-g29dd3dc2"
+            }
+          },
+          {
+            "Name": "docker-init",
+            "Version": "0.19.0",
+            "Details": {
+              "GitCommit": "de40ad0"
+            }
+          }
+        ],
+        "Version": "28.0.4",
+        "ApiVersion": "1.48",
+        "MinAPIVersion": "1.24",
+        "GitCommit": "6430e49",
+        "GoVersion": "go1.23.7",
+        "Os": "linux",
+        "Arch": "amd64",
+        "KernelVersion": "7.0.0-1014-aws",
+        "BuildTime": "2025-03-25T15:07:16.000000000+00:00"
+      }
+    }
+  },
+  "owned_identity": {
+    "kind": "research-environment-receipt-v2",
+    "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+    "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+    "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+    "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+    "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+    "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+    "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+    "unsettled": [],
+    "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+    "access": [
+      {
+        "id": "source",
+        "kind": "source",
+        "identity": {
+          "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+        }
+      }
+    ],
+    "support_inputs": []
+  },
+  "watcher_loss": {
+    "identity": {
+      "kind": "research-environment-receipt-v2",
+      "nonce": "48055f6059394071b2a40c4599eebad7",
+      "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+      "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+      "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+      "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+      "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+      "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+      "unsettled": [],
+      "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+      "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+      "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+      "access": [
+        {
+          "id": "source",
+          "kind": "source",
+          "identity": {
+            "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+          }
+        }
+      ],
+      "support_inputs": []
+    },
+    "lease_seconds": 4,
+    "watcher_pid": 3633,
+    "before": {
+      "status": "running",
+      "running": true,
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      }
+    },
+    "watcher_returncode": -9,
+    "after": {
+      "status": "stopped",
+      "running": false,
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      }
+    },
+    "elapsed_seconds": 0.1657436710000013
+  },
+  "status": "passed",
+  "cleanup": [
+    {
+      "status": "clean",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "48055f6059394071b2a40c4599eebad7",
+        "container_id": "17070ba6e4e25de36b641f8575cd794c3837eec1844c169deec80e6044e7bdbf",
+        "container_name": "oslit-48055f6059394071b2a40c4599eebad7",
+        "stage_container_id": "a785b1b1c7e45202d77a411c33c5ef2636a9dd62c4082675e71caefdc45d1dfe",
+        "stage_container_name": "oslit-48055f6059394071b2a40c4599eebad7-stage",
+        "prepared_image_id": "sha256:c74510a929902f6931f86b38016ef192a2df834e75eb8a27d30834ef58caa44b",
+        "prepared_image_name": "oslit-input-48055f6059394071b2a40c4599eebad7:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "owned_workspace": "container_removed"
+    },
+    {
+      "status": "clean",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "owned_workspace": "container_removed"
+    },
+    {
+      "status": "clean",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "17dd058ca46345a8b01e3f9819e7154f",
+        "container_id": "6e926ced5e7e382c1be9dc21f0159d3de5bdfa3ba5dcf815244a99029c65d590",
+        "container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f",
+        "stage_container_id": "7cd8e7fb49ae6fcaad1910094359d3fc5e77c88076330080c4581101629a7ac0",
+        "stage_container_name": "oslit-17dd058ca46345a8b01e3f9819e7154f-stage",
+        "prepared_image_id": "sha256:e829386f85957663e8404785653e970129b7a78d02d77b4a57b65f5df4c1a5ab",
+        "prepared_image_name": "oslit-input-17dd058ca46345a8b01e3f9819e7154f:latest",
+        "unsettled": [],
+        "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:67739865090ed221526dd42b865ab53a4c0d7d1526bf772cd35f62136af950bd",
+        "access": [
+          {
+            "id": "source",
+            "kind": "source",
+            "identity": {
+              "manifest_sha256": "sha256:222233a416cd339cf48e659546a5e6559de7a465783ecd0fcf1290772f04a52d"
+            }
+          }
+        ],
+        "support_inputs": []
+      },
+      "owned_workspace": "container_removed"
+    }
+  ],
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:4fc419fe148b561b5251ea3a6a5aa727036453b2372162d63fcd37fd0509c305",
+    "tools/research_environment.py": "sha256:8f294586a1089560662ab69f8578803563f274e8eba8c877995d596a224a6a6b",
+    "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+    "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+  }
+}

@@ -1,0 +1,234 @@
+{
+  "checks": [
+    {
+      "name": "unconfigured guardian expires cleanly",
+      "passed": true
+    },
+    {
+      "name": "initial acknowledged lease expires without renewal",
+      "passed": true
+    },
+    {
+      "name": "valid renewal keeps owner alive past initial expiry",
+      "passed": true
+    },
+    {
+      "name": "renewed owner still has a finite expiry",
+      "passed": true
+    },
+    {
+      "name": "control channel EOF ends the guardian",
+      "passed": true
+    },
+    {
+      "name": "explicit revocation ends the guardian",
+      "passed": true
+    },
+    {
+      "name": "partial frame cannot block the expiry clock",
+      "passed": true
+    },
+    {
+      "name": "a different owner nonce is rejected",
+      "passed": true
+    },
+    {
+      "name": "replayed renewal sequence is rejected",
+      "passed": true
+    },
+    {
+      "name": "renewal above the fixed maximum is rejected",
+      "passed": true
+    },
+    {
+      "name": "skipped sequence is rejected",
+      "passed": true
+    },
+    {
+      "name": "boolean duration is rejected",
+      "passed": true
+    },
+    {
+      "name": "nonfinite expiry is rejected",
+      "passed": true
+    },
+    {
+      "name": "unexpected field is rejected",
+      "passed": true
+    },
+    {
+      "name": "expired queued renewal is not rebased on receipt",
+      "passed": true
+    },
+    {
+      "name": "live queued renewal retains its original absolute expiry",
+      "passed": true
+    },
+    {
+      "name": "oversized input fails closed without blocking",
+      "passed": true
+    },
+    {
+      "name": "explicit local daemon selected",
+      "passed": true
+    },
+    {
+      "name": "Linux image pinned by complete content identity",
+      "passed": true
+    },
+    {
+      "name": "guardian is actual root PID 1 without Docker init",
+      "passed": true
+    },
+    {
+      "name": "adopted_children_reaped",
+      "passed": true
+    },
+    {
+      "name": "effective_guardian_command",
+      "passed": true
+    },
+    {
+      "name": "effective_guardian_no_capabilities",
+      "passed": true
+    },
+    {
+      "name": "effective_guardian_root",
+      "passed": true
+    },
+    {
+      "name": "guardian_control_fd_denied",
+      "passed": true
+    },
+    {
+      "name": "guardian_signal_denied",
+      "passed": true
+    },
+    {
+      "name": "worker_nonroot",
+      "passed": true
+    },
+    {
+      "name": "worker exec stream is independent from renewal attach",
+      "passed": true
+    },
+    {
+      "name": "guardian expiry ends its Docker attach stream",
+      "passed": true
+    },
+    {
+      "name": "guardian expiry stops the entire container",
+      "passed": true
+    }
+  ],
+  "classification": "real_local_process_and_docker_pid1",
+  "cleanup": [
+    {
+      "absent": true,
+      "container_id": "022acb45154e57e9f9ab04d0673593aa3ef71b82a717aa5e181225e0037407dd",
+      "removed": true
+    }
+  ],
+  "container_pid1_verified": true,
+  "delayed_renewal_seconds_after_delivery": 0.515,
+  "docker": {
+    "daemon_id": "8fcd00e2-c8ec-49fc-a584-a2113079d563",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "platform": "linux/amd64"
+  },
+  "external_target_calls": 0,
+  "kind": "container-guardian-e2e-v1",
+  "passed": true,
+  "pid1_probe": {
+    "checks": {
+      "adopted_children_reaped": true,
+      "effective_guardian_command": true,
+      "effective_guardian_no_capabilities": true,
+      "effective_guardian_root": true,
+      "guardian_control_fd_denied": true,
+      "guardian_signal_denied": true,
+      "worker_nonroot": true
+    },
+    "zombies": []
+  },
+  "process_cleanup": [
+    {
+      "exited": true,
+      "pid": 4613
+    },
+    {
+      "exited": true,
+      "pid": 4614
+    },
+    {
+      "exited": true,
+      "pid": 4616
+    },
+    {
+      "exited": true,
+      "pid": 4617
+    },
+    {
+      "exited": true,
+      "pid": 4618
+    },
+    {
+      "exited": true,
+      "pid": 4619
+    },
+    {
+      "exited": true,
+      "pid": 4620
+    },
+    {
+      "exited": true,
+      "pid": 4621
+    },
+    {
+      "exited": true,
+      "pid": 4622
+    },
+    {
+      "exited": true,
+      "pid": 4623
+    },
+    {
+      "exited": true,
+      "pid": 4624
+    },
+    {
+      "exited": true,
+      "pid": 4625
+    },
+    {
+      "exited": true,
+      "pid": 4626
+    },
+    {
+      "exited": true,
+      "pid": 4627
+    },
+    {
+      "exited": true,
+      "pid": 4628
+    },
+    {
+      "exited": true,
+      "pid": 4629
+    },
+    {
+      "exited": true,
+      "pid": 4667
+    }
+  ],
+  "provider_calls": 0,
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_container_guardian_e2e.py": "4f588b08170d66e7661c7cac73e5a6a5e72389a58ede02af293b47d88af6bfa8",
+    "tools/engagement_lease_owner.py": "268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a"
+  },
+  "unverified": [
+    "SSH transport",
+    "native model host",
+    "research qualification"
+  ]
+}

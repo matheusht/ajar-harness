@@ -1,0 +1,42 @@
+{
+  "kind": "hosted-container-guardian-evidence-v1",
+  "head": "3d0df8a25e67feaf557688d7179ba57542a99c27",
+  "run_id": 43588193742,
+  "run_url": "https://github.com/matheusht/redteam-harness/actions/runs/43588193742",
+  "conclusion": "success",
+  "receipts": [
+    {
+      "file": "watcher-loss-after.json",
+      "sha256": "sha256:1c1ba1c8617e84267dd5fe64257389cca1f2877dec033eab16aaab472edbfd8c",
+      "status": "passed",
+      "checks": 25,
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:4fc419fe148b561b5251ea3a6a5aa727036453b2372162d63fcd37fd0509c305",
+        "tools/research_environment.py": "sha256:8f294586a1089560662ab69f8578803563f274e8eba8c877995d596a224a6a6b",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919"
+      }
+    },
+    {
+      "file": "guardian-hosted.json",
+      "sha256": "sha256:9d1eaf82e68e0f318950a1858c2dcfb19ab92fe25e72ef544da60fdd26fc9f47",
+      "status": true,
+      "checks": 30,
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_container_guardian_e2e.py": "4f588b08170d66e7661c7cac73e5a6a5e72389a58ede02af293b47d88af6bfa8",
+        "tools/engagement_lease_owner.py": "268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a"
+      }
+    }
+  ],
+  "before": {
+    "head": "fd8674b19e34689047b02730b80367f9c654dbdd",
+    "run_id": 43586949490,
+    "receipt": "watcher-loss-before.json"
+  },
+  "limits": [
+    "No separate SSH host",
+    "No joined native/controller workflow",
+    "No live provider",
+    "No research acceptance"
+  ]
+}

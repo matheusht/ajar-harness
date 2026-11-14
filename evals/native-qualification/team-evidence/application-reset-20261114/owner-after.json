@@ -1,0 +1,77 @@
+{
+  "kind": "owned-application-counter-e2e-v1",
+  "classification": "actual_http_and_stdio_with_simulated_container_owner",
+  "checks": [
+    {
+      "name": "invalid profiles and public origins have no target effects",
+      "passed": true
+    },
+    {
+      "name": "changed baseline has no preparation effect",
+      "passed": true
+    },
+    {
+      "name": "start receipt binds exact owner and signed baseline",
+      "passed": true
+    },
+    {
+      "name": "actual private connector reads fresh baseline",
+      "passed": true
+    },
+    {
+      "name": "actual request mutates only owned target",
+      "passed": true
+    },
+    {
+      "name": "fixed connector rejects host scheme and port substitution",
+      "passed": true
+    },
+    {
+      "name": "one owner cannot mint a second reset epoch",
+      "passed": true
+    },
+    {
+      "name": "revocation prevents new connections",
+      "passed": true
+    },
+    {
+      "name": "cleanup remains possible after revocation",
+      "passed": true
+    },
+    {
+      "name": "independent generation returns same baseline",
+      "passed": true
+    },
+    {
+      "name": "all owned processes exited",
+      "passed": true
+    },
+    {
+      "name": "silent owned target has the same finite response deadline",
+      "passed": true
+    },
+    {
+      "name": "connector failure still cleans exact target and remains an error",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "joined native model workflow",
+    "research outcome"
+  ],
+  "silent_response": {
+    "elapsed_seconds": 5.002803542010952,
+    "finished_before_gate_close": true,
+    "errors": [
+      "TimeoutError"
+    ]
+  },
+  "connector_close_failure": {
+    "error": "ApplicationStateError",
+    "target_status": "absent"
+  },
+  "status": "passed",
+  "source_sha256": "1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b"
+}

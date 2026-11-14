@@ -1,0 +1,33 @@
+{
+  "kind": "application-reset-capture-e2e-v1",
+  "classification": "actual_http_probe_private_relays_signed_journal_with_simulated_container_and_native_peers",
+  "checks": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "live provider",
+    "fresh-target research"
+  ],
+  "status": "failed",
+  "error": "AssertionError: worker cannot discover its signed baseline through the native status tool",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/evals/native-qualification/smoke/check_application_reset_e2e.py",
+    "--scenario",
+    "workflow",
+    "--output",
+    "/tmp/oslit-implementation/application-reset-discovery-before.json"
+  ],
+  "source_sha256": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_contract.py": "sha256:70731001f6e340a013e9dc5007f161db2a519aaeb136331f135c15e35954d422",
+    "tools/engagement_controller.py": "sha256:491c6d3bbdaca3f5774803841bac8dd5fb9e6f825d6d2cb0b8e5f713c21a5f57",
+    "tools/engagement_evidence.py": "sha256:31ff72c58300b3f5dfefc0466976aa450d389cf9e6b7cb43f7a3938723ea5212",
+    "tools/engagement_native_boundary.py": "sha256:4a18f2c3fb02188d8e73c92660b310bbd9a03b5031c09422ed508d232cb20b09",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "tools/target_accounts.py": "sha256:15cc24ab9d2eba93f77ed03e163415365c0c535fb5d5c245d12d60ad83fe3063",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "sha256:b5bf4c7b3b060a51184ca285a16331cbcd08a1ddfd8e82ba3fb896beef9c8e24"
+  }
+}

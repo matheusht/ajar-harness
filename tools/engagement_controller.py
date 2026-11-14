@@ -294,14 +294,18 @@ class Controller:
             grant = operation['grant']
             environment = state['environments'][operation['identity']['nonce']]
             for resource in grant['resources']:
-                if environment.get('cleanup') == 'verified' and not self._shared(state, [resource]):
-                    continue
+                if environment.get('cleanup') == 'verified':
+                    from engagement_evidence import application_released
+                    if not self._shared(state, [resource]) or application_released(state, grant['dispatch_id'], resource):
+                        continue
                 holds = state['resource_holds'].setdefault(resource, [])
                 if grant['dispatch_id'] not in holds:
                     holds.append(grant['dispatch_id'])
         for operation in state['network_operations'].values():
             dispatch = state['dispatches'][operation['grant']['dispatch_id']]
             result = operation['result']
+            if operation.get('target_nonce') and state['environments'][operation['target_nonce']].get('cleanup') == 'verified':
+                continue
             if ((result and result['status'] == 'unknown') or
                     (result is None and dispatch['status'] != 'pending')):
                 holds = state['resource_holds'].setdefault(operation['intent']['access_id'], [])
@@ -1433,9 +1437,13 @@ class Controller:
         from engagement_evidence import record_environment_output
         return record_environment_output(self, grant, environment_profile_id, operation_id, output)
 
-    def record_network_observation(self, grant, environment_profile_id, environment_nonce, observation):
+    def record_network_observation(self, grant, environment_profile_id, environment_nonce, observation, *, target_nonce=None):
         from engagement_evidence import record_network_observation
-        return record_network_observation(self, grant, environment_profile_id, environment_nonce, observation)
+        return record_network_observation(self, grant, environment_profile_id, environment_nonce, observation, target_nonce=target_nonce)
+
+    def record_application_start(self, grant, environment_profile_id, receipt):
+        from engagement_evidence import record_application_start
+        return record_application_start(self, grant, environment_profile_id, receipt)
 
     def register_support_inputs(self, grant, inputs):
         from engagement_evidence import register_support_inputs
@@ -1611,10 +1619,13 @@ class Controller:
             summaries = {name: {key: {field: row[field] for field in selected}
                                 for key, row in list(state[name].items())[:summary_limit]}
                          for name, selected in fields.items()}
+            baselines = {row['access_id']: read_json(self.root / 'contract/applications' / (row['access_id'] + '.json'),
+                private=True)['baseline_id'] for row in state['scope'].get('application_states', [])}
             end = start + len(updates)
             return {'status': state['status'], 'revision': state['revision'],
                 'engagement_id': state['engagement_id'], 'evidence_class': state['evidence_class'],
                 'assignment': worker['assignment'] if worker else None,
+                'application_baselines': baselines,
                 **summaries, 'summary_counts': {name: len(state[name]) for name in fields},
                 'summaries_truncated': {name: len(state[name]) > summary_limit for name in fields},
                 'usage': state['usage'], 'resource_holds': state['resource_holds'], 'cleanup': state['cleanup'],

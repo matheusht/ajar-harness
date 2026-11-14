@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 MAX_FRAME = 24576
 MAX_DATA = 16384
@@ -298,6 +299,55 @@ class ProxyBridge:
                     'native_exit': 'environment_readback_required', 'failure': self.channel.failure}
 
 
+class SocketBridge:
+    """Host sockets reach only the signed target-container loopback port."""
+    def __init__(self, launcher, command, authorize, *, dispatch_guard, port):
+        self.authorize, self.guard = authorize, dispatch_guard
+        self.ready = threading.Event()
+        self.port, self.expected_port = None, port
+        self.close_lock = threading.Lock()
+        with self.guard():
+            if not self._active():
+                raise BridgeUnavailable('bridge_grant_inactive')
+            self.process = launcher(command)
+        self.channel = _Channel(self.process.stdout, self.process.stdin, on_ready=self._ready)
+        self.channel.start()
+        if not self.ready.wait(6) or self.channel.closed.is_set() or self.port != self.expected_port:
+            self.close()
+            raise BridgeUnavailable('bridge_startup_unavailable')
+
+    def _active(self):
+        try: return self.authorize() is True
+        except Exception: return False
+
+    def _ready(self, port):
+        self.port = port; self.ready.set()
+
+    def connect(self):
+        with self.guard():
+            if not self._active() or self.channel.closed.is_set() or self.process.poll() is not None:
+                raise BridgeUnavailable('bridge_grant_inactive')
+            caller, peer = socket.socketpair()
+            self.channel.accept(peer)
+            return caller
+
+    def close(self):
+        with self.close_lock:
+            self.channel.stop()
+            self.channel.write_thread.join(timeout=1)
+            if not self.process.stdin.closed:
+                self.process.stdin.close()
+            try: self.process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                try: os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                self.process.wait(timeout=2)
+            self.channel.read_thread.join(timeout=1)
+            if not self.channel.read_thread.is_alive() and not self.process.stdout.closed:
+                self.process.stdout.close()
+            return {'host_process_exited': self.process.poll() is not None}
+
+
 def relay_main():
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(('127.0.0.1', 0)); listener.listen(MAX_STREAMS); listener.settimeout(.1)
@@ -314,7 +364,28 @@ def relay_main():
     return 1 if channel.failure else 0
 
 
+def connect_main(port):
+    def opener():
+        return socket.create_connection(('127.0.0.1', port), timeout=1)
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            opener().close()
+            break
+        except OSError:
+            if time.monotonic() >= deadline:
+                return 1
+            time.sleep(.05)
+    channel = _Channel(sys.stdin.buffer, sys.stdout.buffer, opener=opener)
+    channel.start(); channel.emit({'type': 'ready', 'port': port})
+    channel.closed.wait()
+    channel.write_thread.join(timeout=1)
+    return 1 if channel.failure else 0
+
+
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == 'connect' and sys.argv[2].isdecimal() and 1 <= int(sys.argv[2]) <= 65535:
+        raise SystemExit(connect_main(int(sys.argv[2])))
     if sys.argv[1:] != ['relay']:
         raise SystemExit(64)
     raise SystemExit(relay_main())

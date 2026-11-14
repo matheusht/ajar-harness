@@ -686,7 +686,8 @@ class Environment:
         """Launch a fixed host service role; model requests never select this role."""
         from engagement_contract import canonical, safe_publication
         self._admit()
-        if role not in ('native_tools', 'network_proxy', 'model', 'model_provider_proxy', 'model_codex_bridge'):
+        if role not in ('native_tools', 'network_proxy', 'model', 'model_provider_proxy', 'model_codex_bridge',
+                        'application', 'application_connector'):
             raise EnvironmentUnavailable('host_pipe_role_invalid')
         if role in self.stdio_processes:
             raise EnvironmentUnavailable('host_pipe_already_started')

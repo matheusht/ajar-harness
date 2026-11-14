@@ -15,7 +15,8 @@ REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'c
             'closure_request', 'patch_propose'}
 LEAD_ONLY = {'review_request', 'review_response', 'closure_request'}
 COLLECTIONS = ('instruments', 'experiments', 'comparisons', 'claims', 'obligations', 'reviews',
-               'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs')
+               'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs',
+               'application_starts')
 CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image'}
 OPERATIONS = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
     'execute', 'start', 'renew', 'launch_stdio', 'readback_input', 'stage_support', 'readback_support',
@@ -141,6 +142,12 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
         prior = state['environment_operations'].get(opid)
         document = {'grant': grant, 'profile_id': profile_id, 'effect_id': effect_id,
             'account_refs': accounts, 'observation': observation}
+        if phase == 'intent' and op == 'execute':
+            starts = prior.get('application_start_nonces', []) if prior else [
+                nonce for nonce, row in state['application_starts'].items()
+                if row['grant']['dispatch_id'] == grant['dispatch_id'] and row.get('operation_id') is None]
+            if starts:
+                document['application_start_nonces'] = starts
         sha = digest(canonical(document))
         if prior and sha in prior['receipts']:
             return {'status': 'recorded', 'receipt': sha}
@@ -195,7 +202,7 @@ def record_environment_output(c, grant, profile_id, operation_id, output):
             'data': {'operation_id': operation_id, 'output_sha256': sha}, '_objects': [sha]})
 
 
-def record_network_observation(c, grant, profile_id, nonce, observation):
+def record_network_observation(c, grant, profile_id, nonce, observation, *, target_nonce=None):
     with c.lock():
         state = c.state()
         binding(c, state, grant)
@@ -253,6 +260,13 @@ def record_network_observation(c, grant, profile_id, nonce, observation):
                 target.port or (443 if target.scheme == 'https' else 80)):
             fail('network_effect_forbidden')
         document = {'grant': grant, 'profile_id': profile_id, 'environment_nonce': nonce, 'observation': observation}
+        if target_nonce is not None:
+            start = state['application_starts'].get(target_nonce)
+            if (start is None or start['grant']['dispatch_id'] != grant['dispatch_id']
+                    or start['receipt']['access_id'] != observation['access_id'] or start.get('operation_id') is None
+                    or (phase == 'intent' and state['environments'][target_nonce].get('cleanup') == 'verified')):
+                fail('network_application_state_invalid')
+            document['target_nonce'] = target_nonce
         sha = digest(canonical(document))
         prior = state['network_operations'].get(opid)
         if prior and sha in prior['receipts']:
@@ -271,6 +285,7 @@ def record_network_observation(c, grant, profile_id, nonce, observation):
             if prior is None:
                 fail('network_intent_missing')
             if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['environment_nonce'] != nonce
+                    or prior.get('target_nonce') != target_nonce
                     or any(prior['intent'][key] != observation[key] for key in common - {'phase'})
                     or (prior['result'] is not None and not
                         (prior['result']['status'] == 'unknown' and observation['status'] == 'settled'))):
@@ -283,7 +298,8 @@ def record_network_observation(c, grant, profile_id, nonce, observation):
 def comparable(left, right):
     return (all(left[key] == right[key] for key in ('instrument_id', 'conditions', 'input_identity',
         'environment_profile_id', 'effect_id', 'account_refs', 'resources'))
-        and left.get('target_bindings', []) == right.get('target_bindings', []))
+        and left.get('target_bindings', []) == right.get('target_bindings', [])
+        and left.get('application_state', {}) == right.get('application_state', {}))
 
 
 def related(left, right, purpose, *, independent=False):
@@ -296,7 +312,11 @@ def related(left, right, purpose, *, independent=False):
         return bool(explains['variable'])
     if right['candidate_sha256'] != left['candidate_sha256'] or right['probe_sha256'] != left['probe_sha256']:
         return False
-    return not independent or (right['session_id'] != left['session_id'] and right['environment_nonce'] != left['environment_nonce'] and right['clean_start'])
+    return not independent or (right['session_id'] != left['session_id'] and right['environment_nonce'] != left['environment_nonce']
+        and right['clean_start'] and all(name in left.get('application_generations', {})
+            and value['target_nonce'] != left['application_generations'][name]['target_nonce']
+            and value['container_id'] != left['application_generations'][name]['container_id']
+            for name, value in right.get('application_generations', {}).items()))
 
 
 def escalation_material(state, claim_id, next_effect_id):
@@ -447,6 +467,12 @@ def validate_request(c, state, worker, kind, data):
             receipt_sha256=dispatch['receipt'], environment_receipts=operation['receipts'], patch_copy=operation.get('patch_copy'),
             execution_receipt_sha256=operation['execution_receipt_sha256'], clean_start=measurement['clean_start'],
             network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)])
+        if operation.get('application_start_nonces'):
+            starts = [state['application_starts'][nonce]['receipt'] for nonce in operation['application_start_nonces']]
+            data['application_state'] = {row['access_id']: {key: row[key] for key in
+                ('baseline_id', 'profile_sha256', 'environment_profile_sha256', 'image_id', 'origin')} for row in starts}
+            data['application_generations'] = {row['access_id']: {key: row[key] for key in
+                ('target_nonce', 'container_id')} for row in starts}
     elif kind == 'experiment_compare':
         keys(data, ('comparison_id', 'experiments'))
         unique(state, 'comparisons', data['comparison_id'])
@@ -689,9 +715,12 @@ def reduce_host(state, payload):
         observation = data['observation']
         operation = state['network_operations'].setdefault(observation['operation_id'], {
             'grant': data['grant'], 'profile_id': data['profile_id'],
-            'environment_nonce': data['environment_nonce'], 'receipts': [], 'result': None})
+            'environment_nonce': data['environment_nonce'], 'receipts': [], 'result': None,
+            **({'target_nonce': data['target_nonce']} if 'target_nonce' in data else {})})
         operation['receipts'].append(data['receipt_sha256'])
         operation[observation['phase']] = observation
+    elif action == 'application_start':
+        state['application_starts'][data['receipt']['target_nonce']] = dict(data, operation_id=None)
     elif action == 'environment_observation':
         observation, grant = data['observation'], data['grant']
         nonce, opid = observation['identity']['nonce'], observation['operation_id']
@@ -703,6 +732,10 @@ def reduce_host(state, payload):
         operation['identity'] = observation['identity']
         operation['receipts'].append(data['receipt_sha256'])
         operation[observation['phase']] = observation
+        if observation['phase'] == 'intent' and 'application_start_nonces' in data:
+            operation['application_start_nonces'] = data['application_start_nonces']
+            for nonce in data['application_start_nonces']:
+                state['application_starts'][nonce]['operation_id'] = opid
     elif action == 'experiment_execution':
         state['environment_operations'][data['operation_id']].update(measurement=data['measurement'], execution_receipt_sha256=data['receipt_sha256'])
     elif action == 'patch_execution':
@@ -971,7 +1004,15 @@ def record_experiment_execution(c, grant, profile_id, operation_id, measurement)
                 or instrument['reset'] != measurement['reset'] or type(measurement['clean_start']) is not bool):
             fail('experiment_execution_invalid')
         if measurement['clean_start'] and c._shared(state, operation['grant']['resources']):
-            fail('experiment_reset_unverified')
+            starts = [state['application_starts'][nonce] for nonce in operation.get('application_start_nonces', [])]
+            applications = c._shared(state, operation['grant']['resources'])
+            if ({row['receipt']['access_id'] for row in starts} != applications
+                    or any(row['operation_id'] != operation_id or row['grant']['dispatch_id'] != grant['dispatch_id'] for row in starts)):
+                fail('experiment_reset_unverified')
+            expected = {row['receipt']['access_id']: row['receipt']['target_nonce'] for row in starts}
+            if any(row.get('target_nonce') != expected.get(row['intent']['access_id']) for row in state['network_operations'].values()
+                   if row['grant']['dispatch_id'] == grant['dispatch_id']):
+                fail('experiment_reset_unverified')
         mapping(measurement['conditions'])
         for name in ('instrument_sha256', 'candidate_sha256', 'probe_sha256'):
             c.read_object(measurement[name])
@@ -984,6 +1025,66 @@ def record_experiment_execution(c, grant, profile_id, operation_id, measurement)
         return c._host('evidence_recorded', {'action': 'experiment_execution',
             'data': {'operation_id': operation_id, 'measurement': measurement, 'receipt_sha256': sha},
             '_objects': [sha, measurement['instrument_sha256'], measurement['candidate_sha256'], measurement['probe_sha256']]})
+
+
+def record_application_start(c, grant, profile_id, receipt):
+    """Record the owned target before its one frozen capture, never from worker text."""
+    from application_state import owned_origin
+    with c.lock():
+        state = c.state()
+        dispatch = binding(c, state, grant)
+        c._authorize(state, grant)
+        keys(receipt, ('kind', 'access_id', 'baseline_id', 'profile_sha256', 'origin', 'target_nonce',
+            'container_id', 'daemon_id', 'environment_profile_sha256', 'image_id'), 'application_start_invalid')
+        reference = next((row for row in state['scope'].get('application_states', [])
+                          if row['access_id'] == receipt['access_id']), None)
+        access = next((row for row in state['scope']['access'] if row['id'] == receipt['access_id']), None)
+        environment = state['environments'].get(receipt['target_nonce'])
+        if (reference is None or reference['environment_id'] != profile_id or receipt['access_id'] not in grant['resources']
+                or receipt['kind'] != 'application-start-v1' or not dispatch.get('parent_dispatch_id')
+                or receipt['target_nonce'] in state['application_starts'] or environment is None
+                or environment['profile_id'] != profile_id or environment.get('cleanup') == 'verified'
+                or environment['worker_id'] != grant['worker_id'] or environment['generation'] != grant['generation']):
+            fail('application_start_invalid')
+        profile = read_json(c.root / 'contract/applications' / (receipt['access_id'] + '.json'), private=True)
+        if (receipt['profile_sha256'] != reference['profile_sha256'] or receipt['baseline_id'] != profile['baseline_id']
+                or receipt['origin'] != owned_origin(access, profile)
+                or receipt['container_id'] != environment['identity']['container_id']
+                or receipt['daemon_id'] != environment['identity']['daemon_id']
+                or receipt['environment_profile_sha256'] != environment['identity']['profile_sha256']
+                or receipt['image_id'] != environment['identity']['image_id'] or environment['identity']['unsettled']):
+            fail('application_start_invalid')
+        operations = [row for row in state['environment_operations'].values()
+                      if row['grant']['dispatch_id'] == grant['dispatch_id']]
+        target = [row for row in operations if row['identity']['nonce'] == receipt['target_nonce']]
+        if (any(row['operation'] == 'execute' for row in operations)
+                or any(row['grant']['dispatch_id'] == grant['dispatch_id'] and row['receipt']['access_id'] == receipt['access_id']
+                       for row in state['application_starts'].values())
+                or not any(row['operation'] == 'start' and (row['result'] or {}).get('status') == 'settled' for row in target)
+                or any(row['effect_id'] != reference['reset_effect_id'] or (row['result'] or {}).get('status') == 'unknown' for row in target)
+                or not {'application', 'application_connector'} <= {row['intent'].get('role') for row in target
+                        if row['operation'] == 'launch_stdio' and row.get('intent') and row.get('result')}):
+            fail('application_start_unverified')
+        data = {'grant': grant, 'profile_id': profile_id, 'receipt': receipt}
+        sha = c.store_object(canonical(data))
+        return c._host('evidence_recorded', {'action': 'application_start',
+            'data': dict(data, receipt_sha256=sha), '_objects': [sha]})
+
+
+def application_released(state, dispatch_id, access_id):
+    """Only a signed disposable target's observed absence releases its state."""
+    reference = next((row for row in state['scope'].get('application_states', []) if row['access_id'] == access_id), None)
+    if reference is None:
+        return False
+    dispatches = {dispatch_id} | {name for name, row in state['dispatches'].items() if row.get('parent_dispatch_id') == dispatch_id}
+    nonces = {row['identity']['nonce'] for row in state['environment_operations'].values()
+        if row['grant']['dispatch_id'] in dispatches and row['profile_id'] == reference['environment_id']
+        and row['effect_id'] == reference['reset_effect_id']
+        and access_id in {access['id'] for access in row['identity']['access']}}
+    if any(state['environments'][nonce].get('cleanup') != 'verified' for nonce in nonces):
+        return False
+    return all(row.get('target_nonce') in nonces for row in state['network_operations'].values()
+        if row['grant']['dispatch_id'] in dispatches and row['intent']['access_id'] == access_id)
 
 
 def current_closure(state, closure):

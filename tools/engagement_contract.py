@@ -462,7 +462,8 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
     _object(scope, ('kind', 'engagement_id', 'operator_id', 'issued_at', 'expires_at',
                     'goal_sha256', 'goal_mode', 'patch_required', 'access', 'environments',
                     'network', 'effects', 'escalation_ceiling', 'benign_objectives',
-                    'runtime_assignments', 'limits', 'revocation'), 'scope_invalid')
+                    'runtime_assignments', 'limits', 'revocation',
+                    *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ())), 'scope_invalid')
     _require(scope['kind'] == SCOPE_KIND, 'scope_kind_invalid')
     _identifier(scope['engagement_id'], 'scope_invalid')
     _require(type(scope['operator_id']) is str and re.fullmatch(
@@ -593,7 +594,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         identity = _identifier(effect['id'], code)
         _require(identity not in effect_ids, code)
         effect_ids.add(identity)
-        _require(effect['kind'] in ('read', 'execute', 'write', 'artifact_create')
+        _require(effect['kind'] in ('read', 'execute', 'write', 'reset', 'artifact_create')
                  and effect['rung'] in RUNGS and
                  RUNGS.index(effect['rung']) <= RUNGS.index(scope['escalation_ceiling']), code)
         _strings(effect['access_ids'], code, allowed=accesses, minimum=1)
@@ -601,7 +602,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         _strings(effect['account_refs'], code)
         _strings(effect['artifact_classes'], code)
         _require(type(effect['cleanup_required']) is bool, code)
-        if effect['kind'] in ('write', 'artifact_create'):
+        if effect['kind'] in ('write', 'reset', 'artifact_create'):
             _require(effect['cleanup_required'], code)
         if effect['kind'] == 'artifact_create':
             _require(bool(effect['artifact_classes']), code)
@@ -612,6 +613,28 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
                      set(effect['account_refs']) <= set(access['account_refs']), code)
             for environment_id in effect['environment_ids']:
                 _require(access['kind'] in environments[environment_id]['capabilities'], code)
+    references = scope.get('application_states', [])
+    _require(type(references) is list and len(references) <= len(accesses), 'scope_application_state_invalid')
+    state_accesses = set()
+    for reference in references:
+        code = 'scope_application_state_invalid'
+        _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id'), code)
+        for key in ('access_id', 'environment_id', 'reset_effect_id'):
+            _identifier(reference[key], code)
+        access = accesses.get(reference['access_id'])
+        effect = next((row for row in scope['effects'] if row['id'] == reference['reset_effect_id']), None)
+        _require(access is not None and access['kind'] == 'application' and 'reset' in access['permissions']
+                 and access['id'] not in state_accesses and reference['environment_id'] in environments, code)
+        _digest(reference['profile_sha256'], code)
+        _require(effect is not None and effect['kind'] == 'reset' and effect['access_ids'] == [access['id']]
+                 and effect['environment_ids'] == [reference['environment_id']] and not effect['account_refs']
+                 and not effect['artifact_classes'] and effect['cleanup_required'], code)
+        origin = _url(access['identity']['base_url'], code)
+        _require(sum(other['kind'] == 'application' and _url(other['identity']['base_url'], code) == origin
+                     for other in accesses.values()) == 1, code)
+        state_accesses.add(access['id'])
+    _require(all(effect['kind'] != 'reset' or any(row['reset_effect_id'] == effect['id'] for row in references)
+                 for effect in scope['effects']), 'scope_application_state_invalid')
     _require(type(scope['runtime_assignments']) is list and 1 <= len(scope['runtime_assignments']) <= 64,
              'scope_runtime_invalid')
     runtime_ids = set()
@@ -646,12 +669,14 @@ def load_inputs(path: Path, *, now: datetime | None = None,
     inputs = _decode(raw_inputs)
     _object(inputs, ('kind', 'scope_file', 'scope_signature', 'allowed_signers',
                      'trusted_fingerprint', 'goal_file', 'access_files',
-                     'runtime_profiles', 'environment_profiles'), 'inputs_invalid')
+                     'runtime_profiles', 'environment_profiles',
+                     *(('application_profiles',) if isinstance(inputs, dict) and 'application_profiles' in inputs else ())), 'inputs_invalid')
     _require(inputs['kind'] == INPUT_KIND, 'inputs_kind_invalid')
     _digest(inputs['trusted_fingerprint'], 'inputs_invalid')
     for key in ('scope_file', 'scope_signature', 'allowed_signers', 'goal_file'):
         _path(inputs[key])
-    for key in ('access_files', 'runtime_profiles', 'environment_profiles'):
+    for key in ('access_files', 'runtime_profiles', 'environment_profiles',
+                *(('application_profiles',) if 'application_profiles' in inputs else ())):
         _require(type(inputs[key]) is dict and len(inputs[key]) <= 256, 'inputs_invalid')
         for identity, filename in inputs[key].items():
             _identifier(identity, 'inputs_invalid')
@@ -718,6 +743,25 @@ def load_inputs(path: Path, *, now: datetime | None = None,
             known_hosts = _pinned_file(ssh['known_hosts_file'], ssh['known_hosts_sha256'])
             frozen[f'environments/{identity}.known_hosts'] = known_hosts
         environment_profiles[identity] = profile
+    references = scope.get('application_states', [])
+    _require(set(inputs.get('application_profiles', {})) == {row['access_id'] for row in references},
+             'inputs_profile_mismatch')
+    for reference in references:
+        from application_state import validate_profile, owned_origin, ApplicationStateError
+        identity = reference['access_id']
+        raw = _pinned_file(inputs['application_profiles'][identity], reference['profile_sha256'], private=True)
+        try:
+            profile = validate_profile(_decode(raw))
+            owned_origin(next(row for row in scope['access'] if row['id'] == identity), profile)
+        except ApplicationStateError as error:
+            raise ContractError(error.code) from None
+        _require(raw == canonical(profile), 'application_profile_noncanonical')
+        route = next(row for row in scope['network']['target'] if
+            (row['protocol'], row['host'], row['port']) == _url(
+                next(row for row in scope['access'] if row['id'] == identity)['identity']['base_url'], 'scope_application_state_invalid'))
+        _require(not route['address_policy']['public_only'] and any(ipaddress.ip_address('127.0.0.1') in ipaddress.ip_network(cidr)
+                 for cidr in route['address_policy']['cidrs']), 'scope_application_state_invalid')
+        frozen[f'applications/{identity}.json'] = raw
     _require(set(inputs['access_files']) == {row['id'] for row in scope['access']
                                            if row['kind'] in ('source', 'binary')}, 'inputs_access_mismatch')
     for access in scope['access']:

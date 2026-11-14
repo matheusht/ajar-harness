@@ -1,0 +1,38 @@
+{
+  "kind": "bounded-source-review-v1",
+  "reviewer": "/root",
+  "verdict": "pass",
+  "base": "db70eada835c79c1d10bf10e4f1cecc43f1c317e",
+  "snapshot": "/tmp/oslit-implementation/application-owner-fixed-review-snapshot.json",
+  "snapshot_sha256": "sha256:62cb00428b4af5979ea3476bf2fcdc0879d4de34af28802d7590c7fe615d7b0b",
+  "files": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "evals/native-qualification/smoke/check_application_owner_e2e.py": "sha256:1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b",
+    "evals/native-qualification/APPLICATION-RESET-SCENARIOS.md": "sha256:85840ff57022a047d18400ab3c5ef221e28f152530e88342617464f3b7e1f2ee",
+    "docs/research/oslit-application-reset-contract-2026-11-14.md": "sha256:7706c152eb65f7d8baaed64f787ae05fe12a8d49ccc34f7b11c277302a6899da"
+  },
+  "initial_hashes_verified": true,
+  "final_hashes_match": true,
+  "scope": "Affected review findings only: five-second connector response timeout and exact target cleanup after connector shutdown failure. Earlier complete bounded owner/connector source review is retained. Full signed contract/controller/native integration awaits its own fixed snapshot.",
+  "resolved_findings": [
+    "NetworkGate._exchange applies timeout=5 to either direct or owned connector sockets before request I/O.",
+    "ApplicationOwner.cleanup attempts Environment.cleanup after a connector close exception and raises application_connector_cleanup_unresolved instead of reporting complete cleanup."
+  ],
+  "independent_execution": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 evals/native-qualification/smoke/check_application_owner_e2e.py --output /tmp/oslit-implementation/application-owner-root-replay.json",
+    "result": "/tmp/oslit-implementation/application-owner-root-replay.json",
+    "checks": 13,
+    "status": "passed",
+    "classification": "actual HTTP and stdio with simulated container owner"
+  },
+  "findings": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "joined native workflow",
+    "research outcome"
+  ]
+}

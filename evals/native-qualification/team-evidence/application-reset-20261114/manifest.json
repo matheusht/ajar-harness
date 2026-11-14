@@ -1,0 +1,60 @@
+{
+  "kind": "application-reset-evidence-v1",
+  "base": "db70eada835c79c1d10bf10e4f1cecc43f1c317e",
+  "classification": "actual_http_private_stdio_with_signed_journal_and_simulated_container_native_owners",
+  "source_sha256": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_contract.py": "sha256:70731001f6e340a013e9dc5007f161db2a519aaeb136331f135c15e35954d422",
+    "tools/engagement_controller.py": "sha256:b8f58e0244cfaa76eb2ba1154f564819261cb9c0c022a66c9aa0b864a02d9842",
+    "tools/engagement_evidence.py": "sha256:31ff72c58300b3f5dfefc0466976aa450d389cf9e6b7cb43f7a3938723ea5212",
+    "tools/engagement_native_boundary.py": "sha256:4a18f2c3fb02188d8e73c92660b310bbd9a03b5031c09422ed508d232cb20b09",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+    "tools/target_accounts.py": "sha256:15cc24ab9d2eba93f77ed03e163415365c0c535fb5d5c245d12d60ad83fe3063",
+    "tools/engagement_runner.py": "sha256:16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "evals/native-qualification/smoke/check_application_owner_e2e.py": "sha256:1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "sha256:b5bf4c7b3b060a51184ca285a16331cbcd08a1ddfd8e82ba3fb896beef9c8e24",
+    "evals/native-qualification/smoke/check_application_owner_docker_e2e.py": "sha256:c20bc25c48ccba71635ea31cf012902d68248c4150a6f237e4e164b17d6b2777",
+    "docs/research/oslit-application-reset-contract-2026-11-14.md": "sha256:db8520c06e7f6a19263a3eb9a64ce926266f92b767cf4c23359f40e7489fae76",
+    "docs/agents/engagement.md": "sha256:4152fe1a47d4e1390099242f9e5522c42f3ae2b23826f82c7a5048af4a16c05e",
+    "docs/research/oslit-v2-contract-2026-11-14.md": "sha256:d54b98013bc744e63d9bcd978b343c687eaaaa482fad609f9585dcacf1e9d40d",
+    "engine/native-engagement-protocol.md": "sha256:4c286e7f88c41b9951c25fd7146bbcb58eff74c53f1c532f3261ab03a396b250",
+    "evals/native-qualification/APPLICATION-RESET-SCENARIOS.md": "sha256:a812712683d70c32eac5599dda0931694e239cbbc6511cbbec667ed6f852e745"
+  },
+  "result_sha256": {
+    "owner-before.json": "sha256:56b7938b95a59b83220d36f0952bfa1f59c9816b7b98e78b4cbc58cfb67c277e",
+    "contract-before.json": "sha256:41330bab2c756f37d1ab36e0c4e006f7bbcde75fa2809d6ace201f5ebdf06d2e",
+    "workflow-before.json": "sha256:8ff64e61b48b99e55428cfd6e52b9cda0212ffcf23fed5f54066843d03424613",
+    "origin-before.json": "sha256:c43cd93848621a77c2c35bb52eb8cb625543344ac433619e0e32819a3ead82fe",
+    "replay-before.json": "sha256:ac617620e312898d12377083d628d0ec525f1692f55d9c2a4e0bc1f6435aa9a6",
+    "recovery-before.json": "sha256:edc1f2cd20c22d902126abc46c6ca28810f6a1c1567d31fde4e1b00d23377e8f",
+    "discovery-before.json": "sha256:9971b4af39bf964d2c4295db8334bf8ee7523796d9bd08161871eaf0e3849a82",
+    "owner-timeout-before.json": "sha256:138a5570e2afbce7b0e8ee64911d3aa4fde96c741d71b6405bd9104ef248af58",
+    "owner-cleanup-before.json": "sha256:8f24bcbed5a502ac70d063f0bcafed4e3836383acd79008b6ed22de1e5b41204",
+    "owner-after.json": "sha256:92b8cf0154a4d0f350b0e0b44dc610727d45934cbf6ac23190ed7632ae93d738",
+    "workflow-after.json": "sha256:28e05029ff60001499f55c2d68acb8d261e6453da3bb4462b7e50bd7f11f5e4a",
+    "native-boundary-regression.json": "sha256:337625af0de3120beacd4d206618ea183310beddc8155f07d11a2518ed2b8421",
+    "ordinary-application-regression.json": "sha256:a3fd4c9b840b6da6f8b13875d0beb5e38655f2e335e93d90f53acdaa3e3f3a3d",
+    "contract-regression.json": "sha256:9f8f6fa51373a8718aedcfdd93a2fe466c709c8a0abc082befa8a6e48601764a",
+    "evidence-regression.json": "sha256:7ac9e11a1e31d9edb8e56bae9360e01bcbd9ab4c7585f5f61ea048f2c1f1a202",
+    "bridge-regression.json": "sha256:588d0c1b447ef379988b80e09f2f0b2b13f96dc77ee8d8cc34ca1b2241d25ed5",
+    "journal-regression.json": "sha256:29fbf4114fd6c505914db7535b3a3c8d14329f68fcc9442a54a17fe35dbc2a28",
+    "owner-independent-review.json": "sha256:ee576205479521dec988521761c62b09d39797321dd548c4e327da7769462f57",
+    "owner-independent-result.json": "sha256:631017658f497951017410da40320e2e085468c122f7c1ae5e439b3c595119ad",
+    "conformance.txt": "sha256:fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf"
+  },
+  "unverified": [
+    "actual Docker application owner execution",
+    "SSH application owner execution",
+    "joined actual native application reset workflow",
+    "live provider",
+    "fresh-target research acceptance"
+  ],
+  "notes": [
+    "Prior owner review covers exact owner and connector product bytes; full shared contract/evidence/boundary review follows the complete fixed capture.",
+    "Adjacent evidence, ordinary-application and journal regressions precede the final status-only baseline discovery field. Final seven-family workflow and twenty-three boundary scenarios bind that field.",
+    "Conformance ran with the existing jsonschema-equipped /tmp/pr209-conformance-venv/bin/python: 900 checks, zero failing. System Python attempt lacked jsonschema and is not a pass."
+  ]
+}

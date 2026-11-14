@@ -1,0 +1,14 @@
+{
+  "kind": "application-reset-capture-e2e-v1",
+  "classification": "actual_http_probe_private_relays_signed_journal_with_simulated_container_and_native_peers",
+  "checks": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "live provider",
+    "fresh-target research"
+  ],
+  "status": "failed",
+  "error": "AssertionError: owned target cleanup did not release held application",
+  "source_sha256": "4798192a52841461a310aa78455a5fe31ffc9c7eb4d3e6eb0960619363b3c91a"
+}

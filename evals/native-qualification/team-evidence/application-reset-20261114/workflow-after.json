@@ -1,0 +1,1293 @@
+{
+  "kind": "application-reset-capture-e2e-v1",
+  "classification": "actual_http_probe_private_relays_signed_journal_with_simulated_container_and_native_peers",
+  "checks": [
+    {
+      "name": "contract",
+      "passed": true,
+      "observed": {
+        "frozen_application_profile_sha256": "sha256:db6c6644c3b673153f5ae2b0c14c3b31e739898352e5a92539da4fd5661ab490",
+        "negative_cases": [
+          "changed_profile",
+          "missing_reset_permission",
+          "wrong_effect",
+          "wrong_environment",
+          "public_origin",
+          "duplicate_origin"
+        ]
+      }
+    },
+    {
+      "name": "workflow",
+      "passed": true,
+      "observed": {
+        "captures": [
+          {
+            "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+            "dispatch_id": "b21fda52d5fe4061a0ceb831c12d498c",
+            "operation_id": "capture-execute-00000000000000000000000000000002",
+            "session_id": "simulated-session-69cef6c02e1945449cb5f4418264398a",
+            "client_environment_nonce": "00000000000000000000000000000002",
+            "clean_start": true,
+            "output_utf8": "0\n1\n1\n",
+            "target_starts": [
+              {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "b21fda52d5fe4061a0ceb831c12d498c",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:44.734182+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "target-main",
+                "receipt": {
+                  "access_id": "app-main",
+                  "baseline_id": "counter-zero",
+                  "container_id": "19d8d35c06ab2cb2ae937b5b8dd4c8570a15280b813e6f0c534b258c9954c7c6",
+                  "daemon_id": "fixture-daemon",
+                  "environment_profile_sha256": "sha256:8120eb13cb74926b3134b379f73a4dbcf81d32d8d8e0da7a7c6f25cc695f7140",
+                  "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                  "kind": "application-start-v1",
+                  "origin": "http://counter.invalid:61270",
+                  "profile_sha256": "sha256:fd1fe7add89e613fa2a82e73cd91585b9c0a6ffe16b4651abfc9797d283e4d1e",
+                  "target_nonce": "00000000000000000000000000000003"
+                },
+                "receipt_sha256": "sha256:712d414a050d77ce85aace51d949ab2f3f4341b86ae65b22c71ceed4a077f0a4",
+                "operation_id": "capture-execute-00000000000000000000000000000002"
+              }
+            ],
+            "target_cleanup": {
+              "00000000000000000000000000000003": "verified"
+            },
+            "requests": {
+              "4e4d0203d10b441798a70911fe9deaf4": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "b21fda52d5fe4061a0ceb831c12d498c",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:44.734182+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000002",
+                "receipts": [
+                  "sha256:f1c96985827b2332931e8aa1ca93b99e811fffbf9b684949e5830bb35603d4cb",
+                  "sha256:c086caafeae15a2a311e43db85dc73b16a8532490e33870463fda05bd938aa93"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "4e4d0203d10b441798a70911fe9deaf4",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000003",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "4e4d0203d10b441798a70911fe9deaf4",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "intent"
+                }
+              },
+              "9f9a2234c2f04dd9b4f8e1501699f5fa": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "b21fda52d5fe4061a0ceb831c12d498c",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:44.734182+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000002",
+                "receipts": [
+                  "sha256:9ad4897bc5dcaf75d5ec05ba03e91b27d44e50c1dc0810825ed25720a925b69c",
+                  "sha256:5ae9b612f7397154bd9afa7283f5922104c6572f243637b5472124818a679ea4"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "9f9a2234c2f04dd9b4f8e1501699f5fa",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000003",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "9f9a2234c2f04dd9b4f8e1501699f5fa",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                  "phase": "intent"
+                }
+              },
+              "ce626ed8d5304cee83f93d31197ac288": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "b21fda52d5fe4061a0ceb831c12d498c",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:44.734182+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000002",
+                "receipts": [
+                  "sha256:1fabee643576a7fdc8d004d07c3d88d8a0b577fec6686ad87497f76b2bec3de4",
+                  "sha256:4bc446e937481e7f2b60a6e026b16f0fe23e52e5dfba0c358a5082515f4b262b"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "ce626ed8d5304cee83f93d31197ac288",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000003",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "ce626ed8d5304cee83f93d31197ac288",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "intent"
+                }
+              }
+            }
+          },
+          {
+            "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+            "dispatch_id": "c99df35062544801968dec4809a95b13",
+            "operation_id": "capture-execute-00000000000000000000000000000004",
+            "session_id": "simulated-session-69cef6c02e1945449cb5f4418264398a",
+            "client_environment_nonce": "00000000000000000000000000000004",
+            "clean_start": true,
+            "output_utf8": "0\n1\n1\n",
+            "target_starts": [
+              {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "c99df35062544801968dec4809a95b13",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:47.739756+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "target-main",
+                "receipt": {
+                  "access_id": "app-main",
+                  "baseline_id": "counter-zero",
+                  "container_id": "2dc3b97b1e90788f360b3e5ad8dda3b159ff696d7f313bcd8eb019f597793358",
+                  "daemon_id": "fixture-daemon",
+                  "environment_profile_sha256": "sha256:8120eb13cb74926b3134b379f73a4dbcf81d32d8d8e0da7a7c6f25cc695f7140",
+                  "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                  "kind": "application-start-v1",
+                  "origin": "http://counter.invalid:61270",
+                  "profile_sha256": "sha256:fd1fe7add89e613fa2a82e73cd91585b9c0a6ffe16b4651abfc9797d283e4d1e",
+                  "target_nonce": "00000000000000000000000000000005"
+                },
+                "receipt_sha256": "sha256:c3ad491a072f697836b36396f9892ccea048a95a63f9be182ea3d83609d42c05",
+                "operation_id": "capture-execute-00000000000000000000000000000004"
+              }
+            ],
+            "target_cleanup": {
+              "00000000000000000000000000000005": "verified"
+            },
+            "requests": {
+              "319e6ff62b50492cb41712f694078525": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "c99df35062544801968dec4809a95b13",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:47.739756+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000004",
+                "receipts": [
+                  "sha256:29c72de0700c2e813a77d68929e5ce1e899cd91437a8a8e713548a060d2ee13e",
+                  "sha256:901373ecc0d6a71d39540589c07ae93e43509aee25b2dc8ba5fdcfabe92e2833"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "319e6ff62b50492cb41712f694078525",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000005",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "319e6ff62b50492cb41712f694078525",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                  "phase": "intent"
+                }
+              },
+              "ddbb38ce87e741a390427b007d70d97d": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "c99df35062544801968dec4809a95b13",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:47.739756+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000004",
+                "receipts": [
+                  "sha256:66278fdb2b2f84a935b5d29df4e84c6f7ba491cf457bd468708beefdb7393d6b",
+                  "sha256:58bcff054718ad12e8ea7716c776c86ace9dd7a0db48056fdeab7cf644d789a7"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "ddbb38ce87e741a390427b007d70d97d",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000005",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "ddbb38ce87e741a390427b007d70d97d",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "intent"
+                }
+              },
+              "e5dd7febe30544bf9358e5eb1f30830f": {
+                "grant": {
+                  "adapter_id": "fixture-native",
+                  "assignment": null,
+                  "dispatch_id": "c99df35062544801968dec4809a95b13",
+                  "generation": 1,
+                  "lease_expires_at": "2026-11-14T12:17:47.739756+00:00",
+                  "profile_id": "runtime-main",
+                  "resources": [
+                    "app-main"
+                  ],
+                  "scope_sha256": "sha256:b9159034f7062efe787eb707ae80d3ac5a63bf013480ae1f1447cce2da43f1b6",
+                  "seconds": 20,
+                  "worker_id": "lead-1"
+                },
+                "profile_id": "lab-main",
+                "environment_nonce": "00000000000000000000000000000004",
+                "receipts": [
+                  "sha256:9b1adb725ddf21eb45b2b27a24d151fbd20e668404d657cb4faf8a8cce6c8aac",
+                  "sha256:33918a15c48151ee2d0836f929d13a24c2be043472fe07a1d2da4bcb9815f138"
+                ],
+                "result": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "http_status": 200,
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "e5dd7febe30544bf9358e5eb1f30830f",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "result",
+                  "request_bytes": 0,
+                  "response_bytes": 1,
+                  "status": "settled"
+                },
+                "target_nonce": "00000000000000000000000000000005",
+                "intent": {
+                  "access_id": "app-main",
+                  "account_ref": null,
+                  "effect_id": "read-app",
+                  "kind": "target-network-observation-v1",
+                  "method": "GET",
+                  "operation_id": "e5dd7febe30544bf9358e5eb1f30830f",
+                  "origin": "http://counter.invalid:61270",
+                  "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                  "phase": "intent"
+                }
+              }
+            }
+          }
+        ],
+        "resource_holds": {}
+      }
+    },
+    {
+      "name": "cleanup",
+      "passed": true,
+      "observed": {
+        "resource_holds": {
+          "app-main": [
+            "88cbf808f8734223b42bd88e6cbe7079"
+          ]
+        },
+        "cleanup": "pending",
+        "dispatch_states": {
+          "1393027300d341ef93f1b9bbd9ee6259": "pending",
+          "88cbf808f8734223b42bd88e6cbe7079": "unknown"
+        }
+      }
+    },
+    {
+      "name": "recovery",
+      "passed": true,
+      "observed": {
+        "recovery": {
+          "status": "settled"
+        },
+        "counts_before_and_after": [
+          2,
+          8,
+          3
+        ],
+        "resource_holds": {},
+        "target_cleanup": {
+          "00000000000000000000000000000003": "verified"
+        }
+      }
+    },
+    {
+      "name": "replay",
+      "passed": true,
+      "observed": {
+        "effect": {
+          "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+          "dispatch_id": "6faebfcc9ebf47109670d31c00f1774f",
+          "operation_id": "capture-execute-00000000000000000000000000000002",
+          "session_id": "simulated-session-47ffdb0440044b499603b538cf3302ae",
+          "client_environment_nonce": "00000000000000000000000000000002",
+          "clean_start": true,
+          "output_utf8": "0\n1\n1\n",
+          "target_starts": [
+            {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "6faebfcc9ebf47109670d31c00f1774f",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:01.798657+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "target-main",
+              "receipt": {
+                "access_id": "app-main",
+                "baseline_id": "counter-zero",
+                "container_id": "19d8d35c06ab2cb2ae937b5b8dd4c8570a15280b813e6f0c534b258c9954c7c6",
+                "daemon_id": "fixture-daemon",
+                "environment_profile_sha256": "sha256:46f17f4f08d991d5b1c6cedc4a357f14d83edd3a4669025c6a92f033175dfef3",
+                "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "kind": "application-start-v1",
+                "origin": "http://counter.invalid:61333",
+                "profile_sha256": "sha256:deda6e2871ba76da9628f2e2302f64161fa8c656308c875dc59c2ae24d05280a",
+                "target_nonce": "00000000000000000000000000000003"
+              },
+              "receipt_sha256": "sha256:5351be6a847eee25031b03d5c3654dc4d15ec4759637e4a02dc49233329e67ab",
+              "operation_id": "capture-execute-00000000000000000000000000000002"
+            }
+          ],
+          "target_cleanup": {
+            "00000000000000000000000000000003": "verified"
+          },
+          "requests": {
+            "095779c680d044939fc82ee06e2e2525": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "6faebfcc9ebf47109670d31c00f1774f",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:01.798657+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:6d666a84c6daa8d0b1f890d3159c1d484f087a94446940eb615a2fc7aee032a4",
+                "sha256:829c56b8997b9eaf8b5147611eb7d188c8d98952fa1f387c977d55ed031dc997"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "095779c680d044939fc82ee06e2e2525",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "095779c680d044939fc82ee06e2e2525",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "47db21e39cad4a6fb4f01e7f162f2311": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "6faebfcc9ebf47109670d31c00f1774f",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:01.798657+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:6a25c9232e7264f43eb1baba11a53d427891bae6965db82dce097640a02541c3",
+                "sha256:50539b81c55975c2266ae42bc1c172641f7ce9686844dfe4c60bdda93d893f1c"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "47db21e39cad4a6fb4f01e7f162f2311",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "47db21e39cad4a6fb4f01e7f162f2311",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "intent"
+              }
+            },
+            "7ece2fc3166f47c3b08e98969a29556a": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "6faebfcc9ebf47109670d31c00f1774f",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:01.798657+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:0d463d7dc3e36382ac2be6b4ead916bda84945f08861b2fdbf94e255b12a7ef4",
+                "sha256:0d269633209f0970ade7566159b65dee195c787bc0993306f6be6fc84534323f"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "7ece2fc3166f47c3b08e98969a29556a",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "7ece2fc3166f47c3b08e98969a29556a",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            }
+          }
+        },
+        "control_output": "0\n0\n0\n",
+        "replay": {
+          "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+          "dispatch_id": "b156749f7f8b48dd958b50fbf6e17a1a",
+          "operation_id": "capture-execute-00000000000000000000000000000007",
+          "session_id": "simulated-session-86f0416fba434934aa98fd61ef973147",
+          "client_environment_nonce": "00000000000000000000000000000007",
+          "clean_start": true,
+          "output_utf8": "0\n1\n1\n",
+          "target_starts": [
+            {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "b156749f7f8b48dd958b50fbf6e17a1a",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:11.763828+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "reviewer-1"
+              },
+              "profile_id": "target-main",
+              "receipt": {
+                "access_id": "app-main",
+                "baseline_id": "counter-zero",
+                "container_id": "da0914b6c61043617d03e8cccc966d0377d0e8afa75fd9b9ddce991f11424c7a",
+                "daemon_id": "fixture-daemon",
+                "environment_profile_sha256": "sha256:46f17f4f08d991d5b1c6cedc4a357f14d83edd3a4669025c6a92f033175dfef3",
+                "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "kind": "application-start-v1",
+                "origin": "http://counter.invalid:61333",
+                "profile_sha256": "sha256:deda6e2871ba76da9628f2e2302f64161fa8c656308c875dc59c2ae24d05280a",
+                "target_nonce": "00000000000000000000000000000008"
+              },
+              "receipt_sha256": "sha256:d05dbfc82aea9dc68c93d1eedf5de6fb9fbd3403d89285d21d2301f04658ddfd",
+              "operation_id": "capture-execute-00000000000000000000000000000007"
+            }
+          ],
+          "target_cleanup": {
+            "00000000000000000000000000000008": "verified"
+          },
+          "requests": {
+            "7293ac0984514d35929c5ccb7ee3aeaa": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "b156749f7f8b48dd958b50fbf6e17a1a",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:11.763828+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "reviewer-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000007",
+              "receipts": [
+                "sha256:a46451a85b53ac7fd3bafffb4db28eeae2a10aa3a0985a2e11905a55604a0adf",
+                "sha256:229b87be5a6f203871e328720179f488d2177345f117d87e272edb18070f2ece"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "7293ac0984514d35929c5ccb7ee3aeaa",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000008",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "7293ac0984514d35929c5ccb7ee3aeaa",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "953d29be44984f54b6c7241327db8920": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "b156749f7f8b48dd958b50fbf6e17a1a",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:11.763828+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "reviewer-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000007",
+              "receipts": [
+                "sha256:7c9597378a33879d22de19b6bc87b4494d11de0238cdbb4fd5d970e12b48b5d3",
+                "sha256:a05cb8b5f288dfb619e051d4a826b83e27e3df52fc89862df75ae1949ffe7092"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "953d29be44984f54b6c7241327db8920",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000008",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "953d29be44984f54b6c7241327db8920",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "intent"
+              }
+            },
+            "cd3100c5a1b54d2f9b4b96bf3621d44f": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "b156749f7f8b48dd958b50fbf6e17a1a",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:11.763828+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "app-main"
+                ],
+                "scope_sha256": "sha256:72c4486f93715979f329fdedc02c5c36eeb116c0840f0c64d148328d4b8e4ff0",
+                "seconds": 20,
+                "worker_id": "reviewer-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000007",
+              "receipts": [
+                "sha256:32cb9cbece169a2753c8b7f27ec340fbab6ce5954141cc9050f5119a4bd60ec4",
+                "sha256:2adfd373e8a2563196149792f6f5631701da4ee47eb88532a7f268adb48d88e0"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "cd3100c5a1b54d2f9b4b96bf3621d44f",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000008",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "cd3100c5a1b54d2f9b4b96bf3621d44f",
+                "origin": "http://counter.invalid:61333",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            }
+          }
+        },
+        "independent_replay_eligible": true,
+        "claim_confirmation": "not_requested"
+      }
+    },
+    {
+      "name": "combined",
+      "passed": true,
+      "observed": {
+        "combined": {
+          "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+          "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+          "operation_id": "capture-execute-00000000000000000000000000000002",
+          "session_id": "simulated-session-ac9315648a834fb89a6af18be51bc2d6",
+          "client_environment_nonce": "00000000000000000000000000000002",
+          "clean_start": true,
+          "output_utf8": "0\n1\n1\n0\n1\n1\n",
+          "target_starts": [
+            {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "target-main",
+              "receipt": {
+                "access_id": "app-main",
+                "baseline_id": "counter-zero",
+                "container_id": "19d8d35c06ab2cb2ae937b5b8dd4c8570a15280b813e6f0c534b258c9954c7c6",
+                "daemon_id": "fixture-daemon",
+                "environment_profile_sha256": "sha256:31c64194c0adeb888915bf8b655b75b3bebeaeb791b9cbf6eb111a0e5e3b13d4",
+                "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "kind": "application-start-v1",
+                "origin": "http://counter.invalid:61397",
+                "profile_sha256": "sha256:f8a4806c471130341e78cae07a389eed0c988af2db89112983aced99e9758674",
+                "target_nonce": "00000000000000000000000000000003"
+              },
+              "receipt_sha256": "sha256:b0399869d5099af4684c028e61652d4f8639c16c7888482b1e84b27f77a25081",
+              "operation_id": "capture-execute-00000000000000000000000000000002"
+            },
+            {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "target-main",
+              "receipt": {
+                "access_id": "app-other",
+                "baseline_id": "counter-zero",
+                "container_id": "a20248c7f641bea3ab7e1640ea5ac3a6b69d2d209ccc6df16e9677f0069b35dc",
+                "daemon_id": "fixture-daemon",
+                "environment_profile_sha256": "sha256:31c64194c0adeb888915bf8b655b75b3bebeaeb791b9cbf6eb111a0e5e3b13d4",
+                "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "kind": "application-start-v1",
+                "origin": "http://counter-other.invalid:61398",
+                "profile_sha256": "sha256:e3ac24edc581e73c490a5b71ecd149122b1cd7a7d784e54c82993ab7dedbc99e",
+                "target_nonce": "00000000000000000000000000000004"
+              },
+              "receipt_sha256": "sha256:444395308021a15995f28c92d87f6d2ffb4b5790ad24056fa7daabb6b408de23",
+              "operation_id": "capture-execute-00000000000000000000000000000002"
+            }
+          ],
+          "target_cleanup": {
+            "00000000000000000000000000000003": "verified",
+            "00000000000000000000000000000004": "verified"
+          },
+          "requests": {
+            "0bc9c964e5154c97a59b549468de1f8e": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:96016a8f557dc3fdfe8068905e4cab2c67f04a3c879d4c3d8015eb741de76beb",
+                "sha256:96d58c56b281d0ed8491667ea94680177caa035dbb5c4205563eacc941841dfc"
+              ],
+              "result": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "0bc9c964e5154c97a59b549468de1f8e",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000004",
+              "intent": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "0bc9c964e5154c97a59b549468de1f8e",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "169a3152452e4514a95d319771b56f15": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:a4ba55c32dcf5925ebe0d45b181dce8ac050c53fde9589dcfda34243fe921be2",
+                "sha256:74ba9aa7456b7b691e42716ce76568ba2ee3cd9a2d0ccdbeb262a1463d3ac0c2"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "169a3152452e4514a95d319771b56f15",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "169a3152452e4514a95d319771b56f15",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "25edf0efda314b16a59eac6a1311f91e": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:6860f800a2db108d6c0c58396b958f0c9615fb15be4ef68dab625ba8fc659286",
+                "sha256:b3b16ded2608403a16cb0239b5f16fc4f7b16ba53a3cd4d9f1b930320b5fb2ad"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "25edf0efda314b16a59eac6a1311f91e",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "25edf0efda314b16a59eac6a1311f91e",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "2e7617bdd3a4420f8d3a71824de12c3d": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:013fa8c4116ab0eaa62008593e1e7d00e4d93f0938b492a0cbaa61cb42702ba1",
+                "sha256:eaa24440ff161f10dfaafeec9b87beabc1106b9623c793d324b506eb0f34ee69"
+              ],
+              "result": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "2e7617bdd3a4420f8d3a71824de12c3d",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000004",
+              "intent": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "2e7617bdd3a4420f8d3a71824de12c3d",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "intent"
+              }
+            },
+            "9e297d31665e46b7bd0c12c4e880e539": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:b86a51e8d0817b989f663f38c4bc9c769a1e332101e77f5481c4d7883b33ba76",
+                "sha256:db32dcc1a4076efa5fb7fabf53bc5a487a47419b8c896b129af734bce60504d5"
+              ],
+              "result": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "9e297d31665e46b7bd0c12c4e880e539",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000004",
+              "intent": {
+                "access_id": "app-other",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "9e297d31665e46b7bd0c12c4e880e539",
+                "origin": "http://counter-other.invalid:61398",
+                "path_sha256": "sha256:8a5edab282632443219e051e4ade2d1d5bbc671c781051bf1437897cbdfea0f1",
+                "phase": "intent"
+              }
+            },
+            "aa78c14b11414b9e86659b437cdfc16a": {
+              "grant": {
+                "adapter_id": "fixture-native",
+                "assignment": null,
+                "dispatch_id": "25f1e7eb24694da5bc2bfef0af1bf7a6",
+                "generation": 1,
+                "lease_expires_at": "2026-11-14T12:18:22.692670+00:00",
+                "profile_id": "runtime-main",
+                "resources": [
+                  "source-main",
+                  "app-main",
+                  "app-other"
+                ],
+                "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+                "seconds": 20,
+                "worker_id": "lead-1"
+              },
+              "profile_id": "lab-main",
+              "environment_nonce": "00000000000000000000000000000002",
+              "receipts": [
+                "sha256:fd650dc0de0eda6f0fb13579cb476b744e376282637d912cd4919cf4593a55d0",
+                "sha256:c4d4b321d8cd11b5270775412f868511f96dee323f77d29674369af47123a3d8"
+              ],
+              "result": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "http_status": 200,
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "aa78c14b11414b9e86659b437cdfc16a",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "result",
+                "request_bytes": 0,
+                "response_bytes": 1,
+                "status": "settled"
+              },
+              "target_nonce": "00000000000000000000000000000003",
+              "intent": {
+                "access_id": "app-main",
+                "account_ref": null,
+                "effect_id": "read-app",
+                "kind": "target-network-observation-v1",
+                "method": "GET",
+                "operation_id": "aa78c14b11414b9e86659b437cdfc16a",
+                "origin": "http://counter.invalid:61397",
+                "path_sha256": "sha256:e0b6481315e24c77c10d8c50c52da053646865879edbb05eae552fbd491ddd48",
+                "phase": "intent"
+              }
+            }
+          }
+        },
+        "source_subset": {
+          "scope_sha256": "sha256:009186addaa3ce41cd70dc9d598865cbe865e944aaf7a72d699b4c3cd2d6a5df",
+          "dispatch_id": "bee71e6f85054819baab45c06ac61d52",
+          "operation_id": "capture-execute-00000000000000000000000000000005",
+          "session_id": "simulated-session-ac9315648a834fb89a6af18be51bc2d6",
+          "client_environment_nonce": "00000000000000000000000000000005",
+          "clean_start": true,
+          "output_utf8": "",
+          "target_starts": [],
+          "target_cleanup": {},
+          "requests": {}
+        }
+      }
+    },
+    {
+      "name": "authority",
+      "passed": true,
+      "observed": {
+        "dispatches_before_and_after": 1,
+        "target_processes": 0,
+        "refusal": {
+          "code": "native_capture_starting_state_invalid",
+          "status": "rejected"
+        }
+      }
+    }
+  ],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "live provider",
+    "fresh-target research"
+  ],
+  "status": "passed",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/matheusvsky/.codex/worktrees/oslit-v2-runtimes/llm-redteam-harness/evals/native-qualification/smoke/check_application_reset_e2e.py",
+    "--output",
+    "/tmp/oslit-implementation/application-reset-final.json"
+  ],
+  "source_sha256": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_contract.py": "sha256:70731001f6e340a013e9dc5007f161db2a519aaeb136331f135c15e35954d422",
+    "tools/engagement_controller.py": "sha256:b8f58e0244cfaa76eb2ba1154f564819261cb9c0c022a66c9aa0b864a02d9842",
+    "tools/engagement_evidence.py": "sha256:31ff72c58300b3f5dfefc0466976aa450d389cf9e6b7cb43f7a3938723ea5212",
+    "tools/engagement_native_boundary.py": "sha256:4a18f2c3fb02188d8e73c92660b310bbd9a03b5031c09422ed508d232cb20b09",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "tools/target_accounts.py": "sha256:15cc24ab9d2eba93f77ed03e163415365c0c535fb5d5c245d12d60ad83fe3063",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "sha256:b5bf4c7b3b060a51184ca285a16331cbcd08a1ddfd8e82ba3fb896beef9c8e24"
+  }
+}

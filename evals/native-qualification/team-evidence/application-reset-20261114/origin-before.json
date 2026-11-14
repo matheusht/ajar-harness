@@ -1,0 +1,14 @@
+{
+  "kind": "application-reset-capture-e2e-v1",
+  "classification": "actual_http_probe_private_relays_signed_journal_with_simulated_container_and_native_peers",
+  "checks": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "live provider",
+    "fresh-target research"
+  ],
+  "status": "failed",
+  "error": "AssertionError: same origin names distinct owned application identities",
+  "source_sha256": "25031a90c88b66694aad853e5504d77cb7e3b030ad1bffae8586cd662764e882"
+}

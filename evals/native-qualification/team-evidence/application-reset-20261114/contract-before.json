@@ -1,0 +1,14 @@
+{
+  "kind": "application-reset-capture-e2e-v1",
+  "classification": "actual_http_probe_private_relays_signed_journal_with_simulated_container_and_native_peers",
+  "checks": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "live provider",
+    "fresh-target research"
+  ],
+  "status": "failed",
+  "error": "ContractError: inputs_invalid",
+  "source_sha256": "c187b6adbc3a4cf21c37af7da619c9e2252eb318369d953f050a3d8a54cbb0fe"
+}

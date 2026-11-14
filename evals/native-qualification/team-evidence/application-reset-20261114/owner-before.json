@@ -1,0 +1,14 @@
+{
+  "kind": "owned-application-counter-e2e-v1",
+  "classification": "actual_http_and_stdio_with_simulated_container_owner",
+  "checks": [],
+  "unverified": [
+    "Docker isolation",
+    "SSH transport",
+    "joined native model workflow",
+    "research outcome"
+  ],
+  "status": "failed",
+  "error": "ModuleNotFoundError: No module named 'application_state'",
+  "source_sha256": "6bc36e772f4236b5f7be690300308f26a7d01ec739289b805701cd7440d3f230"
+}

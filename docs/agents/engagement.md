@@ -212,12 +212,48 @@ with application resources rejects this local selector. Its target requests use
 `X-OSLit-Effect` to select a signed effect; omission requires exactly one compatible
 effect. The host strips that selector before forwarding.
 
-An application capture records `clean_start:false` and
-`remote_application_reset_unverified`. A fresh client lab does not reset the
+An application capture without an owned reset profile records `clean_start:false`
+and `remote_application_reset_unverified`. A fresh client lab does not reset the
 application, so this capture cannot establish clean independent remote replay or
 the confirmed predecessor required for escalation. A source-only subset of
 combined access can use its separately created local input as a clean start.
 See the [capture evidence and limits](../../evals/native-qualification/team-evidence/m5-application-capture-20261114/README.md).
+
+For a disposable application whose entire state belongs to the signed owner,
+configure the optional [owned application reset contract](../research/oslit-application-reset-contract-2026-11-14.md).
+Give this access a unique logical HTTP origin under `.invalid`; an owned clone
+has its own access identity. Pin the complete baseline image in a separate target
+environment profile, and pin an application profile containing its baseline ID,
+absolute startup command and service port. Add the matching `application_states`
+scope reference, `application_profiles` input path, `reset` permission and exact
+reset effect. That effect requires cleanup rights and has no account selector.
+Target HTTP effects and private account bindings remain separately required.
+
+The status tool exposes signed names in `application_baselines`. The worker
+requests this start through the existing capture tool, for example
+`starting_state:{"app-main":"baseline-1"}`. Include every selected application;
+combined access can select a source-only subset without this field. Each capture
+creates a separate target container with no direct network, mounts or published
+port. The existing target gateway reaches its exact container through a private
+connector. A managed origin has no DNS fallback when its owner is unavailable.
+
+The host records the baseline and exact target identity before the frozen probe
+starts, then binds its target requests to that instance. A fresh reviewer needs
+a new session, client lab and target instance with the same signed baseline.
+Cleanup observes target absence; an uncertain cleanup holds the application until
+recovery reads back the recorded owner. An unsupported reset request fails
+explicitly. The first owner supports wholly disposable HTTP applications; existing
+remote deployments, persistent volumes and external databases need another
+qualified owner. This optional capability adds no reset authority to older scopes
+and changes no impact-artifact approval gate.
+
+Run the local composition checks with
+`python3 evals/native-qualification/smoke/check_application_reset_e2e.py --output /private/results/application-reset.json`.
+They use actual HTTP, private relays and the signed journal with simulated native
+and container peers. The separate opt-in
+`check_application_owner_docker_e2e.py --endpoint unix:///... --image-id sha256:... --output /private/results/application-docker.json`
+requires an already installed Python image and exercises the production owner.
+Neither fixture is a fresh-target research acceptance test.
 
 Before a new `stored` or `cross_user` intent, the controller requires an accepted
 current escalation review of the independently confirmed preceding claim and

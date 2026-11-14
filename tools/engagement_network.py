@@ -63,9 +63,17 @@ def _forward_headers(headers, *, request=False):
 
 class NetworkGate:
     def __init__(self, routes, authorize, *, maximum_bytes=1024 * 1024, dispatch_guard=None,
-                 upstream_context=None, request_binder=None):
+                 upstream_context=None, request_binder=None, target_connectors=None):
         self.request_binder = request_binder
         self.routes = copy.deepcopy(routes)
+        self.target_connectors = dict(target_connectors or {})
+        for origin, connector in self.target_connectors.items():
+            parsed = urlsplit(origin)
+            if (parsed.scheme != 'http' or not parsed.hostname or not parsed.hostname.endswith('.invalid')
+                    or origin != f'http://{parsed.hostname}:{parsed.port}' or (connector is not None and not callable(connector))
+                    or not any(r['protocol'] == 'http' and r['host'] == parsed.hostname
+                               and r['port'] == parsed.port for r in self.routes)):
+                raise NetworkDenied('network_owned_connector_invalid')
         self.authorize = authorize
         self.dispatch_guard = dispatch_guard
         self.maximum_bytes = maximum_bytes
@@ -121,6 +129,15 @@ class NetworkGate:
                     r['protocol'] == parsed.scheme and r['host'] == host and r['port'] == port]
         if len(matching) != 1:
             raise NetworkDenied('network_destination_not_granted')
+        owned = f'{parsed.scheme}://{host}:{port}' in self.target_connectors
+        if owned:
+            if self.target_connectors[f'{parsed.scheme}://{host}:{port}'] is None:
+                raise NetworkDenied('network_owned_connector_unavailable')
+            policy = matching[0]['address_policy']
+            if policy['public_only'] or not any(ipaddress.ip_address('127.0.0.1') in ipaddress.ip_network(cidr, strict=True)
+                                              for cidr in policy['cidrs']):
+                raise NetworkDenied('network_resolved_address_not_granted')
+            return parsed, port, '127.0.0.1'
         answers = queue.Queue(maxsize=1)
         if not self.resolvers.acquire(blocking=False):
             raise NetworkDenied('network_resolution_unavailable')
@@ -173,7 +190,10 @@ class NetworkGate:
                     binding = self.request_binder(method, url, headers)
                     if binding is not None:
                         headers = binding.headers
-                peer = socket.create_connection((address, port), timeout=5)
+                origin = f'{parsed.scheme}://{parsed.hostname}:{port}'
+                connector = self.target_connectors.get(origin)
+                peer = connector(origin) if connector is not None else socket.create_connection((address, port), timeout=5)
+                peer.settimeout(5)
                 with self.lock:
                     self.sockets.add(peer)
                 if parsed.scheme == 'https':

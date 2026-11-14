@@ -105,9 +105,17 @@ then `arguments`. An interpreter may be null for an executable probe. It must
 be available in the signed environment. The host binds executed bytes, conditions,
 output and operation identity; a later assertion cannot replace this capture.
 The time limit bounds the operation while short grants renew within remaining
-allowance. Any application subject returns `clean_start:false` with
-`remote_application_reset_unverified`; a fresh local container does not establish a
-remote reset. Returned `network_request_ids` bind actual auxiliary target requests
+allowance. For a signed disposable application, read the access-to-baseline map
+in `engagement_status.application_baselines` and pass, for example,
+`"starting_state":{"app-main":"baseline-1"}`. Include every selected application.
+The host recreates separate owned targets, records their starting identities before
+the probe and binds each target request to its instance. A fresh reviewer needs
+the same baseline and a different session, client lab and target instance.
+
+Without this optional owner, an application capture returns `clean_start:false`
+and `remote_application_reset_unverified`. Select a source-only subset when its
+local clean start answers the question. An unavailable reset request fails
+explicitly. Returned `network_request_ids` bind actual auxiliary target requests
 to protected account/effect observations. A capture refusal is not an experiment.
 
 After a successful settled capture, submit `experiment_record`:
@@ -193,8 +201,8 @@ transition immediately. It replaces earlier pending or accepted reviews; an olde
 reviewer's late answer cannot restore admission. The new review must accept before
 effects resume. Reviews of other transitions retain their own decisions.
 An accepted transition does not change a claim, widen scope or prove semantic
-containment. Shared-application reset, generic artifact classes and route activation
-remain separate limits; current human gates apply, and generic `artifact_create`
+containment. Arbitrary remote-application reset, generic artifact classes and route
+activation remain separate limits; current human gates apply, and generic `artifact_create`
 admission is unsupported.
 
 `strategy_challenge` takes `{"obligation_id":"challenge-1","kind":"contradiction","refs":["contrary-observation"],"resources":["source-main"],"reason":"State the concrete unresolved conflict."}`.

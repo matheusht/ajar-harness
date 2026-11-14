@@ -1,0 +1,975 @@
+known pattern ids: ['pattern.bopla-property-authz', 'pattern.client-supplied-selector-authz', 'pattern.dag-canonicalization-split', 'pattern.dag-js-numeric-value-arithmetic', 'pattern.dag-old-dag-rule-gating', 'pattern.dag-spend-proof-uniqueness', 'pattern.delegated-capability-attenuation', 'pattern.indirect-prompt-injection', 'pattern.jwt-claim-validation', 'pattern.legacy-route-differential', 'pattern.oauth-authorization-code-single-use', 'pattern.oauth-client-binding', 'pattern.ssrf-server-side-fetch', 'pattern.transitive-sanitizer-reliance', 'pattern.ui-only-policy-enforcement', 'pattern.unsafe-default-authz-helper']
+known capability ids: ['external.gloss.channels', 'external.p4.transform', 'external.st3gg.detect']
+
+[cards] skills/patterns/
+  ok   patterns/bopla-property-authz: front-matter present
+  ok   patterns/bopla-property-authz: has id
+  ok   patterns/bopla-property-authz: has type
+  ok   patterns/bopla-property-authz: has activation block
+  ok   patterns/bopla-property-authz: activation.strong
+  ok   patterns/bopla-property-authz: activation.weak
+  ok   patterns/bopla-property-authz: activation.negative
+  ok   patterns/bopla-property-authz: stub ids are quoted
+  ok   patterns/client-supplied-selector-authz: front-matter present
+  ok   patterns/client-supplied-selector-authz: has id
+  ok   patterns/client-supplied-selector-authz: has type
+  ok   patterns/client-supplied-selector-authz: has activation block
+  ok   patterns/client-supplied-selector-authz: activation.strong
+  ok   patterns/client-supplied-selector-authz: activation.weak
+  ok   patterns/client-supplied-selector-authz: activation.negative
+  ok   patterns/client-supplied-selector-authz: stub ids are quoted
+  ok   patterns/client-supplied-selector-authz: route resolves vulns/broken-object-level-authz
+  ok   patterns/client-supplied-selector-authz: route resolves vulns/llm06-excessive-agency
+  ok   patterns/dag-canonicalization-split: front-matter present
+  ok   patterns/dag-canonicalization-split: has id
+  ok   patterns/dag-canonicalization-split: has type
+  ok   patterns/dag-canonicalization-split: has activation block
+  ok   patterns/dag-canonicalization-split: activation.strong
+  ok   patterns/dag-canonicalization-split: activation.weak
+  ok   patterns/dag-canonicalization-split: activation.negative
+  ok   patterns/dag-canonicalization-split: stub ids are quoted
+  ok   patterns/dag-js-numeric-value-arithmetic: front-matter present
+  ok   patterns/dag-js-numeric-value-arithmetic: has id
+  ok   patterns/dag-js-numeric-value-arithmetic: has type
+  ok   patterns/dag-js-numeric-value-arithmetic: has activation block
+  ok   patterns/dag-js-numeric-value-arithmetic: activation.strong
+  ok   patterns/dag-js-numeric-value-arithmetic: activation.weak
+  ok   patterns/dag-js-numeric-value-arithmetic: activation.negative
+  ok   patterns/dag-js-numeric-value-arithmetic: stub ids are quoted
+  ok   patterns/dag-old-dag-rule-gating: front-matter present
+  ok   patterns/dag-old-dag-rule-gating: has id
+  ok   patterns/dag-old-dag-rule-gating: has type
+  ok   patterns/dag-old-dag-rule-gating: has activation block
+  ok   patterns/dag-old-dag-rule-gating: activation.strong
+  ok   patterns/dag-old-dag-rule-gating: activation.weak
+  ok   patterns/dag-old-dag-rule-gating: activation.negative
+  ok   patterns/dag-old-dag-rule-gating: stub ids are quoted
+  ok   patterns/dag-spend-proof-uniqueness: front-matter present
+  ok   patterns/dag-spend-proof-uniqueness: has id
+  ok   patterns/dag-spend-proof-uniqueness: has type
+  ok   patterns/dag-spend-proof-uniqueness: has activation block
+  ok   patterns/dag-spend-proof-uniqueness: activation.strong
+  ok   patterns/dag-spend-proof-uniqueness: activation.weak
+  ok   patterns/dag-spend-proof-uniqueness: activation.negative
+  ok   patterns/dag-spend-proof-uniqueness: stub ids are quoted
+  ok   patterns/delegated-capability-attenuation: front-matter present
+  ok   patterns/delegated-capability-attenuation: has id
+  ok   patterns/delegated-capability-attenuation: has type
+  ok   patterns/delegated-capability-attenuation: has activation block
+  ok   patterns/delegated-capability-attenuation: activation.strong
+  ok   patterns/delegated-capability-attenuation: activation.weak
+  ok   patterns/delegated-capability-attenuation: activation.negative
+  ok   patterns/delegated-capability-attenuation: stub ids are quoted
+  ok   patterns/delegated-capability-attenuation: route resolves vulns/business-logic-abuse
+  ok   patterns/indirect-prompt-injection: front-matter present
+  ok   patterns/indirect-prompt-injection: has id
+  ok   patterns/indirect-prompt-injection: has type
+  ok   patterns/indirect-prompt-injection: has activation block
+  ok   patterns/indirect-prompt-injection: activation.strong
+  ok   patterns/indirect-prompt-injection: activation.weak
+  ok   patterns/indirect-prompt-injection: activation.negative
+  ok   patterns/indirect-prompt-injection: stub ids are quoted
+  ok   patterns/indirect-prompt-injection: route resolves vulns/llm06-excessive-agency
+  ok   patterns/jwt-claim-validation: front-matter present
+  ok   patterns/jwt-claim-validation: has id
+  ok   patterns/jwt-claim-validation: has type
+  ok   patterns/jwt-claim-validation: has activation block
+  ok   patterns/jwt-claim-validation: activation.strong
+  ok   patterns/jwt-claim-validation: activation.weak
+  ok   patterns/jwt-claim-validation: activation.negative
+  ok   patterns/jwt-claim-validation: stub ids are quoted
+  ok   patterns/legacy-route-differential: front-matter present
+  ok   patterns/legacy-route-differential: has id
+  ok   patterns/legacy-route-differential: has type
+  ok   patterns/legacy-route-differential: has activation block
+  ok   patterns/legacy-route-differential: activation.strong
+  ok   patterns/legacy-route-differential: activation.weak
+  ok   patterns/legacy-route-differential: activation.negative
+  ok   patterns/legacy-route-differential: stub ids are quoted
+  ok   patterns/legacy-route-differential: route resolves pattern.client-supplied-selector-authz
+  ok   patterns/legacy-route-differential: route resolves pattern.ui-only-policy-enforcement
+  ok   patterns/oauth-authorization-code-single-use: front-matter present
+  ok   patterns/oauth-authorization-code-single-use: has id
+  ok   patterns/oauth-authorization-code-single-use: has type
+  ok   patterns/oauth-authorization-code-single-use: has activation block
+  ok   patterns/oauth-authorization-code-single-use: activation.strong
+  ok   patterns/oauth-authorization-code-single-use: activation.weak
+  ok   patterns/oauth-authorization-code-single-use: activation.negative
+  ok   patterns/oauth-authorization-code-single-use: stub ids are quoted
+  ok   patterns/oauth-client-binding: front-matter present
+  ok   patterns/oauth-client-binding: has id
+  ok   patterns/oauth-client-binding: has type
+  ok   patterns/oauth-client-binding: has activation block
+  ok   patterns/oauth-client-binding: activation.strong
+  ok   patterns/oauth-client-binding: activation.weak
+  ok   patterns/oauth-client-binding: activation.negative
+  ok   patterns/oauth-client-binding: stub ids are quoted
+  ok   patterns/ssrf-server-side-fetch: front-matter present
+  ok   patterns/ssrf-server-side-fetch: has id
+  ok   patterns/ssrf-server-side-fetch: has type
+  ok   patterns/ssrf-server-side-fetch: has activation block
+  ok   patterns/ssrf-server-side-fetch: activation.strong
+  ok   patterns/ssrf-server-side-fetch: activation.weak
+  ok   patterns/ssrf-server-side-fetch: activation.negative
+  ok   patterns/ssrf-server-side-fetch: stub ids are quoted
+  ok   patterns/transitive-sanitizer-reliance: front-matter present
+  ok   patterns/transitive-sanitizer-reliance: has id
+  ok   patterns/transitive-sanitizer-reliance: has type
+  ok   patterns/transitive-sanitizer-reliance: has activation block
+  ok   patterns/transitive-sanitizer-reliance: activation.strong
+  ok   patterns/transitive-sanitizer-reliance: activation.weak
+  ok   patterns/transitive-sanitizer-reliance: activation.negative
+  ok   patterns/transitive-sanitizer-reliance: stub ids are quoted
+  ok   patterns/transitive-sanitizer-reliance: route resolves vulns/llm05-improper-output-handling
+  ok   patterns/transitive-sanitizer-reliance: route resolves vulns/injection
+  ok   patterns/ui-only-policy-enforcement: front-matter present
+  ok   patterns/ui-only-policy-enforcement: has id
+  ok   patterns/ui-only-policy-enforcement: has type
+  ok   patterns/ui-only-policy-enforcement: has activation block
+  ok   patterns/ui-only-policy-enforcement: activation.strong
+  ok   patterns/ui-only-policy-enforcement: activation.weak
+  ok   patterns/ui-only-policy-enforcement: activation.negative
+  ok   patterns/ui-only-policy-enforcement: stub ids are quoted
+  ok   patterns/ui-only-policy-enforcement: route resolves vulns/llm06-excessive-agency
+  ok   patterns/ui-only-policy-enforcement: route resolves vulns/broken-object-level-authz
+  ok   patterns/unsafe-default-authz-helper: front-matter present
+  ok   patterns/unsafe-default-authz-helper: has id
+  ok   patterns/unsafe-default-authz-helper: has type
+  ok   patterns/unsafe-default-authz-helper: has activation block
+  ok   patterns/unsafe-default-authz-helper: activation.strong
+  ok   patterns/unsafe-default-authz-helper: activation.weak
+  ok   patterns/unsafe-default-authz-helper: activation.negative
+  ok   patterns/unsafe-default-authz-helper: stub ids are quoted
+  ok   patterns/unsafe-default-authz-helper: route resolves vulns/broken-object-level-authz
+  ok   patterns/unsafe-default-authz-helper: route resolves pattern.client-supplied-selector-authz
+  ok   patterns/unsafe-default-authz-helper: route resolves pattern.legacy-route-differential
+
+[cards] skills/vulns/
+  ok   vulns/arbitrary-file-upload: front-matter present
+  ok   vulns/arbitrary-file-upload: has id
+  ok   vulns/arbitrary-file-upload: has type
+  ok   vulns/arbitrary-file-upload: vuln has safe_signal
+  ok   vulns/broken-function-level-authz: front-matter present
+  ok   vulns/broken-function-level-authz: has id
+  ok   vulns/broken-function-level-authz: has type
+  ok   vulns/broken-function-level-authz: vuln has safe_signal
+  ok   vulns/broken-object-level-authz: front-matter present
+  ok   vulns/broken-object-level-authz: has id
+  ok   vulns/broken-object-level-authz: has type
+  ok   vulns/broken-object-level-authz: vuln has safe_signal
+  ok   vulns/business-logic-abuse: front-matter present
+  ok   vulns/business-logic-abuse: has id
+  ok   vulns/business-logic-abuse: has type
+  ok   vulns/business-logic-abuse: vuln has safe_signal
+  ok   vulns/cache-poisoning: front-matter present
+  ok   vulns/cache-poisoning: has id
+  ok   vulns/cache-poisoning: has type
+  ok   vulns/cache-poisoning: vuln has safe_signal
+  ok   vulns/cross-site-scripting: front-matter present
+  ok   vulns/cross-site-scripting: has id
+  ok   vulns/cross-site-scripting: has type
+  ok   vulns/cross-site-scripting: vuln has safe_signal
+  ok   vulns/cryptographic-weakness: front-matter present
+  ok   vulns/cryptographic-weakness: has id
+  ok   vulns/cryptographic-weakness: has type
+  ok   vulns/cryptographic-weakness: vuln has safe_signal
+  ok   vulns/default-creds-brute-force: front-matter present
+  ok   vulns/default-creds-brute-force: has id
+  ok   vulns/default-creds-brute-force: has type
+  ok   vulns/default-creds-brute-force: vuln has safe_signal
+  ok   vulns/evm-access-control: front-matter present
+  ok   vulns/evm-access-control: has id
+  ok   vulns/evm-access-control: has type
+  ok   vulns/evm-access-control: vuln has safe_signal
+  ok   vulns/evm-accounting-invariant: front-matter present
+  ok   vulns/evm-accounting-invariant: has id
+  ok   vulns/evm-accounting-invariant: has type
+  ok   vulns/evm-accounting-invariant: vuln has safe_signal
+  ok   vulns/evm-arithmetic-rounding: front-matter present
+  ok   vulns/evm-arithmetic-rounding: has id
+  ok   vulns/evm-arithmetic-rounding: has type
+  ok   vulns/evm-arithmetic-rounding: vuln has safe_signal
+  ok   vulns/evm-delegatecall-proxy-upgrade: front-matter present
+  ok   vulns/evm-delegatecall-proxy-upgrade: has id
+  ok   vulns/evm-delegatecall-proxy-upgrade: has type
+  ok   vulns/evm-delegatecall-proxy-upgrade: vuln has safe_signal
+  ok   vulns/evm-dos-unbounded-gas: front-matter present
+  ok   vulns/evm-dos-unbounded-gas: has id
+  ok   vulns/evm-dos-unbounded-gas: has type
+  ok   vulns/evm-dos-unbounded-gas: vuln has safe_signal
+  ok   vulns/evm-first-depositor-share-inflation: front-matter present
+  ok   vulns/evm-first-depositor-share-inflation: has id
+  ok   vulns/evm-first-depositor-share-inflation: has type
+  ok   vulns/evm-first-depositor-share-inflation: vuln has safe_signal
+  ok   vulns/evm-flash-loan-governance: front-matter present
+  ok   vulns/evm-flash-loan-governance: has id
+  ok   vulns/evm-flash-loan-governance: has type
+  ok   vulns/evm-flash-loan-governance: vuln has safe_signal
+  ok   vulns/evm-read-only-reentrancy-price: front-matter present
+  ok   vulns/evm-read-only-reentrancy-price: has id
+  ok   vulns/evm-read-only-reentrancy-price: has type
+  ok   vulns/evm-read-only-reentrancy-price: vuln has safe_signal
+  ok   vulns/evm-reentrancy: front-matter present
+  ok   vulns/evm-reentrancy: has id
+  ok   vulns/evm-reentrancy: has type
+  ok   vulns/evm-reentrancy: vuln has safe_signal
+  ok   vulns/evm-signature-replay: front-matter present
+  ok   vulns/evm-signature-replay: has id
+  ok   vulns/evm-signature-replay: has type
+  ok   vulns/evm-signature-replay: vuln has safe_signal
+  ok   vulns/evm-slippage-mev: front-matter present
+  ok   vulns/evm-slippage-mev: has id
+  ok   vulns/evm-slippage-mev: has type
+  ok   vulns/evm-slippage-mev: vuln has safe_signal
+  ok   vulns/evm-unchecked-external-call: front-matter present
+  ok   vulns/evm-unchecked-external-call: has id
+  ok   vulns/evm-unchecked-external-call: has type
+  ok   vulns/evm-unchecked-external-call: vuln has safe_signal
+  ok   vulns/graphql-abuse: front-matter present
+  ok   vulns/graphql-abuse: has id
+  ok   vulns/graphql-abuse: has type
+  ok   vulns/graphql-abuse: vuln has safe_signal
+  ok   vulns/http-protocol-abuse: front-matter present
+  ok   vulns/http-protocol-abuse: has id
+  ok   vulns/http-protocol-abuse: has type
+  ok   vulns/http-protocol-abuse: vuln has safe_signal
+  ok   vulns/ibc-callback-reentrancy: front-matter present
+  ok   vulns/ibc-callback-reentrancy: has id
+  ok   vulns/ibc-callback-reentrancy: has type
+  ok   vulns/ibc-callback-reentrancy: vuln has safe_signal
+  ok   vulns/ibc-nondeterministic-execution: front-matter present
+  ok   vulns/ibc-nondeterministic-execution: has id
+  ok   vulns/ibc-nondeterministic-execution: has type
+  ok   vulns/ibc-nondeterministic-execution: vuln has safe_signal
+  ok   vulns/ics23-proof-verification-laxity: front-matter present
+  ok   vulns/ics23-proof-verification-laxity: has id
+  ok   vulns/ics23-proof-verification-laxity: has type
+  ok   vulns/ics23-proof-verification-laxity: vuln has safe_signal
+  ok   vulns/information-disclosure: front-matter present
+  ok   vulns/information-disclosure: has id
+  ok   vulns/information-disclosure: has type
+  ok   vulns/information-disclosure: vuln has safe_signal
+  ok   vulns/injection: front-matter present
+  ok   vulns/injection: has id
+  ok   vulns/injection: has type
+  ok   vulns/injection: vuln has safe_signal
+  ok   vulns/insecure-deserialization: front-matter present
+  ok   vulns/insecure-deserialization: has id
+  ok   vulns/insecure-deserialization: has type
+  ok   vulns/insecure-deserialization: vuln has safe_signal
+  ok   vulns/jwt-authentication-bypass: front-matter present
+  ok   vulns/jwt-authentication-bypass: has id
+  ok   vulns/jwt-authentication-bypass: has type
+  ok   vulns/jwt-authentication-bypass: vuln has safe_signal
+  ok   vulns/known-cve-exploitation: front-matter present
+  ok   vulns/known-cve-exploitation: has id
+  ok   vulns/known-cve-exploitation: has type
+  ok   vulns/known-cve-exploitation: vuln has safe_signal
+  ok   vulns/llm05-improper-output-handling: front-matter present
+  ok   vulns/llm05-improper-output-handling: has id
+  ok   vulns/llm05-improper-output-handling: has type
+  ok   vulns/llm05-improper-output-handling: vuln has safe_signal
+  ok   vulns/llm06-excessive-agency: front-matter present
+  ok   vulns/llm06-excessive-agency: has id
+  ok   vulns/llm06-excessive-agency: has type
+  ok   vulns/llm06-excessive-agency: vuln has safe_signal
+  ok   vulns/llm07-system-prompt-leakage: front-matter present
+  ok   vulns/llm07-system-prompt-leakage: has id
+  ok   vulns/llm07-system-prompt-leakage: has type
+  ok   vulns/llm07-system-prompt-leakage: vuln has safe_signal
+  ok   vulns/os-command-injection: front-matter present
+  ok   vulns/os-command-injection: has id
+  ok   vulns/os-command-injection: has type
+  ok   vulns/os-command-injection: vuln has safe_signal
+  ok   vulns/path-traversal-lfi: front-matter present
+  ok   vulns/path-traversal-lfi: has id
+  ok   vulns/path-traversal-lfi: has type
+  ok   vulns/path-traversal-lfi: vuln has safe_signal
+  ok   vulns/prototype-pollution: front-matter present
+  ok   vulns/prototype-pollution: has id
+  ok   vulns/prototype-pollution: has type
+  ok   vulns/prototype-pollution: vuln has safe_signal
+  ok   vulns/registry-lockfile-integrity-nonenforcement: front-matter present
+  ok   vulns/registry-lockfile-integrity-nonenforcement: has id
+  ok   vulns/registry-lockfile-integrity-nonenforcement: has type
+  ok   vulns/registry-lockfile-integrity-nonenforcement: vuln has safe_signal
+  ok   vulns/resource-precision-loss: front-matter present
+  ok   vulns/resource-precision-loss: has id
+  ok   vulns/resource-precision-loss: has type
+  ok   vulns/resource-precision-loss: vuln has safe_signal
+  ok   vulns/server-side-template-injection: front-matter present
+  ok   vulns/server-side-template-injection: has id
+  ok   vulns/server-side-template-injection: has type
+  ok   vulns/server-side-template-injection: vuln has safe_signal
+  ok   vulns/sql-injection: front-matter present
+  ok   vulns/sql-injection: has id
+  ok   vulns/sql-injection: has type
+  ok   vulns/sql-injection: vuln has safe_signal
+  ok   vulns/tvm-energy-accounting: front-matter present
+  ok   vulns/tvm-energy-accounting: has id
+  ok   vulns/tvm-energy-accounting: has type
+  ok   vulns/tvm-energy-accounting: vuln has safe_signal
+  ok   vulns/unchecked-arithmetic-panic-dos: front-matter present
+  ok   vulns/unchecked-arithmetic-panic-dos: has id
+  ok   vulns/unchecked-arithmetic-panic-dos: has type
+  ok   vulns/unchecked-arithmetic-panic-dos: vuln has safe_signal
+  ok   vulns/vm-hook-lifecycle: front-matter present
+  ok   vulns/vm-hook-lifecycle: has id
+  ok   vulns/vm-hook-lifecycle: has type
+  ok   vulns/vm-hook-lifecycle: vuln has safe_signal
+  ok   vulns/workflow-step-injection: front-matter present
+  ok   vulns/workflow-step-injection: has id
+  ok   vulns/workflow-step-injection: has type
+  ok   vulns/workflow-step-injection: vuln has safe_signal
+  ok   vulns/xxe-injection: front-matter present
+  ok   vulns/xxe-injection: has id
+  ok   vulns/xxe-injection: has type
+  ok   vulns/xxe-injection: vuln has safe_signal
+
+[cards] skills/techniques/
+  ok   techniques/covert-channel-encoding: front-matter present
+  ok   techniques/covert-channel-encoding: has id
+  ok   techniques/covert-channel-encoding: has type
+  ok   techniques/covert-channel-encoding: optional_capability resolves external.gloss.channels
+  ok   techniques/covert-channel-encoding: optional_capability resolves external.p4.transform
+  ok   techniques/decomposition: front-matter present
+  ok   techniques/decomposition: has id
+  ok   techniques/decomposition: has type
+  ok   techniques/obfuscation-encoding: front-matter present
+  ok   techniques/obfuscation-encoding: has id
+  ok   techniques/obfuscation-encoding: has type
+  ok   techniques/obfuscation-encoding: optional_capability resolves external.p4.transform
+  ok   techniques/persona-pressure: front-matter present
+  ok   techniques/persona-pressure: has id
+  ok   techniques/persona-pressure: has type
+  ok   techniques/steganography: front-matter present
+  ok   techniques/steganography: has id
+  ok   techniques/steganography: has type
+  ok   techniques/steganography: optional_capability resolves external.st3gg.detect
+  ok   techniques/task-reframing: front-matter present
+  ok   techniques/task-reframing: has id
+  ok   techniques/task-reframing: has type
+
+[capabilities] external capability registry
+  ok   capabilities: registry non-empty
+  ok   capabilities/external.p4.transform: sensor-only entry within the keyhole
+  ok   capabilities/external.gloss.channels: sensor-only entry within the keyhole
+  ok   capabilities/external.st3gg.detect: sensor-only entry within the keyhole
+  ok   capabilities: no entry claims oracle/judge authority
+
+[capabilities] capability classes (authority model)
+  ok   classes: non-empty
+  ok   classes/sensor: declares authority
+  ok   classes/sensor: non-oracle class doesn't claim oracle/judge authority
+  ok   classes/converter: declares authority
+  ok   classes/converter: non-oracle class doesn't claim oracle/judge authority
+  ok   classes/payload_generator: declares authority
+  ok   classes/payload_generator: non-oracle class doesn't claim oracle/judge authority
+  ok   classes/executor: declares authority
+  ok   classes/executor: non-oracle class doesn't claim oracle/judge authority
+  ok   classes/oracle: declares authority
+  ok   classes/payload_generator: authority is proposal_only
+  ok   classes/payload_generator: default disabled
+  ok   classes/payload_generator: requires signed_scope
+  ok   classes/payload_generator: requires scope_allows_payload_generation
+  ok   classes/payload_generator: requires declared_payload_class
+  ok   classes/payload_generator: requires containment_plan
+  ok   classes/payload_generator: requires cleanup_plan
+  ok   classes/payload_generator: requires oracle_separation
+  ok   classes/payload_generator: forbids oracle authority
+  ok   classes/payload_generator: forbids judge authority
+  ok   classes/payload_generator: forbids verdict authority
+  ok   classes/payload_generator: forbids confirmed authority
+  ok   classes/payload_generator: forbids allow authority
+  ok   capabilities: every required scope flag is declared in _TEMPLATE/scope.md
+
+[capabilities] _must_reject corpus (the keyhole must fail closed)
+  ok   _must_reject/allowed-forbidden-overlap.yaml: rejected by the keyhole [allowed/forbidden overlap: ['decode']]
+  ok   _must_reject/authority-oracle.yaml: rejected by the keyhole [authority not sensor_only; claims oracle/judge authority]
+  ok   _must_reject/dangerous-allowed-action.yaml: rejected by the keyhole [dangerous in allowed_actions: ['agent']]
+  ok   _must_reject/missing-scope-flag.yaml: rejected by the keyhole [undeclared scope flag: scope_allows_nonexistent_flag]
+  ok   _must_reject/payload-gen-claims-verdict.yaml: rejected by the keyhole [payload_generator emits forbidden verdict tokens: ['confirmed', 'success']]
+  ok   _must_reject/payload-gen-default-enabled.yaml: rejected by the keyhole [payload_generator not default: disabled]
+  ok   _must_reject/payload-gen-no-containment.yaml: rejected by the keyhole [payload_generator missing required gate: containment_plan]
+  ok   _must_reject/payload-gen-no-scope-gate.yaml: rejected by the keyhole [payload_generator missing required gate: scope_allows_payload_generation]
+  ok   _must_reject/unresolved-card-capability.md: rejected by the keyhole [unresolved: external.does.not.exist]
+  ok   completion-claims: portable canonical grandfather manifest
+  ok   completion-claims: hermetic-only synthetic regression suite
+
+[external-work-queue] target-local driver and session launcher
+  ok   read-isolation policy regression suite
+  ok   bounded Claude work-session regression suite
+  ok   signed record-review transaction regression suite
+  ok   work-queue admission predicate regression suite
+  ok   orchestrating-session Stop backstop regression suite
+  ok   registered frozen-corpus denominator regression suite
+  ok   external work-queue driver regression suite
+  ok   container broker authentication and replay regression suite
+  ok   container PID-1 relay and storage adjudication regression suite
+  ok   Docker boundary unit suite (live Docker lane explicitly opt-in)
+  ok   Docker queue integration suite (live Docker lane explicitly opt-in)
+  ok   Docker reducer drain acceptance suite (live Docker lane explicitly opt-in)
+
+[tool-families] family manifests (manifest holds authority; advanced surfaces gated)
+  ok   tool-families/foundry-slither/manifest.yaml: detection-first + staged authority
+  ok   tool-families/p4rs3lt0ngv3/manifest.yaml: detection-first + staged authority
+  ok   tool-families/p4rs3lt0ngv3/AGENT.md: states raw payloads not stored in Plane 1/2
+  ok   tool-families/st3gg/manifest.yaml: detection-first + staged authority
+  ok   tool-families/st3gg/AGENT.md: states raw payloads not stored in Plane 1/2
+
+[tool-families] _must_reject corpus (the manifest must fail closed)
+  ok   _must_reject/blocked-entry-claims-verdict.yaml: rejected [blocked_until/embed_benign_canary: claims forbidden authority: verdict]
+  ok   _must_reject/conceal-missing-redaction.yaml: rejected [blocked_until/conceal_artifact_proposal: missing redaction rule]
+  ok   _must_reject/dangerous-in-allowed-actions.yaml: rejected [dangerous in allowed_actions: ['injector']]
+  ok   _must_reject/entry-missing-scope-gates.yaml: rejected [blocked_until/network_channel_simulation: missing scope-gate requires[]]
+  ok   _must_reject/injector-missing-blocked-until.yaml: rejected [blocked_until/injector_template_proposal: missing blocked_until gate]
+  ok   _must_reject/missing-risk-tier.yaml: rejected [blocked_until/extract_payload_redacted: missing risk_tier]
+  ok   _must_reject/top-level-authority-oracle.yaml: rejected [top-level authority claims forbidden role: oracle]
+
+[payload-proposals] inert proposal schema gate (PG-2)
+  ok   payload-proposals/valid-stego-canary.json: valid proposal
+  ok   payload-proposals/_must_reject/claims-verdict.json: rejected [carries forbidden verdict key verdict; carries forbidden verdict key success]
+  ok   payload-proposals/_must_reject/exploit-poc-no-confirm.json: rejected [zone2 payload_class/risk_tier requires operator_confirmation_required: true; zone2 payload_class/risk_tier requires an impact_demo_ref]
+  ok   payload-proposals/_must_reject/missing-attestation.json: rejected [missing non_authority_attestation]
+  ok   payload-proposals/_must_reject/missing-containment.json: rejected [missing containment_plan]
+  ok   payload-proposals/_must_reject/missing-risk-tier.json: rejected [missing risk_tier]
+
+[oracles] skills/oracles/
+  ok   oracles/adjudication-oracle.md: front-matter present
+  ok   oracles/adjudication-oracle.md: has id
+  ok   oracles/adjudication-oracle.md: has type
+  ok   oracles/chainability-oracle.md: front-matter present
+  ok   oracles/chainability-oracle.md: has id
+  ok   oracles/chainability-oracle.md: has type
+  ok   oracles/ghsa-fix-diff-oracle.md: front-matter present
+  ok   oracles/ghsa-fix-diff-oracle.md: has id
+  ok   oracles/ghsa-fix-diff-oracle.md: has type
+  ok   oracles/pocinator-oracle.md: front-matter present
+  ok   oracles/pocinator-oracle.md: has id
+  ok   oracles/pocinator-oracle.md: has type
+  ok   oracles/regrade-oracle.md: front-matter present
+  ok   oracles/regrade-oracle.md: has id
+  ok   oracles/regrade-oracle.md: has type
+  ok   oracles/severity-precedent-oracle.md: front-matter present
+  ok   oracles/severity-precedent-oracle.md: has id
+  ok   oracles/severity-precedent-oracle.md: has type
+  ok   oracles/signal-oracle.md: front-matter present
+  ok   oracles/signal-oracle.md: has id
+  ok   oracles/signal-oracle.md: has type
+
+[casebooks] pattern-id references
+  ok   casebooks/case-2026-06-ai-webapp-builder: pattern refs resolve
+  ok   casebooks/case-2026-06-b2b-agentic-chat: pattern refs resolve
+  ok   casebooks/case-2026-06-b2b-agentic-chat-api: pattern refs resolve
+  ok   casebooks/case-2026-07-cybench-ctf-corpus: pattern refs resolve
+  ok   casebooks/case-2026-07-jvm-gateway-telemetry-oss: pattern refs resolve
+  ok   casebooks/case-2026-07-oss-supply-chain-tooling: pattern refs resolve
+  ok   casebooks/case-2026-07-postgrest-admin-authz-sweep: pattern refs resolve
+  ok   casebooks/case-2026-07-waf-content-filter-bypass: pattern refs resolve
+  ok   casebooks/case-2026-07-xbow-ctf-calibration: pattern refs resolve
+  ok   casebooks/rotation-case-01-web-api: pattern refs resolve
+  ok   casebooks/rotation-case-02-agentic-tooluse: pattern refs resolve
+  ok   casebooks/synthetic-negative-controls: pattern refs resolve
+  ok   casebooks: provenance, local resolution, and dynamic quarantine self-test
+
+[secrets] casebook + fixture + eval scan
+  ok   casebooks/fixtures/evals contain no live-secret shapes
+
+[findings] evidence-contract gate (necessary, not sufficient)
+  ok   findings/example-legacy-finding.json: base required fields
+  ok   findings/example-legacy-finding.json: recorded_date present (drives the migration gate)
+  ok   findings/example-legacy-finding.json: legacy finding advisory-only
+  ok   findings/example-new-finding.json: base required fields
+  ok   findings/example-new-finding.json: recorded_date present (drives the migration gate)
+  ok   findings/example-new-finding.json: new finding carries complete, schema-valid evidence contract
+  ok   findings/_must_reject/new-with-incomplete-contract.json: caught by full schema + policy gate (invalid-accept guard)
+  ok   findings/_must_reject/new-with-malformed-nested.json: caught by full schema + policy gate (invalid-accept guard)
+  ok   findings/_must_reject/new-without-contract.json: caught by full schema + policy gate (invalid-accept guard)
+
+[decision-0005] full Draft 2020-12 record validation
+  ok   Decision-0005 schemas pass metaschema + closed local refs
+  ok   engagement record fixtures: 68 expected outcomes
+  ok   record-reference fixtures: 8 expected outcomes
+  ok   synthetic legacy corpus inventory matches exact counts, hashes, and root digest
+  ok   legacy inventory baseline exposes 124 version-2 findings
+  ok   legacy inventory baseline exposes 116 forbidden base_model fields
+  ok   legacy inventory baseline exposes five unsupported scope_class values
+
+[false-discovery] invalid-accept guard
+  ok   false-discovery: corpus non-empty
+  ok   false-discovery: invalid_accept_rate == 0 (no trap's correct verdict is 'confirmed')
+  ok   false-discovery/trap-echoed-canary: well-formed
+  ok   false-discovery/trap-public-share-as-idor: well-formed
+  ok   false-discovery/trap-inert-reflection-as-xss: well-formed
+  ok   false-discovery/trap-title-rename-as-execution: well-formed
+  ok   false-discovery/trap-phantom-csp-defense: well-formed
+  ok   false-discovery/trap-missing-replay: well-formed
+  ok   false-discovery/trap-duplicate-surface-as-coverage: well-formed
+  ok   false-discovery/trap-one-backend-refusal-as-router-hold: well-formed
+  ok   false-discovery/trap-idor-public-value-not-cross: well-formed
+  ok   false-discovery/trap-mutation-200-without-effect: well-formed
+  ok   false-discovery/trap-jwt-signature-valid-not-authorized: well-formed
+  ok   false-discovery/trap-bopla-echoed-property: well-formed
+  ok   false-discovery/trap-ssrf-echo-not-fetch: well-formed
+  ok   false-discovery/trap-graphql-introspection-only: well-formed
+  ok   false-discovery/trap-cve-2019-9193: well-formed
+  ok   false-discovery/trap-cve-2007-0830: well-formed
+  ok   false-discovery/trap-cve-2004-2339: well-formed
+  ok   false-discovery/trap-cve-2020-19909: well-formed
+  ok   false-discovery/trap-cve-2013-3245: well-formed
+  ok   false-discovery/trap-cve-2005-1588: well-formed
+  ok   false-discovery/trap-cve-2012-5613: well-formed
+  ok   false-discovery/trap-cve-2023-32001: well-formed
+  ok   false-discovery/trap-cve-2018-14496: well-formed
+  ok   false-discovery/trap-cve-2023-5129: well-formed
+
+[adversarial-candidates] Phase-3 gate fixture (staged, not launched)
+  ok   adversarial: at least one valid additive candidate to retain
+  ok   adversarial: at least one gaming candidate to block
+  ok   adversarial/cand-valid-additive: disposition in vocab
+  ok   adversarial/cand-mutate-budget: disposition in vocab
+  ok   adversarial/cand-mutate-scorer: disposition in vocab
+  ok   adversarial/cand-duplicate-coverage: disposition in vocab
+  ok   adversarial/cand-omit-controls: disposition in vocab
+  ok   adversarial/cand-overfit-visible: disposition in vocab
+  ok   adversarial: every immutable-touching candidate is blocked
+
+[doctrine] CLAUDE.md / AGENTS.md mirror
+  ok   AGENTS.md is byte-identical to CLAUDE.md
+
+[guidance] active engineering navigation
+  ok   guidance/README.md: docs/decisions/README.md is linked and exists
+  ok   guidance/README.md: docs/wiki/index.md is linked and exists
+  ok   guidance/docs/architecture.md: decisions/README.md is linked and exists
+  ok   guidance/docs/architecture.md: decision-0005-implementation-architecture.md is linked and exists
+  ok   guidance/AGENTS.md: docs/decisions/README.md is linked and exists
+  ok   guidance/AGENTS.md: absent setup reference docs/agents/issue-tracker.md stays removed
+  ok   guidance/AGENTS.md: absent setup reference docs/agents/domain.md stays removed
+  ok   guidance/CLAUDE.md: absent setup reference docs/agents/issue-tracker.md stays removed
+  ok   guidance/CLAUDE.md: absent setup reference docs/agents/domain.md stays removed
+
+[doctrine] retained legacy queue completion condition
+  ok   queue stop doctrine: engine/loop.md exists
+  ok   queue stop doctrine: engine/loop.md names the computed work queue
+  ok   queue stop doctrine: engine/loop.md requires no blocking queue item for completion
+  ok   queue stop doctrine: engine/persistence.md exists
+  ok   queue stop doctrine: engine/persistence.md names the computed work queue
+  ok   queue stop doctrine: engine/persistence.md requires no blocking queue item for completion
+  ok   queue stop doctrine: engine/multi-round-orchestration.md exists
+  ok   queue stop doctrine: engine/multi-round-orchestration.md names the computed work queue
+  ok   queue stop doctrine: engine/multi-round-orchestration.md requires no blocking queue item for completion
+  ok   legacy queue doctrine: prompts, cards, and engine docs have no counter-based stop
+  ok   queue stop doctrine: guard recognizes numeric and semantic consecutive-pass stops
+  ok   queue stop doctrine: a dry round is defined only as an observation
+  ok   queue stop doctrine: loop declares one computed loop condition
+  ok   queue stop doctrine: operator-only work pauses instead of completing
+  ok   queue stop doctrine: parked and terminal exits precede active work dispatch
+  ok   queue stop doctrine: runtime guard recognizes snake, camel, kebab, and semantic counters
+  ok   queue stop doctrine: engine runtime configuration surface exists
+  ok   queue stop doctrine: runtime traversal covers every engine configuration
+  ok   queue stop doctrine: code and runtime configuration read no dry-round counter
+
+[fixtures] card-cited fixture paths resolve
+  ok   vulns/evm-access-control: cited fixture exists — evals/contract-audit/fixtures/jpegd-reentrancy/
+  ok   vulns/evm-accounting-invariant: cited fixture exists — evals/contract-audit/fixtures/jpegd-reentrancy/
+  ok   vulns/evm-arithmetic-rounding: cited fixture exists — evals/contract-audit/fixtures/jpegd-reentrancy/
+  ok   vulns/evm-delegatecall-proxy-upgrade: evals/contract-audit/fixtures/audius-storage-collision/ absent, declared fixture_status: planned
+  ok   vulns/evm-delegatecall-proxy-upgrade: evals/contract-audit/fixtures/furucombo-delegatecall-hijack/ absent, declared fixture_status: planned
+  ok   vulns/evm-dos-unbounded-gas: evals/contract-audit/fixtures/ajna-positionmanager-dos/ absent, declared fixture_status: planned
+  ok   vulns/evm-first-depositor-share-inflation: cited fixture exists — evals/contract-audit/fixtures/erc4626-first-depositor/
+  ok   vulns/evm-read-only-reentrancy-price: cited fixture exists — evals/contract-audit/fixtures/curve-readonly-reentrancy/
+  ok   vulns/evm-reentrancy: cited fixture exists — evals/contract-audit/fixtures/jpegd-reentrancy/
+  ok   vulns/evm-signature-replay: evals/contract-audit/fixtures/next-generation-forwarder-replay/ absent, declared fixture_status: planned
+
+[corpus-enumeration] syntactic package + entrypoint denominator
+  ok   corpus enumeration tool, schema, and expected fixture exist
+  ok   corpus enumeration builds from pinned tarballs
+  ok   corpus artifact carries the visitation-not-understanding caveat
+  ok   corpus artifact distinguishes declared and undeclared-published entrypoints
+  ok   every enumerated entrypoint carries a SHA-256 pin
+  ok   out-of-scope units remain enumerated with their disposition
+  ok   hostile control characters cannot enter a frozen entrypoint path
+  ok   freeze records syntactic generation with no model involvement
+  ok   freeze records package + entrypoint granularity and exact denominator
+  ok   frozen corpus artifact re-verifies intact
+  ok   corpus freeze is compatible with the existing frozen-input checker
+  ok   an interrupted exact TSV is recoverably frozen instead of stranded
+  ok   build refuses to freeze an agent-authored denominator
+  ok   build refuses to replace an existing frozen denominator
+  ok   artifact drift fails verification rather than rewriting the denominator
+  ok   mid-run corpus drift is reported without replacing the frozen denominator
+
+[ideation] novelty mapper separation
+  ok   ideation: every card maps to itself as a rediscovery
+  ok   ideation: unrelated prose lands as novelty-candidate
+
+[ablation] promoted lessons demonstrate a changed verdict
+  ok   ablation/kiwicom-vs02-layer-check: lesson changes a verdict and keeps a control
+
+[kb] cross-engagement entries obey the four rules and still change a decision
+  ok   kb: entry ids are unique (append-only)
+  ok   kb/KB-20260821-redaction-allowlist-holds: schema and the four rules
+  ok   kb/KB-20260821-redaction-allowlist-holds: still changes a routing decision
+  ok   kb/KB-20260821-redaction-allowlist-holds: routing removed no route (D-09, rule 4)
+  ok   kb/KB-20260821-write-side-cap-unreachable: schema and the four rules
+  ok   kb/KB-20260821-write-side-cap-unreachable: still changes a routing decision
+  ok   kb/KB-20260821-write-side-cap-unreachable: routing removed no route (D-09, rule 4)
+  ok   kb: tool self-test
+  ok   q02: prompt-ablation adjudicator self-test
+  ok   distill: transcript distiller self-test
+  ok   overlay: pin check exits clean
+
+[kernel] GK blocks a kernel-less engagement; preflight refuses at Round 0
+  ok   kernel: a missing events.jsonl is detected
+  ok   kernel: GK blocks when the kernel never ran
+  ok   kernel: an initialized engagement passes
+  ok   kernel: GK does not fire on an initialized engagement
+
+[overlay] preregistration safety-overlay pins track the files they pin
+  ok   overlay/evals/research-kernel/ab-readiness/preregistration.json: draft record, 0 stale pin(s) reported
+  ok   overlay: no stale pins outstanding
+
+[finding-traps] score_finding.py decisions
+  ok   finding-traps/control-clean-attested: decision is pass
+  ok   finding-traps/control-clean-minimal: decision is pass
+  ok   finding-traps/synthetic-adjudication: decision is block
+  ok   finding-traps/trap-cross-doc: decision is block
+  ok   finding-traps/trap-enumeration: decision is block
+  ok   finding-traps/trap-existence: decision is block
+  ok   finding-traps/trap-negative-control: decision is block
+  ok   finding-traps/trap-pin-version: decision is block
+  ok   finding-traps/trap-real-path-exec: decision is block
+  ok   finding-traps/trap-recompute: decision is block
+  ok   finding-traps/trap-refetch-external: decision is block
+
+[interventions] operator-intervention ledger
+  ok   interventions/backfill-corpus.json: corpus non-empty
+  ok   interventions/backfill-corpus.json: declares its method
+  ok   interventions/INT-20260803-001: carries an auditable quote
+  ok   interventions/INT-20260803-001: provenance declared
+  ok   interventions/INT-20260803-001: id is unique
+  ok   interventions/INT-20260803-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-002: carries an auditable quote
+  ok   interventions/INT-20260803-002: provenance declared
+  ok   interventions/INT-20260803-002: id is unique
+  ok   interventions/INT-20260803-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-003: carries an auditable quote
+  ok   interventions/INT-20260803-003: provenance declared
+  ok   interventions/INT-20260803-003: id is unique
+  ok   interventions/INT-20260803-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-004: carries an auditable quote
+  ok   interventions/INT-20260803-004: provenance declared
+  ok   interventions/INT-20260803-004: id is unique
+  ok   interventions/INT-20260803-004: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-005: carries an auditable quote
+  ok   interventions/INT-20260803-005: provenance declared
+  ok   interventions/INT-20260803-005: id is unique
+  ok   interventions/INT-20260803-005: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-006: carries an auditable quote
+  ok   interventions/INT-20260803-006: provenance declared
+  ok   interventions/INT-20260803-006: id is unique
+  ok   interventions/INT-20260803-006: machine_checkable names its check_shape
+  ok   interventions/INT-20260803-007: carries an auditable quote
+  ok   interventions/INT-20260803-007: provenance declared
+  ok   interventions/INT-20260803-007: id is unique
+  ok   interventions/INT-20260803-007: machine_checkable names its check_shape
+  ok   interventions/INT-20260808-001: carries an auditable quote
+  ok   interventions/INT-20260808-001: provenance declared
+  ok   interventions/INT-20260808-001: id is unique
+  ok   interventions/INT-20260808-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260728-001: carries an auditable quote
+  ok   interventions/INT-20260728-001: provenance declared
+  ok   interventions/INT-20260728-001: id is unique
+  ok   interventions/INT-20260728-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260728-002: carries an auditable quote
+  ok   interventions/INT-20260728-002: provenance declared
+  ok   interventions/INT-20260728-002: id is unique
+  ok   interventions/INT-20260728-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260729-001: carries an auditable quote
+  ok   interventions/INT-20260729-001: provenance declared
+  ok   interventions/INT-20260729-001: id is unique
+  ok   interventions/INT-20260729-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260729-002: carries an auditable quote
+  ok   interventions/INT-20260729-002: provenance declared
+  ok   interventions/INT-20260729-002: id is unique
+  ok   interventions/INT-20260729-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260728-003: carries an auditable quote
+  ok   interventions/INT-20260728-003: provenance declared
+  ok   interventions/INT-20260728-003: id is unique
+  ok   interventions/INT-20260728-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260729-003: carries an auditable quote
+  ok   interventions/INT-20260729-003: provenance declared
+  ok   interventions/INT-20260729-003: id is unique
+  ok   interventions/INT-20260729-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260728-004: carries an auditable quote
+  ok   interventions/INT-20260728-004: provenance declared
+  ok   interventions/INT-20260728-004: id is unique
+  ok   interventions/INT-20260729-004: carries an auditable quote
+  ok   interventions/INT-20260729-004: provenance declared
+  ok   interventions/INT-20260729-004: id is unique
+  ok   interventions/INT-20260805-001: carries an auditable quote
+  ok   interventions/INT-20260805-001: provenance declared
+  ok   interventions/INT-20260805-001: id is unique
+  ok   interventions/INT-20260805-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-002: carries an auditable quote
+  ok   interventions/INT-20260805-002: provenance declared
+  ok   interventions/INT-20260805-002: id is unique
+  ok   interventions/INT-20260805-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-003: carries an auditable quote
+  ok   interventions/INT-20260805-003: provenance declared
+  ok   interventions/INT-20260805-003: id is unique
+  ok   interventions/INT-20260805-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-004: carries an auditable quote
+  ok   interventions/INT-20260805-004: provenance declared
+  ok   interventions/INT-20260805-004: id is unique
+  ok   interventions/INT-20260805-005: carries an auditable quote
+  ok   interventions/INT-20260805-005: provenance declared
+  ok   interventions/INT-20260805-005: id is unique
+  ok   interventions/INT-20260805-005: machine_checkable names its check_shape
+  ok   interventions/INT-20260808-002: carries an auditable quote
+  ok   interventions/INT-20260808-002: provenance declared
+  ok   interventions/INT-20260808-002: id is unique
+  ok   interventions/INT-20260808-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260808-003: carries an auditable quote
+  ok   interventions/INT-20260808-003: provenance declared
+  ok   interventions/INT-20260808-003: id is unique
+  ok   interventions/INT-20260808-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260808-004: carries an auditable quote
+  ok   interventions/INT-20260808-004: provenance declared
+  ok   interventions/INT-20260808-004: id is unique
+  ok   interventions/INT-20260808-004: machine_checkable names its check_shape
+  ok   interventions/INT-20260716-001: carries an auditable quote
+  ok   interventions/INT-20260716-001: provenance declared
+  ok   interventions/INT-20260716-001: id is unique
+  ok   interventions/INT-20260716-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-006: carries an auditable quote
+  ok   interventions/INT-20260805-006: provenance declared
+  ok   interventions/INT-20260805-006: id is unique
+  ok   interventions/INT-20260805-006: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-007: carries an auditable quote
+  ok   interventions/INT-20260805-007: provenance declared
+  ok   interventions/INT-20260805-007: id is unique
+  ok   interventions/INT-20260805-007: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-008: carries an auditable quote
+  ok   interventions/INT-20260805-008: provenance declared
+  ok   interventions/INT-20260805-008: id is unique
+  ok   interventions/INT-20260805-008: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-009: carries an auditable quote
+  ok   interventions/INT-20260805-009: provenance declared
+  ok   interventions/INT-20260805-009: id is unique
+  ok   interventions/INT-20260805-009: machine_checkable names its check_shape
+  ok   interventions/INT-20260805-010: carries an auditable quote
+  ok   interventions/INT-20260805-010: provenance declared
+  ok   interventions/INT-20260805-010: id is unique
+  ok   interventions/INT-20260807-001: carries an auditable quote
+  ok   interventions/INT-20260807-001: provenance declared
+  ok   interventions/INT-20260807-001: id is unique
+  ok   interventions/INT-20260807-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260807-002: carries an auditable quote
+  ok   interventions/INT-20260807-002: provenance declared
+  ok   interventions/INT-20260807-002: id is unique
+  ok   interventions/INT-20260807-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260806-001: carries an auditable quote
+  ok   interventions/INT-20260806-001: provenance declared
+  ok   interventions/INT-20260806-001: id is unique
+  ok   interventions/INT-20260806-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260807-003: carries an auditable quote
+  ok   interventions/INT-20260807-003: provenance declared
+  ok   interventions/INT-20260807-003: id is unique
+  ok   interventions/INT-20260807-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260714-001: carries an auditable quote
+  ok   interventions/INT-20260714-001: provenance declared
+  ok   interventions/INT-20260714-001: id is unique
+  ok   interventions/INT-20260714-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260727-001: carries an auditable quote
+  ok   interventions/INT-20260727-001: provenance declared
+  ok   interventions/INT-20260727-001: id is unique
+  ok   interventions/INT-20260727-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260727-002: carries an auditable quote
+  ok   interventions/INT-20260727-002: provenance declared
+  ok   interventions/INT-20260727-002: id is unique
+  ok   interventions/INT-20260715-001: carries an auditable quote
+  ok   interventions/INT-20260715-001: provenance declared
+  ok   interventions/INT-20260715-001: id is unique
+  ok   interventions/INT-20260715-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260707-001: carries an auditable quote
+  ok   interventions/INT-20260707-001: provenance declared
+  ok   interventions/INT-20260707-001: id is unique
+  ok   interventions/INT-20260707-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260707-002: carries an auditable quote
+  ok   interventions/INT-20260707-002: provenance declared
+  ok   interventions/INT-20260707-002: id is unique
+  ok   interventions/INT-20260707-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260706-001: carries an auditable quote
+  ok   interventions/INT-20260706-001: provenance declared
+  ok   interventions/INT-20260706-001: id is unique
+  ok   interventions/INT-20260706-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260707-003: carries an auditable quote
+  ok   interventions/INT-20260707-003: provenance declared
+  ok   interventions/INT-20260707-003: id is unique
+  ok   interventions/INT-20260707-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260720-001: carries an auditable quote
+  ok   interventions/INT-20260720-001: provenance declared
+  ok   interventions/INT-20260720-001: id is unique
+  ok   interventions/INT-20260720-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260720-002: carries an auditable quote
+  ok   interventions/INT-20260720-002: provenance declared
+  ok   interventions/INT-20260720-002: id is unique
+  ok   interventions/INT-20260720-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260721-001: carries an auditable quote
+  ok   interventions/INT-20260721-001: provenance declared
+  ok   interventions/INT-20260721-001: id is unique
+  ok   interventions/INT-20260721-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260708-001: carries an auditable quote
+  ok   interventions/INT-20260708-001: provenance declared
+  ok   interventions/INT-20260708-001: id is unique
+  ok   interventions/INT-20260708-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260708-002: carries an auditable quote
+  ok   interventions/INT-20260708-002: provenance declared
+  ok   interventions/INT-20260708-002: id is unique
+  ok   interventions/INT-20260723-001: carries an auditable quote
+  ok   interventions/INT-20260723-001: provenance declared
+  ok   interventions/INT-20260723-001: id is unique
+  ok   interventions/INT-20260723-002: carries an auditable quote
+  ok   interventions/INT-20260723-002: provenance declared
+  ok   interventions/INT-20260723-002: id is unique
+  ok   interventions/INT-20260705-001: carries an auditable quote
+  ok   interventions/INT-20260705-001: provenance declared
+  ok   interventions/INT-20260705-001: id is unique
+  ok   interventions/INT-20260705-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260705-002: carries an auditable quote
+  ok   interventions/INT-20260705-002: provenance declared
+  ok   interventions/INT-20260705-002: id is unique
+  ok   interventions/INT-20260705-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260707-004: carries an auditable quote
+  ok   interventions/INT-20260707-004: provenance declared
+  ok   interventions/INT-20260707-004: id is unique
+  ok   interventions/INT-20260707-004: machine_checkable names its check_shape
+  ok   interventions/INT-20260707-005: carries an auditable quote
+  ok   interventions/INT-20260707-005: provenance declared
+  ok   interventions/INT-20260707-005: id is unique
+  ok   interventions/INT-20260707-005: machine_checkable names its check_shape
+  ok   interventions/INT-20260808-005: carries an auditable quote
+  ok   interventions/INT-20260808-005: provenance declared
+  ok   interventions/INT-20260808-005: id is unique
+  ok   interventions/INT-20260708-003: carries an auditable quote
+  ok   interventions/INT-20260708-003: provenance declared
+  ok   interventions/INT-20260708-003: id is unique
+  ok   interventions/INT-20260708-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260728-005: carries an auditable quote
+  ok   interventions/INT-20260728-005: provenance declared
+  ok   interventions/INT-20260728-005: id is unique
+  ok   interventions/INT-20260728-005: machine_checkable names its check_shape
+  ok   interventions/INT-20260725-001: carries an auditable quote
+  ok   interventions/INT-20260725-001: provenance declared
+  ok   interventions/INT-20260725-001: id is unique
+  ok   interventions/INT-20260725-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260706-002: carries an auditable quote
+  ok   interventions/INT-20260706-002: provenance declared
+  ok   interventions/INT-20260706-002: id is unique
+  ok   interventions/INT-20260706-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260706-003: carries an auditable quote
+  ok   interventions/INT-20260706-003: provenance declared
+  ok   interventions/INT-20260706-003: id is unique
+  ok   interventions/INT-20260706-003: machine_checkable names its check_shape
+  ok   interventions/INT-20260701-001: carries an auditable quote
+  ok   interventions/INT-20260701-001: provenance declared
+  ok   interventions/INT-20260701-001: id is unique
+  ok   interventions/INT-20260701-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260717-001: carries an auditable quote
+  ok   interventions/INT-20260717-001: provenance declared
+  ok   interventions/INT-20260717-001: id is unique
+  ok   interventions/INT-20260723-003: carries an auditable quote
+  ok   interventions/INT-20260723-003: provenance declared
+  ok   interventions/INT-20260723-003: id is unique
+  ok   interventions/INT-20260723-003: machine_checkable names its check_shape
+  ok   interventions/live-spotify-backstage-2026-07.json: corpus non-empty
+  ok   interventions/live-spotify-backstage-2026-07.json: declares its method
+  ok   interventions/INT-20260809-001: carries an auditable quote
+  ok   interventions/INT-20260809-001: provenance declared
+  ok   interventions/INT-20260809-001: id is unique
+  ok   interventions/INT-20260809-001: machine_checkable names its check_shape
+  ok   interventions/INT-20260809-002: carries an auditable quote
+  ok   interventions/INT-20260809-002: provenance declared
+  ok   interventions/INT-20260809-002: id is unique
+  ok   interventions/INT-20260809-002: machine_checkable names its check_shape
+  ok   interventions/INT-20260809-003: carries an auditable quote
+  ok   interventions/INT-20260809-003: provenance declared
+  ok   interventions/INT-20260809-003: id is unique
+  ok   interventions/INT-20260809-003: machine_checkable names its check_shape
+
+[adjudication-audit] synthetic-adjudication detector
+  ok   adjudication/evasion-case: verdict is synthetic
+  ok   adjudication/evasion-case: corpus reaches the set-level minimum
+  ok   adjudication/independent-control: verdict is clear
+  ok   adjudication/independent-control: corpus reaches the set-level minimum
+  ok   adjudication/synthetic-case: verdict is synthetic
+  ok   adjudication/synthetic-case: corpus reaches the set-level minimum
+  ok   adjudication: both a synthetic case and a control exist
+
+[disposition-ledger] calibration against external verdicts
+  ok   dispositions/under-calling: verdict is under-calling
+  ok   dispositions/over-calling: verdict is over-calling
+  ok   dispositions/calibrated: verdict is calibrated
+  ok   dispositions: an ungraded closure contributes no delta
+  ok   dispositions: below the floor, no verdict is issued
+
+[framing-probe] evidence packets carry no severity signal
+  ok   framing-probe: packets exist
+  ok   framing-probe/F-A2CHAIN: zero severity signals survive
+  ok   framing-probe/F-A2CHAIN: body matches its recorded hash
+  ok   framing-probe/F-A2LINK: zero severity signals survive
+  ok   framing-probe/F-A2LINK: body matches its recorded hash
+  ok   framing-probe/F-F1: zero severity signals survive
+  ok   framing-probe/F-F1: body matches its recorded hash
+  ok   framing-probe/F-F3: zero severity signals survive
+  ok   framing-probe/F-F3: body matches its recorded hash
+  ok   framing-probe/F-OIDC3: zero severity signals survive
+  ok   framing-probe/F-OIDC3: body matches its recorded hash
+  ok   framing-probe: the scrubber removes every signal the verifier detects
+  ok   framing-probe: the three framings are distinct texts
+  ok   framing-probe: no framing text embeds the evidence
+
+[finding-lifecycle] promotion gates
+  ok   lifecycle/block-no-control: decision is block
+  ok   lifecycle/block-no-control: blocked by G2 and nothing else
+  ok   lifecycle/block-no-cvss: decision is block
+  ok   lifecycle/block-no-cvss: blocked by G5 and nothing else
+  ok   lifecycle/block-privilege-mismatch: decision is block
+  ok   lifecycle/block-privilege-mismatch: blocked by G3 and nothing else
+  ok   lifecycle/block-privilege-not-established: decision is block
+  ok   lifecycle/block-privilege-not-established: blocked by G3 and nothing else
+  ok   lifecycle/block-synthesized-state: decision is block
+  ok   lifecycle/block-synthesized-state: blocked by G6 and nothing else
+  ok   lifecycle/block-synthetic-review: decision is block
+  ok   lifecycle/block-synthetic-review: blocked by G4 and nothing else
+  ok   lifecycle/promote-clean: decision is promote
+  ok   lifecycle: at least one fixture promotes cleanly
+  ok   lifecycle-corpus: the package alone shows nothing
+  ok   lifecycle-corpus: the engagement corpus is what blocks G4
+  ok   lifecycle-governed: an implicit engagement binding stays package-only
+  ok   lifecycle-governed: explicit engagement context audits the whole corpus
+  ok   lifecycle-governed CLI: omitted --engagement stays package-only
+  ok   lifecycle-governed CLI: explicit --engagement retains corpus semantics
+  ok   lifecycle-kernel-revision: revision-only package blocks G0
+  ok   lifecycle-kernel-revision: invalid fixture kernel cannot attest storage
+  ok   lifecycle-control-kind: replay-as-control blocks G2
+  ok   lifecycle-control-kind: matched control clears G2
+
+[finding-lifecycle] G1 + G6 attempt resolution
+  ok   g1/F-G1-OK: clears
+  ok   g1/F-G1-DANGLING: blocks
+  ok   g1/F-G1-HELD: blocks
+  ok   g2/F-G2-DANGLING: blocks a dangling control ref in a populated ledger
+  ok   g6/F-G6-OK: clears
+  ok   g6/F-G6-DANGLING: blocks
+  ok   g6/F-G6-CONTROL: blocks
+  ok   g6/F-G6-HELD: blocks
+  ok   g6/F-G6-PROSE: clears
+
+[real-data] gates against adjudicated engagement packages
+  ok   fabrication/confirming corpus audits synthetic
+  ok   fabrication/rejecting corpus is flagged, never clear
+
+900 checks, 0 failing
+CONFORMANCE: PASS

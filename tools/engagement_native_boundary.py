@@ -30,6 +30,8 @@ from research_environment import Environment
 from native_runtime_transport import HostOperation, MAX_FRAME
 from native_runtime_linux import LinuxModelOwner
 from target_accounts import TargetAccountError, TargetAccountResolver
+from application_state import ApplicationOwner
+from engagement_evidence import application_released
 import native_runtime_codex as codex
 import native_runtime_omp as omp
 
@@ -121,6 +123,7 @@ TOOLS = [
          'interpreter': {'type': ['string', 'null']}, 'arguments': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 64},
          'conditions': {'type': 'object'}, 'seconds': {'type': 'integer', 'minimum': 1},
          'resources': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True},
+         'starting_state': {'type': 'object', 'additionalProperties': {'type': 'string'}, 'description': 'Optional map of every selected application access to its signed owned baseline. Recreates separate owned .invalid targets; omission makes no application clean-start claim.'},
          'effect_id': {'type': 'string', 'description': 'Optional signed local effect for source/binary capture execution; later rungs require current evidence review. Application requests select their own effect.'},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]
@@ -272,6 +275,16 @@ class NativeBoundary:
             return {'known_hosts_file': self.controller.root / 'contract/environments' / (self.environment_id + '.known_hosts')}
         return {}
 
+    def _application_connectors(self, resources, owners=None):
+        managed = {row['access_id'] for row in self.scope.get('application_states', [])}
+        result = {}
+        for access in self.accesses:
+            if access['id'] in resources and access['id'] in managed:
+                scheme, host, port = _origin(access['identity']['base_url'])
+                owner = (owners or {}).get(access['id'])
+                result[f'{scheme}://{host}:{port}'] = owner.connect if owner is not None else None
+        return result
+
     def _runtime_owner(self, receipt):
         self.controller.record_runtime_preparation_owner(self.context.grant, receipt)
         self.owner_receipt = copy.deepcopy(receipt)
@@ -371,7 +384,8 @@ class NativeBoundary:
             provider_url = f'http://127.0.0.1:{provider_address}'
         self.lab_gate = NetworkGate(self.routes['lab'], self._active, maximum_bytes=maximum,
             dispatch_guard=self.context.guard,
-            request_binder=self.target_accounts.bind if self.target_accounts is not None else None)
+            request_binder=self.target_accounts.bind if self.target_accounts is not None else None,
+            target_connectors=self._application_connectors(self.context.grant['resources']))
         self.lab_gate.serve(self.socket_dir / 'lab.sock', certificate=certificate, private_key=key)
         self.controller.record_preparation_setup(self.context.grant)
         self.execution_admitted = True
@@ -545,7 +559,23 @@ class NativeBoundary:
         if (not isinstance(resources, list) or not resources or any(not isinstance(name, str) for name in resources)
                 or len(resources) != len(set(resources)) or not set(resources) <= set(self.context.grant['resources'])):
             raise BoundaryError('native_capture_resources_invalid')
-        application = any(row['id'] in resources and row['kind'] == 'application' for row in self.accesses)
+        applications = {row['id'] for row in self.accesses if row['id'] in resources and row['kind'] == 'application'}
+        application = bool(applications)
+        reset_profiles = {}
+        if 'starting_state' in arguments:
+            requested = arguments['starting_state']
+            references = {row['access_id']: row for row in self.scope.get('application_states', [])}
+            if (not applications or type(requested) is not dict or set(requested) != applications
+                    or not applications <= set(references)):
+                raise BoundaryError('native_capture_starting_state_invalid')
+            for access_id, baseline in requested.items():
+                reference = references[access_id]
+                profile = read_json(self.controller.root / 'contract/applications' / (access_id + '.json'), private=True)
+                if type(baseline) is not str or baseline != profile['baseline_id']:
+                    raise BoundaryError('native_capture_starting_state_invalid')
+                environment = next(row for row in self.scope['environments'] if row['profile_id'] == reference['environment_id'])
+                reset_profiles[access_id] = (reference, profile, environment)
+                segment = min(segment, environment['limits']['lease_seconds'])
         effect_id = self._effect(self.environment_id, dict(self.context.grant, resources=resources))
         if 'effect_id' in arguments:
             effect = next((row for row in self.scope['effects'] if row['id'] == arguments['effect_id']), None)
@@ -569,12 +599,15 @@ class NativeBoundary:
             self.capture_lock.release()
             raise
         self.capture_application_active = application
-        control = {'environment': None, 'cancelled': threading.Event(), 'done': threading.Event(), 'effect_id': effect_id}
+        control = {'environment': None, 'application_owners': {}, 'reset_profiles': reset_profiles,
+            'cancelled': threading.Event(), 'done': threading.Event(), 'effect_id': effect_id}
         def cancel():
             control['cancelled'].set()
             environment = control['environment']
             if environment is not None:
                 environment.revoke()
+            for owner in list(control['application_owners'].values()):
+                owner.environment.revoke()
         self.capture_cancel, self.capture_done = cancel, control['done']
         return HostOperation(lambda: self._capture(arguments, instrument, grant, control), cancel)
 
@@ -585,6 +618,8 @@ class NativeBoundary:
         value = None
         failure = None
         executions, operations, network_operations = [], {}, {}
+        owners = control['application_owners']
+        application_cleanup = {}
         accesses = [row for row in self.accesses if row['id'] in grant['resources']]
         applications = {row['id'] for row in accesses if row['kind'] == 'application'}
         renewal_stopped, prepared = threading.Event(), threading.Event()
@@ -626,7 +661,10 @@ class NativeBoundary:
                     nonce = environment.receipt()['nonce']
                 else:
                     admitted, nonce = network_operations[operation_id]
-                result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation)
+                owner = owners.get(observation['access_id'])
+                target_nonce = owner.start_receipt['target_nonce'] if owner is not None else None
+                result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation,
+                    target_nonce=target_nonce)
                 if observation['phase'] == 'intent':
                     network_operations[operation_id] = (admitted, nonce)
                 else:
@@ -649,15 +687,23 @@ class NativeBoundary:
                         parent_remaining = (instant(parent['lease_expires_at']) - self.controller.clock()).total_seconds()
                         segment = min(math.ceil(available), self.scope['limits']['max_worker_lease_seconds'],
                             self.environment_reference['limits']['lease_seconds'], math.floor(parent_remaining))
+                        if control['reset_profiles']:
+                            segment = min(segment, *(row[2]['limits']['lease_seconds'] for row in control['reset_profiles'].values()))
                         if segment < 1:
                             raise BoundaryError('native_capture_parent_lease_short')
                         grant = self.controller.renew_dispatch(grant, seconds=segment)
                         renewal_window = segment
                         if environment is not None:
                             environment.grant = copy.deepcopy(grant)
+                        for owner in list(owners.values()):
+                            owner.environment.grant = copy.deepcopy(grant)
                     if prepared.is_set():
                         remaining = (instant(grant['lease_expires_at']) - self.controller.clock()).total_seconds()
                         environment.renew(min(remaining, self.environment_reference['limits']['lease_seconds']))
+                    for access_id, owner in list(owners.items()):
+                        if owner.start_receipt is not None:
+                            remaining = (instant(grant['lease_expires_at']) - self.controller.clock()).total_seconds()
+                            owner.renew(min(remaining, control['reset_profiles'][access_id][2]['limits']['lease_seconds']))
                 except Exception as error:
                     renewal_failure.append(getattr(error, 'code', 'native_capture_renewal_unavailable'))
                     control['cancelled'].set()
@@ -687,6 +733,10 @@ class NativeBoundary:
             probe_sha = self.controller.store_object(probe['content'])
             support = {'capture': {'path': str(capture), 'manifest_sha256': digest(canonical(source_manifest(capture)))},
                 'bootstrap': {'path': str(self.bootstrap), 'manifest_sha256': digest(canonical(source_manifest(self.bootstrap)))}}
+            if control['reset_profiles']:
+                connector = directory / 'application-connector'; connector.mkdir(mode=0o700)
+                _write(connector / 'bridge.py', read_bytes(self.bootstrap / 'bridge.py'))
+                support['application-connector'] = {'path': str(connector), 'manifest_sha256': digest(canonical(source_manifest(connector)))}
             subjects = [row['identity']['base_url'] if row['kind'] == 'application' else '/input/' + row['id']
                 for row in accesses]
             patch_manifest = None
@@ -714,12 +764,32 @@ class NativeBoundary:
             authorize()
             environment.prepare(accesses, self.context.contract.inputs['access_files'], support_inputs=support)
             prepared.set()
+            for access_id, (reference, profile, target_environment) in control['reset_profiles'].items():
+                profile_id = reference['environment_id']
+                target_profile = read_json(self.controller.root / 'contract/environments' / (profile_id + '.json'), private=True)
+                target_operations = {}
+                def observe_target(observation, profile_id=profile_id, effect_id=reference['reset_effect_id'], operations=target_operations):
+                    with self.controller.lock():
+                        opid = observation['operation_id']
+                        if observation['phase'] == 'intent' or opid not in operations:
+                            operations[opid] = copy.deepcopy(grant)
+                        return self.controller.record_environment_observation(operations[opid], profile_id,
+                            observation, effect_id=effect_id)
+                options = {'known_hosts_file': self.controller.root / 'contract/environments' / (profile_id + '.known_hosts')} if target_profile['ssh'] else {}
+                owner = ApplicationOwner(profile, next(row for row in accesses if row['id'] == access_id),
+                    target_profile, target_environment['limits'], authorize, observe_target,
+                    grant=grant, dispatch_guard=guard, bootstrap={'application-connector': support['application-connector']}, **options)
+                with self.controller.lock():
+                    owners[access_id] = owner
+                receipt = owner.reset(arguments['starting_state'][access_id])
+                self.controller.record_application_start(grant, profile_id, receipt)
             if applications:
                 target_accounts = TargetAccountResolver(self._target_reference(), self.scope,
                     authorize, observe_network, environment_profile_id=self.environment_id)
             routes = _routes(self.scope, grant['resources'])['lab']
             gate = NetworkGate(routes, active, maximum_bytes=self.environment_reference['limits']['output_bytes'],
-                dispatch_guard=guard, request_binder=target_accounts.bind if target_accounts is not None else None)
+                dispatch_guard=guard, request_binder=target_accounts.bind if target_accounts is not None else None,
+                target_connectors=self._application_connectors(grant['resources'], owners))
             socket_path = self.socket_dir / ('capture-' + uuid.uuid4().hex[:12] + '.sock')
             gate.serve(socket_path, certificate=self.certificate, private_key=self.private_key)
             proxy = ProxyBridge(lambda command: environment.launch_stdio(command, role='network_proxy'),
@@ -740,15 +810,15 @@ class NativeBoundary:
             self.controller.record_experiment_execution(admitted, self.environment_id, operation_id, {
                 'instrument_id': arguments['instrument_id'], 'instrument_sha256': instrument['artifact_sha256'],
                 'candidate_sha256': candidate_sha, 'probe_sha256': probe_sha, 'conditions': arguments['conditions'],
-                'reset': instrument['reset'], 'clean_start': not applications})
+                'reset': instrument['reset'], 'clean_start': not applications or set(owners) == applications})
             if patch_manifest is not None:
                 self.controller.record_patch_execution(admitted, self.environment_id, operation_id,
                     arguments['patch_id'], arguments['patch_arm'], patch_manifest)
             value = {'status': 'captured', 'dispatch_id': grant['dispatch_id'], 'operation_id': operation_id,
                 'instrument_id': arguments['instrument_id'], 'candidate_sha256': candidate_sha, 'probe_sha256': probe_sha,
                 'output_sha256': digest(raw_output), 'returncode': output['returncode'],
-                'environment_nonce': output['identity']['nonce'], 'clean_start': not applications,
-                'limits': ['remote_application_reset_unverified'] if applications else [],
+                'environment_nonce': output['identity']['nonce'], 'clean_start': not applications or set(owners) == applications,
+                'limits': ['remote_application_reset_unverified'] if applications - set(owners) else [],
                 'network_request_ids': sorted(name for name, row in self.controller.state()['network_operations'].items()
                     if row['grant']['dispatch_id'] == grant['dispatch_id'])}
         except Exception as error:
@@ -768,6 +838,13 @@ class NativeBoundary:
                         failure = failure or 'native_capture_transport_cleanup_unverified'
             if target_accounts is not None:
                 target_accounts.close()
+            for access_id, owner in owners.items():
+                try:
+                    readback = owner.cleanup()
+                    self.controller.record_environment_cleanup(grant, control['reset_profiles'][access_id][0]['environment_id'], readback)
+                    application_cleanup[access_id] = readback['status'] == 'clean'
+                except Exception:
+                    failure = failure or 'native_capture_application_cleanup_unresolved'
             if environment is not None:
                 try:
                     cleanup = environment.cleanup()
@@ -775,6 +852,7 @@ class NativeBoundary:
                 except Exception:
                     failure = failure or 'native_capture_cleanup_unresolved'
             known = not renewal.is_alive() and cleanup is not None and cleanup.get('status') == 'clean'
+            known = known and all(application_cleanup.get(name) for name in owners)
             if environment is None:
                 try:
                     known = not renewal.is_alive() and not any(row['grant']['dispatch_id'] == grant['dispatch_id']
@@ -789,6 +867,7 @@ class NativeBoundary:
                         for name in grant['resources']}
                     resources.update({name: 'retained' if retained and not state['resource_holds'].get(name) else 'unknown'
                         for name in applications})
+                    resources.update({name: 'reset' if known and application_cleanup.get(name) else 'unknown' for name in owners})
                     observation = {'status': 'settled' if known else 'unknown',
                         'worker_seconds': min(grant['seconds'], max(0, math.ceil(time.monotonic() - started))) if known else grant['seconds'],
                         'resources': resources, 'usage': {'tokens': None, 'cost': None},
@@ -911,7 +990,8 @@ class NativeBoundary:
                 'setup_environments': [{'profile_id': self.environment_id, 'environment': environment_readback,
                     'cleanup': cleanup}] if pre_native and owned else [],
                 'environment_cleanup': cleanup, 'cleanup': 'verified' if verified else 'unresolved',
-                'resources': {row['id']: ('unchanged' if unused else 'reset') if verified and (unused or row['kind'] != 'application')
+                'resources': {row['id']: ('unchanged' if unused else 'reset') if verified and (unused or row['kind'] != 'application'
+                    or application_released(self.controller.state(), self.context.grant['dispatch_id'], row['id']))
                     else 'unknown' for row in self.accesses}}
             return copy.deepcopy(self.finished)
 
@@ -953,8 +1033,10 @@ def recover_boundary(context, dispatch):
             profile_id = row['profile_id']
             profile = read_json(c.root / 'contract/environments' / (profile_id + '.json'), private=True)
             reference = next(r for r in context.contract.scope['environments'] if r['profile_id'] == profile_id)
-            effects = [r for r in context.contract.scope['effects'] if profile_id in r['environment_ids'] and
-                set(context.grant['resources']) <= set(r['access_ids']) and not r['account_refs']]
+            recorded = {operation['effect_id'] for operation in state['environment_operations'].values()
+                if operation['identity']['nonce'] == row['identity']['nonce'] and operation['grant']['dispatch_id'] == context.grant['dispatch_id']}
+            effects = [r for r in context.contract.scope['effects'] if profile_id in r['environment_ids'] and r['id'] in recorded
+                and {access['id'] for access in row['identity']['access']} <= set(r['access_ids']) and not r['account_refs']]
             if not effects:
                 raise BoundaryError('native_effect_grant_unavailable')
             def observe(value, identity=profile_id, effect=effects[0]['id']):
@@ -978,6 +1060,7 @@ def recover_boundary(context, dispatch):
             return {'status': 'settled'}
         observation = {'status': 'settled', 'worker_seconds': context.grant['seconds'],
             'resources': {name: 'reset' if next(r for r in context.contract.scope['access'] if r['id'] == name)['kind'] != 'application'
+                or application_released(c.state(), context.grant['dispatch_id'], name)
                 else 'unknown' for name in context.grant['resources']}, 'usage': {'tokens': None, 'cost': None}, 'cleanup': 'verified'}
         receipt = c.store_receipt(context.grant, observation, adapter_id=context.grant['adapter_id'])
         c.adopt_receipt(context.grant['dispatch_id'], receipt, adapter_id=context.grant['adapter_id'])

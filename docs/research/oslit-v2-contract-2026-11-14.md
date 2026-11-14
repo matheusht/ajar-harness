@@ -62,6 +62,7 @@ duplicate JSON keys, non-finite numbers, unexpected keys and ambiguous identity.
 | `environments` | Allowed `{id, kind, identity, capabilities, limits, cleanup}`. `docker` pins daemon/profile/image constraints; `ssh` pins host key, host identity and owned resource namespace. Capabilities enumerate privileged actions, resource classes and reset/readback support. Cleanup states permitted actions and owned path/resource boundaries. |
 | `network` | Distinct `provider`, `acquisition`, `target` route lists. Each route gives protocol, destination/port and resolved-address policy. Redirects and direct sockets get the same enforcement. Empty list denies that class. |
 | `effects` | Allowed internal effect classes with affected access/environment IDs, permitted account/role, escalation rung, artifact class and cleanup obligation. No free-form wildcard grant. |
+| `application_states` (optional) | Exact references `{access_id, profile_sha256, environment_id, reset_effect_id}` for owned disposable application baselines. Each access has a unique logical HTTP `.invalid` origin and an explicit reset effect. |
 | `escalation_ceiling`, `benign_objectives` | Explicit permitted rung and harmless expected signals. A signed rung still needs the prior effect and fresh review. |
 | `runtime_assignments` | Allowed `{profile_id, profile_sha256, roles}` referencing the pinned profile below; roles lead/specialist/reviewer. Runtime credentials do not identify model or runtime by implication. |
 | `limits` | Hard dimensions and positive ceilings, plus `max_workers` and `max_worker_lease_seconds`; optional informational budgets explicitly separate. Validate every hard dimension against installed adapter capabilities before run. No hidden duration limit. |
@@ -94,6 +95,34 @@ also requires the matching signed effect and environment, so `write` alone grant
 no arbitrary target mutation. `access_files` must contain exactly the source/binary
 IDs, mapped to the supplied directory/file. Application descriptors need no local
 file. Inspect hashes local input bytes without contacting application endpoints.
+
+An optional `application_profiles` input map must contain exactly the access IDs
+in the signed `application_states` list. Each private profile is canonical JSON
+with exactly `{kind, method, baseline_id, command, service_port}`. Kind is
+`owned-application-state-v1`; method is `owned-container-recreate-v1`. The baseline
+ID is a bounded identifier, `command` is a nonempty argument list starting with
+an absolute executable, and the service port is 1–65535. Write these bytes with
+`engagement_contract.canonical` before hashing and signing; initialization freezes
+them as `applications/<access_id>.json`.
+
+The referenced access must permit `reset` and use one unique HTTP origin under
+`.invalid`, with no path except `/`. Its port must match the profile and its target
+route must admit `127.0.0.1` through the protected connector. No other application
+access can alias that origin. The reset effect must name exactly this access and
+target environment, require cleanup and have empty account/artifact-class lists.
+The signed environment supplies the immutable complete baseline image and bounded
+disposable state. Only its exact instance can back that logical origin.
+
+The existing `engagement_capture` optionally accepts `starting_state`, mapping
+every selected application access to its baseline ID. Host start observations
+precede the one frozen probe, bind its requests to exact target instances, and
+are consumed once. Experiment records separate stable `application_state` from
+physical `application_generations`; independent replay requires the same baseline
+and different native session, client lab and target generation. Missing reset
+capability preserves the ordinary application's explicit clean-start limitation.
+An explicit but invalid reset request never silently falls back. Recovery cleans
+recorded targets without repeating the probe. See the
+[owner contract and failure cases](oslit-application-reset-contract-2026-11-14.md).
 
 Each runtime profile requires:
 `{kind, version, executable, protocol, config_file, config_sha256, provider, model,
@@ -208,10 +237,11 @@ environment owners. They replace the descriptive field-table examples above:
   policy; parsing a route does not establish that enforcement.
 - Effect rows are exactly `{id, kind, access_ids, environment_ids, account_refs,
   rung, artifact_classes, cleanup_required}`. Kinds are `read`, `execute`, `write`,
-  `artifact_create`; rungs are `source_only`, `self`, `stored`, `cross_user` and
+  `reset`, `artifact_create`; rungs are `source_only`, `self`, `stored`, `cross_user` and
   must fit the signed ceiling. IDs resolve to the signed access/environment set,
   accounts/permissions fit each access, and environments request each access mode.
-  Mutation/artifact creation requires cleanup; artifact creation names classes.
+  Mutation/reset/artifact creation requires cleanup; artifact creation names classes.
+  Reset is available only through the signed optional application owner above.
 - Preflight returns `verified_inputs` with `capabilities_verified: false` and no
   runtime/target contact. Safe frozen files include authority, profiles/configs/
   schemas, known hosts and source manifests, never native credentials or source/

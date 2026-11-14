@@ -277,8 +277,9 @@ def record_network_observation(c, grant, profile_id, nonce, observation):
 
 
 def comparable(left, right):
-    return all(left[key] == right[key] for key in ('instrument_id', 'conditions', 'input_identity',
+    return (all(left[key] == right[key] for key in ('instrument_id', 'conditions', 'input_identity',
         'environment_profile_id', 'effect_id', 'account_refs', 'resources'))
+        and left.get('target_bindings', []) == right.get('target_bindings', []))
 
 
 def related(left, right, purpose, *, independent=False):
@@ -348,12 +349,21 @@ def validate_request(c, state, worker, kind, data):
             if data['explains']['variable'] is not None:
                 text(data['explains']['variable'], 1024)
         references(state, data['supersedes'], ('experiments',))
+        requests = {name: row for name, row in state['network_operations'].items()
+                    if row['grant']['dispatch_id'] == operation['grant']['dispatch_id']}
+        if any(row['result'] is None or row['result']['status'] != 'settled' for row in requests.values()):
+            fail('experiment_network_unsettled')
+        bindings = {}
+        for row in requests.values():
+            selected = {key: row['intent'][key] for key in ('access_id', 'effect_id', 'account_ref', 'origin', 'method')}
+            bindings[canonical(selected)] = selected
         data = dict(data, session_id=operation['session_id'], worker_id=worker['id'], generation=worker['generation'],
             environment_nonce=operation['identity']['nonce'], environment_profile_id=operation['profile_id'],
             input_identity=operation['identity']['access'], effect_id=operation['effect_id'],
             account_refs=operation['account_refs'], output_sha256=operation['output_sha256'],
             receipt_sha256=dispatch['receipt'], environment_receipts=operation['receipts'], patch_copy=operation.get('patch_copy'),
-            execution_receipt_sha256=operation['execution_receipt_sha256'], clean_start=measurement['clean_start'])
+            execution_receipt_sha256=operation['execution_receipt_sha256'], clean_start=measurement['clean_start'],
+            network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)])
     elif kind == 'experiment_compare':
         keys(data, ('comparison_id', 'experiments'))
         unique(state, 'comparisons', data['comparison_id'])
@@ -829,6 +839,8 @@ def record_experiment_execution(c, grant, profile_id, operation_id, measurement)
         if (instrument is None or instrument['artifact_sha256'] != measurement['instrument_sha256']
                 or instrument['reset'] != measurement['reset'] or type(measurement['clean_start']) is not bool):
             fail('experiment_execution_invalid')
+        if measurement['clean_start'] and c._shared(state, operation['grant']['resources']):
+            fail('experiment_reset_unverified')
         mapping(measurement['conditions'])
         for name in ('instrument_sha256', 'candidate_sha256', 'probe_sha256'):
             c.read_object(measurement[name])

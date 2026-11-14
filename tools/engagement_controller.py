@@ -330,6 +330,23 @@ class Controller:
             state['workers'][payload['worker_id']].update(session_id=payload['session_id'], runtime_owner_sha256=payload.get('runtime_owner_sha256'))
             if payload.get('runtime_owner_sha256'):
                 state['evidence_objects'][payload['runtime_owner_sha256']] = True
+        elif kind == 'preparation_cancelled':
+            dispatch = state['dispatches'][payload['dispatch_id']]
+            sha = payload['receipt_sha256']
+            dispatch.update(status='settled', receipt=sha, cancelled_receipt=sha)
+            worker = state['workers'][dispatch['worker_id']]
+            worker.update(status='stopped', stop_receipt=sha)
+            state['evidence_objects'][sha] = True
+            state['usage']['reserved_worker_seconds'] -= dispatch['seconds']
+            state['usage']['invocations'] -= 1
+            for resource in dispatch['resources']:
+                holds = [value for value in state['resource_holds'].get(resource, []) if value != dispatch['dispatch_id']]
+                if holds:
+                    state['resource_holds'][resource] = holds
+                else:
+                    state['resource_holds'].pop(resource, None)
+            if not state['environments'] and all(row['status'] == 'stopped' for row in state['workers'].values()):
+                state['cleanup'] = 'verified'
         elif kind == 'runtime_preparation_owner':
             sha = payload['receipt_sha256']
             state['dispatches'][payload['dispatch_id']].setdefault('runtime_owner_receipts', []).append(sha)
@@ -831,7 +848,7 @@ class Controller:
             if parent.get('parent_dispatch_id'):
                 fail('capture_parent_invalid')
             self._resources(state, resources)
-            if self._shared(state, resources) or not set(resources) <= set(parent_grant['resources']):
+            if not set(resources) <= set(parent_grant['resources']):
                 fail('capture_resources_unavailable')
             if any(d.get('parent_dispatch_id') == parent_grant['dispatch_id'] and
                     d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()):
@@ -1039,6 +1056,29 @@ class Controller:
         if cost is not None and (type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0):
             fail('receipt_invalid')
 
+    def cancel_preparation(self, grant, readback):
+        keys(readback, ('execution_admitted', 'cleanup'), 'preparation_cancellation_invalid')
+        if readback['execution_admitted'] is not False or readback['cleanup'] != 'verified':
+            fail('preparation_cancellation_invalid')
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            document = {'kind': 'native-preparation-cancelled-v1', 'grant': grant, 'readback': readback}
+            sha = digest(canonical(document))
+            if dispatch.get('cancelled_receipt') == sha:
+                return {'status': 'cancelled', 'receipt': sha}
+            worker = state['workers'][grant['worker_id']]
+            if (not dispatch.get('preparation') or dispatch['status'] not in ('pending', 'unknown')
+                    or worker['generation'] != grant['generation'] or worker['status'] not in ('preparing', 'revoked')
+                    or dispatch.get('invocations') or dispatch.get('runtime_owner_receipts')
+                    or worker.get('runtime_owner_sha256') or worker.get('session_id')
+                    or any(row['grant']['dispatch_id'] == grant['dispatch_id']
+                           for row in [*state['environment_operations'].values(), *state['network_operations'].values()])
+                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())):
+                fail('preparation_already_admitted')
+            sha = self.store_object(canonical(document))
+            return self._host('preparation_cancelled', {'dispatch_id': grant['dispatch_id'], 'receipt_sha256': sha})
+
     def record_runtime_stopped(self, grant, readback):
         with self.lock():
             state = self.state()
@@ -1156,9 +1196,19 @@ class Controller:
                     or not integer(observation['worker_seconds'], 0, dispatch['seconds'])
                     or not isinstance(observation['resources'], dict)
                     or set(observation['resources']) != set(dispatch['resources'])
-                    or any(value not in ('unchanged', 'reset', 'unknown') for value in observation['resources'].values())
+                    or any(value not in ('unchanged', 'reset', 'unknown', 'retained') for value in observation['resources'].values())
                     or observation['cleanup'] not in ('pending', 'verified', 'unresolved')):
                 fail('receipt_invalid')
+            retained = {name for name, value in observation['resources'].items() if value == 'retained'}
+            if retained:
+                parent = state['dispatches'].get(dispatch.get('parent_dispatch_id'))
+                if (parent is None or observation['status'] != 'settled' or observation['cleanup'] != 'verified'
+                        or not retained <= set(parent['resources']) or self._shared(state, retained) != retained):
+                    fail('receipt_retention_invalid')
+                try:
+                    self._authorize(state, {key: parent[key] for key in GRANT_KEYS})
+                except ControllerError:
+                    fail('receipt_retention_invalid')
             self._check_usage(observation['usage'])
             if dispatch.get('invocations') and observation['usage'] != {'tokens': None, 'cost': None}:
                 fail('receipt_usage_already_recorded')

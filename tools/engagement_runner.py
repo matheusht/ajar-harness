@@ -81,11 +81,20 @@ class WorkerContext:
         return Principal('worker', self.worker['id'], self.worker['generation'])
 
     def authorize(self):
-        self.controller.authorize_dispatch(self.grant)
-        return self.grant
+        with self.controller.lock():
+            self.controller.authorize_dispatch(self.grant)
+            return self.grant
 
+    @contextmanager
     def guard(self):
-        return self.controller.dispatch_guard(self.grant)
+        with self.controller.lock():
+            with self.controller.dispatch_guard(self.grant):
+                yield
+
+    def renew(self, seconds):
+        with self.controller.lock():
+            self.grant = self.controller.renew_dispatch(self.grant, seconds=seconds)
+            return self.grant
 
     def submit(self, request):
         result = self.controller.submit(self.principal, request)
@@ -281,6 +290,9 @@ class Runner:
                 if not runtime.active and not events:
                     break
         readback = boundary.finish() if boundary else {'cleanup': 'unresolved', 'resources': {}}
+        if readback.get('execution_admitted') is False and readback.get('cleanup') == 'verified':
+            c.cancel_preparation(context.grant, {'execution_admitted': False, 'cleanup': 'verified'})
+            return True
         if pending and readback.get('cleanup') == 'verified':
             c.record_invocation_observed(context.grant, pending[-1], {
                 'status': terminal['status'] if terminal else 'stopped_unobserved',
@@ -335,7 +347,7 @@ class Runner:
                     context.authorize()
                     remaining = (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()
                     if remaining < seconds / 2:
-                        context.grant = c.renew_dispatch(context.grant, seconds=seconds)
+                        context.renew(seconds)
                         boundary.renew(min(seconds, (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()))
                     delivered = self._directions(context, boundary, delivered)
                     for event in boundary.runtime.observe(timeout_seconds=.25):

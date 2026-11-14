@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 
-from engagement_contract import VerifiedInputs, canonical, read_bytes, read_json
+from engagement_contract import VerifiedInputs, canonical, digest, read_bytes, read_json
 from engagement_controller import GRANT_KEYS, Principal, instant
 from native_runtime_transport import MAX_FRAME
 
@@ -40,8 +40,20 @@ def frozen_inputs(controller):
         name = row['profile_id']
         profile = read_json(root / 'environments' / (name + '.json'), private=True)
         environments[name] = profile
+    guidance = {}
+    with controller.lock():
+        pins = controller._events()[0]['payload']['contract_files']
+        for name in ('methodology.md', 'protocol.md'):
+            if name not in pins:
+                if state['status'] == 'active':
+                    raise RunnerError('research_guidance_unavailable')
+                continue
+            content = read_bytes(root / name, private=True, max_bytes=1024 * 1024)
+            if digest(content) != pins[name]:
+                raise RunnerError('research_guidance_changed')
+            guidance[name] = content
     return VerifiedInputs(state['scope'], inputs, read_bytes(root / 'goal.md', private=True),
-                          runtimes, environments, {}, inputs['trusted_fingerprint'])
+                          runtimes, environments, guidance, inputs['trusted_fingerprint'])
 
 
 @dataclass
@@ -172,7 +184,7 @@ class Runner:
                 goal = goal[:16000]
             assignment = {key: worker.get(key) for key in ('id', 'role', 'generation', 'question', 'assignment')}
             base += '\nGoal:\n' + goal + '\nRole and assignment:\n' + canonical(assignment).decode()
-            base += '\nRead /input/bootstrap/methodology.md before work. Original inputs are read-only under /input; '
+            base += '\nRead /input/bootstrap/methodology.md and /input/bootstrap/protocol.md before work. Original inputs are read-only under /input; '
             base += 'make disposable working copies under /work. Credentials and controller files are unavailable to tools.'
             for review in state.get('reviews', {}).values():
                 if review['reviewer_id'] == worker['id']:

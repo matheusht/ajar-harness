@@ -33,6 +33,9 @@ SUBMIT_TYPES = {'claim', 'publish', 'task_create', 'task_priority', 'task_assign
 LEAD_TYPES = {'task_priority', 'task_assign', 'worker_request'}
 GRANT_KEYS = {'dispatch_id', 'worker_id', 'generation', 'assignment', 'profile_id',
               'scope_sha256', 'seconds', 'resources', 'lease_expires_at', 'adapter_id'}
+BUNDLED_GUIDANCE = {name: Path(__file__).resolve().parents[1] / 'engine' / source
+                    for name, source in (('methodology.md', 'native-engagement-method.md'),
+                                         ('protocol.md', 'native-engagement-protocol.md'))}
 
 
 class ControllerError(ValueError):
@@ -139,12 +142,20 @@ class Controller:
         protected.extend(Path(profile['tool_bundle']['path']) for profile in contract.runtime_profiles.values())
         if any(overlap(root, path) for path in protected):
             fail('engagement_root_overlap')
+        frozen = dict(contract.frozen_files)
+        if set(frozen) & set(BUNDLED_GUIDANCE):
+            fail('research_guidance_conflict')
+        try:
+            frozen.update({name: safe_publication(read_bytes(path, max_bytes=1024 * 1024))
+                           for name, path in BUNDLED_GUIDANCE.items()})
+        except ContractError:
+            fail('research_guidance_unavailable')
         root.mkdir(mode=0o700)
         c = cls(root)
         for directory in ('contract', 'events', 'objects', 'receipts'):
             (root / directory).mkdir(mode=0o700)
         files = {}
-        for name, data in contract.frozen_files.items():
+        for name, data in frozen.items():
             relative = Path(name)
             if relative.is_absolute() or '..' in relative.parts:
                 fail('contract_path_invalid')
@@ -1411,6 +1422,8 @@ class Controller:
                 'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
                 'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],
                 'network_operations': state['network_operations'],
+                'research_guidance': {name: events[0]['payload']['contract_files'][name]
+                    for name in ('methodology.md', 'protocol.md') if name in events[0]['payload']['contract_files']},
                 'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
             for data in files.values():

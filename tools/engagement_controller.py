@@ -21,7 +21,7 @@ import threading
 import uuid
 
 from engagement_contract import (ContractError, VerifiedInputs, canonical, digest,
-                                 read_bytes, read_json, safe_publication)
+                                 read_bytes, read_json, safe_publication, MAX_PUBLICATION_BYTES)
 
 ID = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
@@ -134,7 +134,9 @@ class Controller:
             fail('engagement_root_exists_or_invalid')
         if root.parent.resolve(strict=True) != root.parent:
             fail('engagement_root_invalid')
-        if any(overlap(root, Path(value)) for value in contract.inputs['access_files'].values()):
+        protected = [Path(value) for value in contract.inputs['access_files'].values()]
+        protected.extend(Path(profile['tool_bundle']['path']) for profile in contract.runtime_profiles.values())
+        if any(overlap(root, path) for path in protected):
             fail('engagement_root_overlap')
         root.mkdir(mode=0o700)
         c = cls(root)
@@ -231,7 +233,7 @@ class Controller:
         scope = initial['scope']
         for name, sha in initial['contract_files'].items():
             try:
-                if digest(read_bytes(self.root / 'contract' / name, private=True)) != sha:
+                if digest(read_bytes(self.root / 'contract' / name, private=True, max_bytes=MAX_PUBLICATION_BYTES)) != sha:
                     fail('contract_changed')
             except ContractError:
                 fail('contract_changed')
@@ -274,6 +276,24 @@ class Controller:
             state['workers']['lead-1'] = {'id': 'lead-1', 'role': 'lead', 'generation': 1,
                 'profile_id': payload['lead_profile'], 'status': 'pending', 'assignment': None,
                 'workspace': None, 'session_id': None, 'cursor': None}
+        elif kind == 'worker_preparing':
+            worker = state['workers'][payload['grant']['worker_id']]
+            worker.update(status='preparing', workspace=payload['workspace'])
+            grant = payload['grant']
+            state['dispatches'][grant['dispatch_id']] = dict(grant, status='pending', receipt=None, preparation=True)
+            state['usage']['invocations'] += 1
+            state['usage']['reserved_worker_seconds'] += grant['seconds']
+        elif kind == 'worker_session_observed':
+            state['workers'][payload['worker_id']]['session_id'] = payload['session_id']
+        elif kind == 'worker_revoked':
+            worker = state['workers'][payload['worker_id']]
+            worker.update(status='revoked', revoke_reason=payload['reason'])
+            for dispatch in state['dispatches'].values():
+                if dispatch['worker_id'] == worker['id'] and dispatch['generation'] == worker['generation'] and dispatch['status'] in ('pending', 'unknown'):
+                    for resource in dispatch['resources']:
+                        holds = state['resource_holds'].setdefault(resource, [])
+                        if dispatch['dispatch_id'] not in holds:
+                            holds.append(dispatch['dispatch_id'])
         elif kind == 'worker_started':
             worker = state['workers'][payload['worker_id']]
             worker.update(status='active', session_id=payload['session_id'], workspace=payload['workspace'])
@@ -316,7 +336,7 @@ class Controller:
             state['status'] = 'stopped'
             state['stop_reason'] = payload['reason']
             for worker in state['workers'].values():
-                if worker['status'] in ('pending', 'active'):
+                if worker['status'] in ('pending', 'preparing', 'active'):
                     worker['status'] = 'revoked'
             for dispatch in state['dispatches'].values():
                 if dispatch['status'] in ('pending', 'unknown'):
@@ -431,7 +451,7 @@ class Controller:
                           for row in state['scope']['runtime_assignments'])
             if not allowed:
                 fail('runtime_assignment_forbidden')
-            if sum(w['status'] in ('pending', 'active') for w in state['workers'].values()) >= state['scope']['limits']['max_workers']:
+            if sum(w['status'] in ('pending', 'preparing', 'active') for w in state['workers'].values()) >= state['scope']['limits']['max_workers']:
                 fail('worker_limit')
             if not isinstance(data['question'], str) or not 1 <= len(data['question']) <= 8192:
                 fail('question_invalid')
@@ -456,7 +476,7 @@ class Controller:
         elif kind in ('claim', 'task_assign'):
             keys(data, () if kind == 'claim' else ('task_id', 'worker_id'))
             assignee = worker if kind == 'claim' else state['workers'].get(data['worker_id'])
-            if assignee is None or assignee['status'] != 'active' or assignee['assignment'] is not None:
+            if assignee is None or assignee['status'] not in (('active',) if kind == 'claim' else ('pending', 'active')) or assignee['assignment'] is not None:
                 fail('worker_assignment_conflict')
             if kind == 'claim':
                 tasks = sorted(state['tasks'].values(), key=lambda task: (-task['priority'], task['created_order']))
@@ -564,30 +584,79 @@ class Controller:
                                  digest(canonical(data)), kind, data)
             return self._receipt(event)
 
-    def record_worker_started(self, worker_id, generation, session_id, workspace):
-        workspace = private_directory(workspace)
-        if overlap(workspace, self.root):
+    def _workspace(self, state, workspace, worker_id):
+        workspace = Path(workspace)
+        inputs = read_json(self.root / 'contract/inputs.json', private=True)
+        protected = [self.root, *[Path(value) for value in inputs['access_files'].values()]]
+        for assignment in state['scope']['runtime_assignments']:
+            profile = read_json(self.root / 'contract/runtimes' / (assignment['profile_id'] + '.json'), private=True)
+            protected.append(Path(profile['tool_bundle']['path']))
+        protected.extend(Path(other['workspace']) for other in state['workers'].values()
+                         if other['workspace'] is not None and other['id'] != worker_id)
+        if any(overlap(workspace, path) for path in protected):
             fail('worker_workspace_overlap')
+        return private_directory(workspace)
+
+    def _session(self, events, session_id):
+        if not isinstance(session_id, str) or not 1 <= len(session_id) <= 256:
+            fail('session_invalid')
+        if any(event['type'] in ('worker_started', 'worker_session_observed') and
+               event['payload']['session_id'] == session_id for event in events):
+            fail('session_reused')
+
+    def record_worker_started(self, worker_id, generation, session_id, workspace):
         with self.lock():
             events = self._events()
             state = self._replay(events)
             self._authority(state)
             worker = state['workers'].get(worker_id)
-            if worker is None or worker['generation'] != generation or worker['status'] != 'pending':
+            if worker is None or worker['generation'] != generation or worker['status'] not in ('pending', 'preparing'):
                 fail('worker_stale')
-            inputs = read_json(self.root / 'contract/inputs.json', private=True)
-            protected = [Path(value) for value in inputs['access_files'].values()]
-            protected.extend(Path(other['workspace']) for other in state['workers'].values()
-                             if other['workspace'] is not None)
-            if any(overlap(workspace, path) for path in protected):
+            workspace = self._workspace(state, workspace, worker_id)
+            if worker['workspace'] is not None and worker['workspace'] != str(workspace):
                 fail('worker_workspace_overlap')
-            if not isinstance(session_id, str) or not 1 <= len(session_id) <= 256:
-                fail('session_invalid')
+            self._session(events, session_id)
             event = self._append(events, Principal('runtime', worker_id, generation), uuid.uuid4().hex,
                 digest(canonical([worker_id, generation, session_id])), 'worker_started',
                 {'worker_id': worker_id, 'generation': generation,
                  'session_id': session_id, 'workspace': str(workspace)})
             return self._receipt(event)
+
+    def record_worker_session(self, worker_id, generation, session_id, *, reason):
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            self._authority(state)
+            self._worker(state, Principal('worker', worker_id, generation))
+            if any(d['worker_id'] == worker_id and d['status'] in ('pending', 'unknown') for d in state['dispatches'].values()):
+                fail('session_dispatch_pending')
+            self._session(events, session_id)
+            if not isinstance(reason, str) or not 1 <= len(reason) <= 1024:
+                fail('session_invalid')
+            return self._host('worker_session_observed', {'worker_id': worker_id, 'generation': generation,
+                'session_id': session_id, 'reason': reason})
+
+    def _grant(self, state, worker, *, seconds, resources, adapter_id):
+        limits, usage = state['scope']['limits'], state['usage']
+        if not integer(seconds, 1, limits['max_worker_lease_seconds']):
+            fail('reservation_invalid')
+        self._dispatch_resources(state, worker, resources)
+        if any(resource in state['resource_holds'] for resource in resources):
+            fail('resource_held')
+        if any(d['status'] in ('pending', 'unknown') and
+               (d['worker_id'] == worker['id'] or set(d['resources']) & set(resources))
+               for d in state['dispatches'].values()):
+            fail('dispatch_conflict')
+        if (usage['invocations'] >= limits['hard']['invocations'] or
+                usage['worker_seconds'] + usage['reserved_worker_seconds'] + seconds > limits['hard']['worker_seconds']):
+            fail('resource_exhausted')
+        lease = self.clock() + timedelta(seconds=seconds)
+        if state['scope'].get('expires_at') is not None:
+            lease = min(lease, instant(state['scope']['expires_at']))
+        return {'dispatch_id': uuid.uuid4().hex, 'worker_id': worker['id'], 'generation': worker['generation'],
+            'assignment': worker['assignment'], 'profile_id': worker['profile_id'],
+            'scope_sha256': state['scope_sha256'], 'seconds': seconds, 'resources': resources,
+            'lease_expires_at': lease.isoformat(), 'adapter_id': identifier(adapter_id)}
 
     def prepare_dispatch(self, worker_id, generation, *, seconds, resources, adapter_id):
         with self.lock():
@@ -595,30 +664,45 @@ class Controller:
             state = self._replay(events)
             self._authority(state)
             worker = self._worker(state, Principal('worker', worker_id, generation))
-            limits, usage = state['scope']['limits'], state['usage']
-            if not integer(seconds, 1, limits['max_worker_lease_seconds']):
-                fail('reservation_invalid')
-            self._dispatch_resources(state, worker, resources)
-            if any(resource in state['resource_holds'] for resource in resources):
-                fail('resource_held')
-            if any(d['status'] in ('pending', 'unknown') and
-                   (d['worker_id'] == worker_id or set(d['resources']) & set(resources))
-                   for d in state['dispatches'].values()):
-                fail('dispatch_conflict')
-            if (usage['invocations'] >= limits['hard']['invocations']
-                    or usage['worker_seconds'] + usage['reserved_worker_seconds'] + seconds > limits['hard']['worker_seconds']):
-                fail('resource_exhausted')
-            lease = self.clock() + timedelta(seconds=seconds)
-            expires = state['scope'].get('expires_at')
-            if expires is not None:
-                lease = min(lease, instant(expires))
-            grant = {'dispatch_id': uuid.uuid4().hex, 'worker_id': worker_id, 'generation': generation,
-                'assignment': worker['assignment'], 'profile_id': worker['profile_id'],
-                'scope_sha256': state['scope_sha256'], 'seconds': seconds, 'resources': resources,
-                'lease_expires_at': lease.isoformat(), 'adapter_id': identifier(adapter_id)}
+            grant = self._grant(state, worker, seconds=seconds, resources=resources, adapter_id=adapter_id)
             self._append(events, Principal('controller', 'controller'), grant['dispatch_id'],
                          digest(canonical(grant)), 'dispatch_intended', grant)
             return grant
+
+    def prepare_worker_dispatch(self, worker_id, generation, workspace, *, seconds, resources, adapter_id):
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            self._authority(state)
+            worker = state['workers'].get(worker_id)
+            if worker is None or worker['generation'] != generation or worker['status'] not in ('pending', 'preparing'):
+                fail('worker_stale')
+            workspace = self._workspace(state, workspace, worker_id)
+            if worker['status'] == 'preparing':
+                prior = next(d for d in state['dispatches'].values() if d.get('preparation') and
+                             d['worker_id'] == worker_id and d['generation'] == generation)
+                if worker['workspace'] != str(workspace) or any(prior[k] != v for k, v in
+                        {'seconds': seconds, 'resources': resources, 'adapter_id': adapter_id}.items()):
+                    fail('preparation_conflict')
+                grant = {key: prior[key] for key in GRANT_KEYS}
+                self._authorize(state, grant)
+                return grant
+            grant = self._grant(state, worker, seconds=seconds, resources=resources, adapter_id=adapter_id)
+            self._append(events, Principal('controller', 'controller'), grant['dispatch_id'],
+                digest(canonical(grant)), 'worker_preparing', {'grant': grant, 'workspace': str(workspace)})
+            return grant
+
+    def revoke_worker(self, worker_id, generation, *, reason):
+        with self.lock():
+            state = self._replay(self._events())
+            worker = state['workers'].get(worker_id)
+            if worker is None or worker['generation'] != generation:
+                fail('worker_stale')
+            if not isinstance(reason, str) or not 1 <= len(reason) <= 1024:
+                fail('stop_reason_invalid')
+            if worker['status'] in ('revoked', 'stopped'):
+                return {'status': worker['status']}
+            return self._host('worker_revoked', {'worker_id': worker_id, 'generation': generation, 'reason': reason})
 
     def authorize_dispatch(self, grant):
         state = self.state()
@@ -634,10 +718,14 @@ class Controller:
     def _authorize(self, state, grant):
         keys(grant, GRANT_KEYS, 'dispatch_identity_invalid')
         self._authority(state)
-        worker = self._worker(state, Principal('worker', grant['worker_id'], grant['generation']))
+        worker = state['workers'].get(grant['worker_id'])
+        if worker is None or worker['generation'] != grant['generation'] or worker['status'] not in ('active', 'preparing'):
+            fail('worker_stale')
         dispatch = state['dispatches'].get(grant['dispatch_id'])
         if dispatch is None or canonical(grant) != canonical({key: dispatch[key] for key in GRANT_KEYS}):
             fail('dispatch_identity_invalid')
+        if worker['status'] == 'preparing' and not dispatch.get('preparation'):
+            fail('worker_stale')
         if dispatch['status'] != 'pending':
             fail('dispatch_settled')
         if worker['assignment'] != dispatch['assignment']:
@@ -854,7 +942,7 @@ class Controller:
             files = {}
             for path in (self.root / 'contract').rglob('*'):
                 if path.is_file():
-                    files[str(path.relative_to(self.root))] = read_bytes(path, private=True)
+                    files[str(path.relative_to(self.root))] = read_bytes(path, private=True, max_bytes=MAX_PUBLICATION_BYTES)
             for event in events:
                 files[f'events/{event["sequence"]:012d}.json'] = canonical(event)
             for publication in state['publications'].values():

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the existing native fixture with a bounded OMP loader observation."""
 from contextlib import contextmanager
+import json
 
 PROBES = (
     ('javascript', 'void 0'),
@@ -8,6 +9,25 @@ PROBES = (
     ('schema_import', 'await import("file:///input/native-runtime/node_modules/@oh-my-pi/pi-ai/src/utils/schema/wire.ts")'),
     ('validation_import', 'await import("file:///input/native-runtime/node_modules/@oh-my-pi/pi-ai/src/utils/validation.ts")'),
 )
+
+
+def sidecar_outcome(observation):
+    result = {'status': observation['status'], 'returncode': observation['returncode'],
+              'ready_matches': False, 'startup_failure_phase': None}
+    for line in observation['output'].splitlines():
+        try:
+            frame = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(frame, dict):
+            continue
+        if frame.get('type') == 'ready' and all(frame.get(key) == value for key, value in
+                {'sdkVersion': '18.20.0', 'bunVersion': '1.4.4', 'platform': 'linux', 'arch': 'x64'}.items()):
+            result['ready_matches'] = True
+        if frame.get('type') == 'startup_failed' and frame.get('phase') in (
+                'paths', 'manifest', 'sdk_import', 'schema_import', 'validation_import', 'settings', 'tools', 'catalog'):
+            result['startup_failure_phase'] = frame['phase']
+    return result
 
 
 @contextmanager
@@ -32,6 +52,10 @@ def observe_loader(environment_class, result):
                     row.update(status=observation['status'], returncode=observation['returncode'])
                     if observation['status'] != 'settled' or observation['returncode'] != 0:
                         break
+                else:
+                    result['omp_sidecar_eof_preflight'] = {'status': 'attempted'}
+                    result['omp_sidecar_eof_preflight'] = sidecar_outcome(
+                        environment.execute(argv, timeout_seconds=30))
         return original(environment, argv, role=role)
 
     environment_class.launch_stdio = launch

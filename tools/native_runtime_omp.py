@@ -18,7 +18,8 @@ class Runtime(Session):
     version = '18.20.0'
 
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
-                 host_call=None, dispatch_guard=None):
+                 host_call=None, dispatch_guard=None, credential_resolver=None, protected_model=False,
+                 profile_sha256=None, provider_environment=None):
         env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard)
         if profile['protocol']['mode'] != 'stdio-jsonl':
             raise RuntimeError('native_protocol_mismatch')
@@ -30,6 +31,9 @@ class Runtime(Session):
                    '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-context-files',
                    '--no-title', '--no-lsp', '--no-pty', '--no-session', '--cwd', str(self.workspace),
                    '--config', profile['config_file'], '--model', profile['provider'] + '/' + profile['model']]
+        command = self._model_command(command, env, protected_model=protected_model,
+            profile_sha256=profile_sha256, credential_resolver=credential_resolver,
+            provider_environment=provider_environment)
         try:
             self.transport = Transport(command, env, str(self.workspace), self._event, omp=True)
             deadline = time.monotonic() + 15
@@ -38,6 +42,7 @@ class Runtime(Session):
                     raise RuntimeError('native_startup_timeout')
                 self.transport.receive(max(0, deadline - time.monotonic()))
             self.transport.request('negotiate_protocol', {'protocolVersion': 2})
+            self._capture_owner()
             if self.host_tools:
                 self.transport.request('set_host_tools', {'tools': [
                     {'name': t['name'], 'description': t['description'], 'parameters': t['inputSchema']}

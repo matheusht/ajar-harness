@@ -135,6 +135,23 @@ def pinned(path, expected, *, max_bytes=None):
     return path
 
 
+def write_pipe(stream, data, *, timeout=5):
+    """Bound backpressure as well as response time; never wait indefinitely under admission."""
+    import select
+    descriptor = stream.fileno()
+    os.set_blocking(descriptor, False)
+    deadline = time.monotonic() + timeout
+    position = 0
+    while position < len(data):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([], [descriptor], [], remaining)[1]:
+            raise RuntimeError('native_write_timeout')
+        try:
+            position += os.write(descriptor, data[position:])
+        except BlockingIOError:
+            continue
+
+
 class Transport:
     """One owned process and a bounded JSONL pipe. stderr is deliberately discarded."""
 
@@ -145,6 +162,7 @@ class Transport:
         self.responses = {}
         self.deferred = []
         self.sequence = 0
+        self.write_lock = threading.Lock()
         self.failure = None
         self.closed = False
         self.process = (launcher(command) if launcher is not None else
@@ -216,8 +234,8 @@ class Transport:
         if self.closed or self.process.poll() is not None:
             raise RuntimeError('native_transport_closed')
         try:
-            self.process.stdin.write(data)
-            self.process.stdin.flush()
+            with self.write_lock:
+                write_pipe(self.process.stdin, data)
         except OSError:
             raise RuntimeError('native_transport_closed') from None
 
@@ -335,8 +353,14 @@ class Session:
         self.sessions = set()
         self.usage = None
         self.closed = False
+        self.credential_binding = None
+        self.model_boundary = None
+        self.model_identity = None
+        self.profile_sha256 = None
+        self.native_executor = None
         env = {k: os.environ[k] for k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SYSTEMROOT') if k in os.environ}
         env['NO_COLOR'] = '1'
+        env['HOME'] = str(self.state_dir)
         return env
 
     def _check_pins(self):
@@ -349,12 +373,70 @@ class Session:
         except ContractError:
             raise RuntimeError('runtime_config_contains_secret') from None
 
+    def _model_command(self, command, env, *, protected_model, profile_sha256, credential_resolver, provider_environment=None):
+        if self.profile.get('credential_ref') is not None and (not protected_model or credential_resolver is None):
+            raise RuntimeError('native_credential_boundary_unavailable')
+        if provider_environment is not None:
+            from urllib.parse import urlsplit
+            allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS'}
+            if (not isinstance(provider_environment, dict) or set(provider_environment) - allowed or
+                    any(not isinstance(value, str) for value in provider_environment.values())):
+                raise RuntimeError('native_provider_environment_invalid')
+            public(provider_environment)
+            for key, value in provider_environment.items():
+                if key.endswith('_PROXY') and key != 'NO_PROXY':
+                    parsed = urlsplit(value)
+                    if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or not parsed.port
+                            or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+                        raise RuntimeError('native_provider_environment_invalid')
+                elif key == 'NO_PROXY':
+                    if any(part not in ('', 'localhost', '127.0.0.1', '::1', '[::1]') for part in value.split(',')):
+                        raise RuntimeError('native_provider_environment_invalid')
+                elif not Path(value).is_absolute() or not Path(value).is_file() or Path(value).resolve() != Path(value):
+                    raise RuntimeError('native_provider_environment_invalid')
+            env.update(provider_environment)
+        if protected_model:
+            from native_runtime_owner import BOUNDARY, model_command
+            if not isinstance(profile_sha256, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', profile_sha256):
+                raise RuntimeError('native_owner_profile_pin_required')
+            command = model_command(command)
+            self.model_boundary = BOUNDARY
+            self.profile_sha256 = profile_sha256
+        if credential_resolver is not None:
+            from native_credentials import CredentialBinding
+            binding = credential_resolver(self.profile)
+            if not isinstance(binding, CredentialBinding):
+                raise RuntimeError('native_credential_binding_invalid')
+            if self.profile.get('credential_ref') is None and (binding.environment() or binding.login()):
+                raise RuntimeError('native_credential_binding_invalid')
+            self.credential_binding = binding
+            env.update(binding.environment())
+        return command
+
+    def _capture_owner(self):
+        if self.model_boundary:
+            from native_runtime_owner import process_identity
+            self.model_identity = process_identity(self.transport.process.pid)
+            if self.model_identity is None:
+                raise RuntimeError('native_owner_process_missing')
+
+    def owner_receipt(self):
+        if not self.model_boundary or self.model_identity is None:
+            raise RuntimeError('native_owner_receipt_unavailable')
+        return {'kind': 'native-runtime-owner-v1', 'runtime': self.kind, 'session_id': self.session_id,
+                'profile_sha256': self.profile_sha256, 'boundary': self.model_boundary,
+                'process': dict(self.model_identity),
+                **({'bridge_process': dict(self.native_executor.bridge_identity)} if self.native_executor else {})}
+
     def capabilities(self):
+        native = self.native_executor is not None and self.native_executor.ready is not None
         return {'runtime': self.kind, 'version': self.version,
-                'available': ['startup', 'fresh_session', 'steer', 'interrupt', 'usage_tokens'],
+                'available': ['startup', 'fresh_session', 'steer', 'interrupt', 'usage_tokens'] +
+                             (['native_tools'] if native else []),
                 'resume': 'live_session_only', 'durable_resume': 'reconstruct_from_published_work',
-                'native_tools': 'withheld_until_isolated_tool_owner',
-                'execution_boundary': 'external_owner_required',
+                'native_tools': 'environment_owned_native_executor' if native else 'withheld_until_isolated_tool_owner',
+                'execution_boundary': self.model_boundary or 'external_owner_required',
+                'child_inventory': 'children_prohibited' if self.model_boundary else 'unverified',
                 'usage_cost_estimate': 'reported' if self.kind == 'omp' else 'unavailable',
                 'provider_inference': 'unverified'}
 
@@ -373,6 +455,8 @@ class Session:
             raise RuntimeError('native_execution_boundary_unavailable')
         with self.guard():
             self._check_pins()
+            if self.credential_binding:self.credential_binding.check()
+            if self.native_executor:self.native_executor.check_authority()
             yield
 
     def _idle(self):
@@ -488,8 +572,15 @@ class Session:
         return events
 
     def close(self):
+        receipt = self.owner_receipt() if self.model_identity else None
         self.closed = True
         self.active = False
         self._cancel_tools()
-        return self.transport.close() if self.transport else {
+        if self.native_executor:self.native_executor.close()
+        if self.credential_binding:self.credential_binding.revoke()
+        result = self.transport.close() if self.transport else {
             'process_exited': True, 'exit_code': None, 'lab_cleanup': 'not_observed', 'child_absence': 'not_observed'}
+        if receipt:
+            from native_runtime_owner import recover_runtime_owner
+            result.update(recover_runtime_owner(receipt))
+        return result

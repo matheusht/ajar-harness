@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "evidence": "actual_unresponsive_pipe_peer",
+  "write_seconds": 6.01,
+  "failure": "native_write_timeout",
+  "close": {
+    "process_exited": true,
+    "exit_code": -15,
+    "lab_cleanup": "not_observed",
+    "child_absence": "not_observed"
+  }
+}

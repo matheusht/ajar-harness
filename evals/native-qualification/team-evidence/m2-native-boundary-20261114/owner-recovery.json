@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "evidence": "actual_darwin_kernel_identity_and_no_fork",
+  "fork_denied": true,
+  "identity_mismatch_refused": true,
+  "readback": {
+    "session_id": "fixture",
+    "process_exited": true,
+    "child_absence": "verified",
+    "capabilities_revoked": true,
+    "boundary": "darwin-no-fork-v1"
+  }
+}

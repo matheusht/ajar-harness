@@ -1,0 +1,37 @@
+{
+  "status": "passed",
+  "evidence": "actual_native_executor_control_no_model",
+  "checks": [
+    {
+      "check": "wrong_bearer",
+      "status": "passed"
+    },
+    {
+      "check": "actual_native_environment",
+      "status": "passed",
+      "info": {
+        "shell": {
+          "name": "zsh",
+          "path": "/bin/zsh"
+        },
+        "cwd": "file:///private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/codex-env-xz9clej2/workspace"
+      }
+    },
+    {
+      "check": "revoked_dispatch",
+      "status": "passed"
+    }
+  ],
+  "close": {
+    "process_exited": true,
+    "bridge_exited": true,
+    "capabilities_revoked": true,
+    "child_absence": "environment_readback_required"
+  },
+  "unverified": [
+    "native_tool_model_loop",
+    "provider_credentials",
+    "Docker/SSH",
+    "research_qualification"
+  ]
+}

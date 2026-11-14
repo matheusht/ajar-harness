@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from native_runtime_transport import PendingTool, RuntimeError, Session, Transport, identifier, text_content
+from native_runtime_transport import PendingTool, RuntimeError, Session, Transport, identifier, text_content, write_pipe
 
 
 class Runtime(Session):
@@ -11,25 +11,47 @@ class Runtime(Session):
     version = '0.166.0'
 
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
-                 host_call=None, dispatch_guard=None):
+                 host_call=None, dispatch_guard=None, native_executor=None, credential_resolver=None,
+                 protected_model=False, profile_sha256=None, provider_environment=None):
         env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard)
         if profile['protocol']['mode'] != 'stdio-jsonrpc':
             raise RuntimeError('native_protocol_mismatch')
+        self.native_executor = native_executor
+        if profile.get('credential_ref') is not None and native_executor is None:
+            raise RuntimeError('native_credential_tool_boundary_unavailable')
         env['CODEX_HOME'] = str(self.state_dir)
+        self.authentication = 'not_requested'
         self.totals = {}
         self.before = {}
         config = self.state_dir / 'config.toml'
         content = Path(profile['config_file']).read_bytes()
+        if native_executor is not None:
+            import tomllib
+            validate_native_config(tomllib.loads(content.decode()))
         if config.exists() and (config.is_symlink() or config.read_bytes() != content):
             raise RuntimeError('runtime_state_config_changed')
         config.write_bytes(content)
         config.chmod(0o400)
-        command = [*command_prefix, profile['executable']['path'], 'app-server', '--stdio']
+        command = [*command_prefix, profile['executable']['path'], '--strict-config', 'app-server', '--stdio']
+        command = self._model_command(command, env, protected_model=protected_model,
+            profile_sha256=profile_sha256, credential_resolver=credential_resolver,
+            provider_environment=provider_environment)
         try:
             self.transport = Transport(command, env, str(self.workspace), self._event)
             self.transport.request('initialize', {'clientInfo': {'name': 'oslit-runtime', 'version': '2'},
                                                   'capabilities': {'experimentalApi': True}})
             self.transport.send({'jsonrpc': '2.0', 'method': 'initialized'})
+            self._capture_owner()
+            if native_executor is not None:
+                validate_native_config(self.transport.request('config/read', {'includeLayers': False})['config'])
+                self.transport.request('environment/add', native_executor.registration())
+                self.transport.request('environment/info', {'environmentId': native_executor.environment_id})
+                native_executor.check_ready()
+            if self.credential_binding and self.credential_binding.login():
+                reply = self.transport.request('account/login/start', self.credential_binding.login())
+                if reply != {'type': 'chatgptAuthTokens'}:
+                    raise RuntimeError('native_external_auth_not_accepted')
+                self.authentication = 'external_tokens_accepted'
         except Exception:
             self.close()
             raise
@@ -38,6 +60,11 @@ class Runtime(Session):
         session = identifier(result.get('thread', {}).get('id'))
         if result.get('model') != self.profile['model'] or result.get('modelProvider') != self.profile['provider']:
             raise RuntimeError('native_model_mismatch')
+        if self.native_executor:
+            if result.get('activePermissionProfile', {}).get('id') != 'oslit-worker':
+                raise RuntimeError('native_permission_profile_mismatch')
+            if result.get('thread', {}).get('environments') != [self.native_executor.selection()]:
+                raise RuntimeError('native_environment_selection_mismatch')
         self.session_id = session
         self.sessions.add(session)
         return {'session_id': session, 'runtime': self.kind, 'model': self.profile['model'],
@@ -47,7 +74,9 @@ class Runtime(Session):
         self._idle()
         result = self.transport.request('thread/start', {
             'ephemeral': True, 'cwd': str(self.workspace), 'model': self.profile['model'],
-            'modelProvider': self.profile['provider'], 'approvalPolicy': 'never', 'sandbox': 'read-only',
+            'modelProvider': self.profile['provider'], 'approvalPolicy': 'never',
+            **({'permissions': 'oslit-worker', 'environments': [self.native_executor.selection()],
+                'allowProviderModelFallback': False} if self.native_executor else {'sandbox': 'read-only'}),
             'dynamicTools': [{'type': 'function', 'name': t['name'], 'description': t['description'],
                               'inputSchema': t['inputSchema']} for t in self.host_tools.values()]})
         return self._identity(result)
@@ -60,7 +89,8 @@ class Runtime(Session):
         result = self.transport.request('thread/read', {'threadId': session_id, 'includeTurns': False})
         if result.get('thread', {}).get('id') != session_id:
             raise RuntimeError('native_session_changed')
-        return self._identity(dict(result, model=self.profile['model'], modelProvider=self.profile['provider']))
+        return self._identity(dict(result, model=self.profile['model'], modelProvider=self.profile['provider'],
+            **({'activePermissionProfile': {'id': 'oslit-worker'}} if self.native_executor else {})))
 
     def invoke(self, prompt, invocation_id):
         with self._admission():
@@ -111,6 +141,13 @@ class Runtime(Session):
                 pending = self._tool(params.get('callId'), params.get('tool'), params.get('arguments'))
             self._queue_tool_reply(frame['id'], pending, lambda result: self._tool_reply(frame['id'], result))
             return
+        if 'id' in frame and method == 'account/chatgptAuthTokens/refresh' and self.credential_binding:
+            try:
+                result = self.credential_binding.refresh(params.get('previousAccountId'))
+                self.transport.send({'jsonrpc': '2.0', 'id': frame['id'], 'result': result})
+                return
+            except RuntimeError:
+                pass
         if 'id' in frame and method:
             # Never approve an unconfigured permission, credential, or tool route.
             self.transport.send({'jsonrpc': '2.0', 'id': frame['id'], 'error': {
@@ -154,3 +191,215 @@ class Runtime(Session):
                 raise RuntimeError('native_host_tool_content_unsupported')
         self.transport.send({'jsonrpc': '2.0', 'id': request_id, 'result': {
             'contentItems': content, 'success': not result.get('isError', False)}})
+
+
+def inspect_tool_bundle(profile, profile_id='runtime-main'):
+    """Verify the fixed Linux exec-server support tree before isolated staging."""
+    from engagement_contract import ContractError, canonical, digest, source_manifest
+    identifier(profile_id)
+    bundle = profile.get('tool_bundle')
+    if profile.get('kind') != 'codex' or not isinstance(bundle, dict):
+        raise RuntimeError('native_bundle_required')
+    root = Path(bundle['path'])
+    try:
+        manifest = source_manifest(root)
+        if digest(canonical(manifest)) != bundle['manifest_sha256']:
+            raise RuntimeError('native_bundle_manifest_mismatch')
+        binary = root / 'bin/codex'
+        with binary.open('rb') as stream:header = stream.read(20)
+        arch = {'linux/arm64': 183, 'linux/amd64': 62}.get(bundle['platform'])
+        if (arch is None or len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or
+                int.from_bytes(header[18:20], 'little') != arch):
+            raise RuntimeError('native_bundle_platform_mismatch')
+        if not binary.stat().st_mode & 0o111:
+            raise RuntimeError('native_bundle_not_executable')
+        if profile['version'] != Runtime.version:
+            raise RuntimeError('native_bundle_version_unsupported')
+    except ContractError:
+        raise RuntimeError('native_bundle_manifest_invalid') from None
+    except OSError:
+        raise RuntimeError('native_bundle_incomplete') from None
+    return {'support_input': {'path': str(root), 'manifest_sha256': bundle['manifest_sha256']},
+            'command': ['/input/' + profile_id + '/bin/codex', 'exec-server', '--listen', 'stdio',
+                        '--linux-sandbox-pid-namespace', 'isolate'],
+            'expected_version': Runtime.version, 'expected_platform': 'linux', 'execution_verified': False}
+
+
+_DISABLED_FEATURES = ('apps', 'plugins', 'multi_agent', 'multi_agent_v2', 'browser_use',
+    'browser_use_external', 'browser_use_full_cdp_access', 'computer_use', 'in_app_browser',
+    'remote_plugin', 'plugin_discovery_prefetch', 'recommended_plugins', 'shell_snapshot',
+    'api_key_model_discovery')
+
+
+def validate_native_config(config):
+    """The signed native profile keeps model-owned execution inside its selected executor."""
+    if (config.get('default_permissions') != 'oslit-worker' or config.get('web_search') != 'disabled'
+            or any(config.get(key) is not None for key in ('sandbox_mode', 'sandbox_workspace_write'))
+            or config.get('mcp_servers') or config.get('hooks')):
+        raise RuntimeError('native_configuration_boundary_invalid')
+    features = config.get('features', {})
+    if any(features.get(key) is not False for key in _DISABLED_FEATURES):
+        raise RuntimeError('native_alternate_tools_enabled')
+    permissions = config.get('permissions', {}).get('oslit-worker', {})
+    fs = permissions.get('filesystem', {})
+    if (permissions.get('extends') is not None or permissions.get('workspace_roots') or
+            fs.get(':root') != 'deny' or fs.get(':minimal') != 'read' or
+            fs.get(':workspace_roots') != {'.': 'write'} or
+            any(value not in (None, 'read', 'deny') for key, value in fs.items()
+                if key not in (':workspace_roots', 'glob_scan_max_depth'))):
+        raise RuntimeError('native_filesystem_profile_invalid')
+    network = permissions.get('network', {})
+    if network.get('dangerously_allow_all_unix_sockets') or network.get('dangerously_allow_non_loopback_proxy'):
+        raise RuntimeError('native_network_profile_invalid')
+    if network.get('enabled') is not False and features.get('network_proxy') is not True:
+        raise RuntimeError('native_network_profile_invalid')
+    shell = config.get('shell_environment_policy', {})
+    if (shell.get('inherit') != 'none' or shell.get('ignore_default_excludes') is True or
+            shell.get('experimental_use_profile') is True or shell.get('include_only') or
+            any(key not in {'PATH', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'SSL_CERT_FILE',
+                           'CURL_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS'} for key in (shell.get('set') or {}))):
+        raise RuntimeError('native_shell_environment_invalid')
+    return config
+
+
+class NativeExecutor:
+    """Private authenticated transport to one environment-owned native executor.
+
+    The WebSocket bridge handles framing only. Every executor request crosses the
+    same host admission lock. No provider credential enters this tool process.
+    """
+    def __init__(self, *, launcher, command, environment_id, cwd, dispatch_guard, bun='bun',
+                 expected_platform=None, expected_version='0.166.0'):
+        import json
+        import secrets
+        import select
+        import shutil
+        import subprocess
+        import threading
+        self.environment_id = identifier(environment_id)
+        self.cwd = str(cwd)
+        self.guard = dispatch_guard
+        self.expected_platform, self.expected_version = expected_platform, expected_version
+        self.initialize_id = None
+        self.ready = None
+        self.bridge_identity = None
+        self.token = secrets.token_urlsafe(32)
+        self.closed = False
+        self.failure = None
+        self.executor = self.bridge = None
+        self.threads = []
+        if not callable(launcher) or not callable(dispatch_guard) or not Path(cwd).is_absolute():
+            raise RuntimeError('native_executor_boundary_unavailable')
+        binary = shutil.which(bun)
+        if not binary:
+            raise RuntimeError('native_executor_bridge_unavailable')
+        try:
+            with self.guard():
+                self.executor = launcher(command)
+            from native_runtime_owner import model_command, process_identity
+            self.bridge = subprocess.Popen(model_command([binary, str(Path(__file__).with_name('native_runtime_codex_exec.mjs'))]),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                env={'PATH': '/usr/bin:/bin'}, start_new_session=True)
+            self.bridge.stdin.write(json.dumps({'token': self.token}).encode() + b'\n')
+            self.bridge.stdin.flush()
+            if not select.select([self.bridge.stdout], [], [], 5)[0]:
+                raise RuntimeError('native_executor_bridge_startup_timeout')
+            ready = json.loads(self.bridge.stdout.readline(4096))
+            self.url = ready['ready']
+            self.bridge_identity = process_identity(self.bridge.pid)
+            if self.bridge_identity is None:raise RuntimeError('native_executor_bridge_startup_failed')
+            from urllib.parse import urlsplit
+            parsed = urlsplit(self.url)
+            if parsed.scheme != 'ws' or parsed.hostname != '127.0.0.1' or parsed.path != '/' or not parsed.port:
+                raise RuntimeError('native_executor_bridge_endpoint_invalid')
+            for source, destination, admit in ((self.bridge, self.executor, True), (self.executor, self.bridge, False)):
+                thread = threading.Thread(target=self._copy, args=(source, destination, admit), daemon=True)
+                self.threads.append(thread);thread.start()
+        except Exception:
+            self.close()
+            raise
+
+    def _copy(self, source, destination, admit):
+        import json
+        from contextlib import nullcontext
+        try:
+            while not self.closed:
+                line = source.stdout.readline(2 * 1048576 + 1)
+                if not line:
+                    break
+                if len(line) > 2 * 1048576 or not line.endswith(b'\n'):
+                    raise RuntimeError('native_executor_frame_oversized')
+                if admit:
+                    value = json.loads(line)
+                    frame = value['frame'].encode()
+                    if len(frame) > 1048576:
+                        raise RuntimeError('native_executor_frame_oversized')
+                    payload = json.loads(frame)
+                    if payload.get('method') == 'initialize':self.initialize_id = payload.get('id')
+                    output = frame + b'\n'
+                else:
+                    payload = json.loads(line)
+                    if payload.get('id') == self.initialize_id and 'result' in payload:
+                        info = payload['result'].get('environmentInfo', {})
+                        if (info.get('executorVersion') != self.expected_version or
+                                self.expected_platform is not None and info.get('platformOs') != self.expected_platform):
+                            raise RuntimeError('native_executor_identity_mismatch')
+                        self.ready = {'version': info['executorVersion'], 'platform': info.get('platformOs')}
+                    output = json.dumps({'frame': line.decode().rstrip('\n')}).encode() + b'\n'
+                with self.guard() if admit else nullcontext():
+                    if self.closed:
+                        break
+                    write_pipe(destination.stdin, output)
+        except Exception:
+            self.failure = 'native_executor_transport_failed'
+        finally:
+            if not self.closed:
+                self.failure = self.failure or 'native_executor_transport_closed'
+                # Losing either pipe revokes the host endpoint immediately.
+                try:self.bridge.stdin.close()
+                except (OSError, ValueError):pass
+
+    def check_authority(self):
+        if self.closed or self.failure:
+            raise RuntimeError(self.failure or 'native_executor_closed')
+        with self.guard():
+            pass
+
+    def check_ready(self):
+        self.check_authority()
+        if self.ready is None:raise RuntimeError('native_executor_not_ready')
+        return dict(self.ready)
+
+    def registration(self):
+        """Private app-server input. Never journal, log or publish this mapping."""
+        self.check_authority()
+        return {'environmentId': self.environment_id, 'execServerUrl': self.url,
+                'authBearerToken': self.token, 'connectTimeoutMs': 5000}
+
+    def selection(self):
+        self.check_authority()
+        return {'environmentId': self.environment_id, 'cwd': self.cwd, 'runtimeWorkspaceRoots': [self.cwd]}
+
+    def close(self):
+        import os
+        import signal
+        import subprocess
+        self.closed = True
+        self.token = None
+        for process in (self.bridge, self.executor):
+            if process is None:continue
+            try:process.stdin.close()
+            except (OSError, ValueError):pass
+            if process.poll() is None:
+                try:process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM);process.wait(timeout=2)
+                    except ProcessLookupError:pass
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL);process.wait(timeout=2)
+        for thread in self.threads:
+            thread.join(timeout=1)
+        return {'process_exited': self.executor is None or self.executor.poll() is not None,
+                'bridge_exited': self.bridge is None or self.bridge.poll() is not None,
+                'capabilities_revoked': True, 'child_absence': 'environment_readback_required'}

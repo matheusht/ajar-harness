@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "evidence": "actual_codex_external_token_fake_no_network",
+  "login_type": "chatgptAuthTokens",
+  "account_routing": "unverified_requires_live_provider",
+  "token_persisted": false,
+  "auth_copy_created": false,
+  "close": {
+    "process_exited": true,
+    "exit_code": 0,
+    "lab_cleanup": "not_observed",
+    "child_absence": "verified",
+    "session_id": null,
+    "capabilities_revoked": true,
+    "boundary": "darwin-no-fork-v1"
+  },
+  "provider_calls": 0,
+  "live_token_validity": "unverified",
+  "auth_route": "experimental0.166_host_managed"
+}

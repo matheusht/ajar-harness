@@ -1,0 +1,31 @@
+{
+  "kind": "native-boundary-engineering-evidence-v1",
+  "classification": "actual_native_macos_with_simulated_model_only",
+  "sources": {
+    "tools/native_runtime_codex.py": "sha256:709767ec7862b50ccf85a7e3bbc44f52a4a071d9c1e1499f268e80b73254f077",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+    "tools/native_runtime_omp.py": "sha256:fa97dc1da6d7997d25f1421e877b882e2fed78a81c892a0be5a1cadd6ac37db2",
+    "tools/native_runtime_owner.py": "sha256:234c02ac32c986cd1055a5e517c5eb831a81c331603140ae7621b6250c094e83",
+    "tools/native_runtime_transport.py": "sha256:de80977426810891a31955cb6980c1e4f9083f71dcbf56dcb3f180f584b8a7a2",
+    "tools/native_runtime_omp_tools.mjs": "sha256:d443923e21bf2477a08f87fe3f19ab414028bc9a793341f49bd6729252bba4c9",
+    "tools/native_credentials.py": "sha256:9961b602ebedcdc4d414ff0747f0c774950d1e23f51a92a79deed19f4d22e437",
+    "evals/native-qualification/smoke/check_codex_native_environment.py": "sha256:1a00c6a2f1fc786c4e705712f888723f6bdeae018314dfccb7c089e0104c9cb0",
+    "evals/native-qualification/smoke/check_codex_external_tokens.py": "sha256:4c65c07f0424a602b3df713e1c8af1318822c5ed4311ce0699aac2b63346a70b",
+    "evals/native-qualification/smoke/check_codex_native_tools.py": "sha256:d6e1c8c64f86fc9c87b1477a55fd09cd1e1218cb4641d96c6dcdc433551280c6",
+    "evals/native-qualification/smoke/check_native_credentials.py": "sha256:3a89a54ceea60423eed4844340f53ff00688563e6366597c10f3d3b7aee35fb6",
+    "evals/native-qualification/smoke/check_native_owner_recovery.py": "sha256:980ff67dc71e773fd65dc736a5c3b4b78466748e83152ec2aaabf660f5dcdda9",
+    "evals/native-qualification/smoke/check_native_pipe_backpressure.py": "sha256:35db883ae29159fb4775b1ffc1031d78f0b62629c164bc1348cad48b3e19dbe1",
+    "evals/native-qualification/smoke/check_omp_provider_boundary.py": "sha256:5f1f7fc49a6944d0dc3a252c12dedb4bfce489428f8827992bb90dcc9f482fd9"
+  },
+  "results": {
+    "codex-external-tokens.json": "sha256:d6822304c70eb09e42384b59d46e674ad4a0f4727d4189dc8cc9b8c6afb553bc",
+    "runtime-regression.json": "sha256:a07f3d565e1f95a33fa2dd6e92dff3005f7ebd7e24ea161c5c689bc95f3d9ad6",
+    "codex-native-control.json": "sha256:3ae659400595f0479fcf022091e64e26f6b3386ed44d82286917791c4f1df5bd",
+    "pipe-backpressure.json": "sha256:32eb3d87ec1013e025f7deb164431fac1fdca1751bed904b4dfeec765ef02d38",
+    "credential-resolution.json": "sha256:60e1dd17a29c4b2c5a3aad748dda1699ac9c44826094f773bf8086e854ad358b",
+    "owner-recovery.json": "sha256:b1f28241840f5cf9390f8871081c006fc10af16ed8124cf67d8cf0e0e903fc7a",
+    "omp-native-tools.json": "sha256:4cca8720dc8467f54e349a15b0dbb92a79a6d27bc18e7e7b8af91331e5122b2d",
+    "codex-native-tools.json": "sha256:1eea7d06b1abb2c55eba9171579b13568a366eb518cf1b909ba7acb2a0296688"
+  },
+  "environment_dependency_sha256": "sha256:978ec14335ce4a3d03314033a62210603f918984370f3df11a30f735dce7fdb3"
+}

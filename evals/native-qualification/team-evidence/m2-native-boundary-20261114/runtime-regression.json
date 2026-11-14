@@ -1,0 +1,524 @@
+{
+  "kind": "native-runtime-adapter-checks-v1",
+  "results": [
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "evidence": "controlled_protocol_subprocesses",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ],
+      "events": [
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": null,
+            "reasoning_output_tokens": null,
+            "total_tokens": 3,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests",
+              "cache_write_input_tokens",
+              "reasoning_output_tokens"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        }
+      ]
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "evidence": "controlled_protocol_subprocesses",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ],
+      "events": [
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "yielded",
+          "status": "completed",
+          "session_settled": false
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 3,
+            "monetary_spend": null,
+            "estimated_cost": 0.01,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "evidence": "actual_native_provider_free_control",
+      "first": {
+        "session_id": "01a1d917-32d3-7720-ad4e-5b6ebd7eec94",
+        "runtime": "codex",
+        "model": "gpt-6.1-sol",
+        "provider": "openai",
+        "history": "ephemeral"
+      },
+      "second": {
+        "session_id": "01a1d917-32f0-7512-8ff7-5fb4a0d319b1",
+        "runtime": "codex",
+        "model": "gpt-6.1-sol",
+        "provider": "openai",
+        "history": "ephemeral"
+      },
+      "close": {
+        "process_exited": true,
+        "exit_code": 0,
+        "lab_cleanup": "not_observed",
+        "child_absence": "not_observed"
+      },
+      "capabilities": {
+        "runtime": "codex",
+        "version": "0.166.0",
+        "available": [
+          "startup",
+          "fresh_session",
+          "steer",
+          "interrupt",
+          "usage_tokens"
+        ],
+        "resume": "live_session_only",
+        "durable_resume": "reconstruct_from_published_work",
+        "native_tools": "withheld_until_isolated_tool_owner",
+        "execution_boundary": "external_owner_required",
+        "child_inventory": "unverified",
+        "usage_cost_estimate": "unavailable",
+        "provider_inference": "unverified"
+      },
+      "executable": {
+        "path": "/Users/matheusvsky/.codex/packages/standalone/releases/0.166.0-aarch64-apple-darwin/bin/codex",
+        "sha256": "sha256:39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1"
+      },
+      "model": "gpt-6.1-sol",
+      "provider": "openai"
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "evidence": "actual_native_provider_free_control",
+      "first": {
+        "session_id": "01a1d917-3e34-7372-8a8f-e82db38159c1",
+        "runtime": "omp",
+        "model": "deepseek-v4.1-flash",
+        "provider": "opencode-go",
+        "history": "ephemeral"
+      },
+      "second": {
+        "session_id": "01a1d917-3e56-7226-92c8-70ad010eac6e",
+        "runtime": "omp",
+        "model": "deepseek-v4.1-flash",
+        "provider": "opencode-go",
+        "history": "ephemeral"
+      },
+      "close": {
+        "process_exited": true,
+        "exit_code": 0,
+        "lab_cleanup": "not_observed",
+        "child_absence": "not_observed"
+      },
+      "capabilities": {
+        "runtime": "omp",
+        "version": "18.20.0",
+        "available": [
+          "startup",
+          "fresh_session",
+          "steer",
+          "interrupt",
+          "usage_tokens"
+        ],
+        "resume": "live_session_only",
+        "durable_resume": "reconstruct_from_published_work",
+        "native_tools": "withheld_until_isolated_tool_owner",
+        "execution_boundary": "external_owner_required",
+        "child_inventory": "unverified",
+        "usage_cost_estimate": "reported",
+        "provider_inference": "unverified"
+      },
+      "executable": {
+        "path": "/Users/matheusvsky/.bun/bin/omp",
+        "sha256": "sha256:2b1309b06a743ae939708f939b63f75c7a436ed08c7953309f0e387e0c793ead"
+      },
+      "model": "deepseek-v4.1-flash",
+      "provider": "opencode-go"
+    },
+    {
+      "status": "passed",
+      "evidence": "actual_native_sdk_tools_no_provider",
+      "runtime": "omp",
+      "sdk_version": "18.20.0",
+      "sdk_pin": "sha256:37a259ec38281a1b35a9344617ffc57d115280a799c811e517d2c2db709477aa",
+      "results": [
+        {
+          "call_id": "write-1",
+          "status": "returned",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "[proof.txt#D989]\nSuccessfully wrote 16 bytes to proof.txt"
+              }
+            ],
+            "details": {
+              "resolvedPath": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-runtime-e2e-c2u1cbzr/tool-workspace/proof.txt"
+            }
+          }
+        },
+        {
+          "call_id": "read-1",
+          "status": "returned",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "[proof.txt#D989]\n1:native-sdk-proof"
+              }
+            ],
+            "details": {
+              "totalLines": 1,
+              "rowPrefixes": true,
+              "displayContent": {
+                "text": "native-sdk-proof",
+                "startLine": 1,
+                "lineNumbers": [
+                  1
+                ]
+              },
+              "fileSize": 16,
+              "meta": {
+                "source": {
+                  "type": "path",
+                  "value": "/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-runtime-e2e-c2u1cbzr/tool-workspace/proof.txt"
+                },
+                "pagedSource": true
+              }
+            }
+          }
+        },
+        {
+          "call_id": "bash-1",
+          "status": "returned",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "native-shell-proof"
+              }
+            ],
+            "details": {
+              "wallTimeNoticeEmitted": false,
+              "timeoutSeconds": 5,
+              "wallTimeMs": 108.24291700000003
+            }
+          }
+        },
+        {
+          "call_id": "cancel-1",
+          "status": "unknown",
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Native tool outcome unavailable; reconcile effects."
+              }
+            ]
+          }
+        }
+      ],
+      "boundary": "host-network-denial-only; not lab qualification",
+      "close": {
+        "process_exited": true,
+        "exit_code": 0,
+        "lab_cleanup": "not_observed",
+        "child_absence": "not_observed"
+      }
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "evidence": "actual_native_sdk_with_simulated_model",
+      "checks": [
+        "native_tool_roundtrip",
+        "native_interrupt",
+        "host_tool_cancel",
+        "owned_child_absent"
+      ],
+      "requests": [
+        {
+          "number": 1,
+          "tool_names": [
+            "read",
+            "write",
+            "edit",
+            "grep",
+            "glob",
+            "bash"
+          ]
+        },
+        {
+          "number": 2,
+          "tool_names": [
+            "read",
+            "write",
+            "edit",
+            "grep",
+            "glob",
+            "bash"
+          ]
+        },
+        {
+          "number": 3,
+          "tool_names": [
+            "read",
+            "write",
+            "edit",
+            "grep",
+            "glob",
+            "bash"
+          ]
+        }
+      ],
+      "events": [
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-normal",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-normal",
+          "event": "text",
+          "text": "Local fixture completed."
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-normal",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 0,
+            "monetary_spend": null,
+            "estimated_cost": 0,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-normal",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-normal",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "host_tool_cancel",
+          "pending": true
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "unknown",
+          "reason": "host_tool_outcome_unavailable"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 0,
+            "monetary_spend": null,
+            "estimated_cost": 0,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "completed",
+          "status": "aborted",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "01a1d917-a70b-7637-93fd-ae25e98a3a18",
+          "invocation_id": "bridge-cancel",
+          "event": "completed",
+          "status": "aborted",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        }
+      ],
+      "external_provider_calls": 0,
+      "sdk_pin": "sha256:37a259ec38281a1b35a9344617ffc57d115280a799c811e517d2c2db709477aa",
+      "lab_isolation": "not_qualified"
+    }
+  ],
+  "unverified": [
+    "provider_inference",
+    "complete_worker_revocation",
+    "lab_isolation",
+    "durable_native_transcript_resume",
+    "multi_day_operation"
+  ],
+  "source_hashes": {
+    "evals/native-qualification/smoke/check_native_runtime_adapters.py": "sha256:fd72f5b6b5a52d1b4cffdae1ca19cdefe43ef01d5cb4975bba0ab1ecc70eabf4",
+    "tools/native_runtime_codex.py": "sha256:709767ec7862b50ccf85a7e3bbc44f52a4a071d9c1e1499f268e80b73254f077",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+    "tools/native_runtime_omp.py": "sha256:fa97dc1da6d7997d25f1421e877b882e2fed78a81c892a0be5a1cadd6ac37db2",
+    "tools/native_runtime_omp_tools.mjs": "sha256:d443923e21bf2477a08f87fe3f19ab414028bc9a793341f49bd6729252bba4c9",
+    "tools/native_runtime_owner.py": "sha256:234c02ac32c986cd1055a5e517c5eb831a81c331603140ae7621b6250c094e83",
+    "tools/native_runtime_transport.py": "sha256:de80977426810891a31955cb6980c1e4f9083f71dcbf56dcb3f180f584b8a7a2"
+  }
+}

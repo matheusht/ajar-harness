@@ -155,7 +155,8 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
             if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['operation'] != op
                     or prior['effect_id'] != effect_id or prior['account_refs'] != accounts):
                 fail('environment_operation_conflict')
-            if prior.get('result') is not None:
+            if prior.get('result') is not None and not (prior['result'].get('status') in ('unknown', 'dispatched')
+                                                       and observation.get('status') == 'settled'):
                 fail('environment_operation_conflict')
         elif op not in ('readback_input', 'readback_support', 'read_workspace_manifest', 'read_artifact'):
             fail('environment_intent_missing')
@@ -499,12 +500,13 @@ def reduce_host(state, payload):
     elif action == 'environment_output':
         state['environment_operations'][data['operation_id']]['output_sha256'] = data['output_sha256']
     elif action == 'obligation_delivery':
-        state['obligations'][data['obligation_id']]['deliveries'][data['dispatch_id']] = data
+        state['obligations'][data['obligation_id']]['deliveries'][data.get('checkpoint_id', data['dispatch_id'])] = data
     elif action == 'decision_checkpoint':
-        state['decision_checkpoints'][data['dispatch_id']] = True
+        checkpoint = data.get('checkpoint_id', data['dispatch_id'])
+        state['decision_checkpoints'][checkpoint] = True
         for name in data['obligations']:
             row = state['obligations'][name]
-            row['checkpoints'].append(data['dispatch_id'])
+            row['checkpoints'].append(checkpoint)
             if row['state'] == 'pending':
                 row['opportunities'] += 1
         state['replacement_required'] = any(o['state'] == 'pending' and o['opportunities'] >= 2 for o in state['obligations'].values())
@@ -539,11 +541,13 @@ def reduce_host(state, payload):
         fail('journal_corrupt')
 
 
-def runtime_owner(c, state, worker, session_id, receipt):
+def runtime_owner(c, state, worker, session_id, receipt, *, preparing=False):
     if receipt is None:
         return None
-    required = {'kind', 'runtime', 'session_id', 'profile_sha256', 'boundary', 'process'}
-    if not isinstance(receipt, dict) or not required <= set(receipt) or not set(receipt) <= required | {'bridge_process'}:
+    required = {'kind', 'runtime', 'session_id', 'profile_sha256', 'boundary'}
+    if (not isinstance(receipt, dict) or not required <= set(receipt)
+            or not set(receipt) <= required | {'process', 'bridge_process'}
+            or not {'process', 'bridge_process'} & set(receipt) or not preparing and 'process' not in receipt):
         fail('runtime_owner_invalid')
     assignment = next(row for row in state['scope']['runtime_assignments'] if row['profile_id'] == worker['profile_id'])
     profile = read_json(c.root / 'contract/runtimes' / (worker['profile_id'] + '.json'), private=True)
@@ -687,7 +691,9 @@ def record_patch_execution(c, grant, profile_id, operation_id, patch_id, arm, ma
                 or operation['operation'] != 'execute' or operation.get('result') is None
                 or operation['result']['status'] != 'settled'):
             fail('environment_observation_missing')
-        if patch['source_access'] not in grant['resources'] or digest(canonical(manifest)) != patch[arm + '_manifest_sha256']:
+        logical = json.loads(c.read_object(patch[arm + '_manifest_sha256']))
+        readonly = {name: dict(row, mode=0o555 if row['mode'] & 0o111 else 0o444) for name, row in logical.items()}
+        if patch['source_access'] not in grant['resources'] or manifest not in (logical, readonly):
             fail('patch_copy_mismatch')
         data = {'operation_id': operation_id, 'patch_id': patch_id, 'arm': arm,
             'manifest_sha256': patch[arm + '_manifest_sha256']}

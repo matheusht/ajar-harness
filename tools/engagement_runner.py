@@ -222,7 +222,8 @@ class Runner:
         if readback.get('environment') is not None:
             c.record_worker_stopped(grant, boundary.environment_id, {
                 'runtime': readback['runtime'], 'environment': readback['environment']})
-            c.record_environment_cleanup(grant, boundary.environment_id, readback['environment_cleanup'])
+            if readback.get('environment_cleanup') is not None:
+                c.record_environment_cleanup(grant, boundary.environment_id, readback['environment_cleanup'])
         elif known:
             c.record_runtime_stopped(grant, readback['runtime'])
         resources = {name: readback.get('resources', {}).get(name, 'unknown') for name in grant['resources']}

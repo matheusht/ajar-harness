@@ -276,6 +276,17 @@ class Controller:
                                                          for row in state['invocations'].values())
         state['usage']['native_usage_incomplete'] = any(row['status'] in ('pending', 'stopped_unobserved')
                                                        for row in state['invocations'].values())
+        for operation in state['environment_operations'].values():
+            if (operation.get('result') or {}).get('status') != 'unknown':
+                continue
+            grant = operation['grant']
+            environment = state['environments'][operation['identity']['nonce']]
+            for resource in grant['resources']:
+                if environment.get('cleanup') == 'verified' and not self._shared(state, [resource]):
+                    continue
+                holds = state['resource_holds'].setdefault(resource, [])
+                if grant['dispatch_id'] not in holds:
+                    holds.append(grant['dispatch_id'])
         return state
 
     def state(self):
@@ -299,6 +310,11 @@ class Controller:
             state['workers'][payload['worker_id']].update(session_id=payload['session_id'], runtime_owner_sha256=payload.get('runtime_owner_sha256'))
             if payload.get('runtime_owner_sha256'):
                 state['evidence_objects'][payload['runtime_owner_sha256']] = True
+        elif kind == 'runtime_preparation_owner':
+            sha = payload['receipt_sha256']
+            state['dispatches'][payload['dispatch_id']].setdefault('runtime_owner_receipts', []).append(sha)
+            state['workers'][payload['worker_id']].update(runtime_owner_sha256=sha, session_id=payload['session_id'])
+            state['evidence_objects'][sha] = True
         elif kind == 'worker_revoked':
             worker = state['workers'][payload['worker_id']]
             worker.update(status='revoked', revoke_reason=payload['reason'])
@@ -683,6 +699,26 @@ class Controller:
         if any(event['type'] in ('worker_started', 'worker_session_observed') and
                event['payload']['session_id'] == session_id for event in events):
             fail('session_reused')
+
+    def record_runtime_preparation_owner(self, grant, receipt):
+        from engagement_evidence import runtime_owner
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            worker = state['workers'][grant['worker_id']]
+            if worker['generation'] != grant['generation'] or worker['status'] != 'preparing':
+                fail('worker_stale')
+            if not isinstance(receipt, dict):
+                fail('runtime_owner_invalid')
+            sha = runtime_owner(self, state, worker, receipt.get('session_id'), receipt, preparing=True)
+            if sha in dispatch.get('runtime_owner_receipts', []):
+                return {'status': 'recorded', 'receipt': sha}
+            if worker.get('runtime_owner_sha256'):
+                prior = json.loads(self.read_object(worker['runtime_owner_sha256']))
+                if any(receipt.get(key) != prior[key] for key in ('process', 'bridge_process') if key in prior):
+                    fail('runtime_owner_changed')
+            return self._host('runtime_preparation_owner', {'worker_id': worker['id'],
+                'dispatch_id': grant['dispatch_id'], 'receipt_sha256': sha, 'session_id': receipt['session_id']})
 
     def record_worker_started(self, worker_id, generation, session_id, workspace, *, owner_receipt=None):
         with self.lock():
@@ -1115,7 +1151,7 @@ class Controller:
         from engagement_evidence import record_environment_cleanup
         return record_environment_cleanup(self, grant, environment_profile_id, readback)
 
-    def record_obligation_delivery(self, obligation_id, worker_id, generation, *, dispatch_id):
+    def record_obligation_delivery(self, obligation_id, worker_id, generation, *, dispatch_id, invocation_id=None):
         with self.lock():
             state = self.state()
             worker = state['workers'].get(worker_id)
@@ -1124,34 +1160,48 @@ class Controller:
                 fail('worker_stale')
             if dispatch is None or dispatch['worker_id'] != worker_id or dispatch['generation'] != generation:
                 fail('dispatch_identity_invalid')
+            if invocation_id is None and dispatch.get('invocations'):
+                fail('invocation_checkpoint_required')
             obligation = state['obligations'].get(obligation_id)
             if obligation is None:
                 fail('obligation_missing')
-            if dispatch_id in obligation['deliveries']:
+            checkpoint = invocation_id or dispatch_id
+            if checkpoint in obligation['deliveries']:
                 return {'status': 'recorded'}
             if dispatch['status'] != 'pending':
                 fail('delivery_after_completion')
+            if invocation_id is not None:
+                invocation = state['invocations'].get(invocation_id)
+                if invocation is None or invocation['dispatch_id'] != dispatch_id or invocation['status'] != 'pending':
+                    fail('delivery_after_completion')
             return self._host('evidence_recorded', {'action': 'obligation_delivery', 'data': {
                 'obligation_id': obligation_id, 'worker_id': worker_id, 'generation': generation,
-                'dispatch_id': dispatch_id}, '_objects': []})
+                'dispatch_id': dispatch_id, 'checkpoint_id': checkpoint}, '_objects': []})
 
-    def record_decision_checkpoint(self, grant):
+    def record_decision_checkpoint(self, grant, *, invocation_id=None):
         from engagement_evidence import binding
         with self.lock():
             state = self.state()
             dispatch = binding(self, state, grant)
-            if grant['dispatch_id'] in state['decision_checkpoints']:
+            if invocation_id is None and dispatch.get('invocations'):
+                fail('invocation_checkpoint_required')
+            checkpoint = invocation_id or grant['dispatch_id']
+            if checkpoint in state['decision_checkpoints']:
                 return {'status': 'recorded'}
-            if dispatch['status'] != 'settled':
+            invocation = state['invocations'].get(invocation_id) if invocation_id is not None else None
+            if ((invocation_id is None and dispatch['status'] != 'settled') or
+                    (invocation_id is not None and (invocation is None or
+                     invocation['dispatch_id'] != grant['dispatch_id'] or invocation['status'] != 'completed'))):
                 fail('checkpoint_unsettled')
             worker = state['workers'][grant['worker_id']]
             if worker['role'] != 'lead' or worker['generation'] != grant['generation']:
                 fail('worker_stale')
-            delivered = [name for name, row in state['obligations'].items() if grant['dispatch_id'] in row['deliveries']]
+            delivered = [name for name, row in state['obligations'].items() if checkpoint in row['deliveries']]
             if not delivered:
                 fail('obligation_not_delivered')
             return self._host('evidence_recorded', {'action': 'decision_checkpoint', 'data': {
-                'dispatch_id': grant['dispatch_id'], 'obligations': delivered}, '_objects': []})
+                'dispatch_id': grant['dispatch_id'], 'checkpoint_id': checkpoint,
+                'obligations': delivered}, '_objects': []})
 
     def replace_lead(self, worker_id, generation, *, profile_id=None):
         with self.lock():

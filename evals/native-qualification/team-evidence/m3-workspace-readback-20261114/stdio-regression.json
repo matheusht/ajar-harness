@@ -1,0 +1,50 @@
+{
+  "kind": "environment-native-pipe-replay-v2",
+  "classification": "simulated_docker_cli_with_actual_stdio",
+  "checks": [
+    {
+      "name": "pinned support tree is separate from target access",
+      "passed": true
+    },
+    {
+      "name": "tool pipe receives only restricted host environment",
+      "passed": true
+    },
+    {
+      "name": "same owned process serves consecutive native messages",
+      "passed": true
+    },
+    {
+      "name": "pipe launch is recorded without claiming command acceptance",
+      "passed": true
+    },
+    {
+      "name": "one native tool owner per environment",
+      "passed": true
+    },
+    {
+      "name": "distinct trusted relay role has its own private pipe",
+      "passed": true
+    },
+    {
+      "name": "arbitrary pipe role is refused",
+      "passed": true
+    },
+    {
+      "name": "revocation closes all host pipes and observes worker stopped",
+      "passed": true
+    },
+    {
+      "name": "retired generation cannot recreate native pipe",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "real Docker containment",
+    "SSH connection",
+    "native SDK in Linux image",
+    "native network bridge"
+  ],
+  "status": "passed",
+  "source_sha256": "ec799f18837e2858781c35679542ffa40537d2cbc95e332ebf30833c7aeead9c"
+}

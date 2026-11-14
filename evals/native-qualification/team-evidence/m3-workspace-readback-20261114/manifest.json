@@ -1,0 +1,21 @@
+{
+  "kind": "environment-workspace-readback-checkpoint-v2",
+  "sources": {
+    "tools/research_environment.py": "cfa791130c2a8e241248ef7831ebede9e11e977b647c3d3f58681222d7620b1e",
+    "tools/engagement_workspace.py": "cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919",
+    "tools/engagement_lease_owner.py": "9957d4c4392c0708bcca0c581230c5a4ae3fa3c0336dfca42f256defaa1e671e",
+    "evals/native-qualification/smoke/check_environment_workspace_e2e.py": "05f9345d89bb174709225df304af61dabaa323e1d519f57d3f4875b8a740e96e",
+    "evals/native-qualification/smoke/check_environment_transport_e2e.py": "2683325e7c43803ebeeace8fc4a48381109dc77fe6ac577e4c37a01c33241082",
+    "evals/native-qualification/smoke/check_environment_stdio_e2e.py": "ec799f18837e2858781c35679542ffa40537d2cbc95e332ebf30833c7aeead9c"
+  },
+  "results": {
+    "transport-regression.json": "3c1ef5da935d9a229c6628c2e7b0ae9d2fa4984be7ffa6c791eedcb7f358acc9",
+    "stdio-regression.json": "4a149122e7c2c63e10c3904a0dd6670fcf9c68755a575f6802fd77a4f9645e00",
+    "before-readback.json": "2079c73a167b92475d79f688a1ab512522636086741db8bdd89a510593c0d18e",
+    "readback-result.json": "e5bb0411dcfce67011a053e2f9cb6993b5a9d14b49534847d7ee8db9b07a36ca"
+  },
+  "external_dependency": {
+    "path": "/Users/matheusvsky/.codex/worktrees/setup-checked-adoption/llm-redteam-harness/tools/engagement_contract.py",
+    "sha256": "9acf36864c1c32526502f4d2ed68be67da53d4023b00fbdf7e749bed6617ecef"
+  }
+}

@@ -28,6 +28,14 @@ class EnvironmentUnavailable(RuntimeError):
     pass
 
 
+def _workspace_path(path, *, directory=False):
+    from engagement_workspace import relative_path
+    try:
+        return relative_path(path, directory=directory)
+    except ValueError:
+        raise EnvironmentUnavailable('workspace_path_invalid') from None
+
+
 def inspect_profile(profile):
     """Inspect local prerequisites only. The contract owns strict schema validation."""
     missing = []
@@ -564,6 +572,75 @@ class Environment:
             result['output'] = '[output withheld]'
         result['identity'] = self.receipt()
         return result
+
+    def _workspace_read(self, operation, path, byte_limit, output_limit):
+        from engagement_contract import read_bytes
+        self._admit()
+        if not self.owner or not self.owner.readback()['running']:
+            raise EnvironmentUnavailable('environment_worker_inactive')
+        self._verify_configuration(self._inspect())
+        program = read_bytes(Path(__file__).with_name('engagement_workspace.py'), max_bytes=65536).decode('utf-8')
+        result = self._run(['container', 'exec', '--user', f"{self.profile['uid']}:{self.profile['gid']}",
+                            '--env', 'PATH=/usr/local/bin:/usr/bin:/bin', '--workdir', '/',
+                            self.identity['container_id'], 'python3', '-I', '-S', '-c', program,
+                            operation, path, str(byte_limit), str(output_limit)],
+                           timeout=self._admit(), output_limit=max(output_limit, 128), dispatch=True)
+        self._admit()
+        if result['status'] != 'settled' or result['returncode']:
+            code = result['output'].decode('ascii', errors='replace').strip()
+            if not re.fullmatch('workspace_[a-z_]{1,64}', code):
+                code = 'workspace_read_unavailable'
+            raise EnvironmentUnavailable(code)
+        if len(result['output']) > output_limit:
+            raise EnvironmentUnavailable('workspace_read_limit')
+        return result['output']
+
+    def read_workspace_manifest(self, path='/work'):
+        from engagement_contract import canonical, safe_publication, MAX_PUBLICATION_BYTES
+        _workspace_path(path, directory=True)
+        safe_publication(path.encode('utf-8'))
+        output_limit = min(self.limits['output_bytes'], MAX_PUBLICATION_BYTES)
+        output = self._workspace_read('manifest', path, self.limits['workspace_bytes'], output_limit)
+        safe_publication(output)
+        manifest = json.loads(output)
+        if not isinstance(manifest, dict) or not manifest or len(manifest) > 200000:
+            raise EnvironmentUnavailable('workspace_manifest_invalid')
+        total = 0
+        for relative, entry in manifest.items():
+            _workspace_path(relative)
+            if (not isinstance(entry, dict) or set(entry) != {'sha256', 'mode', 'size'} or
+                    not isinstance(entry['sha256'], str) or not re.fullmatch('sha256:[0-9a-f]{64}', entry['sha256']) or
+                    type(entry['mode']) is not int or not 0 <= entry['mode'] <= 0o7777 or
+                    type(entry['size']) is not int or entry['size'] < 0):
+                raise EnvironmentUnavailable('workspace_manifest_invalid')
+            total += entry['size']
+        if total > self.limits['workspace_bytes'] or output != canonical(manifest):
+            raise EnvironmentUnavailable('workspace_manifest_invalid')
+        digest = 'sha256:' + hashlib.sha256(output).hexdigest()
+        operation_id = uuid.uuid4().hex
+        with self.dispatch_guard():
+            self._admit()
+            self._event('result', 'read_workspace_manifest', operation_id, status='settled',
+                        path=path, manifest_sha256=digest, files=len(manifest))
+        return {'operation_id': operation_id, 'path': path, 'manifest_sha256': digest, 'manifest': manifest}
+
+    def read_artifact(self, relative_path, max_bytes):
+        from engagement_contract import safe_publication, MAX_PUBLICATION_BYTES
+        _workspace_path(relative_path)
+        path = '/work/' + relative_path
+        safe_publication(path.encode('utf-8'))
+        if type(max_bytes) is not int or not 0 <= max_bytes <= min(self.limits['workspace_bytes'], self.limits['output_bytes'], MAX_PUBLICATION_BYTES):
+            raise EnvironmentUnavailable('workspace_read_limit_invalid')
+        output = self._workspace_read('artifact', relative_path, max_bytes, max_bytes)
+        safe_publication(output)
+        digest = 'sha256:' + hashlib.sha256(output).hexdigest()
+        operation_id = uuid.uuid4().hex
+        with self.dispatch_guard():
+            self._admit()
+            self._event('result', 'read_artifact', operation_id, status='settled',
+                        path=path, output_sha256=digest, bytes=len(output))
+        return {'operation_id': operation_id, 'path': path, 'output_sha256': digest,
+                'bytes': len(output), 'content': output}
 
     def launch_stdio(self, argv, *, role='native_tools'):
         """Launch a fixed host service role; model requests never select this role."""

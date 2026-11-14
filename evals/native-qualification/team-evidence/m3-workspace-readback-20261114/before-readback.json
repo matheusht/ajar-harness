@@ -1,0 +1,13 @@
+{
+  "kind": "environment-workspace-readback-e2e-v2",
+  "classification": "simulated_docker_transport_with_actual_filesystem_helper",
+  "checks": [],
+  "unverified": [
+    "real Docker workspace",
+    "SSH workspace",
+    "earlier experiment byte identity"
+  ],
+  "status": "failed",
+  "error": "AttributeError: 'Environment' object has no attribute 'read_workspace_manifest'",
+  "source_sha256": "302ebf305de16c67f7b0ee5c9fd690440d522e6e680742f7346b4538111606dd"
+}

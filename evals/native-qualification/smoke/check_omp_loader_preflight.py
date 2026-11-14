@@ -2,6 +2,13 @@
 """Run the existing native fixture with a bounded OMP loader observation."""
 from contextlib import contextmanager
 
+PROBES = (
+    ('javascript', 'void 0'),
+    ('sdk_import', 'await import("file:///input/native-runtime/node_modules/@oh-my-pi/pi-coding-agent/src/sdk.ts")'),
+    ('schema_import', 'await import("file:///input/native-runtime/node_modules/@oh-my-pi/pi-ai/src/utils/schema/wire.ts")'),
+    ('validation_import', 'await import("file:///input/native-runtime/node_modules/@oh-my-pi/pi-ai/src/utils/validation.ts")'),
+)
+
 
 @contextmanager
 def observe_loader(environment_class, result):
@@ -16,6 +23,15 @@ def observe_loader(environment_class, result):
             result['omp_loader_preflight'] = {
                 'status': observation['status'], 'returncode': observation['returncode'],
                 'pinned_version_matches': observation['output'].strip() == '1.4.4'}
+            if observation['status'] == 'settled' and observation['returncode'] == 0 and result['omp_loader_preflight']['pinned_version_matches']:
+                result['omp_import_preflight'] = []
+                for phase, script in PROBES:
+                    row = {'phase': phase, 'status': 'attempted'}
+                    result['omp_import_preflight'].append(row)
+                    observation = environment.execute(argv[:-3] + ['--eval', script], timeout_seconds=5)
+                    row.update(status=observation['status'], returncode=observation['returncode'])
+                    if observation['status'] != 'settled' or observation['returncode'] != 0:
+                        break
         return original(environment, argv, role=role)
 
     environment_class.launch_stdio = launch

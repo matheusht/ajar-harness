@@ -138,7 +138,7 @@ def pinned(path, expected, *, max_bytes=None):
 class Transport:
     """One owned process and a bounded JSONL pipe. stderr is deliberately discarded."""
 
-    def __init__(self, command, environment, cwd, on_event, *, omp=False):
+    def __init__(self, command, environment, cwd, on_event, *, omp=False, launcher=None):
         self.omp = omp
         self.on_event = on_event
         self.frames = queue.Queue(maxsize=128)
@@ -147,9 +147,12 @@ class Transport:
         self.sequence = 0
         self.failure = None
         self.closed = False
-        self.process = subprocess.Popen(command, cwd=cwd, env=environment, stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        start_new_session=True)
+        self.process = (launcher(command) if launcher is not None else
+                        subprocess.Popen(command, cwd=cwd, env=environment, stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         start_new_session=True))
+        if self.process.stdin is None or self.process.stdout is None:
+            raise RuntimeError('native_launcher_pipes_missing')
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 
@@ -197,6 +200,10 @@ class Transport:
         finally:
             if not self.closed and self.failure is None:
                 self.failure = 'native_transport_closed'
+            try:
+                self.frames.put_nowait(None)
+            except queue.Full:
+                pass
 
     def next_id(self):
         self.sequence += 1
@@ -226,6 +233,8 @@ class Transport:
                 if self.failure:
                     raise RuntimeError(self.failure)
                 return False
+        if frame is None:
+            raise RuntimeError(self.failure or 'native_transport_closed')
         is_response = frame.get('type') == 'response' if self.omp else (
             'id' in frame and ('result' in frame or 'error' in frame))
         if is_response:

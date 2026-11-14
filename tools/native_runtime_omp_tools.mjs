@@ -27,7 +27,8 @@ const reply = (request, data = {}) => emit({ type: 'response', id: request.id,
   command: request.type, success: true, data });
 const fail = request => emit({ type: 'response', id: request?.id,
   command: request?.type, success: false, error: 'native_tool_request_refused' });
-emit({ type: 'ready', sdkVersion: manifest.version });
+emit({ type: 'ready', sdkVersion: manifest.version, bunVersion: Bun.version,
+  platform: process.platform, arch: process.arch });
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of lines) {
   if (Buffer.byteLength(line) > 1048576) break;

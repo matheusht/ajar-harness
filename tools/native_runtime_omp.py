@@ -213,6 +213,74 @@ def sdk_tree_digest(root):
     return 'sha256:' + manifest.hexdigest()
 
 
+def inspect_tool_bundle(profile, profile_id='runtime-main'):
+    """Verify signed portable inputs without executing supplied code on the host.
+
+    Readiness still requires the isolated process's version/platform handshake.
+    The returned command names only the fixed, read-only support-input layout.
+    """
+    from engagement_contract import ContractError, canonical, digest, source_manifest
+    identifier(profile_id)
+    bundle = profile.get('tool_bundle')
+    if profile.get('kind') != 'omp' or not isinstance(bundle, dict):
+        raise RuntimeError('native_bundle_required')
+    root = Path(bundle['path'])
+    try:
+        manifest = source_manifest(root)
+    except ContractError:
+        raise RuntimeError('native_bundle_manifest_invalid') from None
+    if digest(canonical(manifest)) != bundle['manifest_sha256']:
+        raise RuntimeError('native_bundle_manifest_mismatch')
+    platform = bundle['platform']
+    arch = {'linux/arm64': ('arm64', 183), 'linux/amd64': ('x64', 62)}.get(platform)
+    if arch is None:
+        raise RuntimeError('native_bundle_platform_mismatch')
+    bun = root / 'bin/bun'
+    try:
+        with bun.open('rb') as stream:
+            header = stream.read(20)
+        if not bun.stat().st_mode & 0o111:
+            raise RuntimeError('native_bundle_bun_not_executable')
+        if len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or int.from_bytes(header[18:20], 'little') != arch[1]:
+            raise RuntimeError('native_bundle_platform_mismatch')
+        sdk = root / 'node_modules/@oh-my-pi/pi-coding-agent'
+        metadata = json.loads((sdk / 'package.json').read_bytes())
+    except (OSError, ValueError):
+        raise RuntimeError('native_bundle_incomplete') from None
+    if metadata.get('name') != '@oh-my-pi/pi-coding-agent' or metadata.get('version') != profile['version'] or profile['version'] != Runtime.version:
+        raise RuntimeError('native_bundle_sdk_mismatch')
+    # Pin the supported SDK's exact engine requirement, rather than interpret npm ranges.
+    if metadata.get('engines', {}).get('bun') != '>=1.4.4':
+        raise RuntimeError('native_bundle_engine_unsupported')
+    try:
+        bun_version = tuple(int(x) for x in bundle['bun_version'].split('.'))
+    except (AttributeError, ValueError):
+        raise RuntimeError('native_bundle_bun_unsupported') from None
+    if len(bun_version) != 3 or bun_version < (1, 4, 4):
+        raise RuntimeError('native_bundle_bun_unsupported')
+    addon = root / ('node_modules/@oh-my-pi/pi-natives-linux-' + arch[0])
+    try:
+        data = json.loads((addon / 'package.json').read_bytes())
+        expected_main = './pi_natives.linux-' + arch[0] + '.node'
+        if (data.get('name') != '@oh-my-pi/pi-natives-linux-' + arch[0] or
+                data.get('version') != profile['version'] or data.get('main') != expected_main or
+                not (addon / expected_main).is_file() or not (sdk / 'src/sdk.ts').is_file()):
+            raise RuntimeError('native_bundle_platform_unavailable')
+        sidecar = (root / 'native_runtime_omp_tools.mjs').read_bytes()
+    except (OSError, ValueError):
+        raise RuntimeError('native_bundle_platform_unavailable') from None
+    if sidecar != Path(__file__).with_name('native_runtime_omp_tools.mjs').read_bytes():
+        raise RuntimeError('native_bundle_sidecar_mismatch')
+    remote = '/input/' + profile_id
+    return {'support_input': {'path': str(root), 'manifest_sha256': bundle['manifest_sha256']},
+            'sdk_dir': str(sdk), 'sdk_pin': {'root': str(root), 'sha256': sdk_tree_digest(root)},
+            'command': [remote + '/bin/bun', remote + '/native_runtime_omp_tools.mjs',
+                        remote + '/node_modules/@oh-my-pi/pi-coding-agent', '/work'],
+            'expected_ready': {'sdkVersion': profile['version'], 'bunVersion': bundle['bun_version'],
+                               'platform': 'linux', 'arch': arch[0]},
+            'execution_verified': False}
+
+
 class ToolOwner:
     """Reuse pinned SDK tools in an uncredentialed process owned by a lab adapter.
 
@@ -220,10 +288,12 @@ class ToolOwner:
     owner. They are not themselves evidence of isolation or secret-free storage.
     """
 
-    def __init__(self, sdk_dir, workspace, state_dir, *, sdk_pin, command_prefix=(), dispatch_guard=None, bun='bun'):
+    def __init__(self, sdk_dir, workspace, state_dir, *, sdk_pin, command_prefix=(), dispatch_guard=None,
+                 bun='bun', launcher=None, command=None, target_platform=None, expected_ready=None):
         import shutil
         from native_runtime_transport import public
         self.guard = dispatch_guard
+        self.expected_ready = expected_ready
         self.catalog = []
         self.events = []
         self.results = {}
@@ -233,23 +303,40 @@ class ToolOwner:
         self.seen = set()
         self.ready = False
         self.transport = None
-        if not command_prefix or dispatch_guard is None:
+        if dispatch_guard is None or (not command_prefix and launcher is None):
             raise RuntimeError('native_tool_owner_boundary_unavailable')
+        if launcher is not None and (command_prefix or not isinstance(command, list) or not command):
+            raise RuntimeError('native_tool_owner_launcher_invalid')
+        if launcher is None and command is not None:
+            raise RuntimeError('native_tool_owner_launcher_invalid')
         sdk_dir, workspace, state_dir = (Path(p).resolve() for p in (sdk_dir, workspace, state_dir))
         sdk_root = Path(sdk_pin['root'])
         if not sdk_dir.is_relative_to(sdk_root) or sdk_tree_digest(sdk_root) != sdk_pin['sha256']:
             raise RuntimeError('native_sdk_pin_mismatch')
+        if launcher is not None:
+            platform_addon = {'linux/amd64': 'linux-x64', 'linux/arm64': 'linux-arm64',
+                              'darwin/arm64': 'darwin-arm64', 'darwin/amd64': 'darwin-x64'}.get(target_platform)
+            addon = sdk_root / 'node_modules' / '@oh-my-pi' / ('pi-natives-' + (platform_addon or 'unavailable'))
+            try:
+                version = json.loads((addon / 'package.json').read_text())['version']
+            except (OSError, ValueError, KeyError):
+                raise RuntimeError('native_sdk_platform_unavailable') from None
+            if version != '18.20.0':
+                raise RuntimeError('native_sdk_platform_unavailable')
         state_dir.mkdir(mode=0o700, exist_ok=False)
         env = {key: os.environ[key] for key in ('PATH', 'LANG', 'TMPDIR') if key in os.environ}
         env['PI_CODING_AGENT_DIR'] = str(state_dir)
-        executable = shutil.which(bun)
-        if not executable:
-            raise RuntimeError('native_tool_owner_bun_unavailable')
-        command = [*command_prefix, executable, str(Path(__file__).with_name('native_runtime_omp_tools.mjs')),
-                   str(sdk_dir), str(workspace)]
+        if launcher is None:
+            executable = shutil.which(bun)
+            if not executable:
+                raise RuntimeError('native_tool_owner_bun_unavailable')
+            command = [*command_prefix, executable, str(Path(__file__).with_name('native_runtime_omp_tools.mjs')),
+                       str(sdk_dir), str(workspace)]
         try:
-            self.transport = Transport(command, env, str(workspace), self._event, omp=True)
+            self.transport = Transport(command, env, str(workspace), self._event, omp=True, launcher=launcher)
             response = self.transport.request('catalog', timeout=30)
+            if not self.ready:
+                raise RuntimeError('native_tool_owner_not_ready')
             self.catalog = public(response['tools'])
         except Exception:
             self.close()
@@ -305,6 +392,8 @@ class ToolOwner:
         if frame.get('type') == 'ready':
             if frame.get('sdkVersion') != '18.20.0':
                 raise RuntimeError('native_sdk_version_unsupported')
+            if self.expected_ready is not None and any(frame.get(key) != value for key, value in self.expected_ready.items()):
+                raise RuntimeError('native_tool_owner_platform_mismatch')
             self.ready = True
         elif frame.get('type') == 'tool_result':
             call_id = frame.get('call_id')

@@ -751,8 +751,98 @@ def drive(root: Path, *, command=_command, spawn_owner=_spawn_owner) -> dict:
             return _halt(root, state, command, reason)
 
 
+def _v2_route(argv: list[str]) -> bool:
+    if not argv:
+        return False
+    if argv[0] in ('inspect', 'direction', 'stop', 'export', 'claim', 'submit') or '--socket' in argv:
+        return True
+    if '--inputs' in argv:
+        position = argv.index('--inputs') + 1
+        if position < len(argv):
+            try:
+                return _read_json(Path(argv[position])).get('kind') == 'native-engagement-inputs-v2'
+            except (DriverError, OSError, ValueError):
+                return False
+    if '--engagement-root' in argv:
+        position = argv.index('--engagement-root') + 1
+        if position < len(argv):
+            root = Path(argv[position])
+            return (root / 'contract').exists() or (root / 'events').exists()
+    return False
+
+
+def _v2_main(argv: list[str]) -> int:
+    from engagement_contract import ContractError, inspect_inputs, load_inputs, read_json, read_bytes
+    from engagement_controller import Controller, ControllerError, worker_call
+
+    parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement.')
+    commands = parser.add_subparsers(dest='command', required=True)
+    inspect = commands.add_parser('inspect', help='verify inputs without model or target contact')
+    inspect.add_argument('--inputs', type=Path, required=True)
+    run = commands.add_parser('run', help='initialize the signed v2 engagement')
+    run.add_argument('--inputs', type=Path, required=True)
+    run.add_argument('--engagement-root', type=Path, required=True)
+    for name in ('resume', 'direction', 'stop', 'export'):
+        command = commands.add_parser(name)
+        command.add_argument('--engagement-root', type=Path, required=True)
+        if name == 'direction':
+            command.add_argument('--file', type=Path, required=True)
+        if name == 'export':
+            command.add_argument('--output', type=Path, required=True)
+    status = commands.add_parser('status', help='read state or one authenticated worker update page')
+    origin = status.add_mutually_exclusive_group(required=True)
+    origin.add_argument('--engagement-root', type=Path)
+    origin.add_argument('--socket', type=Path)
+    status.add_argument('--since')
+    status.add_argument('--limit', type=int, default=100)
+    claim = commands.add_parser('claim', help='claim ready work through the worker endpoint')
+    claim.add_argument('--socket', type=Path, required=True)
+    claim.add_argument('--request-id', required=True)
+    claim.add_argument('--expected-revision', type=int, required=True)
+    submit = commands.add_parser('submit', help='submit a typed worker request')
+    submit.add_argument('--socket', type=Path, required=True)
+    submit.add_argument('--file', type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == 'inspect':
+            result = inspect_inputs(args.inputs)
+        elif args.command in ('claim', 'submit'):
+            request = (read_json(args.file) if args.command == 'submit' else
+                       {'request_id': args.request_id, 'expected_revision': args.expected_revision,
+                        'type': 'claim', 'payload': {}})
+            result = worker_call(args.socket, {'operation': 'submit', 'request': request})
+        elif args.command == 'status' and args.socket:
+            result = worker_call(args.socket, {'operation': 'status', 'since': args.since, 'limit': args.limit})
+        else:
+            if (args.engagement_root / 'state.json').exists():
+                raise ControllerError('route_conflict')
+            controller = (Controller.initialize(args.engagement_root, load_inputs(args.inputs))
+                          if args.command == 'run' else Controller(args.engagement_root))
+            if args.command == 'status':
+                result = controller.status(since=args.since, limit=args.limit)
+            elif args.command == 'direction':
+                result = controller.direction(read_bytes(args.file, max_bytes=65536).decode('utf-8'))
+            elif args.command == 'stop':
+                controller.stop('operator_stop')
+                result = controller.status()
+            elif args.command == 'export':
+                result = controller.export(args.output)
+            else:
+                result = controller.status()
+                result.update(status='blocked', code='runtime_environment_integration_pending')
+    except (ControllerError, ContractError) as error:
+        result = {'status': 'rejected', 'code': error.code}
+    except (OSError, ValueError, KeyError, TypeError):
+        result = {'status': 'rejected', 'code': 'engagement_input_unavailable'}
+    print(json.dumps(result, sort_keys=True, allow_nan=False))
+    return 2 if result['status'] in ('rejected', 'blocked') else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
+    argv = sys.argv[1:] if argv is None else argv
+    if _v2_route(argv):
+        return _v2_main(argv)
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     run = commands.add_parser('run', help='begin one scope-only engagement')

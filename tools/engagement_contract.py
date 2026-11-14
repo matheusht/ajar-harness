@@ -388,12 +388,11 @@ def validate_runtime_profile(profile: dict) -> dict:
 def validate_environment_profile(profile: dict) -> dict:
     code = 'environment_profile_invalid'
     _object(profile, ('kind', 'transport', 'docker_binary', 'docker_endpoint', 'daemon_id',
-                      'image_id', 'platform', 'workspace_root', 'uid', 'gid', 'ssh'), code)
+                      'image_id', 'platform', 'uid', 'gid', 'ssh'), code)
     _require(profile['kind'] == 'research-environment-profile-v2'
              and profile['transport'] in ('docker', 'ssh-docker')
              and profile['platform'] in ('linux/arm64', 'linux/amd64'), code)
     _path(profile['docker_binary'])
-    _path(profile['workspace_root'])
     endpoint = profile['docker_endpoint']
     _require(type(endpoint) is str and endpoint.startswith('unix:///'), code)
     _path(endpoint[7:])

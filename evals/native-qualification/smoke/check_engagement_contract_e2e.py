@@ -90,7 +90,7 @@ def make_fixture(root: Path) -> Path:
     environment = {'kind': 'research-environment-profile-v2', 'transport': 'docker',
                    'docker_binary': str(binary), 'docker_endpoint': 'unix:///fixture/docker.sock',
                    'daemon_id': None, 'image_id': 'sha256:' + '1' * 64,
-                   'platform': 'linux/arm64', 'workspace_root': str(root / 'labs'),
+                   'platform': 'linux/arm64',
                    'uid': 1000, 'gid': 1000, 'ssh': None}
     environment_file = root / 'environment.json'
     write(environment_file, encoded(environment))
@@ -173,6 +173,8 @@ try:
         result = {'status':'read','value':c.read_json(path, **options)}
     elif op == 'canonical':
         result = {'status':'canonical','value':c.canonical(json.loads(path.read_bytes())).decode()}
+    elif op == 'environment':
+        result = {'status':'verified', 'profile':c.validate_environment_profile(c.read_json(path))}
     print(json.dumps(result, allow_nan=False))
 except c.ContractError as error:
     print(json.dumps({'status':'refused','code':error.code}))
@@ -227,6 +229,13 @@ def main() -> int:
                 resign_fixture(inputs_path, scope)
                 check(name, 'inspect', inputs_path, expected)
 
+            environment_probe = base / 'environment-probe.json'
+            environment = json.loads((fixture / 'environment.json').read_bytes())
+            write(environment_probe, encoded(dict(environment, workspace_root=str(base / 'unused-workspace'))))
+            check('obsolete_workspace_root_refused', 'environment', environment_probe,
+                  {'environment_profile_invalid'})
+            write(environment_probe, encoded(environment))
+            check('environment_requires_no_unused_host_workspace', 'environment', environment_probe)
             report = check('signed_source_no_deadline_after_three_days', 'inspect', inputs_path)
             assert report['status'] == 'verified_inputs' and report['capabilities_verified'] is False
             frozen = check('freeze_safe_contract_only', 'load', inputs_path)

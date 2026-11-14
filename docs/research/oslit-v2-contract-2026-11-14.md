@@ -140,12 +140,15 @@ environment owners. They replace the descriptive field-table examples above:
 - `environments` contains signed references with exactly
   `{profile_id, profile_sha256, capabilities, limits, cleanup}`. Each referenced
   profile has `{kind: "research-environment-profile-v2", transport, docker_binary,
-  docker_endpoint, daemon_id, image_id, platform, workspace_root, uid, gid, ssh}`.
+  docker_endpoint, daemon_id, image_id, platform, uid, gid, ssh}`.
   Transport is `docker` or `ssh-docker`; Docker endpoint is a canonical absolute
   `unix://` socket reference. Daemon identity may be null only until setup observes
   and pins it before effects. Image is digest-pinned. Platform is `linux/amd64` or
-  `linux/arm64`; uid is positive and gid nonnegative. Workspace root and executable
-  paths are canonical absolute paths. An offline parser does not prove they work.
+  `linux/arm64`; uid is positive and gid nonnegative. Executable paths are canonical
+  absolute paths. The lab's `/work` is a bounded container-local filesystem, not a
+  host mount. The controller checks actual host worker directories at launch;
+  there is no unused host-workspace field in this profile. An offline parser does
+  not prove runtime boundaries work.
 - Docker uses `ssh: null`. SSH uses exactly
   `{host, port, user, known_hosts_file, known_hosts_sha256, identity_file,
   python_binary}`. Known-host bytes are digest-pinned; the identity file is a
@@ -186,6 +189,7 @@ Private root layout:
 contract/             frozen scope, signature, signer proof, goal and safe profiles
 events/000000001.json immutable committed events; one contiguous sequence
 objects/<sha256>      sanitized frozen publication and protected receipt bytes
+receipts/<id>-<sha>   immutable host observations, including late terminal results
 workers/<id>/         adapter-owned private session metadata, not model-writable
 controller.lock       host process lease
 ```
@@ -247,6 +251,13 @@ not by redispatch. Missing receipt leaves the affected resources and unused
 reservation held; other isolated resources remain eligible. `reconcile` requires
 protected observation of those exact resources, never an agent narrative.
 
+An unknown observation can be followed by a new terminal receipt for the same
+complete dispatch grant. Both observations remain immutable. Only the terminal
+transition releases its reservation and charges observed usage; repeating either
+receipt returns its prior acceptance. Later receipts cannot reduce or discard
+previously observed seconds, token counters or cost estimates. A resource-only readback cannot establish
+that a still-unknown runtime has terminated.
+
 Allowed host event families: `initialized`, `request_accepted`, `dispatch_intended`,
 `dispatch_observed`, `effect_reconciled`, `worker_revoked`, `worker_stop_observed`,
 `worker_started`, `direction_recorded`, `notice_delivered`, `stop_requested`,
@@ -261,6 +272,9 @@ bounded page of stable event references. Return `next_cursor` and `has_more`;
 never silently truncate. A cursor binds engagement ID, sequence and event digest.
 All published knowledge remains readable to the lead/reviewers and scoped workers;
 private runtime histories and secrets are excluded. Delivery notices are hints.
+Status collection summaries are bounded and disclose total counts and truncation.
+The cursor-paged event stream carries the complete publication bodies and artifact
+references, with a byte limit as well as an event count limit.
 
 `claim` is an authenticated mutation with request ID and expected revision. Select
 the highest-priority eligible ready task, stable creation order for ties; one

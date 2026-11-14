@@ -10,9 +10,9 @@ This record separates implementation from observed integration and research resu
 | Unit | State | Required evidence |
 | --- | --- | --- |
 | M0 contracts and failure cases | Complete design checkpoint | ADR 0014, concrete v2 contract, native API findings and failure-first scenarios below |
-| M1 one state owner | Not started | Signed authority, one journal, public workflow, preserved v1 readers |
-| M2 runtimes and team | Not started | Codex/OMP control and tools, authenticated workers, queue and revocation |
-| M3 environments | Not started | Source/binary/application/combined setup; local and SSH resource enforcement |
+| M1 one state owner | Authority and journal implemented; integration pending | Signed authority, one journal, public workflow, preserved v1 readers |
+| M2 runtimes and team | Adapters and team controls in progress | Codex/OMP control and tools, authenticated workers, queue and revocation |
+| M3 environments | Environment and network controls in progress | Source/binary/application/combined setup; local and SSH resource enforcement |
 | M4 research evidence and recovery | Not started | Independent measurement review, review obligations, replacement and closeout |
 | M5 accounting and long operation | Not started | Shared accounting, restart, no implicit deadline and sustained harmless soak |
 | M6 delivery | Not started | Install/inspect/examples/guide/export/methodology/CI and operator handoff |
@@ -77,6 +77,19 @@ M0 structural conformance passed **900 checks, zero failures** using
 `/tmp/oslit-implementation/m0-conformance.log`. `git diff --check` and the root
 instruction mirror passed. Code cleanup does not apply to this documentation
 checkpoint; no production code changed.
+
+M1 input validation passed 61 local failure-first cases. The journal/facade passed
+six composite team scenarios with simulated workers, and the preserved v1 driver
+passed its 18 existing cases. Independent fixed-snapshot review then found eight
+controller defects in ownership, directory separation, crash publication, receipt
+identity/recovery, status bounds and retries. A separate eight-scenario E2E check
+failed on that snapshot before fixes and passed afterward. Its crash case exits an
+owned subprocess immediately after the event-directory fsync and reopens the
+journal through the public CLI. Follow-up review added a ninth scenario: a late
+receipt must preserve previously observed usage before releasing its reservation.
+It failed before the fix and passed afterward. These results establish local controller behavior,
+not live runtime containment or provider execution. Run/resume remains explicitly
+blocked until runtime/environment integration is complete.
 
 Failure scenarios are specified before implementation. New checks exercise the
 public CLI or the actual runtime/environment boundary and save commands, inputs,

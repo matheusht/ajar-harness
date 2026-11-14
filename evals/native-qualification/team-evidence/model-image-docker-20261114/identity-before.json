@@ -1,0 +1,112 @@
+{
+  "status": "failed",
+  "classification": "synthetic_hosted_driver",
+  "checks": [
+    {
+      "name": "codex",
+      "passed": true
+    },
+    {
+      "name": "omp",
+      "passed": true
+    },
+    {
+      "name": "non-linux",
+      "passed": true
+    },
+    {
+      "name": "host-platform",
+      "passed": true
+    },
+    {
+      "name": "base-tag",
+      "passed": true
+    },
+    {
+      "name": "base-platform",
+      "passed": true
+    },
+    {
+      "name": "existing-directory",
+      "passed": true
+    },
+    {
+      "name": "install-failure",
+      "passed": true
+    },
+    {
+      "name": "build-failure",
+      "passed": true
+    },
+    {
+      "name": "build-response-lost",
+      "passed": true
+    },
+    {
+      "name": "build-response-lost-untagged",
+      "passed": false,
+      "error": "{'kind': 'model-image-docker-e2e-v1', 'classification': 'actual_docker_model_packaging', 'status': 'failed', 'checks': [{'name': 'native Linux host matches requested architecture', 'passed': True}, {'name': 'runtime and local Docker endpoint are explicit', 'passed': True}, {'name': 'base is a registry digest', 'passed': True}, {'name': 'artifact directory is new and canonical', 'passed': True}, {'name': 'daemon reports an identity', 'passed': True}, {'name': 'installed base has the exact digest and platform', 'passed': True}, {'name': 'production context installer completed', 'passed': True}, {'name': 'retained executable comes from the prepared receipt', 'passed': True}], 'provider_calls': 0, 'native_execution': 'not_run', 'identity': {'nonce': 'f7620ff4bc22407aa6801954b675e9b1', 'tag': 'oslit-model-check:f7620ff4bc22407aa6801954b675e9b1', 'probe_name': 'oslit-model-probe-f7620ff4bc22407aa6801954b675e9b1', 'directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/build-response-lost-untagged/artifacts', 'endpoint': 'unix:///fixture.sock', 'daemon_id': 'owned-daemon', 'base_id': 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'base_image': 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'platform': 'linux/amd64'}, 'commands': [{'arguments': ['info', '--format', '{{.ID}}'], 'returncode': 0}, {'arguments': ['version', '--format', '{{json .}}'], 'returncode': 0}, {'arguments': ['image', 'inspect', 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], 'returncode': 0}, {'arguments': ['image', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['container', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['build', '--pull=false', '--network', 'none', '--platform', 'linux/amd64', '--tag', 'oslit-model-check:f7620ff4bc22407aa6801954b675e9b1', '--label', 'io.oslit.model-image-fixture=f7620ff4bc22407aa6801954b675e9b1', '--iidfile', '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/build-response-lost-untagged/artifacts/image-id', '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/build-response-lost-untagged/artifacts/context'], 'returncode': 1, 'error': ''}, {'arguments': ['info', '--format', '{{.ID}}'], 'returncode': 0}, {'arguments': ['image', 'inspect', 'oslit-model-check:f7620ff4bc22407aa6801954b675e9b1'], 'returncode': 1}, {'arguments': ['container', 'inspect', 'oslit-model-probe-f7620ff4bc22407aa6801954b675e9b1'], 'returncode': 1}, {'arguments': ['image', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['container', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}], 'docker_version': {'Client': {'Version': 'synthetic'}, 'Server': {'Version': 'synthetic'}}, 'installation': {'kind': 'native-model-image-context-receipt-v1', 'status': 'prepared', 'runtime': 'codex', 'platform': 'linux/amd64', 'runtime_manifest': {'bin/model': {'sha256': 'sha256:f223ea39d198c7e28c67db8ccf528535908b26359f66cdc948eadcbdc67b2565', 'size': 17, 'mode': 365}, 'engagement_network_bridge.py': {'sha256': 'sha256:682fbae20f3428bcec4c117c57bea18d438c4758d972909b41dbe22884e0d6b8', 'size': 5, 'mode': 292}, 'native_runtime_bootstrap.py': {'sha256': 'sha256:333c04dd151a2a6831c039cb9a651df29198be8a04e16ce861d4b6a34a11c954', 'size': 9, 'mode': 292}, 'bin/bun': {'sha256': 'sha256:d64cccad12aaaaac4a56402db4e533723bb31ad004f3d635d4c8f3d5b3f294b5', 'size': 15, 'mode': 365}, 'native_runtime_codex_exec.mjs': {'sha256': 'sha256:17f29b073143d8cd97b5bbe492bdeffec1c5fee55cc1fe2112c8b9335f8b6121', 'size': 6, 'mode': 292}}, 'execution_verified': False, 'base_image': 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'profile_fields': {'executable': {'path': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/build-response-lost-untagged/artifacts/context/runtime/bin/model', 'sha256': 'sha256:f223ea39d198c7e28c67db8ccf528535908b26359f66cdc948eadcbdc67b2565'}}}, 'cleanup': {'status': 'clean', 'removed': [], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/build-response-lost-untagged/artifacts'}, 'error': 'RuntimeError: docker_command_failed:build', 'source_sha256': 'sha256:443c65a353a99c60460914c37f4dfa1d2c0ea855237da66b281612d92ed7619d'}"
+    },
+    {
+      "name": "iid-mismatch",
+      "passed": false,
+      "error": "{'kind': 'model-image-docker-e2e-v1', 'classification': 'actual_docker_model_packaging', 'status': 'failed', 'checks': [{'name': 'native Linux host matches requested architecture', 'passed': True}, {'name': 'runtime and local Docker endpoint are explicit', 'passed': True}, {'name': 'base is a registry digest', 'passed': True}, {'name': 'artifact directory is new and canonical', 'passed': True}, {'name': 'daemon reports an identity', 'passed': True}, {'name': 'installed base has the exact digest and platform', 'passed': True}, {'name': 'production context installer completed', 'passed': True}, {'name': 'retained executable comes from the prepared receipt', 'passed': True}, {'name': 'built image has exact fresh identity and ownership', 'passed': False}], 'provider_calls': 0, 'native_execution': 'not_run', 'identity': {'nonce': 'd77d195435bf4292bc075bb8074cafa4', 'tag': 'oslit-model-check:d77d195435bf4292bc075bb8074cafa4', 'probe_name': 'oslit-model-probe-d77d195435bf4292bc075bb8074cafa4', 'directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/iid-mismatch/artifacts', 'endpoint': 'unix:///fixture.sock', 'daemon_id': 'owned-daemon', 'base_id': 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'base_image': 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'platform': 'linux/amd64'}, 'commands': [{'arguments': ['info', '--format', '{{.ID}}'], 'returncode': 0}, {'arguments': ['version', '--format', '{{json .}}'], 'returncode': 0}, {'arguments': ['image', 'inspect', 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], 'returncode': 0}, {'arguments': ['image', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['container', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['build', '--pull=false', '--network', 'none', '--platform', 'linux/amd64', '--tag', 'oslit-model-check:d77d195435bf4292bc075bb8074cafa4', '--label', 'io.oslit.model-image-fixture=d77d195435bf4292bc075bb8074cafa4', '--iidfile', '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/iid-mismatch/artifacts/image-id', '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/iid-mismatch/artifacts/context'], 'returncode': 0}, {'arguments': ['image', 'inspect', 'oslit-model-check:d77d195435bf4292bc075bb8074cafa4'], 'returncode': 0}, {'arguments': ['info', '--format', '{{.ID}}'], 'returncode': 0}, {'arguments': ['image', 'inspect', 'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'], 'returncode': 1}, {'arguments': ['container', 'inspect', 'oslit-model-probe-d77d195435bf4292bc075bb8074cafa4'], 'returncode': 1}, {'arguments': ['image', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}, {'arguments': ['container', 'ls', '--all', '--quiet', '--no-trunc'], 'returncode': 0}], 'docker_version': {'Client': {'Version': 'synthetic'}, 'Server': {'Version': 'synthetic'}}, 'installation': {'kind': 'native-model-image-context-receipt-v1', 'status': 'prepared', 'runtime': 'codex', 'platform': 'linux/amd64', 'runtime_manifest': {'bin/model': {'sha256': 'sha256:f223ea39d198c7e28c67db8ccf528535908b26359f66cdc948eadcbdc67b2565', 'size': 17, 'mode': 365}, 'engagement_network_bridge.py': {'sha256': 'sha256:682fbae20f3428bcec4c117c57bea18d438c4758d972909b41dbe22884e0d6b8', 'size': 5, 'mode': 292}, 'native_runtime_bootstrap.py': {'sha256': 'sha256:333c04dd151a2a6831c039cb9a651df29198be8a04e16ce861d4b6a34a11c954', 'size': 9, 'mode': 292}, 'bin/bun': {'sha256': 'sha256:d64cccad12aaaaac4a56402db4e533723bb31ad004f3d635d4c8f3d5b3f294b5', 'size': 15, 'mode': 365}, 'native_runtime_codex_exec.mjs': {'sha256': 'sha256:17f29b073143d8cd97b5bbe492bdeffec1c5fee55cc1fe2112c8b9335f8b6121', 'size': 6, 'mode': 292}}, 'execution_verified': False, 'base_image': 'python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'profile_fields': {'executable': {'path': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/iid-mismatch/artifacts/context/runtime/bin/model', 'sha256': 'sha256:f223ea39d198c7e28c67db8ccf528535908b26359f66cdc948eadcbdc67b2565'}}}, 'cleanup': {'status': 'clean', 'removed': [], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-joadsmja/iid-mismatch/artifacts'}, 'error': 'RuntimeError: built image has exact fresh identity and ownership', 'source_sha256': 'sha256:443c65a353a99c60460914c37f4dfa1d2c0ea855237da66b281612d92ed7619d'}"
+    },
+    {
+      "name": "build-timeout",
+      "passed": true
+    },
+    {
+      "name": "image-label",
+      "passed": true
+    },
+    {
+      "name": "image-platform",
+      "passed": true
+    },
+    {
+      "name": "inherited-volume",
+      "passed": true
+    },
+    {
+      "name": "create-response-lost",
+      "passed": true
+    },
+    {
+      "name": "probe-label",
+      "passed": true
+    },
+    {
+      "name": "daemon-change",
+      "passed": true
+    },
+    {
+      "name": "changed-file",
+      "passed": true
+    },
+    {
+      "name": "missing-file",
+      "passed": true
+    },
+    {
+      "name": "extra-file",
+      "passed": true
+    },
+    {
+      "name": "mode",
+      "passed": true
+    },
+    {
+      "name": "owner",
+      "passed": true
+    },
+    {
+      "name": "link",
+      "passed": true
+    }
+  ],
+  "actual_docker_calls": 0,
+  "binary_downloads": 0,
+  "native_execution": "not_run",
+  "source_sha256": "sha256:443c65a353a99c60460914c37f4dfa1d2c0ea855237da66b281612d92ed7619d"
+}

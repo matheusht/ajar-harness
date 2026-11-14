@@ -1,0 +1,27 @@
+{
+  "kind": "model-image-docker-e2e-v1",
+  "classification": "actual_docker_model_packaging",
+  "status": "failed",
+  "checks": [
+    {
+      "name": "native Linux host matches requested architecture",
+      "passed": false
+    }
+  ],
+  "provider_calls": 0,
+  "native_execution": "not_run",
+  "identity": {
+    "nonce": "ca2668d7b7ce4d36a5c9e7da79da2639",
+    "tag": "oslit-model-check:ca2668d7b7ce4d36a5c9e7da79da2639",
+    "probe_name": "oslit-model-probe-ca2668d7b7ce4d36a5c9e7da79da2639",
+    "directory": "/tmp/oslit-implementation/model-image-nonlinux-artifacts",
+    "endpoint": "unix:///var/run/docker.sock"
+  },
+  "cleanup": {
+    "status": "clean",
+    "removed": [],
+    "retained_directory": "/tmp/oslit-implementation/model-image-nonlinux-artifacts"
+  },
+  "error": "RuntimeError: native Linux host matches requested architecture",
+  "source_sha256": "sha256:76b27313c9228dadf672d5971bb9eddf51bec29ef8ed2107650622f8f7102a79"
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "model-image-docker-driver-evidence-v1",
+  "base_commit": "6c212a757846bd078ec2f22a0c2da9fd82fcd3e8",
+  "classification": "synthetic_driver_and_nonlinux_refusal_only",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_model_image_docker_e2e.py": "sha256:76b27313c9228dadf672d5971bb9eddf51bec29ef8ed2107650622f8f7102a79",
+    "evals/native-qualification/smoke/check_model_image_docker_fixture_e2e.py": "sha256:55886e290bd0dd305ea743ceb221b6123f78267135535080f213ad6cc01549d9",
+    "tools/install_native_tools.py": "sha256:126d35f3285166d471f8ade1070d3aca1795d0366b4de6cbc14de7a16cd8c944",
+    "evals/native-qualification/team-evidence/model-image-docker-20261114/before.json": "sha256:a46eb61588d7e370d8be6964e1a14343980ac5c136ef2126d438bfa1b7dc034c",
+    "evals/native-qualification/team-evidence/model-image-docker-20261114/identity-before.json": "sha256:4065299f7cd36e1bac30d4955dcc0541c5f09cc5777c84e9addf894bc4ec13b6",
+    "evals/native-qualification/team-evidence/model-image-docker-20261114/after.json": "sha256:93d063fbcdac1435e33ac39347da42fe6867e56857262c1f9d84b56f30c1faf7",
+    "evals/native-qualification/team-evidence/model-image-docker-20261114/nonlinux-refusal.json": "sha256:1573354ab3deaf872cfa2bc899a27461485e927f1b56aee53fbb556e0aba9be1",
+    "evals/native-qualification/team-evidence/model-image-docker-20261114/admission-before.json": "sha256:4d6ca9a22637159f55a26e764a73ec198df1a78abca210c11ea6b80f9dfc7048"
+  },
+  "actual_docker_calls": 0,
+  "binary_downloads": 0,
+  "native_execution": "not_run",
+  "provider_calls": 0
+}

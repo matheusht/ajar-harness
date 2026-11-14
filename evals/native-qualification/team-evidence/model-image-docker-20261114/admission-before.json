@@ -1,0 +1,134 @@
+{
+  "status": "failed",
+  "classification": "synthetic_hosted_driver",
+  "checks": [
+    {
+      "name": "codex",
+      "passed": true
+    },
+    {
+      "name": "omp",
+      "passed": true
+    },
+    {
+      "name": "non-linux",
+      "passed": true
+    },
+    {
+      "name": "host-platform",
+      "passed": true
+    },
+    {
+      "name": "base-tag",
+      "passed": true
+    },
+    {
+      "name": "base-platform",
+      "passed": true
+    },
+    {
+      "name": "base-onbuild",
+      "passed": false,
+      "error": "{\"status\": \"passed\", \"output\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/base-onbuild/result.json\"}\n"
+    },
+    {
+      "name": "base-volume",
+      "passed": false,
+      "error": "{\"status\": \"passed\", \"output\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/base-volume/result.json\"}\n"
+    },
+    {
+      "name": "base-healthcheck",
+      "passed": false,
+      "error": "{\"status\": \"passed\", \"output\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/base-healthcheck/result.json\"}\n"
+    },
+    {
+      "name": "base-port",
+      "passed": false,
+      "error": "{\"status\": \"passed\", \"output\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/base-port/result.json\"}\n"
+    },
+    {
+      "name": "existing-directory",
+      "passed": true
+    },
+    {
+      "name": "install-failure",
+      "passed": true
+    },
+    {
+      "name": "build-failure",
+      "passed": false,
+      "error": "{'status': 'failed', 'error': 'RuntimeError: docker_command_failed:build', 'cleanup': {'status': 'clean', 'removed': [], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/build-failure/artifacts'}}"
+    },
+    {
+      "name": "build-response-lost",
+      "passed": false,
+      "error": "{'status': 'failed', 'error': 'RuntimeError: docker_command_failed:build', 'cleanup': {'status': 'clean', 'removed': ['sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/build-response-lost/artifacts'}}"
+    },
+    {
+      "name": "build-response-lost-untagged",
+      "passed": false,
+      "error": "{'status': 'failed', 'error': 'RuntimeError: docker_command_failed:build', 'cleanup': {'status': 'clean', 'removed': ['sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/build-response-lost-untagged/artifacts'}}"
+    },
+    {
+      "name": "iid-mismatch",
+      "passed": true
+    },
+    {
+      "name": "build-timeout",
+      "passed": true
+    },
+    {
+      "name": "image-label",
+      "passed": true
+    },
+    {
+      "name": "image-platform",
+      "passed": true
+    },
+    {
+      "name": "inherited-volume",
+      "passed": true
+    },
+    {
+      "name": "create-response-lost",
+      "passed": false,
+      "error": "{'status': 'failed', 'error': 'RuntimeError: docker_command_failed:container', 'cleanup': {'status': 'clean', 'removed': ['cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], 'retained_directory': '/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/model-image-driver-fixture-e78q9gkm/create-response-lost/artifacts'}}"
+    },
+    {
+      "name": "probe-label",
+      "passed": true
+    },
+    {
+      "name": "daemon-change",
+      "passed": true
+    },
+    {
+      "name": "changed-file",
+      "passed": true
+    },
+    {
+      "name": "missing-file",
+      "passed": true
+    },
+    {
+      "name": "extra-file",
+      "passed": true
+    },
+    {
+      "name": "mode",
+      "passed": true
+    },
+    {
+      "name": "owner",
+      "passed": true
+    },
+    {
+      "name": "link",
+      "passed": true
+    }
+  ],
+  "actual_docker_calls": 0,
+  "binary_downloads": 0,
+  "native_execution": "not_run",
+  "source_sha256": "sha256:1a279e67a50367f5653f47b86fb97b446a0de0670f39720f8649c1264bc480dc"
+}

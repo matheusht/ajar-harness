@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "classification": "synthetic_hosted_driver",
+  "checks": [
+    {
+      "name": "driver exists",
+      "passed": false,
+      "error": "check_model_image_docker_e2e.py is not implemented"
+    }
+  ]
+}

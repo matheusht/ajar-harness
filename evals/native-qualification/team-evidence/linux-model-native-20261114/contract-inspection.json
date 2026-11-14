@@ -1,0 +1,23 @@
+{
+  "classification": "synthetic_signed_input_freeze_only",
+  "native_execution": false,
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "checks": [
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "initialized_workers": [
+        "lead-1"
+      ]
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "initialized_workers": [
+        "lead-1"
+      ]
+    }
+  ],
+  "source_sha256": "sha256:a2112a7352e8966d3f3ff64729420003b8c6b923af134b4ea7f940fb86b8792e"
+}

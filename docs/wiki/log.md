@@ -899,3 +899,14 @@ This establishes transport composition, while separate remote-host/partition
 behavior, joined native execution and research acceptance remain unverified.
 The current implementation and delivery pages now distinguish these boundaries.
 Documentation/evidence only; no additional runtime or conformance run.
+
+## [2026-11-14] implement | Separate Linux model owner
+
+The [Linux model-host unit](../../evals/native-qualification/team-evidence/m2-linux-model-host-20261114/README.md)
+at `cceac74c` adds a signed private model container, exact owner receipts,
+renewal/recovery and a frozen OMP model catalog. It reuses the environment owner
+and provider gateway while preserving the separate target/tool laboratory and
+existing Darwin route. Independent fixed-patch review and all 14 contained
+scenario families passed. Docker/namespace facts are simulated in these checks;
+actual pinned Linux native execution remains unverified. The complete M0–M6
+assignment and the operator's research acceptance remain open.

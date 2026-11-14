@@ -69,17 +69,20 @@ peers; the joined Docker workflow remains unverified.
 | --- | --- |
 | M0 — contracts | Design/contracts and failure scenarios have local review; their assumptions still need the integrated execution evidence required by the plan. |
 | M1 — one state owner | Final public workflow integration must preserve sole ownership, revocation and exact cleanup across the combined runtime/environment path. |
-| M2 — runtimes/team | Actual native tools have local evidence, but the full joined protected workflow and Linux model-host boundary remain unqualified. Linux model-host execution is currently unsupported. |
+| M2 — runtimes/team | The optional Linux model-container owner and frozen OMP catalog are implemented at `cceac74c`; [14 contained scenario families](../../evals/native-qualification/team-evidence/m2-linux-model-host-20261114/README.md) passed independent replay. Actual pinned Linux native startup and the full joined protected workflow remain unverified. |
 | M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual loopback SSH passed 26 checks at `1ec66d6d`. Separate remote-host/partition checks, the joined workflow, complete setup repair and remote application reset/replay remain open. |
 | M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence; the joined native workflow remains unverified. Remote application reset/replay, fresh impact-artifact approval and an artifact cleanup ledger remain open. Existing operator review and artifact gates remain active. |
 | M5 — long operation/usage | No actual multiday soak or sustained host restart result; provider request totals, billed spend and monetary caps remain unavailable. Report missing usage dimensions explicitly. |
 | M6 — delivery | Final integrated verification, hosted CI and an operator-install-to-cleanup release-candidate handoff remain open. Broader caller retirement waits for parity evidence. |
 
-The protected model owner currently uses macOS `sandbox-exec` and Darwin process
-birth identity. A Linux tool container is a different boundary. Native tools
-require the owned Docker environment; the candidate provides no uncontained host
-tool fallback. The local macOS listener/network check is not a proof of Docker
-network isolation.
+The protected model owner supports the existing macOS `sandbox-exec` route and
+an optional signed Linux Docker model host. The Linux implementation composes a
+second owned container, separate from the target/tool lab, and binds its receipt
+to the host, boot, container, guardian process and cgroup. Configuration and the
+optional OMP model catalog are frozen; credentials cross a private input pipe
+after image/helper verification. The contained checks use simulated Docker and
+namespace observations with actual bootstrap/protocol subprocesses. Native tools
+still require the owned environment; there is no uncontained host tool fallback.
 
 The development Docker endpoint did not provide usable live verification, and the
 operator reported no disposable Linux/SSH host. Existing services and data were
@@ -90,8 +93,8 @@ A later disposable GitHub-hosted Ubuntu run supplied actual Docker lifecycle
 evidence, reproduced watcher loss and verified its container-local fix. It did not use
 the operator's development daemon or a separate SSH host. Keep this bounded
 execution proof, including the later loopback SSH run, separate from simulated
-transport checks and from the still
-unimplemented Linux model-host boundary.
+transport checks and from the newly implemented Linux model-host boundary,
+which still needs actual native/container execution evidence.
 
 ## Repeatable portable checks
 

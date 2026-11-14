@@ -18,7 +18,7 @@ subsequently connected to the real runner by the public CLI delivery unit.
 | --- | --- | --- |
 | M0 contracts and failure cases | Design checkpoint reviewed; concrete contracts and runnable failure scenarios retained | Validate assumptions through the integrated workflow required by the plan |
 | M1 one state owner | Signed authority, journal, public workflow and preserved v1 readers implemented | Final joined sole-owner/recovery/cleanup verification |
-| M2 runtimes and team | Codex/OMP adapters, native tools and team controls implemented with local native and simulated evidence | Complete protected workflow qualification; Linux model-host support |
+| M2 runtimes and team | Codex/OMP adapters, native tools, team controls and optional Linux model-container ownership implemented with bounded evidence | Actual pinned Linux native execution and complete protected workflow qualification |
 | M3 environments | All access descriptors, environment/network controls and target account binding implemented; hosted Docker, watcher-loss and loopback SSH checks passed | Separate remote-host/partition verification, joined workflow and application reset/replay |
 | M4 research evidence and recovery | Evidence/review, declared prior-rung admission, protected capture, obligations, replacement and closeout mechanics implemented and locally checked | Joined execution proof and impact-artifact approval/cleanup controls; existing gates remain active |
 | M5 accounting and long operation | Shared accounting, delayed settlement, optional deadline and renewable-worker mechanics implemented | Actual sustained operation/restart and provider request/billing completeness |
@@ -55,8 +55,8 @@ workflow governs this assignment. No shared worktree reset is permitted.
   are unsupported until complete observation and enforcement are demonstrated.
 - Real Docker probes timed out on the development Mac. No daemon restart or
   existing-resource cleanup was attempted. The user confirmed no disposable
-  Linux/SSH host is currently available. SSH integration evidence therefore
-  remains unavailable; code and local checks can proceed independently.
+  Linux/SSH host was available at M0. The later hosted loopback SSH check below
+  supplies bounded transport evidence; a separate remote host remains unavailable.
 - The development volume has approximately 4.6 GiB free. No new VM or large image
   was installed. Existing runtimes and user data remain protected.
 
@@ -87,9 +87,15 @@ retains the startup failure and corrected fixture account policy. This verifies
 OpenSSH transport composition; it does not replace a separate remote host or
 network-partition test.
 The [saved manifest](../../evals/native-qualification/team-evidence/real-docker-20261114/hosted-manifest.json)
-records exact source hashes and run links. Missing Linux model-host support remains
-an implementation task; the hosted runner is a path to verifying it, not proof
-that it already exists.
+records exact source hashes and run links.
+
+The Linux model-host implementation at `cceac74c` privately composes a separate
+owned container with signed limits, exact process/cgroup receipts, private
+credential delivery, frozen configuration and an optional OMP model catalog.
+Independent replay passed all 14
+[contained scenario families](../../evals/native-qualification/team-evidence/m2-linux-model-host-20261114/README.md).
+Those scenarios simulate Docker and namespace facts; actual Linux native startup,
+network containment and recovery remain for the hosted native workflow.
 
 ## Historical verification checkpoints
 

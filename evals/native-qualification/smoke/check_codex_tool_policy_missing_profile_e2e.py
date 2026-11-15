@@ -115,24 +115,27 @@ def main():
                 state = info.get('State', {}) if isinstance(info, dict) else {}
                 state_error = state.get('Error', '') if isinstance(state, dict) else ''
                 state_error_apparmor = isinstance(state_error, str) and 'apparmor' in state_error.lower()
-                state_error_profile = isinstance(state_error, str) and candidate.APPARMOR_PROFILE in state_error
-                startup = result.get('startup_failure', {})
-                profile_refusal = ((state_error_apparmor and state_error_profile)
-                    or (startup.get('message_mentions_apparmor') and startup.get('message_mentions_profile')))
                 host = info.get('HostConfig', {}) if isinstance(info, dict) else {}
                 security = host.get('SecurityOpt') or []
+                host_apparmor_options = [value[len('apparmor='):] for value in security
+                    if isinstance(value, str) and value.startswith('apparmor=')]
+                configured_profile_exact = (host_apparmor_options == [candidate.APPARMOR_PROFILE]
+                    and info.get('AppArmorProfile') == candidate.APPARMOR_PROFILE)
+                nonready_state = (state.get('Running') is False
+                    and state.get('Status') in ('created', 'exited', 'dead'))
+                profile_refusal = (absent and state_error_apparmor
+                    and configured_profile_exact and nonready_state)
                 result['start_readback'] = {'inspect_succeeded': inspect.returncode == 0,
                     'state_status': state.get('Status') if state.get('Status') in (
                         'created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead') else None,
                     'state_running': state.get('Running') if type(state.get('Running')) is bool else None,
                     'state_error_present': bool(state_error),
                     'state_error_mentions_apparmor': state_error_apparmor,
-                    'state_error_mentions_profile': state_error_profile,
-                    'startup_error_mentions_apparmor': startup.get('message_mentions_apparmor', False),
-                    'startup_error_mentions_profile': startup.get('message_mentions_profile', False),
+                    'host_profile_absent_before_start': absent,
+                    'configured_profile_exact': configured_profile_exact,
+                    'nonready_state': nonready_state,
                     'apparmor_profile': info.get('AppArmorProfile'),
-                    'host_apparmor_options': [value[len('apparmor='):] for value in security
-                        if isinstance(value, str) and value.startswith('apparmor=')],
+                    'host_apparmor_options': host_apparmor_options,
                     'host_security_option_names': sorted('no-new-privileges' if value in (
                         'no-new-privileges', 'no-new-privileges=true', 'no-new-privileges:true')
                         else 'apparmor' if value.startswith('apparmor=')
@@ -140,9 +143,11 @@ def main():
                         for value in security if isinstance(value, str)),
                     'cap_add': sorted(host.get('CapAdd') or []),
                     'cap_drop': sorted(host.get('CapDrop') or [])}
-                check('Docker recorded missing named AppArmor profile as the start refusal',
+                check('Docker AppArmor start refusal matches the exact configured profile and stayed nonready',
                       profile_refusal)
-                result['refusal_evidence'] = {'start_error_mentions_apparmor': profile_refusal,
+                result['refusal_evidence'] = {'state_error_mentions_apparmor': state_error_apparmor,
+                    'configured_profile_exact': configured_profile_exact,
+                    'host_profile_absent_before_start': absent, 'nonready_state': nonready_state,
                     'ready_environment_returned': False}
             else:
                 check('setup refusal is the production environment creation refusal',

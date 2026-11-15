@@ -87,10 +87,23 @@ for line in sys.stdin:
    seq+=1;session='session-'+str(seq);result={'thread':{'id':session,'turns':[]},'model':a['model'],'modelProvider':a['modelProvider']}
   elif op in ['thread/resume','thread/read']:result={'thread':{'id':a['threadId'],'turns':[]},'model':'gpt-6.1-sol','modelProvider':'openai'}
   elif op=='turn/start':result={'turn':{'id':'turn-1','status':'inProgress'}}
-  if op=='turn/start' and a['input'][0]['text']=='ordinary':
+  prompt=a['input'][0]['text'] if op=='turn/start' else ''
+  if op=='turn/start' and prompt=='ordinary':
    emit({'method':'turn/started','params':{'threadId':session,'turn':{'id':'turn-1'}}})
    emit({'id':'call-early','method':'item/tool/call','params':{'threadId':session,'turnId':'turn-1','callId':'tool-1','tool':'engagement_status','arguments':{}}})
+  if op=='turn/start' and prompt.startswith('admission|'):
+   _,marker,requests=prompt.split('|',2)
+   try:
+    with open(requests) as f:count=int(f.read())
+   except FileNotFoundError:count=0
+   with open(requests,'w') as f:f.write(str(count+1))
+   import time
+   deadline=time.monotonic()+10
+   while not __import__('os').path.exists(marker) and time.monotonic()<deadline:time.sleep(.005)
+   if not __import__('os').path.exists(marker):sys.exit(17)
   emit({'id':ident,'result':result})
+  if op=='turn/start' and prompt.startswith('admission|'):
+   emit({'method':'turn/completed','params':{'threadId':session,'turn':{'id':'turn-1','status':'completed'}}})
   if op=='turn/start':
    prompt=a['input'][0]['text']
    if prompt=='malformed':print('{bad',flush=True)
@@ -135,7 +148,7 @@ for line in sys.stdin:
 
 def controlled(root, kind):
     module = importlib.import_module('native_runtime_' + kind)
-    from native_runtime_transport import HostOperation, RuntimeError
+    from native_runtime_transport import RuntimeError
     peer = root / (kind + '-peer')
     peer.write_text(PEER.replace('KIND', repr(kind)))
     peer.chmod(0o700)
@@ -237,6 +250,125 @@ def controlled(root, kind):
                        'redaction', 'reasoning_omission',
                        'malformed_frame', 'oversized_frame', 'pin_mismatch', 'process_exit'],
             'events': events}
+
+
+def codex_executor_admission(root, capture_red=False):
+    """A turn response waits for a background executor send through the dispatch guard."""
+    module = importlib.import_module('native_runtime_codex')
+    from native_runtime_transport import HostOperation, RuntimeError
+    peer = root / 'codex-admission-peer'
+    peer.write_text(PEER.replace('KIND', repr('codex')))
+    peer.chmod(0o700)
+    config = profile(root, 'codex', peer)
+    lock = threading.RLock()
+    allowed = [True]
+    request_sent = threading.Event()
+    sent = threading.Event()
+    send_times = []
+    guard_state = threading.local()
+    turn_start_sends = [0]
+    wait_finished_at = []
+
+    @contextmanager
+    def guard():
+        if not allowed[0]:
+            raise RuntimeError('assignment_revoked')
+        with lock:
+            if not allowed[0]:
+                raise RuntimeError('assignment_revoked')
+            guard_state.depth = getattr(guard_state, 'depth', 0) + 1
+            try:
+                yield
+            finally:
+                guard_state.depth -= 1
+
+    def executor_send():
+        request_sent.wait(2)
+        try:
+            with guard():
+                send_times.append(time.monotonic())
+                marker.write_text('guarded')
+                sent.set()
+        except RuntimeError:
+            return
+
+    tools = [{'name': 'engagement_status', 'description': 'Read own assignment',
+              'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}}]
+    runtime = module.Runtime(config, root / 'codex-admission-state', root,
+                             host_tools=tools, host_call=lambda *_: None, dispatch_guard=guard)
+    marker, request_count = root / 'executor-admitted', root / 'peer-turn-start-count'
+    old_request = runtime.transport.request
+    old_send = runtime.transport.send
+
+    def send(value):
+        if value.get('method') == 'turn/start':
+            require(getattr(guard_state, 'depth', 0) > 0, 'turn/start send was not guarded')
+            turn_start_sends[0] += 1
+        old_send(value)
+        if value.get('method') == 'turn/start':
+            request_sent.set()
+
+    def bounded_request(operation, params=None, **kwargs):
+        if operation == 'turn/start':
+            kwargs['timeout'] = .5
+        try:
+            return old_request(operation, params, **kwargs)
+        finally:
+            if operation == 'turn/start':
+                wait_finished_at.append(time.monotonic())
+
+    runtime.transport.request = bounded_request
+    runtime.transport.send = send
+    outcome = 'passed'
+    try:
+        runtime.fresh()
+        worker = threading.Thread(target=executor_send, daemon=True)
+        worker.start()
+        prompt = f'admission|{marker}|{request_count}'
+        try:
+            runtime.invoke(prompt, 'executor-admission')
+        except RuntimeError as error:
+            outcome = str(error)
+        # The old implementation times out while its outer admission still owns the lock;
+        # its executor sender can enter only after the timeout unwinds.
+        if outcome != 'passed':
+            sent.wait(1)
+        else:
+            require(sent.wait(1), 'executor send did not pass the guard')
+        require(marker.exists() == sent.is_set(), 'executor send marker was not guarded')
+        worker.join(1)
+        require(not worker.is_alive(), 'background executor sender did not settle')
+        if outcome == 'passed':
+            require(send_times and send_times[0] < wait_finished_at[0],
+                    'executor admission did not release the native response wait')
+            runtime.observe(.1)
+            require(not runtime.active, 'controlled turn did not settle before revoked-send check')
+            allowed[0] = False
+            try:
+                runtime.invoke(prompt, 'revoked-executor-admission')
+                raise AssertionError('revoked request was dispatched')
+            except RuntimeError as error:
+                require(str(error) == 'assignment_revoked', 'revoked send had wrong refusal')
+            require(turn_start_sends[0] == 1, 'revoked turn/start reached the transport send')
+            require(request_count.read_text() == '1', 'revoked invocation reached native peer')
+        elif capture_red:
+            require(outcome == 'native_response_timeout', 'unexpected pre-fix failure: ' + outcome)
+            require(marker.exists() and sent.is_set(), 'executor send never proceeded after request wait released')
+            require(send_times[0] >= wait_finished_at[0],
+                    'executor send was not delayed until the response wait ended')
+        else:
+            raise AssertionError('executor admission blocked turn response: ' + outcome)
+    finally:
+        runtime.close()
+    if outcome != 'passed':
+        return {'runtime': 'codex', 'status': 'red_observed', 'error': outcome,
+                'checks': ['peer_waited_for_executor_send', 'turn_start_guarded', 'executor_send_guarded',
+                           'executor_send_after_response_wait_ended'],
+                'revoked_send': 'not_reached'}
+    return {'runtime': 'codex', 'status': 'passed', 'evidence': 'controlled_native_peer_and_guard',
+            'checks': ['peer_waited_for_executor_send', 'turn_start_guarded', 'executor_send_guarded',
+                       'turn_response_after_guard_release',
+                       'revoked_send_refused_before_peer']}
 
 
 def live(root, kind):
@@ -408,16 +540,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--live', action='store_true')
+    parser.add_argument('--capture-admission-red', action='store_true',
+                        help='expect and record the current Codex executor-admission timeout')
+    parser.add_argument('--admission-only', action='store_true',
+                        help='run only the controlled Codex executor-admission regression')
     parser.add_argument('--omp-sdk', type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='native-runtime-e2e-') as temporary:
         root = Path(temporary).resolve()
-        rows = [controlled(root, kind) for kind in ['codex', 'omp']]
-        if args.live:
-            rows.extend(live(root, kind) for kind in ['codex', 'omp'])
-        if args.omp_sdk:
-            rows.append(native_tools(root, args.omp_sdk))
-            rows.append(native_bridge(root, args.omp_sdk))
+        if args.admission_only:
+            rows = [codex_executor_admission(root, capture_red=args.capture_admission_red)]
+        else:
+            rows = [controlled(root, kind) for kind in ['codex', 'omp']]
+            rows.append(codex_executor_admission(root, capture_red=args.capture_admission_red))
+            if args.live:
+                rows.extend(live(root, kind) for kind in ['codex', 'omp'])
+            if args.omp_sdk:
+                rows.append(native_tools(root, args.omp_sdk))
+                rows.append(native_bridge(root, args.omp_sdk))
     result = {'kind': 'native-runtime-adapter-checks-v1', 'results': rows,
               'unverified': ['provider_inference', 'complete_worker_revocation', 'lab_isolation',
                              'durable_native_transcript_resume', 'multi_day_operation']}

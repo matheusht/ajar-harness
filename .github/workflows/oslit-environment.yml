@@ -26,6 +26,7 @@ on:
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
+      - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -69,6 +70,7 @@ on:
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
+      - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -153,6 +155,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Check Codex executor admission releases the response wait
+        if: matrix.runtime == 'codex'
+        run: |
+          python3 evals/native-qualification/smoke/check_native_runtime_adapters.py \
+            --admission-only \
+            --output "$RUNNER_TEMP/oslit-native-e2e-codex/admission.json"
       - name: Install the pinned base on this disposable runner
         run: |
           image=python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39

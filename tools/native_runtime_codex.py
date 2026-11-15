@@ -105,12 +105,14 @@ class Runtime(Session):
         with self._admission():
             self._begin(invocation_id, prompt)
             self.before = dict(self.totals.get(self.session_id, {}))
-            try:
-                result = self.transport.request('turn/start', {'threadId': self.session_id,
-                          'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]}, defer_events=True)
-            except Exception:
-                self._emit('unknown', reason='native_dispatch_not_settled')
-                raise
+        try:
+            # The reply may require an executor callback through the same admission lock.
+            result = self.transport.request('turn/start', {'threadId': self.session_id,
+                      'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]},
+                      defer_events=True, dispatch_guard=self._admission)
+        except Exception:
+            self._emit('unknown', reason='native_dispatch_not_settled')
+            raise
         try:
             turn = identifier(result.get('turn', {}).get('id'))
             if self.native_turn not in (None, turn):
@@ -126,9 +128,9 @@ class Runtime(Session):
         if not self.active or not self.native_turn:
             raise RuntimeError('native_invocation_not_active')
         message = text_content(message)
-        with self._admission():
-            self.transport.request('turn/steer', {'threadId': self.session_id, 'expectedTurnId': self.native_turn,
-                                                 'input': [{'type': 'text', 'text': message}]}, defer_events=True)
+        self.transport.request('turn/steer', {'threadId': self.session_id, 'expectedTurnId': self.native_turn,
+                                            'input': [{'type': 'text', 'text': message}]},
+                               defer_events=True, dispatch_guard=self._admission)
         return {'delivered': True, 'invocation_id': self.invocation_id}
 
     def interrupt(self):

@@ -7,7 +7,7 @@ A dispatch guard or successful interrupt is not evidence that those controls wor
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
@@ -272,11 +272,13 @@ class Transport:
                 self.on_event(frame)
         return True
 
-    def request(self, operation, params=None, *, request_id=None, timeout=15, defer_events=False):
+    def request(self, operation, params=None, *, request_id=None, timeout=15, defer_events=False,
+                dispatch_guard=None):
         request_id = request_id or self.next_id()
         value = {'id': request_id, 'type': operation, **(params or {})} if self.omp else {
             'jsonrpc': '2.0', 'id': request_id, 'method': operation, 'params': params or {}}
-        self.send(value)
+        with dispatch_guard() if dispatch_guard is not None else nullcontext():
+            self.send(value)
         deadline = time.monotonic() + timeout
         while request_id not in self.responses:
             remaining = deadline - time.monotonic()

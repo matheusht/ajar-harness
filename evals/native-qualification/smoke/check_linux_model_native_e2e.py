@@ -55,6 +55,24 @@ def diagnostic_transport(observations, known_secrets):
             self.observed_operation = operation
             try:
                 return super().request(operation, *args, **kwargs)
+            except Exception as error:
+                if (getattr(error, 'code', None) == 'native_response_timeout'
+                        and len(observations) < 8):
+                    allowed_methods = {'turn/started', 'turn/completed', 'turn/failed',
+                        'thread/tokenUsage/updated', 'item/started', 'item/completed',
+                        'item/tool/call', 'item/tool/callCompleted'}
+                    counts = {}
+                    for frame in self.deferred[:128]:
+                        method = frame.get('method') if isinstance(frame, dict) else None
+                        if method in allowed_methods:
+                            counts[method] = counts.get(method, 0) + 1
+                    observations.append({'operation_timeout': operation,
+                        'error': 'native_response_timeout',
+                        'deferred_event_count': len(self.deferred),
+                        'deferred_method_counts': counts,
+                        'queued_frame_count': self.frames.qsize(),
+                        'unmatched_response_count': len(self.responses)})
+                raise
             finally:
                 self.observed_operation = None
 

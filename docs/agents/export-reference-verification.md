@@ -12,7 +12,7 @@ engagement identity and revision to that replay. It does not start an engagement
 contact a target or model, repair records, or change bundle files.
 
 Use a private local directory owned by the current user, with the export's private
-file modes preserved. Links and escaped contract paths are rejected. Do not run
+file modes preserved. Links on inspected paths and escaped contract paths are rejected. Do not run
 against a directory that another process can change during verification.
 
 Exit 0 reports journal reference closure. Exit 1 reports a failed check without

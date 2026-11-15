@@ -176,7 +176,7 @@ def main():
                 'PATH=/usr/local/bin:/usr/bin:/bin', '/runtime/bin/model', '--version']
             assert owner.environment.calls[0][2] == 10
             assert result == {'omp_model_version_preflight': {'status': 'settled', 'returncode': 0,
-                'pinned_version_matches': True, 'pinned_version_line_present': True}}
+                'pinned_version_matches': True, 'pinned_version_line_present': True, 'output_category': 'expected_version'}}
         else:
             assert result == {}
         assert 'unpublished' not in str(result)
@@ -192,7 +192,11 @@ def main():
         row = result['omp_model_version_preflight']
         assert row['pinned_version_line_present'] is expected and row['pinned_version_matches'] is False
         assert 'unpublished' not in str(row)
-    print('passed: 31 offline diagnostic cases; no native or provider calls')
+    for output, expected in [('', 'empty'), ('\x1b[32momp v18.20.0\x1b[0m\n', 'expected_version'),
+                             ('1.4.4', 'other_numeric_version'), ('unpublished 18.20.0 detail', 'unrecognized'),
+                             ('18.20.0\n1.4.4', 'unrecognized')]:
+        assert driver.version_output_category(output) == expected
+    print('passed: 36 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

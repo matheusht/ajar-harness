@@ -83,12 +83,14 @@ def main():
         result = {}
         environment = Environment({'output': '1.4.4\n', 'status': 'settled', 'returncode': 0})
         def run_native(root, fixture, result):
+            result.update(controlled_provider_requests=0, external_provider_calls=0)
             return environment.launch_stdio(COMMAND)
-        fixture = SimpleNamespace(run_native=run_native)
+        fixture = SimpleNamespace(run_native=run_native, invoke=lambda *args: None)
         fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
                                       'research_environment': SimpleNamespace(Environment=Environment, subprocess=__import__('subprocess')),
-                                      'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object),
+                                      'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object, RuntimeError=RuntimeError),
+                                      'native_runtime_codex': SimpleNamespace(Runtime=object, RuntimeError=RuntimeError),
                                       'native_runtime_linux': SimpleNamespace(LinuxModelOwner=Owner)}):
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
@@ -277,7 +279,66 @@ def main():
     assert module.subprocess is original
     assert result['omp_model_stderr_categories'] == [{'markers':['enospc_marker'], 'bytes':180006, 'truncated':True, 'complete':True}]
     assert 'unpublished' not in str(result)
-    print('passed: 53 offline diagnostic cases; no native or provider calls')
+    for direct in (False, True):
+        invoked = []
+        class Runtime:
+            def invoke(self, *args):
+                invoked.append(args)
+        fixture = SimpleNamespace(invoke=lambda *args: invoked.append(args))
+        module = SimpleNamespace(Runtime=Runtime, RuntimeError=Failure)
+        original = fixture.invoke
+        result = {'controlled_provider_requests': 0, 'external_provider_calls': 0}
+        try:
+            with driver.startup_only(fixture, module, result):
+                if direct:
+                    module.Runtime().invoke('prompt')
+                else:
+                    fixture.invoke('prompt')
+        except Failure:
+            pass
+        else:
+            raise AssertionError('invocation was not stopped')
+        assert not invoked and fixture.invoke is original and module.Runtime is Runtime
+        assert result['native_startup_only'] == 'stopped_before_invocation'
+    try:
+        with driver.startup_only(fixture, module, {'controlled_provider_requests': 1}):
+            pass
+    except Failure:
+        pass
+    else:
+        raise AssertionError('nonzero provider count accepted')
+    for runtime in ('omp', 'codex'):
+        invoked = []
+        result = {}
+        fixture = SimpleNamespace(invoke=lambda *args: invoked.append(args))
+        def run_native(root, current, result):
+            result.update(controlled_provider_requests=0, external_provider_calls=0)
+            fixture.invoke('must-not-send')
+        fixture.run_native = run_native
+        fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
+        original = fixture.invoke
+        with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
+                'research_environment': SimpleNamespace(Environment=Environment, subprocess=subprocess),
+                'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object, RuntimeError=Failure),
+                'native_runtime_codex': SimpleNamespace(Runtime=object, RuntimeError=Failure),
+                'native_runtime_linux': SimpleNamespace(LinuxModelOwner=Owner)}):
+            try:
+                driver.main()
+            except Failure:
+                pass
+            else:
+                raise AssertionError('matrix runtime invoked provider')
+        assert not invoked and fixture.invoke is original and fixture.run_native is run_native
+    for counts in ({}, {'controlled_provider_requests':False,'external_provider_calls':0},
+                   {'controlled_provider_requests':0,'external_provider_calls':-1}):
+        try:
+            with driver.startup_only(fixture,module,counts):
+                pass
+        except Failure:
+            pass
+        else:
+            raise AssertionError('invalid provider counters accepted')
+    print('passed: 61 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

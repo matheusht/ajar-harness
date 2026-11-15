@@ -2,6 +2,7 @@
 """Run the existing native fixture with a bounded OMP loader observation."""
 from contextlib import contextmanager
 import json
+import re
 
 PROBES = (
     ('javascript', 'void 0'),
@@ -117,6 +118,22 @@ def observe_model_startup(runtime_module, result):
 
 
 
+
+def version_output_category(output):
+    if not output.strip():
+        return 'empty'
+    # Classify complete version lines only; never return captured native text.
+    plain = re.sub(r'\x1b\[[0-9;]*m', '', output)
+    versions = []
+    for line in plain.splitlines():
+        match = re.fullmatch(r'(?:omp(?: version)?[ \t]+)?v?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})', line.strip())
+        if match:
+            versions.append(match.group(1))
+    if len(versions) != 1:
+        return 'unrecognized'
+    return 'expected_version' if versions[0] == '18.20.0' else 'other_numeric_version'
+
+
 @contextmanager
 def observe_model_version(owner_class, result):
     original = owner_class.launch_model
@@ -131,7 +148,8 @@ def observe_model_version(owner_class, result):
             result['omp_model_version_preflight'] = {
                 'status': observation['status'], 'returncode': observation['returncode'],
                 'pinned_version_matches': observation['output'].strip() == '18.20.0',
-                'pinned_version_line_present': '18.20.0' in observation['output'].splitlines()}
+                'pinned_version_line_present': '18.20.0' in observation['output'].splitlines(),
+                'output_category': version_output_category(observation['output'])}
         return original(owner, command, public_environment, binding)
 
     owner_class.launch_model = launch

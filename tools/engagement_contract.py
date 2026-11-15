@@ -22,6 +22,7 @@ from operator_signature import verify_operator_signature_bytes
 INPUT_KIND = 'native-engagement-inputs-v2'
 SCOPE_KIND = 'native-engagement-scope-v2'
 SIGNATURE_NAMESPACE = 'llm-redteam-harness-native-engagement-v2'
+CODEX_TOOL_POLICY = 'docker-confined-v1'
 MAX_PUBLICATION_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_BYTES = 8 * 1024 * 1024 * 1024
 MAX_SOURCE_FILES = 200000
@@ -221,10 +222,12 @@ def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> b
             except UnicodeError:
                 raise ContractError('publication_invalid') from None
             break
+    sensitive_views = []
     for view in tuple(views):
         try:
             value = _decode(view)
         except ContractError:
+            sensitive_views.append(view)
             continue
         views.append(canonical(value))
         pending = [value]
@@ -232,13 +235,19 @@ def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> b
             item = pending.pop()
             if type(item) is str:
                 views.append(item.encode('utf-8'))
+                sensitive_views.append(item.encode('utf-8'))
             elif type(item) is list:
                 pending.extend(item)
             elif type(item) is dict:
                 pending.extend(item.values())
+                # OMP's exact public environment reference is not a credential value.
+                if item.get('apiKey') == 'OPENAI_API_KEY':
+                    del item['apiKey']
+        sensitive_views.append(canonical(value))
     for view in views:
-        _require(not detect_secret_classes(view) and not SENSITIVE_TEXT.search(view)
+        _require(not detect_secret_classes(view)
                  and not any(value in view for value in known_secrets), 'publication_secret')
+    _require(not any(SENSITIVE_TEXT.search(view) for view in sensitive_views), 'publication_secret')
     return data
 
 
@@ -428,7 +437,10 @@ def validate_model_host(host: dict) -> dict:
 def validate_environment_profile(profile: dict) -> dict:
     code = 'environment_profile_invalid'
     _object(profile, ('kind', 'transport', 'docker_binary', 'docker_endpoint', 'daemon_id',
-                      'image_id', 'platform', 'uid', 'gid', 'ssh'), code)
+                      'image_id', 'platform', 'uid', 'gid', 'ssh',
+                      *(('codex_tool_policy',) if isinstance(profile, dict) and 'codex_tool_policy' in profile else ())), code)
+    if 'codex_tool_policy' in profile:
+        _require(profile['codex_tool_policy'] == CODEX_TOOL_POLICY, code)
     _require(profile['kind'] == 'research-environment-profile-v2'
              and profile['transport'] in ('docker', 'ssh-docker')
              and profile['platform'] in ('linux/arm64', 'linux/amd64'), code)
@@ -463,8 +475,11 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
                     'goal_sha256', 'goal_mode', 'patch_required', 'access', 'environments',
                     'network', 'effects', 'escalation_ceiling', 'benign_objectives',
                     'runtime_assignments', 'limits', 'revocation',
-                    *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ())), 'scope_invalid')
+                    *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ()),
+                    *(('authority_policy',) if isinstance(scope, dict) and 'authority_policy' in scope else ())), 'scope_invalid')
     _require(scope['kind'] == SCOPE_KIND, 'scope_kind_invalid')
+    _require('authority_policy' not in scope or scope['authority_policy'] == 'initial-scope-v1',
+             'scope_authority_policy_invalid')
     _identifier(scope['engagement_id'], 'scope_invalid')
     _require(type(scope['operator_id']) is str and re.fullmatch(
         r'[A-Za-z0-9_.@+-]{1,128}', scope['operator_id']) is not None, 'scope_invalid')
@@ -606,6 +621,8 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
             _require(effect['cleanup_required'], code)
         if effect['kind'] == 'artifact_create':
             _require(bool(effect['artifact_classes']), code)
+            if 'owned-lab-state-v2' in effect['artifact_classes']:
+                _require(scope.get('authority_policy') == 'initial-scope-v1', 'scope_authority_policy_required')
         permission = 'write' if effect['kind'] == 'artifact_create' else effect['kind']
         for access_id in effect['access_ids']:
             access = accesses[access_id]
@@ -618,7 +635,9 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
     state_accesses = set()
     for reference in references:
         code = 'scope_application_state_invalid'
-        _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id'), code)
+        _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id',
+            *(('artifact_effect_id',) if isinstance(reference, dict) and 'artifact_effect_id' in reference else ())), code)
+        _require(scope.get('authority_policy') != 'initial-scope-v1' or 'artifact_effect_id' in reference, code)
         for key in ('access_id', 'environment_id', 'reset_effect_id'):
             _identifier(reference[key], code)
         access = accesses.get(reference['access_id'])
@@ -629,6 +648,13 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         _require(effect is not None and effect['kind'] == 'reset' and effect['access_ids'] == [access['id']]
                  and effect['environment_ids'] == [reference['environment_id']] and not effect['account_refs']
                  and not effect['artifact_classes'] and effect['cleanup_required'], code)
+        if 'artifact_effect_id' in reference:
+            _identifier(reference['artifact_effect_id'], code)
+            artifact = next((row for row in scope['effects'] if row['id'] == reference['artifact_effect_id']), None)
+            _require(artifact is not None and artifact['kind'] == 'artifact_create' and
+                artifact['access_ids'] == [access['id']] and artifact['environment_ids'] == [reference['environment_id']] and
+                artifact['artifact_classes'] == ['owned-application-state-v1'] and not artifact['account_refs'] and
+                artifact['cleanup_required'] and artifact['rung'] in ('source_only', 'self'), code)
         origin = _url(access['identity']['base_url'], code)
         _require(sum(other['kind'] == 'application' and _url(other['identity']['base_url'], code) == origin
                      for other in accesses.values()) == 1, code)
@@ -753,6 +779,14 @@ def load_inputs(path: Path, *, now: datetime | None = None,
         try:
             profile = validate_profile(_decode(raw))
             owned_origin(next(row for row in scope['access'] if row['id'] == identity), profile)
+            if 'state_volumes' in profile:
+                from application_volumes import validate
+                from research_environment import EnvironmentUnavailable
+                environment = next(row for row in scope['environments'] if row['profile_id'] == reference['environment_id'])
+                try:
+                    validate(profile['state_volumes'], environment['limits'])
+                except EnvironmentUnavailable:
+                    raise ApplicationStateError('application_state_volumes_invalid') from None
         except ApplicationStateError as error:
             raise ContractError(error.code) from None
         _require(raw == canonical(profile), 'application_profile_noncanonical')

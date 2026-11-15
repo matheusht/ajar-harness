@@ -1,0 +1,1880 @@
+{
+  "kind": "application-owner-docker-e2e-v1",
+  "classification": "actual_docker_owned_counter",
+  "checks": [
+    {
+      "name": "supplied baseline is an exact installed Linux image",
+      "passed": true
+    },
+    {
+      "name": "actual target is isolated with no persistent state or published port",
+      "passed": true
+    },
+    {
+      "name": "private connector observes baseline and actual mutation",
+      "passed": true
+    },
+    {
+      "name": "wrong-origin attempt preserved exact target identity",
+      "passed": true
+    },
+    {
+      "name": "first exact target and derived image are absent",
+      "passed": true
+    },
+    {
+      "name": "recreation reaches baseline in a distinct actual container",
+      "passed": true
+    },
+    {
+      "name": "recovery cleans exact target after authority ends",
+      "passed": true
+    },
+    {
+      "name": "all preexisting containers and supplied base image remain",
+      "passed": true
+    },
+    {
+      "name": "all owned containers are absent",
+      "passed": true
+    }
+  ],
+  "observations": [
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create_stage",
+      "operation_id": "55fc9dcf066c467186f58d6a06d3e36e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [
+          "create_stage"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:d3b27ae3bb397dabdad7dfd19c8e36c7c570b8bf548f52ceb0e50a2211f7efc9"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create_stage",
+      "operation_id": "55fc9dcf066c467186f58d6a06d3e36e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:741c51b4c71e6c5a8170462cd1085259a74260e7ac447b85399a98342ed1e3ad"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "stage_input",
+      "operation_id": "f0d9aab4f6a34c6a9a98fb216ccb9f2e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:1f20167574e071e894d7ef6e487fc0e7bf02da8924d498fac72bbd54a64256af"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "stage_input",
+      "operation_id": "f0d9aab4f6a34c6a9a98fb216ccb9f2e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "snapshot_input",
+      "operation_id": "4022381909144299861baebc94d20ed7",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [
+          "snapshot_input"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:0ec944421acba09306b101e499d417348689c74228edc56a62b5f3087aaf4ab2"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "snapshot_input",
+      "operation_id": "4022381909144299861baebc94d20ed7",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:6195eb1e56b73806efd128e63995a5c20381653c5f91599e0070a38c2c2bbca7"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_stage",
+      "operation_id": "713734ee5ac242b58339ff73368274fa",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:4d1e9fb29314dfb0c614d5274650e87238258da2f079a2e6387e3439d87b230e"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_stage",
+      "operation_id": "713734ee5ac242b58339ff73368274fa",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:741c51b4c71e6c5a8170462cd1085259a74260e7ac447b85399a98342ed1e3ad"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create",
+      "operation_id": "b17f3ff5dc4b4223bbdf6aa3c5028b18",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [
+          "create"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:05eef731a5d5c788010dbcb3555a5e6e1e4f74062c307bac4fcaa2a629a9e0c9"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create",
+      "operation_id": "b17f3ff5dc4b4223bbdf6aa3c5028b18",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": null,
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:7b9dd5dce7ac3d2aea37ab05942a85db869ef7a9538699d33d439d9aa4decd8a"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "readback_input",
+      "operation_id": "ae827d518b404522a039f2f2116d6fe2",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "manifest_sha256": "sha256:95ca1e668ba869505dcbeeb0803fec4dd4acc1f3830d192c73b35b5b7bca52b2",
+      "files": 1
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "start",
+      "operation_id": "b69a0613ab5e4501b8bd9455e402e62f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "start",
+      "operation_id": "b69a0613ab5e4501b8bd9455e402e62f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "launch_stdio",
+      "operation_id": "c96f3641d7794a4f916be0d52b4d1488",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:8d0084a1e9521e2cb05facf93967cba0ce13b2e186712bc30e1f4feffce08437",
+      "role": "application"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "launch_stdio",
+      "operation_id": "c96f3641d7794a4f916be0d52b4d1488",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "dispatched",
+      "role": "application",
+      "native_acknowledgment": "caller_required"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "launch_stdio",
+      "operation_id": "9c7488626c3f432fa1e5e6b30f381e6c",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:3d7a096929a1c5ead23c25280b2e11fbec5340450e481642f34a895ac986f961",
+      "role": "application_connector"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "launch_stdio",
+      "operation_id": "9c7488626c3f432fa1e5e6b30f381e6c",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "dispatched",
+      "role": "application_connector",
+      "native_acknowledgment": "caller_required"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove",
+      "operation_id": "e0c47d0041684c22b3163bcafed5b865",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:9cfa0b54daf9694e33985eeae3bd96587b59ba55534ab82942327739fe775c13"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove",
+      "operation_id": "e0c47d0041684c22b3163bcafed5b865",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:7b9dd5dce7ac3d2aea37ab05942a85db869ef7a9538699d33d439d9aa4decd8a"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_input_image",
+      "operation_id": "2681ac01a4c3490a9ecf7d1e5b7e59d0",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:338b9f59eb355cb2079aa9b225e823596b0f14b7c26a17c93599ca2f0a61256b"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_input_image",
+      "operation_id": "2681ac01a4c3490a9ecf7d1e5b7e59d0",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:0439343c3c6ba2804e361261cc8064bc45123248895ba14e98c7d0f67ca3247b"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create_stage",
+      "operation_id": "b4e6e82388fd4d6eb391b7bbdf1233de",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [
+          "create_stage"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:68eea3e837354a8a7cb2252c090e28f5f4895bffd5b3d8accc40216e12fe64a8"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create_stage",
+      "operation_id": "b4e6e82388fd4d6eb391b7bbdf1233de",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": null,
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:eaf6860a7de466c10c616a54ae7b57cf5a7c13c75ee875be0cbe06bf09f1c729"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "stage_input",
+      "operation_id": "76842e49aad44dd0a3b2ac24b76b8307",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:7dbb027ecf2af821e2fd0423751a097b1d13f90cdc22aa31c4a58153cf97ec56"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "stage_input",
+      "operation_id": "76842e49aad44dd0a3b2ac24b76b8307",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "snapshot_input",
+      "operation_id": "1738fdf8ab964972895ff806f4f6b637",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [
+          "snapshot_input"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:460eeef33749b14e7969c9061d702d1a50c987b0d16e8976b69ca444d16dc0d5"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "snapshot_input",
+      "operation_id": "1738fdf8ab964972895ff806f4f6b637",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": null,
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:a0665d133b03a95dd3e724bf9c3c9e1b8201d1de3d106d01c1cebd49f3a8f1b4"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_stage",
+      "operation_id": "ec873bf7beb249a3bda068932c511e06",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:f7b1aa0e5dc1ddaf0da4db268286a4bfe78c048fa78b3c3e9de86ce694d68985"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_stage",
+      "operation_id": "ec873bf7beb249a3bda068932c511e06",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:eaf6860a7de466c10c616a54ae7b57cf5a7c13c75ee875be0cbe06bf09f1c729"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "create",
+      "operation_id": "4e759c78ed244d28a78087fe71bede8a",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [
+          "create"
+        ],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:c0312f5efa263a519c9b7e9e520a8010dd4973c70550f8979b9ff511410d1072"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "create",
+      "operation_id": "4e759c78ed244d28a78087fe71bede8a",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": null,
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:27bc1c449d4aeee22da7dd1435ee2b30e4300b46ea58fb75c1825bee3b02c4e6"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "readback_input",
+      "operation_id": "ab041a32880c4168be41af71125e0ccb",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "manifest_sha256": "sha256:95ca1e668ba869505dcbeeb0803fec4dd4acc1f3830d192c73b35b5b7bca52b2",
+      "files": 1
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "start",
+      "operation_id": "e23ddf5f35d1466ba466e9e2d37eb5d2",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "start",
+      "operation_id": "e23ddf5f35d1466ba466e9e2d37eb5d2",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "launch_stdio",
+      "operation_id": "da0ae85f3f304931be5fd0560a99f36e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:8d0084a1e9521e2cb05facf93967cba0ce13b2e186712bc30e1f4feffce08437",
+      "role": "application"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "launch_stdio",
+      "operation_id": "da0ae85f3f304931be5fd0560a99f36e",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "dispatched",
+      "role": "application",
+      "native_acknowledgment": "caller_required"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "launch_stdio",
+      "operation_id": "adaec6463d3742148fbf68d9d30e6340",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:3d7a096929a1c5ead23c25280b2e11fbec5340450e481642f34a895ac986f961",
+      "role": "application_connector"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "launch_stdio",
+      "operation_id": "adaec6463d3742148fbf68d9d30e6340",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "dispatched",
+      "role": "application_connector",
+      "native_acknowledgment": "caller_required"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "revoke",
+      "operation_id": "46de6e33697645d8b79e17f4decf463f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:da95ed6ff374e2175df7157d19d0940755a77c1d562382c90d7c330013e3ba38"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "revoke",
+      "operation_id": "46de6e33697645d8b79e17f4decf463f",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:27bc1c449d4aeee22da7dd1435ee2b30e4300b46ea58fb75c1825bee3b02c4e6"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove",
+      "operation_id": "43634b8d453643278083860dca134253",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:fef3a77446f4eb9ae7a1fd8c812cbe8498e32335c9b2b73b79a91d7b6977d11a"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove",
+      "operation_id": "43634b8d453643278083860dca134253",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:27bc1c449d4aeee22da7dd1435ee2b30e4300b46ea58fb75c1825bee3b02c4e6"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "intent",
+      "operation": "remove_input_image",
+      "operation_id": "acf689ab21eb4df09d9be899aaf3d5b2",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "request_sha256": "sha256:a6b0afa85b421f1e4a91bced3de160ff588427f29d4e0be9c89ff0d51590c681"
+    },
+    {
+      "kind": "environment-observation-v2",
+      "phase": "result",
+      "operation": "remove_input_image",
+      "operation_id": "acf689ab21eb4df09d9be899aaf3d5b2",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "status": "settled",
+      "returncode": 0,
+      "output_sha256": "sha256:cb412faed57f0ef13f805086b10ddf0625beb3c7c273f43e6e37654167891cc6"
+    }
+  ],
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "unverified": [
+    "SSH transport",
+    "joined native model and journal workflow",
+    "research acceptance"
+  ],
+  "first": {
+    "receipt": {
+      "kind": "application-start-v1",
+      "access_id": "app-main",
+      "baseline_id": "counter-zero",
+      "profile_sha256": "sha256:e9c490313ebd167a6fdbc1942f2114fb68f4d30806d7e102a00e3849029bc3ee",
+      "origin": "http://owned-counter.invalid:8123",
+      "target_nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+      "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+      "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+      "environment_profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+      "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba"
+    },
+    "counter_observations": [
+      "0",
+      "1",
+      "1"
+    ]
+  },
+  "replay": {
+    "kind": "application-start-v1",
+    "access_id": "app-main",
+    "baseline_id": "counter-zero",
+    "profile_sha256": "sha256:e9c490313ebd167a6fdbc1942f2114fb68f4d30806d7e102a00e3849029bc3ee",
+    "origin": "http://owned-counter.invalid:8123",
+    "target_nonce": "b3c329639bb147e99007b5f657c5d28c",
+    "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+    "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+    "environment_profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba"
+  },
+  "recovery": {
+    "status": "clean",
+    "identity": {
+      "kind": "research-environment-receipt-v2",
+      "nonce": "b3c329639bb147e99007b5f657c5d28c",
+      "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+      "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+      "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+      "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+      "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+      "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+      "unsettled": [],
+      "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+      "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+      "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+      "access": [
+        {
+          "id": "app-main",
+          "kind": "application",
+          "identity": {
+            "base_url": "http://owned-counter.invalid:8123/",
+            "version": "counter-v1"
+          }
+        }
+      ],
+      "support_inputs": [
+        {
+          "id": "application-connector",
+          "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+        }
+      ]
+    },
+    "owned_workspace": "container_removed"
+  },
+  "status": "passed",
+  "cleanup": [
+    {
+      "status": "clean",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "6a5af9179307418eb0d11ad4ae0b0460",
+        "container_id": "0320b7fb19eea76ee4ac0f373eea466c19c1cc8a12739e50c64754f436f3713c",
+        "container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460",
+        "stage_container_id": "619ad6f1e3c31db1d3a10e6efe1bc3aa5fc1ddc74aca28ceabe8eba65d66c654",
+        "stage_container_name": "oslit-6a5af9179307418eb0d11ad4ae0b0460-stage",
+        "prepared_image_id": "sha256:aba7dc44521a6d61d30b6c3e4905dbc1e8d57be7f346e09ffa41a54f764a3eaa",
+        "prepared_image_name": "oslit-input-6a5af9179307418eb0d11ad4ae0b0460:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "owned_workspace": "container_removed"
+    },
+    {
+      "status": "clean",
+      "identity": {
+        "kind": "research-environment-receipt-v2",
+        "nonce": "b3c329639bb147e99007b5f657c5d28c",
+        "container_id": "4c2e56215f930263f766375d52db5130698e77adac16fb1771df339cae0f2961",
+        "container_name": "oslit-b3c329639bb147e99007b5f657c5d28c",
+        "stage_container_id": "9dfbba35482cbc9ac6789f6325001dd090f31912d959ccc48ca481c289e28605",
+        "stage_container_name": "oslit-b3c329639bb147e99007b5f657c5d28c-stage",
+        "prepared_image_id": "sha256:9be9f6ec3cc8d2d4e39faca39422c1a41cbc4def02f0ef0a8c343b038757e707",
+        "prepared_image_name": "oslit-input-b3c329639bb147e99007b5f657c5d28c:latest",
+        "unsettled": [],
+        "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+        "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+        "profile_sha256": "sha256:30853f33b99eb2540e3d3bad6260663fe615b4e0db402f0830574dd2a00b8bb7",
+        "access": [
+          {
+            "id": "app-main",
+            "kind": "application",
+            "identity": {
+              "base_url": "http://owned-counter.invalid:8123/",
+              "version": "counter-v1"
+            }
+          }
+        ],
+        "support_inputs": [
+          {
+            "id": "application-connector",
+            "manifest_sha256": "sha256:7c6842b95d456bf267160cb673921c51afdfecc19242bce2df0ebf7ca47c25d4"
+          }
+        ]
+      },
+      "owned_workspace": "container_removed"
+    }
+  ],
+  "source_sha256": {
+    "tools/application_state.py": "sha256:29c3dc268db18a2c91111307135ebd4ce2cac919a89b1fd10b0d3b42c3ab8b13",
+    "tools/engagement_network_bridge.py": "sha256:f91d26c1dec2fd840aefe76e902e11e33dd09b6afe952c99695f025025827531",
+    "tools/engagement_network.py": "sha256:7661e59429579029fdfaab3022f9575df77697487fda2686efcd5d366a34b034",
+    "tools/research_environment.py": "sha256:ba6423644f6b642ac529b8b0dd65e5632974446bbedccbaf68c3f074808dd2cd",
+    "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+    "evals/native-qualification/smoke/check_application_owner_e2e.py": "sha256:1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b",
+    "evals/native-qualification/smoke/check_application_owner_docker_e2e.py": "sha256:c20bc25c48ccba71635ea31cf012902d68248c4150a6f237e4e164b17d6b2777"
+  }
+}

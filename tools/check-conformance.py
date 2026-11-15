@@ -652,6 +652,17 @@ SECRET_PATTERNS = [
 ]
 
 
+# Preserve archived redaction probes; changed bytes or another path lose the exception.
+ARCHIVED_SYNTHETIC_SECRETS = {
+    "evals/native-qualification/team-evidence/linux-native-request-diagnostics-20261114/diagnostic-e2e.py":
+        ("6313d48295b9b58555ab25c4c2c17aa00f5083924f354088988c3e69b5eb62a1", "Bearer diagnostic-private-canary"),
+    "evals/native-qualification/team-evidence/linux-startup-diagnostics-20261114/diagnostic-e2e.py":
+        ("97a06a89793908b69392b2a75b113b0b3fce33ac356c04e596d78d1271e9bc3c", "Bearer fixture-private-canary"),
+    "evals/native-qualification/team-evidence/linux-native-preflight-20261114/installer-diagnostic-e2e.py":
+        ("2724cf861994e14efd1618582ebb185acbaf987e0cf7df1972e2d508b3759939", "Bearer fixture-private-marker"),
+}
+
+
 def check_secrets():
     print("\n[secrets] casebook + fixture + eval scan")
     hits = []
@@ -662,9 +673,15 @@ def check_secrets():
         for dirpath, _, files in os.walk(base):
             for fn in files:
                 fp = os.path.join(dirpath, fn)
-                text = open(fp, errors="ignore").read()
+                with open(fp, "rb") as stream:
+                    content = stream.read()
+                text = content.decode(errors="ignore")
+                exception = ARCHIVED_SYNTHETIC_SECRETS.get(os.path.relpath(fp, ROOT))
+                allowed = exception[1] if exception and hashlib.sha256(content).hexdigest() == exception[0] else None
                 for pat, desc in SECRET_PATTERNS:
                     for m in re.finditer(pat, text):
+                        if m.group(0) == allowed:
+                            continue
                         hits.append(f"{os.path.relpath(fp, ROOT)}: {desc} :: {m.group(0)[:24]}")
     record(not hits, "casebooks/fixtures/evals contain no live-secret shapes",
            "; ".join(hits) if hits else "")

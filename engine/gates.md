@@ -1,5 +1,11 @@
 # engine/gates.md — human-in-the-loop gates
 
+**Route scope:** the historical gates below apply to legacy/v1 and v2 scopes
+without `authority_policy: initial-scope-v1`. New v2 work follows the
+[initial-scope policy](../docs/decisions/0015-initial-scope-autonomy.md) and
+[native worker protocol](native-engagement-protocol.md); do not import legacy
+per-artifact or operator-rung approvals into that signed workflow.
+
 The harness runs autonomously *between* gates; the human supplies steering + authorization *at*
 them. The agents supply tireless execution, validation, and bookkeeping.
 

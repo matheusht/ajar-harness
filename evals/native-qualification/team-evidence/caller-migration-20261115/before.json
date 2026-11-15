@@ -1,0 +1,51 @@
+{
+  "kind": "native-caller-migration-check-v1",
+  "classification": "local_cli_routing_simulation",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "checks": [
+    {
+      "name": "default_help_lists_v2_commands",
+      "status": "failed",
+      "detail": "usage: native_engagement.py [-h] {run,resume,status} ...\n\nDrive one scope-only native engagement through the existing phase commands.\nThe signed scope and each phase command decide authority. This file only\norders the commands and records enough state to refuse an uncertain repeat\nafter loss of the driver. ``resume`` re-reads durable phase receipts; it never\nclears an unknown model or Docker effect.\n\npositional arguments:\n  {run,resume,status}\n    run                begin one scope-only engagement\n    resume             continue one durable engagement\n    status             read the driver phase without dispatch\n\noptions:\n  -h, --help           show this help message and exit\n"
+    },
+    {
+      "name": "default_help_exposes_legacy_route",
+      "status": "failed",
+      "detail": "usage: native_engagement.py [-h] {run,resume,status} ...\n\nDrive one scope-only native engagement through the existing phase commands.\nThe signed scope and each phase command decide authority. This file only\norders the commands and records enough state to refuse an uncertain repeat\nafter loss of the driver. ``resume`` re-reads durable phase receipts; it never\nclears an unknown model or Docker effect.\n\npositional arguments:\n  {run,resume,status}\n    run                begin one scope-only engagement\n    resume             continue one durable engagement\n    status             read the driver phase without dispatch\n\noptions:\n  -h, --help           show this help message and exit\n"
+    },
+    {
+      "name": "equals_form_v2_inputs_select_v2_and_fail_closed",
+      "status": "failed",
+      "detail": "{\"code\": \"engagement_inputs_invalid\", \"status\": \"rejected\"}\n root_exists=False"
+    },
+    {
+      "name": "malformed_equals_form_input_rejects_without_legacy_init",
+      "status": "failed",
+      "detail": "{\"code\": \"input_json_invalid\", \"status\": \"rejected\"}\n root_exists=False"
+    },
+    {
+      "name": "separate_form_v1_inputs_keep_legacy_driver",
+      "status": "passed",
+      "detail": "{\"cleanup\": {\"status\": \"unverified\"}, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-9tsbqfkx/v1/engagement-separate\", \"reason\": \"engagement_input_unavailable\", \"status\": \"cleanup_unverified\"}\n state_kind=native-engagement-driver-v1 phase=incomplete"
+    },
+    {
+      "name": "equals_form_v1_inputs_keep_legacy_driver",
+      "status": "passed",
+      "detail": "{\"cleanup\": {\"status\": \"unverified\"}, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-9tsbqfkx/v1/engagement-equals\", \"reason\": \"engagement_input_unavailable\", \"status\": \"cleanup_unverified\"}\n state_kind=native-engagement-driver-v1 phase=incomplete"
+    },
+    {
+      "name": "equals_form_state_only_root_keeps_legacy_reader",
+      "status": "passed",
+      "detail": "{\"cleanup\": null, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-9tsbqfkx/v1/equals-status\", \"error\": null, \"pending\": null, \"status\": \"initialized\"}\n"
+    },
+    {
+      "name": "mixed_v1_v2_root_is_rejected",
+      "status": "passed",
+      "detail": "{\"code\": \"route_conflict\", \"status\": \"rejected\"}\n"
+    }
+  ],
+  "status": "failed"
+}

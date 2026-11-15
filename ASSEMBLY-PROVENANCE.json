@@ -1,0 +1,57 @@
+{
+  "source_head": "5d290d193ee5a0e824bd461f9033bf216b6ff83f",
+  "staged_cherry_pick": "4559fcadc1085da12357dc57929901726f4eab9d",
+  "original_checkout_unchanged": true,
+  "assembly_checkpoint_mapping": {
+    "dae6e533c8435c671caa4e1ab40ac22573e2fc72": "8b951fc592020afcf10576cd10cd1a04aefff0b0"
+  },
+  "assembly_parent_note": "Identical snapshot tree reattached to source_head so the test branch preserves repository ancestry; original snapshot branch retained locally",
+  "prs": {
+    "211": "ec8efb4399e73745d32ee41b674b59eff3c2b0e5",
+    "212": "79896eaeecbb729e023c81508855a2c2d46f584a",
+    "213": "49e5e41e7510231412defeb556016a63b2f30ab4",
+    "214": "8056bb785e0df9ac8eb2517fda66431d75183a8e",
+    "215": "6bf0af4f55bfb2e49c88c4c6e20ff36fe60148c6",
+    "216": "7217305c82d6d71a24286d3d17f24c20b766eb47",
+    "217": "f89ff18ce503b819be6bcf2374e8c11c4d51dddf",
+    "218": "9f5c518527226e47b5fbe51eb3530b1a0b0a902f",
+    "219": "56cd466cef584dbbded2d376973ca29a0a790a16"
+  },
+  "conflict_resolution": "PR214 and219 installer test combined preserving both asset contracts; archive-fixture E2E passed locally via GPT-6 Luna",
+  "focused_patches": [
+    "inventory exact UID/GID and namespace types",
+    "staged lab-artifact result projection",
+    "OMP tool validator module binding",
+    "canonical export fixture roots and simulated Linux diagnostic fields",
+    "account resolver closure fixture and delivery documentation reconciliation"
+  ],
+  "verification": "Full hosted conformance passed 37 steps at c1fa3a77; joined Codex and OMP each passed 21 checks at e93a4fd9 with owned deterministic provider; Docker, loopback SSH and reset passed. Final guarded-send conformance pending; broader qualification and research acceptance remain open.",
+  "status": "published implementation test candidate on codex/oslit-integrated-e2e-20261115; not merged, adopted or research-accepted",
+  "conformance": "900 checks, 0 failing after exact path/full-file hash/literal exceptions for three synthetic archived probes; five regression scenarios passed; archived bytes unchanged",
+  "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation",
+  "hosted_observations": {
+    "assembly_head": "eedb24c9503cea4c6805ab4bcf567b69b4a7e0d2",
+    "native_run": 43725604682,
+    "conformance_run": 43725604808,
+    "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
+    "namespace_diagnostic_run": 43726713247,
+    "codex_blocker": "Default tool policy still refuses user namespace before native invocation. Confined candidate at 5d9da3c5 permits user namespace and denies outer mount with zero effective capabilities, then raw Bubblewrap fails proc mount; container and profile cleanup verified. Actual Codex proc fallback replay pending; production policy unchanged.",
+    "full_conformance": "Full workflow passed at 9415de22 (43731100402) and dd63fe81 (43738351015): 899 structural checks, zero failures; canonical v5 frozen inputs intact. Intermittent signed-review staging deadline is separately under repair; final repair revision still requires hosted verification.",
+    "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally",
+    "latest_native_head": "5d9da3c5093a1f19fbefbffcb06f045227f5f1d7",
+    "latest_native_run": 43739457623,
+    "latest_conformance_run": 43738351015,
+    "omp_joined": "Passed 21 checks: two invocations, four model POSTs, one discovery GET, zero provider escapes/errors; retention, owner-loss stop, revocation, recovery, export and cleanup verified; deterministic owned provider only"
+  },
+  "native_policy_integration": {
+    "head": "e93a4fd99de0c0429d9d91493eead2dda4b56123",
+    "run": 43751103990,
+    "codex": "21 checks passed; two invocations, four controlled POSTs, retention, revocation, owner-loss recovery, export and cleanup verified",
+    "omp": "21 checks passed; two invocations, four controlled POSTs plus one model-discovery GET, retention, revocation, owner-loss recovery, export and cleanup verified",
+    "provider": "owned deterministic fixture; zero external-provider calls",
+    "codex_policy": "signed optional docker-confined-v1; model default unchanged; missing-profile refusal and cleanup passed; owned host profile unloaded",
+    "evidence": "evals/native-qualification/team-evidence/codex-admission-20261115/hosted/",
+    "conformance_run": 43751103945,
+    "conformance_status": "pending"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "kind": "nonpricing-completion-evidence-v1",
+  "base_commit": "15bf29df45fe005fc8ce1443214b8b9eeefcc447",
+  "source_sha256": {
+    "docs/agents/engagement.md": "4e152a3cfa6f6974cfe07fb6f5f12fc62aa2ada62f82bcc8a01608fe67127398",
+    "docs/agents/fresh-target-handoff.md": "416074c2bbf2fb85f4f61ab3f9fdbd4171c96d28eccac3e8236d63e5960486e4",
+    "docs/research/oslit-v2-contract-2026-11-14.md": "bc42d341c88d4fe7c20c55b48a1ea98a3228166acf4ee0037aebddbd46ebf16b",
+    "docs/wiki/oslit-v2-delivery-2026-11-14.md": "6ff96f7e68e5db4f937a40aaaa0a28d7bc8e826ba8807ba47e2bd241fa5f74da",
+    "engine/native-engagement-protocol.md": "1d59f609ddc7f3bdd3a88b5a64217ea654a34667a223ecfd2f67f5df5c44496b",
+    "evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md": "e9566a971b8179633128b01296db71999e785fe182c803d4e628fd0a26aca6e0",
+    "evals/native-qualification/smoke/ENGAGEMENT-APPLICATION-ARTIFACT-E2E.md": "af14169920ac69183d35d9331a577cf8d12482f9d67c18727100e65444f5fe5e",
+    "evals/native-qualification/smoke/ENGAGEMENT-BOARD-STEERING-E2E.md": "84859aab25159ae6e06cddeb4cd876458ba080f0f1af6a97378c615efe27beee",
+    "evals/native-qualification/smoke/check_application_artifact_e2e.py": "558ef02edeff03a7ca5c4416bb0ce98864999f3bbde0e4c546dec7c78afabd5e",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "354be013fc0bec8237b20c20103174508f483d5f1aee33d29308b4a61eab91d5",
+    "evals/native-qualification/smoke/check_application_state_volumes_e2e.py": "d94abe1b0daab578c59fb8d3d2982db8d3f0ed54eb2f2f586c158df4a332dfed",
+    "evals/native-qualification/smoke/check_engagement_board_e2e.py": "5f5149c20b0b46e7eb34940cc8f22c773d7a210e3e973a01ae9bc5eeef33bf8e",
+    "examples/native-engagement-v2/README.md": "98056b5cf19a100e195fefebf4f2e2c21b48eb69fb88eb3a137b12499b4eabc4",
+    "tools/application_state.py": "9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+    "tools/application_volumes.py": "4bab7e20015d49ea600741199ab943eca03c4192c2055cdd0e94219436558c39",
+    "tools/engagement_board.py": "22fdda9708a3b5ecc876a9b954a290c5666728f0dc3b6965706d644e15d99316",
+    "tools/engagement_contract.py": "dc99f1dbc52a287398ebc864242b2b4ed4ebbd18b642f690493d9e1a467ed0c2",
+    "tools/engagement_controller.py": "82b98462be2ce743a555d5774203331acf77c38b9bc3c1065555ebeaf8f433c1",
+    "tools/engagement_evidence.py": "b722528650a9a8b33a6373cef29d0559df822774c62f44cb015740bf3f2dcb3a",
+    "tools/engagement_lab_artifacts.py": "c7814fc53c947ec7d2a5a98f41c3e0702c65f357cd199c1a6736f6024e0dcb99",
+    "tools/engagement_lab_inventory.py": "1b96ef56359d2cf4a72cc943b8a2ce797f381d3431f8b750c53f8353c8e98e01",
+    "tools/engagement_native_boundary.py": "b6571d65ddb20ed67f5ed275ddc491055e8bd71f809e00ca0d944688ec4d4fdc",
+    "tools/engagement_runner.py": "8a24f815687a6926e9fad36a7b5ff82df8ba1e576637e0ce45e7642a2fdbaecc",
+    "tools/native_engagement.py": "9aa9d2166681db9053f0379efe4a67cdcfff12b677922b57ffe6c39204f0b8b5",
+    "tools/research_environment.py": "47a9c193a587c5ce34b6302000a525e9a69fe0403d508e7fede04182587314ff"
+  },
+  "result_sha256": {
+    "shared-board-20261115/result.json": "52460cba2da065b7c23c1ac4709559e37cc8c69f62af74d4fb333f1138c3fe09",
+    "application-state-volumes-20261115/result.json": "f3497212923897156a14d9c27d496f348e59e7e449f9adc08f202809c8fe7c85",
+    "application-state-volumes-20261115/nocopy-before.json": "5ed13978c33d9dd4513892ae23e676cf84232e76c8fdb48b3c66961d98d6ad66",
+    "application-artifact-20261115/result.json": "37c25f8be9624becf17d9b2d8aa2acb7d9f7d1425b159b369dcce0b88f016e8c",
+    "nonpricing-completion-20261115/conformance.json": "79a0aefe71176c410f49c318cd187e099718aa742f1c70cd16b96c379fc80ada"
+  },
+  "classification": "local_controlled_engineering_checks",
+  "hosted_ci": "not_run_for_this_change",
+  "physical_docker": "not_run",
+  "provider_calls": 0,
+  "fresh_target": "reserved_to_operator"
+}

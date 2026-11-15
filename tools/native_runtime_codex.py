@@ -105,12 +105,14 @@ class Runtime(Session):
         with self._admission():
             self._begin(invocation_id, prompt)
             self.before = dict(self.totals.get(self.session_id, {}))
-            try:
-                result = self.transport.request('turn/start', {'threadId': self.session_id,
-                          'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]}, defer_events=True)
-            except Exception:
-                self._emit('unknown', reason='native_dispatch_not_settled')
-                raise
+        try:
+            # The reply may require an executor callback through the same admission lock.
+            result = self.transport.request('turn/start', {'threadId': self.session_id,
+                      'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]},
+                      defer_events=True, dispatch_guard=self._admission)
+        except Exception:
+            self._emit('unknown', reason='native_dispatch_not_settled')
+            raise
         try:
             turn = identifier(result.get('turn', {}).get('id'))
             if self.native_turn not in (None, turn):
@@ -126,9 +128,9 @@ class Runtime(Session):
         if not self.active or not self.native_turn:
             raise RuntimeError('native_invocation_not_active')
         message = text_content(message)
-        with self._admission():
-            self.transport.request('turn/steer', {'threadId': self.session_id, 'expectedTurnId': self.native_turn,
-                                                 'input': [{'type': 'text', 'text': message}]}, defer_events=True)
+        self.transport.request('turn/steer', {'threadId': self.session_id, 'expectedTurnId': self.native_turn,
+                                            'input': [{'type': 'text', 'text': message}]},
+                               defer_events=True, dispatch_guard=self._admission)
         return {'delivered': True, 'invocation_id': self.invocation_id}
 
     def interrupt(self):
@@ -298,6 +300,8 @@ class NativeExecutor:
         self.token = secrets.token_urlsafe(32)
         self.closed = False
         self.failure = None
+        self.transport_diagnostic = None
+        self.diagnostic_lock = threading.Lock()
         self.executor = self.bridge = None
         self.threads = []
         if not callable(launcher) or not callable(dispatch_guard) or not Path(cwd).is_absolute():
@@ -362,11 +366,14 @@ class NativeExecutor:
     def _copy(self, source, destination, admit):
         import json
         from contextlib import nullcontext
+        phase = 'read'
         try:
             while not self.closed:
+                phase = 'read'
                 line = source.stdout.readline(2 * 1048576 + 1)
                 if not line:
                     break
+                phase = 'frame'
                 if len(line) > 2 * 1048576 or not line.endswith(b'\n'):
                     raise RuntimeError('native_executor_frame_oversized')
                 if admit:
@@ -380,20 +387,34 @@ class NativeExecutor:
                 else:
                     payload = json.loads(line)
                     if payload.get('id') == self.initialize_id and 'result' in payload:
+                        phase = 'identity'
                         info = payload['result'].get('environmentInfo', {})
-                        if (info.get('executorVersion') != self.expected_version or
-                                self.expected_platform is not None and info.get('platformOs') != self.expected_platform):
+                        phase = 'identity_version'
+                        if info.get('executorVersion') != self.expected_version:
+                            raise RuntimeError('native_executor_identity_mismatch')
+                        phase = 'identity_platform'
+                        if self.expected_platform is not None and info.get('platformOs') != self.expected_platform:
                             raise RuntimeError('native_executor_identity_mismatch')
                         self.ready = {'version': info['executorVersion'], 'platform': info.get('platformOs')}
                     output = json.dumps({'frame': line.decode().rstrip('\n')}).encode() + b'\n'
+                phase = 'admission'
                 with self.guard() if admit else nullcontext():
                     if self.closed:
                         break
+                    phase = 'write'
                     write_pipe(destination.stdin, output)
         except Exception:
+            with self.diagnostic_lock:
+                if self.transport_diagnostic is None:
+                    self.transport_diagnostic = {'direction': 'to_executor' if admit else 'from_executor',
+                                                 'phase': phase, 'outcome': 'exception'}
             self.failure = 'native_executor_transport_failed'
         finally:
             if not self.closed:
+                with self.diagnostic_lock:
+                    if self.transport_diagnostic is None:
+                        self.transport_diagnostic = {'direction': 'to_executor' if admit else 'from_executor',
+                                                     'phase': 'read', 'outcome': 'eof'}
                 self.failure = self.failure or 'native_executor_transport_closed'
                 # Losing either pipe revokes the host endpoint immediately.
                 try:self.bridge.stdin.close()

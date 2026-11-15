@@ -71,7 +71,8 @@ def run(base):
         addon_main = 'pi_natives.linux-' + arch + ('-baseline' if arch == 'x64' else '') + '.node'
         return {'kind': 'native-tool-installation-lock-v1', 'codex_version': '0.166.0',
             'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {platform: {
-                'codex': artifact('/codex.tgz', tar({'codex-linux': elf(machine)}), member='codex-linux'),
+                'codex': artifact('/codex.tgz', tar({'codex-linux': elf(machine), 'codex-resources/bwrap': elf(machine), 'codex-package.json': json.dumps({'version': '0.166.0',
+                    'target': ('aarch64' if machine == 183 else 'x86_64') + '-unknown-linux-musl'}).encode()}), member='codex-linux'),
                 'bun': artifact('/bun.zip', zip_bun(machine, bun_member), member=bun_member)}},
             'packages': [artifact('/sdk.tgz', tar({'package/package.json': json.dumps({
                 'name': '@oh-my-pi/pi-coding-agent', 'version': '18.20.0', 'engines': {'bun': '>=1.4.4'},
@@ -111,7 +112,7 @@ def run(base):
             if name == 'checksum':current['platforms']['linux/arm64']['codex']['integrity'] = 'sha256:' + '0' * 64
             if name == 'traversal':current['packages'][0] = artifact('/bad.tgz', tar({'package/../../ESCAPE': b'no'}), **{k:current['packages'][0][k] for k in ('destination','name','version')})
             if name == 'link':current['packages'][0] = artifact('/link.tgz', tar({}, link='/tmp'), **{k:current['packages'][0][k] for k in ('destination','name','version')})
-            if name == 'wrong-platform':current['platforms']['linux/arm64']['codex'] = artifact('/wrong.tgz', tar({'codex-linux': elf(62)}), member='codex-linux')
+            if name == 'wrong-platform':current['platforms']['linux/arm64']['codex'] = artifact('/wrong.tgz', tar({'codex-linux': elf(62), 'codex-resources/bwrap': elf(183), 'codex-package.json': json.dumps({'version':'0.166.0', 'target':'aarch64-unknown-linux-musl'}).encode()}), member='codex-linux')
             if name == 'bun-version':current['bun_version'] = '1.4.0'
             if name == 'truncated':current['platforms']['linux/arm64']['codex'] = artifact('/truncated', tar({'codex-linux': elf()}), member='codex-linux')
             if name == 'existing':

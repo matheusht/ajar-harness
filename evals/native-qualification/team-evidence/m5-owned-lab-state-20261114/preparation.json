@@ -1,0 +1,290 @@
+{
+  "classification": "engineering_simulation_real_journal_runner_boundary",
+  "status": "passed",
+  "checks": [
+    {
+      "scenario": "in-process",
+      "status": "passed",
+      "result": {
+        "status": "settled",
+        "cleanup": "verified",
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 3,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "reopened",
+      "status": "passed",
+      "result": {
+        "status": "settled",
+        "cleanup": "verified",
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 1,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "identity-evolution",
+      "status": "passed",
+      "result": {
+        "status": "settled",
+        "cleanup": "verified",
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 1,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "before-environment",
+      "status": "passed",
+      "result": {
+        "status": "settled",
+        "cleanup": "verified",
+        "usage": {
+          "invocations": 0,
+          "worker_seconds": 1,
+          "reserved_worker_seconds": 0,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "unresolved-cleanup",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "identity-changed",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "native-admitted",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "proxy-admission",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "missing-marker",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "late-marker",
+      "status": "passed",
+      "result": {
+        "status": "pending",
+        "cleanup": "pending",
+        "usage": {
+          "invocations": 1,
+          "worker_seconds": 0,
+          "reserved_worker_seconds": 30,
+          "tokens": {},
+          "cost": null,
+          "known_estimated_cost": 0,
+          "observed_token_dimensions": {},
+          "cost_observations": 0,
+          "missing": [
+            "billed_cost",
+            "provider_requests"
+          ],
+          "native_invocations_admitted": 0,
+          "native_invocations_observed": 0,
+          "native_usage_incomplete": false
+        },
+        "native_runtime_starts": 0
+      }
+    },
+    {
+      "scenario": "registration",
+      "status": "passed",
+      "result": {
+        "monotonic_phase": true,
+        "foreign_authority_refused": true
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:4f3464a03fbff1b6d103dd80079ed0511a5e0561775c900aef3bc5d79cbb5d60",
+    "tools/engagement_controller.py": "sha256:117bbb319fff16bfe64366445905a77780006624f6771a4b8447546d8627bfcc",
+    "tools/engagement_runner.py": "sha256:16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "tools/engagement_evidence.py": "sha256:5565704036cf7274436fbdd542a9c8b3b9d68c3dc2e7b868a2079536d9bf6c20",
+    "evals/native-qualification/smoke/check_engagement_preparation_recovery_e2e.py": "sha256:9806a4096aa9a8f2bc21ee6e9c699d3555eb4f94893c8b9a6f629c31ae6347b5"
+  },
+  "unverified": [
+    "Docker/SSH cleanup",
+    "live provider behavior",
+    "native process containment",
+    "research acceptance"
+  ]
+}

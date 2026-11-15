@@ -14,6 +14,7 @@ This is curated topic coverage, not a complete repository ingestion or a live tr
 | How would all 30 decisions be implemented, and what code would remain? | [Engineering plan and 14 November corrections](../research/oslit-engineering-plan-2026-11-14.md) |
 | Why use task-local scored search and a minimal shared interface? | [Q30 decision and rationale](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration) |
 | How should architecture changes preserve founder intent, and when should an agent ask? | [Architecture guidance](../decisions/AGENTS.md) |
+| Which initial authority policy and caller route apply to new research? | [Initial-scope autonomy and caller migration](../decisions/0015-initial-scope-autonomy.md) |
 | What does the candidate Codex/OMP v2 route deliver, and what remains open? | [14 November v2 delivery state](oslit-v2-delivery-2026-11-14.md) and [operator guide](../agents/engagement.md) |
 | What is implemented and what is actually qualified? | [Native research status](native-research-status.md) |
 | What did the October discussion and external research establish? | [Discussion record and research lessons](../research/research-direction-discussion-2026-10.md) |

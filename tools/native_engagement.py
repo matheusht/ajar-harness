@@ -752,23 +752,25 @@ def drive(root: Path, *, command=_command, spawn_owner=_spawn_owner) -> dict:
 
 
 def _v2_route(argv: list[str]) -> bool:
-    if not argv:
-        return False
-    if argv[0] in ('inspect', 'direction', 'stop', 'export', 'claim', 'submit') or '--socket' in argv:
+    if argv and argv[0] in ('inspect', 'direction', 'stop', 'export', 'claim', 'submit'):
         return True
-    if '--inputs' in argv:
-        position = argv.index('--inputs') + 1
-        if position < len(argv):
-            try:
-                return _read_json(Path(argv[position])).get('kind') == 'native-engagement-inputs-v2'
-            except (DriverError, OSError, ValueError):
-                return False
-    if '--engagement-root' in argv:
-        position = argv.index('--engagement-root') + 1
-        if position < len(argv):
-            root = Path(argv[position])
-            return (root / 'contract').exists() or (root / 'events').exists()
-    return False
+    route = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    route.add_argument('--inputs', type=Path)
+    route.add_argument('--engagement-root', type=Path)
+    route.add_argument('--socket')
+    selected, _ = route.parse_known_args(argv)
+    if selected.socket is not None:
+        return True
+    if selected.engagement_root is not None:
+        root = selected.engagement_root
+        if (root / 'contract').exists() or (root / 'events').exists():
+            return True
+    if selected.inputs is not None:
+        try:
+            return _read_json(selected.inputs).get('kind') != INPUT_KIND
+        except (DriverError, OSError, ValueError, AttributeError):
+            return True
+    return selected.engagement_root is None or not (selected.engagement_root / 'state.json').exists()
 
 
 def _v2_main(argv: list[str]) -> int:
@@ -777,7 +779,7 @@ def _v2_main(argv: list[str]) -> int:
     from engagement_preflight import inspect_engagement
     from engagement_runner import Runner, RunnerError
 
-    parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement.')
+    parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement. Explicit v1 inputs and existing v1 roots retain their compatibility driver.', allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     inspect = commands.add_parser('inspect', help='verify inputs without model or target contact')
     inspect.add_argument('--inputs', type=Path, required=True)
@@ -797,6 +799,9 @@ def _v2_main(argv: list[str]) -> int:
     origin.add_argument('--socket', type=Path)
     status.add_argument('--since')
     status.add_argument('--limit', type=int, default=100)
+    status.add_argument('--view', choices=('updates', 'board'), default='updates')
+    status.add_argument('--query', default='')
+    status.add_argument('--kind', action='append', dest='kinds')
     claim = commands.add_parser('claim', help='claim ready work through the worker endpoint')
     claim.add_argument('--socket', type=Path, required=True)
     claim.add_argument('--request-id', required=True)
@@ -814,14 +819,16 @@ def _v2_main(argv: list[str]) -> int:
                         'type': 'claim', 'payload': {}})
             result = worker_call(args.socket, {'operation': 'submit', 'request': request})
         elif args.command == 'status' and args.socket:
-            result = worker_call(args.socket, {'operation': 'status', 'since': args.since, 'limit': args.limit})
+            result = worker_call(args.socket, {'operation': 'status', 'since': args.since, 'limit': args.limit,
+                'view': args.view, 'query': args.query, 'kinds': args.kinds})
         else:
             if (args.engagement_root / 'state.json').exists():
                 raise ControllerError('route_conflict')
             controller = (Controller.initialize(args.engagement_root, load_inputs(args.inputs))
                           if args.command == 'run' else Controller(args.engagement_root))
             if args.command == 'status':
-                result = controller.status(since=args.since, limit=args.limit)
+                result = controller.status(since=args.since, limit=args.limit,
+                    view=args.view, query=args.query, kinds=args.kinds)
             elif args.command == 'direction':
                 result = controller.direction(read_bytes(args.file, max_bytes=65536).decode('utf-8'))
             elif args.command == 'stop':

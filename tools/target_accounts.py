@@ -141,7 +141,7 @@ class TargetAccountResolver:
             _deny('target_account_secret_capacity')
         self.secrets = combined
 
-    def bind(self, method, url, headers):
+    def bind(self, method, url, headers, *, request_length=None):
         with self.lock:
             if self.closed:
                 _deny('target_account_binding_closed')

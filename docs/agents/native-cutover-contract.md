@@ -1,5 +1,10 @@
 # Native local research cutover contract (candidate)
 
+**Historical source-route contract:** this records the October v1 migration.
+New work now follows the [v2 engagement entry](engagement.md) and
+[Decision 0015](../decisions/0015-initial-scope-autonomy.md). Existing v1/queue
+contracts and the historical evidence below are retained.
+
 The candidate native source route implements the source changes for issues #166–170. On 2026-10-22 the
 operator authorized implementation of all five tickets and deferred testing to one
 full E2E run after integration. New local source work follows the native entry;

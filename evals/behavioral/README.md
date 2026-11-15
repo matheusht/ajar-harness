@@ -77,17 +77,23 @@ drops them (or overclaims) confirms it → FDR → block.
 
 ```
 python3 tools/build-behavioral-campaign.py
-python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
+python3 tools/run-behavioral-eval.py --campaign evals/behavioral/campaigns/behavioral-canonical-v5-2026-11-15/campaign-manifest.json
 python3 tools/run-behavioral-eval.py --self-test
 ```
 
-## Canonical campaign: `behavioral-canonical-v4-2026-09-13`
+## Canonical campaign: `behavioral-canonical-v5-2026-11-15`
 
-Revision 4 retains the existing candidate definitions and patch bytes and freezes the current
-conformance checker after queue/guidance changes. Revision 3 was already drifted on main before
-#113, and #113 changes the checker further. Its manifest and prior results are preserved rather
-than retroactively re-pinned. Revision 4 has no executed candidate run or new efficacy claim.
-Future changes to a frozen input require another explicit revision; do not refresh this pin in place.
+Revision 5 retains the existing candidate definitions, patch bytes, seed and non-checker pins.
+It freezes the checker after the exact path/digest/literal allowances for three synthetic archived
+probes. Revision 4 and all older manifests, candidates and results remain unchanged. Revision 5
+has no executed candidate run or new efficacy claim. Future frozen-input changes require another
+explicit revision; never refresh a historical pin in place.
+
+### Historical revision 4
+
+Revision 4 froze the checker after queue/guidance changes, preserving revision 3 and its historical
+evidence. The later checker correction caused an expected drift refusal; revision 5 records the new
+input without re-pinning or regrading revision 4.
 
 ### Historical revision 3
 

@@ -42,16 +42,43 @@ assert all(checks.values()),checks
 '''
 
 
+LAB_STATE_PROBE = r'''import ctypes,os,pty
+from pathlib import Path
+for path in ('/work','/tmp','/dev/shm'):
+    Path(path+'/inert-owned-state').write_bytes(b'inert')
+master,slave=pty.openpty()
+os.close(master);os.close(slave)
+class Attributes(ctypes.Structure):
+    _fields_=[('flags',ctypes.c_long),('maxmsg',ctypes.c_long),('msgsize',ctypes.c_long),('curmsgs',ctypes.c_long),('reserved',ctypes.c_long*4)]
+libc=ctypes.CDLL(None,use_errno=True)
+libc.mq_open.restype=ctypes.c_int
+name=b'/oslit-inert-state'
+attributes=Attributes(0,4,64,0)
+queue=libc.mq_open(name,os.O_CREAT|os.O_EXCL|os.O_RDWR,0o600,ctypes.byref(attributes))
+if queue==-1:raise OSError(ctypes.get_errno(),'mq_open')
+try:
+    assert Path('/dev/mqueue/oslit-inert-state').exists()
+    if libc.mq_send(queue,b'inert',ctypes.c_size_t(5),0):raise OSError(ctypes.get_errno(),'mq_send')
+finally:
+    libc.mq_close(queue)
+    if libc.mq_unlink(name):raise OSError(ctypes.get_errno(),'mq_unlink')
+print('inert file, PTY and private message-queue creation complete')
+'''
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--endpoint', required=True, help='Explicit unix:// Docker endpoint; never uses the default context')
     parser.add_argument('--image-id', required=True, help='Already installed sha256 image ID with /bin/sh and /usr/local/bin/python3')
     parser.add_argument('--loopback-ssh-profile', type=Path,
                         help='Use an existing disposable SSH listener on 127.0.0.1 to reach this same daemon')
+    parser.add_argument('--owned-lab-state', action='store_true',
+                        help='Also exercise owned-lab-state-v1 physical mount readback and mutable state')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     result = {'kind': 'environment-real-docker-e2e-v2', 'classification': 'actual_docker_environment',
               'checks': [], 'observations': [], 'provider_calls': 0, 'external_target_calls': 0,
+              'lab_artifact_class': 'owned-lab-state-v1' if args.owned_lab_state else None,
               'unverified': ['SSH transport', 'native model host', 'joined controller workflow', 'research acceptance']}
     environments = []
 
@@ -110,7 +137,7 @@ def main():
 
         def owned(receipt=None):
             value = Environment(profile, limits, authorize, events.append,
-                                dispatch_guard=nullcontext, receipt=receipt)
+                                dispatch_guard=nullcontext, receipt=receipt, lab_artifact=args.owned_lab_state)
             environments.append(value)
             return value
 
@@ -142,6 +169,14 @@ def main():
             active[0] = True
             prepared = environment.prepare([access], {'source': str(source)})
             check('production staging starts the exact owned environment', prepared['status'] == 'ready')
+            if args.owned_lab_state:
+                result['lab_state_readback'] = environment.artifact_state_readback()
+                check('all actual mutable and kernel mounts pass the class policy',
+                      result['lab_state_readback']['kind'] == 'owned-lab-state-readback-v1')
+                written = environment.execute(['/usr/local/bin/python3', '-I', '-S', '-c', LAB_STATE_PROBE],
+                    timeout_seconds=5)
+                check('native identity creates inert files, private PTY and private message queue',
+                      written['status'] == 'settled' and written['returncode'] == 0)
             identity = environment.receipt()
             result['owned_identity'] = identity
             info, = json.loads(call('container', 'inspect', identity['container_id']).stdout)
@@ -190,9 +225,11 @@ def main():
             active[0] = True
             deadline[0] = time.monotonic() + 30
             lost = Environment(profile, dict(limits, lease_seconds=4), authorize, events.append,
-                               dispatch_guard=nullcontext)
+                               dispatch_guard=nullcontext, lab_artifact=args.owned_lab_state)
             environments.append(lost)
             lost.prepare([access], {'source': str(source)})
+            if args.owned_lab_state:
+                result['lost_owner_lab_state_readback'] = lost.artifact_state_readback()
             spawned = lost.execute(['/usr/local/bin/python3', '-c',
                 "import subprocess; p=subprocess.Popen(['/usr/local/bin/python3','-c','import time;time.sleep(45)'],"
                 "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);print(p.pid)"],
@@ -232,7 +269,8 @@ def main():
         result['cleanup'] = cleanup
         result['source_sha256'] = {str(path.relative_to(REPO)): 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (Path(__file__).resolve(), REPO / 'tools/research_environment.py',
-                         REPO / 'tools/engagement_lease_owner.py', REPO / 'tools/engagement_workspace.py')}
+                         REPO / 'tools/engagement_lease_owner.py', REPO / 'tools/engagement_workspace.py',
+                         REPO / 'tools/engagement_lab_artifacts.py', REPO / 'tools/engagement_lab_inventory.py')}
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({'status': result['status'], 'checks': len(result['checks']), 'output': str(args.output)}))

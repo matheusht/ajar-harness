@@ -15,6 +15,7 @@ import re
 import stat
 from contextlib import contextmanager
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -264,6 +265,39 @@ def build_registry(documents: dict[str, dict[str, Any]] | None = None) -> Regist
     return registry
 
 
+def _schema_snapshot() -> tuple[tuple[str, bytes], ...]:
+    snapshot = []
+    for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
+        try:
+            content = _read_bound_regular_file(path)
+            if content is None:
+                content = path.read_bytes()
+        except OSError as exc:
+            raise RecordError("invalid_json", f"cannot load JSON {path}: {exc}") from exc
+        snapshot.append((str(path), content))
+    return tuple(snapshot)
+
+
+@lru_cache(maxsize=1)
+def _schema_documents_from_snapshot(snapshot: tuple[tuple[str, bytes], ...]) -> dict[str, dict[str, Any]]:
+    # Only exact schema bytes are reused; files and engagement records remain freshly read.
+    documents = {}
+    for path, content in snapshot:
+        try:
+            document = json.loads(content.decode("utf-8"), object_pairs_hook=_reject_duplicate_pairs)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise RecordError("invalid_json", f"cannot load JSON {path}: {exc}") from exc
+        if not isinstance(document, dict):
+            raise RecordError("invalid_schema_document", f"schema is not an object: {path}")
+        documents[Path(path).name] = document
+    return documents
+
+
+@lru_cache(maxsize=1)
+def _registry_from_schema_snapshot(snapshot: tuple[tuple[str, bytes], ...]) -> Registry:
+    return build_registry(_schema_documents_from_snapshot(snapshot))
+
+
 def _reference_problems(name: str, document: dict[str, Any], documents: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     by_id = {value.get("$id"): value for value in documents.values() if value.get("$id")}
     problems: list[dict[str, Any]] = []
@@ -452,12 +486,13 @@ def validate_record(record: Any, schema_name: str) -> list[dict[str, Any]]:
     filename = RECORD_SCHEMA_FILES.get(schema_name)
     if filename is None:
         return [{"code": "unknown_schema", "instance_path": "/", "schema_path": "/", "message": schema_name}]
-    documents = _load_schema_documents()
+    snapshot = _schema_snapshot()
+    documents = _schema_documents_from_snapshot(snapshot)
     schema = documents.get(filename)
     if schema is None:
         return [{"code": "missing_schema", "instance_path": "/", "schema_path": "/", "message": filename}]
     try:
-        validator = Draft202012Validator(schema, registry=build_registry(documents), format_checker=FormatChecker())
+        validator = Draft202012Validator(schema, registry=_registry_from_schema_snapshot(snapshot), format_checker=FormatChecker())
         errors = sorted(validator.iter_errors(record), key=lambda item: (list(item.absolute_path), item.message))
     except Exception as exc:
         return [{"code": "schema_resolution_failed", "instance_path": "/", "schema_path": "/", "message": str(exc)}]

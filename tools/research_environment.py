@@ -76,13 +76,20 @@ class Environment:
     """
 
     def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None,
-                 known_hosts_file=None):
-        from engagement_contract import validate_environment_profile
+                 known_hosts_file=None, lab_artifact=False, codex_tool_policy=False, state_volumes=None):
+        from engagement_contract import CODEX_TOOL_POLICY, validate_environment_profile
         validate_environment_profile(profile)
         self.profile = json.loads(json.dumps(profile))
+        self.tool_policy = None
+        if codex_tool_policy:
+            if profile.get('codex_tool_policy') != CODEX_TOOL_POLICY:
+                raise EnvironmentUnavailable('codex_tool_policy_not_authorized')
+            from codex_tool_policy import load_policy
+            self.tool_policy = load_policy()
         if known_hosts_file is not None and profile['transport'] != 'ssh-docker':
             raise EnvironmentUnavailable('ssh_host_override_invalid')
         self.known_hosts_file = known_hosts_file
+        self.lab_artifact = lab_artifact
         self.limits = dict(limits)
         if set(limits) != {'memory_bytes', 'cpu_count', 'pids', 'workspace_bytes', 'lease_seconds', 'output_bytes'}:
             raise EnvironmentUnavailable('environment_limits_invalid')
@@ -90,6 +97,10 @@ class Environment:
             valid = type(value) in (int, float) and math.isfinite(value) and value > 0
             if not valid or (key != 'cpu_count' and type(value) is not int):
                 raise EnvironmentUnavailable('environment_limits_invalid')
+        self.state_volumes = json.loads(json.dumps(state_volumes)) if state_volumes is not None else []
+        if state_volumes is not None:
+            from application_volumes import validate
+            validate(self.state_volumes, limits)
         self.authorize, self.observe = authorize, observe
         self.grant = json.loads(json.dumps(grant)) if grant is not None else None
         self.dispatch_guard = dispatch_guard
@@ -109,7 +120,12 @@ class Environment:
         self.identity['container_name'] = 'oslit-' + self.identity['nonce']
         self.identity['stage_container_name'] = self.identity['container_name'] + '-stage'
         self.identity['prepared_image_name'] = 'oslit-input-' + self.identity['nonce'] + ':latest'
+        if self.state_volumes:
+            from application_volumes import identities
+            self.identity.update(kind='research-environment-receipt-v3',
+                state_volumes=identities(self.identity['nonce'], self.state_volumes))
         if receipt is not None:
+            from application_volumes import unsettled_valid, validate_identity
             required = set(self.identity)
             if (not isinstance(receipt, dict) or set(receipt) != required or
                     receipt['kind'] != self.identity['kind'] or
@@ -125,10 +141,11 @@ class Environment:
                      not re.fullmatch('[0-9a-f]{64}', receipt['stage_container_id'])) or
                     (receipt['prepared_image_id'] is not None and
                      not re.fullmatch('sha256:[0-9a-f]{64}', receipt['prepared_image_id'])) or
-                    not isinstance(receipt['unsettled'], list) or
-                    not set(receipt['unsettled']) <= {'create_stage', 'snapshot_input', 'create'} or
+                    not unsettled_valid(receipt) or
                     not receipt['daemon_id']):
                 raise EnvironmentUnavailable('environment_receipt_invalid')
+            if self.state_volumes:
+                validate_identity(receipt, self.state_volumes, limits)
             self.identity = json.loads(json.dumps(receipt))
             # Recovery can inspect/revoke/clean an exact resource; it cannot revive it.
             self.retired = True
@@ -139,6 +156,11 @@ class Environment:
 
     def receipt(self):
         return json.loads(json.dumps(self.identity))
+
+    def allocation_identity(self):
+        self._admit()
+        self._daemon()
+        return self.receipt()
 
     def _admit(self):
         if self.retired or self.held:
@@ -253,12 +275,13 @@ class Environment:
             raise EnvironmentUnavailable('docker_daemon_changed')
         self.identity['daemon_id'] = value
 
-    def _effect(self, operation, args, *, cleanup=False, timeout=5, input_file=None, output_limit=None):
+    def _effect(self, operation, args, *, cleanup=False, timeout=5, input_file=None, output_limit=None, uncertain_key=None):
         remaining = timeout if cleanup else min(timeout, self._admit())
         self._daemon()
         operation_id = uuid.uuid4().hex
-        if operation in ('create_stage', 'snapshot_input', 'create'):
-            self.identity['unsettled'].append(operation)
+        key = uncertain_key or (operation if operation in ('create_stage', 'snapshot_input', 'create') else None)
+        if key:
+            self.identity['unsettled'].append(key)
         self._event('intent', operation, operation_id, request_sha256=self._digest(args))
         # The journal write may have taken time or the grant may have been revoked.
         if not cleanup:
@@ -268,8 +291,8 @@ class Environment:
         result = self._run(args, timeout=remaining, input_file=input_file,
                            output_limit=output_limit or 4 * 1024 * 1024, dispatch=not cleanup,
                            include_stderr=operation == 'execute')
-        if result['status'] == 'settled' and result['returncode'] == 0 and operation in self.identity['unsettled']:
-            self.identity['unsettled'].remove(operation)
+        if result['status'] == 'settled' and result['returncode'] == 0 and key in self.identity['unsettled']:
+            self.identity['unsettled'].remove(key)
         try:
             self._event('result', operation, operation_id, status=result['status'],
                         returncode=result['returncode'], output_sha256='sha256:' + hashlib.sha256(result['output']).hexdigest())
@@ -323,7 +346,7 @@ class Environment:
                 command = guardian_command(self.identity['nonce'], self.limits['lease_seconds'])
                 expected_user, expected_init, expected_stdin = '0:0', False, True
                 expected_workdir = '/'
-            elif self.recovering and 'io.oslit.guardian' not in config['Labels']:
+            elif self.recovering and not self.lab_artifact and 'io.oslit.guardian' not in config['Labels']:
                 command = ['/bin/sh', '-c', 'while :; do sleep 3600; done']
                 expected_user = f"{self.profile['uid']}:{self.profile['gid']}"
                 expected_init, expected_stdin = True, False
@@ -344,9 +367,28 @@ class Environment:
                     host['MemorySwap'] != self.limits['memory_bytes'] or
                     host['NanoCpus'] != int(self.limits['cpu_count'] * 1e9) or
                     host['PidsLimit'] != self.limits['pids'] or
-                    host.get('Binds') or info.get('Mounts') or host.get('PortBindings') or
+                    host.get('Binds') or host.get('PortBindings') or
                     host['Tmpfs'] != expected_tmpfs):
                 raise ValueError('configuration')
+            from application_volumes import verify_mounts
+            verify_mounts(self, info, stage=stage)
+            if self.lab_artifact:
+                if (config['Labels'].get('io.oslit.engagement') != self.identity['nonce']
+                        or config['Labels'].get('io.oslit.profile') != self.identity['profile_sha256']):
+                    raise ValueError('artifact_owner')
+                from engagement_lab_artifacts import validate_configuration
+                validate_configuration(info, self.limits)
+            if self.tool_policy and not stage:
+                from codex_tool_policy import verify_configuration
+                verify_configuration(info, self.tool_policy)
+                if info['State']['Running'] and not self.retired and not self.held:
+                    observed = self._run(['container', 'exec', '--user',
+                        f"{self.profile['uid']}:{self.profile['gid']}", self.identity['container_id'],
+                        '/bin/cat', '/proc/self/attr/current'], output_limit=256, dispatch=True)
+                    expected = (self.tool_policy['apparmor_profile'] + ' (enforce)').encode()
+                    if (observed['status'] != 'settled' or observed['returncode']
+                            or observed['output'].strip() != expected):
+                        raise ValueError('codex_tool_policy_not_enforcing')
         except (KeyError, TypeError, ValueError):
             raise EnvironmentUnavailable('environment_configuration_mismatch') from None
 
@@ -380,7 +422,7 @@ class Environment:
 
     def _tmpfs(self):
         return {path: f"rw,nosuid,nodev,size={size},uid={self.profile['uid']},gid={self.profile['gid']},mode=0700"
-                for path, size in (('/work', self.limits['workspace_bytes']),
+                for path, size in (('/work', self.limits['workspace_bytes'] - sum(row['bytes'] for row in self.state_volumes)),
                                    ('/tmp', min(self.limits['workspace_bytes'], 64 * 1024 * 1024)))}
 
     def _archive(self, accesses, access_files, support_inputs):
@@ -513,21 +555,25 @@ class Environment:
                     '--memory', str(self.limits['memory_bytes']), '--memory-swap', str(self.limits['memory_bytes']),
                     '--cpus', str(self.limits['cpu_count']), '--user', '0:0',
                     '--workdir', '/', '--entrypoint', guardian[0], '--init=false', '--interactive']
+            if self.lab_artifact:
+                from engagement_lab_artifacts import storage_policy
+                args.extend(['--ipc', 'private', '--cgroupns', 'private',
+                    '--shm-size', str(storage_policy(self.limits)['shm_bytes'])])
             for path, options in self._tmpfs().items():
                 args.extend(['--tmpfs', path + ':' + options])
             image_argument = len(args)
             args.extend([self.profile['image_id'], *guardian[1:]])
-            created = self._effect('create_stage', args)
+            created = self._effect('create_stage', args, timeout=self._admit())
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_create_unknown')
             self._verify_configuration(self._inspect(stage=True), stage=True)
-            copied = self._effect('stage_input', ['container', 'cp', '-', self.identity['stage_container_id'] + ':/'], input_file=archive)
+            copied = self._effect('stage_input', ['container', 'cp', '-', self.identity['stage_container_id'] + ':/'], input_file=archive, timeout=self._admit())
             if copied['status'] != 'settled' or copied['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_stage_unknown')
             committed = self._effect('snapshot_input', ['container', 'commit', self.identity['stage_container_id'],
-                                                       self.identity['prepared_image_name']])
+                                                       self.identity['prepared_image_name']], timeout=self._admit())
             if committed['status'] != 'settled' or committed['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_snapshot_unknown')
@@ -539,7 +585,20 @@ class Environment:
             args[args.index('--name') + 1] = self.identity['container_name']
             args[image_argument] = self.identity['prepared_image_id']
             args.insert(2, '--read-only')
-            created = self._effect('create', args)
+            if self.state_volumes:
+                from application_volumes import create
+                create(self)
+                for row in self.identity['state_volumes']:
+                    args[2:2] = ['--mount', f"type=volume,source={row['name']},target={row['path']},volume-nocopy"]
+            if self.tool_policy:
+                args[2:2] = ['--security-opt', 'apparmor=' + self.tool_policy['apparmor_profile'],
+                             '--security-opt', 'seccomp=/dev/stdin']
+                with tempfile.TemporaryFile() as policy_input:
+                    policy_input.write(self.tool_policy['seccomp'])
+                    policy_input.seek(0)
+                    created = self._effect('create', args, timeout=self._admit(), input_file=policy_input)
+            else:
+                created = self._effect('create', args, timeout=self._admit())
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_create_unknown')
@@ -723,11 +782,38 @@ class Environment:
             raise
         return process
 
+    def artifact_state_readback(self):
+        from engagement_lab_artifacts import validate_inventory, configuration_snapshot
+        if not self.lab_artifact:
+            raise EnvironmentUnavailable('lab_artifact_class_missing')
+        self._admit()
+        info = self._inspect()
+        self._verify_configuration(info)
+        if not info['State']['Running']:
+            raise EnvironmentUnavailable('lab_artifact_not_running')
+        program = Path(__file__).with_name('engagement_lab_inventory.py').read_text()
+        result = self._run(['container', 'exec', '--user', f"{self.profile['uid']}:{self.profile['gid']}",
+            '--workdir', '/', '--env', 'PATH=/usr/local/bin:/usr/bin:/bin', self.identity['container_id'],
+            'python3', '-I', '-S', '-B', '-c', program], dispatch=True, output_limit=65536)
+        try:
+            if result['status'] != 'settled' or result['returncode']:
+                raise ValueError()
+            inventory = json.loads(result['output'])
+        except (ValueError, TypeError):
+            raise EnvironmentUnavailable('lab_artifact_storage_unavailable') from None
+        validate_inventory(inventory, self.profile, self.limits, self.state_volumes)
+        return {'kind': 'owned-lab-state-readback-v1', 'identity': self.receipt(),
+            'configuration': configuration_snapshot(info), 'inventory': inventory}
+
     def readback(self):
         info = self._inspect(absent_ok=True)
         if info is None:
             return {'status': 'absent', 'identity': self.receipt()}
         self._verify_configuration(info)
+        if self.state_volumes:
+            from application_volumes import inspect
+            for index in range(len(self.state_volumes)):
+                inspect(self, index)
         return {'status': 'held' if self.held else ('running' if info['State']['Running'] else 'stopped'),
                 'running': info['State']['Running'], 'identity': self.receipt()}
 
@@ -793,4 +879,7 @@ class Environment:
             removed = self._effect('remove_input_image', ['image', 'rm', self.identity['prepared_image_id']], cleanup=True)
             if removed['status'] != 'settled' or removed['returncode'] or self._input_image(absent_ok=True) is not None:
                 raise EnvironmentUnavailable('environment_image_cleanup_unobserved')
+        if self.state_volumes:
+            from application_volumes import cleanup
+            cleanup(self)
         return {'status': 'clean', 'identity': self.receipt(), 'owned_workspace': 'container_removed'}

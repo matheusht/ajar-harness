@@ -1,0 +1,10 @@
+{
+  "command": "python3 tools/check-conformance.py",
+  "classification": "local_structural_conformance",
+  "checks": 900,
+  "failures": 0,
+  "status": "passed",
+  "output_sha256": "fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf",
+  "checker_sha256": "50f60510ebec8b85914e1f4d32cdaba157ed3dd7e7c21840a9d811a4bdf099a7",
+  "scope": "structural repository checks; dynamic behavior is covered only by the focused scenario results"
+}

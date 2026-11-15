@@ -1,4 +1,9 @@
-# Bounded native source setup
+# Native v1 source setup compatibility
+
+For new research, use the [v2 engagement guide](engagement.md). The procedure
+below is retained for explicit v1 inputs or existing v1 records; its approvals,
+limits and signatures keep their original meaning. Do not apply them to v2.
+
 
 Use this route for a **new, authorized source** before a target runtime recipe
 exists. It ends with an agent proposal for host review. The source stays

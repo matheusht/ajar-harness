@@ -1,7 +1,9 @@
 # UNSIGNED TEMPLATE — application access
 
 Replace every `REPLACE_` value, review the authority and resource limits, then sign
-the resulting challenge with the operator key. This file grants no authority.
+the resulting challenge with the operator key. This file grants no authority until signed. The initial-scope policy then covers
+all artifact types inside the named owned lab and permitted effects without
+additional confirmations; remote application mutations need their own effects.
 
 - Operator allowed signers SHA256: sha256:REPLACE_ALLOWED_SIGNERS_SHA256
 - Signed: [ ] operator review and signature required
@@ -26,7 +28,9 @@ the resulting challenge with the operator key. This file grants no authority.
       },
       "account_refs": [],
       "permissions": [
-        "read"
+        "read",
+        "write",
+        "execute"
       ]
     }
   ],
@@ -92,6 +96,36 @@ the resulting challenge with the operator key. This file grants no authority.
       "rung": "self",
       "artifact_classes": [],
       "cleanup_required": false
+    },
+    {
+      "id": "execute-local",
+      "kind": "execute",
+      "access_ids": [
+        "application-main"
+      ],
+      "environment_ids": [
+        "lab-main"
+      ],
+      "account_refs": [],
+      "rung": "self",
+      "artifact_classes": [],
+      "cleanup_required": false
+    },
+    {
+      "id": "create-owned-lab",
+      "kind": "artifact_create",
+      "access_ids": [
+        "application-main"
+      ],
+      "environment_ids": [
+        "lab-main"
+      ],
+      "account_refs": [],
+      "rung": "self",
+      "artifact_classes": [
+        "owned-lab-state-v2"
+      ],
+      "cleanup_required": true
     }
   ],
   "escalation_ceiling": "self",
@@ -121,6 +155,7 @@ the resulting challenge with the operator key. This file grants no authority.
   "revocation": {
     "operator_stop": true,
     "disconnected_worker": "lease_expiry"
-  }
+  },
+  "authority_policy": "initial-scope-v1"
 }
 ```

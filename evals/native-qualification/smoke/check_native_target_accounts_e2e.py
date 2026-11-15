@@ -183,10 +183,10 @@ def account_workflow(path, target):
         else:
             raise AssertionError('unsigned account accepted')
         require(len(target.seen) == before, 'unsigned account reached target')
-        binder = x.boundary.lab_gate.request_binder
+        binder = x.boundary.target_accounts.bind
         x.boundary.finish()
         try:
-            binder('GET', target.url + '/who', {})
+            binder('GET', target.url + '/who', {}, request_length=0)
         except Exception as error:
             require(getattr(error, 'code', str(error)) == 'target_account_binding_closed', 'private account binding remained usable')
         else:

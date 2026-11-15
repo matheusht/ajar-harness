@@ -13,6 +13,7 @@ import socket
 import socketserver
 import ssl
 import threading
+import uuid
 from urllib.parse import urljoin, urlsplit
 
 
@@ -28,16 +29,24 @@ def _request(stream):
     headers, total = {}, 0
     while True:
         row = stream.readline(8193); total += len(row)
-        if not row.endswith(b'\r\n') or len(row) > 8192 or total > 16384:
-            raise NetworkDenied('network_headers_invalid')
+        if not row.endswith(b'\r\n') or len(row) > 8192:
+            raise NetworkDenied('network_header_line_invalid')
+        if total > 16384:
+            raise NetworkDenied('network_headers_too_large')
         if row == b'\r\n':
             return method, target, headers
         key, value = row.decode('ascii').rstrip('\r\n').split(':', 1)
         key, value = key.lower(), value.strip()
-        if (not re.fullmatch('[a-z0-9-]+', key) or key in headers or
-                key in ('proxy-authorization', 'expect') or
-                any(ord(c) < 32 or ord(c) == 127 for c in value)):
-            raise NetworkDenied('network_headers_invalid')
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9a-z-]+", key):
+            raise NetworkDenied('network_header_name_invalid')
+        if key in headers:
+            raise NetworkDenied('network_header_duplicate')
+        if key == 'proxy-authorization':
+            raise NetworkDenied('network_header_proxy_authorization_unavailable')
+        if key == 'expect':
+            raise NetworkDenied('network_header_expect_unavailable')
+        if any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise NetworkDenied('network_header_value_invalid')
         headers[key] = value
 
 
@@ -53,18 +62,23 @@ def _forward_headers(headers, *, request=False):
     total = 0
     for key, value in headers:
         total += len(key) + len(value) + 4
-        if (total > 16384 or len(key) + len(value) > 8192 or
-                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key) or
-                any(ord(c) < 32 or ord(c) == 127 for c in value)):
-            raise NetworkDenied('network_headers_invalid')
+        if total > 16384:
+            raise NetworkDenied('network_headers_too_large')
+        if len(key) + len(value) > 8192:
+            raise NetworkDenied('network_header_line_invalid')
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key):
+            raise NetworkDenied('network_header_name_invalid')
+        if any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise NetworkDenied('network_header_value_invalid')
         if key.lower() not in blocked:
             yield key, value
 
 
 class NetworkGate:
     def __init__(self, routes, authorize, *, maximum_bytes=1024 * 1024, dispatch_guard=None,
-                 upstream_context=None, request_binder=None, target_connectors=None):
+                 upstream_context=None, request_binder=None, target_connectors=None, request_observer=None):
         self.request_binder = request_binder
+        self.request_observer = request_observer
         self.routes = copy.deepcopy(routes)
         self.target_connectors = dict(target_connectors or {})
         for origin, connector in self.target_connectors.items():
@@ -179,6 +193,7 @@ class NetworkGate:
                 raise NetworkDenied('network_header_invalid')
         parsed, port, address = self._destination(url)
         peer = binding = response = None
+        request_id = None
         total = 0
         status = 'unknown'
         connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
@@ -187,7 +202,7 @@ class NetworkGate:
                 if not self._active():
                     raise NetworkDenied('network_lease_inactive')
                 if self.request_binder is not None:
-                    binding = self.request_binder(method, url, headers)
+                    binding = self.request_binder(method, url, headers, request_length=length)
                     if binding is not None:
                         headers = binding.headers
                 origin = f'{parsed.scheme}://{parsed.hostname}:{port}'
@@ -211,6 +226,10 @@ class NetworkGate:
                 connection.putheader('Connection', 'close')
                 connection.putheader('Transfer-Encoding' if length is None else 'Content-Length',
                                      'chunked' if length is None else str(length))
+                if self.request_observer is not None:
+                    started_id = uuid.uuid4().hex
+                    self.request_observer({'request_id': started_id, 'status': 'started'})
+                    request_id = started_id
                 connection.endheaders()
             for chunk in chunks:
                 if total + len(chunk) > self.maximum_bytes:
@@ -242,6 +261,9 @@ class NetworkGate:
                 peer.close()
             if binding is not None:
                 binding.finish(status, response.status if response is not None else None, total)
+            if request_id is not None:
+                self.request_observer({'request_id': request_id,
+                                       'status': 'completed' if status == 'settled' else 'unknown'})
 
     def _response_shape(self, response, method):
         lengths = response.headers.get_all('Content-Length', [])

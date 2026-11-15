@@ -24,12 +24,14 @@ import uuid
 
 from engagement_contract import canonical, digest, read_bytes, read_json, source_manifest
 from engagement_controller import ControllerError, instant, overlap
+from engagement_lab_artifacts import select_effect as select_artifact_effect, execute_effect, cleanup_staging
 from engagement_network import NetworkGate
 from engagement_network_bridge import ProxyBridge
 from research_environment import Environment
 from native_runtime_transport import HostOperation, MAX_FRAME
 from native_runtime_linux import LinuxModelOwner
 from target_accounts import TargetAccountError, TargetAccountResolver
+from acquisition_network import LabRequestBinder
 from application_state import ApplicationOwner
 from engagement_evidence import application_released
 import native_runtime_codex as codex
@@ -108,8 +110,12 @@ def _tool(name, description, properties, required):
 
 
 TOOLS = [
-    _tool('engagement_status', 'Read your assignment, current authority and bounded shared evidence updates.',
-        {'since': {'type': ['string', 'null']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}, ['since', 'limit']),
+    _tool('engagement_status', 'Read assignment and updates, or search the shared research board with view=board. Board cursors are separate from update acknowledgments.',
+        {'since': {'type': ['string', 'null']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+         'view': {'type': 'string', 'enum': ['updates', 'board']}, 'query': {'type': 'string', 'maxLength': 1024},
+         'kinds': {'type': 'array', 'items': {'type': 'string', 'enum': [
+             'task', 'publication', 'instrument', 'experiment', 'claim', 'review', 'obligation', 'message']},
+                   'minItems': 1, 'maxItems': 8, 'uniqueItems': True}}, ['since', 'limit']),
     _tool('engagement_submit', 'Submit a typed request using your authenticated worker identity and the current revision.',
         {'request': {'type': 'object'}}, ['request']),
     _tool('engagement_read', 'Read a published evidence object or current ephemeral status view in byte ranges. Follow next_offset until null; default max_bytes is 65536.',
@@ -124,6 +130,7 @@ TOOLS = [
          'conditions': {'type': 'object'}, 'seconds': {'type': 'integer', 'minimum': 1},
          'resources': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True},
          'starting_state': {'type': 'object', 'additionalProperties': {'type': 'string'}, 'description': 'Optional map of every selected application access to its signed owned baseline. Recreates separate owned .invalid targets; omission makes no application clean-start claim.'},
+         'artifact_effect_id': {'type': 'string', 'description': 'Optional signed owned-lab-state creation effect; separate from probe execution.'},
          'effect_id': {'type': 'string', 'description': 'Optional signed local effect for source/binary capture execution; later rungs require current evidence review. Application requests select their own effect.'},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]
@@ -211,6 +218,7 @@ class NativeBoundary:
         self.provider_gate = self.lab_gate = None
         self.owner_receipt = None
         self.execution_admitted = False
+        self.artifact_effect = None
         self.status_read_view = None
         self.finished = None
         self.finish_lock = threading.Lock()
@@ -267,8 +275,10 @@ class NativeBoundary:
                 self.operations[operation_id] = admitted
             else:
                 admitted = self.operations[operation_id]
+        execution = observation['operation'] == 'execute' or (observation['operation'] == 'launch_stdio' and observation.get('role') == 'native_tools')
         return self.controller.record_environment_observation(admitted, self.environment_id, observation,
-            effect_id=self._effect(self.environment_id, admitted))
+            effect_id=execute_effect(self.scope, admitted, self.environment_id) if self.artifact_effect and execution
+                else self._effect(self.environment_id, admitted))
 
     def _environment_options(self):
         if self.environment_profile['ssh']:
@@ -341,6 +351,9 @@ class NativeBoundary:
         self.accesses = [copy.deepcopy(row) for row in self.scope['access'] if row['id'] in self.context.grant['resources']]
         self.routes = _routes(self.scope, self.context.grant['resources'])
         self.environment_id, self.environment_reference, self.environment_profile = self._select_environment()
+        self.artifact_effect = select_artifact_effect(self.scope, self.context.grant, self.environment_id)
+        if self.artifact_effect:
+            execute_effect(self.scope, self.context.grant, self.environment_id)
         self.profile = copy.deepcopy(self.context.contract.runtime_profiles[self.context.worker['profile_id']])
         self.profile['config_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.config'))
         self.profile['protocol']['schema_file'] = str(self.controller.root / 'contract/runtimes' / (self.context.worker['profile_id'] + '.schema'))
@@ -375,7 +388,9 @@ class NativeBoundary:
         support[bundle_id] = bundle['support_input']
         maximum = self.environment_reference['limits']['output_bytes']
         self.provider_gate = NetworkGate(self.routes['provider'], self._active,
-            maximum_bytes=max(maximum, 8 * 1024 * 1024), dispatch_guard=self.context.guard)
+            maximum_bytes=max(maximum, 8 * 1024 * 1024), dispatch_guard=self.context.guard,
+            request_observer=lambda observation: self.controller.record_provider_request(
+                self.context.grant, observation))
         provider_url = None
         if 'model_host' in self.profile:
             self.provider_gate.serve(self.socket_dir / 'provider.sock', certificate=certificate, private_key=key)
@@ -384,15 +399,23 @@ class NativeBoundary:
             provider_url = f'http://127.0.0.1:{provider_address}'
         self.lab_gate = NetworkGate(self.routes['lab'], self._active, maximum_bytes=maximum,
             dispatch_guard=self.context.guard,
-            request_binder=self.target_accounts.bind if self.target_accounts is not None else None,
+            request_binder=LabRequestBinder(self.scope, self.environment_id, self._authorize_target,
+                self._observe_network, self.target_accounts).bind,
             target_connectors=self._application_connectors(self.context.grant['resources']))
         self.lab_gate.serve(self.socket_dir / 'lab.sock', certificate=certificate, private_key=key)
         self.controller.record_preparation_setup(self.context.grant)
         self.execution_admitted = True
         self.environment = Environment(self.environment_profile, self.environment_reference['limits'],
             self.context.authorize, self._observe, grant=self.context.grant,
-            dispatch_guard=self.context.guard, **self._environment_options())
+            dispatch_guard=self.context.guard, lab_artifact=bool(self.artifact_effect),
+            codex_tool_policy=(self.profile['kind'] == 'codex'
+                and 'codex_tool_policy' in self.environment_profile), **self._environment_options())
+        if self.artifact_effect:
+            self.controller.record_lab_artifact_intent(self.context.grant, self.environment_id, self.artifact_effect,
+                self.environment.allocation_identity())
         self.environment.prepare(self.accesses, self.context.contract.inputs['access_files'], support_inputs=support)
+        if self.artifact_effect:
+            self.controller.record_lab_artifact_ready(self.context.grant, self.environment_id, self.environment.artifact_state_readback())
         if 'model_host' in self.profile:
             self.model_owner = LinuxModelOwner(self.profile, self.context.assignment['profile_sha256'],
                 self.context.grant, authorize=self.context.authorize, dispatch_guard=self.context.guard,
@@ -481,9 +504,13 @@ class NativeBoundary:
 
     def _status(self, arguments):
         self.status_read_view = None
+        if (not isinstance(arguments, dict) or not {'since', 'limit'} <= set(arguments) or
+                set(arguments) - {'since', 'limit', 'view', 'query', 'kinds'}):
+            raise BoundaryError('native_status_arguments_invalid')
         limit = arguments['limit']
         while True:
-            page = self.controller.status(self.context.principal, since=arguments['since'], limit=limit)
+            page = self.controller.status(self.context.principal, since=arguments['since'], limit=limit,
+                view=arguments.get('view', 'updates'), query=arguments.get('query', ''), kinds=arguments.get('kinds'))
             if len(canonical(_result(page))) <= MAX_FRAME // 2:
                 return _completed(page)
             if limit > 1:
@@ -576,13 +603,16 @@ class NativeBoundary:
                 environment = next(row for row in self.scope['environments'] if row['profile_id'] == reference['environment_id'])
                 reset_profiles[access_id] = (reference, profile, environment)
                 segment = min(segment, environment['limits']['lease_seconds'])
-        effect_id = self._effect(self.environment_id, dict(self.context.grant, resources=resources))
+        capture_grant = dict(self.context.grant, resources=resources)
+        artifact_effect = select_artifact_effect(self.scope, capture_grant, self.environment_id, arguments.get('artifact_effect_id'))
         if 'effect_id' in arguments:
             effect = next((row for row in self.scope['effects'] if row['id'] == arguments['effect_id']), None)
-            if (application or effect is None or effect['kind'] == 'artifact_create' or effect['account_refs']
+            if (application or effect is None or effect['kind'] == 'artifact_create' or (artifact_effect and effect['kind'] != 'execute') or effect['account_refs']
                     or self.environment_id not in effect['environment_ids'] or not set(resources) <= set(effect['access_ids'])):
                 raise BoundaryError('native_capture_effect_invalid')
             effect_id = effect['id']
+        else:
+            effect_id = execute_effect(self.scope, capture_grant, self.environment_id) if artifact_effect else self._effect(self.environment_id, capture_grant)
         if application and self.network_operations:
             raise BoundaryError('native_capture_target_busy')
         if (arguments['patch_id'] is None) != (arguments['patch_arm'] is None):
@@ -600,7 +630,7 @@ class NativeBoundary:
             raise
         self.capture_application_active = application
         control = {'environment': None, 'application_owners': {}, 'reset_profiles': reset_profiles,
-            'cancelled': threading.Event(), 'done': threading.Event(), 'effect_id': effect_id}
+            'cancelled': threading.Event(), 'done': threading.Event(), 'effect_id': effect_id, 'artifact_effect': artifact_effect}
         def cancel():
             control['cancelled'].set()
             environment = control['environment']
@@ -615,6 +645,7 @@ class NativeBoundary:
         started = time.monotonic()
         environment = proxy = gate = directory = target_accounts = None
         cleanup = None
+        artifact_nonce = None
         value = None
         failure = None
         executions, operations, network_operations = [], {}, {}
@@ -661,7 +692,7 @@ class NativeBoundary:
                     nonce = environment.receipt()['nonce']
                 else:
                     admitted, nonce = network_operations[operation_id]
-                owner = owners.get(observation['access_id'])
+                owner = owners.get(observation.get('access_id'))
                 target_nonce = owner.start_receipt['target_nonce'] if owner is not None else None
                 result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation,
                     target_nonce=target_nonce)
@@ -717,7 +748,21 @@ class NativeBoundary:
         renewal.start()
         try:
             authorize()
+            environment = Environment(self.environment_profile, self.environment_reference['limits'], authorize,
+                observe, grant=grant, dispatch_guard=guard, lab_artifact=bool(control['artifact_effect']), **self._environment_options())
+            control['environment'] = environment
+            if control['artifact_effect']:
+                identity = environment.allocation_identity()
+                self.controller.record_lab_artifact_intent(grant, self.environment_id, control['artifact_effect'], identity)
+                artifact_nonce = identity['nonce']
             directory = Path(tempfile.mkdtemp(prefix='capture-', dir=self.state_dir))
+            if artifact_nonce:
+                paths = ['capture/instrument', 'capture/candidate', 'capture/probe']
+                if arguments['patch_id'] is not None:
+                    patch = self.controller.state()['patches'][arguments['patch_id']]
+                    logical = json.loads(self.controller.read_object(patch[arguments['patch_arm'] + '_manifest_sha256']))
+                    paths.extend('patch-source/' + name for name in logical)
+                self.controller.record_artifact_staging(grant, artifact_nonce, directory, paths)
             capture = directory / 'capture'; capture.mkdir(mode=0o700)
             limit = min(4 * 1024 * 1024, self.environment_reference['limits']['output_bytes'])
             candidate = self.environment.read_artifact(arguments['candidate_path'], limit)
@@ -758,11 +803,10 @@ class NativeBoundary:
                 subjects = ['/input/patch-source']
             with self.controller.lock():
                 self.controller.register_support_inputs(grant, support)
-            environment = Environment(self.environment_profile, self.environment_reference['limits'], authorize,
-                observe, grant=grant, dispatch_guard=guard, **self._environment_options())
-            control['environment'] = environment
             authorize()
             environment.prepare(accesses, self.context.contract.inputs['access_files'], support_inputs=support)
+            if artifact_nonce:
+                self.controller.record_lab_artifact_ready(grant, self.environment_id, environment.artifact_state_readback())
             prepared.set()
             for access_id, (reference, profile, target_environment) in control['reset_profiles'].items():
                 profile_id = reference['environment_id']
@@ -776,11 +820,19 @@ class NativeBoundary:
                         return self.controller.record_environment_observation(operations[opid], profile_id,
                             observation, effect_id=effect_id)
                 options = {'known_hosts_file': self.controller.root / 'contract/environments' / (profile_id + '.known_hosts')} if target_profile['ssh'] else {}
+                artifact_effect = reference.get('artifact_effect_id')
+                if artifact_effect:
+                    options.update(lab_artifact=True,
+                        on_ready=lambda value, target_profile_id=profile_id:
+                            self.controller.record_lab_artifact_ready(grant, target_profile_id, value))
                 owner = ApplicationOwner(profile, next(row for row in accesses if row['id'] == access_id),
                     target_profile, target_environment['limits'], authorize, observe_target,
                     grant=grant, dispatch_guard=guard, bootstrap={'application-connector': support['application-connector']}, **options)
                 with self.controller.lock():
                     owners[access_id] = owner
+                if artifact_effect:
+                    owner.environment.identity['access'] = [{key: owner.access[key] for key in ('id', 'kind', 'identity')}]
+                    self.controller.record_lab_artifact_intent(grant, profile_id, artifact_effect, owner.environment.allocation_identity())
                 receipt = owner.reset(arguments['starting_state'][access_id])
                 self.controller.record_application_start(grant, profile_id, receipt)
             if applications:
@@ -788,7 +840,8 @@ class NativeBoundary:
                     authorize, observe_network, environment_profile_id=self.environment_id)
             routes = _routes(self.scope, grant['resources'])['lab']
             gate = NetworkGate(routes, active, maximum_bytes=self.environment_reference['limits']['output_bytes'],
-                dispatch_guard=guard, request_binder=target_accounts.bind if target_accounts is not None else None,
+                dispatch_guard=guard, request_binder=LabRequestBinder(self.scope, self.environment_id,
+                    authorize, observe_network, target_accounts).bind,
                 target_connectors=self._application_connectors(grant['resources'], owners))
             socket_path = self.socket_dir / ('capture-' + uuid.uuid4().hex[:12] + '.sock')
             gate.serve(socket_path, certificate=self.certificate, private_key=self.private_key)
@@ -841,7 +894,10 @@ class NativeBoundary:
             for access_id, owner in owners.items():
                 try:
                     readback = owner.cleanup()
-                    self.controller.record_environment_cleanup(grant, control['reset_profiles'][access_id][0]['environment_id'], readback)
+                    reference = control['reset_profiles'][access_id][0]
+                    self.controller.record_environment_cleanup(grant, reference['environment_id'], readback)
+                    if reference.get('artifact_effect_id'):
+                        self.controller.record_lab_artifact_cleanup(grant, reference['environment_id'], readback)
                     application_cleanup[access_id] = readback['status'] == 'clean'
                 except Exception:
                     failure = failure or 'native_capture_application_cleanup_unresolved'
@@ -851,11 +907,27 @@ class NativeBoundary:
                     self.controller.record_environment_cleanup(grant, self.environment_id, cleanup)
                 except Exception:
                     failure = failure or 'native_capture_cleanup_unresolved'
-            known = not renewal.is_alive() and cleanup is not None and cleanup.get('status') == 'clean'
+            staging_clean = directory is None
+            if directory is not None:
+                try:
+                    if artifact_nonce:
+                        cleanup_staging(self.controller, grant, artifact_nonce)
+                    else:
+                        shutil.rmtree(directory)
+                    staging_clean = not directory.exists() and not directory.is_symlink()
+                except Exception:
+                    failure = failure or 'native_capture_staging_cleanup_unverified'
+            if artifact_nonce and cleanup is not None and cleanup.get('status') == 'clean' and staging_clean:
+                try:
+                    self.controller.record_lab_artifact_cleanup(grant, self.environment_id, cleanup)
+                except Exception:
+                    staging_clean = False
+                    failure = failure or 'native_capture_artifact_cleanup_unverified'
+            known = not renewal.is_alive() and cleanup is not None and cleanup.get('status') == 'clean' and staging_clean
             known = known and all(application_cleanup.get(name) for name in owners)
             if environment is None:
                 try:
-                    known = not renewal.is_alive() and not any(row['grant']['dispatch_id'] == grant['dispatch_id']
+                    known = staging_clean and not renewal.is_alive() and not any(row['grant']['dispatch_id'] == grant['dispatch_id']
                         for row in self.controller.state()['environment_operations'].values())
                 except Exception:
                     known = False
@@ -876,11 +948,6 @@ class NativeBoundary:
                     self.controller.adopt_receipt(grant['dispatch_id'], receipt, adapter_id=grant['adapter_id'])
             except Exception:
                 failure = failure or 'native_capture_settlement_unresolved'
-            if known and directory is not None:
-                try:
-                    shutil.rmtree(directory)
-                except OSError:
-                    failure = failure or 'native_capture_staging_cleanup_unverified'
             with self.controller.lock():
                 self.capture_application_active = False
                 self.capture_cancel = None
@@ -956,13 +1023,17 @@ class NativeBoundary:
                 try:
                     environment_readback = self.environment.revoke()
                     cleanup = self.environment.cleanup()
+                    if self.artifact_effect:
+                        self.controller.record_environment_cleanup(self.context.grant, self.environment_id, cleanup)
                 except Exception:
                     pass
             unused = (not self.execution_admitted and self.owner_receipt is None and self.runtime is None
                 and self.native_owner is None and self.environment is None and self.proxy is None)
             pre_native = self.controller.preparation_without_native(self.context.grant)
-            owned = any(row['grant']['dispatch_id'] == self.context.grant['dispatch_id']
-                for row in self.controller.state()['environment_operations'].values())
+            cleanup_state = self.controller.state()
+            owned = (any(row['grant']['dispatch_id'] == self.context.grant['dispatch_id']
+                for row in cleanup_state['environment_operations'].values())
+                or any(row['dispatch_id'] == self.context.grant['dispatch_id'] for row in cleanup_state['lab_artifacts'].values()))
             if pre_native and owned and cleanup is not None and cleanup.get('status') == 'clean':
                 try:
                     environment_readback = self.environment.revoke()
@@ -977,6 +1048,10 @@ class NativeBoundary:
             verified = verified or (pre_native and capture_closed and transports_closed and
                 (not owned or (cleanup is not None and cleanup.get('status') == 'clean'
                     and environment_readback is not None and environment_readback.get('status') in ('stopped', 'absent'))))
+            if verified and self.state_dir is not None:
+                verified = not any(row['state'] != 'clean' and row['dispatch_id'] != self.context.grant['dispatch_id']
+                    and cleanup_state['dispatches'][row['dispatch_id']].get('parent_dispatch_id') == self.context.grant['dispatch_id']
+                    for row in cleanup_state['lab_artifacts'].values())
             if verified:
                 for directory in (self.socket_dir, self.state_dir):
                     if directory is not None:
@@ -984,6 +1059,11 @@ class NativeBoundary:
                             shutil.rmtree(directory)
                         except OSError:
                             verified = False
+            if verified and self.artifact_effect and self.environment is not None:
+                try:
+                    self.controller.record_lab_artifact_cleanup(self.context.grant, self.environment_id, cleanup)
+                except Exception:
+                    verified = False
             self.finished = {'runtime': runtime_readback, 'environment': environment_readback,
                 'execution_admitted': self.execution_admitted,
                 'setup_only': pre_native,
@@ -1025,6 +1105,7 @@ def recover_boundary(context, dispatch):
             runtime_readback['owner_receipt_sha256'] = owner_sha
         nonces = {row['identity']['nonce'] for row in state['environment_operations'].values()
             if row['grant']['dispatch_id'] == context.grant['dispatch_id']}
+        nonces.update(row['nonce'] for row in state['lab_artifacts'].values() if row['dispatch_id'] == context.grant['dispatch_id'])
         environments = [row for nonce, row in state['environments'].items() if nonce in nonces]
         if not environments and not pre_native:
             return {'status': 'unknown', 'code': 'native_environment_receipt_unavailable'}
@@ -1035,6 +1116,9 @@ def recover_boundary(context, dispatch):
             reference = next(r for r in context.contract.scope['environments'] if r['profile_id'] == profile_id)
             recorded = {operation['effect_id'] for operation in state['environment_operations'].values()
                 if operation['identity']['nonce'] == row['identity']['nonce'] and operation['grant']['dispatch_id'] == context.grant['dispatch_id']}
+            artifact = state['lab_artifacts'].get(row['identity']['nonce'])
+            if artifact is not None and not recorded:
+                recorded.add(artifact['effect_id'])
             effects = [r for r in context.contract.scope['effects'] if profile_id in r['environment_ids'] and r['id'] in recorded
                 and {access['id'] for access in row['identity']['access']} <= set(r['access_ids']) and not r['account_refs']]
             if not effects:
@@ -1042,10 +1126,18 @@ def recover_boundary(context, dispatch):
             def observe(value, identity=profile_id, effect=effects[0]['id']):
                 return c.record_environment_observation(context.grant, identity, value, effect_id=effect)
             options = {'known_hosts_file': c.root / 'contract/environments' / (profile_id + '.known_hosts')} if profile['ssh'] else {}
+            if row['identity']['kind'] == 'research-environment-receipt-v3':
+                access_id = row['identity']['access'][0]['id']
+                application_profile = read_json(c.root / 'contract/applications' / (access_id + '.json'), private=True)
+                options['state_volumes'] = application_profile['state_volumes']
             environment = Environment(profile, reference['limits'], context.authorize, observe,
-                grant=context.grant, dispatch_guard=context.guard, receipt=row['identity'], **options)
+                grant=context.grant, dispatch_guard=context.guard, receipt=row['identity'], lab_artifact=artifact is not None, **options)
             stopped = environment.revoke()
             cleanup = environment.cleanup()
+            if artifact is not None:
+                c.record_environment_cleanup(context.grant, profile_id, cleanup)
+                cleanup_staging(c, context.grant, row['identity']['nonce'])
+                c.record_lab_artifact_cleanup(context.grant, profile_id, cleanup)
             if pre_native:
                 stopped = environment.revoke()
                 setup_readbacks.append({'profile_id': profile_id, 'environment': stopped, 'cleanup': cleanup})

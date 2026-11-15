@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -54,6 +55,24 @@ def diagnostic_transport(observations, known_secrets):
             self.observed_operation = operation
             try:
                 return super().request(operation, *args, **kwargs)
+            except Exception as error:
+                if (getattr(error, 'code', None) == 'native_response_timeout'
+                        and len(observations) < 8):
+                    allowed_methods = {'turn/started', 'turn/completed', 'turn/failed',
+                        'thread/tokenUsage/updated', 'item/started', 'item/completed',
+                        'item/tool/call', 'item/tool/callCompleted'}
+                    counts = {}
+                    for frame in self.deferred[:128]:
+                        method = frame.get('method') if isinstance(frame, dict) else None
+                        if method in allowed_methods:
+                            counts[method] = counts.get(method, 0) + 1
+                    observations.append({'operation_timeout': operation,
+                        'error': 'native_response_timeout',
+                        'deferred_event_count': len(self.deferred),
+                        'deferred_method_counts': counts,
+                        'queued_frame_count': self.frames.qsize(),
+                        'unmatched_response_count': len(self.responses)})
+                raise
             finally:
                 self.observed_operation = None
 
@@ -69,6 +88,123 @@ def diagnostic_transport(observations, known_secrets):
             return received
 
     return ObservedTransport
+
+
+def diagnostic_omp_frame(frame, known_secrets):
+    """Keep only bounded OMP terminal/error fields; discard assistant content and tool data."""
+    if not isinstance(frame, dict):
+        return None
+    if frame.get('type') == 'prompt_result':
+        status = frame.get('status')
+        if status not in ('completed', 'aborted', 'error'):
+            return {'event': 'prompt_result', 'status': 'invalid'}
+        row = {'event': 'prompt_result', 'status': status}
+        if type(frame.get('sessionSettled')) is bool:
+            row['session_settled'] = frame['sessionSettled']
+        error = frame.get('error')
+        if status == 'error' and isinstance(error, dict) and isinstance(error.get('message'), str) and error['message']:
+            row.update(_diagnostic_omp_error(error['message'], known_secrets))
+        return row
+    if frame.get('type') != 'message_end':
+        return None
+    message = frame.get('message')
+    if not isinstance(message, dict) or message.get('role') != 'assistant':
+        return None
+    error = message.get('errorMessage')
+    if not isinstance(error, str) or not error:
+        return None
+    return {'event': 'message_end', 'role': 'assistant',
+            **_diagnostic_omp_error(error, known_secrets)}
+
+
+def _diagnostic_omp_error(error, known_secrets):
+    try:
+        safe_publication(canonical({'errorMessage': error}), known_secrets=known_secrets)
+    except ContractError:
+        return {'error_message': '[diagnostic redacted]', 'redacted': True}
+    safe_error = ''.join(character if character in '\n\t' or ord(character) >= 32 else ' '
+                          for character in error)
+    safe_error = re.sub(r'(?i)(?:/home|/users|/private|/var/folders)/[^\s:]+', '[path]', safe_error)
+    encoded = safe_error.encode('utf-8', 'replace')
+    truncated = len(encoded) > 1024
+    if truncated:
+        safe_error = encoded[:1024].decode('utf-8', 'ignore')
+    return {'error_message': safe_error, 'truncated': truncated}
+
+
+def observe_omp_native_events(runtime, result, known_secrets):
+    """Record selected OMP events before the runtime's unchanged normal handler."""
+    transport = runtime.transport
+    original = transport.on_event
+    diagnostic = result.setdefault('omp_native_events', {'events': [], 'truncated': False})
+
+    def observe(frame):
+        row = diagnostic_omp_frame(frame, known_secrets)
+        if row is not None:
+            if len(diagnostic['events']) < 12:
+                diagnostic['events'].append(row)
+            else:
+                diagnostic['truncated'] = True
+        original(frame)
+
+    transport.on_event = observe
+
+
+def provider_request_diagnostic(method, target, headers):
+    method = method if method in ('GET', 'POST') else 'other'
+    path, separator, _query = target.partition('?') if isinstance(target, str) else ('', '', '')
+    routes = {('GET', '/v1/models'): 'openai_models_v1',
+              ('POST', '/v1/chat/completions'): 'openai_chat_completions_v1',
+              ('POST', '/v1/responses'): 'openai_responses_v1'}
+    return {'method': method, 'route': routes.get((method, path), 'other'),
+            'query_present': bool(separator),
+            'authorization_present': any(name.lower() == 'authorization' for name in headers)}
+
+
+def diagnostic_omp_model_state(model, expected_base_url, expected_provider, expected_model):
+    api = model.get('api')
+    return {'api': api if api in ('openai-completions', 'openai-responses') else 'other',
+            'base_url_matches': model.get('baseUrl') == expected_base_url,
+            'provider_matches': model.get('provider') == expected_provider,
+            'model_matches': model.get('id') == expected_model}
+
+
+class NetworkDenialObserver:
+    """Test-only replacement subclass that records bounded NetworkDenied codes."""
+    def __init__(self, module):
+        self.module = module
+        self.maximum = 16
+        self.codes = []
+        self.total = 0
+        self.original_type = module.NetworkDenied
+        self.installed_type = None
+        self.lock = threading.Lock()
+
+    def install(self):
+        observer = self
+        original = self.original_type
+
+        class ObservedNetworkDenied(original):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                value = args[0] if args else None
+                code = value if isinstance(value, str) and re.fullmatch(r'[a-z_]{1,100}', value) else 'unclassified'
+                with observer.lock:
+                    observer.total += 1
+                    if len(observer.codes) < observer.maximum:
+                        observer.codes.append(code)
+
+        self.installed_type = ObservedNetworkDenied
+        self.module.NetworkDenied = ObservedNetworkDenied
+
+    def restore(self):
+        if self.installed_type is not None and self.module.NetworkDenied is self.installed_type:
+            self.module.NetworkDenied = self.original_type
+
+    def snapshot(self):
+        with self.lock:
+            return {'codes': list(self.codes), 'total': self.total,
+                    'truncated': self.total > len(self.codes)}
 
 
 def environment_diagnostics(controller, known_secrets):
@@ -171,7 +307,10 @@ class Provider:
         directory.mkdir(mode=0o700)
         self.ca, certificate, key = _certificates(directory, [PROVIDER_HOST], lifetime_seconds=3600)
         self.runtime, self.secret = runtime, secret
-        self.requests, self.errors, self.escapes = [], [], 0
+        self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
+        self.discovery_requests = 0
+        self.request_observation_total = 0
+        self.request_observation_lock = threading.Lock()
         self.command = None
         fixture = self
 
@@ -180,11 +319,24 @@ class Provider:
                 pass
 
             def do_GET(self):
+                fixture.observe_request('GET', self.path, self.headers)
+                if (fixture.runtime == 'omp' and self.path == '/v1/models'
+                        and self.headers.get('Authorization') == 'Bearer ' + fixture.secret):
+                    fixture.discovery_requests += 1
+                    body = canonical({'object': 'list', 'data': [{'id': 'fixture-model', 'object': 'model',
+                        'created': 0, 'owned_by': 'fixture'}]})
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 fixture.escapes += 1
                 self.send_response(403); self.end_headers()
 
             def do_POST(self):
                 try:
+                    fixture.observe_request('POST', self.path, self.headers)
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 2 * 1024 * 1024:
                         raise ValueError('provider_request_size')
@@ -216,6 +368,18 @@ class Provider:
         self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+
+    def observe_request(self, method, target, headers):
+        row = provider_request_diagnostic(method, target, headers)
+        with self.request_observation_lock:
+            self.request_observation_total += 1
+            if len(self.request_observations) < 16:
+                self.request_observations.append(row)
+
+    def request_snapshot(self):
+        with self.request_observation_lock:
+            return {'total': self.request_observation_total, 'events': list(self.request_observations),
+                    'truncated': self.request_observation_total > len(self.request_observations)}
 
     @property
     def origin(self):
@@ -253,7 +417,11 @@ def tool_bundle(fixture, result):
     destination = fixture.directory / 'tool-bundle'
     if fixture.runtime == 'codex':
         (destination / 'bin').mkdir(parents=True, mode=0o700)
-        os.link(fixture.context_receipt['profile_fields']['executable']['path'], destination / 'bin/codex')
+        executable = Path(fixture.context_receipt['profile_fields']['executable']['path'])
+        os.link(executable, destination / 'bin/codex')
+        shutil.copyfile(executable.parent.parent / 'codex-package.json', destination / 'codex-package.json')
+        (destination / 'codex-resources').mkdir()
+        shutil.copy2(executable.parent.parent / 'codex-resources/bwrap', destination / 'codex-resources/bwrap')
         bundle = {'path': str(destination), 'manifest_sha256': digest(canonical(source_manifest(destination))),
                   'platform': fixture.platform}
         result['tool_installation'] = {'reused_verified_model_bytes': True, 'tool_bundle': bundle}
@@ -275,7 +443,25 @@ def tool_bundle(fixture, result):
     return result['tool_installation']['profile_fields']['tool_bundle']
 
 
-def signed_inputs(root, fixture, provider, bundle):
+def omp_fixture_catalog(provider_url):
+    return canonical({'providers': {'openai': {'baseUrl': provider_url + '/v1',
+        'api': 'openai-completions', 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
+            'reasoning': False, 'input': ['text'], 'supportsTools': True,
+            'contextWindow': 32768, 'maxTokens': 1024,
+            'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}})
+
+
+def validate_omp_fixture_catalog(content, provider_url, secret):
+    catalog = json.loads(content)
+    provider = catalog['providers']['openai']
+    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != 'openai-completions'
+            or provider.get('apiKey') != 'OPENAI_API_KEY'
+            or [model.get('id') for model in provider.get('models', [])] != ['fixture-model']
+            or secret.encode() in content):
+        raise ValueError('omp_fixture_model_catalog_invalid')
+
+
+def signed_inputs(root, fixture, provider, bundle, codex_tool_policy=None):
     from native_runtime_codex import _DISABLED_FEATURES
     inputs_path = make_fixture(root / 'input')
     inputs = json.loads(inputs_path.read_bytes())
@@ -332,16 +518,16 @@ env_key = "OPENAI_API_KEY"
             'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128, 'workspace_bytes': 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
-        write(catalog, canonical({'providers': {'openai': {'baseUrl': provider.origin + '/v1',
-            'api': 'openai-completions', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
-                'reasoning': False, 'input': ['text'], 'supportsTools': True,
-                'contextWindow': 32768, 'maxTokens': 1024,
-                'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}}))
+        catalog_content = omp_fixture_catalog(provider.origin)
+        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret)
+        write(catalog, catalog_content)
         profile['model_catalog'] = {'path': str(catalog), 'sha256': digest(catalog.read_bytes())}
     write(Path(inputs['runtime_profiles']['runtime-main']), canonical(profile))
     environment = {'kind': 'research-environment-profile-v2', 'transport': 'docker',
         'docker_binary': fixture.docker, 'docker_endpoint': fixture.endpoint, 'daemon_id': fixture.daemon_id,
         'image_id': fixture.base_id, 'platform': fixture.platform, 'uid': 1000, 'gid': 1000, 'ssh': None}
+    if codex_tool_policy is not None:
+        environment['codex_tool_policy'] = codex_tool_policy
     write(Path(inputs['environment_profiles']['lab-main']), canonical(environment))
     scope = fixture_scope(inputs_path)
     scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(source)))
@@ -356,33 +542,196 @@ env_key = "OPENAI_API_KEY"
     return inputs_path
 
 
+def policy_readback(fixture, tool_container_id, model_container_id, selected_policy, expected_seccomp):
+    """Publish policy names and hashes only, never Docker's serialized policy blob."""
+    import hashlib
+    import json
+    from codex_tool_policy import APPARMOR_PROFILE
+
+    def inspect(container_id):
+        observed = subprocess.run([fixture.docker, '--host', fixture.endpoint, 'container',
+            'inspect', container_id], check=True, capture_output=True, text=True, timeout=10)
+        rows = json.loads(observed.stdout)
+        if len(rows) != 1:
+            raise ValueError('container_policy_readback_invalid')
+        info = rows[0]
+        host = info['HostConfig']
+        security = host.get('SecurityOpt') or []
+        seccomp = [value[len('seccomp='):] for value in security
+                   if isinstance(value, str) and value.startswith('seccomp=')]
+        parsed, seccomp_kind, seccomp_digest = None, 'missing', None
+        if len(seccomp) == 1:
+            if seccomp[0] == 'unconfined':
+                seccomp_kind = 'unconfined'
+            else:
+                try:
+                    parsed = json.loads(seccomp[0])
+                    seccomp_kind = 'json'
+                    seccomp_digest = 'sha256:' + hashlib.sha256(
+                        json.dumps(parsed, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                except (ValueError, TypeError):
+                    seccomp_kind = 'invalid'
+        return {'apparmor_profile': info.get('AppArmorProfile'),
+            'cap_add': sorted(host.get('CapAdd') or []), 'cap_drop': sorted(host.get('CapDrop') or []),
+            'security_opt_names': sorted('no-new-privileges' if value in (
+                'no-new-privileges', 'no-new-privileges=true', 'no-new-privileges:true')
+                else 'apparmor' if value.startswith('apparmor=')
+                else 'seccomp' if value.startswith('seccomp=') else 'other'
+                for value in security if isinstance(value, str)),
+            'seccomp_kind': seccomp_kind, 'seccomp_sha256': seccomp_digest,
+            'seccomp_matches_codex_policy': parsed == expected_seccomp,
+            'codex_tool_policy_applied': info.get('AppArmorProfile') == APPARMOR_PROFILE
+                and host.get('CapAdd') in (None, [])
+                and sorted(host.get('CapDrop') or []) == ['ALL']
+                and parsed == expected_seccomp}
+
+    tool, model = inspect(tool_container_id), inspect(model_container_id)
+    model_policy_is_default = (model['apparmor_profile'] != APPARMOR_PROFILE
+        and model['cap_add'] == [] and model['cap_drop'] == ['ALL']
+        and model['security_opt_names'] == ['no-new-privileges']
+        and model['seccomp_matches_codex_policy'] is False)
+    return {'signed_policy': selected_policy, 'tool_container': tool, 'model_container': model,
+        'tool_policy_verified': tool['codex_tool_policy_applied'] is True,
+        'tool_apparmor_enforcement_verified_by_prepare': True,
+        'model_container_separate': tool_container_id != model_container_id,
+        'model_policy_is_default': model_policy_is_default}
+
+
 def invoke(context, boundary, prompt, result):
     from engagement_runner import Runner
     invocation = context.controller.begin_invocation(context.grant)
     boundary.runtime.invoke(prompt, invocation)
-    deadline, completed = time.monotonic() + 70, None
+    started = time.monotonic()
+    deadline, completed = started + 70, None
+    observed = []
+    observed_truncated = False
     while time.monotonic() < deadline:
         events = boundary.runtime.observe(timeout_seconds=.1)
-        completed = next((event for event in events if event['event'] == 'completed'), completed)
+        for event in events:
+            kind = event.get('event')
+            if kind in ('started', 'completed', 'yielded', 'unknown', 'host_tool_cancel'):
+                row = {'event': kind}
+                for key in ('status', 'reason', 'resource_settlement'):
+                    value = event.get(key)
+                    if isinstance(value, str) and len(value) <= 128:
+                        row[key] = value
+                if type(event.get('session_settled')) is bool:
+                    row['session_settled'] = event['session_settled']
+                if type(event.get('usage_available')) is bool:
+                    row['usage_available'] = event['usage_available']
+                if len(observed) < 32:
+                    observed.append(row)
+                else:
+                    observed_truncated = True
+            if kind == 'completed':
+                completed = event
         if not boundary.runtime.active:
             break
+    result.setdefault('native_invocation_diagnostics', []).append({
+        'runtime': boundary.runtime.kind,
+        'phase': 'completed' if completed is not None else 'no_completion_before_deadline',
+        'status': completed.get('status') if completed is not None else None,
+        'active_after_wait': bool(boundary.runtime.active),
+        'wait_seconds': round(time.monotonic() - started, 3),
+        'events': observed, 'events_truncated': observed_truncated,
+    })
     check(result, 'native invocation completed', completed is not None and completed['status'] == 'completed')
     context.controller.record_invocation_observed(context.grant, invocation,
         {'status': completed['status'], 'usage': Runner._usage(boundary.runtime)})
+
+
+def verify_engagement_export(controller, root, result):
+    """Export this run privately, then verify bytes, journal references and result projection."""
+    import subprocess
+
+    bundle = root / 'export'
+    try:
+        exported = controller.export(bundle)
+        commands = {
+            'integrity': [sys.executable, str(ROOT / 'tools/check_engagement_export.py'), str(bundle)],
+            'references': [sys.executable, str(ROOT / 'tools/verify_engagement_export_references.py'), str(bundle)],
+            'result': [sys.executable, str(ROOT / 'tools/verify_engagement_export_references.py'),
+                       str(bundle), '--check-result'],
+        }
+        reports = {}
+        for name, command in commands.items():
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            if completed.returncode != 0:
+                raise ValueError('export_' + name + '_verification_failed')
+            reports[name] = json.loads(completed.stdout)
+        manifest = json.loads((bundle / 'manifest.json').read_text())
+        result['export_verification'] = {
+            'status': 'passed' if exported['status'] == 'exported'
+                and reports['integrity'].get('integrity') == 'verified'
+                and reports['references'].get('status') == 'verified'
+                and reports['result'].get('result_consistency_verified') is True
+                else 'failed',
+            'revision': exported['revision'],
+            'file_count': len(manifest['files']),
+            'manifest_sha256': digest((bundle / 'manifest.json').read_bytes()),
+            'integrity': reports['integrity'],
+            'references': reports['references'],
+            'result': reports['result'],
+        }
+        result['checks'].append({'name': 'same engagement export integrity, references and result verified',
+                                 'passed': result['export_verification']['status'] == 'passed'})
+        if result['export_verification']['status'] != 'passed':
+            result['status'] = 'failed'
+    except Exception as error:
+        result['export_verification'] = {'status': 'failed', 'error': error_code(error)}
 
 
 def run_native(root, fixture, result):
     from engagement_controller import Controller
     from engagement_runner import Runner, WorkerContext
     from engagement_native_boundary import NativeBoundary, recover_boundary
+    from check_native_userns_probe import compare_environment
     import native_runtime_codex
     import research_environment
     bundle = tool_bundle(fixture, result)
+    if fixture.runtime == 'codex':
+        from check_codex_sandbox_policy_diagnostic import run_diagnostic, verified_bwrap_asset
+        try:
+            bwrap = Path(bundle['path']) / 'codex-resources/bwrap'
+            expected = fixture.context_receipt.get('runtime_manifest', {}).get(
+                'codex-resources/bwrap', {}).get('sha256')
+            installed = verified_bwrap_asset(bwrap, expected)
+        except Exception:
+            expected, installed = None, None
+        if not expected or installed != expected:
+            result['codex_sandbox_policy_diagnostic'] = {
+                'kind': 'codex-sandbox-policy-diagnostic-v1',
+                'classification': 'diagnostic_only', 'qualification': False,
+                'status': 'failed', 'error': 'bwrap_asset_identity_invalid',
+                'cleanup': 'not_started'}
+        else:
+            try:
+                result['codex_sandbox_policy_diagnostic'] = run_diagnostic(
+                    fixture.docker, fixture.endpoint, fixture.image_id, expected)
+            except Exception:
+                result['codex_sandbox_policy_diagnostic'] = {
+                    'kind': 'codex-sandbox-policy-diagnostic-v1',
+                    'classification': 'diagnostic_only', 'qualification': False,
+                    'status': 'failed', 'error': 'diagnostic_integration_error',
+                    'cleanup': 'unresolved'}
+            if (os.environ.get('OSLIT_CODEX_POLICY_REPLAY') == '1'
+                    and getattr(fixture, 'codex_tool_policy', None) is None):
+                from check_codex_sandbox_policy_candidate import run_candidate
+                try:
+                    result['codex_policy_candidate'] = run_candidate(
+                        fixture.docker, fixture.endpoint, fixture.image_id, expected,
+                        allow_host_policy_load=True, parser='/usr/sbin/apparmor_parser')
+                except Exception:
+                    result['codex_policy_candidate'] = {
+                        'classification': 'diagnostic_only', 'qualification': False,
+                        'status': 'failed', 'error': 'candidate_integration_error',
+                        'cleanup': 'unresolved'}
     secret = 'fake-oslit-linux-provider-' + uuid.uuid4().hex
     provider = Provider(root / 'provider-tls', fixture.runtime, secret)
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
     os.environ['OPENAI_API_KEY'], os.environ['SSL_CERT_FILE'] = secret, str(provider.ca)
     boundary = context = runner = controller = None
+    denial_observer = None
     original_transport = native_runtime_codex.Transport
     original_subprocess = research_environment.subprocess
     executor_diagnostics = ExecutorDiagnostics(original_subprocess)
@@ -391,16 +740,36 @@ def run_native(root, fixture, result):
     native_runtime_codex.Transport = diagnostic_transport(result['native_request_errors'], (secret.encode(),))
     started = time.monotonic()
     try:
-        inputs = signed_inputs(root, fixture, provider, bundle)
+        codex_tool_policy = getattr(fixture, 'codex_tool_policy', None)
+        inputs = signed_inputs(root, fixture, provider, bundle, codex_tool_policy)
         controller = Controller.initialize(root / 'engagement', load_inputs(inputs))
+        if fixture.runtime == 'omp':
+            frozen_catalog = controller.root / 'contract/runtimes/runtime-main.models.yml'
+            validate_omp_fixture_catalog(frozen_catalog.read_bytes(), provider.origin, secret)
         runner = Runner(controller)
         worker = next(row for row in controller.state()['workers'].values() if row['role'] == 'lead')
         workspace = root / 'workspace'; workspace.mkdir(mode=0o700)
         grant = controller.prepare_worker_dispatch(worker['id'], worker['generation'], workspace,
             seconds=LEASE, resources=['source-main'], adapter_id='native-runner')
         context = WorkerContext(runner, worker, grant, workspace)
+        if fixture.runtime == 'omp':
+            import engagement_network
+            denial_observer = NetworkDenialObserver(engagement_network)
+            denial_observer.install()
         boundary = NativeBoundary(context)
-        identity = boundary.start()
+        try:
+            identity = boundary.start()
+        finally:
+            result['userns_diagnostic'] = (compare_environment(boundary.environment)
+                if boundary.environment is not None else {'classification': 'environment_unavailable'})
+        if fixture.runtime == 'omp':
+            observe_omp_native_events(boundary.runtime, result, (secret.encode(),))
+            state = boundary.runtime._read_state()
+            model_state = state.get('model') or {}
+            result['omp_native_model_state'] = diagnostic_omp_model_state(model_state,
+                provider.origin + '/v1', 'openai', 'fixture-model')
+            result['omp_provider_requests_before_prompt'] = provider.request_snapshot()
+            result['omp_network_denials_before_prompt'] = denial_observer.snapshot()
         result['native_execution'] = 'initialized'
         controller.record_worker_started(worker['id'], worker['generation'], identity['session_id'], workspace,
                                          owner_receipt=identity['owner_receipt'])
@@ -408,13 +777,35 @@ def run_native(root, fixture, result):
         model = boundary.model_owner
         model_receipt = model.receipt(identity['session_id'])
         lab_identity = boundary.environment.receipt()
+        if fixture.runtime == 'codex' and codex_tool_policy is not None:
+            from codex_tool_policy import load_policy
+            policy = load_policy()
+            result['codex_tool_policy_readback'] = policy_readback(
+                fixture, lab_identity['container_id'],
+                model_receipt['owner']['environment']['container_id'],
+                codex_tool_policy, policy['seccomp_document'])
+            check(result, 'signed Codex policy observed on tool container and separate model container',
+                result['codex_tool_policy_readback']['tool_policy_verified']
+                and result['codex_tool_policy_readback']['model_container_separate']
+                and result['codex_tool_policy_readback']['model_policy_is_default'])
         check(result, 'actual separate model and tool containers',
               model_receipt['boundary'] == 'linux-docker-model-v1'
               and model_receipt['owner']['environment']['container_id'] != lab_identity['container_id'])
         outside = root / 'outside.txt'; write(outside, b'HOST_ONLY_MARKER\n')
         provider.command = '/usr/local/bin/python3 /input/source-main/probe.py ' + shlex.quote(str(outside)) + ' ' + str(
             provider.server.server_port) + ' ' + str(model_receipt['owner']['init']['host_pid']) + ' ' + str(boundary.proxy.port)
-        invoke(context, boundary, FIRST_PROMPT, result)
+        if fixture.runtime == 'omp':
+            try:
+                invoke(context, boundary, FIRST_PROMPT, result)
+            finally:
+                result['omp_prompt_request_diagnostic'] = {
+                    'provider_requests_before': result['omp_provider_requests_before_prompt'],
+                    'provider_requests_after': provider.request_snapshot(),
+                    'network_denials_before': result['omp_network_denials_before_prompt'],
+                    'network_denials_after': denial_observer.snapshot(),
+                }
+        else:
+            invoke(context, boundary, FIRST_PROMPT, result)
         text = json.dumps(provider.requests)
         check(result, 'owned TLS provider credential and native tool outputs',
               len(provider.requests) == 2 and not provider.errors and secret not in text and 'NATIVE_PROBE=' in text)
@@ -454,6 +845,7 @@ def run_native(root, fixture, result):
               and 'LINUX_NATIVE_FIRST_TURN' in json.dumps(provider.requests[3]) and not provider.errors)
         result['native_execution'] = 'two_invocations_completed'
         result['controlled_provider_requests'] = len(provider.requests)
+        result['controlled_provider_discovery_requests'] = provider.discovery_requests
         inspect_bytes = canonical(model.environment._inspect())
         public_files = [path for path in controller.root.rglob('*') if path.is_file()]
         check(result, 'synthetic credential absent from container config and host evidence',
@@ -505,6 +897,8 @@ def run_native(root, fixture, result):
         check(result, 'verified recovery releases dispatch reservation', current['usage']['reserved_worker_seconds'] == 0
               and not current['resource_holds'])
     finally:
+        if denial_observer is not None:
+            denial_observer.restore()
         native_runtime_codex.Transport = original_transport
         research_environment.subprocess = original_subprocess
         known_secrets = [secret.encode()]
@@ -513,6 +907,7 @@ def run_native(root, fixture, result):
             if native.token is not None:
                 known_secrets.append(native.token.encode())
             result['native_executor_state'] = {'failure': native.failure, 'ready': native.ready,
+                'transport_diagnostic': native.transport_diagnostic,
                 'executor_returncode': native.executor.poll() if native.executor is not None else None,
                 'bridge_returncode': native.bridge.poll() if native.bridge is not None else None}
         if controller is not None:
@@ -522,6 +917,35 @@ def run_native(root, fixture, result):
                 result['environment_operation_diagnostics'] = {'status': 'unavailable', 'error': error_code(error)}
                 result['status'] = 'failed'
         if boundary is not None:
+            if fixture.runtime == 'omp':
+                try:
+                    transport = boundary.runtime.transport
+                    laboratory_channel = getattr(getattr(boundary, 'proxy', None), 'channel', None)
+                    provider_channel = getattr(getattr(boundary, 'model_proxy', None), 'channel', None)
+                    result['omp_runtime_diagnostic'] = {
+                        'runtime_ready': bool(boundary.runtime.ready),
+                        'runtime_active': bool(boundary.runtime.active),
+                        'pending_completion': boundary.runtime.pending_completion
+                            if boundary.runtime.pending_completion in ('completed', 'aborted', 'error') else None,
+                        'transport_failure': transport.failure
+                            if isinstance(transport.failure, str) and re.fullmatch(r'[a-z_]{1,100}', transport.failure)
+                            else None,
+                        'process_returncode': transport.process.poll(),
+                        'provider_requests': len(provider.requests),
+                        'provider_errors': provider.errors[:8],
+                        'provider_errors_truncated': len(provider.errors) > 8,
+                        'provider_escapes': provider.escapes,
+                        'proxy_channel_failures': {
+                            'laboratory': laboratory_channel.failure
+                                if laboratory_channel is not None and isinstance(laboratory_channel.failure, str)
+                                and re.fullmatch(r'[a-z_]{1,100}', laboratory_channel.failure) else None,
+                            'model_provider': provider_channel.failure
+                                if provider_channel is not None and isinstance(provider_channel.failure, str)
+                                and re.fullmatch(r'[a-z_]{1,100}', provider_channel.failure) else None,
+                        },
+                    }
+                except Exception:
+                    result['omp_runtime_diagnostic'] = {'status': 'unavailable'}
             result['recovery_identities'] = {}
             readers = {
                 'model_owner': lambda: boundary.model_owner.receipt() if boundary.model_owner is not None else boundary.owner_receipt,
@@ -547,17 +971,20 @@ def run_native(root, fixture, result):
             except Exception as error:
                 result['boundary_cleanup_error'] = error_code(error)
                 result['status'] = 'failed'
+        if controller is not None:
+            verify_engagement_export(controller, root, result)
         result['native_executor_stderr'] = executor_diagnostics.finish(tuple(known_secrets))
         provider.close()
         for name, value in original.items():
             if value is None:os.environ.pop(name, None)
             else:os.environ[name] = value
         result['controlled_provider_requests'] = len(provider.requests)
+        result['controlled_provider_discovery_requests'] = provider.discovery_requests
         result['controlled_provider_errors'] = provider.errors
         safe_publication(canonical(result), known_secrets=tuple(known_secrets))
 
 
-def main():
+def main(*, classify_result=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', choices=('codex', 'omp'), required=True)
     parser.add_argument('--platform', choices=('linux/amd64', 'linux/arm64'), required=True)
@@ -565,6 +992,7 @@ def main():
     parser.add_argument('--endpoint', required=True)
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -574,10 +1002,12 @@ def main():
     try:
         fixture = prepare_image(runtime=args.runtime, platform=args.platform, base_image=args.base_image,
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
+        fixture.codex_tool_policy = args.codex_tool_policy
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:
             run_native(Path(temporary).resolve(), fixture, result)
+        check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
         check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
         result['status'] = 'passed'
     except Exception as error:
@@ -592,9 +1022,19 @@ def main():
                 cleanup_image(fixture, result['image'])
             if result['image']['status'] != 'passed':result['status'] = 'failed'
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
-            [Path(__file__), Path(__file__).with_name('check_model_image_docker_e2e.py'),
+            [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
+             Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
+             Path(__file__).with_name('check_codex_sandbox_policy_candidate.py'),
+             Path(__file__).with_name('check_codex_tool_policy_missing_profile_e2e.py'),
+             Path(__file__).with_name('manage_codex_tool_policy_host.py'),
+             *sorted((ROOT / 'engine/codex-tool-policy-v1').glob('*')),
+             Path(__file__).with_name('check_omp_loader_preflight.py'),
+             Path(__file__).with_name('check_model_image_docker_e2e.py'),
              *sorted((ROOT / 'tools').glob('*.py')), ROOT / 'tools/native_runtime_codex_exec.mjs',
              ROOT / 'tools/native_runtime_omp_tools.mjs', ROOT / 'config/native-tool-lock.json']}
+        if classify_result is not None and classify_result(result):
+            result['status'] = 'passed'
+            result['expected_stop'] = result.pop('error')
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(safe_publication(canonical(result)))
     print(json.dumps({'status': result['status'], 'output': str(args.output)}))

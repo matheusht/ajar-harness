@@ -1,5 +1,10 @@
 # Decision 0012 — Full autonomy as the north star: scope is the only human decision
 
+**15 November successor:** [Decision 0015](0015-initial-scope-autonomy.md) adopts
+standing internal authority for explicitly signed v2 scopes. The dated north-star
+record below remains historical; it does not govern the new policy or authorize
+external actions.
+
 **Status:** **RECORDED DIRECTION — not accepted for implementation, not scheduled, not authorized.**
 Nothing in this document changes any current gate.\
 **Date:** 2026-08-16\

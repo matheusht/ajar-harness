@@ -2,7 +2,7 @@ name: conformance
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/oslit-integrated-e2e-20261115]
   pull_request:
 
 jobs:
@@ -32,6 +32,10 @@ jobs:
       - name: Candidate v2 portable workflows (no model or external target)
         run: |
           mkdir -p "$RUNNER_TEMP/oslit-v2-checks"
+          python3 evals/native-qualification/smoke/check_omp_public_credential_reference.py
+          python3 evals/native-qualification/smoke/check_codex_transport_diagnostics.py
+          python3 evals/native-qualification/smoke/check_codex_package_metadata.py
+          python3 evals/native-qualification/smoke/check_model_image_archive.py
           python3 evals/native-qualification/smoke/check_engagement_contract_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/contract.json"
           python3 evals/native-qualification/smoke/check_engagement_team_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/team.json"
           python3 evals/native-qualification/smoke/check_engagement_evidence_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/evidence.json"
@@ -39,6 +43,7 @@ jobs:
           python3 evals/native-qualification/smoke/check_engagement_coordination_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/coordination.json"
           python3 evals/native-qualification/smoke/check_engagement_guidance_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/guidance.json"
           python3 evals/native-qualification/smoke/check_target_accounts_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/target-accounts.json"
+          python3 evals/native-qualification/smoke/check_engagement_export_e2e.py -v
       - name: Retain candidate v2 workflow receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -47,7 +52,9 @@ jobs:
           path: ${{ runner.temp }}/oslit-v2-checks/*.json
           if-no-files-found: warn
       - name: Decision 0005 engagement-record schema gate (self-test)
-        run: python3 tools/run-engagement.py --self-test
+        run: |
+          python3 tools/engagement-schema-cache-test.py --expect-cache
+          python3 tools/run-engagement.py --self-test
       - name: Decision 0006 frozen old/new gate replay
         run: python3 tools/decision6_replay.py --self-test
       - name: Decision 0006 fail-closed capability matrix
@@ -63,7 +70,9 @@ jobs:
       - name: Decision 0005 prospective A/B readiness freezer (self-test)
         run: python3 tools/prepare-ab-study.py --self-test
       - name: Structural conformance (cards, routes, casebooks, secrets, evidence contract, corpora)
-        run: python3 tools/check-conformance.py
+        run: |
+          python3 tests/e2e/test_secret_scanner_archived_allowlist.py
+          python3 tools/check-conformance.py
       - name: Campaign / candidate contract gate (self-test)
         run: python3 tools/check-campaign.py --self-test
       - name: Campaign input hasher (self-test)
@@ -89,14 +98,14 @@ jobs:
       - name: DSPy spike — routing normalizer baseline (deterministic, self-test)
         run: python3 experiments/dspy-routing-normalizer/normalize.py --self-test
       # Frozen-input integrity is gated against the CURRENT canonical campaign, not historical
-      # revisions. Revision 4 freezes the current checker after queue/guidance changes; revisions
-      # 2 and 3 remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
+      # revisions. Revision 5 freezes the checker after exact archived-probe allowances; revisions
+      # 2 through 4 remain historical and superseded. The gepa-shadow campaigns (Phase 8 / 2026-06-26) are archived:
       # their frozen_inputs pin
       # Phase-8-era tool and gold hashes that later evaluator hardening (10F/10G/10H0) and gold rotation
       # legitimately drifted — the drift detector working as designed. See each campaign's SUPERSEDED.md.
       # Re-pinning historical revisions to silence CI is forbidden (it would rewrite superseded history).
       - name: Canonical behavioral campaign frozen-input integrity
-        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v4-2026-09-13/campaign-manifest.json
+        run: python3 tools/hash-campaign-inputs.py --check evals/behavioral/campaigns/behavioral-canonical-v5-2026-11-15/campaign-manifest.json
       # The promotion bundle hash-pin / drift machinery is exercised by render-promotion-bundle --self-test
       # (verify_drift: intact -> clean, tampered gold -> drift). There is no live promotion bundle to pin
       # against until a real-model qualification produces one.

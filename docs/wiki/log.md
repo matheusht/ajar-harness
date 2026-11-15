@@ -910,3 +910,34 @@ existing Darwin route. Independent fixed-patch review and all 14 contained
 scenario families passed. Docker/namespace facts are simulated in these checks;
 actual pinned Linux native execution remains unverified. The complete M0–M6
 assignment and the operator's research acceptance remain open.
+
+
+## 2026-11-15 — canonical checker successor for the assembly
+
+Hosted conformance run `43725604808` at `eedb24c9` passed structural conformance,
+then refused revision 4's checker pin after the exact archived-probe scanner fix.
+Following the existing builder's rotate-CAMP_ID rule, revision 5 records the new
+checker from committed source `2640d491`. Existing revision-4 and older bytes,
+results and pins are preserved. The active builder, workflow and behavioral README
+now point to `behavioral-canonical-v5-2026-11-15`. This is a new input snapshot,
+not a candidate run, retrospective regrade or research efficacy claim.
+
+
+## 2026-11-15 — initial-scope autonomy and default caller migration
+
+The operator requested standing initial authority for every in-scope Zone-2
+artifact type, without repeated human reviews or refreshed signatures, and
+completion of caller migration. [Decision 0015](../decisions/0015-initial-scope-autonomy.md)
+records that accepted policy. A signed `initial-scope-v1` field selects it;
+`owned-lab-state-v2` covers the owned client/tool lab across all access modes.
+Target mutations and owned application state retain separate exact effect grants.
+Independent agent review, revocation, cleanup and immutable historical records remain.
+
+New CLI help, bootstrap and root guidance enter v2; recognized v1 inputs/state
+retain the existing phase driver. No duplicate v2 state owner was found, so the
+migration retires old defaults rather than deleting required compatibility code.
+The focused [policy](../../evals/native-qualification/smoke/AUTONOMY-POLICY-E2E.md)
+and [caller](../../evals/native-qualification/smoke/NATIVE-CALLER-MIGRATION-E2E.md)
+checks retain before/after results. Pricing, hosted CI and fresh-target research
+were excluded by the operator. This adoption does not certify physical Docker,
+external providers or sustained operation.

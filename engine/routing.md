@@ -1,5 +1,11 @@
 # engine/routing.md — recon → activation signals → card selection
 
+**Route scope:** the historical gates below apply to legacy/v1 and v2 scopes
+without `authority_policy: initial-scope-v1`. New v2 work follows the
+[initial-scope policy](../docs/decisions/0015-initial-scope-autonomy.md) and
+[native worker protocol](native-engagement-protocol.md); do not import legacy
+per-artifact or operator-rung approvals into that signed workflow.
+
 The connective tissue between recon and the loop. Recon does not hand the orchestrator a target; it
 hands it a set of **activation signals**, and those signals select which `skills/patterns/` and
 `skills/vulns/` cards come into play. This is what makes "the orchestrator chooses" a *recorded,

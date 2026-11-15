@@ -1,0 +1,237 @@
+{
+  "classification": "synthetic_local_diagnostic",
+  "complete_write_counts": {
+    "baseline": 5,
+    "candidate": 5
+  },
+  "complete_write_median_seconds": {
+    "baseline": 7.967846042000019,
+    "candidate": 3.7145095840023714
+  },
+  "environment": {
+    "post_trial_observation": {
+      "captured_at_utc": "2026-11-15T17:42:29.706464+00:00",
+      "collection_timing": "collected after all timed trials; load is host-wide and may include unrelated processes",
+      "load_average_1_5_15": [
+        1.30419921875,
+        1.36083984375,
+        1.431640625
+      ],
+      "logical_cpu_count": 10,
+      "machine": "arm64",
+      "platform": "macOS-26.5-arm64-arm-64bit-Mach-O"
+    }
+  },
+  "jsonschema_version": "4.26.0",
+  "kind": "record-review-schema-cache-ab-v1",
+  "order": [
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ]
+  ],
+  "performance_verdict": "measured",
+  "python": "Python 3.14.6",
+  "record_review_prewrite_limit_seconds": 10.0,
+  "scenario": {
+    "allowed_signers_sha256": "19134cdee6f3f66bac6c3dc87eab85f9762d347673576ad9f104899c3ca169f0",
+    "engagement_tree_sha256": "f1c48a5e3b3cc1b3557936aa80e10b2521072b576337163ad06e5e62a8414f24",
+    "initial_event_count": 64,
+    "normalized_event_sha256": "05b7ff8b27b5a1a86adea661cfe6663da7435ffd9d0baea6f25f9da77df36713",
+    "original_unsigned_event_sha256": "a8ac64789e8d1e9a5f5f54ae9d97c0686694e8633d52df85057eea97bef8791e",
+    "review_id": "review-canonical-public",
+    "session_binding": "session-posix-501-9780",
+    "signature_sha256": "c5f82eb9505998f9f3509e271d47828ef8e301595439dc21a998e21f9cc4e6ef",
+    "signed_review_sha256": "faf2b055cecdba2c520f2875895f7c53f197f51c01546314ae9838ddef7ed063"
+  },
+  "scenario_source_commit": "f244b0035549f68337ce5edb4505db163c14a14c",
+  "source_base_tree_ids": {
+    "baseline": {
+      "engine": "3bda4a7d498e9ee9cddbe759eccefec40a13d1df",
+      "schemas": "500de173340991bc207383b1ad250df2d4a8ef0a",
+      "tools": "a6e00faa1f980708f4e483be2008e2501200a904"
+    },
+    "candidate_base": {
+      "engine": "3bda4a7d498e9ee9cddbe759eccefec40a13d1df",
+      "schemas": "500de173340991bc207383b1ad250df2d4a8ef0a",
+      "tools": "a6e00faa1f980708f4e483be2008e2501200a904"
+    }
+  },
+  "source_commits": {
+    "baseline": "f244b0035549f68337ce5edb4505db163c14a14c",
+    "candidate_base": "5d9da3c5093a1f19fbefbffcb06f045227f5f1d7"
+  },
+  "source_sha256": {
+    "baseline": {
+      "completion_claim_pins": "61548e4bba5e73fcd02a6b01de7124d5a124d3b469ee1d47a5e15dd9f149523d",
+      "engagement_records": "eebb2ed208a9b0897ad44ae9c6a6dea01fd6dd18bb9fa7ba218fb28f633910a5",
+      "operation_capabilities": "1a72d9058770dba2e5cdc87c11459626354a02f5781fc6be04b62505bde5e165",
+      "run_engagement": "728371c7c081900651fc5cf86dce848b036e02c14e60a69da4c3998c4a103ce0"
+    },
+    "candidate": {
+      "completion_claim_pins": "61548e4bba5e73fcd02a6b01de7124d5a124d3b469ee1d47a5e15dd9f149523d",
+      "engagement_records": "0ac48c1f47da33b2c3439184a9f96d202e5eea911d0e81c5a8cffb1b7127e1c3",
+      "operation_capabilities": "1a72d9058770dba2e5cdc87c11459626354a02f5781fc6be04b62505bde5e165",
+      "run_engagement": "728371c7c081900651fc5cf86dce848b036e02c14e60a69da4c3998c4a103ce0"
+    }
+  },
+  "timing_scope": "record-review CLI only; engagement copy and independent verification excluded",
+  "trials": [
+    {
+      "error_code": null,
+      "pair": 1,
+      "returncode": 0,
+      "seconds": 7.817719458002102,
+      "side": "baseline",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 1,
+      "returncode": 0,
+      "seconds": 3.693357833999471,
+      "side": "candidate",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 2,
+      "returncode": 0,
+      "seconds": 3.702479083000071,
+      "side": "candidate",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 2,
+      "returncode": 0,
+      "seconds": 7.97228504099985,
+      "side": "baseline",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 3,
+      "returncode": 0,
+      "seconds": 7.974110125000152,
+      "side": "baseline",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 3,
+      "returncode": 0,
+      "seconds": 3.7145747920003487,
+      "side": "candidate",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 4,
+      "returncode": 0,
+      "seconds": 3.7368869579986495,
+      "side": "candidate",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 4,
+      "returncode": 0,
+      "seconds": 7.967846042000019,
+      "side": "baseline",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 5,
+      "returncode": 0,
+      "seconds": 7.962107082999864,
+      "side": "baseline",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    },
+    {
+      "error_code": null,
+      "pair": 5,
+      "returncode": 0,
+      "seconds": 3.7145095840023714,
+      "side": "candidate",
+      "status": "complete_write_verified",
+      "unchanged_on_failure": false,
+      "verification": {
+        "event_count": 66,
+        "review_id": "review-canonical-public",
+        "status": "verified"
+      }
+    }
+  ]
+}

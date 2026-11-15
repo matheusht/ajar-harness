@@ -1,0 +1,31 @@
+{
+  "classification": "engineering_simulation",
+  "docker_calls": 0,
+  "kind": "engagement-board-steering-e2e-v1",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "scenarios": [
+    {
+      "first_page_items": 1,
+      "name": "search_snapshot_native_tool",
+      "snapshot_revision": 15,
+      "status": "pass"
+    },
+    {
+      "cursor": "WyJjb250cmFjdC1maXh0dXJlIiwxOSwic2hhMjU2OjQxNzY2ODY1ZGIzNDI2MzVhZjJiNDgxMTY2OTllMmJiNGU1MGExOWNmYjQyY2M5MmQ4NjdhNDJlMDUxN2ZkOTQiXQo",
+      "name": "peer_message_steering_ack_recovery",
+      "status": "pass",
+      "steered_notices": 1
+    },
+    {
+      "name": "revoked_worker_cannot_message_or_revive",
+      "status": "pass"
+    },
+    {
+      "export_revision": 23,
+      "name": "cli_socket_and_export",
+      "status": "pass"
+    }
+  ],
+  "target_calls": 0
+}

@@ -4,22 +4,45 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const [sdkArg, workspaceArg] = process.argv.slice(2);
-const sdk = await realpath(sdkArg);
-const workspace = await realpath(workspaceArg);
-const manifest = JSON.parse(await readFile(path.join(sdk, 'package.json'), 'utf8'));
-if (manifest.name !== '@oh-my-pi/pi-coding-agent' || manifest.version !== '18.20.0') {
-  throw new Error('native_sdk_version_unsupported');
+let startupPhase = 'paths';
+async function initialize() {
+  const [sdkArg, workspaceArg] = process.argv.slice(2);
+  const sdk = await realpath(sdkArg);
+  const workspace = await realpath(workspaceArg);
+  startupPhase = 'manifest';
+  const manifest = JSON.parse(await readFile(path.join(sdk, 'package.json'), 'utf8'));
+  if (manifest.name !== '@oh-my-pi/pi-coding-agent' || manifest.version !== '18.20.0') {
+    throw new Error('native_sdk_version_unsupported');
+  }
+  startupPhase = 'sdk_import';
+  const { createTools, Settings } = await import(pathToFileURL(path.join(sdk, 'src/sdk.ts')).href);
+  startupPhase = 'schema_import';
+  const { toolWireSchema } = await import(pathToFileURL(path.join(sdk, '../pi-ai/src/utils/schema/wire.ts')).href);
+  startupPhase = 'validation_import';
+  const { validateToolArguments } = await import(pathToFileURL(path.join(sdk, '../pi-ai/src/utils/validation.ts')).href);
+  startupPhase = 'settings';
+  const settings = Settings.isolated({ 'tools.xdev': false, 'bash.direnv': 'off', 'async.enabled': false });
+  startupPhase = 'tools';
+  const tools = await createTools({ cwd: workspace, hasUI: false, settings,
+    getSessionFile: () => null, getSessionSpawns: () => null, restrictToolNames: true,
+    skipPythonPreflight: true, enableLsp: false, noContextFiles: true,
+  }, ['read', 'write', 'edit', 'grep', 'glob', 'bash']);
+  startupPhase = 'catalog';
+  const catalog = tools.map(t => ({ name: t.name, description: t.description, inputSchema: toolWireSchema(t) }));
+  return { manifest, tools, catalog, validateToolArguments };
 }
-const { createTools, Settings } = await import(pathToFileURL(path.join(sdk, 'src/sdk.ts')).href);
-const { toolWireSchema } = await import(pathToFileURL(path.join(sdk, '../pi-ai/src/utils/schema/wire.ts')).href);
-const { validateToolArguments } = await import(pathToFileURL(path.join(sdk, '../pi-ai/src/utils/validation.ts')).href);
-const settings = Settings.isolated({ 'tools.xdev': false, 'bash.direnv': 'off', 'async.enabled': false });
-const tools = await createTools({ cwd: workspace, hasUI: false, settings,
-  getSessionFile: () => null, getSessionSpawns: () => null, restrictToolNames: true,
-  skipPythonPreflight: true, enableLsp: false, noContextFiles: true,
-}, ['read', 'write', 'edit', 'grep', 'glob', 'bash']);
-const catalog = tools.map(t => ({ name: t.name, description: t.description, inputSchema: toolWireSchema(t) }));
+let initialized;
+try {
+  initialized = await initialize();
+} catch {
+  await new Promise(resolve => process.stdout.write(
+    JSON.stringify({ type: 'startup_failed', phase: startupPhase }) + '\n', resolve));
+}
+if (!initialized) {
+  for await (const _ of process.stdin) { /* Wait for the owner to close the failed startup. */ }
+  process.exit(1);
+}
+const { manifest, tools, catalog, validateToolArguments } = initialized;
 const pending = new Map();
 const completed = new Set();
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n');

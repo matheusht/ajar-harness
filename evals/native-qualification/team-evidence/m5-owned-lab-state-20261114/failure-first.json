@@ -1,0 +1,74 @@
+{
+  "kind": "owned-lab-state-contained-e2e-v1",
+  "evidence_class": "engineering_simulation",
+  "docker_contacted": false,
+  "provider_contacted": false,
+  "physical_mount_qualification": false,
+  "passed": false,
+  "results": [
+    {
+      "case": "signed_selection",
+      "status": "failed",
+      "error": "ModuleNotFoundError: No module named 'engagement_lab_artifacts'"
+    },
+    {
+      "case": "journal_lifecycle",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "separate_execution",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "namespace_configuration",
+      "status": "failed",
+      "error": "ModuleNotFoundError: No module named 'engagement_lab_artifacts'"
+    },
+    {
+      "case": "complete_writable_inventory",
+      "status": "failed",
+      "error": "ModuleNotFoundError: No module named 'engagement_lab_artifacts'"
+    },
+    {
+      "case": "host_staging_cleanup",
+      "status": "failed",
+      "error": "ModuleNotFoundError: No module named 'engagement_lab_artifacts'"
+    },
+    {
+      "case": "intent_only_recovery",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "journal_trust",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "renewal_preserves_artifact",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "native_boundary_order",
+      "status": "failed",
+      "error": "KeyError: 'lab_artifacts'"
+    },
+    {
+      "case": "retained_specialist",
+      "status": "failed",
+      "error": "AttributeError: 'Controller' object has no attribute 'record_lab_artifact_intent'"
+    },
+    {
+      "case": "capture_cleanup_order",
+      "status": "failed",
+      "error": "KeyError: 'lab_artifacts'"
+    },
+    {
+      "case": "existing_without_class",
+      "status": "passed"
+    }
+  ]
+}

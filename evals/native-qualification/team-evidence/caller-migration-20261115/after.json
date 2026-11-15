@@ -1,0 +1,51 @@
+{
+  "kind": "native-caller-migration-check-v1",
+  "classification": "local_cli_routing_simulation",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "checks": [
+    {
+      "name": "default_help_lists_v2_commands",
+      "status": "passed",
+      "detail": "usage: native_engagement.py [-h]\n                            {inspect,run,resume,direction,stop,export,status,claim,submit} ...\n\nOperate a versioned v2 research engagement. Explicit v1 inputs and existing v1\nroots retain their compatibility driver.\n\npositional arguments:\n  {inspect,run,resume,direction,stop,export,status,claim,submit}\n    inspect             verify inputs without model or target contact\n    run                 initialize and run the signed v2 engagement\n    status              read state or one authenticated worker update page\n    claim               claim ready work through the worker endpoint\n    submit              submit a typed worker request\n\noptions:\n  -h, --help            show this help message and exit\n"
+    },
+    {
+      "name": "default_help_exposes_legacy_route",
+      "status": "passed",
+      "detail": "usage: native_engagement.py [-h]\n                            {inspect,run,resume,direction,stop,export,status,claim,submit} ...\n\nOperate a versioned v2 research engagement. Explicit v1 inputs and existing v1\nroots retain their compatibility driver.\n\npositional arguments:\n  {inspect,run,resume,direction,stop,export,status,claim,submit}\n    inspect             verify inputs without model or target contact\n    run                 initialize and run the signed v2 engagement\n    status              read state or one authenticated worker update page\n    claim               claim ready work through the worker endpoint\n    submit              submit a typed worker request\n\noptions:\n  -h, --help            show this help message and exit\n"
+    },
+    {
+      "name": "equals_form_v2_inputs_select_v2_and_fail_closed",
+      "status": "passed",
+      "detail": "{\"code\": \"inputs_invalid\", \"status\": \"rejected\"}\n root_exists=False"
+    },
+    {
+      "name": "malformed_equals_form_input_rejects_without_legacy_init",
+      "status": "passed",
+      "detail": "{\"code\": \"json_invalid\", \"status\": \"rejected\"}\n root_exists=False"
+    },
+    {
+      "name": "separate_form_v1_inputs_keep_legacy_driver",
+      "status": "passed",
+      "detail": "{\"cleanup\": {\"status\": \"unverified\"}, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-ts1lqul_/v1/engagement-separate\", \"reason\": \"engagement_input_unavailable\", \"status\": \"cleanup_unverified\"}\n state_kind=native-engagement-driver-v1 phase=incomplete"
+    },
+    {
+      "name": "equals_form_v1_inputs_keep_legacy_driver",
+      "status": "passed",
+      "detail": "{\"cleanup\": {\"status\": \"unverified\"}, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-ts1lqul_/v1/engagement-equals\", \"reason\": \"engagement_input_unavailable\", \"status\": \"cleanup_unverified\"}\n state_kind=native-engagement-driver-v1 phase=incomplete"
+    },
+    {
+      "name": "equals_form_state_only_root_keeps_legacy_reader",
+      "status": "passed",
+      "detail": "{\"cleanup\": null, \"engagement_root\": \"/private/var/folders/2f/618ctccs3_96jmkcj7ckl3m40000gn/T/native-caller-migration-ts1lqul_/v1/equals-status\", \"error\": null, \"pending\": null, \"status\": \"initialized\"}\n"
+    },
+    {
+      "name": "mixed_v1_v2_root_is_rejected",
+      "status": "passed",
+      "detail": "{\"code\": \"route_conflict\", \"status\": \"rejected\"}\n"
+    }
+  ],
+  "status": "passed"
+}

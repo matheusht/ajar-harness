@@ -1,0 +1,154 @@
+{
+  "checks": [
+    {
+      "name": "exact named profile is absent before the refusal check",
+      "passed": true
+    },
+    {
+      "name": "one Codex tool container create was attempted",
+      "passed": true
+    },
+    {
+      "name": "policy refusal occurred at the observed start phase",
+      "passed": true
+    },
+    {
+      "name": "Docker AppArmor start refusal matches the exact configured profile and stayed nonready",
+      "passed": true
+    },
+    {
+      "name": "cleanup-only recovery removed all owned resources",
+      "passed": true
+    },
+    {
+      "name": "recovery did not retry container creation",
+      "passed": true
+    },
+    {
+      "name": "refused attempt left no owned stage or active container",
+      "passed": true
+    },
+    {
+      "name": "recovery removed the partial prepared image",
+      "passed": true
+    }
+  ],
+  "classification": "actual_docker_without_host_profile",
+  "cleanup": {
+    "owned_workspace": "container_removed",
+    "status": "clean"
+  },
+  "cleanup_status": "clean",
+  "events": [
+    {
+      "operation": "create_stage",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "create_stage",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "stage_input",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "stage_input",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "snapshot_input",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "snapshot_input",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "remove_stage",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "remove_stage",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "create",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "create",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "readback_input",
+      "phase": "result",
+      "status": "settled"
+    },
+    {
+      "operation": "start",
+      "phase": "intent",
+      "status": null
+    },
+    {
+      "operation": "start",
+      "phase": "result",
+      "status": "unknown"
+    }
+  ],
+  "identity": {
+    "container_id_observed": true,
+    "daemon_id": "0fef2a29-aadb-43ca-98b5-edbc7a28f18a",
+    "image_id": "sha256:cf2dad23925ed51a00735f57606b2998aedf4705a1634cb9ae1053b5c145d5ba",
+    "unsettled_before_recovery": []
+  },
+  "kind": "codex-tool-policy-missing-profile-e2e-v1",
+  "refusal_evidence": {
+    "configured_profile_exact": true,
+    "host_profile_absent_before_start": true,
+    "nonready_state": true,
+    "ready_environment_returned": false,
+    "state_error_mentions_apparmor": true
+  },
+  "refusal_phase": "start",
+  "start_readback": {
+    "apparmor_profile": "oslit-codex-tool-v1",
+    "cap_add": [],
+    "cap_drop": [
+      "ALL"
+    ],
+    "configured_profile_exact": true,
+    "host_apparmor_options": [
+      "oslit-codex-tool-v1"
+    ],
+    "host_profile_absent_before_start": true,
+    "host_security_option_names": [
+      "apparmor",
+      "no-new-privileges",
+      "seccomp"
+    ],
+    "inspect_succeeded": true,
+    "nonready_state": true,
+    "state_error_mentions_apparmor": true,
+    "state_error_present": true,
+    "state_running": false,
+    "state_status": "created"
+  },
+  "startup_failure": {
+    "environment_code": null,
+    "exception_type": "RuntimeError",
+    "message_mentions_apparmor": false,
+    "message_mentions_profile": false
+  },
+  "status": "passed"
+}

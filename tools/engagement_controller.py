@@ -30,7 +30,7 @@ DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
 EVENT_KEYS = {'kind', 'engagement_id', 'sequence', 'previous_sha256', 'at', 'actor',
               'request_id', 'request_sha256', 'type', 'payload', 'sha256'}
 SUBMIT_TYPES = {'claim', 'publish', 'task_create', 'task_priority', 'task_assign',
-                'worker_request', 'task_result', 'updates_ack'}
+                'worker_request', 'task_result', 'updates_ack', 'team_message'}
 LEAD_TYPES = {'task_priority', 'task_assign', 'worker_request'}
 GRANT_KEYS = {'dispatch_id', 'worker_id', 'generation', 'assignment', 'profile_id',
               'scope_sha256', 'seconds', 'resources', 'lease_expires_at', 'adapter_id'}
@@ -174,6 +174,7 @@ class Controller:
                 digest(canonical(contract.scope)), 'initialized',
                 {'scope': contract.scope, 'scope_sha256': digest(contract.frozen_files['scope.md']),
                  'contract_files': files, 'evidence_class': evidence_class,
+                 'provider_accounting': 'proxy-attempts-v1',
                  'lead_profile': choices[0]['profile_id']})
         return c
 
@@ -252,8 +253,9 @@ class Controller:
                 fail('contract_changed')
         state = {'engagement_id': scope['engagement_id'], 'scope': scope,
                  'scope_sha256': initial['scope_sha256'], 'evidence_class': initial['evidence_class'],
-                 'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {},
-                 'directions': [], 'dispatches': {}, 'invocations': {}, 'resource_holds': {}, 'cleanup': 'pending',
+                 'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {}, 'messages': {},
+                 'directions': [], 'dispatches': {}, 'invocations': {}, 'provider_requests': {},
+                 'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
                            'tokens': {}, 'cost': None, 'known_estimated_cost': 0,
                            'observed_token_dimensions': {}, 'cost_observations': 0,
@@ -286,8 +288,26 @@ class Controller:
         state['usage']['native_invocations_admitted'] = len(state['invocations'])
         state['usage']['native_invocations_observed'] = sum(row['status'] not in ('pending', 'stopped_unobserved')
                                                          for row in state['invocations'].values())
-        state['usage']['native_usage_incomplete'] = any(row['status'] in ('pending', 'stopped_unobserved')
-                                                       for row in state['invocations'].values())
+        state['usage']['native_usage_incomplete'] = any(
+            row['status'] in ('pending', 'stopped_unobserved') or
+            'total' not in (row.get('usage', {}).get('tokens') or {})
+            for row in state['invocations'].values())
+        usage = state['usage']
+        requests = list(state['provider_requests'].values())
+        usage['provider_requests'] = len(requests)
+        usage['provider_requests_completed'] = sum(row['status'] == 'completed' for row in requests)
+        usage['provider_requests_unknown'] = sum(row['status'] != 'completed' for row in requests)
+        usage['provider_requests_complete'] = initial.get('provider_accounting') == 'proxy-attempts-v1'
+        if usage['provider_requests_complete']:
+            usage['missing'].remove('provider_requests')
+        usage['billed_cost'] = None
+        usage['billed_cost_unavailable_reason'] = 'provider_billing_receipt_unavailable'
+        usage['native_usage_observations'] = sum(row['status'] != 'pending' for row in state['invocations'].values())
+        usage['native_token_totals_complete'] = bool(state['invocations']) and all(
+            'total' in (row.get('usage', {}).get('tokens') or {}) for row in state['invocations'].values())
+        usage['estimated_cost_complete'] = bool(state['invocations']) and all(
+            row.get('usage', {}).get('cost') is not None for row in state['invocations'].values())
+        usage['cost'] = usage['known_estimated_cost'] if usage['estimated_cost_complete'] else None
         for operation in state['environment_operations'].values():
             if (operation.get('result') or {}).get('status') != 'unknown':
                 continue
@@ -302,6 +322,11 @@ class Controller:
                 if grant['dispatch_id'] not in holds:
                     holds.append(grant['dispatch_id'])
         for operation in state['network_operations'].values():
+            if operation['intent']['kind'] == 'acquisition-network-observation-v1':
+                # Missing transfer readback remains an obligation, never a target-state hold.
+                if operation['result'] is None or operation['result']['status'] == 'unknown':
+                    state['cleanup'] = 'pending'
+                continue
             dispatch = state['dispatches'][operation['grant']['dispatch_id']]
             result = operation['result']
             if operation.get('target_nonce') and state['environments'][operation['target_nonce']].get('cleanup') == 'verified':
@@ -311,6 +336,15 @@ class Controller:
                 holds = state['resource_holds'].setdefault(operation['intent']['access_id'], [])
                 if dispatch['dispatch_id'] not in holds:
                     holds.append(dispatch['dispatch_id'])
+        for artifact in state['lab_artifacts'].values():
+            if artifact['state'] == 'clean':
+                continue
+            state['cleanup'] = 'pending'
+            if state['dispatches'][artifact['dispatch_id']]['status'] != 'pending':
+                for resource in artifact['resources']:
+                    holds = state['resource_holds'].setdefault(resource, [])
+                    if artifact['dispatch_id'] not in holds:
+                        holds.append(artifact['dispatch_id'])
         return state
 
     def state(self):
@@ -416,6 +450,10 @@ class Controller:
             invocation = state['invocations'][payload['invocation_id']]
             invocation.update(payload['observation'])
             self._accumulate_usage(state['usage'], payload['observation']['usage'])
+        elif kind == 'provider_request_started':
+            state['provider_requests'][payload['request_id']] = dict(payload, status='started')
+        elif kind == 'provider_request_finished':
+            state['provider_requests'][payload['request_id']]['status'] = payload['status']
         elif kind == 'task_outcome_pending':
             state['workers'][payload['worker_id']]['outcome_pending'] = payload['request']
         elif kind == 'task_outcome_finalized':
@@ -520,6 +558,8 @@ class Controller:
             state['publications'][data['publication_id']] = dict(data, author=actor)
             from engagement_evidence import invalidate
             invalidate(state, data['supersedes'])
+        elif kind == 'team_message':
+            state['messages'][data['message_id']] = dict(data, author=actor)
         elif kind == 'task_result':
             task = state['tasks'][data['task_id']]
             task.update(status=data['disposition'], result=data['result'], evidence_refs=data['evidence_refs'])
@@ -662,6 +702,21 @@ class Controller:
             if task is None:
                 fail('no_ready_task')
             data = {'task_id': task['task_id'], 'worker_id': assignee['id']}
+        elif kind == 'team_message':
+            keys(data, ('message_id', 'recipient_ids', 'subject', 'body', 'refs'))
+            identifier(data['message_id'])
+            if data['message_id'] in state['messages']:
+                fail('message_exists')
+            recipients = data['recipient_ids']
+            if (not isinstance(recipients, list) or not 1 <= len(recipients) <= 16 or
+                    any(not isinstance(name, str) or name not in state['workers'] or
+                        state['workers'][name]['status'] not in ('pending', 'preparing', 'active') for name in recipients) or
+                    len(recipients) != len(set(recipients))):
+                fail('message_recipient_invalid')
+            if (not isinstance(data['subject'], str) or not 1 <= len(data['subject']) <= 1024 or
+                    not isinstance(data['body'], str) or not 1 <= len(data['body']) <= 8192):
+                fail('message_invalid')
+            self._references(state, data['refs'])
         elif kind == 'publish':
             keys(data, ('publication_id', 'kind', 'subject', 'body', 'refs', 'supersedes', 'artifacts'))
             identifier(data['publication_id'])
@@ -1123,6 +1178,37 @@ class Controller:
                 fail('invocation_observation_conflict')
             return self._host('invocation_observed', {'invocation_id': invocation_id, 'observation': observation})
 
+    def record_provider_request(self, grant, observation):
+        """Persist a proxy attempt before sending; completion can arrive after revocation."""
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            keys(observation, ('request_id', 'status'), 'provider_observation_invalid')
+            request_id = identifier(observation['request_id'])
+            status = observation['status']
+            if status not in ('started', 'completed', 'unknown'):
+                fail('provider_observation_invalid')
+            prior = state['provider_requests'].get(request_id)
+            if prior is not None and prior['dispatch_id'] != grant['dispatch_id']:
+                fail('provider_observation_conflict')
+            if status == 'started':
+                if prior is not None:
+                    return {'status': 'recorded'}
+                self._authorize(state, grant)
+                pending = [name for name in dispatch.get('invocations', [])
+                           if state['invocations'][name]['status'] == 'pending']
+                return self._host('provider_request_started', {
+                    'request_id': request_id, 'dispatch_id': grant['dispatch_id'],
+                    'worker_id': grant['worker_id'], 'generation': grant['generation'],
+                    'profile_id': grant['profile_id'], 'invocation_id': pending[-1] if pending else None})
+            if prior is None:
+                fail('provider_request_not_started')
+            if prior['status'] != 'started':
+                if prior['status'] == status:
+                    return {'status': 'recorded'}
+                fail('provider_observation_conflict')
+            return self._host('provider_request_finished', {'request_id': request_id, 'status': status})
+
     @staticmethod
     def _accumulate_usage(total, usage):
         for key, amount in (usage['tokens'] or {}).items():
@@ -1169,6 +1255,12 @@ class Controller:
             dispatch = state['dispatches'][grant['dispatch_id']]
             if not dispatch.get('preparation') or not dispatch.get('setup_started_at'):
                 fail('preparation_phase_missing')
+            from engagement_lab_artifacts import execute_effect
+            for row in state['lab_artifacts'].values():
+                if row['dispatch_id'] == grant['dispatch_id']:
+                    if row['state'] != 'ready':
+                        fail('lab_artifact_not_ready')
+                    execute_effect(state['scope'], grant, row['environment_profile_id'])
             if dispatch.get('native_admitted'):
                 return {'status': 'recorded'}
             return self._host('preparation_native_admitted', {'dispatch_id': grant['dispatch_id']})
@@ -1216,6 +1308,8 @@ class Controller:
                 fail('preparation_cleanup_unverified')
             expected = {row['identity']['nonce'] for row in state['environment_operations'].values()
                         if row['grant']['dispatch_id'] == grant['dispatch_id']}
+            expected.update(row['nonce'] for row in state['lab_artifacts'].values()
+                if row['dispatch_id'] == grant['dispatch_id'])
             observed = set()
             for row in environments:
                 keys(row, ('profile_id', 'environment', 'cleanup'), 'preparation_cleanup_unverified')
@@ -1233,6 +1327,8 @@ class Controller:
                 observed.add(nonce)
             if observed != expected:
                 fail('preparation_cleanup_unverified')
+            from engagement_lab_artifacts import require_clean
+            require_clean(state, grant['dispatch_id'])
             sha = self.store_object(canonical({'kind': 'native-preparation-settled-v1', 'grant': grant,
                 'environments': environments, 'worker_seconds': worker_seconds, 'native_admitted': False}))
             return self._host('preparation_settled', {'dispatch_id': grant['dispatch_id'],
@@ -1256,7 +1352,8 @@ class Controller:
                     or worker.get('runtime_owner_sha256') or worker.get('session_id')
                     or any(row['grant']['dispatch_id'] == grant['dispatch_id']
                            for row in [*state['environment_operations'].values(), *state['network_operations'].values()])
-                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())):
+                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())
+                    or any(row['dispatch_id'] == grant['dispatch_id'] for row in state['lab_artifacts'].values())):
                 fail('preparation_already_admitted')
             sha = self.store_object(canonical(document))
             return self._host('preparation_cancelled', {'dispatch_id': grant['dispatch_id'], 'receipt_sha256': sha})
@@ -1381,6 +1478,10 @@ class Controller:
                     or any(value not in ('unchanged', 'reset', 'unknown', 'retained') for value in observation['resources'].values())
                     or observation['cleanup'] not in ('pending', 'verified', 'unresolved')):
                 fail('receipt_invalid')
+            if (observation['status'] == 'settled' or observation['cleanup'] == 'verified'
+                    or any(value != 'unknown' for value in observation['resources'].values())):
+                from engagement_lab_artifacts import require_clean
+                require_clean(state, dispatch_id)
             retained = {name for name, value in observation['resources'].items() if value == 'retained'}
             if retained:
                 parent = state['dispatches'].get(dispatch.get('parent_dispatch_id'))
@@ -1422,11 +1523,29 @@ class Controller:
                 fail('readback_invalid')
             if any(value not in ('unchanged', 'reset') for value in resources.values()):
                 fail('readback_invalid')
+            from engagement_lab_artifacts import require_clean
+            require_clean(state, dispatch_id)
             data = {'dispatch_id': dispatch_id, 'resources': resources, 'adapter_id': adapter_id}
             evidence = self.store_object(canonical(data))
             event = self._append(events, Principal('environment', adapter_id), uuid.uuid4().hex,
                 evidence, 'effect_reconciled', dict(data, evidence=evidence))
             return self._receipt(event)
+
+    def record_lab_artifact_intent(self, grant, profile_id, effect_id, identity):
+        from engagement_lab_artifacts import record_intent
+        return record_intent(self, grant, profile_id, effect_id, identity)
+
+    def record_lab_artifact_ready(self, grant, profile_id, readback):
+        from engagement_lab_artifacts import record_ready
+        return record_ready(self, grant, profile_id, readback)
+
+    def record_artifact_staging(self, grant, artifact_nonce, path, paths):
+        from engagement_lab_artifacts import record_staging
+        return record_staging(self, grant, artifact_nonce, path, paths)
+
+    def record_lab_artifact_cleanup(self, grant, profile_id, readback):
+        from engagement_lab_artifacts import record_cleanup
+        return record_cleanup(self, grant, profile_id, readback)
 
     def record_environment_observation(self, grant, environment_profile_id, observation, output=None, *, effect_id, account_refs=()):
         from engagement_evidence import record_environment_observation
@@ -1545,7 +1664,8 @@ class Controller:
                 fail('closure_stale')
             if any(row['status'] != 'stopped' for row in state['workers'].values()) or state['cleanup'] != 'verified':
                 fail('closure_cleanup_unverified')
-            if state['resource_holds'] or any(d['status'] != 'settled' for d in state['dispatches'].values()):
+            if (any(row['state'] != 'clean' for row in state['lab_artifacts'].values())
+                    or state['resource_holds'] or any(d['status'] != 'settled' for d in state['dispatches'].values())):
                 fail('closure_effects_unsettled')
             return self._host('evidence_recorded', {'action': 'closure_finalized', 'data': {
                 'closure_id': closure_id}, '_objects': []})
@@ -1589,7 +1709,27 @@ class Controller:
         except (ValueError, TypeError, IndexError, UnicodeError):
             fail('cursor_invalid')
 
-    def status(self, principal=None, *, since=None, limit=100):
+    def board(self, principal=None, *, query='', kinds=None, since=None, limit=30):
+        from engagement_board import page
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            worker = self._worker(state, principal) if principal is not None else None
+            return page(self, events, state, worker, query=query, kinds=kinds, since=since, limit=limit)
+
+    def notices(self, principal, *, since=0, limit=30):
+        from engagement_board import notices
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            worker = self._worker(state, principal)
+            return notices(self, events, state, worker, since=since, limit=limit)
+
+    def status(self, principal=None, *, since=None, limit=100, view='updates', query='', kinds=None):
+        if view == 'board':
+            return self.board(principal, query=query, kinds=kinds, since=since, limit=limit)
+        if view != 'updates' or query or kinds is not None:
+            fail('status_view_invalid')
         if not integer(limit, 1, 1000):
             fail('page_limit_invalid')
         with self.lock():
@@ -1624,12 +1764,18 @@ class Controller:
             end = start + len(updates)
             return {'status': state['status'], 'revision': state['revision'],
                 'engagement_id': state['engagement_id'], 'evidence_class': state['evidence_class'],
+                'authority_policy': state['scope'].get('authority_policy', 'legacy-confirmation'),
                 'assignment': worker['assignment'] if worker else None,
                 'application_baselines': baselines,
                 **summaries, 'summary_counts': {name: len(state[name]) for name in fields},
                 'summaries_truncated': {name: len(state[name]) > summary_limit for name in fields},
                 'usage': state['usage'], 'resource_holds': state['resource_holds'], 'cleanup': state['cleanup'],
                 'replacement_required': state['replacement_required'],
+                'lab_state_artifacts': {'classes': {name: sum(row['artifact_class'] == name for row in state['lab_artifacts'].values())
+                    for name in sorted({row['artifact_class'] for row in state['lab_artifacts'].values()})},
+                    'count': len(state['lab_artifacts']),
+                    'pending_cleanup': sum(row['state'] != 'clean' for row in state['lab_artifacts'].values()),
+                    'retained_evidence_objects': len(state['evidence_objects'])},
                 'updates': updates, 'has_more': end < len(events),
                 'next_cursor': self._encode_cursor(state, events[end - 1]) if updates else since}
 
@@ -1655,15 +1801,23 @@ class Controller:
                     files['objects/' + sha[7:]] = self.read_object(sha)
             for sha in state['evidence_objects']:
                 files['objects/' + sha[7:]] = self.read_object(sha)
+            from engagement_board import rows as board_rows
+            files['board.json'] = canonical({'engagement_id': state['engagement_id'],
+                'snapshot_revision': state['revision'], 'evidence_class': state['evidence_class'],
+                'items': board_rows(state, events)})
             files['result.json'] = canonical({'engagement_id': state['engagement_id'],
                 'scope_sha256': state['scope_sha256'], 'evidence_class': state['evidence_class'],
+                'authority_policy': state['scope'].get('authority_policy', 'legacy-confirmation'),
                 'status': state['status'], 'claim_acceptance': 'per_claim', 'tasks': state['tasks'],
                 'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
                 'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],
                 'network_operations': state['network_operations'],
+                'lab_artifacts': state['lab_artifacts'],
+                'retained_evidence_objects': len(state['evidence_objects']),
                 'research_guidance': {name: events[0]['payload']['contract_files'][name]
                     for name in ('methodology.md', 'protocol.md') if name in events[0]['payload']['contract_files']},
-                'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],
+                'directions': state['directions'], 'messages': state['messages'],
+                'usage': state['usage'], 'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
             for data in files.values():
                 try:
@@ -1699,8 +1853,11 @@ class WorkerServer:
                         fail('request_invalid')
                     request = json.loads(line, object_pairs_hook=unique_pairs)
                     if request.get('operation') == 'status':
-                        keys(request, ('operation', 'since', 'limit'), 'request_invalid')
-                        result = controller.status(principal, since=request['since'], limit=request['limit'])
+                        if (not {'operation', 'since', 'limit'} <= set(request) or
+                                set(request) - {'operation', 'since', 'limit', 'view', 'query', 'kinds'}):
+                            fail('request_invalid')
+                        result = controller.status(principal, since=request['since'], limit=request['limit'],
+                            view=request.get('view', 'updates'), query=request.get('query', ''), kinds=request.get('kinds'))
                     elif request.get('operation') == 'submit':
                         keys(request, ('operation', 'request'), 'request_invalid')
                         result = controller.submit(principal, request['request'])

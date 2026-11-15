@@ -1,0 +1,103 @@
+{
+  "checks": [
+    {
+      "name": "fail_closed_policy_gates",
+      "observed": [
+        {
+          "code": "scope_authority_policy_required",
+          "name": "missing-policy-v2-effect",
+          "status": "refused"
+        },
+        {
+          "code": "scope_authority_policy_invalid",
+          "name": "unknown-policy",
+          "status": "refused"
+        },
+        {
+          "code": "lab_artifact_effect_unavailable",
+          "name": "misbound-application-class",
+          "status": "refused"
+        },
+        {
+          "code": "scope_effect_invalid",
+          "name": "missing-cleanup-obligation",
+          "status": "refused"
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "single_initial_scope_artifact_flow",
+      "observed": {
+        "artifact_count": 1,
+        "artifact_state": "clean",
+        "board_policy": "initial-scope-v1",
+        "confirmation_events": 0,
+        "export_policy": "initial-scope-v1",
+        "legacy_policy": "legacy-confirmation",
+        "status_policy": "initial-scope-v1"
+      },
+      "status": "passed"
+    },
+    {
+      "name": "signed_resource_mode_selection",
+      "observed": [
+        {
+          "effect_id": "create-lab",
+          "mode": "source",
+          "resources": [
+            "source-main"
+          ]
+        },
+        {
+          "effect_id": "create-lab",
+          "mode": "binary",
+          "resources": [
+            "binary-main"
+          ]
+        },
+        {
+          "effect_id": "create-lab",
+          "mode": "application",
+          "resources": [
+            "application-main"
+          ]
+        },
+        {
+          "effect_id": "create-lab",
+          "mode": "combined",
+          "resources": [
+            "source-main",
+            "binary-main",
+            "application-main"
+          ]
+        },
+        {
+          "code": "lab_artifact_effect_unavailable",
+          "name": "missing-matching-creation-grant",
+          "status": "refused"
+        },
+        {
+          "code": "lab_artifact_effect_unavailable",
+          "name": "legacy-v1-application-resource",
+          "status": "refused"
+        }
+      ],
+      "status": "passed"
+    }
+  ],
+  "classification": "engineering_simulation_fake_owned_lab",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/private/tmp/oslit-final-implementation-20261115/evals/native-qualification/smoke/check_autonomy_policy_e2e.py",
+    "--output",
+    "evals/native-qualification/team-evidence/autonomy-policy-20261115/result.json"
+  ],
+  "docker_daemon_calls": 0,
+  "external_target_calls": 0,
+  "kind": "initial-scope-autonomy-e2e-v1",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "resource_mode_coverage": "signed scope load plus selector evaluation for source, binary, application, and combined resource sets; selector-only resource fixtures are not dispatch-issued work grants; fake-lab startup/readback remains source-only",
+  "status": "passed"
+}

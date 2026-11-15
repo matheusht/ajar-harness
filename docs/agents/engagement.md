@@ -2,15 +2,20 @@
 
 Use this guide for the versioned Codex/OMP engagement route. It is candidate
 implementation work: local checks, packaging and preflight do not establish
-qualification, adoption or research success. Existing native/legacy records keep
+runtime qualification or research success. Policy adoption is recorded separately
+in [Decision 0015](../decisions/0015-initial-scope-autonomy.md). Existing native/legacy records keep
 their original contract. The signed scope defines authority; repository access and
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
 Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
-claiming support or readiness. The complete M0–M6 engineering assignment remains
-unfinished. The repository impact-artifact and escalation-review gates still
-apply: a signed ceiling and the internal evidence-review checks do not replace
-operator review, fresh artifact confirmation or an artifact cleanup ledger.
+claiming support or readiness. Start with the [fresh-target handoff](fresh-target-handoff.md)
+for installation, input preparation and run/recovery commands. Select
+`authority_policy: "initial-scope-v1"` in the initial scope before signing once.
+That grant covers every artifact type inside its permitted owned lab state and
+effects. No new confirmation or signature is needed for creation, setup, resume
+or an already signed internal escalation. Fresh independent agent evidence review
+still governs escalation and consequential claims. Scope expansion and external
+actions remain separate; scopes without this policy retain their original gates.
 
 ## Prepare the host and tool lab
 
@@ -18,8 +23,10 @@ Pin the repository revision and use a private, durable engagement directory. Kee
 the host awake during a run. The protected model owner uses either macOS
 `sandbox-exec` with Darwin process birth identity or the optional signed Linux
 Docker model owner. The model container and target/tool lab are separate owners.
-The Linux implementation has contained checks; actual native startup, joined
-workflow recovery and sustained operation still need execution evidence.
+Both pinned runtimes have actual Linux startup and joined source-workflow
+evidence with controlled provider replies, including owner-loss recovery and cleanup.
+See the [integrated results](../research/oslit-implementation-assembly-2026-11-15.md#signed-codex-integration-and-repeated-turn-repair).
+Live-provider behavior and sustained operation remain for operator testing.
 
 Runtime prerequisites are Python 3.11+ with its standard library, OpenSSH
 `ssh-keygen` for local signature verification, OpenSSL for private proxy trust,
@@ -88,6 +95,37 @@ definitions may additionally use `model_catalog: {path, sha256}` pointing to a
 private nonsecret `models.yml`; settings still use `config_file`. Both are frozen
 at initialization. See the [runtime contract](../research/oslit-v2-contract-2026-11-14.md)
 for exact fields and retained compatibility.
+
+### Codex tool policy on Docker
+
+If the Docker host's defaults block Codex's native user namespace, the environment
+profile can include `"codex_tool_policy": "docker-confined-v1"`. Select it before
+pinning and signing the profile. It applies only to the main Codex tool container;
+staging, model, application and OMP containers retain their existing configuration.
+An omitted setting preserves the existing profile and receipt contract.
+
+On the authorized tool Docker host, verify the pinned policy files and install
+the named AppArmor profile once, from the repository root:
+
+```sh
+PYTHONPATH=tools python3 -c 'from codex_tool_policy import load_policy; load_policy()'
+sudo apparmor_parser -Ka engine/codex-tool-policy-v1/oslit-codex-tool-v1.apparmor
+```
+
+The add-only install refuses a preexisting name. Keep the profile installed while
+its owned containers run; remove it only after their cleanup is verified. The
+runtime supplies the pinned seccomp bytes to Docker and checks the exact security
+options, absent added capabilities, AppArmor name and active enforcing mode.
+Missing or mismatched policy stops setup or execution; recovery remains cleanup-only.
+The runtime does not install host policy or switch to an unconfined mode.
+
+The host operator owns the loaded policy bytes. Runtime readback establishes the
+name and enforcing mode, not a kernel content hash. See the
+[fixed policy's provenance](../../engine/codex-tool-policy-v1/SOURCE-PROVENANCE.md)
+and the [dated integrated evidence](../research/oslit-implementation-assembly-2026-11-15.md)
+before making qualification claims. The signed full-workflow integration passed
+with the pinned native runtime and owned deterministic provider. Live-provider
+behavior, broader access modes and research acceptance require their own evidence.
 
 ## Fill and sign the inputs
 
@@ -206,7 +244,8 @@ containment remain separate verification requirements.
 `engagement_capture` runs a pinned probe in a separate reserved lab over a nonempty
 subset of the worker's resources. For source/binary-only capture, optional
 `effect_id` selects a signed local execution effect; omission uses the initial
-read effect. Setup requires exactly one account-free `read` effect at
+read effect unless the signed owned-lab-state class below requires a separate
+`execute` effect. Setup requires exactly one account-free `read` effect at
 `source_only` or `self` covering the selected resources and environment. Capture
 with application resources rejects this local selector. Its target requests use
 `X-OSLit-Effect` to select a signed effect; omission requires exactly one compatible
@@ -245,7 +284,7 @@ recovery reads back the recorded owner. An unsupported reset request fails
 explicitly. The first owner supports wholly disposable HTTP applications; existing
 remote deployments, persistent volumes and external databases need another
 qualified owner. This optional capability adds no reset authority to older scopes
-and changes no impact-artifact approval gate.
+and does not widen signed authority.
 
 Run the local composition checks with
 `python3 evals/native-qualification/smoke/check_application_reset_e2e.py --output /private/results/application-reset.json`.
@@ -260,11 +299,47 @@ current escalation review of the independently confirmed preceding claim and
 exact next signed effect. The frozen worker protocol describes the request and
 review evidence. Reopened claims, superseded instruments or a replacement review
 request invalidate the old transition's admission. Matching late observations
-and owned cleanup remain recordable. Generic `artifact_create` is unsupported;
-the repository's operator review and fresh artifact-approval gates remain active.
+and owned cleanup remain recordable. Under `initial-scope-v1`, that agent review
+is sufficient for the already signed rung; no operator approval is added. Artifact
+creation uses the owned-state lifecycle below, not a generic network effect.
 The [source capture workflow](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md)
 checks declared adjacent rungs using harmless local probes and simulated native,
 container and reviewer behavior. It does not establish a security escalation.
+
+## Track explicitly signed disposable lab state
+
+`owned-lab-state-v2` treats one owned tool/client lab and all its mutable state
+as the artifact across source, binary, application and combined access. It includes native writes from their first
+creation inside `/work`, `/tmp`, bounded shared memory and private IPC. It does
+not classify content or register each generated file separately. Every content
+type is covered inside the signed envelope, including contained Zone-2 artifacts.
+`owned-lab-state-v1` retains its historical source/binary-only meaning.
+
+The signed access needs `write` permission, plus a matching
+`artifact_create` effect with `artifact_classes:["owned-lab-state-v2"]`,
+`cleanup_required:true`, no accounts and a `source_only` or `self` rung. Keep the
+separate setup `read` effect and execution `execute` effect. Main startup requires
+one matching class effect. Capture may use `artifact_effect_id` to choose between
+matching class effects; its existing `effect_id` selects execution. Creation-only
+authority cannot start native tools or run a probe.
+
+The host persists intent before allocation and checks actual Docker configuration
+and every supported writable/kernel mount before native admission. Additional
+mounts/devices, shared host namespaces and unsupported class selections refuse.
+An application resource in this client-lab grant does not authorize remote mutation;
+its network effects and owned target-state lifecycle require their own signed grants. Class workspace capacity must be a multiple of 4096 bytes. The
+[contract](../research/oslit-v2-contract-2026-11-14.md#candidate-owned-lab-state-class)
+records the precise storage bounds and exclusions.
+
+Status exposes `lab_state_artifacts` with the instance count, pending cleanup and
+retained evidence-object count. A ready instance may survive a specialist's next
+related assignment. Final settlement and resource reconciliation require exact
+container, staging container, prepared image and registered host capture staging
+absence. A failed host cleanup remains held even when the container is gone.
+Recovery uses the recorded owner, including intent-only preparation. Evidence
+objects and published workspace copies remain retained; “clean” describes the
+disposable instance. Run the [repeatable workflow](../../evals/native-qualification/OWNED-LAB-STATE-E2E.md)
+to distinguish contained journal checks from actual Linux readback evidence.
 
 ## Inspect and run
 
@@ -299,7 +374,8 @@ incompatible work, failed readback and controller recovery use cleanup and
 reconstruction from published records and frozen inputs. The
 [retention evidence](../../evals/native-qualification/team-evidence/m2-retained-specialists-20261114/README.md)
 separates actual Codex/OMP continuity with fake provider replies from the simulated
-controller transition and the unverified joined Docker workflow. Ordinary model-turn
+controller transition. Later [joined Docker results](../research/oslit-implementation-assembly-2026-11-15.md#signed-codex-integration-and-repeated-turn-repair)
+verify two retained native invocations. Ordinary model-turn
 completion does not finish an engagement. The lead can continue, create tasks and request allowed
 specialists. Confirmation requires an observed effect,
 a relevant control and clean independent reproduction. Broad work also needs an
@@ -317,6 +393,19 @@ Directions record operator steering and do not expand authority. Status summarie
 are bounded; use `--since CURSOR --limit N` and the returned `next_cursor`/`has_more`
 for subsequent update pages. Worker status/claim/submit endpoints are assigned by
 the host; a claimed role or native session ID is not authentication.
+
+Search the shared board without changing work:
+
+```sh
+python3 tools/native_engagement.py status --engagement-root /private/engagements/example \
+  --view board --query parser --kind publication --kind claim --limit 20
+```
+
+Use `--since` with the returned board cursor and the same filters for stable
+snapshot pagination. Agents use `engagement_status` with `view:board` and can send
+typed `team_message` submissions. Relevant peer updates are delivered through
+native steering; durable acknowledgments recover missed updates after restart.
+The board retains source references and review state, and export includes it.
 
 ## Stop, recover and export
 
@@ -353,6 +442,11 @@ exported portable `methodology.md`; the protocol file contains OSLit-specific
 worker operations. Inspect those states before
 calling the result complete. Export neither grants external-action authority nor
 publishes a report.
+
+Check the bundle using the [byte-integrity guide](engagement-export-integrity.md)
+and [reference and result verification guide](export-reference-verification.md).
+These checks establish exported-byte and journal consistency, not signer identity
+or research acceptance.
 
 The operator owns the future fresh-target acceptance test and comparison with a
 capable native agent. Engineering fixtures, local runtime controls, live provider

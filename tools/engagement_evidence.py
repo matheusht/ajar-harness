@@ -16,11 +16,11 @@ REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'c
 LEAD_ONLY = {'review_request', 'review_response', 'closure_request'}
 COLLECTIONS = ('instruments', 'experiments', 'comparisons', 'claims', 'obligations', 'reviews',
                'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs',
-               'application_starts')
-CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image'}
+               'application_starts', 'lab_artifacts')
+CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image', 'remove_state_volume'}
 OPERATIONS = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
     'execute', 'start', 'renew', 'launch_stdio', 'readback_input', 'stage_support', 'readback_support',
-    'read_workspace_manifest', 'read_artifact'}
+    'read_workspace_manifest', 'read_artifact', 'create_state_volume'}
 IDENTITY_KEYS = {'kind', 'nonce', 'container_id', 'container_name', 'stage_container_id',
     'stage_container_name', 'prepared_image_id', 'prepared_image_name', 'unsettled',
     'daemon_id', 'image_id', 'profile_sha256', 'access', 'support_inputs'}
@@ -62,14 +62,15 @@ def binding(c, state, grant):
 
 
 def identity(c, state, grant, profile_id, value):
-    keys(value, IDENTITY_KEYS, 'environment_identity_invalid')
+    volume_owner = isinstance(value, dict) and value.get('kind') == 'research-environment-receipt-v3'
+    keys(value, IDENTITY_KEYS | ({'state_volumes'} if volume_owner else set()), 'environment_identity_invalid')
     signed = next((row for row in state['scope']['environments'] if row['profile_id'] == profile_id), None)
     if signed is None:
         fail('environment_profile_forbidden')
     profile = read_json(c.root / 'contract/environments' / (profile_id + '.json'), private=True)
     expected_digest = digest(json.dumps(profile, sort_keys=True, separators=(',', ':')).encode())
     nonce = value['nonce']
-    if (value['kind'] != 'research-environment-receipt-v2' or not isinstance(nonce, str)
+    if (value['kind'] not in ('research-environment-receipt-v2', 'research-environment-receipt-v3') or not isinstance(nonce, str)
             or not re.fullmatch('[0-9a-f]{32}', nonce)
             or value['container_name'] != 'oslit-' + nonce
             or value['stage_container_name'] != 'oslit-' + nonce + '-stage'
@@ -82,8 +83,8 @@ def identity(c, state, grant, profile_id, value):
         pattern = 'sha256:[0-9a-f]{64}' if key == 'prepared_image_id' else '[0-9a-f]{64}'
         if value[key] is not None and (not isinstance(value[key], str) or not re.fullmatch(pattern, value[key])):
             fail('environment_identity_invalid')
-    if (not isinstance(value['unsettled'], list) or
-            any(v not in ('create_stage', 'snapshot_input', 'create') for v in value['unsettled'])):
+    from application_volumes import unsettled_valid, validate_identity
+    if not unsettled_valid(value):
         fail('environment_identity_invalid')
     accesses = {row['id']: {k: row[k] for k in ('id', 'kind', 'identity')} for row in state['scope']['access']}
     if not isinstance(value['access'], list) or len(value['access']) > len(accesses):
@@ -94,6 +95,19 @@ def identity(c, state, grant, profile_id, value):
         if row['id'] not in grant['resources'] or row != accesses.get(row['id']) or row['id'] in observed:
             fail('environment_access_invalid')
         observed.append(row['id'])
+    if volume_owner:
+        from research_environment import EnvironmentUnavailable
+        if len(observed) != 1 or accesses[observed[0]]['kind'] != 'application':
+            fail('application_volume_identity_mismatch')
+        reference = next((row for row in state['scope'].get('application_states', [])
+                          if row['access_id'] == observed[0] and row['environment_id'] == profile_id), None)
+        if reference is None:
+            fail('application_volume_identity_mismatch')
+        application = read_json(c.root / 'contract/applications' / (observed[0] + '.json'), private=True)
+        try:
+            validate_identity(value, application.get('state_volumes'), signed['limits'])
+        except EnvironmentUnavailable:
+            fail('application_volume_identity_mismatch')
     runtime = read_json(c.root / 'contract/runtimes' / (grant['profile_id'] + '.json'), private=True)
     support = value['support_inputs']
     if not isinstance(support, list) or len(support) > 33:
@@ -113,8 +127,14 @@ def identity(c, state, grant, profile_id, value):
             fail('environment_owner_mismatch')
         for key in IDENTITY_KEYS - {'unsettled'}:
             old = prior['identity'][key]
+            if prior.get('allocation_pending') and key in ('access', 'support_inputs') and old == []:
+                continue
             if old is not None and old != value[key]:
                 fail('environment_identity_changed')
+        if volume_owner:
+            for old, current in zip(prior['identity']['state_volumes'], value['state_volumes']):
+                if old['created_at'] is not None and old['created_at'] != current['created_at']:
+                    fail('environment_identity_changed')
     return signed
 
 
@@ -160,6 +180,8 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
             else:
                 c._authorize(state, grant)
                 admit_effect(state, effect, profile_id=profile_id, access_ids=access_ids, account_refs=accounts)
+                from engagement_lab_artifacts import admit_operation
+                admit_operation(state, grant, profile_id, observation, effect)
         elif prior:
             if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['operation'] != op
                     or prior['effect_id'] != effect_id or prior['account_refs'] != accounts):
@@ -203,6 +225,9 @@ def record_environment_output(c, grant, profile_id, operation_id, output):
 
 
 def record_network_observation(c, grant, profile_id, nonce, observation, *, target_nonce=None):
+    if isinstance(observation, dict) and observation.get('kind') == 'acquisition-network-observation-v1':
+        from engagement_acquisition import record
+        return record(c, grant, profile_id, nonce, observation, target_nonce=target_nonce)
     with c.lock():
         state = c.state()
         binding(c, state, grant)
@@ -299,6 +324,7 @@ def comparable(left, right):
     return (all(left[key] == right[key] for key in ('instrument_id', 'conditions', 'input_identity',
         'environment_profile_id', 'effect_id', 'account_refs', 'resources'))
         and left.get('target_bindings', []) == right.get('target_bindings', [])
+        and left.get('acquisition_bindings', []) == right.get('acquisition_bindings', [])
         and left.get('application_state', {}) == right.get('application_state', {}))
 
 
@@ -456,8 +482,13 @@ def validate_request(c, state, worker, kind, data):
                     if row['grant']['dispatch_id'] == operation['grant']['dispatch_id']}
         if any(row['result'] is None or row['result']['status'] != 'settled' for row in requests.values()):
             fail('experiment_network_unsettled')
-        bindings = {}
+        bindings, acquisitions = {}, {}
         for row in requests.values():
+            if row['intent']['kind'] == 'acquisition-network-observation-v1':
+                from engagement_acquisition import projection
+                selected = projection(row)
+                acquisitions[canonical(selected)] = selected
+                continue
             selected = {key: row['intent'][key] for key in ('access_id', 'effect_id', 'account_ref', 'origin', 'method')}
             bindings[canonical(selected)] = selected
         data = dict(data, session_id=operation['session_id'], worker_id=worker['id'], generation=worker['generation'],
@@ -466,7 +497,8 @@ def validate_request(c, state, worker, kind, data):
             account_refs=operation['account_refs'], output_sha256=operation['output_sha256'],
             receipt_sha256=dispatch['receipt'], environment_receipts=operation['receipts'], patch_copy=operation.get('patch_copy'),
             execution_receipt_sha256=operation['execution_receipt_sha256'], clean_start=measurement['clean_start'],
-            network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)])
+            network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)],
+            acquisition_bindings=[acquisitions[key] for key in sorted(acquisitions)])
         if operation.get('application_start_nonces'):
             starts = [state['application_starts'][nonce]['receipt'] for nonce in operation['application_start_nonces']]
             data['application_state'] = {row['access_id']: {key: row[key] for key in
@@ -709,7 +741,21 @@ def reduce_request(state, actor, kind, data):
 def reduce_host(state, payload):
     action, data = payload['action'], payload['data']
     state['evidence_objects'].update({sha: True for sha in payload.get('_objects', [])})
-    if action == 'support_inputs_registered':
+    if action == 'lab_artifact_intended':
+        state['lab_artifacts'][data['nonce']] = dict(data, state='intended', staging=[])
+        state['environments'][data['nonce']] = {'identity': data['identity'],
+            'profile_id': data['environment_profile_id'], 'worker_id': data['worker_id'],
+            'generation': data['generation'], 'allocation_pending': True}
+        state['cleanup'] = 'pending'
+    elif action == 'lab_artifact_ready':
+        state['lab_artifacts'][data['nonce']].update(state='ready', ready=data['readback'])
+    elif action == 'lab_artifact_staging':
+        state['lab_artifacts'][data['nonce']]['staging'].append(data['owner'])
+    elif action == 'lab_artifact_cleanup_observed':
+        state['lab_artifacts'][data['nonce']].update(state='clean', cleanup=data['readback'])
+        state['cleanup'] = 'verified' if (all(row.get('cleanup') == 'verified' for row in state['environments'].values())
+            and all(row['state'] == 'clean' for row in state['lab_artifacts'].values())) else 'pending'
+    elif action == 'support_inputs_registered':
         state['support_inputs'][data['grant']['dispatch_id']] = data['inputs']
     elif action == 'network_observation':
         observation = data['observation']
@@ -725,7 +771,8 @@ def reduce_host(state, payload):
         observation, grant = data['observation'], data['grant']
         nonce, opid = observation['identity']['nonce'], observation['operation_id']
         state['environments'][nonce] = dict(state['environments'].get(nonce, {}),
-            identity=observation['identity'], profile_id=data['profile_id'], worker_id=grant['worker_id'], generation=grant['generation'])
+            identity=observation['identity'], profile_id=data['profile_id'], worker_id=grant['worker_id'], generation=grant['generation'],
+            allocation_pending=False)
         operation = state['environment_operations'].setdefault(opid, {'grant': grant, 'profile_id': data['profile_id'],
             'operation': observation['operation'], 'effect_id': data['effect_id'], 'account_refs': data['account_refs'],
             'session_id': data['session_id'], 'receipts': [], 'result': None})
@@ -762,7 +809,8 @@ def reduce_host(state, payload):
     elif action == 'environment_cleanup':
         state['environments'][data['nonce']]['cleanup'] = 'verified'
         state['environments'][data['nonce']]['cleanup_receipt'] = data['receipt_sha256']
-        state['cleanup'] = 'verified' if all(row.get('cleanup') == 'verified' for row in state['environments'].values()) else 'pending'
+        state['cleanup'] = 'verified' if (all(row.get('cleanup') == 'verified' for row in state['environments'].values())
+            and all(row['state'] == 'clean' for row in state['lab_artifacts'].values())) else 'pending'
     elif action == 'lead_replaced':
         old = state['workers'][data['worker_id']]
         old.setdefault('history', []).append({key: value for key, value in old.items() if key != 'history'})
@@ -1011,7 +1059,8 @@ def record_experiment_execution(c, grant, profile_id, operation_id, measurement)
                 fail('experiment_reset_unverified')
             expected = {row['receipt']['access_id']: row['receipt']['target_nonce'] for row in starts}
             if any(row.get('target_nonce') != expected.get(row['intent']['access_id']) for row in state['network_operations'].values()
-                   if row['grant']['dispatch_id'] == grant['dispatch_id']):
+                   if row['grant']['dispatch_id'] == grant['dispatch_id']
+                   and row['intent']['kind'] == 'target-network-observation-v1'):
                 fail('experiment_reset_unverified')
         mapping(measurement['conditions'])
         for name in ('instrument_sha256', 'candidate_sha256', 'probe_sha256'):
@@ -1084,7 +1133,8 @@ def application_released(state, dispatch_id, access_id):
     if any(state['environments'][nonce].get('cleanup') != 'verified' for nonce in nonces):
         return False
     return all(row.get('target_nonce') in nonces for row in state['network_operations'].values()
-        if row['grant']['dispatch_id'] in dispatches and row['intent']['access_id'] == access_id)
+        if row['grant']['dispatch_id'] in dispatches
+        and row['intent']['kind'] == 'target-network-observation-v1' and row['intent']['access_id'] == access_id)
 
 
 def current_closure(state, closure):

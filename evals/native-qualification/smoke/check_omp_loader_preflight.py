@@ -116,16 +116,41 @@ def observe_model_startup(runtime_module, result):
         runtime_module.Runtime = original
 
 
+
+@contextmanager
+def observe_model_version(owner_class, result):
+    original = owner_class.launch_model
+
+    def launch(owner, command, public_environment, binding):
+        if owner.profile['kind'] == 'omp':
+            owner.check_authority()
+            result['omp_model_version_preflight'] = {'status': 'attempted'}
+            observation = owner.environment.execute([
+                '/usr/bin/env', '-i', 'HOME=/tmp', 'TMPDIR=/tmp', 'PI_CODING_AGENT_DIR=/tmp',
+                'PATH=/usr/local/bin:/usr/bin:/bin', '/runtime/bin/model', '--version'], timeout_seconds=10)
+            result['omp_model_version_preflight'] = {
+                'status': observation['status'], 'returncode': observation['returncode'],
+                'pinned_version_matches': observation['output'].strip() == '18.20.0'}
+        return original(owner, command, public_environment, binding)
+
+    owner_class.launch_model = launch
+    try:
+        yield
+    finally:
+        owner_class.launch_model = original
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
     import native_runtime_omp
+    import native_runtime_linux
     original = fixture_module.run_native
 
     def run_native(root, fixture, result):
         if fixture.runtime != 'omp':
             return original(root, fixture, result)
-        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result):
+        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result), observe_model_version(native_runtime_linux.LinuxModelOwner, result):
             return original(root, fixture, result)
 
     fixture_module.run_native = run_native

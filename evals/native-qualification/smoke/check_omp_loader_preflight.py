@@ -130,7 +130,8 @@ def observe_model_version(owner_class, result):
                 'PATH=/usr/local/bin:/usr/bin:/bin', '/runtime/bin/model', '--version'], timeout_seconds=10)
             result['omp_model_version_preflight'] = {
                 'status': observation['status'], 'returncode': observation['returncode'],
-                'pinned_version_matches': observation['output'].strip() == '18.20.0'}
+                'pinned_version_matches': observation['output'].strip() == '18.20.0',
+                'pinned_version_line_present': '18.20.0' in observation['output'].splitlines()}
         return original(owner, command, public_environment, binding)
 
     owner_class.launch_model = launch

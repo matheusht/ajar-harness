@@ -280,6 +280,24 @@ def tool_bundle(fixture, result):
     return result['tool_installation']['profile_fields']['tool_bundle']
 
 
+def omp_fixture_catalog(provider_url):
+    return canonical({'providers': {'openai': {'baseUrl': provider_url + '/v1',
+        'api': 'openai-completions', 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
+            'reasoning': False, 'input': ['text'], 'supportsTools': True,
+            'contextWindow': 32768, 'maxTokens': 1024,
+            'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}})
+
+
+def validate_omp_fixture_catalog(content, provider_url, secret):
+    catalog = json.loads(content)
+    provider = catalog['providers']['openai']
+    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != 'openai-completions'
+            or provider.get('apiKey') != 'OPENAI_API_KEY'
+            or [model.get('id') for model in provider.get('models', [])] != ['fixture-model']
+            or secret.encode() in content):
+        raise ValueError('omp_fixture_model_catalog_invalid')
+
+
 def signed_inputs(root, fixture, provider, bundle):
     from native_runtime_codex import _DISABLED_FEATURES
     inputs_path = make_fixture(root / 'input')
@@ -337,11 +355,9 @@ env_key = "OPENAI_API_KEY"
             'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128, 'workspace_bytes': 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
-        write(catalog, canonical({'providers': {'openai': {'baseUrl': provider.origin + '/v1',
-            'api': 'openai-completions', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
-                'reasoning': False, 'input': ['text'], 'supportsTools': True,
-                'contextWindow': 32768, 'maxTokens': 1024,
-                'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}}))
+        catalog_content = omp_fixture_catalog(provider.origin)
+        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret)
+        write(catalog, catalog_content)
         profile['model_catalog'] = {'path': str(catalog), 'sha256': digest(catalog.read_bytes())}
     write(Path(inputs['runtime_profiles']['runtime-main']), canonical(profile))
     environment = {'kind': 'research-environment-profile-v2', 'transport': 'docker',
@@ -440,6 +456,9 @@ def run_native(root, fixture, result):
     try:
         inputs = signed_inputs(root, fixture, provider, bundle)
         controller = Controller.initialize(root / 'engagement', load_inputs(inputs))
+        if fixture.runtime == 'omp':
+            frozen_catalog = controller.root / 'contract/runtimes/runtime-main.models.yml'
+            validate_omp_fixture_catalog(frozen_catalog.read_bytes(), provider.origin, secret)
         runner = Runner(controller)
         worker = next(row for row in controller.state()['workers'].values() if row['role'] == 'lead')
         workspace = root / 'workspace'; workspace.mkdir(mode=0o700)

@@ -3,9 +3,16 @@
 from check_omp_loader_preflight import observe_loader
 import check_omp_loader_preflight as driver
 import copy
+import json
 import os
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from check_linux_model_native_e2e import omp_fixture_catalog, validate_omp_fixture_catalog
 
 COMMAND = ['/usr/bin/env', '-i', 'HOME=/work', 'PATH=/usr/bin:/bin',
            '/input/native-runtime/bin/bun', '/input/native-runtime/native_runtime_omp_tools.mjs',
@@ -56,6 +63,25 @@ def test_startup_only_classification():
         assert failed == before, 'classification must preserve the failed result and its diagnostics'
 
 
+def test_omp_fixture_catalog_uses_secret_free_environment_reference():
+    origin = 'https://127.0.0.2:4443'
+    secret = 'synthetic-omp-fixture-key'
+    content = omp_fixture_catalog(origin)
+    validate_omp_fixture_catalog(content, origin, secret)
+    catalog = json.loads(content)
+    missing_reference = copy.deepcopy(catalog)
+    missing_reference['providers']['openai'].pop('apiKey')
+    literal_secret = copy.deepcopy(catalog)
+    literal_secret['providers']['openai']['apiKey'] = secret
+    for invalid in (missing_reference, literal_secret):
+        try:
+            validate_omp_fixture_catalog(json.dumps(invalid).encode(), origin, secret)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('invalid OMP fixture credential config was accepted')
+
+
 class Environment:
     def __init__(self, observation):
         self.observation = observation
@@ -76,6 +102,7 @@ class Environment:
 
 def main():
     test_startup_only_classification()
+    test_omp_fixture_catalog_uses_secret_free_environment_reference()
     original = Environment.launch_stdio
     for output, status, code, matches in [('1.4.4\n', 'settled', 0, True),
         ('unpublished diagnostic text', 'settled', 127, False), ('[output withheld]', 'unknown', -9, False)]:

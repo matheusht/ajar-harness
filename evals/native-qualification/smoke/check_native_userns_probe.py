@@ -12,6 +12,7 @@ result = {}
 for key, path in {
     'unprivileged_userns_clone': '/proc/sys/kernel/unprivileged_userns_clone',
     'apparmor_restrict_unprivileged_userns': '/proc/sys/kernel/apparmor_restrict_unprivileged_userns',
+    'apparmor_profile': '/proc/self/attr/current',
     'uid_map': '/proc/self/uid_map', 'gid_map': '/proc/self/gid_map',
 }.items():
     try:

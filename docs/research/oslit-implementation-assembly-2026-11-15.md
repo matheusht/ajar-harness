@@ -4,8 +4,9 @@ Continuation update: conformance now passes all 900 checks. The scanner recogniz
 only the exact path, full-file digest and known synthetic literal of each of the
 three archived probes. Five failure-first regression scenarios passed; archived
 bytes remain unchanged. The earlier failure below is retained as a checkpoint.
-The joined Codex/OMP workflow is being run on the dedicated test branch; no native
-completion claim follows from the conformance result.
+The assembly is published on `codex/oslit-integrated-e2e-20261115`. Hosted structural
+conformance passed at `eedb24c9`; the full conformance workflow is still running.
+Neither native runtime has completed the joined workflow.
 
 This is a local implementation candidate, not an accepted release or qualified
 research workflow. It combines the source at `5d290d19`, the staged bounded
@@ -50,18 +51,50 @@ authority was refused. The fixture now checks private account-resolver closure
 directly; all seven account scenarios passed. Its local HTTP behavior remains
 distinct from real target-account or native-container qualification.
 
-These are current local checks, not hosted CI or a joined native research run.
-The Docker daemon was unavailable, no disposable remote host was supplied, and
-the exact pinned Bun/OMP tool package was unavailable locally. Earlier hosted
-receipts retain their original source/version scope and do not certify this tree.
+These local checks do not establish a joined native research run. The local Docker
+daemon was unavailable, no separate disposable remote host was supplied, and the
+exact pinned Bun/OMP package was unavailable locally. The newer hosted checks
+below exercise the assembled source; earlier receipts retain their original scope.
 
-Repository conformance under the existing pinned Python environment completed
-900 checks with one failure: the secret-shape scan flags synthetic bearer strings
+At the earlier assembly checkpoint, repository conformance under the pinned Python
+environment completed 900 checks with one failure: the secret-shape scan flags synthetic bearer strings
 in three archived diagnostic fixtures. Those historical bytes and the scanner
-were preserved. This remains a release-gate failure, not a green conformance
-result. The initial missing-dependency failures disappeared under the correct
+were preserved. That checkpoint was a release-gate failure; the narrowly pinned
+scanner correction described above subsequently passed locally and in hosted CI. The initial missing-dependency failures disappeared under the correct
 environment; whitespace checks passed. A separate legacy observation check also
 refused its historical source pin before execution and supplies no v2 evidence.
+
+## Hosted observations
+
+The [assembled native run](https://github.com/matheusht/redteam-harness/actions/runs/43725604682)
+at `eedb24c9` passed the Docker environment, container guardian, owned loopback SSH,
+and application reset checks. Codex's executor reached verified readiness but
+thread creation failed when Bubblewrap could not create a user namespace. OMP's
+SDK imports, tool catalog and model version checks passed; its model process then
+exited before readiness. Neither made a controlled or external provider request.
+Both failed-run journals exported successfully and passed byte integrity,
+reference closure and result consistency checks; cleanup was verified.
+
+The [namespace diagnostic run](https://github.com/matheusht/redteam-harness/actions/runs/43726713247)
+at `2a0f04b5` found that the runner host permits `unshare(CLONE_NEWUSER)` while the
+tool container refuses it with `EPERM`. The container has Docker's seccomp filter
+and no effective capabilities. This localizes the incompatibility to container
+policy; it does not justify bypassing the native sandbox. OMP's new stderr
+self-check hit Linux's argument-size limit before the startup diagnostic step.
+The joined OMP check still ran and failed before readiness. The fixture now
+passes that synthetic payload through stdin, and startup diagnostics run even if
+an earlier diagnostic check fails. Sandbox settings remain unchanged. The later
+[startup diagnostic run](https://github.com/matheusht/redteam-harness/actions/runs/43727095656)
+at `07ac9ff2` identified OMP's exact refusal: a custom model definition requires
+an `apiKey` or an explicit alternate authentication mode. The fixture now names
+`OPENAI_API_KEY` as the environment reference, following the integrity-verified
+18.20.0 package resolver. No key value is written to its catalog; the owned
+provider still requires the synthetic credential. The corrected native run is
+pending.
+
+The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
+at `eedb24c9` has passed the structural conformance step. The full workflow is still
+pending. These observations do not qualify either native research runtime.
 
 ## Remaining implementation and delivery
 
@@ -79,6 +112,7 @@ intended behavior works. Optional capture output-directory manifests remain
 unimplemented; the approved plan does not require that particular interface.
 Existing transfer digests never prove that downloaded code executed.
 
-No PR, merge, workflow dispatch or publication was performed in this continuation.
-This assembly retains source, documentation and scenario definitions. Local
-verification logs and source hashes are retained separately for the handoff.
+The test branch was pushed to run hosted checks. No PR or merge was created.
+Source, scenario definitions and provenance remain in the branch; hosted results
+are attached to the linked runs. Local verification logs and downloaded hosted
+artifacts, including source hashes, are retained separately for the handoff.

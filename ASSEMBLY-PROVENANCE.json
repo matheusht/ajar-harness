@@ -25,8 +25,17 @@
     "canonical export fixture roots and simulated Linux diagnostic fields",
     "account resolver closure fixture and delivery documentation reconciliation"
   ],
-  "verification": "independent source reviews completed; GPT-6 Luna ran local contract/team/evidence/runner/coordination/guidance, acquisition/inventory/export and runtime fixtures; no joined live native, Docker, remote or hosted CI qualification",
-  "status": "local implementation candidate; remaining native/remote/soak qualification and release handoff; not published or accepted",
+  "verification": "GPT-6 Luna local workflows and hosted structural conformance passed at eedb24c9; hosted Docker/loopback SSH/reset passed; Codex and OMP native work remain blocked before provider invocation; failed-run exports and cleanup verified",
+  "status": "published implementation test candidate on codex/oslit-integrated-e2e-20261115; not merged, adopted or research-accepted",
   "conformance": "900 checks, 0 failing after exact path/full-file hash/literal exceptions for three synthetic archived probes; five regression scenarios passed; archived bytes unchanged",
-  "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation"
+  "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation",
+  "hosted_observations": {
+    "assembly_head": "eedb24c9503cea4c6805ab4bcf567b69b4a7e0d2",
+    "native_run": 43725604682,
+    "conformance_run": 43725604808,
+    "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
+    "namespace_diagnostic_run": 43726713247,
+    "codex_blocker": "tool container denies unprivileged user namespace creation; host probe allows it",
+    "omp_blocker": "custom fixture model catalog omitted apiKey environment reference; corrected after pinned-source verification, native rerun pending"
+  }
 }

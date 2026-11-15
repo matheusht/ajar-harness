@@ -160,7 +160,7 @@ def main():
                 return 'original-process'
         calls, result = [], {}
         owner = ModelOwner()
-        owner.environment = Environment({'status': 'settled', 'returncode': 0, 'output': '18.20.0\n'})
+        owner.environment = Environment({'status': 'settled', 'returncode': 0, 'output': 'omp/18.20.0\n'})
         original = ModelOwner.launch_model
         try:
             with driver.observe_model_version(ModelOwner, result):
@@ -180,7 +180,7 @@ def main():
         else:
             assert result == {}
         assert 'unpublished' not in str(result)
-    for output, expected in [('unpublished warning\n18.20.0\n', True), ('118.20.0\n', False),
+    for output, expected in [('unpublished warning\nomp/18.20.0\n', True), ('118.20.0\n', False),
                              ('unpublished 18.20.0 detail', False)]:
         owner = ModelOwner()
         owner.profile = {'kind': 'omp'}
@@ -192,11 +192,66 @@ def main():
         row = result['omp_model_version_preflight']
         assert row['pinned_version_line_present'] is expected and row['pinned_version_matches'] is False
         assert 'unpublished' not in str(row)
-    for output, expected in [('', 'empty'), ('\x1b[32momp v18.20.0\x1b[0m\n', 'expected_version'),
+    for output, expected in [('omp/18.20.0\n', 'expected_version'), ('omp/18.19.0\n', 'other_numeric_version'), ('', 'empty'), ('\x1b[32momp v18.20.0\x1b[0m\n', 'expected_version'),
                              ('1.4.4', 'other_numeric_version'), ('unpublished 18.20.0 detail', 'unrecognized'),
                              ('18.20.0\n1.4.4', 'unrecognized')]:
         assert driver.version_output_category(output) == expected
-    print('passed: 36 offline diagnostic cases; no native or provider calls')
+    for output, accepted in [('{"work_available_bytes":0,"native_files":1,"native_bytes":128}', True),
+        ('{"work_available_bytes":0,"native_files":true,"native_bytes":128}', False),
+        ('{"secret":"unpublished"}', False), ('unpublished', False)]:
+        row = driver.model_storage_outcome({'status':'settled','returncode':0,'output':output})
+        assert ('native_bytes' in row) == accepted and 'unpublished' not in str(row)
+    for denied in (False, True):
+        class Storage:
+            def execute(self, argv, *, timeout_seconds):
+                assert argv[-1] == driver.MODEL_STORAGE_PROBE and timeout_seconds == 5
+                if denied:
+                    raise Failure('unpublished refusal')
+                return {'status':'settled','returncode':0,
+                        'output':'{"work_available_bytes":0,"native_files":1,"native_bytes":128}'}
+        cleanup = []
+        class Model:
+            def _startup_failed(self, error):
+                cleanup.append(error)
+        module, result = SimpleNamespace(Runtime=Model), {}
+        error = Failure('unpublished')
+        with driver.observe_model_startup(module,result):
+            model = module.Runtime(); model.ready = False
+            model.transport = SimpleNamespace(process=SimpleNamespace(poll=lambda:1))
+            model.model_owner = SimpleNamespace(environment=Storage())
+            model._startup_failed(error)
+        assert cleanup == [error] and module.Runtime is Model and 'unpublished' not in str(result)
+        assert ('native_bytes' in result['omp_model_storage_failure']) != denied
+    import tempfile
+    from pathlib import Path
+    scope = {'__name__': 'probe_test'}
+    exec(driver.MODEL_STORAGE_PROBE, scope)
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        work = root / 'work'; work.mkdir()
+        outside = root / 'outside'; outside.mkdir(); (outside / 'unrelated.node').write_bytes(b'outside')
+        cache = work / '.model' / '.omp' / 'natives'; cache.mkdir(parents=True)
+        (cache / 'good.node').write_bytes(b'123')
+        (cache / 'linked.node').symlink_to(outside / 'unrelated.node')
+        (cache / 'linked-dir').symlink_to(outside, target_is_directory=True)
+        row = scope['probe'](str(work))
+        assert row['native_files'] == 1 and row['native_bytes'] == 3
+        cache.rename(cache.with_name('saved'))
+        cache.symlink_to(outside, target_is_directory=True)
+        try:
+            scope['probe'](str(work))
+        except OSError:
+            pass
+        else:
+            raise AssertionError('followed cache root symlink')
+        cache.unlink()
+        try:
+            scope['probe'](str(work))
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError('missing cache reported complete')
+    print('passed: 47 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

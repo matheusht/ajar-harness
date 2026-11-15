@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 import json
 import re
+import threading
 
 PROBES = (
     ('javascript', 'void 0'),
@@ -215,6 +216,88 @@ def observe_model_version(owner_class, result):
         owner_class.launch_model = original
 
 
+
+ERROR_MARKERS = {
+    'no_space_marker': b'No space left on device',
+    'enospc_marker': b'ENOSPC',
+    'permission_marker': b'Permission denied',
+    'eacces_marker': b'EACCES',
+    'enoent_marker': b'ENOENT',
+    'missing_module_marker': b'Cannot find module',
+    'native_load_marker': b'Failed to load native',
+    'missing_key_marker': b'No API key',
+}
+
+
+class ErrorCategories:
+    def __init__(self):
+        self.states = {name: 0 for name in ERROR_MARKERS}
+        self.found = set()
+
+    def feed(self, chunk):
+        for byte in chunk:
+            for name, pattern in ERROR_MARKERS.items():
+                if name in self.found:
+                    continue
+                state = self.states[name]
+                while state and pattern[state] != byte:
+                    prefix = pattern[:state]
+                    state = next((size for size in range(state - 1, 0, -1)
+                                  if prefix.endswith(pattern[:size])), 0)
+                if pattern[state] == byte:
+                    state += 1
+                if state == len(pattern):
+                    self.found.add(name)
+                    state = 0
+                self.states[name] = state
+
+
+@contextmanager
+def observe_model_stderr(environment_module, result):
+    original = environment_module.subprocess
+    captures = []
+
+    class Observer:
+        def __getattr__(self, name):
+            return getattr(original, name)
+
+        def Popen(self, command, *args, **kwargs):
+            selected = (isinstance(command, list) and command[-3:] ==
+                        ['-I', '-S', '/runtime/native_runtime_bootstrap.py'] and
+                        kwargs.get('stderr') == original.DEVNULL)
+            if not selected:
+                return original.Popen(command, *args, **kwargs)
+            process = original.Popen(command, *args, **dict(kwargs, stderr=original.PIPE))
+            capture = {'categories': ErrorCategories(), 'bytes': 0, 'complete': False}
+            def drain():
+                try:
+                    while chunk := process.stderr.read(4096):
+                        remaining = max(0, 65536 - capture['bytes'])
+                        capture['categories'].feed(chunk[:remaining])
+                        capture['bytes'] += len(chunk)
+                    capture['complete'] = True
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    process.stderr.close()
+            thread = threading.Thread(target=drain, daemon=True)
+            captures.append((capture, thread))
+            thread.start()
+            return process
+
+    environment_module.subprocess = Observer()
+    try:
+        yield
+    finally:
+        environment_module.subprocess = original
+        rows = []
+        for capture, thread in captures:
+            thread.join(timeout=1)
+            rows.append({'markers': sorted(capture['categories'].found),
+                         'bytes': capture['bytes'], 'truncated': capture['bytes'] > 65536, 'complete': capture['complete'] and not thread.is_alive()})
+        result['omp_model_stderr_categories'] = rows
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
@@ -225,7 +308,7 @@ def main():
     def run_native(root, fixture, result):
         if fixture.runtime != 'omp':
             return original(root, fixture, result)
-        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result), observe_model_version(native_runtime_linux.LinuxModelOwner, result):
+        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result), observe_model_version(native_runtime_linux.LinuxModelOwner, result), observe_model_stderr(research_environment, result):
             return original(root, fixture, result)
 
     fixture_module.run_native = run_native

@@ -1,0 +1,8 @@
+{
+  "enforcing": true,
+  "kind": "codex-tool-policy-host-profile-setup-v1",
+  "loader_returncode": 0,
+  "ownership_marker": "/home/runner/work/_temp/oslit-codex-profile-owner.json",
+  "profile": "oslit-codex-tool-v1",
+  "status": "passed"
+}

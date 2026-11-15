@@ -9,7 +9,10 @@ conformance passed at `eedb24c9`; the full workflow later refused the stale v4
 checker pin. A v5 successor preserves every preexisting v4 byte. The full hosted
 conformance workflow subsequently passed at `9415de22` and `dd63fe81` (899 structural
 checks, zero failures; v5 frozen inputs intact). OMP completed the joined workflow at
-`f244b003`, with subsequent passes at `dd63fe81` and `5d9da3c5`; Codex remains blocked.
+`f244b003`, with subsequent passes including `c1fa3a77`. Both Codex and OMP completed the full
+joined workflow at `e93a4fd9`; each saved result has 21 passing checks and verified
+cleanup. Full conformance passed all 37 steps at `c1fa3a77`, including the schema
+cache repair. Conformance for the later guarded-send fix is still running.
 
 This is a local implementation candidate, not an accepted release or qualified
 research workflow. It combines the source at `5d290d19`, the staged bounded
@@ -27,9 +30,9 @@ qualification.
 
 The implementation broadly follows the approved design: one journal owns team
 state; authority and budgets survive replacement; native adapters supply worker
-execution; evidence, unfinished search and cleanup remain distinct. Delivery has
-not met the plan's requirement for an observed integrated workflow on every
-supported runtime and environment.
+execution; evidence, unfinished search and cleanup remain distinct. Both pinned runtimes now have an observed joined source workflow against an
+owned deterministic provider. That does not complete the plan's wider acceptance
+across every access mode, environment, concurrent team workload and long run.
 
 ## Current local verification
 
@@ -196,15 +199,53 @@ and independently verified on both versions; local median command time fell from
 These macOS timings are not a hosted Linux performance claim; the changed revision
 still requires full hosted verification.
 
+## Signed Codex integration and repeated-turn repair
+
+The [hosted workflow at `e93a4fd9`](https://github.com/matheusht/redteam-harness/actions/runs/43751103990)
+completed both Codex and OMP startup and joined scenarios. All three jobs passed,
+including the Docker, owned loopback SSH and application-reset workflow. The signed optional tool policy
+uses pinned seccomp bytes and a preinstalled named AppArmor profile; readback
+confirmed the model container retained its default policy. The absent-profile
+scenario refused startup and cleaned up. Docker's error names AppArmor but does
+not repeat the profile name, so attribution combines that error with the exact
+configured profile, observed host absence and nonrunning container state.
+
+The first integrated replay at `1d2f9a66` completed one tool invocation, then timed
+out on the second turn before another provider request. A controlled peer
+reproduced a dispatch-lock cycle: the response waited for an executor callback,
+while the response waiter held the callback's admission lock. Codex now rechecks
+authority at the request write and releases the guard before awaiting its reply.
+Executor operations retain their own admission checks; no timeout was widened.
+The [failure-first regression](../../evals/native-qualification/team-evidence/codex-admission-20261115/README.md)
+records the red and green results. A revocation between initial bookkeeping and
+the guarded write can still leave a conservatively unknown invocation requiring
+reconciliation, even if no request was sent.
+
+Each hosted native result passed 21 checks: two native invocations and four controlled
+provider POSTs, retained conversation and lab state, input/credential/process/network
+separation, guardian stop after owner loss, revoked-call refusal, reopened receipt
+recovery, idempotent cleanup, released reservation and all export checks. The tool,
+model, prepared images and owned AppArmor profile were cleaned up. External provider
+calls were zero and research acceptance was not run. OMP also made one separately
+counted model-discovery GET. The [saved hosted results](../../evals/native-qualification/team-evidence/codex-admission-20261115/hosted/)
+retain the exact source hashes and bounded observations.
+
+The [conformance run at `c1fa3a77`](https://github.com/matheusht/redteam-harness/actions/runs/43748757758)
+passed all 37 steps in 21m44s, including the schema-cache and canonical lifecycle
+gates. The final guarded-send revision is being checked separately. The focused
+lock regression, UTF-8 transport and provider-free startup ownership checks passed.
+The broader controlled adapter fixture also exposed a cancellation assertion on
+both old and new runtime code; that result remains separate and unresolved here.
+
 ## Remaining implementation and delivery
 
 | Area | What remains |
 | --- | --- |
-| M0–M2 | Verify the combined contracts, controller and protected Codex/OMP workflow with the exact installed runtime packages; repair any defects exposed by that execution. |
+| M0–M2 | Both pinned runtimes have joined source-workflow evidence. Extend that proof to concurrent team behavior and resolve the broader controlled adapter fixture failure. |
 | M3 | Exercise actual acquisition, setup failure and repair, all access modes, reset/replay and cleanup through the joined workflow. Verify loss/reconnection against a separate authorized SSH host. |
 | M4 | Qualify physical owned-lab state, independent replay and cleanup in that workflow. Unsupported artifact classes still stop; existing operator gates remain active until policy adoption. |
 | M5 | Run the sustained restart/multiday scenario. Provider request totals and billed spend are still unavailable; invocation and worker-second enforcement must not be described as complete monetary accounting. |
-| M6 | Full hosted conformance passed at `9415de22` without rewriting historical evidence. Finish native checks, verify the final revision and complete the operator install-to-export/cleanup handoff. Retire redundant callers only after parity. |
+| M6 | Full hosted conformance passed at `c1fa3a77` without rewriting historical evidence. Verify the final guarded-send revision and complete the operator install-to-export/cleanup handoff. Retire redundant callers only after parity. |
 | Research acceptance | The operator owns the fresh-target test and fair native-agent comparison. It has not run. |
 
 The review found no additional missing major subsystem. It did not prove every
@@ -212,7 +253,13 @@ intended behavior works. Optional capture output-directory manifests remain
 unimplemented; the approved plan does not require that particular interface.
 Existing transfer digests never prove that downloaded code executed.
 
-The test branch was pushed to run hosted checks. No PR or merge was created.
+The integration branch is published for review and has not been merged.
 Source, scenario definitions and provenance remain in the branch; hosted results
 are attached to the linked runs. Local verification logs and downloaded hosted
 artifacts, including source hashes, are retained separately for the handoff.
+
+The final integration review found six archived server logs omitted by the original
+assembly commit. Their exact base bytes were restored, and all six comparisons
+matched. Structural conformance then passed 900 checks with zero failures in the
+pinned local environment. This repair preserves the existing records; it does not
+replace them with a new execution.

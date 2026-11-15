@@ -118,8 +118,9 @@ The host operator owns the loaded policy bytes. Runtime readback establishes the
 name and enforcing mode, not a kernel content hash. See the
 [fixed policy's provenance](../../engine/codex-tool-policy-v1/SOURCE-PROVENANCE.md)
 and the [dated integrated evidence](../research/oslit-implementation-assembly-2026-11-15.md)
-before making qualification claims. The harmless native-helper replay passed;
-the signed full-workflow integration is awaiting execution.
+before making qualification claims. The signed full-workflow integration passed
+with the pinned native runtime and owned deterministic provider. Live-provider
+behavior, broader access modes and research acceptance require their own evidence.
 
 ## Fill and sign the inputs
 

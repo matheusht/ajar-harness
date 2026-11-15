@@ -10,10 +10,16 @@ This evidence isolates the `turn/start` admission-lock cycle with the existing c
 
 ## Reproduction
 
-From the repository root, on the pre-fix source version, run:
+From a checkout containing this regression, copy the fixed tree into an isolated
+directory and restore only the two baseline runtime modules. The baseline commit
+does not itself contain the new regression flags.
 
 ```sh
-python3 evals/native-qualification/smoke/check_native_runtime_adapters.py \
+replay_dir=$(mktemp -d /tmp/oslit-admission-red.XXXXXX)
+git archive HEAD | tar -x -C "$replay_dir"
+git show 1d2f9a66:tools/native_runtime_codex.py > "$replay_dir/tools/native_runtime_codex.py"
+git show 1d2f9a66:tools/native_runtime_transport.py > "$replay_dir/tools/native_runtime_transport.py"
+python3 "$replay_dir/evals/native-qualification/smoke/check_native_runtime_adapters.py" \
   --admission-only --capture-admission-red --output /tmp/native-admission-red.json
 ```
 
@@ -35,3 +41,14 @@ The JSON receipts include SHA-256 hashes for the helper and every `tools/native_
 | `tools/native_runtime_transport.py` | `sha256:9afba0a16025ab1bb7fa872c64c6e6baa65de8383ef79f3e4ac7b47e9c80bd72` | `sha256:e17ded9a16eb48084596a04a413075f37a04027125fd15542c3be767f620d99f` |
 
 `red.json` identifies the baseline runtime hashes; `green.json` identifies the fixed runtime hashes. The helper and receipt schemas are otherwise the same.
+
+## Hosted native run
+
+GitHub Actions run [43751103990](https://github.com/matheusht/redteam-harness/actions/runs/43751103990) on commit `e93a4fd99de0c0429d9d91493eead2dda4b56123` completed successfully on 2026-11-15. All three jobs (`docker`, `native-linux (codex)`, `native-linux (omp)`) passed.
+
+- Hosted Codex admission JSON passed all five guarded-send and revoked-send assertions.
+- The hosted absent-profile check JSON passed at the actual Docker start refusal phase: the named profile was absent before setup; Docker recorded an AppArmor start error; exact requested profile configuration was observed; the container remained `created` and not running; cleanup was clean. The final absent-profile gate also passed. The reviewed profile setup then succeeded and cleanup reported `clean`.
+- Codex joined native E2E passed 21/21 checks, including two invocations in one session, four requests to the controlled provider, zero external provider calls, policy readback, and verified cleanup.
+- OMP joined native E2E passed 21/21 checks, including two invocations in one session, four controlled-provider requests, zero external provider calls, and verified cleanup.
+
+These are hosted Linux/Docker observations with real native runtimes and a controlled simulated provider. They are not evidence of inference against an external provider. The per-run JSON files under `hosted/` preserve the sanitized results; the full downloaded workflow artifacts are kept at `/private/tmp/oslit-full-native-20261115/published-e93a4fd9/` in the active workspace environment.

@@ -1,0 +1,6 @@
+{
+  "kind": "codex-tool-policy-host-profile-cleanup-v1",
+  "profile_present": false,
+  "status": "clean",
+  "unload": "attempted"
+}

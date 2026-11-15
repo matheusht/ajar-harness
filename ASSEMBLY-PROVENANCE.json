@@ -25,7 +25,7 @@
     "canonical export fixture roots and simulated Linux diagnostic fields",
     "account resolver closure fixture and delivery documentation reconciliation"
   ],
-  "verification": "GPT-6 Luna local workflows and full hosted conformance passed at 9415de22; joined OMP native workflow passed 21 checks at f244b003; hosted Docker, loopback SSH and reset passed; Codex remains blocked by tool-container sandbox policy",
+  "verification": "Full hosted conformance passed 37 steps at c1fa3a77; joined Codex and OMP each passed 21 checks at e93a4fd9 with owned deterministic provider; Docker, loopback SSH and reset passed. Final guarded-send conformance pending; broader qualification and research acceptance remain open.",
   "status": "published implementation test candidate on codex/oslit-integrated-e2e-20261115; not merged, adopted or research-accepted",
   "conformance": "900 checks, 0 failing after exact path/full-file hash/literal exceptions for three synthetic archived probes; five regression scenarios passed; archived bytes unchanged",
   "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation",
@@ -42,5 +42,16 @@
     "latest_native_run": 43739457623,
     "latest_conformance_run": 43738351015,
     "omp_joined": "Passed 21 checks: two invocations, four model POSTs, one discovery GET, zero provider escapes/errors; retention, owner-loss stop, revocation, recovery, export and cleanup verified; deterministic owned provider only"
+  },
+  "native_policy_integration": {
+    "head": "e93a4fd99de0c0429d9d91493eead2dda4b56123",
+    "run": 43751103990,
+    "codex": "21 checks passed; two invocations, four controlled POSTs, retention, revocation, owner-loss recovery, export and cleanup verified",
+    "omp": "21 checks passed; two invocations, four controlled POSTs plus one model-discovery GET, retention, revocation, owner-loss recovery, export and cleanup verified",
+    "provider": "owned deterministic fixture; zero external-provider calls",
+    "codex_policy": "signed optional docker-confined-v1; model default unchanged; missing-profile refusal and cleanup passed; owned host profile unloaded",
+    "evidence": "evals/native-qualification/team-evidence/codex-admission-20261115/hosted/",
+    "conformance_run": 43751103945,
+    "conformance_status": "pending"
   }
 }

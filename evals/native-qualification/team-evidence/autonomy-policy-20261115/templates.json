@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "classification": "materialized_unsigned_templates_with_fixture_signatures",
+  "provider_calls": 0,
+  "target_calls": 0,
+  "checks": [
+    {
+      "check": "source",
+      "status": "passed"
+    },
+    {
+      "check": "binary",
+      "status": "passed"
+    },
+    {
+      "check": "application",
+      "status": "passed"
+    },
+    {
+      "check": "combined",
+      "status": "passed"
+    }
+  ]
+}

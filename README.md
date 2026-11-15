@@ -15,12 +15,12 @@ byte-identical to it.
 
 ## Current scope
 
-On `main`, the Decision 0005/0006 record kernel (legacy engagements) and the
-[research lifecycle](docs/research-lifecycle.md) layer (attempt start/finish, bounded negative
-results, evidence-bundle manifests) are implemented. New local source research has a candidate
-native route in this checkout. It is not qualified or adopted. #165 adoption, #171 integrated
-qualification and #172 unfamiliar-target study remain open. Treat it as candidate evidence, not a
-shipped procedure.
+The Decision 0005/0006 record kernel and [research lifecycle](docs/research-lifecycle.md)
+remain for existing contracts. New research enters the candidate Codex/OMP v2
+workflow. [Decision 0015](docs/decisions/0015-initial-scope-autonomy.md) adopts its
+explicit initial-scope authority policy and default caller routing. Runtime
+qualification, sustained operation and the operator's fresh-target study remain
+separate from that policy decision; the candidate branch is not a release.
 
 ## Scope fence (read first)
 
@@ -30,7 +30,7 @@ cards.
 | Boundary | What | Gate |
 | --- | --- | --- |
 | ✅ **Authorized local research** | a benign objective set declared in the signed target-local scope, run only inside the declared local environment | signed scope **+** a benign `safe_signal` for every used card **+** the declared effect, containment and cleanup ceiling |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed `scope.md` **+** fresh human confirmation **+** containment **+** a cleanup obligation recorded at creation |
+| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed scope **+** containment **+** recorded cleanup; v2 `initial-scope-v1` preauthorizes in-scope artifacts, other routes require fresh human confirmation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
 **Authorization is mandatory.** No filled and signed `scope.md` → the legacy loop refuses to run.
@@ -47,7 +47,8 @@ across domains.
 | Repository engineering, research, docs or planning | [`AGENTS.md`](AGENTS.md), then [the layout](#layout) and [decision index](docs/decisions/README.md) |
 | Existing queue/record engagement | [legacy queue and record entry](docs/agents/legacy-local-research.md) |
 | Attempts, bounded negatives, evidence bundles | [research lifecycle](docs/research-lifecycle.md) |
-| Candidate native source research | [native local research](docs/agents/native-local-research.md) and [status](docs/wiki/native-research-status.md); adoption and qualification remain open |
+| New source, binary, application or combined research | [v2 engagement guide](docs/agents/engagement.md) and [initial-scope autonomy](docs/decisions/0015-initial-scope-autonomy.md); runtime qualification remains separate |
+| Explicit v1 native inputs or existing v1 run | [v1 compatibility guide](docs/agents/native-local-research.md) |
 | Capability, readiness or qualification claim | [engineering wiki](docs/wiki/index.md), then its source evidence |
 
 ## Layout

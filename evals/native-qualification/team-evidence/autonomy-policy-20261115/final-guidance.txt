@@ -1,0 +1,18 @@
+
+[doctrine] CLAUDE.md / AGENTS.md mirror
+  ok   AGENTS.md is byte-identical to CLAUDE.md
+
+[overlay] preregistration safety-overlay pins track the files they pin
+  ok   overlay/evals/research-kernel/ab-readiness/preregistration.json: draft record, 0 stale pin(s) reported
+  ok   overlay: no stale pins outstanding
+
+[guidance] active engineering navigation
+  ok   guidance/README.md: docs/decisions/README.md is linked and exists
+  ok   guidance/README.md: docs/wiki/index.md is linked and exists
+  ok   guidance/docs/architecture.md: decisions/README.md is linked and exists
+  ok   guidance/docs/architecture.md: decision-0005-implementation-architecture.md is linked and exists
+  ok   guidance/AGENTS.md: docs/decisions/README.md is linked and exists
+  ok   guidance/AGENTS.md: absent setup reference docs/agents/issue-tracker.md stays removed
+  ok   guidance/AGENTS.md: absent setup reference docs/agents/domain.md stays removed
+  ok   guidance/CLAUDE.md: absent setup reference docs/agents/issue-tracker.md stays removed
+  ok   guidance/CLAUDE.md: absent setup reference docs/agents/domain.md stays removed

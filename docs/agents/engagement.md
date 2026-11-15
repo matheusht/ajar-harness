@@ -2,17 +2,20 @@
 
 Use this guide for the versioned Codex/OMP engagement route. It is candidate
 implementation work: local checks, packaging and preflight do not establish
-qualification, adoption or research success. Existing native/legacy records keep
+runtime qualification or research success. Policy adoption is recorded separately
+in [Decision 0015](../decisions/0015-initial-scope-autonomy.md). Existing native/legacy records keep
 their original contract. The signed scope defines authority; repository access and
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
 Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
 claiming support or readiness. Start with the [fresh-target handoff](fresh-target-handoff.md)
-for installation, input preparation and run/recovery commands. The repository impact-artifact and escalation-review gates still
-apply: a signed ceiling and the internal evidence-review checks do not replace
-operator review or fresh artifact confirmation. The candidate owned-lab-state
-ledger described below records physical lifecycle; it does not adopt broader
-artifact authority.
+for installation, input preparation and run/recovery commands. Select
+`authority_policy: "initial-scope-v1"` in the initial scope before signing once.
+That grant covers every artifact type inside its permitted owned lab state and
+effects. No new confirmation or signature is needed for creation, setup, resume
+or an already signed internal escalation. Fresh independent agent evidence review
+still governs escalation and consequential claims. Scope expansion and external
+actions remain separate; scopes without this policy retain their original gates.
 
 ## Prepare the host and tool lab
 
@@ -281,7 +284,7 @@ recovery reads back the recorded owner. An unsupported reset request fails
 explicitly. The first owner supports wholly disposable HTTP applications; existing
 remote deployments, persistent volumes and external databases need another
 qualified owner. This optional capability adds no reset authority to older scopes
-and changes no impact-artifact approval gate.
+and does not widen signed authority.
 
 Run the local composition checks with
 `python3 evals/native-qualification/smoke/check_application_reset_e2e.py --output /private/results/application-reset.json`.
@@ -296,23 +299,24 @@ current escalation review of the independently confirmed preceding claim and
 exact next signed effect. The frozen worker protocol describes the request and
 review evidence. Reopened claims, superseded instruments or a replacement review
 request invalidate the old transition's admission. Matching late observations
-and owned cleanup remain recordable. Generic `artifact_create` remains unsupported;
-the narrow class below has a separate lifecycle. The repository's operator review
-and fresh artifact-approval gates remain active.
+and owned cleanup remain recordable. Under `initial-scope-v1`, that agent review
+is sufficient for the already signed rung; no operator approval is added. Artifact
+creation uses the owned-state lifecycle below, not a generic network effect.
 The [source capture workflow](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md)
 checks declared adjacent rungs using harmless local probes and simulated native,
 container and reviewer behavior. It does not establish a security escalation.
 
 ## Track explicitly signed disposable lab state
 
-The candidate `owned-lab-state-v1` class treats one owned source/binary lab and all
-its mutable state as the artifact. It includes native writes from their first
+`owned-lab-state-v2` treats one owned tool/client lab and all its mutable state
+as the artifact across source, binary, application and combined access. It includes native writes from their first
 creation inside `/work`, `/tmp`, bounded shared memory and private IPC. It does
-not classify content or register each generated file separately. Use it only
-within current operator gates; implementation does not activate a new policy.
+not classify content or register each generated file separately. Every content
+type is covered inside the signed envelope, including contained Zone-2 artifacts.
+`owned-lab-state-v1` retains its historical source/binary-only meaning.
 
-The signed source/binary access needs `write` permission, plus a matching
-`artifact_create` effect with `artifact_classes:["owned-lab-state-v1"]`,
+The signed access needs `write` permission, plus a matching
+`artifact_create` effect with `artifact_classes:["owned-lab-state-v2"]`,
 `cleanup_required:true`, no accounts and a `source_only` or `self` rung. Keep the
 separate setup `read` effect and execution `execute` effect. Main startup requires
 one matching class effect. Capture may use `artifact_effect_id` to choose between
@@ -321,8 +325,9 @@ authority cannot start native tools or run a probe.
 
 The host persists intent before allocation and checks actual Docker configuration
 and every supported writable/kernel mount before native admission. Additional
-mounts/devices, shared host namespaces, application resources and explicit
-unsupported class selections refuse. Class workspace capacity must be a multiple of 4096 bytes. The
+mounts/devices, shared host namespaces and unsupported class selections refuse.
+An application resource in this client-lab grant does not authorize remote mutation;
+its network effects and owned target-state lifecycle require their own signed grants. Class workspace capacity must be a multiple of 4096 bytes. The
 [contract](../research/oslit-v2-contract-2026-11-14.md#candidate-owned-lab-state-class)
 records the precise storage bounds and exclusions.
 

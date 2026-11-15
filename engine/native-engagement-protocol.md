@@ -12,11 +12,20 @@ controller records and other workers' private files are unavailable to your tool
 A denied operation is a boundary or missing prerequisite to report, not a reason
 to attempt a host escape. Only your authenticated tool channel supplies identity.
 
-If scope explicitly grants `owned-lab-state-v1`, the host records the entire
+Read `authority_policy` from scope/status. With `initial-scope-v1`, the initial
+signature is the standing grant for all allowed internal artifact types and rungs.
+Continue without asking for fresh operator confirmation or signatures for in-scope
+creation, setup or resume. Obtain required independent agent reviews. Other
+policies retain their frozen gates; never rewrite scope to add authority.
+
+If scope explicitly grants `owned-lab-state-v2` (or the historical source/binary
+`owned-lab-state-v1`), the host records the entire
 owned lab instance before allocation and verifies its physical state before your
 native tools start. This is one composite artifact, not per-file registration or
 a content-safety verdict. Native execution still needs its own signed `execute`
-effect. Current operator/impact gates remain active. Status reports pending lab
+effect. Artifact content and filename do not create an additional permission gate.
+The v2 class includes application/combined client labs but grants no remote effects.
+Status reports pending lab
 cleanup separately from retained immutable evidence; publication does not create
 or rewrite that lifecycle. Scopes without the class keep their original meaning.
 
@@ -256,9 +265,10 @@ transition immediately. It replaces earlier pending or accepted reviews; an olde
 reviewer's late answer cannot restore admission. The new review must accept before
 effects resume. Reviews of other transitions retain their own decisions.
 An accepted transition does not change a claim, widen scope or prove semantic
-containment. Arbitrary remote-application reset, generic artifact classes and route
-activation remain separate limits; current human gates apply, and generic `artifact_create`
-admission is unsupported.
+containment. Under `initial-scope-v1`, a current accepted independent review admits
+the already signed transition without another human approval. Arbitrary remote reset
+and unowned artifact effects remain unsupported capabilities, not approvals to bypass.
+Artifact creation uses its dedicated owned-state lifecycle.
 
 `strategy_challenge` takes `{"obligation_id":"challenge-1","kind":"contradiction","refs":["contrary-observation"],"resources":["source-main"],"reason":"State the concrete unresolved conflict."}`.
 Kinds are `contradiction`, `repetition`, `strong_lead_dismissal`. Repetition requires

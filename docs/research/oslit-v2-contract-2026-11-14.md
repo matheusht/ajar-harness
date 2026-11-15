@@ -26,6 +26,18 @@ integration. The operator's fresh-target test remains separate.
 6. Keep optional overall expiry distinct from renewable short execution leases.
    There is no fixed engagement age or v1 24-hour clamp in the v2 route.
 
+## Initial-scope authority policy
+
+The optional signed field `authority_policy` accepts only `initial-scope-v1`.
+[Decision 0015](../decisions/0015-initial-scope-autonomy.md) adopts that policy:
+one initial signature authorizes every artifact type inside its declared owned
+lab state and effects. Setup, artifact creation, restart and resume do not require
+new human confirmation or a renewed signature. Current independent agent review
+admits already signed escalation; evidence cannot expand authority. Missing or
+unsupported grants refuse. Status, board and export expose the policy. Absence
+reports `legacy-confirmation` and retains the scope's original gates. Existing
+signed bytes, journals and frozen guidance are never upgraded in place.
+
 ## Signed input
 
 The launcher input is configuration by reference, not authority:
@@ -297,7 +309,8 @@ class on an `artifact_create` effect. The artifact is one exact disposable lab
 instance and its mutable files, processes and private IPC state. It covers first
 creation inside that instance; publication is a later content snapshot. Status
 counts lab instances and pending cleanup, never individually registered files.
-This candidate mechanism does not adopt a replacement for current operator gates.
+The v1 class retains its original source/binary meaning. With a signed
+`initial-scope-v1` policy, its contents need no per-artifact human confirmation.
 
 The class supports account-free source/binary resources in the existing owned
 Docker or pinned SSH-Docker environment. The effect must require cleanup and use
@@ -307,7 +320,17 @@ selects creation authority; `effect_id` continues to select execution. Explicit 
 class selections refuse. Unselected unsupported grants confer no class capability;
 scopes without this class preserve their existing meaning.
 Application state, model-owner state, persistent storage and external effects are
-outside this class.
+outside this v1 class.
+
+The versioned `owned-lab-state-v2` class requires `initial-scope-v1` and extends
+the same owned tool/client-lab lifecycle to source, binary, application and combined
+access. It covers every content type, not a PoC filename or capability whitelist.
+It accepts application identities with account references but the creation effect
+itself is account-free: target credentials/effects stay with the protected network
+path. An application resource in the lab does not authorize remote state mutation.
+The owned mounts, resource limits, exact cleanup and separate execution effect are
+unchanged. A policy-enabled tool lab without a supported creation grant refuses
+before allocation; unsupported classes do not silently become untracked writes.
 
 An owned application can instead select `owned-application-state-v1` through its
 signed `application_states[].artifact_effect_id`. This separate `artifact_create`
@@ -317,7 +340,9 @@ required. The same journal records intent before allocation, verified configurat
 and mount inventory before application launch, and cleanup after the exact container
 and any declared state volumes are absent. This supports both application profile
 versions above; model-owner and external storage remain outside the class. The
-repository's operator artifact and escalation gates continue to apply.
+selected scope policy governs confirmation. Under `initial-scope-v1`, every
+`application_states` reference must include its matching artifact effect; creation
+and already signed escalation require no additional human approval.
 
 The host records intent before allocation, then exact owner IDs, verified Docker
 configuration and a fixed mount inventory before native admission. The inventory

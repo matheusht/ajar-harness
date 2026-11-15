@@ -17,7 +17,8 @@ full-day run. A passing engineering fixture is not research acceptance.
    binary, application and combined access are supported. Choose Codex or OMP;
    both are unnecessary for one run. Keep credentials in the host's private
    environment/store, referenced by name only.
-3. Fill the target, goal, provider/model, access, permitted effects, cleanup rights,
+3. Select `authority_policy: "initial-scope-v1"` for standing internal authority.
+   Fill the target, goal, provider/model, access, permitted effects, cleanup rights,
    budgets and real paths. Set no overall expiry if the authorized investigation
    should continue without a deadline; worker leases still renew and shared
    invocation/worker-second limits still apply. Choose budgets for the whole team.
@@ -34,7 +35,8 @@ them from its pinned image inside the memory-limited container. An optional
 signed application artifact effect records their creation and cleanup lifecycle.
 External databases and persistent state outside that owner need their own reset;
 an ordinary restart does not establish clean replay. Unsupported artifact classes
-remain refused, and the repository's artifact/escalation review gates still apply.
+remain refused. The initial-scope policy needs no repeated artifact confirmation
+or signature; independent agent reviews and all signed boundaries still apply.
 
 ## Inspect, start and observe
 

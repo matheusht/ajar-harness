@@ -1,5 +1,11 @@
 # autonomy.md — staged autonomy and how a gate earns removal
 
+**Route scope:** the historical gates below apply to legacy/v1 and v2 scopes
+without `authority_policy: initial-scope-v1`. New v2 work follows the
+[initial-scope policy](../docs/decisions/0015-initial-scope-autonomy.md) and
+[native worker protocol](native-engagement-protocol.md); do not import legacy
+per-artifact or operator-rung approvals into that signed workflow.
+
 ## 1. Autonomy is not one control
 
 The harness treats supervision as one setting: the operator checks the work before it moves on. That

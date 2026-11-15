@@ -38,9 +38,8 @@ For the maintained engineering synthesis and implementation evidence, start with
 
 - [0013 — One versioned signed finding activation](0013-canonical-filing-contract.md) — **interim fail-closed draft; new positive filings unavailable because original G3/G6 producer is missing; #85 incomplete**
 - [0014 — One durable engagement controller with native research runtimes](0014-native-engagement-team.md) — **accepted implementation direction; capability enforcement required before v2 activation; old routes unchanged**
+- [0015 — Initial signed authority for autonomous internal research](0015-initial-scope-autonomy.md) — **accepted v2 initial-scope policy and default caller migration; no repeated human artifact/rung approvals inside the signed envelope; historical contracts retained**
 
-The [native local research source route](../agents/native-local-research.md) is implemented as a
-candidate for new local source research; the [legacy entry](../agents/legacy-local-research.md)
-remains for supported existing queue/record work. This source implementation does not revise
-accepted decisions or historical records. #165 adoption, #171 integrated qualification and #172
-unfamiliar-target study remain open.
+New research uses the [v2 engagement entry](../agents/engagement.md). Existing v1
+native inputs and queue/record work retain their compatibility entries and immutable
+history. Policy adoption is distinct from runtime qualification or research acceptance.

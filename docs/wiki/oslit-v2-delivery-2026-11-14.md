@@ -21,6 +21,14 @@ provider replies, acquisition, owned application reset and the bounded lab-artif
 The [fresh-target handoff](../agents/fresh-target-handoff.md) is the current operator entry.
 The candidate is unmerged; research acceptance remains with the operator.
 
+15 November policy/caller completion: [Decision 0015](../decisions/0015-initial-scope-autonomy.md)
+adopts `initial-scope-v1` for new signed scopes and routes new work to v2. All
+artifact contents inside an enforced owned-state grant use the initial signature;
+agent evidence review governs signed internal escalation. Old scopes remain
+unchanged. Focused [policy](../../evals/native-qualification/smoke/AUTONOMY-POLICY-E2E.md)
+and [caller](../../evals/native-qualification/smoke/NATIVE-CALLER-MIGRATION-E2E.md)
+scenarios separate this implementation from physical/live qualification.
+
 ## Implemented behavior and evidence
 
 | Area | Candidate implementation | What the evidence establishes |
@@ -54,9 +62,10 @@ local input without making a remote-reset claim.
 New `stored` and `cross_user` intents require a current accepted review of the
 independently confirmed predecessor and the exact next signed effect. Reopened
 claims, superseded instruments and replacement review requests invalidate that
-transition's admission. These internal checks preserve the repository's separate
-operator review and impact-artifact gates. Generic `artifact_create` remains
-unsupported. The harmless source fixture exercises adjacent declared rungs with
+transition's admission. For scopes selecting `authority_policy: initial-scope-v1`, these independent agent
+reviews admit already signed rungs without renewed operator approval. Other scopes
+retain their original gates. Artifact creation uses explicitly owned-state classes;
+arbitrary external/unowned artifact effects remain unsupported. The harmless source fixture exercises adjacent declared rungs with
 simulated reviewer judgments; it is not a demonstrated security escalation.
 
 The [Q20 retention unit](../../evals/native-qualification/team-evidence/m2-retained-specialists-20261114/README.md)
@@ -79,9 +88,9 @@ peers; the later joined source workflow verifies native continuity and cleanup w
 | M1 — one state owner | Implemented controller/journal, reservations, replay and recovery; joined source workflow has actual runtime/container evidence. |
 | M2 — runtimes/team | Both pinned runtimes passed joined Linux source workflows with controlled provider replies. The controlled cancellation fixture's missing import is corrected. Live-model team behavior remains operator verification. |
 | M3 — environments | Source, binary, application and combined descriptors, acquisition, setup repair, Docker/SSH and owned application reset are implemented. The 15 November completion adds bounded disposable Docker state volumes and application artifact tracking. Separate remote-host loss, physical volume qualification and broader joined access combinations remain verification work. External persistent state requires a target-specific reset owner. |
-| M4 — research/evidence | Evidence/control/replay, review/replacement, closure and bounded owned-lab artifact tracking are implemented. Physical lab-state qualification, live independent review and research acceptance remain unverified. Existing operator gates remain active. |
+| M4 — research/evidence | Evidence/control/replay, review/replacement, closure and bounded owned-lab artifact tracking are implemented. Physical lab-state qualification, live independent review and research acceptance remain unverified. Decision 0015 adopts initial-scope internal authority; old contracts keep their gates. |
 | M5 — long operation/usage | Shared limits, reservations, request-attempt journal, native token/estimate totals, completeness reporting, restart and no-deadline continuation are implemented. Real billing receipts and hard dollar/token limits are unsupported; sustained operation is unverified. |
-| M6 — delivery | Installer, preflight, templates, export and the fresh-target handoff are available. Hosted evidence is retained for its checked revision; no new CI or fresh-target run is required by this implementation pass. The operator must configure a responding Docker/SSH lab, provider and target-specific signed inputs. |
+| M6 — delivery | Installer, preflight, templates, export and the fresh-target handoff are available. Default help/bootstrap now select v2; explicit v1 callers retain their compatibility paths. Hosted evidence is retained for its checked revision; no new CI or fresh-target run is required by this implementation pass. The operator must configure a responding Docker/SSH lab, provider and target-specific signed inputs. |
 
 
 The protected model owner supports the existing macOS `sandbox-exec` route and

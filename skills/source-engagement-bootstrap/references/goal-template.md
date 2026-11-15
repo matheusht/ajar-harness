@@ -2,10 +2,8 @@
 
 This is the legacy queue/record route for supported existing engagements and
 tasks explicitly assigned to that runtime. New local source research is
-prepared through the [native entry procedure](../../../docs/agents/native-local-research.md);
-the candidate source default is implemented, while #165 qualification/adoption
-remains open. Actual native execution still needs the signed scope, plan-bound
-approval, supported route and independent evidence.
+prepared through the [v2 engagement entry](../../../docs/agents/engagement.md).
+The legacy template below does not supply v2 inputs or authority.
 
 Replace every bracketed field with verified engagement facts. Delete inapplicable sections; never fill unknowns by guessing.
 

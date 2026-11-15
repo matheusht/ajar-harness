@@ -752,23 +752,25 @@ def drive(root: Path, *, command=_command, spawn_owner=_spawn_owner) -> dict:
 
 
 def _v2_route(argv: list[str]) -> bool:
-    if not argv:
-        return False
-    if argv[0] in ('inspect', 'direction', 'stop', 'export', 'claim', 'submit') or '--socket' in argv:
+    if argv and argv[0] in ('inspect', 'direction', 'stop', 'export', 'claim', 'submit'):
         return True
-    if '--inputs' in argv:
-        position = argv.index('--inputs') + 1
-        if position < len(argv):
-            try:
-                return _read_json(Path(argv[position])).get('kind') == 'native-engagement-inputs-v2'
-            except (DriverError, OSError, ValueError):
-                return False
-    if '--engagement-root' in argv:
-        position = argv.index('--engagement-root') + 1
-        if position < len(argv):
-            root = Path(argv[position])
-            return (root / 'contract').exists() or (root / 'events').exists()
-    return False
+    route = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    route.add_argument('--inputs', type=Path)
+    route.add_argument('--engagement-root', type=Path)
+    route.add_argument('--socket')
+    selected, _ = route.parse_known_args(argv)
+    if selected.socket is not None:
+        return True
+    if selected.engagement_root is not None:
+        root = selected.engagement_root
+        if (root / 'contract').exists() or (root / 'events').exists():
+            return True
+    if selected.inputs is not None:
+        try:
+            return _read_json(selected.inputs).get('kind') != INPUT_KIND
+        except (DriverError, OSError, ValueError, AttributeError):
+            return True
+    return selected.engagement_root is None or not (selected.engagement_root / 'state.json').exists()
 
 
 def _v2_main(argv: list[str]) -> int:
@@ -777,7 +779,7 @@ def _v2_main(argv: list[str]) -> int:
     from engagement_preflight import inspect_engagement
     from engagement_runner import Runner, RunnerError
 
-    parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement.')
+    parser = argparse.ArgumentParser(description='Operate a versioned v2 research engagement. Explicit v1 inputs and existing v1 roots retain their compatibility driver.', allow_abbrev=False)
     commands = parser.add_subparsers(dest='command', required=True)
     inspect = commands.add_parser('inspect', help='verify inputs without model or target contact')
     inspect.add_argument('--inputs', type=Path, required=True)

@@ -475,8 +475,11 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
                     'goal_sha256', 'goal_mode', 'patch_required', 'access', 'environments',
                     'network', 'effects', 'escalation_ceiling', 'benign_objectives',
                     'runtime_assignments', 'limits', 'revocation',
-                    *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ())), 'scope_invalid')
+                    *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ()),
+                    *(('authority_policy',) if isinstance(scope, dict) and 'authority_policy' in scope else ())), 'scope_invalid')
     _require(scope['kind'] == SCOPE_KIND, 'scope_kind_invalid')
+    _require('authority_policy' not in scope or scope['authority_policy'] == 'initial-scope-v1',
+             'scope_authority_policy_invalid')
     _identifier(scope['engagement_id'], 'scope_invalid')
     _require(type(scope['operator_id']) is str and re.fullmatch(
         r'[A-Za-z0-9_.@+-]{1,128}', scope['operator_id']) is not None, 'scope_invalid')
@@ -618,6 +621,8 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
             _require(effect['cleanup_required'], code)
         if effect['kind'] == 'artifact_create':
             _require(bool(effect['artifact_classes']), code)
+            if 'owned-lab-state-v2' in effect['artifact_classes']:
+                _require(scope.get('authority_policy') == 'initial-scope-v1', 'scope_authority_policy_required')
         permission = 'write' if effect['kind'] == 'artifact_create' else effect['kind']
         for access_id in effect['access_ids']:
             access = accesses[access_id]
@@ -632,6 +637,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         code = 'scope_application_state_invalid'
         _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id',
             *(('artifact_effect_id',) if isinstance(reference, dict) and 'artifact_effect_id' in reference else ())), code)
+        _require(scope.get('authority_policy') != 'initial-scope-v1' or 'artifact_effect_id' in reference, code)
         for key in ('access_id', 'environment_id', 'reset_effect_id'):
             _identifier(reference[key], code)
         access = accesses.get(reference['access_id'])

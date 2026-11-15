@@ -701,6 +701,15 @@ Filing, disclosure, publication, deployment and merging remain external actions.
 
 ## 8. Initial authority: the explicit policy change
 
+**15 November adoption:** the operator requested initial signed authority without
+repeated human artifact/rung approvals and completion of caller migration.
+[Decision 0015](../decisions/0015-initial-scope-autonomy.md) adopts this for new
+v2 scopes selecting `authority_policy: initial-scope-v1`. The owned-state classes
+cover all artifact contents inside their signed boundaries; independent agent
+review and cleanup remain enforced. Existing signatures and record contracts are
+not rewritten. Pricing, CI and the fresh-target test remain excluded from this pass.
+The proposal below records the original change and its preserved boundaries.
+
 Propose a new versioned `native-engagement-scope-v2` and an accepted ADR before
 enabling its broader authority. Reuse signature verification and immutable inputs;
 do not reinterpret a v1 signature. The new contract names access identities,
@@ -720,8 +729,8 @@ unknown; a threat-model note or agent request cannot widen these fields.
 This change must reach root `AGENTS.md`/`CLAUDE.md`, the native/bootstrap guides,
 the new scope validator, runtime/environment admission and relevant failure checks
 together. Existing safe-signal requirements for loaded cards, redaction and immutable
-history remain. The current gates stay active until the new policy is explicitly
-approved and its corresponding controls are verified and adopted. Plan approval
+history remain. For scopes without the adopted initial-scope policy, the historical gates stay
+active. Qualified runtime operation remains a separate evidence claim. Plan approval
 is not itself a signed research engagement or an external-action grant.
 
 ## 9. Keep, simplify, replace, delete

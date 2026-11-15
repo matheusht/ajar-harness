@@ -1,7 +1,9 @@
 # UNSIGNED TEMPLATE — binary access
 
 Replace every `REPLACE_` value, review the authority and resource limits, then sign
-the resulting challenge with the operator key. This file grants no authority.
+the resulting challenge with the operator key. This file grants no authority until signed. The initial-scope policy then covers
+all artifact types inside the named owned lab and permitted effects without
+additional confirmations; remote application mutations need their own effects.
 
 - Operator allowed signers SHA256: sha256:REPLACE_ALLOWED_SIGNERS_SHA256
 - Signed: [ ] operator review and signature required
@@ -27,7 +29,8 @@ the resulting challenge with the operator key. This file grants no authority.
       "account_refs": [],
       "permissions": [
         "read",
-        "execute"
+        "execute",
+        "write"
       ]
     }
   ],
@@ -96,6 +99,22 @@ the resulting challenge with the operator key. This file grants no authority.
       "rung": "source_only",
       "artifact_classes": [],
       "cleanup_required": false
+    },
+    {
+      "id": "create-owned-lab",
+      "kind": "artifact_create",
+      "access_ids": [
+        "binary-main"
+      ],
+      "environment_ids": [
+        "lab-main"
+      ],
+      "account_refs": [],
+      "rung": "source_only",
+      "artifact_classes": [
+        "owned-lab-state-v2"
+      ],
+      "cleanup_required": true
     }
   ],
   "escalation_ceiling": "source_only",
@@ -125,6 +144,7 @@ the resulting challenge with the operator key. This file grants no authority.
   "revocation": {
     "operator_stop": true,
     "disconnected_worker": "lease_expiry"
-  }
+  },
+  "authority_policy": "initial-scope-v1"
 }
 ```

@@ -14,6 +14,7 @@ from engagement_contract import canonical, read_json
 from engagement_controller import fail
 
 CLASS = 'owned-lab-state-v1'
+ALL_ACCESS_CLASS = 'owned-lab-state-v2'
 APPLICATION_CLASS = 'owned-application-state-v1'
 CONFIG_FIELDS = ('Init', 'NetworkMode', 'ReadonlyRootfs', 'Privileged', 'CapDrop', 'SecurityOpt',
     'LogConfig', 'RestartPolicy', 'Memory', 'MemorySwap', 'NanoCpus', 'PidsLimit', 'Binds', 'PortBindings',
@@ -28,20 +29,29 @@ def configuration_snapshot(info):
                 ('io.oslit.engagement', 'io.oslit.profile', 'io.oslit.guardian') if key in info['Config']['Labels']}},
         **{key: info[key] for key in ('Image', 'Path', 'Args', 'Mounts')}}
 
-def select_effect(scope, grant, profile_id, selector=None, *, resources=None, artifact_class=CLASS):
+def select_effect(scope, grant, profile_id, selector=None, *, resources=None, artifact_class=None):
     selected = grant['resources'] if resources is None else resources
-    if artifact_class not in (CLASS, APPLICATION_CLASS) or not set(selected) <= set(grant['resources']):
+    classes = (CLASS, ALL_ACCESS_CLASS) if artifact_class is None else (artifact_class,)
+    if any(name not in (CLASS, ALL_ACCESS_CLASS, APPLICATION_CLASS) for name in classes) or not set(selected) <= set(grant['resources']):
         fail('lab_artifact_effect_unavailable')
     effects = [row for row in scope['effects'] if row['kind'] == 'artifact_create'
         and profile_id in row['environment_ids'] and set(selected) <= set(row['access_ids'])]
     if selector is None:
-        effects = [row for row in effects if artifact_class in row['artifact_classes']]
+        effects = [row for row in effects if any(name in row['artifact_classes'] for name in classes)]
         if not effects:
+            if scope.get('authority_policy') == 'initial-scope-v1':
+                fail('lab_artifact_effect_unavailable')
             return None
     else:
         effects = [row for row in effects if row['id'] == selector]
     accesses = [row for row in scope['access'] if row['id'] in selected]
-    kinds = ('application',) if artifact_class == APPLICATION_CLASS else ('source', 'binary')
+    if len(effects) != 1 or len(effects[0]['artifact_classes']) != 1 or effects[0]['artifact_classes'][0] not in classes:
+        fail('lab_artifact_class_unsupported')
+    artifact_class = effects[0]['artifact_classes'][0]
+    if artifact_class == ALL_ACCESS_CLASS and scope.get('authority_policy') != 'initial-scope-v1':
+        fail('lab_artifact_policy_required')
+    kinds = ('source', 'binary', 'application') if artifact_class == ALL_ACCESS_CLASS else (
+        ('application',) if artifact_class == APPLICATION_CLASS else ('source', 'binary'))
     if (len(effects) != 1 or not accesses or any(row['kind'] not in kinds or
             (artifact_class == CLASS and row['account_refs']) for row in accesses)):
         fail('lab_artifact_effect_unavailable')
@@ -174,7 +184,7 @@ def record_intent(c, grant, profile_id, effect_id, value):
         state = c.state()
         c.bind_grant(state, grant)
         effect = next((row for row in state['scope']['effects'] if row['id'] == effect_id), {})
-        artifact_class = APPLICATION_CLASS if effect.get('artifact_classes') == [APPLICATION_CLASS] else CLASS
+        artifact_class = effect.get('artifact_classes', [None])[0] if len(effect.get('artifact_classes', [])) == 1 else None
         resources = [row['id'] for row in value.get('access', [])] if artifact_class == APPLICATION_CLASS and isinstance(value, dict) else None
         if select_effect(state['scope'], grant, profile_id, effect_id, resources=resources, artifact_class=artifact_class) != effect_id:
             fail('lab_artifact_effect_unavailable')
@@ -316,7 +326,7 @@ def require_clean(state, dispatch_id):
 def admit_operation(state, grant, profile_id, observation, effect):
     op, nonce = observation['operation'], observation['identity']['nonce']
     row = state['lab_artifacts'].get(nonce)
-    artifact_class = row['artifact_class'] if row else (APPLICATION_CLASS if effect['kind'] == 'reset' else CLASS)
+    artifact_class = row['artifact_class'] if row else (APPLICATION_CLASS if effect['kind'] == 'reset' else None)
     resources = [access['id'] for access in observation['identity']['access']] if artifact_class == APPLICATION_CLASS else None
     if select_effect(state['scope'], grant, profile_id, row['effect_id'] if row else None,
                      resources=resources, artifact_class=artifact_class) is None:

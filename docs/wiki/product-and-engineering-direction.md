@@ -1,6 +1,6 @@
 # Product and engineering direction
 
-Maintained synthesis, updated 14 November 2026. Read this before changing the harness's product
+Maintained synthesis, updated 15 November 2026. Read this before changing the harness's product
 scope, research workflow, runtime architecture, or engineering plan. Accepted
 [decision records](../decisions/README.md) retain their authority. The
 [discussion record](../research/research-direction-discussion-2026-10.md) attributes
@@ -17,14 +17,16 @@ supplies the architecture, source-grounded disposition map, delivery sequence an
 all-30 traceability. The operator endorsed its direction with two corrections:
 Codex and OMP are the intended runtimes, and research continues while authorized
 and resourced without a fixed 24-hour ceiling. The plan incorporates those corrections;
-implementation and qualification remain pending. For architecture changes, follow
+the current implementation and remaining qualification are tracked in
+[the v2 delivery state](oslit-v2-delivery-2026-11-14.md). For architecture changes, follow
 the [architecture instructions](../decisions/AGENTS.md), including when to ask the founder.
 
 [Q30](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)
 adds scored search as a technique within a task and minimal, enforced native-tool
 reuse. The record retains the paper's evidence limits, alternatives and rationale.
 The plan specifies durable relevant updates, versioned shared instruments and
-execution-enforced ownership/role/resource boundaries; these remain unimplemented.
+execution-enforced ownership/role/resource boundaries; implementation and focused
+controlled checks are retained in the [completion evidence](../../evals/native-qualification/team-evidence/nonpricing-completion-20261115/README.md).
 
 **Authority status:** this page is a maintained synthesis of operator choices, not an
 accepted ADR. It does not create or change a gate. A durable gate change needs a
@@ -62,16 +64,19 @@ The north stars are:
    model, provider, agent runtime, or first test domain. Add a mechanism when an
    observed gap earns its complexity; prefer a smaller existing path when it suffices.
 
-The ultimate autonomy aspiration in
-[Decision 0012](../decisions/0012-full-autonomy-north-star.md) remains recorded
-direction. Its possible future gate changes are not current permission. Current
-scope, consequential review, escalation, and external-action requirements still apply.
+The original aspiration in [Decision 0012](../decisions/0012-full-autonomy-north-star.md)
+is historical. [Decision 0015](../decisions/0015-initial-scope-autonomy.md) now adopts
+initial signed authority for internal v2 research: no repeated human confirmation
+for artifact contents or an already signed escalation. Fresh independent agent
+review, exact ownership, cleanup and the signed ceiling remain enforced. New
+work enters the v2 facade; old v1/queue records retain their own contracts.
+This policy adoption is not physical runtime qualification or research acceptance.
 
 ## Choices that guide engineering
 
 | Choice | Consequence for a change |
 | --- | --- |
-| Native research is the chosen direction for new local source work. | Develop one coherent native workflow. Keep the source default, live qualification, and scoped adoption separate; see the [cutover contract](../agents/native-cutover-contract.md). |
+| New research uses the v2 Codex/OMP engagement entry. | Follow the [initial-scope policy and caller map](../decisions/0015-initial-scope-autonomy.md). Existing v1 native and queue contracts remain compatibility routes; physical qualification stays separate. |
 | Model/provider access is distinct from agent runtime integration. | Codex and OMP are the selected new-route runtimes. Reuse their native execution, tools, sessions and delegation; add missing engagement behavior. OpenCode remains an existing compatibility route and optional provider source, not a required new runtime. Verify each actual runtime/provider combination. |
 | The researcher chooses the investigation. | Tools, cards, graphs, and prior results inform choices. Stages describe evidence maturity; they do not impose a fixed order or mandatory roster. |
 | Scored search serves a task; the engagement remains evidence-directed. | Use native instruments and local metrics where useful. No universal finding score or leaderboard determines priorities or acceptance. |

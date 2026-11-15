@@ -1,7 +1,7 @@
 # Legacy session-end backstop
 
 Explicit legacy queue sessions use this backstop. Repository Claude sessions do not inherit it;
-new local source research uses [the native procedure](native-local-research.md).
+new research uses [the v2 procedure](engagement.md).
 
 The Stop hook is a last check on the computed work queue. It does not run work, change queue or
 coverage truth, infer an engagement, or replace the local close/render precondition.

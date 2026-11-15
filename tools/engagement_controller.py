@@ -1764,6 +1764,7 @@ class Controller:
             end = start + len(updates)
             return {'status': state['status'], 'revision': state['revision'],
                 'engagement_id': state['engagement_id'], 'evidence_class': state['evidence_class'],
+                'authority_policy': state['scope'].get('authority_policy', 'legacy-confirmation'),
                 'assignment': worker['assignment'] if worker else None,
                 'application_baselines': baselines,
                 **summaries, 'summary_counts': {name: len(state[name]) for name in fields},
@@ -1806,6 +1807,7 @@ class Controller:
                 'items': board_rows(state, events)})
             files['result.json'] = canonical({'engagement_id': state['engagement_id'],
                 'scope_sha256': state['scope_sha256'], 'evidence_class': state['evidence_class'],
+                'authority_policy': state['scope'].get('authority_policy', 'legacy-confirmation'),
                 'status': state['status'], 'claim_acceptance': 'per_claim', 'tasks': state['tasks'],
                 'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
                 'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],

@@ -85,6 +85,7 @@ def page(controller, events, state, worker, *, query, kinds, since, limit):
     more = end < len(matches)
     cursor = base64.urlsafe_b64encode(canonical(['board-v1', snapshot, end, query, kinds])).decode().rstrip('=') if more else None
     return {'view': 'board', 'engagement_id': state['engagement_id'], 'status': state['status'],
+            'authority_policy': state['scope'].get('authority_policy', 'legacy-confirmation'),
             'revision': state['revision'], 'snapshot_revision': revision,
             'evidence_class': state['evidence_class'], 'assignment': worker['assignment'] if worker else None,
             'query': query, 'kinds': kinds, 'items': selected, 'total_matches': len(matches),

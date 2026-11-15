@@ -1,0 +1,17 @@
+{
+  "checks": [],
+  "classification": "engineering_simulation_fake_owned_lab",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/private/tmp/oslit-final-implementation-20261115/evals/native-qualification/smoke/check_autonomy_policy_e2e.py",
+    "--output",
+    "/tmp/autonomy-policy-before.json"
+  ],
+  "docker_daemon_calls": 0,
+  "error": "AssertionError: missing-policy-v2-effect was accepted",
+  "external_target_calls": 0,
+  "kind": "initial-scope-autonomy-e2e-v1",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "status": "failed"
+}

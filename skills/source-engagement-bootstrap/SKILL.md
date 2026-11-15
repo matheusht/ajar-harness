@@ -8,22 +8,20 @@ disable-model-invocation: true
 
 Use this skill only when explicitly invoked with `/source-engagement-bootstrap <scope-file> [operator preferences]`, Pi's `/skill:source-engagement-bootstrap`, or the Skill tool. This canonical procedure uses root policy and the native guide; the legacy template is reached only through the named existing-work branch.
 
-For a **new local source task**, rank the source, prepare one target-local scope
-and native brief, then follow the [native entry](../../docs/agents/native-local-research.md)
-for the current prepare/start/resume/stop interface. This source branch implements
-the proposed #166 default; #165 remains open and qualification is unverified.
-Actual runs still require a signed scope, plan-bound approval and supported
-runtime; an unqualified result cannot be called adopted. Do not silently fall
-back to a queue task because native
-qualification is unavailable. A supported existing queue/record engagement follows the
-[legacy branch](references/legacy-bootstrap.md) instead.
+For a **new local source task**, rank the source, prepare private v2 inputs, and
+follow the [engagement entry](../../docs/agents/engagement.md). Its initial signed
+scope selects standing internal authority; no separate setup or per-artifact
+approval is required inside that grant. Existing v1 native runs follow their
+[compatibility guide](../../docs/agents/native-local-research.md); existing
+queue/record engagements use the [legacy branch](references/legacy-bootstrap.md).
+A missing runtime capability is a blocker, never a fallback to another contract.
 
 ## Non-negotiable authority and safety
 
-1. Read the repo root policy `CLAUDE.md` (mirrored as `AGENTS.md`), the current target policy and scope, and the [native entry](../../docs/agents/native-local-research.md) before preparing a new task. Root policy wins over this skill. For an existing queue/record task, read the [legacy branch](references/legacy-bootstrap.md) and its referenced engine docs.
+1. Read the repo root policy `CLAUDE.md` (mirrored as `AGENTS.md`), the current target policy and scope, and the [v2 entry](../../docs/agents/engagement.md) before preparing a new task. Root policy wins over this skill. For an existing queue/record task, read the [legacy branch](references/legacy-bootstrap.md) and its referenced engine docs.
 2. Accept **source code only**: a local source tree or an authorized repository URL with a branch/tag/commit that can be frozen. Reject live applications, production hosts, browser targets, API-only targets, binaries without corresponding source, and entries whose authorization cannot be established. Ranking/repository inspection is offline source triage; do not contact or probe an application.
-3. Never claim to be the human operator or fabricate a scope signature. Fill the scope completely, record the proposed operator identity, leave its `Signed: [ ]` block pending, and stop at the scope gate. Resume only after the human signs it. An operator may explicitly sign inline in-session; then record their stated identity, date, and `[x]`, quoting that instruction. The agent still never invents a signature.
-4. Convert operator intent into exact proposed artifact classes, environment, accounts, containment, expiry and cleanup requirements. Before creating a Zone-2 PoC artifact, require fresh human confirmation or an explicit target-local standing local-PoC grant in the current signed scope (`CLAUDE.md` §1 gate 3). A target-specific grant is valid only inside that target's signed scope; it is not a portable exception. Record each artifact and cleanup obligation at creation; effects beyond signed environment, containment, or cleanup authority require human confirmation. A native route without the kernel does not inherit that grant.
+3. Prepare exact unsigned inputs; the operator supplies the trusted initial cryptographic signature described in the v2 guide. A checkbox, agent statement or inline note is not that signature. Reuse a valid existing signature over the same bytes; never sign on the operator's behalf.
+4. Select `authority_policy: initial-scope-v1` and the exact owned-lab artifact/effect grants before the initial signature. Every artifact type inside those effects and ownership boundaries is preauthorized, including Zone-2. The host records composite state and cleanup before allocation; independent agents review consequential evidence and already signed escalation. No repeated human confirmation, setup approval or signature is needed. Missing authority or unsupported ownership blocks the affected effect; it cannot be repaired by silently widening scope.
 5. Never authorize or perform production exploitation, cross-user reach against systems you do not own, real-value loss, destructive writes, persistence outside a disposable owned environment, real secret access, real credential use, public disclosure, filing, deployment, or supply-chain publication. "Does not impact other users" does not waive scope, Zone-2, cleanup, or filing gates.
 6. Models and tools are proposal/review sources, not oracles. Operator priors can increase search effort but cannot establish truth. Do not fabricate findings, controls, reachability, exploitation, source identity, coverage, or independent review.
 7. Multiple graders must mean genuinely independent model runs/sessions or a human review. Never simulate a panel by asking one model to role-play several experts. If independent execution is unavailable, record that limitation and keep the candidate alive or route it to human review.
@@ -51,37 +49,25 @@ Rank at two levels:
 
 For every score, cite the source path, symbol/config, and policy fact that supports it. Unknown factors remain unknown. Select the highest evidence-backed target unless a material tie or missing authorization requires human choice.
 
-## Phase 3 — Prepare one native handoff for new local source research
+## Phase 3 — Prepare one v2 handoff
 
-1. Put `engagements/<id>/scope.md` in the selected target's own repository.
-   Record the exact source identity and eligible release, local environment,
-   authorized surfaces and benign objectives, exclusions, safe-signal cards,
-   effect and escalation ceiling, accounts, expiry, cleanup authority, and
-   operator identity. Prepare a signed-scope review; only the operator signs.
-   The legacy `_TEMPLATE/` contains queue/kernel fields and is not copied into
-   a new native run. Ranking and a draft scope never authorize execution.
-2. Prepare a separate native brief with the target and objective, a falsifier,
-   exact source, allowance, stop conditions, optional reference/tool files,
-   independent capture needs, and chosen fresh review behavior. Keep the
-   persistent private run root outside `engagements/<id>` and outside the source
-   tree. Match the actual supported target/model/transport and capture class in
-   `tools/native_research.py prepare --help`; an unsupported class is a blocker,
-   not an invitation to infer that a generic adapter exists.
-3. Follow the [native guide](../../docs/agents/native-local-research.md) for
-   `prepare`, plan inspection, plan-bound approval, `start`, `research`, `resume`,
-   `review`, `status` and `stop`. The guide owns their detailed sequence. Before
-   any run, require the signed scope, benign `safe_signal` for every used
-   vulnerability card, exact plan-bound approval, and runtime/independent-capture
-   readiness. Record the #165 qualification/adoption status without treating
-   source implementation as that decision. Until actual run requirements exist,
-   return the proposed paths and blockers, with `start` marked pending. A native
-   route without the record kernel never inherits a kernel-enforced standing
-   local-PoC grant; Zone-2 creation needs fresh human confirmation.
-4. Return ranked source evidence, the selected target and prepared scope/brief
-   paths, the exact unresolved authorization/runtime facts, and the `prepare`
-   command only when its inputs are fixed. Do not generate a legacy `/goal`
-   brief, initialize the queue or record kernel, or treat native output as an
-   external filing.
+1. Copy the [source input example](../../examples/native-engagement-v2/source/inputs.json)
+   into a private durable directory outside the target repository and future run root.
+   Prepare its scope, goal, runtime and environment references using the
+   [operator guide](../../docs/agents/engagement.md#fill-and-sign-the-inputs).
+   Freeze the exact source identity, authority, limits and cleanup responsibilities.
+   The signed initial policy grants owned lab state, separate execution effects,
+   and the intended internal escalation ceiling; artifact contents are not enumerated.
+2. Resolve every placeholder and obtain the initial trusted operator signature.
+   Supply the target and goal, useful falsifiers and available access. The agent owns
+   subsequent setup and experiment choices; a target build recipe is optional.
+3. Run `python3 tools/native_engagement.py inspect --inputs /private/inputs/inputs.json`.
+   Fix reported prerequisites within the authorized engineering scope. Start with
+   `run --inputs ... --engagement-root ...`; use `resume` for an existing v2 root.
+   The guide owns status, direction, stop and export. Record verification limits.
+4. Return the ranked source evidence, prepared input paths and actual readiness or
+   blockers. Do not generate a v1 plan/phase approval, initialize a queue/kernel,
+   rewrite existing records or treat internal completion as an external filing.
 
 ## Existing queue/record work
 

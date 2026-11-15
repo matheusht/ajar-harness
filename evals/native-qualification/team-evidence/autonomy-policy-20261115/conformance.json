@@ -1,0 +1,19 @@
+{
+  "command": "python3 tools/check-conformance.py",
+  "status": "passed",
+  "checks": 900,
+  "failures": 0,
+  "classification": "local_structural_conformance",
+  "output_sha256": "fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf",
+  "draft_overlay_refresh": [
+    "AGENTS.md",
+    "engine/gates.md"
+  ],
+  "historical_execution_records_changed": false,
+  "final_prose_correction_checks": [
+    "check_doctrine_mirror",
+    "check_overlay_pins",
+    "check_active_guidance"
+  ],
+  "final_guidance_output_sha256": "74e0fdb8100a39b34f6ac0eadce00551705b70065eb84c5da4d20b2a78d12b32"
+}

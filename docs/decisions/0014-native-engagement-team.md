@@ -1,5 +1,9 @@
 # 0014 — One durable engagement controller with native research runtimes
 
+**15 November policy successor:** [Decision 0015](0015-initial-scope-autonomy.md)
+adopts the initial-scope v2 authority policy and new-work caller routing. The
+implementation decision and historical evidence below retain their dated meaning.
+
 **Status:** Accepted implementation direction, 14 November 2026. Runtime
 activation remains conditional on the signed v2 contract and verified capability
 enforcement. Existing route gates and historical signatures keep their meaning.

@@ -130,7 +130,7 @@ TOOLS = [
          'conditions': {'type': 'object'}, 'seconds': {'type': 'integer', 'minimum': 1},
          'resources': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True},
          'starting_state': {'type': 'object', 'additionalProperties': {'type': 'string'}, 'description': 'Optional map of every selected application access to its signed owned baseline. Recreates separate owned .invalid targets; omission makes no application clean-start claim.'},
-         'artifact_effect_id': {'type': 'string', 'description': 'Optional signed owned-lab-state-v1 creation effect; separate from probe execution.'},
+         'artifact_effect_id': {'type': 'string', 'description': 'Optional signed owned-lab-state creation effect; separate from probe execution.'},
          'effect_id': {'type': 'string', 'description': 'Optional signed local effect for source/binary capture execution; later rungs require current evidence review. Application requests select their own effect.'},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]

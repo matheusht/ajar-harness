@@ -1,9 +1,8 @@
 # Legacy Docker work-queue backend
 
 This is the explicit legacy queue procedure for existing engagements and supported workflows.
-New local source research in this candidate implementation uses `tools/native_research.py` and the
-[native local research procedure](native-local-research.md). Preparing that source route does not
-record a scoped adopt decision or verify the final native E2E.
+New research uses `tools/native_engagement.py` and the [v2 engagement guide](engagement.md).
+This queue remains a compatibility route, never a fallback after v2 refusal.
 
 The legacy public work-queue CLI runs every queue session in an explicit Docker boundary. It has no
 implicit host-process fallback. The parent driver continues to own queue reduction, action

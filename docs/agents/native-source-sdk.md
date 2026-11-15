@@ -1,4 +1,9 @@
-# Native source research
+# Native v1 source-mode compatibility
+
+For new research, use the [v2 engagement guide](engagement.md). The procedure
+below is retained for explicit v1 inputs or existing v1 records; its approvals,
+limits and signatures keep their original meaning. Do not apply them to v2.
+
 
 This is shared source-mode code. It is not a separate adapter for each target.
 Target inputs are source, runtime images, prepared dependencies, and commands.

@@ -2,6 +2,7 @@
 """Offline command/output contract checks; not a native loader qualification."""
 from check_omp_loader_preflight import observe_loader
 import check_omp_loader_preflight as driver
+import copy
 import os
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,6 +10,50 @@ from unittest.mock import patch
 COMMAND = ['/usr/bin/env', '-i', 'HOME=/work', 'PATH=/usr/bin:/bin',
            '/input/native-runtime/bin/bun', '/input/native-runtime/native_runtime_omp_tools.mjs',
            '/input/native-runtime/node_modules/@oh-my-pi/pi-coding-agent', '/work']
+
+
+def test_startup_only_classification():
+    base = {
+        'runtime': 'omp', 'status': 'failed', 'error': 'native_startup_only_stop',
+        'native_startup_only': 'stopped_before_invocation', 'native_execution': 'initialized',
+        'native_identity': {'session_id': 'fixture-session',
+                            'owner_receipt': {'kind': 'native-runtime-owner-v1', 'runtime': 'omp',
+                                              'model': 'fixture-model', 'session_id': 'fixture-session'}},
+        'checks': [{'name': 'catalog', 'passed': True}, {'name': 'model ready', 'passed': True}],
+        'controlled_provider_requests': 0, 'external_provider_calls': 0,
+        'boundary_cleanup': {'cleanup': 'verified'},
+        'image': {'status': 'passed', 'cleanup': {'status': 'clean'}},
+        'export_verification': {'status': 'passed',
+            'integrity': {'integrity': 'verified'},
+            'references': {'status': 'verified'},
+            'result': {'result_consistency_verified': True}},
+    }
+    assert driver.classify_startup_result(base) is True
+
+    # An intentional startup stop is accepted only after every boundary is verified.
+    for mutation in (
+        lambda row: row.update(error='native_startup_failed'),
+        lambda row: row.update(native_execution='not_started'),
+        lambda row: row.update(native_identity=None),
+        lambda row: row.update(checks=[{'name': 'catalog', 'passed': False}]),
+        lambda row: row.update(controlled_provider_requests=1),
+        lambda row: row.update(external_provider_calls=False),
+        lambda row: row.update(boundary_cleanup={'cleanup': 'unresolved'}),
+        lambda row: row.update(boundary_cleanup_error='cleanup_unverified'),
+        lambda row: row.update(image={'status': 'passed', 'cleanup': {'status': 'unresolved'}}),
+        lambda row: row.update(image={'status': 'failed', 'cleanup': {'status': 'clean'}}),
+        lambda row: row.update(native_request_errors=[{'operation': 'catalog', 'error': 'transport_failed'}]),
+        lambda row: row.update(native_executor_state={'failure': 'native_executor_transport_failed'}),
+        lambda row: row.update(export_verification={'status': 'failed'}),
+        lambda row: row.update(export_verification={'status': 'passed',
+            'integrity': {'integrity': 'verified'}, 'references': {'status': 'verified'},
+            'result': {'result_consistency_verified': False}}),
+    ):
+        failed = copy.deepcopy(base)
+        mutation(failed)
+        before = copy.deepcopy(failed)
+        assert driver.classify_startup_result(failed) is False
+        assert failed == before, 'classification must preserve the failed result and its diagnostics'
 
 
 class Environment:
@@ -30,6 +75,7 @@ class Environment:
 
 
 def main():
+    test_startup_only_classification()
     original = Environment.launch_stdio
     for output, status, code, matches in [('1.4.4\n', 'settled', 0, True),
         ('unpublished diagnostic text', 'settled', 127, False), ('[output withheld]', 'unknown', -9, False)]:
@@ -87,7 +133,10 @@ def main():
             result.update(controlled_provider_requests=0, external_provider_calls=0)
             return environment.launch_stdio(COMMAND)
         fixture = SimpleNamespace(run_native=run_native, invoke=lambda *args: None)
-        fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
+        def fixture_main(*, classify_result=None):
+            assert classify_result is driver.classify_startup_result
+            return fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
+        fixture.main = fixture_main
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
                                       'research_environment': SimpleNamespace(Environment=Environment, subprocess=__import__('subprocess')),
                                       'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object, RuntimeError=RuntimeError),
@@ -282,7 +331,8 @@ def main():
             stderr=original.DEVNULL, stdout=subprocess.DEVNULL)
         assert process.wait(timeout=5) == 7
     assert module.subprocess is original
-    assert result['omp_model_stderr_categories'] == [{'markers':['enospc_marker'], 'bytes':180006, 'truncated':True, 'complete':True}]
+    assert result['omp_model_stderr_categories'] == [{'markers':['enospc_marker'], 'bytes':180006,
+        'truncated':True, 'complete':True, 'diagnostic':'[oversized diagnostic withheld]'}]
     assert 'unpublished' not in str(result)
     for direct in (False, True):
         invoked = []
@@ -320,7 +370,10 @@ def main():
             result.update(controlled_provider_requests=0, external_provider_calls=0)
             fixture.invoke('must-not-send')
         fixture.run_native = run_native
-        fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
+        def fixture_main(*, classify_result=None):
+            assert classify_result is driver.classify_startup_result
+            return fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
+        fixture.main = fixture_main
         original = fixture.invoke
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
                 'research_environment': SimpleNamespace(Environment=Environment, subprocess=subprocess),
@@ -343,7 +396,7 @@ def main():
             pass
         else:
             raise AssertionError('invalid provider counters accepted')
-    print('passed: 61 offline diagnostic cases; no native or provider calls')
+    print('passed: offline diagnostic checks; no native or provider calls')
 
 
 if __name__ == '__main__':

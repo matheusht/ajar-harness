@@ -25,6 +25,8 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_native_userns_probe.py
+      - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_omp_model_addon_assets.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
@@ -55,6 +57,8 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_native_userns_probe.py
+      - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_omp_model_addon_assets.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
@@ -133,6 +137,7 @@ jobs:
         if: matrix.runtime == 'omp'
         run: |
           python3 evals/native-qualification/smoke/check_omp_loader_preflight_test.py
+          python3 evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
           python3 evals/native-qualification/smoke/check_omp_model_addon_assets.py
       - name: Check pinned native startup without provider invocation
         run: |

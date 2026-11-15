@@ -421,6 +421,7 @@ def run_native(root, fixture, result):
     from engagement_controller import Controller
     from engagement_runner import Runner, WorkerContext
     from engagement_native_boundary import NativeBoundary, recover_boundary
+    from check_native_userns_probe import compare_environment
     import native_runtime_codex
     import research_environment
     bundle = tool_bundle(fixture, result)
@@ -446,7 +447,11 @@ def run_native(root, fixture, result):
             seconds=LEASE, resources=['source-main'], adapter_id='native-runner')
         context = WorkerContext(runner, worker, grant, workspace)
         boundary = NativeBoundary(context)
-        identity = boundary.start()
+        try:
+            identity = boundary.start()
+        finally:
+            result['userns_diagnostic'] = (compare_environment(boundary.environment)
+                if boundary.environment is not None else {'classification': 'environment_unavailable'})
         result['native_execution'] = 'initialized'
         controller.record_worker_started(worker['id'], worker['generation'], identity['session_id'], workspace,
                                          owner_receipt=identity['owner_receipt'])
@@ -606,7 +611,7 @@ def run_native(root, fixture, result):
         safe_publication(canonical(result), known_secrets=tuple(known_secrets))
 
 
-def main():
+def main(*, classify_result=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', choices=('codex', 'omp'), required=True)
     parser.add_argument('--platform', choices=('linux/amd64', 'linux/arm64'), required=True)
@@ -642,9 +647,14 @@ def main():
                 cleanup_image(fixture, result['image'])
             if result['image']['status'] != 'passed':result['status'] = 'failed'
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
-            [Path(__file__), Path(__file__).with_name('check_model_image_docker_e2e.py'),
+            [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
+             Path(__file__).with_name('check_omp_loader_preflight.py'),
+             Path(__file__).with_name('check_model_image_docker_e2e.py'),
              *sorted((ROOT / 'tools').glob('*.py')), ROOT / 'tools/native_runtime_codex_exec.mjs',
              ROOT / 'tools/native_runtime_omp_tools.mjs', ROOT / 'config/native-tool-lock.json']}
+        if classify_result is not None and classify_result(result):
+            result['status'] = 'passed'
+            result['expected_stop'] = result.pop('error')
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(safe_publication(canonical(result)))
     print(json.dumps({'status': result['status'], 'output': str(args.output)}))

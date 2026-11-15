@@ -2,6 +2,7 @@
 """Run provider-free native startup with bounded OMP observations."""
 from contextlib import contextmanager
 import json
+import os
 import re
 import threading
 
@@ -260,6 +261,7 @@ class ErrorCategories:
 def observe_model_stderr(environment_module, result):
     original = environment_module.subprocess
     captures = []
+    limit = 65536
 
     class Observer:
         def __getattr__(self, name):
@@ -272,12 +274,16 @@ def observe_model_stderr(environment_module, result):
             if not selected:
                 return original.Popen(command, *args, **kwargs)
             process = original.Popen(command, *args, **dict(kwargs, stderr=original.PIPE))
-            capture = {'categories': ErrorCategories(), 'bytes': 0, 'complete': False}
+            capture = {'categories': ErrorCategories(), 'bytes': 0, 'content': bytearray(),
+                       'complete': False,
+                       'known_secrets': tuple(value.encode() for value in
+                           (os.environ.get('OPENAI_API_KEY'),) if value)}
             def drain():
                 try:
                     while chunk := process.stderr.read(4096):
-                        remaining = max(0, 65536 - capture['bytes'])
+                        remaining = max(0, limit - capture['bytes'])
                         capture['categories'].feed(chunk[:remaining])
+                        capture['content'].extend(chunk[:remaining])
                         capture['bytes'] += len(chunk)
                     capture['complete'] = True
                 except (OSError, ValueError):
@@ -297,8 +303,22 @@ def observe_model_stderr(environment_module, result):
         rows = []
         for capture, thread in captures:
             thread.join(timeout=1)
+            complete = capture['complete'] and not thread.is_alive()
+            truncated = capture['bytes'] > limit
+            if not complete:
+                diagnostic = '[incomplete diagnostic withheld]'
+            elif truncated:
+                diagnostic = '[oversized diagnostic withheld]'
+            else:
+                from engagement_contract import ContractError, safe_publication
+                try:
+                    diagnostic = safe_publication(bytes(capture['content']),
+                        known_secrets=capture['known_secrets']).decode('utf-8', 'replace')[:2048]
+                except ContractError:
+                    diagnostic = '[diagnostic redacted]'
             rows.append({'markers': sorted(capture['categories'].found),
-                         'bytes': capture['bytes'], 'truncated': capture['bytes'] > 65536, 'complete': capture['complete'] and not thread.is_alive()})
+                         'bytes': capture['bytes'], 'truncated': truncated, 'complete': complete,
+                         'diagnostic': diagnostic})
         result['omp_model_stderr_categories'] = rows
 
 
@@ -328,6 +348,33 @@ def startup_only(fixture_module, runtime_module, result):
             raise runtime_module.RuntimeError('native_startup_only_provider_violation')
 
 
+
+def classify_startup_result(result):
+    """Accept the planned stop only after startup, export and cleanup succeeded."""
+    identity = result.get('native_identity')
+    checks = result.get('checks', [])
+    exported = result.get('export_verification', {})
+    image = result.get('image', {})
+    return (result.get('error') == 'native_startup_only_stop'
+        and result.get('native_startup_only') == 'stopped_before_invocation'
+        and result.get('native_execution') == 'initialized'
+        and isinstance(identity, dict) and bool(identity.get('session_id'))
+        and isinstance(identity.get('owner_receipt'), dict)
+        and bool(checks) and all(row.get('passed') is True for row in checks)
+        and all(type(result.get(key)) is int and result[key] == 0
+                for key in ('controlled_provider_requests', 'external_provider_calls'))
+        and not result.get('native_request_errors')
+        and not result.get('native_executor_state', {}).get('failure')
+        and not result.get('boundary_cleanup_error')
+        and result.get('environment_operation_diagnostics', {}).get('status') != 'unavailable'
+        and result.get('boundary_cleanup', {}).get('cleanup') == 'verified'
+        and image.get('status') == 'passed' and image.get('cleanup', {}).get('status') == 'clean'
+        and exported.get('status') == 'passed'
+        and exported.get('integrity', {}).get('integrity') == 'verified'
+        and exported.get('references', {}).get('status') == 'verified'
+        and exported.get('result', {}).get('result_consistency_verified') is True)
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
@@ -345,7 +392,7 @@ def main():
 
     fixture_module.run_native = run_native
     try:
-        return fixture_module.main()
+        return fixture_module.main(classify_result=classify_startup_result)
     finally:
         fixture_module.run_native = original
 

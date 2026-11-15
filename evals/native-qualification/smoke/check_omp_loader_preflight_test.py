@@ -85,7 +85,7 @@ def main():
         fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
                                       'research_environment': SimpleNamespace(Environment=Environment),
-                                      'native_runtime_omp': SimpleNamespace(Transport=object)}):
+                                      'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object)}):
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
         assert ('omp_loader_preflight' in result) == (runtime == 'omp')
@@ -122,7 +122,30 @@ def main():
             {'status': 'failed', 'failure': 'native_transport_closed', 'returncode_before_cleanup': 139}
             if fail else {'status': 'returned'})}
         assert result == expected and 'unpublished' not in str(result)
-    print('passed: 22 offline diagnostic cases; no native or provider calls')
+    for ready, exit_code, unavailable in [(False, 7, False), (True, None, False), (False, None, True)]:
+        cleanup = []
+        error = Failure('unpublished model detail')
+        def poll():
+            if unavailable:
+                raise ValueError('unpublished process detail')
+            return exit_code
+        class Model:
+            def _startup_failed(self, failure):
+                cleanup.append(failure)
+                failure.cleanup_result = 'verified'
+        module, result = SimpleNamespace(Runtime=Model), {}
+        with driver.observe_model_startup(module, result):
+            model = module.Runtime()
+            model.ready = ready
+            model.transport = SimpleNamespace(process=SimpleNamespace(poll=poll))
+            model._startup_failed(error)
+        assert module.Runtime is Model and cleanup == [error] and error.cleanup_result == 'verified'
+        row = result['omp_model_startup_failure']
+        assert row['phase'] == ('post_ready' if ready else 'awaiting_ready')
+        assert row['returncode_before_cleanup'] == exit_code
+        assert ('process_observation' in row) == unavailable
+        assert 'unpublished' not in str(result)
+    print('passed: 25 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

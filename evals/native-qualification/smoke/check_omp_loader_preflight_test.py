@@ -76,6 +76,9 @@ def main():
         assert rows[-1]['returncode'] == 133 and 'unpublished' not in str(result)
         assert environment.calls[-1] == ('launch', COMMAND, 'native_tools')
         assert Environment.launch_stdio is original
+    class Owner:
+        def launch_model(self, *args):
+            return 'original'
     for runtime in ('omp', 'codex'):
         result = {}
         environment = Environment({'output': '1.4.4\n', 'status': 'settled', 'returncode': 0})
@@ -85,7 +88,8 @@ def main():
         fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
                                       'research_environment': SimpleNamespace(Environment=Environment),
-                                      'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object)}):
+                                      'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object),
+                                      'native_runtime_linux': SimpleNamespace(LinuxModelOwner=Owner)}):
             assert driver.main() == 'original-process'
         assert fixture.run_native is run_native and Environment.launch_stdio is original
         assert ('omp_loader_preflight' in result) == (runtime == 'omp')
@@ -145,7 +149,38 @@ def main():
         assert row['returncode_before_cleanup'] == exit_code
         assert ('process_observation' in row) == unavailable
         assert 'unpublished' not in str(result)
-    print('passed: 25 offline diagnostic cases; no native or provider calls')
+    for kind, denied in [('omp', False), ('codex', False), ('omp', True)]:
+        class ModelOwner:
+            profile = {'kind': kind}
+            def check_authority(self):
+                if denied:
+                    raise Failure('unpublished denial')
+            def launch_model(self, *args):
+                calls.append(args)
+                return 'original-process'
+        calls, result = [], {}
+        owner = ModelOwner()
+        owner.environment = Environment({'status': 'settled', 'returncode': 0, 'output': '18.20.0\n'})
+        original = ModelOwner.launch_model
+        try:
+            with driver.observe_model_version(ModelOwner, result):
+                assert owner.launch_model(['original-command'], {'private': 'unpublished'}, object()) == 'original-process'
+        except Failure:
+            assert denied
+        assert ModelOwner.launch_model is original
+        assert len(calls) == (0 if denied else 1)
+        assert len(owner.environment.calls) == (1 if kind == 'omp' and not denied else 0)
+        if kind == 'omp' and not denied:
+            argv = owner.environment.calls[0][1]
+            assert argv == ['/usr/bin/env', '-i', 'HOME=/tmp', 'TMPDIR=/tmp', 'PI_CODING_AGENT_DIR=/tmp',
+                'PATH=/usr/local/bin:/usr/bin:/bin', '/runtime/bin/model', '--version']
+            assert owner.environment.calls[0][2] == 10
+            assert result == {'omp_model_version_preflight': {'status': 'settled', 'returncode': 0,
+                'pinned_version_matches': True}}
+        else:
+            assert result == {}
+        assert 'unpublished' not in str(result)
+    print('passed: 28 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

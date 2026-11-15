@@ -92,6 +92,30 @@ def observe_catalog(runtime_module, result):
         runtime_module.Transport = original
 
 
+
+@contextmanager
+def observe_model_startup(runtime_module, result):
+    original = runtime_module.Runtime
+
+    class ObservedRuntime(original):
+        def _startup_failed(self, error):
+            row = {'phase': 'post_ready' if self.ready else 'awaiting_ready',
+                   'returncode_before_cleanup': None}
+            result['omp_model_startup_failure'] = row
+            try:
+                if self.transport is not None:
+                    row['returncode_before_cleanup'] = self.transport.process.poll()
+            except Exception:
+                row['process_observation'] = 'unavailable'
+            return super()._startup_failed(error)
+
+    runtime_module.Runtime = ObservedRuntime
+    try:
+        yield
+    finally:
+        runtime_module.Runtime = original
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
@@ -101,7 +125,7 @@ def main():
     def run_native(root, fixture, result):
         if fixture.runtime != 'omp':
             return original(root, fixture, result)
-        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result):
+        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result):
             return original(root, fixture, result)
 
     fixture_module.run_native = run_native

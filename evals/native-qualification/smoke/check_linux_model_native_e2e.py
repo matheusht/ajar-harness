@@ -441,6 +441,31 @@ def run_native(root, fixture, result):
     import native_runtime_codex
     import research_environment
     bundle = tool_bundle(fixture, result)
+    if fixture.runtime == 'codex':
+        from check_codex_sandbox_policy_diagnostic import run_diagnostic, verified_bwrap_asset
+        try:
+            bwrap = Path(bundle['path']) / 'codex-resources/bwrap'
+            expected = fixture.context_receipt.get('runtime_manifest', {}).get(
+                'codex-resources/bwrap', {}).get('sha256')
+            installed = verified_bwrap_asset(bwrap, expected)
+        except Exception:
+            expected, installed = None, None
+        if not expected or installed != expected:
+            result['codex_sandbox_policy_diagnostic'] = {
+                'kind': 'codex-sandbox-policy-diagnostic-v1',
+                'classification': 'diagnostic_only', 'qualification': False,
+                'status': 'failed', 'error': 'bwrap_asset_identity_invalid',
+                'cleanup': 'not_started'}
+        else:
+            try:
+                result['codex_sandbox_policy_diagnostic'] = run_diagnostic(
+                    fixture.docker, fixture.endpoint, fixture.image_id, expected)
+            except Exception:
+                result['codex_sandbox_policy_diagnostic'] = {
+                    'kind': 'codex-sandbox-policy-diagnostic-v1',
+                    'classification': 'diagnostic_only', 'qualification': False,
+                    'status': 'failed', 'error': 'diagnostic_integration_error',
+                    'cleanup': 'unresolved'}
     secret = 'fake-oslit-linux-provider-' + uuid.uuid4().hex
     provider = Provider(root / 'provider-tls', fixture.runtime, secret)
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
@@ -667,6 +692,7 @@ def main(*, classify_result=None):
             if result['image']['status'] != 'passed':result['status'] = 'failed'
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
             [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
+             Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
              Path(__file__).with_name('check_omp_loader_preflight.py'),
              Path(__file__).with_name('check_model_image_docker_e2e.py'),
              *sorted((ROOT / 'tools').glob('*.py')), ROOT / 'tools/native_runtime_codex_exec.mjs',

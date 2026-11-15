@@ -910,3 +910,14 @@ existing Darwin route. Independent fixed-patch review and all 14 contained
 scenario families passed. Docker/namespace facts are simulated in these checks;
 actual pinned Linux native execution remains unverified. The complete M0–M6
 assignment and the operator's research acceptance remain open.
+
+
+## 2026-11-15 — canonical checker successor for the assembly
+
+Hosted conformance run `43725604808` at `eedb24c9` passed structural conformance,
+then refused revision 4's checker pin after the exact archived-probe scanner fix.
+Following the existing builder's rotate-CAMP_ID rule, revision 5 records the new
+checker from committed source `2640d491`. Existing revision-4 and older bytes,
+results and pins are preserved. The active builder, workflow and behavioral README
+now point to `behavioral-canonical-v5-2026-11-15`. This is a new input snapshot,
+not a candidate run, retrospective regrade or research efficacy claim.

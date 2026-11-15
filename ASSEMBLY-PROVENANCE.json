@@ -36,6 +36,8 @@
     "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
     "namespace_diagnostic_run": 43726713247,
     "codex_blocker": "tool container denies unprivileged user namespace creation; host probe allows it",
-    "omp_blocker": "custom fixture model catalog omitted apiKey environment reference; corrected after pinned-source verification, native rerun pending"
+    "omp_blocker": "custom catalog env reference now passes parsed-publication and frozen-input checks; native rerun pending",
+    "full_conformance": "eedb24c9 passed structural 899/0 then refused stale canonical v4 checker pin; 2640d491 hit a legacy review staging deadline; no full green result",
+    "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally"
   }
 }

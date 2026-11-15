@@ -221,10 +221,12 @@ def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> b
             except UnicodeError:
                 raise ContractError('publication_invalid') from None
             break
+    sensitive_views = []
     for view in tuple(views):
         try:
             value = _decode(view)
         except ContractError:
+            sensitive_views.append(view)
             continue
         views.append(canonical(value))
         pending = [value]
@@ -232,13 +234,19 @@ def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> b
             item = pending.pop()
             if type(item) is str:
                 views.append(item.encode('utf-8'))
+                sensitive_views.append(item.encode('utf-8'))
             elif type(item) is list:
                 pending.extend(item)
             elif type(item) is dict:
                 pending.extend(item.values())
+                # OMP's exact public environment reference is not a credential value.
+                if item.get('apiKey') == 'OPENAI_API_KEY':
+                    del item['apiKey']
+        sensitive_views.append(canonical(value))
     for view in views:
-        _require(not detect_secret_classes(view) and not SENSITIVE_TEXT.search(view)
+        _require(not detect_secret_classes(view)
                  and not any(value in view for value in known_secrets), 'publication_secret')
+    _require(not any(SENSITIVE_TEXT.search(view) for view in sensitive_views), 'publication_secret')
     return data
 
 

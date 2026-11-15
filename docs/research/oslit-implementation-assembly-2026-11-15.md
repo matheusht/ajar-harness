@@ -5,7 +5,8 @@ only the exact path, full-file digest and known synthetic literal of each of the
 three archived probes. Five failure-first regression scenarios passed; archived
 bytes remain unchanged. The earlier failure below is retained as a checkpoint.
 The assembly is published on `codex/oslit-integrated-e2e-20261115`. Hosted structural
-conformance passed at `eedb24c9`; the full conformance workflow is still running.
+conformance passed at `eedb24c9`; the full workflow later refused the stale v4
+checker pin. A v5 successor preserves every preexisting v4 byte.
 Neither native runtime has completed the joined workflow.
 
 This is a local implementation candidate, not an accepted release or qualified
@@ -89,12 +90,20 @@ at `07ac9ff2` identified OMP's exact refusal: a custom model definition requires
 an `apiKey` or an explicit alternate authentication mode. The fixture now names
 `OPENAI_API_KEY` as the environment reference, following the integrity-verified
 18.20.0 package resolver. No key value is written to its catalog; the owned
-provider still requires the synthetic credential. The corrected native run is
-pending.
+provider still requires the synthetic credential. The next run reached the publication guard, which classified that public reference
+as a credential assignment. The guard now recognizes only the exact parsed JSON
+member `apiKey: OPENAI_API_KEY`; actual credential and known-secret checks retain
+the original bytes. Four accepted and eight rejected cases, frozen signed inputs,
+and the 75-check contract suite passed locally. The corrected native run is pending.
 
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
-at `eedb24c9` has passed the structural conformance step. The full workflow is still
-pending. These observations do not qualify either native research runtime.
+at `eedb24c9` passed structural conformance (899 checks, no failures) but later
+refused revision 4's checker pin. Revision 5 records the changed checker under the
+existing successor procedure; a local tamper control still rejects drift and all
+preexisting v4 bytes remain unchanged. A later full run at `2640d491` hit the
+legacy review staging deadline before structural conformance. That same gate
+passed on the earlier hosted run and locally; no timeout was widened. There is
+no full hosted conformance pass yet. Neither native runtime is qualified.
 
 ## Remaining implementation and delivery
 

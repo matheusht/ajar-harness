@@ -139,6 +139,17 @@ queries, bad credentials and Codex discovery requests.
 Codex's default policy still refuses namespace creation. A named, confined policy
 candidate is being prepared for harmless replay; no production policy has changed.
 
+The [OMP repair run](https://github.com/matheusht/redteam-harness/actions/runs/43737579256)
+at `f244b003` passed all 21 joined OMP checks: two native invocations, four model
+POSTs, one separately counted discovery GET, no provider escapes or errors, retained
+conversation and workspace state, owner-loss stop, revocation, recovery, verified
+export and cleanup. Docker also passed. This is actual pinned native execution
+against an owned deterministic provider, not external-provider or research acceptance.
+Codex still failed before model requests. Its next disposable-host replay selects
+fixed, digest-pinned seccomp and named AppArmor profiles for a harmless Bubblewrap
+command only. It verifies the unchanged outer container controls and a denied mount
+outside the child user namespace, then removes its owned container and profile.
+
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later
 refused revision 4's checker pin. Revision 5 records the changed checker under the
@@ -150,7 +161,8 @@ a [full hosted conformance pass at `9415de22`](https://github.com/matheusht/redt
 899 structural checks, zero failures, and v5 frozen inputs intact. The schema and
 retrospective gates also passed under hosted Python 3.15.2. This verifies that
 repository workflow at that revision; subsequent commits refine diagnostics, and a
-final check must cover the finished repair. Neither native runtime is qualified.
+final check must cover the finished repair. OMP's joined fixture passes at `f244b003`;
+Codex and the broader delivery gates remain open.
 
 ## Remaining implementation and delivery
 

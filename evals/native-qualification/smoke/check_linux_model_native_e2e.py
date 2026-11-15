@@ -639,6 +639,17 @@ def run_native(root, fixture, result):
                     'classification': 'diagnostic_only', 'qualification': False,
                     'status': 'failed', 'error': 'diagnostic_integration_error',
                     'cleanup': 'unresolved'}
+            if os.environ.get('OSLIT_CODEX_POLICY_REPLAY') == '1':
+                from check_codex_sandbox_policy_candidate import run_candidate
+                try:
+                    result['codex_policy_candidate'] = run_candidate(
+                        fixture.docker, fixture.endpoint, fixture.image_id, expected,
+                        allow_host_policy_load=True, parser='/usr/sbin/apparmor_parser')
+                except Exception:
+                    result['codex_policy_candidate'] = {
+                        'classification': 'diagnostic_only', 'qualification': False,
+                        'status': 'failed', 'error': 'candidate_integration_error',
+                        'cleanup': 'unresolved'}
     secret = 'fake-oslit-linux-provider-' + uuid.uuid4().hex
     provider = Provider(root / 'provider-tls', fixture.runtime, secret)
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
@@ -923,6 +934,8 @@ def main(*, classify_result=None):
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
             [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
+             Path(__file__).with_name('check_codex_sandbox_policy_candidate.py'),
+             *sorted((ROOT / 'evals/native-qualification/fixtures/codex-tool-policy-v1').glob('*')),
              Path(__file__).with_name('check_omp_loader_preflight.py'),
              Path(__file__).with_name('check_model_image_docker_e2e.py'),
              *sorted((ROOT / 'tools').glob('*.py')), ROOT / 'tools/native_runtime_codex_exec.mjs',

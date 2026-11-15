@@ -26,4 +26,6 @@ jobs:
       - name: Verify offline export reference closure
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python3 evals/native-qualification/smoke/check_engagement_export_references_e2e.py -v
+        run: |
+          python3 evals/native-qualification/smoke/check_engagement_export_references_e2e.py -v
+          python3 evals/native-qualification/smoke/check_engagement_export_result_e2e.py -v

@@ -120,7 +120,7 @@ def probe(work):
                     if stat.S_ISREG(info.st_mode):
                         count += 1
                         size += info.st_size
-        return {'work_available_bytes': v.f_bavail * v.f_frsize,
+        return {'work_available_bytes': v.f_bavail * v.f_frsize, 'work_noexec': bool(v.f_flag & os.ST_NOEXEC),
                 'native_files': count, 'native_bytes': size}
 
 if __name__ == '__main__':
@@ -135,8 +135,9 @@ def model_storage_outcome(observation):
         data = None
     keys = {'work_available_bytes', 'native_files', 'native_bytes'}
     if (observation['status'] == 'settled' and observation['returncode'] == 0 and
-            isinstance(data, dict) and set(data) == keys and
-            all(type(value) is int and 0 <= value <= 2**53 for value in data.values())):
+            isinstance(data, dict) and set(data) == keys | {'work_noexec'} and
+            type(data['work_noexec']) is bool and
+            all(type(data[key]) is int and 0 <= data[key] <= 2**53 for key in keys)):
         row.update(data)
     else:
         row['observation'] = 'unavailable'
@@ -226,6 +227,9 @@ ERROR_MARKERS = {
     'missing_module_marker': b'Cannot find module',
     'native_load_marker': b'Failed to load native',
     'missing_key_marker': b'No API key',
+    'native_addon_load_marker': b'Failed to load pi_natives native addon',
+    'addon_mapping_marker': b'failed to map segment from shared object',
+    'addon_extraction_marker': b'embedded addon extraction (',
 }
 
 

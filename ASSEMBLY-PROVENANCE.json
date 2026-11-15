@@ -1,0 +1,32 @@
+{
+  "source_head": "5d290d193ee5a0e824bd461f9033bf216b6ff83f",
+  "staged_cherry_pick": "4559fcadc1085da12357dc57929901726f4eab9d",
+  "original_checkout_unchanged": true,
+  "assembly_checkpoint_mapping": {
+    "dae6e533c8435c671caa4e1ab40ac22573e2fc72": "8b951fc592020afcf10576cd10cd1a04aefff0b0"
+  },
+  "assembly_parent_note": "Identical snapshot tree reattached to source_head so the test branch preserves repository ancestry; original snapshot branch retained locally",
+  "prs": {
+    "211": "ec8efb4399e73745d32ee41b674b59eff3c2b0e5",
+    "212": "79896eaeecbb729e023c81508855a2c2d46f584a",
+    "213": "49e5e41e7510231412defeb556016a63b2f30ab4",
+    "214": "8056bb785e0df9ac8eb2517fda66431d75183a8e",
+    "215": "6bf0af4f55bfb2e49c88c4c6e20ff36fe60148c6",
+    "216": "7217305c82d6d71a24286d3d17f24c20b766eb47",
+    "217": "f89ff18ce503b819be6bcf2374e8c11c4d51dddf",
+    "218": "9f5c518527226e47b5fbe51eb3530b1a0b0a902f",
+    "219": "56cd466cef584dbbded2d376973ca29a0a790a16"
+  },
+  "conflict_resolution": "PR214 and219 installer test combined preserving both asset contracts; archive-fixture E2E passed locally via GPT-6 Luna",
+  "focused_patches": [
+    "inventory exact UID/GID and namespace types",
+    "staged lab-artifact result projection",
+    "OMP tool validator module binding",
+    "canonical export fixture roots and simulated Linux diagnostic fields",
+    "account resolver closure fixture and delivery documentation reconciliation"
+  ],
+  "verification": "independent source reviews completed; GPT-6 Luna ran local contract/team/evidence/runner/coordination/guidance, acquisition/inventory/export and runtime fixtures; no joined live native, Docker, remote or hosted CI qualification",
+  "status": "local implementation candidate; remaining native/remote/soak qualification and release handoff; not published or accepted",
+  "conformance": "900 checks, 0 failing after exact path/full-file hash/literal exceptions for three synthetic archived probes; five regression scenarios passed; archived bytes unchanged",
+  "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation"
+}

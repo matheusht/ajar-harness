@@ -533,17 +533,17 @@ class Environment:
                 args.extend(['--tmpfs', path + ':' + options])
             image_argument = len(args)
             args.extend([self.profile['image_id'], *guardian[1:]])
-            created = self._effect('create_stage', args)
+            created = self._effect('create_stage', args, timeout=self._admit())
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_create_unknown')
             self._verify_configuration(self._inspect(stage=True), stage=True)
-            copied = self._effect('stage_input', ['container', 'cp', '-', self.identity['stage_container_id'] + ':/'], input_file=archive)
+            copied = self._effect('stage_input', ['container', 'cp', '-', self.identity['stage_container_id'] + ':/'], input_file=archive, timeout=self._admit())
             if copied['status'] != 'settled' or copied['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_stage_unknown')
             committed = self._effect('snapshot_input', ['container', 'commit', self.identity['stage_container_id'],
-                                                       self.identity['prepared_image_name']])
+                                                       self.identity['prepared_image_name']], timeout=self._admit())
             if committed['status'] != 'settled' or committed['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_snapshot_unknown')
@@ -555,7 +555,7 @@ class Environment:
             args[args.index('--name') + 1] = self.identity['container_name']
             args[image_argument] = self.identity['prepared_image_id']
             args.insert(2, '--read-only')
-            created = self._effect('create', args)
+            created = self._effect('create', args, timeout=self._admit())
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_create_unknown')

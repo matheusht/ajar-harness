@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -253,7 +254,11 @@ def tool_bundle(fixture, result):
     destination = fixture.directory / 'tool-bundle'
     if fixture.runtime == 'codex':
         (destination / 'bin').mkdir(parents=True, mode=0o700)
-        os.link(fixture.context_receipt['profile_fields']['executable']['path'], destination / 'bin/codex')
+        executable = Path(fixture.context_receipt['profile_fields']['executable']['path'])
+        os.link(executable, destination / 'bin/codex')
+        shutil.copyfile(executable.parent.parent / 'codex-package.json', destination / 'codex-package.json')
+        (destination / 'codex-resources').mkdir()
+        shutil.copy2(executable.parent.parent / 'codex-resources/bwrap', destination / 'codex-resources/bwrap')
         bundle = {'path': str(destination), 'manifest_sha256': digest(canonical(source_manifest(destination))),
                   'platform': fixture.platform}
         result['tool_installation'] = {'reused_verified_model_bytes': True, 'tool_bundle': bundle}
@@ -369,6 +374,47 @@ def invoke(context, boundary, prompt, result):
     check(result, 'native invocation completed', completed is not None and completed['status'] == 'completed')
     context.controller.record_invocation_observed(context.grant, invocation,
         {'status': completed['status'], 'usage': Runner._usage(boundary.runtime)})
+
+
+def verify_engagement_export(controller, root, result):
+    """Export this run privately, then verify bytes, journal references and result projection."""
+    import subprocess
+
+    bundle = root / 'export'
+    try:
+        exported = controller.export(bundle)
+        commands = {
+            'integrity': [sys.executable, str(ROOT / 'tools/check_engagement_export.py'), str(bundle)],
+            'references': [sys.executable, str(ROOT / 'tools/verify_engagement_export_references.py'), str(bundle)],
+            'result': [sys.executable, str(ROOT / 'tools/verify_engagement_export_references.py'),
+                       str(bundle), '--check-result'],
+        }
+        reports = {}
+        for name, command in commands.items():
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            if completed.returncode != 0:
+                raise ValueError('export_' + name + '_verification_failed')
+            reports[name] = json.loads(completed.stdout)
+        manifest = json.loads((bundle / 'manifest.json').read_text())
+        result['export_verification'] = {
+            'status': 'passed' if exported['status'] == 'exported'
+                and reports['integrity'].get('integrity') == 'verified'
+                and reports['references'].get('status') == 'verified'
+                and reports['result'].get('result_consistency_verified') is True
+                else 'failed',
+            'revision': exported['revision'],
+            'file_count': len(manifest['files']),
+            'manifest_sha256': digest((bundle / 'manifest.json').read_bytes()),
+            'integrity': reports['integrity'],
+            'references': reports['references'],
+            'result': reports['result'],
+        }
+        result['checks'].append({'name': 'same engagement export integrity, references and result verified',
+                                 'passed': result['export_verification']['status'] == 'passed'})
+        if result['export_verification']['status'] != 'passed':
+            result['status'] = 'failed'
+    except Exception as error:
+        result['export_verification'] = {'status': 'failed', 'error': error_code(error)}
 
 
 def run_native(root, fixture, result):
@@ -513,6 +559,7 @@ def run_native(root, fixture, result):
             if native.token is not None:
                 known_secrets.append(native.token.encode())
             result['native_executor_state'] = {'failure': native.failure, 'ready': native.ready,
+                'transport_diagnostic': native.transport_diagnostic,
                 'executor_returncode': native.executor.poll() if native.executor is not None else None,
                 'bridge_returncode': native.bridge.poll() if native.bridge is not None else None}
         if controller is not None:
@@ -547,6 +594,8 @@ def run_native(root, fixture, result):
             except Exception as error:
                 result['boundary_cleanup_error'] = error_code(error)
                 result['status'] = 'failed'
+        if controller is not None:
+            verify_engagement_export(controller, root, result)
         result['native_executor_stderr'] = executor_diagnostics.finish(tuple(known_secrets))
         provider.close()
         for name, value in original.items():
@@ -578,6 +627,7 @@ def main():
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:
             run_native(Path(temporary).resolve(), fixture, result)
+        check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
         check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
         result['status'] = 'passed'
     except Exception as error:

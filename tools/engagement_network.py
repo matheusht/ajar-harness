@@ -187,7 +187,7 @@ class NetworkGate:
                 if not self._active():
                     raise NetworkDenied('network_lease_inactive')
                 if self.request_binder is not None:
-                    binding = self.request_binder(method, url, headers)
+                    binding = self.request_binder(method, url, headers, request_length=length)
                     if binding is not None:
                         headers = binding.headers
                 origin = f'{parsed.scheme}://{parsed.hostname}:{port}'

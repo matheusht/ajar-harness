@@ -207,6 +207,9 @@ def record_environment_output(c, grant, profile_id, operation_id, output):
 
 
 def record_network_observation(c, grant, profile_id, nonce, observation, *, target_nonce=None):
+    if isinstance(observation, dict) and observation.get('kind') == 'acquisition-network-observation-v1':
+        from engagement_acquisition import record
+        return record(c, grant, profile_id, nonce, observation, target_nonce=target_nonce)
     with c.lock():
         state = c.state()
         binding(c, state, grant)
@@ -303,6 +306,7 @@ def comparable(left, right):
     return (all(left[key] == right[key] for key in ('instrument_id', 'conditions', 'input_identity',
         'environment_profile_id', 'effect_id', 'account_refs', 'resources'))
         and left.get('target_bindings', []) == right.get('target_bindings', [])
+        and left.get('acquisition_bindings', []) == right.get('acquisition_bindings', [])
         and left.get('application_state', {}) == right.get('application_state', {}))
 
 
@@ -460,8 +464,13 @@ def validate_request(c, state, worker, kind, data):
                     if row['grant']['dispatch_id'] == operation['grant']['dispatch_id']}
         if any(row['result'] is None or row['result']['status'] != 'settled' for row in requests.values()):
             fail('experiment_network_unsettled')
-        bindings = {}
+        bindings, acquisitions = {}, {}
         for row in requests.values():
+            if row['intent']['kind'] == 'acquisition-network-observation-v1':
+                from engagement_acquisition import projection
+                selected = projection(row)
+                acquisitions[canonical(selected)] = selected
+                continue
             selected = {key: row['intent'][key] for key in ('access_id', 'effect_id', 'account_ref', 'origin', 'method')}
             bindings[canonical(selected)] = selected
         data = dict(data, session_id=operation['session_id'], worker_id=worker['id'], generation=worker['generation'],
@@ -470,7 +479,8 @@ def validate_request(c, state, worker, kind, data):
             account_refs=operation['account_refs'], output_sha256=operation['output_sha256'],
             receipt_sha256=dispatch['receipt'], environment_receipts=operation['receipts'], patch_copy=operation.get('patch_copy'),
             execution_receipt_sha256=operation['execution_receipt_sha256'], clean_start=measurement['clean_start'],
-            network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)])
+            network_operations=sorted(requests), target_bindings=[bindings[key] for key in sorted(bindings)],
+            acquisition_bindings=[acquisitions[key] for key in sorted(acquisitions)])
         if operation.get('application_start_nonces'):
             starts = [state['application_starts'][nonce]['receipt'] for nonce in operation['application_start_nonces']]
             data['application_state'] = {row['access_id']: {key: row[key] for key in
@@ -1031,7 +1041,8 @@ def record_experiment_execution(c, grant, profile_id, operation_id, measurement)
                 fail('experiment_reset_unverified')
             expected = {row['receipt']['access_id']: row['receipt']['target_nonce'] for row in starts}
             if any(row.get('target_nonce') != expected.get(row['intent']['access_id']) for row in state['network_operations'].values()
-                   if row['grant']['dispatch_id'] == grant['dispatch_id']):
+                   if row['grant']['dispatch_id'] == grant['dispatch_id']
+                   and row['intent']['kind'] == 'target-network-observation-v1'):
                 fail('experiment_reset_unverified')
         mapping(measurement['conditions'])
         for name in ('instrument_sha256', 'candidate_sha256', 'probe_sha256'):
@@ -1104,7 +1115,8 @@ def application_released(state, dispatch_id, access_id):
     if any(state['environments'][nonce].get('cleanup') != 'verified' for nonce in nonces):
         return False
     return all(row.get('target_nonce') in nonces for row in state['network_operations'].values()
-        if row['grant']['dispatch_id'] in dispatches and row['intent']['access_id'] == access_id)
+        if row['grant']['dispatch_id'] in dispatches
+        and row['intent']['kind'] == 'target-network-observation-v1' and row['intent']['access_id'] == access_id)
 
 
 def current_closure(state, closure):

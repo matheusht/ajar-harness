@@ -391,6 +391,11 @@ worker operations. Inspect those states before
 calling the result complete. Export neither grants external-action authority nor
 publishes a report.
 
+Check the bundle using the [byte-integrity guide](engagement-export-integrity.md)
+and [reference and result verification guide](export-reference-verification.md).
+These checks establish exported-byte and journal consistency, not signer identity
+or research acceptance.
+
 The operator owns the future fresh-target acceptance test and comparison with a
 capable native agent. Engineering fixtures, local runtime controls, live provider
 behavior and research acceptance must remain distinct in every status report.

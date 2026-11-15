@@ -31,6 +31,7 @@ from research_environment import Environment
 from native_runtime_transport import HostOperation, MAX_FRAME
 from native_runtime_linux import LinuxModelOwner
 from target_accounts import TargetAccountError, TargetAccountResolver
+from acquisition_network import LabRequestBinder
 from application_state import ApplicationOwner
 from engagement_evidence import application_released
 import native_runtime_codex as codex
@@ -392,7 +393,8 @@ class NativeBoundary:
             provider_url = f'http://127.0.0.1:{provider_address}'
         self.lab_gate = NetworkGate(self.routes['lab'], self._active, maximum_bytes=maximum,
             dispatch_guard=self.context.guard,
-            request_binder=self.target_accounts.bind if self.target_accounts is not None else None,
+            request_binder=LabRequestBinder(self.scope, self.environment_id, self._authorize_target,
+                self._observe_network, self.target_accounts).bind,
             target_connectors=self._application_connectors(self.context.grant['resources']))
         self.lab_gate.serve(self.socket_dir / 'lab.sock', certificate=certificate, private_key=key)
         self.controller.record_preparation_setup(self.context.grant)
@@ -678,7 +680,7 @@ class NativeBoundary:
                     nonce = environment.receipt()['nonce']
                 else:
                     admitted, nonce = network_operations[operation_id]
-                owner = owners.get(observation['access_id'])
+                owner = owners.get(observation.get('access_id'))
                 target_nonce = owner.start_receipt['target_nonce'] if owner is not None else None
                 result = self.controller.record_network_observation(admitted, self.environment_id, nonce, observation,
                     target_nonce=target_nonce)
@@ -818,7 +820,8 @@ class NativeBoundary:
                     authorize, observe_network, environment_profile_id=self.environment_id)
             routes = _routes(self.scope, grant['resources'])['lab']
             gate = NetworkGate(routes, active, maximum_bytes=self.environment_reference['limits']['output_bytes'],
-                dispatch_guard=guard, request_binder=target_accounts.bind if target_accounts is not None else None,
+                dispatch_guard=guard, request_binder=LabRequestBinder(self.scope, self.environment_id,
+                    authorize, observe_network, target_accounts).bind,
                 target_connectors=self._application_connectors(grant['resources'], owners))
             socket_path = self.socket_dir / ('capture-' + uuid.uuid4().hex[:12] + '.sock')
             gate.serve(socket_path, certificate=self.certificate, private_key=self.private_key)

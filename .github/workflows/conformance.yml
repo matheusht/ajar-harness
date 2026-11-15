@@ -2,7 +2,7 @@ name: conformance
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/oslit-integrated-e2e-20261115]
   pull_request:
 
 jobs:
@@ -32,6 +32,9 @@ jobs:
       - name: Candidate v2 portable workflows (no model or external target)
         run: |
           mkdir -p "$RUNNER_TEMP/oslit-v2-checks"
+          python3 evals/native-qualification/smoke/check_codex_transport_diagnostics.py
+          python3 evals/native-qualification/smoke/check_codex_package_metadata.py
+          python3 evals/native-qualification/smoke/check_model_image_archive.py
           python3 evals/native-qualification/smoke/check_engagement_contract_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/contract.json"
           python3 evals/native-qualification/smoke/check_engagement_team_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/team.json"
           python3 evals/native-qualification/smoke/check_engagement_evidence_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/evidence.json"
@@ -39,6 +42,7 @@ jobs:
           python3 evals/native-qualification/smoke/check_engagement_coordination_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/coordination.json"
           python3 evals/native-qualification/smoke/check_engagement_guidance_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/guidance.json"
           python3 evals/native-qualification/smoke/check_target_accounts_e2e.py --output "$RUNNER_TEMP/oslit-v2-checks/target-accounts.json"
+          python3 evals/native-qualification/smoke/check_engagement_export_e2e.py -v
       - name: Retain candidate v2 workflow receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,7 +67,9 @@ jobs:
       - name: Decision 0005 prospective A/B readiness freezer (self-test)
         run: python3 tools/prepare-ab-study.py --self-test
       - name: Structural conformance (cards, routes, casebooks, secrets, evidence contract, corpora)
-        run: python3 tools/check-conformance.py
+        run: |
+          python3 tests/e2e/test_secret_scanner_archived_allowlist.py
+          python3 tools/check-conformance.py
       - name: Campaign / candidate contract gate (self-test)
         run: python3 tools/check-campaign.py --self-test
       - name: Campaign input hasher (self-test)

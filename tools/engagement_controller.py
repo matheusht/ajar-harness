@@ -302,6 +302,11 @@ class Controller:
                 if grant['dispatch_id'] not in holds:
                     holds.append(grant['dispatch_id'])
         for operation in state['network_operations'].values():
+            if operation['intent']['kind'] == 'acquisition-network-observation-v1':
+                # Missing transfer readback remains an obligation, never a target-state hold.
+                if operation['result'] is None or operation['result']['status'] == 'unknown':
+                    state['cleanup'] = 'pending'
+                continue
             dispatch = state['dispatches'][operation['grant']['dispatch_id']]
             result = operation['result']
             if operation.get('target_nonce') and state['environments'][operation['target_nonce']].get('cleanup') == 'verified':

@@ -15,6 +15,10 @@ receipt from an earlier unit does not certify later changes. The
 [October source-route assessment](native-research-status.md) remains a separate
 historical observation.
 
+November 15 source reconciliation: the [local assembly assessment](../research/oslit-implementation-assembly-2026-11-15.md)
+updates the M3/M4 gaps below. It includes acquisition, owned application reset and
+the bounded lab-artifact ledger, but remains an unqualified local candidate.
+
 ## Implemented behavior and evidence
 
 | Area | Candidate implementation | What the evidence establishes |
@@ -38,7 +42,9 @@ Source/binary-only capture may name a signed local `effect_id`; application requ
 select their own effect through `X-OSLit-Effect`. Initial setup still requires
 exactly one account-free `read` effect at `source_only` or `self` covering the
 selected resources and environment. A capture containing application access records
-`clean_start:false` and `remote_application_reset_unverified`. It cannot provide
+`clean_start:false` and `remote_application_reset_unverified` unless the capture
+uses the later implemented signed owned-application reset. An uncontrolled remote
+application cannot provide
 the clean independent remote replay needed for claim confirmation or the next
 escalation rung. A source-only subset of combined access can have a separate clean
 local input without making a remote-reset claim.
@@ -70,8 +76,8 @@ peers; the joined Docker workflow remains unverified.
 | M0 — contracts | Design/contracts and failure scenarios have local review; their assumptions still need the integrated execution evidence required by the plan. |
 | M1 — one state owner | Final public workflow integration must preserve sole ownership, revocation and exact cleanup across the combined runtime/environment path. |
 | M2 — runtimes/team | The optional Linux model-container owner and frozen OMP catalog are implemented at `cceac74c`; [14 contained scenario families](../../evals/native-qualification/team-evidence/m2-linux-model-host-20261114/README.md) passed independent replay. Actual pinned Linux native startup and the full joined protected workflow remain unverified. |
-| M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual loopback SSH passed 26 checks at `1ec66d6d`. Separate remote-host/partition checks, the joined workflow, complete setup repair and remote application reset/replay remain open. |
-| M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence; the joined native workflow remains unverified. Remote application reset/replay, fresh impact-artifact approval and an artifact cleanup ledger remain open. Existing operator review and artifact gates remain active. |
+| M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual loopback SSH passed 26 checks at `1ec66d6d`. The November 15 assembly includes signed acquisition provenance and owned application reset. Separate remote-host/partition checks and the joined setup/repair/reset workflow remain open; an uncontrolled remote application still has no verified reset. |
+| M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence. The November 15 assembly includes the bounded `owned-lab-state-v1` artifact ledger and cleanup recovery. Joined native execution, physical lab-state qualification and policy adoption remain open. Unsupported artifact classes are refused; existing operator review and artifact gates remain active. |
 | M5 — long operation/usage | No actual multiday soak or sustained host restart result; provider request totals, billed spend and monetary caps remain unavailable. Report missing usage dimensions explicitly. |
 | M6 — delivery | Final integrated verification, hosted CI and an operator-install-to-cleanup release-candidate handoff remain open. Broader caller retirement waits for parity evidence. |
 

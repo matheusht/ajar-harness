@@ -79,9 +79,12 @@ def validate_inventory(value, profile, limits):
     required = {'/', '/work', '/tmp', '/dev', '/dev/shm', '/dev/pts', '/dev/mqueue', '/proc',
         '/sys', '/sys/fs/cgroup', '/etc/hosts', '/etc/hostname', '/etc/resolv.conf'}
     try:
-        if (set(value) != {'uid', 'gid', 'mounts', 'namespaces'} or value['uid'] != profile['uid']
+        if (set(value) != {'uid', 'gid', 'mounts', 'namespaces'}
+                or type(value['uid']) is not int or type(value['gid']) is not int
+                or value['uid'] != profile['uid']
                 or value['gid'] != profile['gid'] or value['uid'] == 0 or not isinstance(value['mounts'], list)
-                or not 13 <= len(value['mounts']) <= 128 or set(value['namespaces']) != {'ipc', 'pid', 'mnt', 'net', 'cgroup'}
+                or not 13 <= len(value['mounts']) <= 128 or type(value['namespaces']) is not dict
+                or set(value['namespaces']) != {'ipc', 'pid', 'mnt', 'net', 'cgroup'}
                 or any(not re.fullmatch(name + r':\[[0-9]+\]', item) for name, item in value['namespaces'].items())):
             raise ValueError()
         observed = set()

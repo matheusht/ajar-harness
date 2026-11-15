@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import time
+import tempfile
 from types import SimpleNamespace
 
 
@@ -46,8 +46,11 @@ class PopenAdapter:
     def Popen(self, command, *args, **kwargs):
         if self.incomplete:
             return BrokenProcess()
-        code = 'import sys;sys.stderr.buffer.write(bytes.fromhex(sys.argv[1]))'
-        return subprocess.Popen([sys.executable, '-c', code, self.output.hex()], *args, **kwargs)
+        code = 'import sys;sys.stderr.buffer.write(sys.stdin.buffer.read())'
+        with tempfile.TemporaryFile() as source:
+            source.write(self.output)
+            source.seek(0)
+            return subprocess.Popen([sys.executable, '-c', code], stdin=source, *args, **kwargs)
 
 
 def observe(stderr, *, incomplete=False):
@@ -59,7 +62,6 @@ def observe(stderr, *, incomplete=False):
     try:
         with driver.observe_model_stderr(module, result):
             module.subprocess.Popen(COMMAND, stderr=subprocess.DEVNULL)
-            time.sleep(0.05)
     finally:
         if previous is None:
             os.environ.pop('OPENAI_API_KEY', None)

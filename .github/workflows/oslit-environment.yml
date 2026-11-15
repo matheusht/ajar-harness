@@ -28,6 +28,7 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
+      - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_omp_model_addon_assets.py
@@ -62,6 +63,7 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
+      - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_omp_model_addon_assets.py
@@ -142,6 +144,7 @@ jobs:
         run: |
           python3 evals/native-qualification/smoke/check_omp_loader_preflight_test.py
           python3 evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
+          python3 evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
           python3 evals/native-qualification/smoke/check_omp_public_credential_reference.py
           python3 evals/native-qualification/smoke/check_omp_model_addon_assets.py
       - name: Check pinned native startup without provider invocation

@@ -94,7 +94,20 @@ provider still requires the synthetic credential. The next run reached the publi
 as a credential assignment. The guard now recognizes only the exact parsed JSON
 member `apiKey: OPENAI_API_KEY`; actual credential and known-secret checks retain
 the original bytes. Four accepted and eight rejected cases, frozen signed inputs,
-and the 75-check contract suite passed locally. The corrected native run is pending.
+and the 75-check contract suite passed locally.
+
+The [next native run](https://github.com/matheusht/redteam-harness/actions/runs/43731100404)
+at `9415de22` passed OMP startup. Its joined invocation did not complete and made
+zero controlled provider requests. Both failed journals again passed all three
+export checks and verified cleanup. Codex still failed before startup. A fixed,
+harmless policy comparison found two restrictions: removing seccomp allowed the
+user namespace, then Docker AppArmor denied Bubblewrap's mount operation. The
+both-relaxed probe hit a loopback setup error. The [pinned Codex argument builder](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/linux-sandbox/src/bwrap.rs)
+requires a network namespace for this network-disabled profile; the next probe
+will match those native flags. The error does not by itself identify a missing
+outer capability: [vendored Bubblewrap](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/vendor/bubblewrap/bubblewrap.c)
+sets up loopback before dropping final sandbox capabilities. These disposable component
+diagnostics do not qualify a runtime or change production sandbox policy.
 
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later

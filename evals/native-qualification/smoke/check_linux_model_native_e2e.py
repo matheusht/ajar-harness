@@ -72,6 +72,66 @@ def diagnostic_transport(observations, known_secrets):
     return ObservedTransport
 
 
+def diagnostic_omp_frame(frame, known_secrets):
+    """Keep only bounded OMP terminal/error fields; discard assistant content and tool data."""
+    if not isinstance(frame, dict):
+        return None
+    if frame.get('type') == 'prompt_result':
+        status = frame.get('status')
+        if status not in ('completed', 'aborted', 'error'):
+            return {'event': 'prompt_result', 'status': 'invalid'}
+        row = {'event': 'prompt_result', 'status': status}
+        if type(frame.get('sessionSettled')) is bool:
+            row['session_settled'] = frame['sessionSettled']
+        error = frame.get('errorMessage')
+        if isinstance(error, str) and error:
+            row.update(_diagnostic_omp_error(error, known_secrets))
+        return row
+    if frame.get('type') != 'message_end':
+        return None
+    message = frame.get('message')
+    if not isinstance(message, dict) or message.get('role') != 'assistant':
+        return None
+    error = message.get('errorMessage')
+    if not isinstance(error, str) or not error:
+        return None
+    return {'event': 'message_end', 'role': 'assistant',
+            **_diagnostic_omp_error(error, known_secrets)}
+
+
+def _diagnostic_omp_error(error, known_secrets):
+    try:
+        safe_publication(canonical({'errorMessage': error}), known_secrets=known_secrets)
+    except ContractError:
+        return {'error_message': '[diagnostic redacted]', 'redacted': True}
+    safe_error = ''.join(character if character in '\n\t' or ord(character) >= 32 else ' '
+                          for character in error)
+    safe_error = re.sub(r'(?i)(?:/home|/users|/private|/var/folders)/[^\s:]+', '[path]', safe_error)
+    encoded = safe_error.encode('utf-8', 'replace')
+    truncated = len(encoded) > 1024
+    if truncated:
+        safe_error = encoded[:1024].decode('utf-8', 'ignore')
+    return {'error_message': safe_error, 'truncated': truncated}
+
+
+def observe_omp_native_events(runtime, result, known_secrets):
+    """Record selected OMP events before the runtime's unchanged normal handler."""
+    transport = runtime.transport
+    original = transport.on_event
+    diagnostic = result.setdefault('omp_native_events', {'events': [], 'truncated': False})
+
+    def observe(frame):
+        row = diagnostic_omp_frame(frame, known_secrets)
+        if row is not None:
+            if len(diagnostic['events']) < 12:
+                diagnostic['events'].append(row)
+            else:
+                diagnostic['truncated'] = True
+        original(frame)
+
+    transport.on_event = observe
+
+
 def environment_diagnostics(controller, known_secrets):
     with controller.lock():
         events = [event for event in controller._events() if event['type'] == 'evidence_recorded'
@@ -381,12 +441,40 @@ def invoke(context, boundary, prompt, result):
     from engagement_runner import Runner
     invocation = context.controller.begin_invocation(context.grant)
     boundary.runtime.invoke(prompt, invocation)
-    deadline, completed = time.monotonic() + 70, None
+    started = time.monotonic()
+    deadline, completed = started + 70, None
+    observed = []
+    observed_truncated = False
     while time.monotonic() < deadline:
         events = boundary.runtime.observe(timeout_seconds=.1)
-        completed = next((event for event in events if event['event'] == 'completed'), completed)
+        for event in events:
+            kind = event.get('event')
+            if kind in ('started', 'completed', 'yielded', 'unknown', 'host_tool_cancel'):
+                row = {'event': kind}
+                for key in ('status', 'reason', 'resource_settlement'):
+                    value = event.get(key)
+                    if isinstance(value, str) and len(value) <= 128:
+                        row[key] = value
+                if type(event.get('session_settled')) is bool:
+                    row['session_settled'] = event['session_settled']
+                if type(event.get('usage_available')) is bool:
+                    row['usage_available'] = event['usage_available']
+                if len(observed) < 32:
+                    observed.append(row)
+                else:
+                    observed_truncated = True
+            if kind == 'completed':
+                completed = event
         if not boundary.runtime.active:
             break
+    result.setdefault('native_invocation_diagnostics', []).append({
+        'runtime': boundary.runtime.kind,
+        'phase': 'completed' if completed is not None else 'no_completion_before_deadline',
+        'status': completed.get('status') if completed is not None else None,
+        'active_after_wait': bool(boundary.runtime.active),
+        'wait_seconds': round(time.monotonic() - started, 3),
+        'events': observed, 'events_truncated': observed_truncated,
+    })
     check(result, 'native invocation completed', completed is not None and completed['status'] == 'completed')
     context.controller.record_invocation_observed(context.grant, invocation,
         {'status': completed['status'], 'usage': Runner._usage(boundary.runtime)})
@@ -496,6 +584,8 @@ def run_native(root, fixture, result):
         finally:
             result['userns_diagnostic'] = (compare_environment(boundary.environment)
                 if boundary.environment is not None else {'classification': 'environment_unavailable'})
+        if fixture.runtime == 'omp':
+            observe_omp_native_events(boundary.runtime, result, (secret.encode(),))
         result['native_execution'] = 'initialized'
         controller.record_worker_started(worker['id'], worker['generation'], identity['session_id'], workspace,
                                          owner_receipt=identity['owner_receipt'])
@@ -618,6 +708,35 @@ def run_native(root, fixture, result):
                 result['environment_operation_diagnostics'] = {'status': 'unavailable', 'error': error_code(error)}
                 result['status'] = 'failed'
         if boundary is not None:
+            if fixture.runtime == 'omp':
+                try:
+                    transport = boundary.runtime.transport
+                    laboratory_channel = getattr(getattr(boundary, 'proxy', None), 'channel', None)
+                    provider_channel = getattr(getattr(boundary, 'model_proxy', None), 'channel', None)
+                    result['omp_runtime_diagnostic'] = {
+                        'runtime_ready': bool(boundary.runtime.ready),
+                        'runtime_active': bool(boundary.runtime.active),
+                        'pending_completion': boundary.runtime.pending_completion
+                            if boundary.runtime.pending_completion in ('completed', 'aborted', 'error') else None,
+                        'transport_failure': transport.failure
+                            if isinstance(transport.failure, str) and re.fullmatch(r'[a-z_]{1,100}', transport.failure)
+                            else None,
+                        'process_returncode': transport.process.poll(),
+                        'provider_requests': len(provider.requests),
+                        'provider_errors': provider.errors[:8],
+                        'provider_errors_truncated': len(provider.errors) > 8,
+                        'provider_escapes': provider.escapes,
+                        'proxy_channel_failures': {
+                            'laboratory': laboratory_channel.failure
+                                if laboratory_channel is not None and isinstance(laboratory_channel.failure, str)
+                                and re.fullmatch(r'[a-z_]{1,100}', laboratory_channel.failure) else None,
+                            'model_provider': provider_channel.failure
+                                if provider_channel is not None and isinstance(provider_channel.failure, str)
+                                and re.fullmatch(r'[a-z_]{1,100}', provider_channel.failure) else None,
+                        },
+                    }
+                except Exception:
+                    result['omp_runtime_diagnostic'] = {'status': 'unavailable'}
             result['recovery_identities'] = {}
             readers = {
                 'model_owner': lambda: boundary.model_owner.receipt() if boundary.model_owner is not None else boundary.owner_receipt,

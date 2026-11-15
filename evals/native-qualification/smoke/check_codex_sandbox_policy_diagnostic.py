@@ -54,9 +54,10 @@ print('OSLIT_USERNS='+json.dumps(r,sort_keys=True,separators=(',',':')))
 '''
 
 BWRAP_COMMAND = (
-    '/runtime/codex-resources/bwrap', '--die-with-parent', '--unshare-user',
-    '--unshare-pid', '--unshare-net', '--uid', '1000', '--gid', '1000',
-    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--', '/bin/true',
+    '/runtime/codex-resources/bwrap', '--new-session', '--die-with-parent',
+    '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-pid',
+    '--unshare-ipc', '--unshare-net', '--proc', '/proc', '--cap-drop', 'ALL',
+    '--', '/bin/true',
 )
 
 
@@ -382,8 +383,10 @@ def _self_check():
         assert args[args.index('--user') + 1] == '1000:1000'
         assert args[args.index('--pids-limit') + 1] == '32'
         assert '--mount' not in args and '-v' not in args and '--privileged' not in args
-        assert '/runtime/codex-resources/bwrap' in args[-1]
-        assert '/bin/true' in args[-1]
+        bwrap_lines = [line for line in args[-1].splitlines()
+                       if line.startswith('/runtime/codex-resources/bwrap ')]
+        assert len(bwrap_lines) == 1
+        assert shlex.split(bwrap_lines[0]) == list(BWRAP_COMMAND)
         inspection = {'Image': 'sha256:' + 'a' * 64,
             'Name': '/oslit-codex-policy-' + 'b' * 12 + '-' + name,
             'Config': {'User': '1000:1000', 'Labels': {

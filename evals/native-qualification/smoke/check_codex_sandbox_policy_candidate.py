@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a fixed harmless bwrap probe under two digest-pinned Docker policies.
+"""Run Codex's fixed harmless sandbox CLI probe under two digest-pinned policies.
 
 This test-only route loads a unique AppArmor policy on the local disposable Linux
 CI host. It does not qualify the native runtime or change production settings.
@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import socket
 import struct
@@ -26,6 +27,15 @@ APPARMOR_PROFILE = 'oslit-codex-tool-v1'
 APPARMOR_SHA256 = '416fa88e0a55d80ba102e7d7ba4205281dff504e9021e66d21bae9c7feb4960f'
 SECCOMP_SHA256 = 'ce43ad043604a1d352bb505633df3087630716dfb9af894841faadef6021275a'
 BWRAP_SHA256 = 'sha256:77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c'
+CODEX_SANDBOX_COMMAND = (
+    '/runtime/bin/model', 'sandbox', '--permission-profile', ':read-only', '--', '/bin/true',
+)
+CODEX_SANDBOX_HOME = '/tmp/codex-home'
+CODEX_SANDBOX_PATH = '/runtime/codex-resources'
+CODEX_SANDBOX_LAUNCH = (
+    '/usr/bin/env', 'PATH=' + CODEX_SANDBOX_PATH,
+    'HOME=' + CODEX_SANDBOX_HOME, 'CODEX_HOME=' + CODEX_SANDBOX_HOME, *CODEX_SANDBOX_COMMAND,
+)
 APPARMOR_PROFILE_PATH = Path('/sys/kernel/security/apparmor/profiles')
 TIMEOUT = 30
 
@@ -153,6 +163,26 @@ def _self_check() -> dict:
     assert _profile_present(APPARMOR_PROFILE + ' (complain)\n', APPARMOR_PROFILE)
     assert not _loaded_profile(APPARMOR_PROFILE + ' (complain)\n', APPARMOR_PROFILE)
     assert _loaded_profile(APPARMOR_PROFILE + ' (enforce)\n', APPARMOR_PROFILE)
+    assert CODEX_SANDBOX_COMMAND == (
+        '/runtime/bin/model', 'sandbox', '--permission-profile', ':read-only', '--', '/bin/true')
+    assert 'linux' not in CODEX_SANDBOX_LAUNCH
+    previous_command = diagnostic.BWRAP_COMMAND
+    previous_probe = diagnostic.UNSHARE_PROBE
+    try:
+        diagnostic.BWRAP_COMMAND = CODEX_SANDBOX_LAUNCH
+        diagnostic.UNSHARE_PROBE = (OUTER_MOUNT_PROBE + '\nimport os; os.mkdir('
+            + repr(CODEX_SANDBOX_HOME) + ', 0o700)\n' + previous_probe)
+        _, native_args = diagnostic._scenario_command(
+            'docker', 'unix:///fixture', 'sha256:' + 'a' * 64, 'b' * 32,
+            'candidate', ('seccomp=/policy', 'apparmor=' + APPARMOR_PROFILE))
+        native_script = native_args[-1]
+        assert shlex.join(CODEX_SANDBOX_LAUNCH) in native_script
+        assert 'os.mkdir' in native_script and CODEX_SANDBOX_HOME in native_script
+        assert native_script.index('os.mkdir') < native_script.index('libc.unshare')
+        assert 'OSLIT_BWRAP_STATUS=' in native_script
+    finally:
+        diagnostic.BWRAP_COMMAND = previous_command
+        diagnostic.UNSHARE_PROBE = previous_probe
     assert _parse_mount_result('OSLIT_OUTER_MOUNT={"status":"denied","errno":1,"errno_name":"EPERM","cleanup":true,"cap_eff":"0000000000000000"}') == {
         'status': 'denied', 'errno': 1, 'errno_name': 'EPERM',
         'cleanup': True, 'cap_eff': '0000000000000000'}
@@ -274,7 +304,7 @@ def run_candidate(docker: str, endpoint: str, image_id: str, bwrap_sha256: str,
               'candidate_profiles': {'apparmor_name': APPARMOR_PROFILE,
                   'apparmor_sha256': 'sha256:' + APPARMOR_SHA256,
                   'seccomp_sha256': 'sha256:' + SECCOMP_SHA256},
-              'bwrap_sha256': BWRAP_SHA256,
+              'codex_bwrap_asset_sha256': BWRAP_SHA256,
               'common_policy': {'cap_drop': ['ALL'], 'no_new_privileges': True,
                   'network': 'none', 'host_bind_mounts': 0, 'readonly_root': True,
                   'memory_bytes': 268435456, 'memory_swap_bytes': 268435456,
@@ -345,8 +375,11 @@ def run_candidate(docker: str, endpoint: str, image_id: str, bwrap_sha256: str,
 
         options = ('seccomp=' + str(SECCOMP_FILE), 'apparmor=' + APPARMOR_PROFILE)
         prior_probe = diagnostic.UNSHARE_PROBE
+        prior_command = diagnostic.BWRAP_COMMAND
         prior_verify = diagnostic._verify_container
-        diagnostic.UNSHARE_PROBE = OUTER_MOUNT_PROBE + '\n' + prior_probe
+        diagnostic.UNSHARE_PROBE = (OUTER_MOUNT_PROBE + '\nimport os; os.mkdir('
+            + repr(CODEX_SANDBOX_HOME) + ', 0o700)\n' + prior_probe)
+        diagnostic.BWRAP_COMMAND = CODEX_SANDBOX_LAUNCH
         diagnostic._verify_container = _candidate_verify_container
         audit_window_started = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         scenario_started = True
@@ -355,18 +388,34 @@ def run_candidate(docker: str, endpoint: str, image_id: str, bwrap_sha256: str,
                                       options, BWRAP_SHA256)
         finally:
             diagnostic.UNSHARE_PROBE = prior_probe
+            diagnostic.BWRAP_COMMAND = prior_command
             diagnostic._verify_container = prior_verify
+        probe_output = row.get('bwrap', {}).get('stdout', '')
+        outer_mount = _parse_mount_result(probe_output)
+        # _run_one's bwrap slot is only a compatibility surface for this
+        # candidate-local command override. Publish it under its actual identity.
+        native_row = row.pop('bwrap', {})
+        native_row['codex_bwrap_asset_sha256'] = native_row.pop('bwrap_sha256', BWRAP_SHA256)
+        native_row.update(executable=CODEX_SANDBOX_COMMAND[0],
+                          argv=list(CODEX_SANDBOX_COMMAND),
+                          environment={'HOME': CODEX_SANDBOX_HOME,
+                                       'CODEX_HOME': CODEX_SANDBOX_HOME,
+                                       'PATH': CODEX_SANDBOX_PATH},
+                          home_mode='0700',
+                          bwrap_selection='expected_bundled_from_controlled_path',
+                          permission_profile=':read-only', image_id=image_id,
+                          proc_mount_fallback='not_observed')
+        row['native_sandbox'] = native_row
         report['scenario'] = row
-        outer_mount = _parse_mount_result(row.get('bwrap', {}).get('stdout', ''))
         report['outside_namespace_mount'] = outer_mount
         report['outside_namespace_mount_denied'] = (
             outer_mount.get('status') == 'denied' and outer_mount.get('errno') == 1
             and outer_mount.get('cap_eff') == '0000000000000000' and outer_mount.get('cleanup'))
         report['apparmor_runtime_name_matches'] = row.get('apparmor_profile') == APPARMOR_PROFILE
-        bwrap_ok = (row.get('status') == 'observed'
-                    and row.get('bwrap', {}).get('status') == 'exit:0'
+        native_sandbox_ok = (row.get('status') == 'observed'
+                    and row.get('native_sandbox', {}).get('status') == 'exit:0'
                     and row.get('unshare', {}).get('status') == 'allowed')
-        success = (bwrap_ok and report['outside_namespace_mount_denied']
+        success = (native_sandbox_ok and report['outside_namespace_mount_denied']
                    and report['apparmor_runtime_name_matches']
                    and row.get('container_cleanup') == 'verified')
         report['status'] = 'observed' if success else 'failed'

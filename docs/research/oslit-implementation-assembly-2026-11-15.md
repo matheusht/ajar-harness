@@ -7,9 +7,9 @@ bytes remain unchanged. The earlier failure below is retained as a checkpoint.
 The assembly is published on `codex/oslit-integrated-e2e-20261115`. Hosted structural
 conformance passed at `eedb24c9`; the full workflow later refused the stale v4
 checker pin. A v5 successor preserves every preexisting v4 byte. The full hosted
-conformance workflow subsequently passed at `9415de22` (899 structural checks,
-zero failures; v5 frozen inputs intact). Neither native runtime has completed
-the joined workflow.
+conformance workflow subsequently passed at `9415de22` and `dd63fe81` (899 structural
+checks, zero failures; v5 frozen inputs intact). OMP completed the joined workflow at
+`f244b003`, with subsequent passes at `dd63fe81` and `5d9da3c5`; Codex remains blocked.
 
 This is a local implementation candidate, not an accepted release or qualified
 research workflow. It combines the source at `5d290d19`, the staged bounded
@@ -150,6 +150,16 @@ fixed, digest-pinned seccomp and named AppArmor profiles for a harmless Bubblewr
 command only. It verifies the unchanged outer container controls and a denied mount
 outside the child user namespace, then removes its owned container and profile.
 
+The [confined-policy replay](https://github.com/matheusht/redteam-harness/actions/runs/43739457623)
+at `5d9da3c5` loaded the candidate AppArmor profile in enforce mode and permitted
+the user namespace. The outer mount still failed with `EPERM` and zero effective
+capabilities. Raw Bubblewrap then failed mounting `/proc`; candidate container
+and profile cleanup were verified. The pinned Codex implementation has its own
+fresh-proc preflight and fallback while retaining PID isolation. The next check
+therefore invokes that native helper, preserving its default behavior. This
+component result does not establish successful Codex execution or enable the
+candidate policy in production.
+
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later
 refused revision 4's checker pin. Revision 5 records the changed checker under the
@@ -163,6 +173,11 @@ retrospective gates also passed under hosted Python 3.15.2. This verifies that
 repository workflow at that revision; subsequent commits refine diagnostics, and a
 final check must cover the finished repair. OMP's joined fixture passes at `f244b003`;
 Codex and the broader delivery gates remain open.
+
+The [full conformance run at `dd63fe81`](https://github.com/matheusht/redteam-harness/actions/runs/43738351015)
+also passed. The canonical lifecycle step completed after 16m29s, within a 31m45s
+workflow; it was ongoing work, not a stalled process. A separate intermittent
+signed-review staging deadline remains under repair without raising the deadline.
 
 ## Remaining implementation and delivery
 

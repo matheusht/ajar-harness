@@ -48,7 +48,13 @@ name and never replaces `docker-default`.
 Run `python3 evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py --self-check`
 for the offline contract check. The full workflow preserves the replay under
 `codex_policy_candidate` in the joined Codex JSON artifact, with policy and helper
-source hashes. Expected candidate result: Bubblewrap exits zero, an outer-container
+source hashes. The candidate now invokes `/runtime/bin/model sandbox --permission-profile :read-only -- /bin/true`
+(the image's installed Codex executable), with a private home on the existing
+temporary filesystem and `PATH=/runtime/codex-resources` selecting the pinned Bubblewrap asset. This selects Codex's
+native read-only filesystem and restricted-network policy with default PID isolation.
+Its [native helper](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/linux-sandbox/src/linux_run_main.rs#L389-L419)
+chooses whether to mount a fresh `/proc`; the branch taken is silent and is not
+directly observed by this replay. Expected candidate result: Codex exits zero, an outer-container
 mount is denied with zero effective capabilities, the exact container controls
 are observed, and both the container and owned profile have verified cleanup.
 The four default/relaxed diagnostic scenarios remain separate controls. A candidate

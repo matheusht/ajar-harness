@@ -35,12 +35,12 @@
     "conformance_run": 43725604808,
     "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
     "namespace_diagnostic_run": 43726713247,
-    "codex_blocker": "faithful native-flag probe reproduces namespace denial, AppArmor mount denial, and both-relaxed loopback denial under unprivileged_userns; production policy unchanged",
-    "full_conformance": "Passed at 9415de223d77aa1bce122b08056c73a2a5a964f2, run 43731100402: 899 structural checks, zero failures; canonical v5 frozen inputs intact; schema and retrospective gates passed under Python 3.15.2. Later diagnostic commits are not a final repaired-head pass.",
+    "codex_blocker": "Default tool policy still refuses user namespace before native invocation. Confined candidate at 5d9da3c5 permits user namespace and denies outer mount with zero effective capabilities, then raw Bubblewrap fails proc mount; container and profile cleanup verified. Actual Codex proc fallback replay pending; production policy unchanged.",
+    "full_conformance": "Full workflow passed at 9415de22 (43731100402) and dd63fe81 (43738351015): 899 structural checks, zero failures; canonical v5 frozen inputs intact. Intermittent signed-review staging deadline is separately under repair; final repair revision still requires hosted verification.",
     "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally",
-    "latest_native_head": "f244b0035549f68337ce5edb4505db163c14a14c",
-    "latest_native_run": 43737579256,
-    "latest_conformance_run": 43731100402,
+    "latest_native_head": "5d9da3c5093a1f19fbefbffcb06f045227f5f1d7",
+    "latest_native_run": 43739457623,
+    "latest_conformance_run": 43738351015,
     "omp_joined": "Passed 21 checks: two invocations, four model POSTs, one discovery GET, zero provider escapes/errors; retention, owner-loss stop, revocation, recovery, export and cleanup verified; deterministic owned provider only"
   }
 }

@@ -235,6 +235,12 @@ def model_image_context(args):
                         int.from_bytes(header[18:20], 'little') != {'linux/arm64': 183, 'linux/amd64': 62}[args.platform]):
                     raise InstallError('native_bundle_platform_mismatch')
                 output.chmod(0o555)
+            if args.runtime == 'omp':
+                from native_model_addon import prepare_omp_addon_assets
+                assets = Path(temporary) / 'addon-assets'
+                addon = prepare_omp_addon_assets(lock, args.platform, assets, budget=budget)
+                shutil.copytree(assets, runtime, dirs_exist_ok=True)
+                archives.append(addon['archive'])
             helpers = ['engagement_network_bridge.py', 'native_runtime_bootstrap.py']
             if args.runtime == 'codex':helpers.append('native_runtime_codex_exec.mjs')
             for name in helpers:

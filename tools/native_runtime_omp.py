@@ -414,7 +414,13 @@ class ToolOwner:
 
     def _event(self, frame):
         from native_runtime_transport import public
-        if frame.get('type') == 'ready':
+        if frame.get('type') == 'startup_failed':
+            phase = frame.get('phase')
+            if self.ready or phase not in ('paths', 'manifest', 'sdk_import', 'schema_import',
+                                           'validation_import', 'settings', 'tools', 'catalog'):
+                raise RuntimeError('native_tool_startup_diagnostic_invalid')
+            raise RuntimeError('native_tool_startup_' + phase)
+        elif frame.get('type') == 'ready':
             if frame.get('sdkVersion') != '18.20.0':
                 raise RuntimeError('native_sdk_version_unsupported')
             if self.expected_ready is not None and any(frame.get(key) != value for key, value in self.expected_ready.items()):

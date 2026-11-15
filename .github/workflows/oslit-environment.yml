@@ -24,6 +24,7 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
       - evals/native-qualification/smoke/check_container_guardian_e2e.py
       - evals/native-qualification/smoke/check_application_owner_docker_e2e.py
@@ -51,6 +52,7 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_omp_loader_preflight*.py
       - evals/native-qualification/smoke/check_environment_docker_e2e.py
       - evals/native-qualification/smoke/check_container_guardian_e2e.py
       - evals/native-qualification/smoke/check_application_owner_docker_e2e.py
@@ -123,9 +125,16 @@ jobs:
         run: |
           docker --host unix:///var/run/docker.sock pull \
             python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
+      - name: Check bounded loader-preflight contract
+        if: matrix.runtime == 'omp'
+        run: python3 evals/native-qualification/smoke/check_omp_loader_preflight_test.py
       - name: Exercise pinned native tools and recovery with a controlled provider
         run: |
-          python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
+          script=evals/native-qualification/smoke/check_linux_model_native_e2e.py
+          if [ "${{ matrix.runtime }}" = omp ]; then
+            script=evals/native-qualification/smoke/check_omp_loader_preflight.py
+          fi
+          python3 "$script" \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \

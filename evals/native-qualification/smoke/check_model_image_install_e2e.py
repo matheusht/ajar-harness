@@ -3,7 +3,7 @@
 
 Owned localhost assets contain synthetic ELF headers, never native executables.
 No Docker/build/provider call is made. The two size-bound cases run the same CLI
-with the general archive ceiling reduced to 256 bytes in an isolated subprocess.
+with the general archive ceiling reduced to 512 bytes in an isolated subprocess.
 This proves limit selection without allocating or downloading a 288 MB fixture.
 """
 from __future__ import annotations
@@ -50,12 +50,12 @@ def run(base):
     fixture_repo = base / 'repository'
     tools = fixture_repo / 'tools'; tools.mkdir(parents=True)
     for name in ('install_native_tools.py', 'engagement_contract.py', 'engagement_records.py',
-                 'operator_signature.py', 'native_runtime_transport.py'):
+                 'operator_signature.py', 'native_runtime_transport.py', 'native_model_addon.py'):
         shutil.copyfile(ROOT / 'tools' / name, tools / name)
     for name in (*HELPERS, 'native_runtime_codex_exec.mjs'):
         (tools / name).write_text('# frozen packaging fixture for ' + name + '\n')
     wrapper = tools / 'scaled_limit.py'
-    wrapper.write_text('import install_native_tools as installer\ninstaller.MAX_ARCHIVE = 256\nraise SystemExit(installer.main())\n')
+    wrapper.write_text('import install_native_tools as installer\ninstaller.MAX_ARCHIVE = 512\nraise SystemExit(installer.main())\n')
 
     def asset(name, content, **fields):
         assets['/' + name] = content
@@ -68,12 +68,21 @@ def run(base):
         zipped = io.BytesIO()
         with zipfile.ZipFile(zipped, 'w') as archive:
             archive.writestr('bun/bun', binary)
-        raw = binary + b'\0' * 492
+        raw = binary + b'\0' * 1004
+        cpu = 'arm64' if platform == 'linux/arm64' else 'x64'
+        filenames = (['pi_natives.linux-x64-baseline.node', 'pi_natives.linux-x64-modern.node']
+                     if cpu == 'x64' else ['pi_natives.linux-arm64.node'])
+        package_name = '@oh-my-pi/pi-natives-linux-' + cpu
+        package = {'package/' + filename: binary for filename in filenames}
+        package.update({'package/package.json': json.dumps({'name': package_name, 'version': '18.20.0',
+            'os': ['linux'], 'cpu': [cpu], 'main': './' + filenames[0]}).encode(),
+            'package/LICENSE': b'MIT', 'package/THIRD-PARTY-NOTICES.txt': b'notices', 'package/README.md': b'readme'})
+        addon = {**asset(name + '-addon', tar(package), version='18.20.0', os='linux', cpu=cpu), 'name': package_name}
         return {'kind': 'native-tool-installation-lock-v1', 'codex_version': '0.166.0',
                 'omp_version': '18.20.0', 'bun_version': '1.4.4', 'platforms': {platform: {
                     'codex': asset(name + '-codex', tar({'codex': binary}), member='codex'),
                     'bun': asset(name + '-bun', zipped.getvalue(), member='bun/bun'),
-                    'model_omp': asset(name + '-omp', raw, format='raw', size=len(raw))}}, 'packages': []}
+                    'model_omp': asset(name + '-omp', raw, format='raw', size=len(raw))}}, 'packages': [addon]}
 
     cases = [('codex-arm64', 'codex', 'linux/arm64'), ('codex-amd64', 'codex', 'linux/amd64'),
              ('omp-arm64', 'omp', 'linux/arm64'), ('omp-amd64', 'omp', 'linux/amd64')]
@@ -130,7 +139,7 @@ def run(base):
             if name == 'base-injection':base_image = BASE + '\nRUN echo forbidden'
             if name == 'version':current['omp_version'] = '18.19.0'
             if name == 'archive-limit':
-                row['codex'] = asset(name + '-large', b'x' * 512, member='codex')
+                row['codex'] = asset(name + '-large', b'x' * 1024, member='codex')
             pin = folder / 'lock.json'; pin.write_text(json.dumps(current))
             arguments = ['model-image-context', '--runtime', runtime, '--platform', platform,
                 '--base-image', base_image, '--destination', str(destination), '--receipt', str(receipt), '--lock', str(pin)]
@@ -154,6 +163,10 @@ def run(base):
                     assert document['lock_sha256'] == sha(pin.read_bytes())
                     expected = {'bin/model', *HELPERS}
                     if runtime == 'codex':expected |= {'bin/bun', 'native_runtime_codex_exec.mjs'}
+                    else:
+                        expected |= {'omp-native-' + name for name in ('package.json', 'LICENSE', 'THIRD-PARTY-NOTICES.txt', 'README.md')}
+                        expected |= ({'bin/pi_natives.linux-x64-baseline.node', 'bin/pi_natives.linux-x64-modern.node'}
+                                     if platform == 'linux/amd64' else {'bin/pi_natives.linux-arm64.node'})
                     manifest = document['runtime_manifest']
                     assert set(manifest) == expected
                     executable = document['profile_fields']['executable']
@@ -162,7 +175,7 @@ def run(base):
                     for relative in expected:
                         path = destination / 'runtime' / relative
                         assert manifest[relative]['sha256'] == sha(path.read_bytes())
-                        assert stat.S_IMODE(path.stat().st_mode) == (0o555 if relative.startswith('bin/') else 0o444)
+                        assert stat.S_IMODE(path.stat().st_mode) == (0o555 if relative in ('bin/model', 'bin/bun') else 0o444)
                     assert stat.S_IMODE(destination.stat().st_mode) == 0o700
                     assert all(stat.S_IMODE(path.stat().st_mode) == 0o755 for path in
                                (destination / 'runtime', destination / 'runtime/bin'))
@@ -174,7 +187,7 @@ def run(base):
                     assert set(path.name for path in destination.iterdir()) == {'runtime', 'Dockerfile', '.dockerignore'}
                     assert '.model' not in set(path.name for path in destination.iterdir())
                     assert document['context_manifest_sha256'].startswith('sha256:')
-                    for helper_name in expected - {'bin/model', 'bin/bun'}:
+                    for helper_name in set(HELPERS) | ({'native_runtime_codex_exec.mjs'} if runtime == 'codex' else set()):
                         assert (destination / 'runtime' / helper_name).read_bytes() == (tools / helper_name).read_bytes()
                 assert not any(folder.glob('.oslit-download-*')), 'temporary acquisition left behind'
                 checks.append({'name': name, 'status': 'passed'})

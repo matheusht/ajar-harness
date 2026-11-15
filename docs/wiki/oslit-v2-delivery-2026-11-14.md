@@ -16,8 +16,10 @@ receipt from an earlier unit does not certify later changes. The
 historical observation.
 
 November 15 source reconciliation: the [local assembly assessment](../research/oslit-implementation-assembly-2026-11-15.md)
-updates the M3/M4 gaps below. It includes acquisition, owned application reset and
-the bounded lab-artifact ledger, but remains an unqualified local candidate.
+records the joined Codex/OMP source workflows with actual Linux runtimes and controlled
+provider replies, acquisition, owned application reset and the bounded lab-artifact ledger.
+The [fresh-target handoff](../agents/fresh-target-handoff.md) is the current operator entry.
+The candidate is unmerged; research acceptance remains with the operator.
 
 ## Implemented behavior and evidence
 
@@ -27,7 +29,7 @@ the bounded lab-artifact ledger, but remains an unqualified local candidate.
 | Codex and OMP | Native tools, sessions, host operations, isolated model credential binding, owned startup/recovery receipts and separate provider/tool routes | [Actual native checks](../../evals/native-qualification/team-evidence/m2-native-boundary-20261114/README.md) used installed Codex 0.166.0 and OMP 18.20.0 against owned fake provider responses. These are native-process observations, not live model or provider qualification. |
 | Environments and accounts | Source/binary/application/combined descriptors, local or SSH Docker transport, lease ownership, exact resource readback, target account injection and separate cookie state | [Environment checks](../../evals/native-qualification/team-evidence/m3-environment-20261114/README.md), [renewed execution](../../evals/native-qualification/team-evidence/m3-renewed-execution-20261114/README.md), [account checks](../../evals/native-qualification/team-evidence/m3-target-accounts-20261114/README.md) and [native-boundary account integration](../../evals/native-qualification/team-evidence/m5-boundary-integration-20261114/README.md) distinguish actual local sockets/processes from simulated native/container peers and Docker/SSH responses. Private host references bind logical accounts to request observations; they do not prove which user a real target recognizes. |
 | Coordination and evidence | Versioned shared updates/instruments, independent review packets, strategy obligations, lead replacement, protected experiments, current review for declared escalation and reviewed closure | [Evidence workflows](../../evals/native-qualification/smoke/check_engagement_evidence_e2e.py), [coordination workflows](../../evals/native-qualification/smoke/check_engagement_coordination_e2e.py), [declared escalation](../../evals/native-qualification/team-evidence/declared-escalation-20261114/README.md), [application capture](../../evals/native-qualification/team-evidence/m5-application-capture-20261114/README.md) and [source capture effects](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md) establish local composition and admission mechanics. Native/container peers and reviewer judgments are simulated where stated; local probes and owned HTTP receivers supply the stated execution observations. |
-| Usage and continued work | Shared invocation/worker-second reservations; late and duplicate settlement; optional overall deadline; renewable workers | [Actual native accounting](../../evals/native-qualification/team-evidence/native-usage-accounting-20261114/README.md) preserves per-invocation reported tokens, retries and interrupted partial usage against fake provider responses. Provider request totals and billed spend remain unavailable. Short renewal checks and clock scenarios are not multiday operation. |
+| Usage and continued work | Shared invocation/worker-second reservations; late and duplicate settlement; optional overall deadline; renewable workers | [Actual native accounting](../../evals/native-qualification/team-evidence/native-usage-accounting-20261114/README.md) preserves per-invocation reported tokens, retries and interrupted partial usage against fake provider responses. The proxy now journals provider request attempts, completed responses and unknown outcomes, including retries and startup requests. Runtime tokens and estimates remain separate from unavailable provider billing receipts. Short renewal checks and clock scenarios are not multiday operation. |
 | Operator delivery | [Pinned installation](../agents/native-tool-installation.md), [input templates](../../examples/native-engagement-v2/README.md), [guide](../agents/engagement.md), preflight, export, portable methodology and CI selection | [Installation evidence](../../evals/native-qualification/team-evidence/m6-native-installation-20261114/README.md) and [guidance workflow](../../evals/native-qualification/smoke/check_engagement_guidance_e2e.py) cover their stated local boundaries. CI wiring is not a hosted CI result or a complete install-to-cleanup run. |
 
 The portable methodology and OSLit worker protocol are separate files. New
@@ -67,19 +69,20 @@ readback and controller recovery use cleanup and reconstruction from published
 records and frozen inputs. Actual Codex/OMP checks observed prior conversation
 and tool files across two invocations using owned fake provider responses. The
 controller transition was checked separately with simulated native/environment
-peers; the joined Docker workflow remains unverified.
+peers; the later joined source workflow verifies native continuity and cleanup with controlled provider replies; broader team behavior remains operator verification.
 
-## Remaining engineering and qualification gaps
+## Implementation and remaining verification
 
-| Milestone | Remaining completion boundary |
+| Milestone | Current boundary |
 | --- | --- |
-| M0 — contracts | Design/contracts and failure scenarios have local review; their assumptions still need the integrated execution evidence required by the plan. |
-| M1 — one state owner | Final public workflow integration must preserve sole ownership, revocation and exact cleanup across the combined runtime/environment path. |
-| M2 — runtimes/team | The optional Linux model-container owner and frozen OMP catalog are implemented at `cceac74c`; [14 contained scenario families](../../evals/native-qualification/team-evidence/m2-linux-model-host-20261114/README.md) passed independent replay. Actual pinned Linux native startup and the full joined protected workflow remain unverified. |
-| M3 — environments | The [hosted Docker workflow](../../evals/native-qualification/team-evidence/real-docker-20261114/README.md) reproduced a watcher-loss defect at `fd8674b1`, then passed the unchanged 25-check scenario and 30 guardian checks at `3d0df8a2` after container-local lease enforcement. Actual loopback SSH passed 26 checks at `1ec66d6d`. The November 15 assembly includes signed acquisition provenance and owned application reset. Separate remote-host/partition checks and the joined setup/repair/reset workflow remain open; an uncontrolled remote application still has no verified reset. |
-| M4 — research/evidence | Declared prior-rung review and protected source/application capture have local composition evidence. The November 15 assembly includes the bounded `owned-lab-state-v1` artifact ledger and cleanup recovery. Joined native execution, physical lab-state qualification and policy adoption remain open. Unsupported artifact classes are refused; existing operator review and artifact gates remain active. |
-| M5 — long operation/usage | No actual multiday soak or sustained host restart result; provider request totals, billed spend and monetary caps remain unavailable. Report missing usage dimensions explicitly. |
-| M6 — delivery | Final integrated verification, hosted CI and an operator-install-to-cleanup release-candidate handoff remain open. Broader caller retirement waits for parity evidence. |
+| M0 — contracts | Implemented signed contracts, access modes, identities, limits and failure scenarios. |
+| M1 — one state owner | Implemented controller/journal, reservations, replay and recovery; joined source workflow has actual runtime/container evidence. |
+| M2 — runtimes/team | Both pinned runtimes passed joined Linux source workflows with controlled provider replies. The controlled cancellation fixture's missing import is corrected. Live-model team behavior remains operator verification. |
+| M3 — environments | Source, binary, application and combined descriptors, acquisition, setup repair, Docker/SSH and owned application reset are implemented. Separate remote-host loss and broader joined access combinations remain verification work. Unsupported persistent application state requires a target-specific reset owner. |
+| M4 — research/evidence | Evidence/control/replay, review/replacement, closure and bounded owned-lab artifact tracking are implemented. Physical lab-state qualification, live independent review and research acceptance remain unverified. Existing operator gates remain active. |
+| M5 — long operation/usage | Shared limits, reservations, request-attempt journal, native token/estimate totals, completeness reporting, restart and no-deadline continuation are implemented. Real billing receipts and hard dollar/token limits are unsupported; sustained operation is unverified. |
+| M6 — delivery | Installer, preflight, templates, export and the fresh-target handoff are available. Hosted evidence is retained for its checked revision; no new CI or fresh-target run is required by this implementation pass. The operator must configure a responding Docker/SSH lab, provider and target-specific signed inputs. |
+
 
 The protected model owner supports the existing macOS `sandbox-exec` route and
 an optional signed Linux Docker model host. The Linux implementation composes a

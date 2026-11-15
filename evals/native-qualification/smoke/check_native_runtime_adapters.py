@@ -148,7 +148,7 @@ for line in sys.stdin:
 
 def controlled(root, kind):
     module = importlib.import_module('native_runtime_' + kind)
-    from native_runtime_transport import RuntimeError
+    from native_runtime_transport import HostOperation, RuntimeError
     peer = root / (kind + '-peer')
     peer.write_text(PEER.replace('KIND', repr(kind)))
     peer.chmod(0o700)

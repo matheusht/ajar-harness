@@ -1,0 +1,90 @@
+{
+  "attempts": {
+    "376329993267489f8ae5ca4f03590299": {
+      "dispatch_id": "a9e46911ae28439cb71babcff7bfa0b1",
+      "generation": 1,
+      "invocation_id": "86ed6dcf4dd040db9f8211de3cb7f106",
+      "profile_id": "runtime-main",
+      "request_id": "376329993267489f8ae5ca4f03590299",
+      "status": "completed",
+      "worker_id": "lead-1"
+    },
+    "46564e729710481a9c5593cb1ca06ad6": {
+      "dispatch_id": "a9e46911ae28439cb71babcff7bfa0b1",
+      "generation": 1,
+      "invocation_id": "79a92c893dbf45dcadc61e273b540942",
+      "profile_id": "runtime-main",
+      "request_id": "46564e729710481a9c5593cb1ca06ad6",
+      "status": "unknown",
+      "worker_id": "lead-1"
+    },
+    "61f0d4a39f3643738d0d1bf11dc8d189": {
+      "dispatch_id": "a9e46911ae28439cb71babcff7bfa0b1",
+      "generation": 1,
+      "invocation_id": "86ed6dcf4dd040db9f8211de3cb7f106",
+      "profile_id": "runtime-main",
+      "request_id": "61f0d4a39f3643738d0d1bf11dc8d189",
+      "status": "completed",
+      "worker_id": "lead-1"
+    },
+    "d7c6f9c489a44638baf8224364283d75": {
+      "dispatch_id": "a9e46911ae28439cb71babcff7bfa0b1",
+      "generation": 1,
+      "invocation_id": "86ed6dcf4dd040db9f8211de3cb7f106",
+      "profile_id": "runtime-main",
+      "request_id": "d7c6f9c489a44638baf8224364283d75",
+      "status": "completed",
+      "worker_id": "lead-1"
+    }
+  },
+  "coverage": [
+    "started",
+    "completed",
+    "unknown",
+    "denied route",
+    "native usage replay",
+    "provider settlement replay",
+    "missing usage",
+    "billed cost unknown"
+  ],
+  "evidence": "public_network_gate_and_controller_journal",
+  "external_provider_calls": 0,
+  "interrupted_errors": [
+    "RemoteDisconnected"
+  ],
+  "loopback_provider_requests": 4,
+  "status": "passed",
+  "usage": {
+    "billed_cost": null,
+    "billed_cost_unavailable_reason": "provider_billing_receipt_unavailable",
+    "cost": null,
+    "cost_observations": 1,
+    "estimated_cost_complete": false,
+    "invocations": 2,
+    "known_estimated_cost": 0.012,
+    "missing": [
+      "billed_cost"
+    ],
+    "native_invocations_admitted": 2,
+    "native_invocations_observed": 2,
+    "native_token_totals_complete": false,
+    "native_usage_incomplete": true,
+    "native_usage_observations": 2,
+    "observed_token_dimensions": {
+      "input": 1,
+      "output": 1,
+      "total": 1
+    },
+    "provider_requests": 4,
+    "provider_requests_complete": true,
+    "provider_requests_completed": 3,
+    "provider_requests_unknown": 1,
+    "reserved_worker_seconds": 30,
+    "tokens": {
+      "input": 20,
+      "output": 5,
+      "total": 25
+    },
+    "worker_seconds": 0
+  }
+}

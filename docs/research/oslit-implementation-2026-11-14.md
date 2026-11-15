@@ -7,23 +7,17 @@ This record separates implementation from observed integration and research resu
 
 ## Delivery state
 
-The complete M0–M6 engineering assignment remains unfinished. Read the
-[dated v2 delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) for the current
-source/evidence map and remaining completion boundaries. The verification entries
-below preserve earlier checkpoints; their original counts and limitations do not
-certify later code. In particular, the early M1 `run`/`resume` placeholder was
-subsequently connected to the real runner by the public CLI delivery unit.
+Read the [current M0–M6 status](../wiki/oslit-v2-delivery-2026-11-14.md#implementation-and-remaining-verification)
+and [operator handoff](../agents/fresh-target-handoff.md) for implemented behavior,
+setup and remaining verification. Both native runtimes have joined Linux source
+workflow evidence with controlled provider replies. Provider attempts are now
+journaled; real billing receipts remain unavailable. The operator owns the later
+fresh-target and full-day tests. No new hosted CI is requested for this pass.
 
-| Unit | Current candidate state | Remaining completion boundary |
-| --- | --- | --- |
-| M0 contracts and failure cases | Design checkpoint reviewed; concrete contracts and runnable failure scenarios retained | Validate assumptions through the integrated workflow required by the plan |
-| M1 one state owner | Signed authority, journal, public workflow and preserved v1 readers implemented | Final joined sole-owner/recovery/cleanup verification |
-| M2 runtimes and team | Codex/OMP adapters, native tools, team controls and optional Linux model-container ownership implemented with bounded evidence | Actual pinned Linux native execution and complete protected workflow qualification |
-| M3 environments | All access descriptors, environment/network controls and target account binding implemented; hosted Docker, watcher-loss and loopback SSH checks passed. The November 15 assembly also includes signed acquisition provenance and owned application reset | Separate remote-host/partition verification and joined setup/repair/reset workflow; historical Docker reset evidence does not qualify the combined tree |
-| M4 research evidence and recovery | Evidence/review, declared prior-rung admission, protected capture, obligations, replacement and closeout mechanics implemented. The assembly includes the bounded owned-lab-state artifact ledger and cleanup recovery | Joined execution and physical lab-state qualification; unsupported artifact classes remain refused and existing operator gates remain active pending policy adoption |
-| M5 accounting and long operation | Shared accounting, delayed settlement, optional deadline and renewable-worker mechanics implemented | Actual sustained operation/restart and provider request/billing completeness |
-| M6 delivery | Installation, preflight, examples, guide, export, frozen methodology and CI selection implemented | Final integrated checks, hosted CI and release-candidate handoff |
-| Fresh-target research acceptance | Operator-owned; not run | The agreed fresh-target test and native-agent comparison |
+The entries below preserve earlier checkpoints; their original counts and
+limitations do not describe today's implementation. In particular, the early M1
+`run`/`resume` placeholder was subsequently connected to the real runner, and the
+Linux startup gap was superseded by the November 15 integrated results.
 
 ## Starting point and ownership
 

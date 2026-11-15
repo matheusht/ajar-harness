@@ -1,0 +1,174 @@
+{
+  "kind": "native-runtime-adapter-checks-v1",
+  "results": [
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "evidence": "controlled_protocol_subprocesses",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ],
+      "events": [
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": null,
+            "reasoning_output_tokens": null,
+            "total_tokens": 3,
+            "monetary_spend": null,
+            "estimated_cost": null,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests",
+              "cache_write_input_tokens",
+              "reasoning_output_tokens"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "codex",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        }
+      ]
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "evidence": "controlled_protocol_subprocesses",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ],
+      "events": [
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "started"
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "yielded",
+          "status": "completed",
+          "session_settled": false
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "usage",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 3,
+            "monetary_spend": null,
+            "estimated_cost": 0.01,
+            "provider_requests": null,
+            "missing_dimensions": [
+              "monetary_spend",
+              "provider_requests"
+            ],
+            "source": "native_runtime"
+          }
+        },
+        {
+          "kind": "native-runtime-event-v1",
+          "runtime": "omp",
+          "session_id": "session-2",
+          "invocation_id": "invocation-1",
+          "event": "completed",
+          "status": "completed",
+          "usage_available": true,
+          "resource_settlement": "environment_readback_required"
+        }
+      ]
+    },
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "evidence": "controlled_native_peer_and_guard",
+      "checks": [
+        "peer_waited_for_executor_send",
+        "turn_start_guarded",
+        "executor_send_guarded",
+        "turn_response_after_guard_release",
+        "revoked_send_refused_before_peer"
+      ]
+    }
+  ],
+  "unverified": [
+    "provider_inference",
+    "complete_worker_revocation",
+    "lab_isolation",
+    "durable_native_transcript_resume",
+    "multi_day_operation"
+  ],
+  "source_hashes": {
+    "evals/native-qualification/smoke/check_native_runtime_adapters.py": "sha256:16a9a28baf1d7957b013d4e94d6c17a4dc6d8e1b6a3a2eb47d6004cff6dbe1a0",
+    "tools/native_runtime_bootstrap.py": "sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4",
+    "tools/native_runtime_codex.py": "sha256:6383f4067ca521c0013fe62e561855b1528ae14304fe402050f09e88255c57bc",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+    "tools/native_runtime_linux.py": "sha256:44f7ffe66458ee3de54e13bbeb5244f4316a2291dbaaf5f20416a1bbc8642d91",
+    "tools/native_runtime_omp.py": "sha256:066aab5f3cad5c5ab3dd6a179929c1f000ea31b9dad8705df555b8eade395e51",
+    "tools/native_runtime_omp_tools.mjs": "sha256:62c20f894b7de475a6339bc86e44fa03bdb893bbbfbf1c727addaf18fce0c37e",
+    "tools/native_runtime_owner.py": "sha256:c020a07159206e2c620e702825c3f8b1e2d816cb070c4bb9ce740b63175a63ca",
+    "tools/native_runtime_transport.py": "sha256:e17ded9a16eb48084596a04a413075f37a04027125fd15542c3be767f620d99f"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "engineering-check-provenance-v1",
+  "evidence": "owned_loopback_provider_and_controlled_protocol_subprocesses",
+  "external_provider_calls": 0,
+  "source_sha256": {
+    "tools/engagement_controller.py": "91fe98a0d6fe496de25e1e2bdf15b1a2564683ec51f1ccf79d084ae741f0fabb",
+    "tools/engagement_network.py": "edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+    "tools/engagement_native_boundary.py": "5d625cc9aa3027d9c990630201a82cd51f855d85e5aa7f48aa7231be760e88dd",
+    "tools/engagement_runner.py": "16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "evals/native-qualification/smoke/check_provider_accounting_e2e.py": "c4ad0ab5bce3b08e46704dc3a9c4826ff1a8d1f77f575f1b104c80eb05e9a657",
+    "evals/native-qualification/smoke/check_native_runtime_adapters.py": "16a9a28baf1d7957b013d4e94d6c17a4dc6d8e1b6a3a2eb47d6004cff6dbe1a0"
+  },
+  "result_sha256": {
+    "result.json": "6c0a48aeb3d324e9f7d714df78edb06f1f649183d8cb0d8d3294c491b89ad6e1",
+    "adapters.json": "eb6eb431bc87430d15fbb99550da0261fb5e7adc8d88eb53744e58c5a1816eba"
+  }
+}

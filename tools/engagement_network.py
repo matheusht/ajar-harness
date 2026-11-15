@@ -13,6 +13,7 @@ import socket
 import socketserver
 import ssl
 import threading
+import uuid
 from urllib.parse import urljoin, urlsplit
 
 
@@ -75,8 +76,9 @@ def _forward_headers(headers, *, request=False):
 
 class NetworkGate:
     def __init__(self, routes, authorize, *, maximum_bytes=1024 * 1024, dispatch_guard=None,
-                 upstream_context=None, request_binder=None, target_connectors=None):
+                 upstream_context=None, request_binder=None, target_connectors=None, request_observer=None):
         self.request_binder = request_binder
+        self.request_observer = request_observer
         self.routes = copy.deepcopy(routes)
         self.target_connectors = dict(target_connectors or {})
         for origin, connector in self.target_connectors.items():
@@ -191,6 +193,7 @@ class NetworkGate:
                 raise NetworkDenied('network_header_invalid')
         parsed, port, address = self._destination(url)
         peer = binding = response = None
+        request_id = None
         total = 0
         status = 'unknown'
         connection = http.client.HTTPConnection(parsed.hostname, port, timeout=5)
@@ -223,6 +226,10 @@ class NetworkGate:
                 connection.putheader('Connection', 'close')
                 connection.putheader('Transfer-Encoding' if length is None else 'Content-Length',
                                      'chunked' if length is None else str(length))
+                if self.request_observer is not None:
+                    started_id = uuid.uuid4().hex
+                    self.request_observer({'request_id': started_id, 'status': 'started'})
+                    request_id = started_id
                 connection.endheaders()
             for chunk in chunks:
                 if total + len(chunk) > self.maximum_bytes:
@@ -254,6 +261,9 @@ class NetworkGate:
                 peer.close()
             if binding is not None:
                 binding.finish(status, response.status if response is not None else None, total)
+            if request_id is not None:
+                self.request_observer({'request_id': request_id,
+                                       'status': 'completed' if status == 'settled' else 'unknown'})
 
     def _response_shape(self, response, method):
         lengths = response.headers.get_all('Content-Length', [])

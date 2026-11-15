@@ -384,7 +384,9 @@ class NativeBoundary:
         support[bundle_id] = bundle['support_input']
         maximum = self.environment_reference['limits']['output_bytes']
         self.provider_gate = NetworkGate(self.routes['provider'], self._active,
-            maximum_bytes=max(maximum, 8 * 1024 * 1024), dispatch_guard=self.context.guard)
+            maximum_bytes=max(maximum, 8 * 1024 * 1024), dispatch_guard=self.context.guard,
+            request_observer=lambda observation: self.controller.record_provider_request(
+                self.context.grant, observation))
         provider_url = None
         if 'model_host' in self.profile:
             self.provider_gate.serve(self.socket_dir / 'provider.sock', certificate=certificate, private_key=key)

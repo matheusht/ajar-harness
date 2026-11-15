@@ -232,20 +232,23 @@ retain the exact source hashes and bounded observations.
 
 The [conformance run at `c1fa3a77`](https://github.com/matheusht/redteam-harness/actions/runs/43748757758)
 passed all 37 steps in 21m44s, including the schema-cache and canonical lifecycle
-gates. The final guarded-send revision is being checked separately. The focused
+gates. PR #220 also retains the later [passing final-runtime conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43751103945)
+at `e93a4fd9`; this predates the provider-accounting completion pass. The focused
 lock regression, UTF-8 transport and provider-free startup ownership checks passed.
-The broader controlled adapter fixture also exposed a cancellation assertion on
-both old and new runtime code; that result remains separate and unresolved here.
+The broader controlled adapter fixture exposed a cancellation assertion on both old
+and new runtime code. The November 15 completion pass traced it to a missing
+`HostOperation` import in the fixture. The corrected controlled Codex/OMP check passes;
+no production cancellation change was needed.
 
 ## Remaining implementation and delivery
 
 | Area | What remains |
 | --- | --- |
-| M0–M2 | Both pinned runtimes have joined source-workflow evidence. Extend that proof to concurrent team behavior and resolve the broader controlled adapter fixture failure. |
+| M0–M2 | Both pinned runtimes have joined source-workflow evidence. The controlled adapter fixture is corrected. Extend verification to live-model concurrent team behavior during operator testing. |
 | M3 | Exercise actual acquisition, setup failure and repair, all access modes, reset/replay and cleanup through the joined workflow. Verify loss/reconnection against a separate authorized SSH host. |
 | M4 | Qualify physical owned-lab state, independent replay and cleanup in that workflow. Unsupported artifact classes still stop; existing operator gates remain active until policy adoption. |
-| M5 | Run the sustained restart/multiday scenario. Provider request totals and billed spend are still unavailable; invocation and worker-second enforcement must not be described as complete monetary accounting. |
-| M6 | Full hosted conformance passed at `c1fa3a77` without rewriting historical evidence. Verify the final guarded-send revision and complete the operator install-to-export/cleanup handoff. Retire redundant callers only after parity. |
+| M5 | Provider proxy attempts now have durable start/completion records with worker, dispatch and invocation attribution. Tokens/estimates and missing dimensions are reported separately. Real billing receipts and hard dollar/token caps are unsupported. Sustained restart/multiday operation remains operator verification. |
+| M6 | Full hosted conformance passed at `c1fa3a77` without rewriting historical evidence. The [operator handoff](../agents/fresh-target-handoff.md) covers setup through export/cleanup. This completion pass skips CI as requested. Retire redundant callers only after parity. |
 | Research acceptance | The operator owns the fresh-target test and fair native-agent comparison. It has not run. |
 
 The review found no additional missing major subsystem. It did not prove every

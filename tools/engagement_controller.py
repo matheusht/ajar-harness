@@ -174,6 +174,7 @@ class Controller:
                 digest(canonical(contract.scope)), 'initialized',
                 {'scope': contract.scope, 'scope_sha256': digest(contract.frozen_files['scope.md']),
                  'contract_files': files, 'evidence_class': evidence_class,
+                 'provider_accounting': 'proxy-attempts-v1',
                  'lead_profile': choices[0]['profile_id']})
         return c
 
@@ -253,7 +254,8 @@ class Controller:
         state = {'engagement_id': scope['engagement_id'], 'scope': scope,
                  'scope_sha256': initial['scope_sha256'], 'evidence_class': initial['evidence_class'],
                  'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {},
-                 'directions': [], 'dispatches': {}, 'invocations': {}, 'resource_holds': {}, 'cleanup': 'pending',
+                 'directions': [], 'dispatches': {}, 'invocations': {}, 'provider_requests': {},
+                 'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
                            'tokens': {}, 'cost': None, 'known_estimated_cost': 0,
                            'observed_token_dimensions': {}, 'cost_observations': 0,
@@ -286,8 +288,26 @@ class Controller:
         state['usage']['native_invocations_admitted'] = len(state['invocations'])
         state['usage']['native_invocations_observed'] = sum(row['status'] not in ('pending', 'stopped_unobserved')
                                                          for row in state['invocations'].values())
-        state['usage']['native_usage_incomplete'] = any(row['status'] in ('pending', 'stopped_unobserved')
-                                                       for row in state['invocations'].values())
+        state['usage']['native_usage_incomplete'] = any(
+            row['status'] in ('pending', 'stopped_unobserved') or
+            'total' not in (row.get('usage', {}).get('tokens') or {})
+            for row in state['invocations'].values())
+        usage = state['usage']
+        requests = list(state['provider_requests'].values())
+        usage['provider_requests'] = len(requests)
+        usage['provider_requests_completed'] = sum(row['status'] == 'completed' for row in requests)
+        usage['provider_requests_unknown'] = sum(row['status'] != 'completed' for row in requests)
+        usage['provider_requests_complete'] = initial.get('provider_accounting') == 'proxy-attempts-v1'
+        if usage['provider_requests_complete']:
+            usage['missing'].remove('provider_requests')
+        usage['billed_cost'] = None
+        usage['billed_cost_unavailable_reason'] = 'provider_billing_receipt_unavailable'
+        usage['native_usage_observations'] = sum(row['status'] != 'pending' for row in state['invocations'].values())
+        usage['native_token_totals_complete'] = bool(state['invocations']) and all(
+            'total' in (row.get('usage', {}).get('tokens') or {}) for row in state['invocations'].values())
+        usage['estimated_cost_complete'] = bool(state['invocations']) and all(
+            row.get('usage', {}).get('cost') is not None for row in state['invocations'].values())
+        usage['cost'] = usage['known_estimated_cost'] if usage['estimated_cost_complete'] else None
         for operation in state['environment_operations'].values():
             if (operation.get('result') or {}).get('status') != 'unknown':
                 continue
@@ -430,6 +450,10 @@ class Controller:
             invocation = state['invocations'][payload['invocation_id']]
             invocation.update(payload['observation'])
             self._accumulate_usage(state['usage'], payload['observation']['usage'])
+        elif kind == 'provider_request_started':
+            state['provider_requests'][payload['request_id']] = dict(payload, status='started')
+        elif kind == 'provider_request_finished':
+            state['provider_requests'][payload['request_id']]['status'] = payload['status']
         elif kind == 'task_outcome_pending':
             state['workers'][payload['worker_id']]['outcome_pending'] = payload['request']
         elif kind == 'task_outcome_finalized':
@@ -1136,6 +1160,37 @@ class Controller:
                     return {'status': 'recorded'}
                 fail('invocation_observation_conflict')
             return self._host('invocation_observed', {'invocation_id': invocation_id, 'observation': observation})
+
+    def record_provider_request(self, grant, observation):
+        """Persist a proxy attempt before sending; completion can arrive after revocation."""
+        with self.lock():
+            state = self.state()
+            dispatch = self.bind_grant(state, grant)
+            keys(observation, ('request_id', 'status'), 'provider_observation_invalid')
+            request_id = identifier(observation['request_id'])
+            status = observation['status']
+            if status not in ('started', 'completed', 'unknown'):
+                fail('provider_observation_invalid')
+            prior = state['provider_requests'].get(request_id)
+            if prior is not None and prior['dispatch_id'] != grant['dispatch_id']:
+                fail('provider_observation_conflict')
+            if status == 'started':
+                if prior is not None:
+                    return {'status': 'recorded'}
+                self._authorize(state, grant)
+                pending = [name for name in dispatch.get('invocations', [])
+                           if state['invocations'][name]['status'] == 'pending']
+                return self._host('provider_request_started', {
+                    'request_id': request_id, 'dispatch_id': grant['dispatch_id'],
+                    'worker_id': grant['worker_id'], 'generation': grant['generation'],
+                    'profile_id': grant['profile_id'], 'invocation_id': pending[-1] if pending else None})
+            if prior is None:
+                fail('provider_request_not_started')
+            if prior['status'] != 'started':
+                if prior['status'] == status:
+                    return {'status': 'recorded'}
+                fail('provider_observation_conflict')
+            return self._host('provider_request_finished', {'request_id': request_id, 'status': status})
 
     @staticmethod
     def _accumulate_usage(total, usage):

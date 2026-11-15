@@ -7,8 +7,8 @@ their original contract. The signed scope defines authority; repository access a
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
 Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
-claiming support or readiness. The complete M0–M6 engineering assignment remains
-unfinished. The repository impact-artifact and escalation-review gates still
+claiming support or readiness. Start with the [fresh-target handoff](fresh-target-handoff.md)
+for installation, input preparation and run/recovery commands. The repository impact-artifact and escalation-review gates still
 apply: a signed ceiling and the internal evidence-review checks do not replace
 operator review or fresh artifact confirmation. The candidate owned-lab-state
 ledger described below records physical lifecycle; it does not adopt broader
@@ -20,8 +20,10 @@ Pin the repository revision and use a private, durable engagement directory. Kee
 the host awake during a run. The protected model owner uses either macOS
 `sandbox-exec` with Darwin process birth identity or the optional signed Linux
 Docker model owner. The model container and target/tool lab are separate owners.
-The Linux implementation has contained checks; actual native startup, joined
-workflow recovery and sustained operation still need execution evidence.
+Both pinned runtimes have actual Linux startup and joined source-workflow
+evidence with controlled provider replies, including owner-loss recovery and cleanup.
+See the [integrated results](../research/oslit-implementation-assembly-2026-11-15.md#signed-codex-integration-and-repeated-turn-repair).
+Live-provider behavior and sustained operation remain for operator testing.
 
 Runtime prerequisites are Python 3.11+ with its standard library, OpenSSH
 `ssh-keygen` for local signature verification, OpenSSL for private proxy trust,
@@ -367,7 +369,8 @@ incompatible work, failed readback and controller recovery use cleanup and
 reconstruction from published records and frozen inputs. The
 [retention evidence](../../evals/native-qualification/team-evidence/m2-retained-specialists-20261114/README.md)
 separates actual Codex/OMP continuity with fake provider replies from the simulated
-controller transition and the unverified joined Docker workflow. Ordinary model-turn
+controller transition. Later [joined Docker results](../research/oslit-implementation-assembly-2026-11-15.md#signed-codex-integration-and-repeated-turn-repair)
+verify two retained native invocations. Ordinary model-turn
 completion does not finish an engagement. The lead can continue, create tasks and request allowed
 specialists. Confirmation requires an observed effect,
 a relevant control and clean independent reproduction. Broad work also needs an

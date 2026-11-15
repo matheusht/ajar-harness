@@ -56,8 +56,9 @@ These profiles omit `model_host` and therefore select the macOS model owner with
 an isolated Linux tool lab. For the implemented Linux owner, follow the
 [operator host setup](../../docs/agents/engagement.md#prepare-the-host-and-tool-lab)
 and add its exact signed `model_host` object before signing. OMP custom model
-definitions may use the optional pinned `model_catalog`. Actual Linux native
-startup and joined containment/recovery remain unverified. The
+definitions may use the optional pinned `model_catalog`. Both runtimes passed actual Linux native
+startup and joined source containment/recovery with controlled provider replies; see the
+[fresh-target handoff](../../docs/agents/fresh-target-handoff.md). The
 [dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md) separates
 implementation, contained checks and qualification work.
 

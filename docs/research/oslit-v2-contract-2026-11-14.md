@@ -190,6 +190,16 @@ that proves their enforcement. `max_workers` is a positive integer. The worker
 lease limit is a positive integer and is independent of overall engagement age.
 `revocation` is exactly `{operator_stop: true, disconnected_worker: "lease_expiry"}`.
 
+The host's provider proxy journals each request attempt before sending bytes, with
+worker/dispatch and optional invocation identity, then records a completed response
+or unknown outcome. Startup/model-discovery requests have no invocation. Retries
+are distinct attempts; repeated observations of one ID are idempotent. Historical
+journals without this accounting marker retain incomplete provider coverage.
+Native token and cost-estimate observations are separate: absent totals stay
+incomplete, and `billed_cost` remains null unless a real billing receipt is available
+(neither pinned adapter currently supplies one). See the
+[accounting handoff](../agents/fresh-target-handoff.md#read-accounting-correctly).
+
 Bound IDs to 1–128 ASCII letters/digits/`_.-`, text fields to explicit byte limits,
 collections to declared practical cardinality limits, JSON nesting/total input
 bytes to a parser budget. Reject an unexpected field rather than ignore it. Native

@@ -94,6 +94,54 @@ def observe_catalog(runtime_module, result):
 
 
 
+
+MODEL_STORAGE_PROBE = """import json, os, stat
+from contextlib import ExitStack
+
+def probe(work):
+    def fail(error):
+        raise error
+    with ExitStack() as stack:
+        fd = os.open(work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        v = os.fstatvfs(fd)
+        for name in ('.model', '.omp', 'natives'):
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, fd)
+        count = size = entries = 0
+        for directory, directories, files, current in os.fwalk('.', dir_fd=fd, follow_symlinks=False, onerror=fail):
+            entries += len(directories) + len(files)
+            if entries > 1000:
+                raise ValueError('bounded')
+            for name in files:
+                if name.endswith('.node'):
+                    info = os.stat(name, dir_fd=current, follow_symlinks=False)
+                    if stat.S_ISREG(info.st_mode):
+                        count += 1
+                        size += info.st_size
+        return {'work_available_bytes': v.f_bavail * v.f_frsize,
+                'native_files': count, 'native_bytes': size}
+
+if __name__ == '__main__':
+    print(json.dumps(probe('/work')))
+"""
+
+def model_storage_outcome(observation):
+    row = {'status': observation['status'], 'returncode': observation['returncode']}
+    try:
+        data = json.loads(observation['output'])
+    except (ValueError, TypeError):
+        data = None
+    keys = {'work_available_bytes', 'native_files', 'native_bytes'}
+    if (observation['status'] == 'settled' and observation['returncode'] == 0 and
+            isinstance(data, dict) and set(data) == keys and
+            all(type(value) is int and 0 <= value <= 2**53 for value in data.values())):
+        row.update(data)
+    else:
+        row['observation'] = 'unavailable'
+    return row
+
+
 @contextmanager
 def observe_model_startup(runtime_module, result):
     original = runtime_module.Runtime
@@ -108,6 +156,14 @@ def observe_model_startup(runtime_module, result):
                     row['returncode_before_cleanup'] = self.transport.process.poll()
             except Exception:
                 row['process_observation'] = 'unavailable'
+            try:
+                owner = getattr(self, 'model_owner', None)
+                if owner is not None and row['returncode_before_cleanup'] is not None:
+                    result['omp_model_storage_failure'] = model_storage_outcome(owner.environment.execute([
+                        '/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin',
+                        'python3', '-I', '-S', '-c', MODEL_STORAGE_PROBE], timeout_seconds=5))
+            except Exception:
+                result['omp_model_storage_failure'] = {'observation': 'unavailable'}
             return super()._startup_failed(error)
 
     runtime_module.Runtime = ObservedRuntime
@@ -126,7 +182,7 @@ def version_output_category(output):
     plain = re.sub(r'\x1b\[[0-9;]*m', '', output)
     versions = []
     for line in plain.splitlines():
-        match = re.fullmatch(r'(?:omp(?: version)?[ \t]+)?v?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})', line.strip())
+        match = re.fullmatch(r'(?:omp/|omp(?: version)?[ \t]+)?v?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})', line.strip())
         if match:
             versions.append(match.group(1))
     if len(versions) != 1:
@@ -147,8 +203,8 @@ def observe_model_version(owner_class, result):
                 'PATH=/usr/local/bin:/usr/bin:/bin', '/runtime/bin/model', '--version'], timeout_seconds=10)
             result['omp_model_version_preflight'] = {
                 'status': observation['status'], 'returncode': observation['returncode'],
-                'pinned_version_matches': observation['output'].strip() == '18.20.0',
-                'pinned_version_line_present': '18.20.0' in observation['output'].splitlines(),
+                'pinned_version_matches': observation['output'].strip() == 'omp/18.20.0',
+                'pinned_version_line_present': 'omp/18.20.0' in observation['output'].splitlines(),
                 'output_category': version_output_category(observation['output'])}
         return original(owner, command, public_environment, binding)
 

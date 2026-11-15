@@ -35,3 +35,22 @@ The actual tested bwrap binary is supported by two files at the immutable Codex 
 - The exact harmless diagnostic argv is retained in evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py in the immutable implementation snapshot: --ro-bind / / --dev /dev --unshare-user --unshare-pid --unshare-ipc --unshare-net --proc /proc --cap-drop ALL -- /bin/true. Its bwrap SHA-256 is 77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c.
 
 For this exact path, bubblewrap.c forms one clone() flags value containing NEWNS, NEWUSER, NEWPID, NEWIPC, and NEWNET. The source's opt_needs_devpts branch (triggered by --dev) can call unshare(CLONE_NEWUSER) after the initial clone. The ordinary setup then calls mount() for propagation, tmpfs, binds and proc/dev mounts; pivot_root(); and umount2() for old-root cleanup. The normal diagnostic invocation does not pass pid namespace or user namespace file descriptors, so its source path does not require setns(); it does not call chroot().
+
+## Repeat the harmless replay
+
+Use the `OSLit owned environment` workflow on Ubuntu 24.04 with its pinned base
+image and Codex assets. Its joined Codex step sets `OSLIT_CODEX_POLICY_REPLAY=1`;
+without that explicit setting the native E2E does not load a host profile. The
+host needs Docker, AppArmor and noninteractive sudo for the fixed inventory read
+and profile load/remove commands. The replay refuses an already loaded candidate
+name and never replaces `docker-default`.
+
+Run `python3 evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py --self-check`
+for the offline contract check. The full workflow preserves the replay under
+`codex_policy_candidate` in the joined Codex JSON artifact, with policy and helper
+source hashes. Expected candidate result: Bubblewrap exits zero, an outer-container
+mount is denied with zero effective capabilities, the exact container controls
+are observed, and both the container and owned profile have verified cleanup.
+The four default/relaxed diagnostic scenarios remain separate controls. A candidate
+pass establishes this fixed harmless setup only; native workflow and research
+acceptance require their own observations.

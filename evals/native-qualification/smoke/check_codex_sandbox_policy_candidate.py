@@ -86,9 +86,16 @@ def _loaded_profile(contents: str, name: str) -> bool:
 
 
 def _read_loaded_profiles() -> str:
+    sudo = shutil.which('sudo')
+    if sudo is None:
+        raise CandidateFailure('apparmor_profile_readback_unavailable')
     try:
-        return APPARMOR_PROFILE_PATH.read_text()
-    except OSError:
+        result = diagnostic._command(sudo, None, '-n', '/usr/bin/cat',
+                                     str(APPARMOR_PROFILE_PATH), direct=True, timeout=TIMEOUT)
+        if result.returncode != 0 or len(result.stdout) >= diagnostic.MAX_COMMAND_OUTPUT:
+            raise CandidateFailure('apparmor_profile_readback_unavailable')
+        return result.stdout.decode('utf-8', 'strict')
+    except (OSError, UnicodeDecodeError, diagnostic.DiagnosticFailure):
         raise CandidateFailure('apparmor_profile_readback_unavailable') from None
 
 

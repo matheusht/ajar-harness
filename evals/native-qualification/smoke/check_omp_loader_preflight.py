@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the existing native fixture with a bounded OMP loader observation."""
+"""Run provider-free native startup with bounded OMP observations."""
 from contextlib import contextmanager
 import json
 import re
@@ -302,17 +302,45 @@ def observe_model_stderr(environment_module, result):
         result['omp_model_stderr_categories'] = rows
 
 
+
+@contextmanager
+def startup_only(fixture_module, runtime_module, result):
+    original_invoke = fixture_module.invoke
+    original_runtime = runtime_module.Runtime
+
+    def stop(*args, **kwargs):
+        result['native_startup_only'] = 'stopped_before_invocation'
+        raise runtime_module.RuntimeError('native_startup_only_stop')
+
+    class StartupOnlyRuntime(original_runtime):
+        def invoke(self, *args, **kwargs):
+            return stop()
+
+    fixture_module.invoke = stop
+    runtime_module.Runtime = StartupOnlyRuntime
+    try:
+        yield
+    finally:
+        fixture_module.invoke = original_invoke
+        runtime_module.Runtime = original_runtime
+        if type(result.get('controlled_provider_requests')) is not int or result['controlled_provider_requests'] != 0 or type(result.get('external_provider_calls')) is not int or result['external_provider_calls'] != 0:
+            result['native_startup_only'] = 'unexpected_provider_requests'
+            raise runtime_module.RuntimeError('native_startup_only_provider_violation')
+
+
 def main():
     import check_linux_model_native_e2e as fixture_module
     import research_environment
     import native_runtime_omp
+    import native_runtime_codex
     import native_runtime_linux
     original = fixture_module.run_native
 
     def run_native(root, fixture, result):
         if fixture.runtime != 'omp':
-            return original(root, fixture, result)
-        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result), observe_model_version(native_runtime_linux.LinuxModelOwner, result), observe_model_stderr(research_environment, result):
+            with startup_only(fixture_module, native_runtime_codex, result):
+                return original(root, fixture, result)
+        with observe_loader(research_environment.Environment, result), observe_catalog(native_runtime_omp, result), observe_model_startup(native_runtime_omp, result), observe_model_version(native_runtime_linux.LinuxModelOwner, result), observe_model_stderr(research_environment, result), startup_only(fixture_module, native_runtime_omp, result):
             return original(root, fixture, result)
 
     fixture_module.run_native = run_native

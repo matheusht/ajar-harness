@@ -62,7 +62,7 @@ duplicate JSON keys, non-finite numbers, unexpected keys and ambiguous identity.
 | `environments` | Allowed `{id, kind, identity, capabilities, limits, cleanup}`. `docker` pins daemon/profile/image constraints; `ssh` pins host key, host identity and owned resource namespace. Capabilities enumerate privileged actions, resource classes and reset/readback support. Cleanup states permitted actions and owned path/resource boundaries. |
 | `network` | Distinct `provider`, `acquisition`, `target` route lists. Each route gives protocol, destination/port and resolved-address policy. Redirects and direct sockets get the same enforcement. Empty list denies that class. |
 | `effects` | Allowed internal effect classes with affected access/environment IDs, permitted account/role, escalation rung, artifact class and cleanup obligation. No free-form wildcard grant. |
-| `application_states` (optional) | Exact references `{access_id, profile_sha256, environment_id, reset_effect_id}` for owned disposable application baselines. Each access has a unique logical HTTP `.invalid` origin and an explicit reset effect. |
+| `application_states` (optional) | References `{access_id, profile_sha256, environment_id, reset_effect_id}` for owned disposable application baselines, with optional `artifact_effect_id` for their artifact ledger. Each access has a unique logical HTTP `.invalid` origin and an explicit reset effect. |
 | `escalation_ceiling`, `benign_objectives` | Explicit permitted rung and harmless expected signals. A signed rung still needs the prior effect and fresh review. |
 | `runtime_assignments` | Allowed `{profile_id, profile_sha256, roles}` referencing the pinned profile below; roles lead/specialist/reviewer. Runtime credentials do not identify model or runtime by implication. |
 | `limits` | Hard dimensions and positive ceilings, plus `max_workers` and `max_worker_lease_seconds`; optional informational budgets explicitly separate. Validate every hard dimension against installed adapter capabilities before run. No hidden duration limit. |
@@ -104,6 +104,27 @@ ID is a bounded identifier, `command` is a nonempty argument list starting with
 an absolute executable, and the service port is 1–65535. Write these bytes with
 `engagement_contract.canonical` before hashing and signing; initialization freezes
 them as `applications/<access_id>.json`.
+
+For database/filesystem state in the owned Docker lab, v2 uses kind
+`owned-application-state-v2`, method `owned-container-recreate-v2`, and adds
+`state_volumes`, for example `[{"path":"/state/database","bytes":16777216}]`.
+Declare one to eight unique direct `/state/<id>` paths. Each capacity is a positive
+multiple of 4096, at least 4096 bytes; their sum must be less than the environment's
+`workspace_bytes`. The remainder bounds `/work`. Each generation gets fresh named
+local-driver tmpfs volumes, mounted with `volume-nocopy` and removed on cleanup.
+The signed database startup command initializes the empty volumes inside the
+memory-limited container. It can copy a baseline from a separate read-only seed
+path in the pinned image, then start the database using `/state/<id>`. Automatic
+Docker seed copying is disabled because it runs outside the application cgroup.
+Initialization must use the signed uid/gid and preserve mode `0700` for artifact
+inventory admission; the root filesystem remains read-only.
+These are disposable state copies, not attachment or snapshots of an existing
+external volume. They do not preserve database state across daemon loss.
+Docker documents the [local-driver options](https://docs.docker.com/reference/cli/docker/volume/create/)
+and [the `volume-nocopy` option](https://docs.docker.com/engine/storage/volumes/).
+The protected v3 environment receipt binds names, paths, capacities and observed
+creation timestamps. Unknown creation/removal or mismatched ownership keeps
+cleanup unresolved. See the [repeatable volume scenarios](../../evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md).
 
 The referenced access must permit `reset` and use one unique HTTP origin under
 `.invalid`, with no path except `/`. Its port must match the profile and its target
@@ -287,6 +308,16 @@ class selections refuse. Unselected unsupported grants confer no class capabilit
 scopes without this class preserve their existing meaning.
 Application state, model-owner state, persistent storage and external effects are
 outside this class.
+
+An owned application can instead select `owned-application-state-v1` through its
+signed `application_states[].artifact_effect_id`. This separate `artifact_create`
+effect names exactly that application and environment, requires cleanup, has no
+effect accounts and uses `source_only` or `self`. The existing reset effect remains
+required. The same journal records intent before allocation, verified configuration
+and mount inventory before application launch, and cleanup after the exact container
+and any declared state volumes are absent. This supports both application profile
+versions above; model-owner and external storage remain outside the class. The
+repository's operator artifact and escalation gates continue to apply.
 
 The host records intent before allocation, then exact owner IDs, verified Docker
 configuration and a fixed mount inventory before native admission. The inventory

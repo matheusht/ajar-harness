@@ -14,9 +14,10 @@ from engagement_contract import canonical, read_json
 from engagement_controller import fail
 
 CLASS = 'owned-lab-state-v1'
+APPLICATION_CLASS = 'owned-application-state-v1'
 CONFIG_FIELDS = ('Init', 'NetworkMode', 'ReadonlyRootfs', 'Privileged', 'CapDrop', 'SecurityOpt',
     'LogConfig', 'RestartPolicy', 'Memory', 'MemorySwap', 'NanoCpus', 'PidsLimit', 'Binds', 'PortBindings',
-    'Tmpfs', 'IpcMode', 'PidMode', 'UTSMode', 'CgroupnsMode', 'ShmSize', 'Devices', 'DeviceRequests',
+    'Tmpfs', 'Mounts', 'IpcMode', 'PidMode', 'UTSMode', 'CgroupnsMode', 'ShmSize', 'Devices', 'DeviceRequests',
     'DeviceCgroupRules', 'CapAdd', 'VolumesFrom', 'Links', 'ExtraHosts', 'Sysctls', 'MaskedPaths', 'ReadonlyPaths')
 
 
@@ -27,22 +28,31 @@ def configuration_snapshot(info):
                 ('io.oslit.engagement', 'io.oslit.profile', 'io.oslit.guardian') if key in info['Config']['Labels']}},
         **{key: info[key] for key in ('Image', 'Path', 'Args', 'Mounts')}}
 
-def select_effect(scope, grant, profile_id, selector=None):
+def select_effect(scope, grant, profile_id, selector=None, *, resources=None, artifact_class=CLASS):
+    selected = grant['resources'] if resources is None else resources
+    if artifact_class not in (CLASS, APPLICATION_CLASS) or not set(selected) <= set(grant['resources']):
+        fail('lab_artifact_effect_unavailable')
     effects = [row for row in scope['effects'] if row['kind'] == 'artifact_create'
-        and profile_id in row['environment_ids'] and set(grant['resources']) <= set(row['access_ids'])]
+        and profile_id in row['environment_ids'] and set(selected) <= set(row['access_ids'])]
     if selector is None:
-        effects = [row for row in effects if CLASS in row['artifact_classes']]
+        effects = [row for row in effects if artifact_class in row['artifact_classes']]
         if not effects:
             return None
     else:
         effects = [row for row in effects if row['id'] == selector]
-    resources = [row for row in scope['access'] if row['id'] in grant['resources']]
-    if (len(effects) != 1 or not resources or any(row['kind'] not in ('source', 'binary') or row['account_refs'] for row in resources)):
+    accesses = [row for row in scope['access'] if row['id'] in selected]
+    kinds = ('application',) if artifact_class == APPLICATION_CLASS else ('source', 'binary')
+    if (len(effects) != 1 or not accesses or any(row['kind'] not in kinds or
+            (artifact_class == CLASS and row['account_refs']) for row in accesses)):
         fail('lab_artifact_effect_unavailable')
     effect = effects[0]
-    if (effect['artifact_classes'] != [CLASS] or effect['account_refs'] or not effect['cleanup_required']
+    if (effect['artifact_classes'] != [artifact_class] or effect['account_refs'] or not effect['cleanup_required']
             or effect['rung'] not in ('source_only', 'self')):
         fail('lab_artifact_class_unsupported')
+    if artifact_class == APPLICATION_CLASS and (len(accesses) != 1 or not any(
+            row['access_id'] == accesses[0]['id'] and row['environment_id'] == profile_id and
+            row.get('artifact_effect_id') == effect['id'] for row in scope.get('application_states', []))):
+        fail('lab_artifact_effect_unavailable')
     return effect['id']
 
 
@@ -74,10 +84,12 @@ def validate_configuration(info, limits):
         fail('lab_artifact_namespace_unverified')
 
 
-def validate_inventory(value, profile, limits):
+def validate_inventory(value, profile, limits, state_volumes=None):
     policy = storage_policy(limits)
+    volumes = {row['path']: row['bytes'] for row in state_volumes or []}
+    policy['work_bytes'] -= sum(volumes.values())
     required = {'/', '/work', '/tmp', '/dev', '/dev/shm', '/dev/pts', '/dev/mqueue', '/proc',
-        '/sys', '/sys/fs/cgroup', '/etc/hosts', '/etc/hostname', '/etc/resolv.conf'}
+        '/sys', '/sys/fs/cgroup', '/etc/hosts', '/etc/hostname', '/etc/resolv.conf'} | set(volumes)
     try:
         if (set(value) != {'uid', 'gid', 'mounts', 'namespaces'}
                 or type(value['uid']) is not int or type(value['gid']) is not int
@@ -99,11 +111,11 @@ def validate_inventory(value, profile, limits):
             observed.add(path)
             if path in required and (row['kind'] != ('file' if path.startswith('/etc/') else 'directory') or row['device'] is not None):
                 raise ValueError()
-            if path in ('/work', '/tmp', '/dev/shm', '/dev'):
-                size = policy[{'/work':'work_bytes','/tmp':'tmp_bytes','/dev/shm':'shm_bytes','/dev':'dev_bytes'}[path]]
+            if path in ('/work', '/tmp', '/dev/shm', '/dev') or path in volumes:
+                size = volumes[path] if path in volumes else policy[{'/work':'work_bytes','/tmp':'tmp_bytes','/dev/shm':'shm_bytes','/dev':'dev_bytes'}[path]]
                 if row['filesystem'] != 'tmpfs' or row['size_bytes'] != size or row['readonly']:
                     raise ValueError()
-                if path in ('/work','/tmp') and (not row['writable'] or row['uid'] != profile['uid']
+                if (path in ('/work','/tmp') or path in volumes) and (not row['writable'] or row['uid'] != profile['uid']
                         or row['gid'] != profile['gid'] or row['mode'] != 0o700):
                     raise ValueError()
                 if path == '/dev' and (row['writable'] or row['uid'] != 0):
@@ -161,7 +173,10 @@ def record_intent(c, grant, profile_id, effect_id, value):
     with c.lock():
         state = c.state()
         c.bind_grant(state, grant)
-        if select_effect(state['scope'], grant, profile_id, effect_id) != effect_id:
+        effect = next((row for row in state['scope']['effects'] if row['id'] == effect_id), {})
+        artifact_class = APPLICATION_CLASS if effect.get('artifact_classes') == [APPLICATION_CLASS] else CLASS
+        resources = [row['id'] for row in value.get('access', [])] if artifact_class == APPLICATION_CLASS and isinstance(value, dict) else None
+        if select_effect(state['scope'], grant, profile_id, effect_id, resources=resources, artifact_class=artifact_class) != effect_id:
             fail('lab_artifact_effect_unavailable')
         reference = next(row for row in state['scope']['environments'] if row['profile_id'] == profile_id)
         if not isinstance(value, dict) or not isinstance(value.get('nonce'), str):
@@ -169,7 +184,7 @@ def record_intent(c, grant, profile_id, effect_id, value):
         nonce = value['nonce']
         prior = state['lab_artifacts'].get(nonce)
         data = {key: grant[key] for key in ('dispatch_id', 'worker_id', 'generation', 'profile_id', 'resources', 'scope_sha256', 'adapter_id')}
-        data.update(nonce=nonce, environment_profile_id=profile_id, artifact_class=CLASS, effect_id=effect_id,
+        data.update(nonce=nonce, environment_profile_id=profile_id, artifact_class=artifact_class, effect_id=effect_id,
             identity=value, policy=storage_policy(reference['limits']))
         if prior:
             _owner(c, state, grant, nonce)
@@ -207,10 +222,14 @@ def record_ready(c, grant, profile_id, readback):
         if row.get('ready') is not None:
             fail('lab_artifact_readback_changed')
         profile = read_json(c.root / 'contract/environments' / (profile_id + '.json'), private=True)
+        volumes = None
+        if value['kind'] == 'research-environment-receipt-v3':
+            application = read_json(c.root / 'contract/applications' / (value['access'][0]['id'] + '.json'), private=True)
+            volumes = application['state_volumes']
         verifier = Environment(profile, reference['limits'], lambda: False, lambda value: None,
-            receipt=value, lab_artifact=True)
+            receipt=value, lab_artifact=True, state_volumes=volumes)
         verifier._verify_configuration(readback['configuration'])
-        validate_inventory(readback['inventory'], profile, reference['limits'])
+        validate_inventory(readback['inventory'], profile, reference['limits'], volumes)
         return _record(c, 'lab_artifact_ready', {'nonce': value['nonce'], 'readback': readback})
 
 
@@ -297,10 +316,16 @@ def require_clean(state, dispatch_id):
 def admit_operation(state, grant, profile_id, observation, effect):
     op, nonce = observation['operation'], observation['identity']['nonce']
     row = state['lab_artifacts'].get(nonce)
-    if select_effect(state['scope'], grant, profile_id, row['effect_id'] if row else None) is None:
+    artifact_class = row['artifact_class'] if row else (APPLICATION_CLASS if effect['kind'] == 'reset' else CLASS)
+    resources = [access['id'] for access in observation['identity']['access']] if artifact_class == APPLICATION_CLASS else None
+    if select_effect(state['scope'], grant, profile_id, row['effect_id'] if row else None,
+                     resources=resources, artifact_class=artifact_class) is None:
         return
     if row is None or row['dispatch_id'] != grant['dispatch_id'] or row['state'] == 'clean':
         fail('lab_artifact_intent_missing')
     if op == 'execute' or (op == 'launch_stdio' and observation.get('role') == 'native_tools'):
         if row['state'] != 'ready' or effect['kind'] != 'execute':
+            fail('lab_artifact_execute_unavailable')
+    if artifact_class == APPLICATION_CLASS and op == 'launch_stdio' and observation.get('role') in ('application', 'application_connector'):
+        if row['state'] != 'ready' or effect['kind'] != 'reset':
             fail('lab_artifact_execute_unavailable')

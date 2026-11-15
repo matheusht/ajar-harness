@@ -389,6 +389,19 @@ are bounded; use `--since CURSOR --limit N` and the returned `next_cursor`/`has_
 for subsequent update pages. Worker status/claim/submit endpoints are assigned by
 the host; a claimed role or native session ID is not authentication.
 
+Search the shared board without changing work:
+
+```sh
+python3 tools/native_engagement.py status --engagement-root /private/engagements/example \
+  --view board --query parser --kind publication --kind claim --limit 20
+```
+
+Use `--since` with the returned board cursor and the same filters for stable
+snapshot pagination. Agents use `engagement_status` with `view:board` and can send
+typed `team_message` submissions. Relevant peer updates are delivered through
+native steering; durable acknowledgments recover missed updates after restart.
+The board retains source references and review state, and export includes it.
+
 ## Stop, recover and export
 
 ```sh

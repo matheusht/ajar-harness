@@ -110,8 +110,12 @@ def _tool(name, description, properties, required):
 
 
 TOOLS = [
-    _tool('engagement_status', 'Read your assignment, current authority and bounded shared evidence updates.',
-        {'since': {'type': ['string', 'null']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}, ['since', 'limit']),
+    _tool('engagement_status', 'Read assignment and updates, or search the shared research board with view=board. Board cursors are separate from update acknowledgments.',
+        {'since': {'type': ['string', 'null']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+         'view': {'type': 'string', 'enum': ['updates', 'board']}, 'query': {'type': 'string', 'maxLength': 1024},
+         'kinds': {'type': 'array', 'items': {'type': 'string', 'enum': [
+             'task', 'publication', 'instrument', 'experiment', 'claim', 'review', 'obligation', 'message']},
+                   'minItems': 1, 'maxItems': 8, 'uniqueItems': True}}, ['since', 'limit']),
     _tool('engagement_submit', 'Submit a typed request using your authenticated worker identity and the current revision.',
         {'request': {'type': 'object'}}, ['request']),
     _tool('engagement_read', 'Read a published evidence object or current ephemeral status view in byte ranges. Follow next_offset until null; default max_bytes is 65536.',
@@ -500,9 +504,13 @@ class NativeBoundary:
 
     def _status(self, arguments):
         self.status_read_view = None
+        if (not isinstance(arguments, dict) or not {'since', 'limit'} <= set(arguments) or
+                set(arguments) - {'since', 'limit', 'view', 'query', 'kinds'}):
+            raise BoundaryError('native_status_arguments_invalid')
         limit = arguments['limit']
         while True:
-            page = self.controller.status(self.context.principal, since=arguments['since'], limit=limit)
+            page = self.controller.status(self.context.principal, since=arguments['since'], limit=limit,
+                view=arguments.get('view', 'updates'), query=arguments.get('query', ''), kinds=arguments.get('kinds'))
             if len(canonical(_result(page))) <= MAX_FRAME // 2:
                 return _completed(page)
             if limit > 1:
@@ -812,11 +820,19 @@ class NativeBoundary:
                         return self.controller.record_environment_observation(operations[opid], profile_id,
                             observation, effect_id=effect_id)
                 options = {'known_hosts_file': self.controller.root / 'contract/environments' / (profile_id + '.known_hosts')} if target_profile['ssh'] else {}
+                artifact_effect = reference.get('artifact_effect_id')
+                if artifact_effect:
+                    options.update(lab_artifact=True,
+                        on_ready=lambda value, target_profile_id=profile_id:
+                            self.controller.record_lab_artifact_ready(grant, target_profile_id, value))
                 owner = ApplicationOwner(profile, next(row for row in accesses if row['id'] == access_id),
                     target_profile, target_environment['limits'], authorize, observe_target,
                     grant=grant, dispatch_guard=guard, bootstrap={'application-connector': support['application-connector']}, **options)
                 with self.controller.lock():
                     owners[access_id] = owner
+                if artifact_effect:
+                    owner.environment.identity['access'] = [{key: owner.access[key] for key in ('id', 'kind', 'identity')}]
+                    self.controller.record_lab_artifact_intent(grant, profile_id, artifact_effect, owner.environment.allocation_identity())
                 receipt = owner.reset(arguments['starting_state'][access_id])
                 self.controller.record_application_start(grant, profile_id, receipt)
             if applications:
@@ -878,7 +894,10 @@ class NativeBoundary:
             for access_id, owner in owners.items():
                 try:
                     readback = owner.cleanup()
-                    self.controller.record_environment_cleanup(grant, control['reset_profiles'][access_id][0]['environment_id'], readback)
+                    reference = control['reset_profiles'][access_id][0]
+                    self.controller.record_environment_cleanup(grant, reference['environment_id'], readback)
+                    if reference.get('artifact_effect_id'):
+                        self.controller.record_lab_artifact_cleanup(grant, reference['environment_id'], readback)
                     application_cleanup[access_id] = readback['status'] == 'clean'
                 except Exception:
                     failure = failure or 'native_capture_application_cleanup_unresolved'
@@ -1107,6 +1126,10 @@ def recover_boundary(context, dispatch):
             def observe(value, identity=profile_id, effect=effects[0]['id']):
                 return c.record_environment_observation(context.grant, identity, value, effect_id=effect)
             options = {'known_hosts_file': c.root / 'contract/environments' / (profile_id + '.known_hosts')} if profile['ssh'] else {}
+            if row['identity']['kind'] == 'research-environment-receipt-v3':
+                access_id = row['identity']['access'][0]['id']
+                application_profile = read_json(c.root / 'contract/applications' / (access_id + '.json'), private=True)
+                options['state_volumes'] = application_profile['state_volumes']
             environment = Environment(profile, reference['limits'], context.authorize, observe,
                 grant=context.grant, dispatch_guard=context.guard, receipt=row['identity'], lab_artifact=artifact is not None, **options)
             stopped = environment.revoke()

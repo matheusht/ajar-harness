@@ -1,0 +1,78 @@
+{
+  "checks": [
+    {
+      "name": "source_binary_artifact_selector_compatibility",
+      "status": "passed"
+    },
+    {
+      "name": "signed_effect_contract_gates",
+      "observed": {
+        "rejected": [
+          "wrong_effect",
+          "wrong_class",
+          "account_or_cleanup"
+        ],
+        "valid_app_class": "owned-application-state-v1"
+      },
+      "status": "passed"
+    },
+    {
+      "name": "missing_intent_before_allocation",
+      "observed": {
+        "application_launches": 0,
+        "capture_refused": true,
+        "target_allocated": false
+      },
+      "status": "passed"
+    },
+    {
+      "name": "normal_ready_to_clean",
+      "observed": {
+        "application_generation": "eb26f29535094a5c992b01c4321aa937",
+        "artifact_state": "clean",
+        "capture_status": "passed",
+        "order": [
+          "prepare_attempt",
+          "environment_allocated",
+          "application_launch"
+        ],
+        "unrelated_volumes_preserved": true,
+        "volume_nocopy": true
+      },
+      "status": "passed"
+    },
+    {
+      "name": "cleanup_hold",
+      "observed": {
+        "application_held": true,
+        "artifact_states": [
+          "ready"
+        ],
+        "capture_refused": true
+      },
+      "status": "passed"
+    },
+    {
+      "name": "cleanup_recovery",
+      "observed": {
+        "artifacts_clean": true,
+        "recovery_status": "settled",
+        "unrelated_volume_preserved": true
+      },
+      "status": "passed"
+    }
+  ],
+  "classification": "engineering_simulation_fake_docker_volume_peer",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/private/tmp/oslit-final-implementation-20261115/evals/native-qualification/smoke/check_application_artifact_e2e.py",
+    "--output",
+    "evals/native-qualification/team-evidence/application-artifact-20261115/result.json"
+  ],
+  "docker_daemon_calls": 0,
+  "external_target_calls": 0,
+  "kind": "application-owned-artifact-e2e-v1",
+  "provider_calls": 0,
+  "research_acceptance": "not_run",
+  "status": "passed"
+}

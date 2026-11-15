@@ -30,7 +30,7 @@ DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
 EVENT_KEYS = {'kind', 'engagement_id', 'sequence', 'previous_sha256', 'at', 'actor',
               'request_id', 'request_sha256', 'type', 'payload', 'sha256'}
 SUBMIT_TYPES = {'claim', 'publish', 'task_create', 'task_priority', 'task_assign',
-                'worker_request', 'task_result', 'updates_ack'}
+                'worker_request', 'task_result', 'updates_ack', 'team_message'}
 LEAD_TYPES = {'task_priority', 'task_assign', 'worker_request'}
 GRANT_KEYS = {'dispatch_id', 'worker_id', 'generation', 'assignment', 'profile_id',
               'scope_sha256', 'seconds', 'resources', 'lease_expires_at', 'adapter_id'}
@@ -253,7 +253,7 @@ class Controller:
                 fail('contract_changed')
         state = {'engagement_id': scope['engagement_id'], 'scope': scope,
                  'scope_sha256': initial['scope_sha256'], 'evidence_class': initial['evidence_class'],
-                 'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {},
+                 'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {}, 'messages': {},
                  'directions': [], 'dispatches': {}, 'invocations': {}, 'provider_requests': {},
                  'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
@@ -558,6 +558,8 @@ class Controller:
             state['publications'][data['publication_id']] = dict(data, author=actor)
             from engagement_evidence import invalidate
             invalidate(state, data['supersedes'])
+        elif kind == 'team_message':
+            state['messages'][data['message_id']] = dict(data, author=actor)
         elif kind == 'task_result':
             task = state['tasks'][data['task_id']]
             task.update(status=data['disposition'], result=data['result'], evidence_refs=data['evidence_refs'])
@@ -700,6 +702,21 @@ class Controller:
             if task is None:
                 fail('no_ready_task')
             data = {'task_id': task['task_id'], 'worker_id': assignee['id']}
+        elif kind == 'team_message':
+            keys(data, ('message_id', 'recipient_ids', 'subject', 'body', 'refs'))
+            identifier(data['message_id'])
+            if data['message_id'] in state['messages']:
+                fail('message_exists')
+            recipients = data['recipient_ids']
+            if (not isinstance(recipients, list) or not 1 <= len(recipients) <= 16 or
+                    any(not isinstance(name, str) or name not in state['workers'] or
+                        state['workers'][name]['status'] not in ('pending', 'preparing', 'active') for name in recipients) or
+                    len(recipients) != len(set(recipients))):
+                fail('message_recipient_invalid')
+            if (not isinstance(data['subject'], str) or not 1 <= len(data['subject']) <= 1024 or
+                    not isinstance(data['body'], str) or not 1 <= len(data['body']) <= 8192):
+                fail('message_invalid')
+            self._references(state, data['refs'])
         elif kind == 'publish':
             keys(data, ('publication_id', 'kind', 'subject', 'body', 'refs', 'supersedes', 'artifacts'))
             identifier(data['publication_id'])
@@ -1692,7 +1709,27 @@ class Controller:
         except (ValueError, TypeError, IndexError, UnicodeError):
             fail('cursor_invalid')
 
-    def status(self, principal=None, *, since=None, limit=100):
+    def board(self, principal=None, *, query='', kinds=None, since=None, limit=30):
+        from engagement_board import page
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            worker = self._worker(state, principal) if principal is not None else None
+            return page(self, events, state, worker, query=query, kinds=kinds, since=since, limit=limit)
+
+    def notices(self, principal, *, since=0, limit=30):
+        from engagement_board import notices
+        with self.lock():
+            events = self._events()
+            state = self._replay(events)
+            worker = self._worker(state, principal)
+            return notices(self, events, state, worker, since=since, limit=limit)
+
+    def status(self, principal=None, *, since=None, limit=100, view='updates', query='', kinds=None):
+        if view == 'board':
+            return self.board(principal, query=query, kinds=kinds, since=since, limit=limit)
+        if view != 'updates' or query or kinds is not None:
+            fail('status_view_invalid')
         if not integer(limit, 1, 1000):
             fail('page_limit_invalid')
         with self.lock():
@@ -1733,7 +1770,9 @@ class Controller:
                 'summaries_truncated': {name: len(state[name]) > summary_limit for name in fields},
                 'usage': state['usage'], 'resource_holds': state['resource_holds'], 'cleanup': state['cleanup'],
                 'replacement_required': state['replacement_required'],
-                'lab_state_artifacts': {'class': 'owned-lab-state-v1', 'count': len(state['lab_artifacts']),
+                'lab_state_artifacts': {'classes': {name: sum(row['artifact_class'] == name for row in state['lab_artifacts'].values())
+                    for name in sorted({row['artifact_class'] for row in state['lab_artifacts'].values()})},
+                    'count': len(state['lab_artifacts']),
                     'pending_cleanup': sum(row['state'] != 'clean' for row in state['lab_artifacts'].values()),
                     'retained_evidence_objects': len(state['evidence_objects'])},
                 'updates': updates, 'has_more': end < len(events),
@@ -1761,6 +1800,10 @@ class Controller:
                     files['objects/' + sha[7:]] = self.read_object(sha)
             for sha in state['evidence_objects']:
                 files['objects/' + sha[7:]] = self.read_object(sha)
+            from engagement_board import rows as board_rows
+            files['board.json'] = canonical({'engagement_id': state['engagement_id'],
+                'snapshot_revision': state['revision'], 'evidence_class': state['evidence_class'],
+                'items': board_rows(state, events)})
             files['result.json'] = canonical({'engagement_id': state['engagement_id'],
                 'scope_sha256': state['scope_sha256'], 'evidence_class': state['evidence_class'],
                 'status': state['status'], 'claim_acceptance': 'per_claim', 'tasks': state['tasks'],
@@ -1771,7 +1814,8 @@ class Controller:
                 'retained_evidence_objects': len(state['evidence_objects']),
                 'research_guidance': {name: events[0]['payload']['contract_files'][name]
                     for name in ('methodology.md', 'protocol.md') if name in events[0]['payload']['contract_files']},
-                'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],
+                'directions': state['directions'], 'messages': state['messages'],
+                'usage': state['usage'], 'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
             for data in files.values():
                 try:
@@ -1807,8 +1851,11 @@ class WorkerServer:
                         fail('request_invalid')
                     request = json.loads(line, object_pairs_hook=unique_pairs)
                     if request.get('operation') == 'status':
-                        keys(request, ('operation', 'since', 'limit'), 'request_invalid')
-                        result = controller.status(principal, since=request['since'], limit=request['limit'])
+                        if (not {'operation', 'since', 'limit'} <= set(request) or
+                                set(request) - {'operation', 'since', 'limit', 'view', 'query', 'kinds'}):
+                            fail('request_invalid')
+                        result = controller.status(principal, since=request['since'], limit=request['limit'],
+                            view=request.get('view', 'updates'), query=request.get('query', ''), kinds=request.get('kinds'))
                     elif request.get('operation') == 'submit':
                         keys(request, ('operation', 'request'), 'request_invalid')
                         result = controller.submit(principal, request['request'])

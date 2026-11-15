@@ -17,7 +17,7 @@ for line in Path('/proc/self/mountinfo').read_text().splitlines():
     path, filesystem = unescape(fields[4]), fields[separator + 1]
     info = os.stat(path)
     kind = 'directory' if stat.S_ISDIR(info.st_mode) else 'file' if stat.S_ISREG(info.st_mode) else 'character' if stat.S_ISCHR(info.st_mode) else 'other'
-    size = os.statvfs(path) if path in ('/work', '/tmp', '/dev', '/dev/shm') else None
+    size = os.statvfs(path) if path in ('/work', '/tmp', '/dev', '/dev/shm') or path.startswith('/state/') else None
     mounts.append({'path': path, 'filesystem': filesystem,
         'readonly': 'ro' in fields[5].split(',') or 'ro' in fields[separator + 3].split(','),
         'writable': os.access(path, os.W_OK), 'size_bytes': size.f_frsize * size.f_blocks if size else 0,

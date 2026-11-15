@@ -1,0 +1,68 @@
+{
+  "kind": "application-state-volumes-e2e-v1",
+  "classification": "real_signed_contract_controller_http_and_private_connector_with_fake_docker_owner",
+  "checks": [
+    {
+      "name": "signed-v2-profile-frozen-and-profile-tamper-rejected",
+      "passed": true
+    },
+    {
+      "name": "target-mount-requires-volume-nocopy-true",
+      "passed": true
+    },
+    {
+      "name": "invalid-path-size-duplicate-and-total-byte-descriptors-rejected",
+      "passed": true
+    },
+    {
+      "name": "v3-receipt-exact-local-tmpfs-labels-options-mount-and-cleanup",
+      "passed": true
+    },
+    {
+      "name": "controller-journal-create-before-start-and-remove-after-stop",
+      "passed": true
+    },
+    {
+      "name": "fresh-replay-generation-reaches-pinned-image-baseline-and-preserves-unrelated-volume",
+      "passed": true
+    },
+    {
+      "name": "unknown-volume-cleanup-retains-exact-volume-and-resource-hold",
+      "passed": true
+    }
+  ],
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "planned_not_exercised": [
+    "v1 compatibility in this workflow",
+    "all invalid schema/path/size variants in the scenario table",
+    "missing reset authority and invalid effect bindings",
+    "volume label/options/timestamp tampering",
+    "uncertain create/readback and recovery",
+    "revocation during create or cleanup",
+    "multiple volumes and limit-count boundary",
+    "physical Docker volume semantics",
+    "SSH transport"
+  ],
+  "unverified": [
+    "physical Docker volume semantics",
+    "SSH transport",
+    "provider/runtime integration",
+    "research acceptance"
+  ],
+  "frozen_profile_sha256": "sha256:40b5fa0dc65697a175ebf8ebf823ee9035536dfa46cf432ba291c303fe3a192f",
+  "status": "passed",
+  "source_sha256": {
+    "tools/application_state.py": "sha256:9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+    "tools/application_volumes.py": "sha256:4bab7e20015d49ea600741199ab943eca03c4192c2055cdd0e94219436558c39",
+    "tools/research_environment.py": "sha256:47a9c193a587c5ce34b6302000a525e9a69fe0403d508e7fede04182587314ff",
+    "tools/engagement_contract.py": "sha256:dc99f1dbc52a287398ebc864242b2b4ed4ebbd18b642f690493d9e1a467ed0c2",
+    "tools/engagement_evidence.py": "sha256:b722528650a9a8b33a6373cef29d0559df822774c62f44cb015740bf3f2dcb3a",
+    "tools/engagement_controller.py": "sha256:82b98462be2ce743a555d5774203331acf77c38b9bc3c1065555ebeaf8f433c1",
+    "tools/engagement_native_boundary.py": "sha256:b6571d65ddb20ed67f5ed275ddc491055e8bd71f809e00ca0d944688ec4d4fdc",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "sha256:354be013fc0bec8237b20c20103174508f483d5f1aee33d29308b4a61eab91d5",
+    "evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md": "sha256:e9566a971b8179633128b01296db71999e785fe182c803d4e628fd0a26aca6e0",
+    "evals/native-qualification/smoke/check_application_state_volumes_e2e.py": "sha256:d94abe1b0daab578c59fb8d3d2982db8d3f0ed54eb2f2f586c158df4a332dfed"
+  }
+}

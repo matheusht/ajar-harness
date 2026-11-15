@@ -41,7 +41,7 @@ def require(condition, message):
     if not condition: raise AssertionError(message)
 
 
-def configured(path, *, combined=False, applications=1, reset_capability=True):
+def configured(path, *, combined=False, applications=1, reset_capability=True, state_volumes=None):
     inputs = fixture.make_fixture(path / 'input')
     document = json.loads(inputs.read_text()); scope = fixture.fixture_scope(inputs)
     counter = path / 'counter.py'; fixture.write(counter, COUNTER.encode())
@@ -74,8 +74,25 @@ def configured(path, *, combined=False, applications=1, reset_capability=True):
         effect_id = 'reset-app' if index == 0 else 'reset-other'
         scope['effects'].append(dict(template, id=effect_id, kind='reset', access_ids=[identity],
             environment_ids=['target-main'], cleanup_required=True))
+        command = [sys.executable, str(counter), str(port)]
+        if state_volumes is not None:
+            command.append(state_volumes[0]['path'])
         profile = {'kind': 'owned-application-state-v1', 'method': 'owned-container-recreate-v1',
-            'baseline_id': 'counter-zero', 'command': [sys.executable, str(counter), str(port)], 'service_port': port}
+            'baseline_id': 'counter-zero', 'command': command, 'service_port': port}
+        if state_volumes is not None:
+            counter.write_text('''import http.server,pathlib,sys
+path=pathlib.Path(sys.argv[2]);path.mkdir(parents=True,exist_ok=True);value_file=path/'value'
+if not value_file.exists():value_file.write_text('0')
+class Counter(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  value=int(value_file.read_text()) if value_file.exists() else 0
+  if self.path=='/increment':value+=1;value_file.write_text(str(value))
+  data=str(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+ def log_message(self,*args):pass
+http.server.HTTPServer(('127.0.0.1',int(sys.argv[1])),Counter).serve_forever()
+''')
+            profile.update(kind='owned-application-state-v2', method='owned-container-recreate-v2',
+                state_volumes=copy.deepcopy(state_volumes))
         filename = path / (identity + '.json'); fixture.write(filename, canonical(profile))
         scope['application_states'].append({'access_id': identity, 'profile_sha256': digest(filename.read_bytes()),
             'environment_id': 'target-main', 'reset_effect_id': effect_id})

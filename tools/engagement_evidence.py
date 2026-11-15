@@ -17,10 +17,10 @@ LEAD_ONLY = {'review_request', 'review_response', 'closure_request'}
 COLLECTIONS = ('instruments', 'experiments', 'comparisons', 'claims', 'obligations', 'reviews',
                'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs',
                'application_starts', 'lab_artifacts')
-CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image'}
+CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image', 'remove_state_volume'}
 OPERATIONS = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
     'execute', 'start', 'renew', 'launch_stdio', 'readback_input', 'stage_support', 'readback_support',
-    'read_workspace_manifest', 'read_artifact'}
+    'read_workspace_manifest', 'read_artifact', 'create_state_volume'}
 IDENTITY_KEYS = {'kind', 'nonce', 'container_id', 'container_name', 'stage_container_id',
     'stage_container_name', 'prepared_image_id', 'prepared_image_name', 'unsettled',
     'daemon_id', 'image_id', 'profile_sha256', 'access', 'support_inputs'}
@@ -62,14 +62,15 @@ def binding(c, state, grant):
 
 
 def identity(c, state, grant, profile_id, value):
-    keys(value, IDENTITY_KEYS, 'environment_identity_invalid')
+    volume_owner = isinstance(value, dict) and value.get('kind') == 'research-environment-receipt-v3'
+    keys(value, IDENTITY_KEYS | ({'state_volumes'} if volume_owner else set()), 'environment_identity_invalid')
     signed = next((row for row in state['scope']['environments'] if row['profile_id'] == profile_id), None)
     if signed is None:
         fail('environment_profile_forbidden')
     profile = read_json(c.root / 'contract/environments' / (profile_id + '.json'), private=True)
     expected_digest = digest(json.dumps(profile, sort_keys=True, separators=(',', ':')).encode())
     nonce = value['nonce']
-    if (value['kind'] != 'research-environment-receipt-v2' or not isinstance(nonce, str)
+    if (value['kind'] not in ('research-environment-receipt-v2', 'research-environment-receipt-v3') or not isinstance(nonce, str)
             or not re.fullmatch('[0-9a-f]{32}', nonce)
             or value['container_name'] != 'oslit-' + nonce
             or value['stage_container_name'] != 'oslit-' + nonce + '-stage'
@@ -82,8 +83,8 @@ def identity(c, state, grant, profile_id, value):
         pattern = 'sha256:[0-9a-f]{64}' if key == 'prepared_image_id' else '[0-9a-f]{64}'
         if value[key] is not None and (not isinstance(value[key], str) or not re.fullmatch(pattern, value[key])):
             fail('environment_identity_invalid')
-    if (not isinstance(value['unsettled'], list) or
-            any(v not in ('create_stage', 'snapshot_input', 'create') for v in value['unsettled'])):
+    from application_volumes import unsettled_valid, validate_identity
+    if not unsettled_valid(value):
         fail('environment_identity_invalid')
     accesses = {row['id']: {k: row[k] for k in ('id', 'kind', 'identity')} for row in state['scope']['access']}
     if not isinstance(value['access'], list) or len(value['access']) > len(accesses):
@@ -94,6 +95,19 @@ def identity(c, state, grant, profile_id, value):
         if row['id'] not in grant['resources'] or row != accesses.get(row['id']) or row['id'] in observed:
             fail('environment_access_invalid')
         observed.append(row['id'])
+    if volume_owner:
+        from research_environment import EnvironmentUnavailable
+        if len(observed) != 1 or accesses[observed[0]]['kind'] != 'application':
+            fail('application_volume_identity_mismatch')
+        reference = next((row for row in state['scope'].get('application_states', [])
+                          if row['access_id'] == observed[0] and row['environment_id'] == profile_id), None)
+        if reference is None:
+            fail('application_volume_identity_mismatch')
+        application = read_json(c.root / 'contract/applications' / (observed[0] + '.json'), private=True)
+        try:
+            validate_identity(value, application.get('state_volumes'), signed['limits'])
+        except EnvironmentUnavailable:
+            fail('application_volume_identity_mismatch')
     runtime = read_json(c.root / 'contract/runtimes' / (grant['profile_id'] + '.json'), private=True)
     support = value['support_inputs']
     if not isinstance(support, list) or len(support) > 33:
@@ -117,6 +131,10 @@ def identity(c, state, grant, profile_id, value):
                 continue
             if old is not None and old != value[key]:
                 fail('environment_identity_changed')
+        if volume_owner:
+            for old, current in zip(prior['identity']['state_volumes'], value['state_volumes']):
+                if old['created_at'] is not None and old['created_at'] != current['created_at']:
+                    fail('environment_identity_changed')
     return signed
 
 

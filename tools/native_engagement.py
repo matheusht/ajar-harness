@@ -797,6 +797,9 @@ def _v2_main(argv: list[str]) -> int:
     origin.add_argument('--socket', type=Path)
     status.add_argument('--since')
     status.add_argument('--limit', type=int, default=100)
+    status.add_argument('--view', choices=('updates', 'board'), default='updates')
+    status.add_argument('--query', default='')
+    status.add_argument('--kind', action='append', dest='kinds')
     claim = commands.add_parser('claim', help='claim ready work through the worker endpoint')
     claim.add_argument('--socket', type=Path, required=True)
     claim.add_argument('--request-id', required=True)
@@ -814,14 +817,16 @@ def _v2_main(argv: list[str]) -> int:
                         'type': 'claim', 'payload': {}})
             result = worker_call(args.socket, {'operation': 'submit', 'request': request})
         elif args.command == 'status' and args.socket:
-            result = worker_call(args.socket, {'operation': 'status', 'since': args.since, 'limit': args.limit})
+            result = worker_call(args.socket, {'operation': 'status', 'since': args.since, 'limit': args.limit,
+                'view': args.view, 'query': args.query, 'kinds': args.kinds})
         else:
             if (args.engagement_root / 'state.json').exists():
                 raise ControllerError('route_conflict')
             controller = (Controller.initialize(args.engagement_root, load_inputs(args.inputs))
                           if args.command == 'run' else Controller(args.engagement_root))
             if args.command == 'status':
-                result = controller.status(since=args.since, limit=args.limit)
+                result = controller.status(since=args.since, limit=args.limit,
+                    view=args.view, query=args.query, kinds=args.kinds)
             elif args.command == 'direction':
                 result = controller.direction(read_bytes(args.file, max_bytes=65536).decode('utf-8'))
             elif args.command == 'stop':

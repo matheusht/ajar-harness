@@ -27,6 +27,11 @@ full-day run. A passing engineering fixture is not research acceptance.
 
 No generic template can supply a target's authority, actual provider access or
 reset semantics. For owned application replay, sign the supported reset descriptor.
+For Docker database state, use the [v2 application profile](../research/oslit-v2-contract-2026-11-14.md)
+with bounded `/state/<id>` volumes and a database command that uses those paths.
+Every reset starts empty disposable volumes; the signed startup command initializes
+them from its pinned image inside the memory-limited container. An optional
+signed application artifact effect records their creation and cleanup lifecycle.
 External databases and persistent state outside that owner need their own reset;
 an ordinary restart does not establish clean replay. Unsupported artifact classes
 remain refused, and the repository's artifact/escalation review gates still apply.
@@ -52,12 +57,17 @@ In a second terminal, set `OSLIT_RUN` to the same directory:
 
 ```sh
 python3 tools/native_engagement.py status --engagement-root "$OSLIT_RUN"
+python3 tools/native_engagement.py status --engagement-root "$OSLIT_RUN" --view board --query parser --limit 20
 python3 tools/native_engagement.py direction --engagement-root "$OSLIT_RUN" --file /absolute/private/direction.md
 ```
 
 Directions refine work within signed authority. They cannot expand scope.
 Ordinary model turn completion does not end an investigation. The lead owns
 priorities, team requests and continued work; unresolved paths remain visible.
+The searchable board derives from the journal and is included in export. Agents
+send typed `team_message` submissions through the existing tool; relevant peer
+updates reach active turns through native steering. Durable acknowledgments recover
+missed updates. Messages remain team-visible data and confer no authority.
 
 ## Recover, stop and retain the result
 
@@ -103,5 +113,11 @@ records real pinned Linux Codex/OMP source workflows with deterministic provider
 replies, continuity, isolation, owner-loss recovery and cleanup. The focused
 [accounting scenario](../../evals/native-qualification/smoke/PROVIDER-ACCOUNTING-E2E.md)
 covers proxy attempts and journal replay with an owned local provider.
+The [shared-board workflow](../../evals/native-qualification/smoke/ENGAGEMENT-BOARD-STEERING-E2E.md)
+checks searchable snapshots, native tool access, addressed messages, steering,
+acknowledgments and export with a simulated runtime. The
+[state-volume workflow](../../evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md)
+uses the signed controller/capture path and a real local HTTP service with simulated
+Docker ownership. Physical Docker volume behavior still needs qualification.
 Live-model investigation quality, separate-host outages and full-day operation
 are deliberately left to the operator's test. No fresh target was run here.

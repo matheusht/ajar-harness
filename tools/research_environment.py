@@ -76,7 +76,7 @@ class Environment:
     """
 
     def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None,
-                 known_hosts_file=None, lab_artifact=False, codex_tool_policy=False):
+                 known_hosts_file=None, lab_artifact=False, codex_tool_policy=False, state_volumes=None):
         from engagement_contract import CODEX_TOOL_POLICY, validate_environment_profile
         validate_environment_profile(profile)
         self.profile = json.loads(json.dumps(profile))
@@ -97,6 +97,10 @@ class Environment:
             valid = type(value) in (int, float) and math.isfinite(value) and value > 0
             if not valid or (key != 'cpu_count' and type(value) is not int):
                 raise EnvironmentUnavailable('environment_limits_invalid')
+        self.state_volumes = json.loads(json.dumps(state_volumes)) if state_volumes is not None else []
+        if state_volumes is not None:
+            from application_volumes import validate
+            validate(self.state_volumes, limits)
         self.authorize, self.observe = authorize, observe
         self.grant = json.loads(json.dumps(grant)) if grant is not None else None
         self.dispatch_guard = dispatch_guard
@@ -116,7 +120,12 @@ class Environment:
         self.identity['container_name'] = 'oslit-' + self.identity['nonce']
         self.identity['stage_container_name'] = self.identity['container_name'] + '-stage'
         self.identity['prepared_image_name'] = 'oslit-input-' + self.identity['nonce'] + ':latest'
+        if self.state_volumes:
+            from application_volumes import identities
+            self.identity.update(kind='research-environment-receipt-v3',
+                state_volumes=identities(self.identity['nonce'], self.state_volumes))
         if receipt is not None:
+            from application_volumes import unsettled_valid, validate_identity
             required = set(self.identity)
             if (not isinstance(receipt, dict) or set(receipt) != required or
                     receipt['kind'] != self.identity['kind'] or
@@ -132,10 +141,11 @@ class Environment:
                      not re.fullmatch('[0-9a-f]{64}', receipt['stage_container_id'])) or
                     (receipt['prepared_image_id'] is not None and
                      not re.fullmatch('sha256:[0-9a-f]{64}', receipt['prepared_image_id'])) or
-                    not isinstance(receipt['unsettled'], list) or
-                    not set(receipt['unsettled']) <= {'create_stage', 'snapshot_input', 'create'} or
+                    not unsettled_valid(receipt) or
                     not receipt['daemon_id']):
                 raise EnvironmentUnavailable('environment_receipt_invalid')
+            if self.state_volumes:
+                validate_identity(receipt, self.state_volumes, limits)
             self.identity = json.loads(json.dumps(receipt))
             # Recovery can inspect/revoke/clean an exact resource; it cannot revive it.
             self.retired = True
@@ -265,12 +275,13 @@ class Environment:
             raise EnvironmentUnavailable('docker_daemon_changed')
         self.identity['daemon_id'] = value
 
-    def _effect(self, operation, args, *, cleanup=False, timeout=5, input_file=None, output_limit=None):
+    def _effect(self, operation, args, *, cleanup=False, timeout=5, input_file=None, output_limit=None, uncertain_key=None):
         remaining = timeout if cleanup else min(timeout, self._admit())
         self._daemon()
         operation_id = uuid.uuid4().hex
-        if operation in ('create_stage', 'snapshot_input', 'create'):
-            self.identity['unsettled'].append(operation)
+        key = uncertain_key or (operation if operation in ('create_stage', 'snapshot_input', 'create') else None)
+        if key:
+            self.identity['unsettled'].append(key)
         self._event('intent', operation, operation_id, request_sha256=self._digest(args))
         # The journal write may have taken time or the grant may have been revoked.
         if not cleanup:
@@ -280,8 +291,8 @@ class Environment:
         result = self._run(args, timeout=remaining, input_file=input_file,
                            output_limit=output_limit or 4 * 1024 * 1024, dispatch=not cleanup,
                            include_stderr=operation == 'execute')
-        if result['status'] == 'settled' and result['returncode'] == 0 and operation in self.identity['unsettled']:
-            self.identity['unsettled'].remove(operation)
+        if result['status'] == 'settled' and result['returncode'] == 0 and key in self.identity['unsettled']:
+            self.identity['unsettled'].remove(key)
         try:
             self._event('result', operation, operation_id, status=result['status'],
                         returncode=result['returncode'], output_sha256='sha256:' + hashlib.sha256(result['output']).hexdigest())
@@ -356,9 +367,11 @@ class Environment:
                     host['MemorySwap'] != self.limits['memory_bytes'] or
                     host['NanoCpus'] != int(self.limits['cpu_count'] * 1e9) or
                     host['PidsLimit'] != self.limits['pids'] or
-                    host.get('Binds') or info.get('Mounts') or host.get('PortBindings') or
+                    host.get('Binds') or host.get('PortBindings') or
                     host['Tmpfs'] != expected_tmpfs):
                 raise ValueError('configuration')
+            from application_volumes import verify_mounts
+            verify_mounts(self, info, stage=stage)
             if self.lab_artifact:
                 if (config['Labels'].get('io.oslit.engagement') != self.identity['nonce']
                         or config['Labels'].get('io.oslit.profile') != self.identity['profile_sha256']):
@@ -409,7 +422,7 @@ class Environment:
 
     def _tmpfs(self):
         return {path: f"rw,nosuid,nodev,size={size},uid={self.profile['uid']},gid={self.profile['gid']},mode=0700"
-                for path, size in (('/work', self.limits['workspace_bytes']),
+                for path, size in (('/work', self.limits['workspace_bytes'] - sum(row['bytes'] for row in self.state_volumes)),
                                    ('/tmp', min(self.limits['workspace_bytes'], 64 * 1024 * 1024)))}
 
     def _archive(self, accesses, access_files, support_inputs):
@@ -572,6 +585,11 @@ class Environment:
             args[args.index('--name') + 1] = self.identity['container_name']
             args[image_argument] = self.identity['prepared_image_id']
             args.insert(2, '--read-only')
+            if self.state_volumes:
+                from application_volumes import create
+                create(self)
+                for row in self.identity['state_volumes']:
+                    args[2:2] = ['--mount', f"type=volume,source={row['name']},target={row['path']},volume-nocopy"]
             if self.tool_policy:
                 args[2:2] = ['--security-opt', 'apparmor=' + self.tool_policy['apparmor_profile'],
                              '--security-opt', 'seccomp=/dev/stdin']
@@ -783,7 +801,7 @@ class Environment:
             inventory = json.loads(result['output'])
         except (ValueError, TypeError):
             raise EnvironmentUnavailable('lab_artifact_storage_unavailable') from None
-        validate_inventory(inventory, self.profile, self.limits)
+        validate_inventory(inventory, self.profile, self.limits, self.state_volumes)
         return {'kind': 'owned-lab-state-readback-v1', 'identity': self.receipt(),
             'configuration': configuration_snapshot(info), 'inventory': inventory}
 
@@ -792,6 +810,10 @@ class Environment:
         if info is None:
             return {'status': 'absent', 'identity': self.receipt()}
         self._verify_configuration(info)
+        if self.state_volumes:
+            from application_volumes import inspect
+            for index in range(len(self.state_volumes)):
+                inspect(self, index)
         return {'status': 'held' if self.held else ('running' if info['State']['Running'] else 'stopped'),
                 'running': info['State']['Running'], 'identity': self.receipt()}
 
@@ -857,4 +879,7 @@ class Environment:
             removed = self._effect('remove_input_image', ['image', 'rm', self.identity['prepared_image_id']], cleanup=True)
             if removed['status'] != 'settled' or removed['returncode'] or self._input_image(absent_ok=True) is not None:
                 raise EnvironmentUnavailable('environment_image_cleanup_unobserved')
+        if self.state_volumes:
+            from application_volumes import cleanup
+            cleanup(self)
         return {'status': 'clean', 'identity': self.receipt(), 'owned_workspace': 'container_removed'}

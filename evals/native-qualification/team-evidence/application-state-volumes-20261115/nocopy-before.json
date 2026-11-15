@@ -1,0 +1,39 @@
+{
+  "kind": "application-state-volumes-e2e-v1",
+  "classification": "real_signed_contract_controller_http_and_private_connector_with_fake_docker_owner",
+  "checks": [],
+  "provider_calls": 0,
+  "external_target_calls": 0,
+  "docker_calls": 0,
+  "planned_not_exercised": [
+    "v1 compatibility in this workflow",
+    "all invalid schema/path/size variants in the scenario table",
+    "missing reset authority and invalid effect bindings",
+    "volume label/options/timestamp tampering",
+    "uncertain create/readback and recovery",
+    "revocation during create or cleanup",
+    "multiple volumes and limit-count boundary",
+    "physical Docker volume semantics",
+    "SSH transport"
+  ],
+  "unverified": [
+    "physical Docker volume semantics",
+    "SSH transport",
+    "provider/runtime integration",
+    "research acceptance"
+  ],
+  "status": "failed",
+  "error": "AssertionError: target verifier accepted NoCopy=False",
+  "source_sha256": {
+    "tools/application_state.py": "sha256:9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+    "tools/application_volumes.py": "sha256:8a4ce74b6aea24c3d0f0e702fb40d8b9ffbf07b6066b22c919d832f6199648e9",
+    "tools/research_environment.py": "sha256:6392ef3c2e479cef61f5f5649fc5d4529b711e9891101016726bb734c681b306",
+    "tools/engagement_contract.py": "sha256:dc99f1dbc52a287398ebc864242b2b4ed4ebbd18b642f690493d9e1a467ed0c2",
+    "tools/engagement_evidence.py": "sha256:b722528650a9a8b33a6373cef29d0559df822774c62f44cb015740bf3f2dcb3a",
+    "tools/engagement_controller.py": "sha256:82b98462be2ce743a555d5774203331acf77c38b9bc3c1065555ebeaf8f433c1",
+    "tools/engagement_native_boundary.py": "sha256:b6571d65ddb20ed67f5ed275ddc491055e8bd71f809e00ca0d944688ec4d4fdc",
+    "evals/native-qualification/smoke/check_application_reset_e2e.py": "sha256:354be013fc0bec8237b20c20103174508f483d5f1aee33d29308b4a61eab91d5",
+    "evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md": "sha256:e9566a971b8179633128b01296db71999e785fe182c803d4e628fd0a26aca6e0",
+    "evals/native-qualification/smoke/check_application_state_volumes_e2e.py": "sha256:d94abe1b0daab578c59fb8d3d2982db8d3f0ed54eb2f2f586c158df4a332dfed"
+  }
+}

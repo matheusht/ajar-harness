@@ -630,7 +630,8 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
     state_accesses = set()
     for reference in references:
         code = 'scope_application_state_invalid'
-        _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id'), code)
+        _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id',
+            *(('artifact_effect_id',) if isinstance(reference, dict) and 'artifact_effect_id' in reference else ())), code)
         for key in ('access_id', 'environment_id', 'reset_effect_id'):
             _identifier(reference[key], code)
         access = accesses.get(reference['access_id'])
@@ -641,6 +642,13 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         _require(effect is not None and effect['kind'] == 'reset' and effect['access_ids'] == [access['id']]
                  and effect['environment_ids'] == [reference['environment_id']] and not effect['account_refs']
                  and not effect['artifact_classes'] and effect['cleanup_required'], code)
+        if 'artifact_effect_id' in reference:
+            _identifier(reference['artifact_effect_id'], code)
+            artifact = next((row for row in scope['effects'] if row['id'] == reference['artifact_effect_id']), None)
+            _require(artifact is not None and artifact['kind'] == 'artifact_create' and
+                artifact['access_ids'] == [access['id']] and artifact['environment_ids'] == [reference['environment_id']] and
+                artifact['artifact_classes'] == ['owned-application-state-v1'] and not artifact['account_refs'] and
+                artifact['cleanup_required'] and artifact['rung'] in ('source_only', 'self'), code)
         origin = _url(access['identity']['base_url'], code)
         _require(sum(other['kind'] == 'application' and _url(other['identity']['base_url'], code) == origin
                      for other in accesses.values()) == 1, code)
@@ -765,6 +773,14 @@ def load_inputs(path: Path, *, now: datetime | None = None,
         try:
             profile = validate_profile(_decode(raw))
             owned_origin(next(row for row in scope['access'] if row['id'] == identity), profile)
+            if 'state_volumes' in profile:
+                from application_volumes import validate
+                from research_environment import EnvironmentUnavailable
+                environment = next(row for row in scope['environments'] if row['profile_id'] == reference['environment_id'])
+                try:
+                    validate(profile['state_volumes'], environment['limits'])
+                except EnvironmentUnavailable:
+                    raise ApplicationStateError('application_state_volumes_invalid') from None
         except ApplicationStateError as error:
             raise ContractError(error.code) from None
         _require(raw == canonical(profile), 'application_profile_noncanonical')

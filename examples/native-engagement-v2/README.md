@@ -70,3 +70,9 @@ lab state, including first native writes, rather than each file. Application and
 credentialed model state remain separate. See the [class contract](../../docs/research/oslit-v2-contract-2026-11-14.md#candidate-owned-lab-state-class)
 and [repeatable engineering checks](../../evals/native-qualification/OWNED-LAB-STATE-E2E.md).
 Current operator gates and explicit qualification requirements still apply.
+
+For an owned Docker application/database baseline, the [application contract](../../docs/research/oslit-v2-contract-2026-11-14.md)
+defines v2 disposable state volumes and the optional `owned-application-state-v1`
+artifact effect. The supplied templates omit both. Set the real database command,
+image baseline and state paths before pinning and signing; an external database
+or existing volume is not reset by this descriptor.

@@ -19,9 +19,11 @@ class ApplicationStateError(ValueError):
 
 def validate_profile(profile):
     code = 'application_state_profile_invalid'
-    if (type(profile) is not dict or set(profile) != {'kind', 'method', 'baseline_id', 'command', 'service_port'}
-            or profile['kind'] != 'owned-application-state-v1'
-            or profile['method'] != 'owned-container-recreate-v1'
+    version = 2 if isinstance(profile, dict) and profile.get('kind') == 'owned-application-state-v2' else 1
+    expected = {'kind', 'method', 'baseline_id', 'command', 'service_port'} | ({'state_volumes'} if version == 2 else set())
+    if (type(profile) is not dict or set(profile) != expected
+            or profile['kind'] != f'owned-application-state-v{version}'
+            or profile['method'] != f'owned-container-recreate-v{version}'
             or type(profile['baseline_id']) is not str
             or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', profile['baseline_id'])
             or type(profile['service_port']) is not int or not 1 <= profile['service_port'] <= 65535
@@ -29,6 +31,13 @@ def validate_profile(profile):
             or any(type(value) is not str or not value or '\0' in value for value in profile['command'])
             or not profile['command'][0].startswith('/')):
         raise ApplicationStateError(code)
+    if version == 2:
+        from application_volumes import validate
+        from research_environment import EnvironmentUnavailable
+        try:
+            validate(profile['state_volumes'])
+        except EnvironmentUnavailable:
+            raise ApplicationStateError(code) from None
     safe_publication(canonical(profile))
     return profile
 
@@ -49,15 +58,19 @@ def owned_origin(access, profile):
 
 class ApplicationOwner:
     def __init__(self, profile, access, environment_profile, limits, authorize, observe, *,
-                 grant, dispatch_guard, bootstrap, known_hosts_file=None):
+                 grant, dispatch_guard, bootstrap, known_hosts_file=None, lab_artifact=False, on_ready=None):
         self.profile = copy.deepcopy(validate_profile(profile))
         self.origin = owned_origin(access, self.profile)
         self.access_id = access['id']
         self.access = copy.deepcopy(access)
         self.authorize, self.guard = authorize, dispatch_guard
         self.bootstrap = copy.deepcopy(bootstrap)
+        if bool(lab_artifact) != callable(on_ready):
+            raise ApplicationStateError('application_artifact_observer_required')
+        self.on_ready = on_ready
         self.environment = Environment(environment_profile, limits, authorize, observe, grant=grant,
-            dispatch_guard=dispatch_guard, known_hosts_file=known_hosts_file)
+            dispatch_guard=dispatch_guard, known_hosts_file=known_hosts_file,
+            state_volumes=profile.get('state_volumes'), lab_artifact=lab_artifact)
         self.application = self.bridge = self.start_receipt = None
         self.started = False
 
@@ -70,6 +83,8 @@ class ApplicationOwner:
             self.authorize()
             self.started = True
         self.environment.prepare([self.access], {}, support_inputs=self.bootstrap)
+        if self.on_ready is not None:
+            self.on_ready(self.environment.artifact_state_readback())
         self.application = self.environment.launch_stdio(self.profile['command'], role='application')
         # Output is never a readiness or reset assertion and must not block startup.
         def discard_output():

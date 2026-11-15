@@ -36,11 +36,11 @@
     "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
     "namespace_diagnostic_run": 43726713247,
     "codex_blocker": "faithful native-flag probe reproduces namespace denial, AppArmor mount denial, and both-relaxed loopback denial under unprivileged_userns; production policy unchanged",
-    "omp_blocker": "startup passed; model invocation returned403 before any model POST; startup model-discoveryGET observed separately; gate/route diagnosis pending",
+    "omp_blocker": "startup passed; invocation refused network_header_name_invalid before model POST; pinned client adds valid session_id header rejected by incoming parser; authenticated discovery GET requires a separate fixture response",
     "full_conformance": "Passed at 9415de223d77aa1bce122b08056c73a2a5a964f2, run 43731100402: 899 structural checks, zero failures; canonical v5 frozen inputs intact; schema and retrospective gates passed under Python 3.15.2. Later diagnostic commits are not a final repaired-head pass.",
     "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally",
-    "latest_native_head": "9430bc343c6a3a14de8fded24a0e97f8421ae95b",
-    "latest_native_run": 43732699926,
+    "latest_native_head": "00850047ae4d0773ce29314d82be9ba57709f96f",
+    "latest_native_run": 43736379813,
     "latest_conformance_run": 43731100402
   }
 }

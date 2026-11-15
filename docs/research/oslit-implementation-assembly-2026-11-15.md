@@ -124,6 +124,21 @@ cause of the later invocation refusal. Bounded route and gate diagnostics are ne
 Both failed-run exports again verified and cleanup settled. Docker's ancillary
 workflow passed. No native work or retention qualification follows from these runs.
 
+The [header diagnostic run](https://github.com/matheusht/redteam-harness/actions/runs/43736379813)
+at `00850047` isolated OMP's invocation refusal to `network_header_name_invalid`:
+the proxy rejected the request before any model POST reached the provider.
+The integrity-verified OMP 18.20.0 client adds `session_id` for OpenAI sessions;
+the incoming parser rejected underscores although the forwarding parser already
+accepted them. The one-line repair aligns the two token rules. The local owned-TLS
+workflow now passes all 22 checks, including forwarding `session_id` and retaining
+duplicate, framing, size and control-character refusals; the existing seven-check
+TCP gate workflow also passes. These results precede the next native run. The fixture
+now answers only OMP's exact authenticated model-discovery GET, counted separately
+from model invocations. Its seven local checks preserve refusal of other paths,
+queries, bad credentials and Codex discovery requests.
+Codex's default policy still refuses namespace creation. A named, confined policy
+candidate is being prepared for harmless replay; no production policy has changed.
+
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later
 refused revision 4's checker pin. Revision 5 records the changed checker under the
@@ -134,7 +149,7 @@ passed on the earlier hosted run and locally; no timeout was widened. There is
 a [full hosted conformance pass at `9415de22`](https://github.com/matheusht/redteam-harness/actions/runs/43731100402):
 899 structural checks, zero failures, and v5 frozen inputs intact. The schema and
 retrospective gates also passed under hosted Python 3.15.2. This verifies that
-repository workflow at that revision; subsequent commits add diagnostics, and a
+repository workflow at that revision; subsequent commits refine diagnostics, and a
 final check must cover the finished repair. Neither native runtime is qualified.
 
 ## Remaining implementation and delivery

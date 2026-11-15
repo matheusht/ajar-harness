@@ -28,6 +28,23 @@ def request_bytes(headers):
     return b'POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\n' + headers + b'\r\n'
 
 
+def connect_tls_peer(gate_port, upstream_port, trust):
+    authority = f'127.0.0.1:{upstream_port}'
+    peer = socket.create_connection(('127.0.0.1', gate_port), timeout=5)
+    peer.sendall(f'CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n'.encode())
+    response = bytearray()
+    while not response.endswith(b'\r\n\r\n'):
+        chunk = peer.recv(1)
+        if not chunk:
+            peer.close()
+            raise RuntimeError('owned TLS CONNECT closed before response')
+        response.extend(chunk)
+    if not response.startswith(b'HTTP/1.1 200'):
+        peer.close()
+        raise RuntimeError('owned TLS CONNECT failed')
+    return trust.wrap_socket(peer, server_hostname='127.0.0.1')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -92,8 +109,20 @@ def main():
         parser_case('aggregate header limit has its own fixed code',
                     b'X-A: ' + b'a' * 6000 + b'\r\n' + b'X-B: ' + b'b' * 6000 + b'\r\n'
                     + b'X-C: ' + b'c' * 6000 + b'\r\n', 'network_headers_too_large')
-        parser_case('invalid header name has its own fixed code', b'X_Test: value\r\n',
+        parser_case('invalid header name has its own fixed code', b'X@Bad: value\r\n',
                     'network_header_name_invalid')
+        rfc_token_names = [f"X{ord(char):02X}{char}" for char in "!#$%&'*+-.^_`|~" +
+            "0123456789" + "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+        try:
+            parsed_names = network._request(io.BytesIO(request_bytes(
+                ''.join(f'{name}: value\r\n' for name in rfc_token_names).encode())))[2]
+        except original_denied:
+            parsed_names = {}
+        except Exception:
+            parsed_names = {}
+        check('request parser accepts every RFC token character in header names',
+              set(parsed_names) == {'host', *[name.lower() for name in rfc_token_names]},
+              {'expected_count': len(rfc_token_names) + 1, 'observed_count': len(parsed_names)})
         parser_case('case-insensitive duplicate header has its own fixed code',
                     b'X-Test: one\r\nx-test: two\r\n', 'network_header_duplicate')
         parser_case('Expect remains rejected with a specific code', b'Expect: 100-continue\r\n',
@@ -125,6 +154,7 @@ def main():
                 stderr=subprocess.DEVNULL, check=True, timeout=15)
             key.chmod(0o600)
             hits = []
+            session_ids = []
 
             class Receiver(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
@@ -134,6 +164,7 @@ def main():
 
                 def do_POST(self):
                     body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                    session_ids.append(self.headers.get('session_id'))
                     hits.append(('POST', self.path, body))
                     self.send_response(200); self.send_header('Content-Length', '7'); self.end_headers()
                     self.wfile.write(b'POST_OK')
@@ -165,20 +196,16 @@ def main():
                 get_ok = response.status == 200 and response.read() == b'GET_OK'; connection.close()
                 check('owned TLS GET crosses the actual Python proxy', get_ok and hits == [('GET', '/get', b'')])
                 connection = client(); connection.request('POST', '/post', body=b'owned-body',
-                    headers={'Content-Type': 'application/octet-stream'}); response = connection.getresponse()
-                post_ok = response.status == 200 and response.read() == b'POST_OK'; connection.close()
+                    headers={'Content-Type': 'application/octet-stream', 'session_id': 'synthetic-safe-value'}); response = connection.getresponse()
+                post_status, post_body = response.status, response.read(); connection.close()
+                post_ok = (post_status == 200 and post_body == b'POST_OK' and session_ids[-1] == 'synthetic-safe-value')
                 check('owned TLS POST crosses the actual Python proxy', post_ok
-                      and hits[-1] == ('POST', '/post', b'owned-body'))
+                      and hits[-1] == ('POST', '/post', b'owned-body'),
+                      {'status': post_status, 'session_id_received': bool(session_ids and session_ids[-1] == 'synthetic-safe-value')})
 
                 authority = f'127.0.0.1:{upstream.server_port}'
-                peer = socket.create_connection(('127.0.0.1', gate_port), timeout=5)
-                peer.sendall(f'CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n'.encode())
-                response = bytearray()
-                while not response.endswith(b'\r\n\r\n'):
-                    response.extend(peer.recv(1))
-                check('owned TLS CONNECT is established for malformed-header replay',
-                      response.startswith(b'HTTP/1.1 200'))
-                peer = trust.wrap_socket(peer, server_hostname='127.0.0.1')
+                peer = connect_tls_peer(gate_port, upstream.server_port, trust)
+                check('owned TLS CONNECT is established for malformed-header replay', True)
                 before_codes, before_hits = len(denial_codes), list(hits)
                 peer.sendall((f'POST /blocked HTTP/1.1\r\nHost: {authority}\r\n'
                               'X-Test: one\r\nx-test: two\r\n\r\n').encode())
@@ -189,6 +216,20 @@ def main():
                 check('duplicate-header TLS request remains an HTTP 403 without upstream dispatch',
                       denied.status == 403 and code == 'network_header_duplicate' and hits == before_hits,
                       {'expected': 'network_header_duplicate', 'observed': code})
+
+                for label, invalid_name in [('space', 'X Bad'), ('at sign', 'X@Bad'),
+                        ('parenthesis', 'X(Bad'), ('control', 'X\x01Bad')]:
+                    peer = connect_tls_peer(gate_port, upstream.server_port, trust)
+                    before_codes, before_hits = len(denial_codes), list(hits)
+                    peer.sendall((f'POST /blocked HTTP/1.1\r\nHost: {authority}\r\n'
+                        + f'{invalid_name}: value\r\n\r\n').encode())
+                    denied = http.client.HTTPResponse(peer); denied.begin(); denied.read(); peer.close()
+                    code = denial_codes[before_codes] if len(denial_codes) > before_codes else 'no_network_denied'
+                    result['http_denials'].append({'method': 'POST', 'route': 'other', 'status': denied.status,
+                        'code': code, 'upstream_unchanged': hits == before_hits, 'case': label})
+                    check(f'{label} in a header name remains an HTTP 403 without upstream dispatch',
+                        denied.status == 403 and code == 'network_header_name_invalid' and hits == before_hits,
+                        {'expected': 'network_header_name_invalid', 'observed': code})
             finally:
                 gate.close(); upstream.shutdown(); upstream.server_close(); thread.join()
         result['status'] = 'passed' if not result['failures'] else 'failed'

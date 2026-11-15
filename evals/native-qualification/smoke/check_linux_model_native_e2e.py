@@ -290,6 +290,7 @@ class Provider:
         self.ca, certificate, key = _certificates(directory, [PROVIDER_HOST], lifetime_seconds=3600)
         self.runtime, self.secret = runtime, secret
         self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
+        self.discovery_requests = 0
         self.request_observation_total = 0
         self.request_observation_lock = threading.Lock()
         self.command = None
@@ -300,8 +301,19 @@ class Provider:
                 pass
 
             def do_GET(self):
-                fixture.escapes += 1
                 fixture.observe_request('GET', self.path, self.headers)
+                if (fixture.runtime == 'omp' and self.path == '/v1/models'
+                        and self.headers.get('Authorization') == 'Bearer ' + fixture.secret):
+                    fixture.discovery_requests += 1
+                    body = canonical({'object': 'list', 'data': [{'id': 'fixture-model', 'object': 'model',
+                        'created': 0, 'owned_by': 'fixture'}]})
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                fixture.escapes += 1
                 self.send_response(403); self.end_headers()
 
             def do_POST(self):
@@ -734,6 +746,7 @@ def run_native(root, fixture, result):
               and 'LINUX_NATIVE_FIRST_TURN' in json.dumps(provider.requests[3]) and not provider.errors)
         result['native_execution'] = 'two_invocations_completed'
         result['controlled_provider_requests'] = len(provider.requests)
+        result['controlled_provider_discovery_requests'] = provider.discovery_requests
         inspect_bytes = canonical(model.environment._inspect())
         public_files = [path for path in controller.root.rglob('*') if path.is_file()]
         check(result, 'synthetic credential absent from container config and host evidence',
@@ -867,6 +880,7 @@ def run_native(root, fixture, result):
             if value is None:os.environ.pop(name, None)
             else:os.environ[name] = value
         result['controlled_provider_requests'] = len(provider.requests)
+        result['controlled_provider_discovery_requests'] = provider.discovery_requests
         result['controlled_provider_errors'] = provider.errors
         safe_publication(canonical(result), known_secrets=tuple(known_secrets))
 

@@ -36,7 +36,7 @@ def _request(stream):
             return method, target, headers
         key, value = row.decode('ascii').rstrip('\r\n').split(':', 1)
         key, value = key.lower(), value.strip()
-        if not re.fullmatch('[a-z0-9-]+', key):
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9a-z-]+", key):
             raise NetworkDenied('network_header_name_invalid')
         if key in headers:
             raise NetworkDenied('network_header_duplicate')

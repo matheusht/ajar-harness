@@ -87,7 +87,7 @@ def main():
         fixture = SimpleNamespace(run_native=run_native)
         fixture.main = lambda: fixture.run_native(None, SimpleNamespace(runtime=runtime), result)
         with patch.dict('sys.modules', {'check_linux_model_native_e2e': fixture,
-                                      'research_environment': SimpleNamespace(Environment=Environment),
+                                      'research_environment': SimpleNamespace(Environment=Environment, subprocess=__import__('subprocess')),
                                       'native_runtime_omp': SimpleNamespace(Transport=object, Runtime=object),
                                       'native_runtime_linux': SimpleNamespace(LinuxModelOwner=Owner)}):
             assert driver.main() == 'original-process'
@@ -251,7 +251,32 @@ def main():
             pass
         else:
             raise AssertionError('missing cache reported complete')
-    print('passed: 47 offline diagnostic cases; no native or provider calls')
+    for chunks, expected in [([b'unpublished-secret'], set()), ([b'EN', b'OSPC'], {'enospc_marker'}),
+                             ([b'EENOENT'], {'enoent_marker'}),
+                             ([b'No space left on device'], {'no_space_marker'})]:
+        categories = driver.ErrorCategories()
+        for chunk in chunks:
+            categories.feed(chunk)
+        assert categories.found == expected
+        assert 'unpublished' not in str(vars(categories))
+    import subprocess
+    import sys
+    class ProcessModule:
+        DEVNULL = subprocess.DEVNULL
+        PIPE = subprocess.PIPE
+        def Popen(self, command, *args, **kwargs):
+            return subprocess.Popen([sys.executable, '-c',
+                "import sys;sys.stderr.write('ENOSPC' + 'unpublished-secret' * 10000);raise SystemExit(7)"],
+                *args, **kwargs)
+    original = ProcessModule(); module = SimpleNamespace(subprocess=original); result = {}
+    with driver.observe_model_stderr(module, result):
+        process = module.subprocess.Popen(['python3','-I','-S','/runtime/native_runtime_bootstrap.py'],
+            stderr=original.DEVNULL, stdout=subprocess.DEVNULL)
+        assert process.wait(timeout=5) == 7
+    assert module.subprocess is original
+    assert result['omp_model_stderr_categories'] == [{'markers':['enospc_marker'], 'bytes':180006, 'truncated':True, 'complete':True}]
+    assert 'unpublished' not in str(result)
+    print('passed: 52 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

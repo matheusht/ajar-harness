@@ -12,6 +12,14 @@ controller records and other workers' private files are unavailable to your tool
 A denied operation is a boundary or missing prerequisite to report, not a reason
 to attempt a host escape. Only your authenticated tool channel supplies identity.
 
+If scope explicitly grants `owned-lab-state-v1`, the host records the entire
+owned lab instance before allocation and verifies its physical state before your
+native tools start. This is one composite artifact, not per-file registration or
+a content-safety verdict. Native execution still needs its own signed `execute`
+effect. Current operator/impact gates remain active. Status reports pending lab
+cleanup separately from retained immutable evidence; publication does not create
+or rewrite that lifecycle. Scopes without the class keep their original meaning.
+
 ## Read the current state
 
 Call `engagement_status` with `{"since":null,"limit":30}`. It returns the current
@@ -97,7 +105,10 @@ are `/input/<access_id>` paths, and application subjects are their signed base U
 For source/binary-only capture, optional `effect_id` names the signed effect used
 for probe execution. It must cover the selected resources and environment without
 account references; higher rungs require the current transition review below.
-Omission uses the initial read effect. Preparation and cleanup use the unique
+For a class-enabled lab, optional `artifact_effect_id` selects the signed creation
+effect separately; execution must use `kind:execute`, and omission selects its
+unique matching effect. Otherwise omission uses the initial read effect.
+Preparation and cleanup use the unique
 initial account-free read effect. Application captures select actual request effects
 with `X-OSLit-Effect`, so they reject this capture-level selector.
 The probe receives the frozen instrument path, candidate path, each selected subject,

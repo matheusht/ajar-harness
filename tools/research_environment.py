@@ -76,13 +76,14 @@ class Environment:
     """
 
     def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None,
-                 known_hosts_file=None):
+                 known_hosts_file=None, lab_artifact=False):
         from engagement_contract import validate_environment_profile
         validate_environment_profile(profile)
         self.profile = json.loads(json.dumps(profile))
         if known_hosts_file is not None and profile['transport'] != 'ssh-docker':
             raise EnvironmentUnavailable('ssh_host_override_invalid')
         self.known_hosts_file = known_hosts_file
+        self.lab_artifact = lab_artifact
         self.limits = dict(limits)
         if set(limits) != {'memory_bytes', 'cpu_count', 'pids', 'workspace_bytes', 'lease_seconds', 'output_bytes'}:
             raise EnvironmentUnavailable('environment_limits_invalid')
@@ -139,6 +140,11 @@ class Environment:
 
     def receipt(self):
         return json.loads(json.dumps(self.identity))
+
+    def allocation_identity(self):
+        self._admit()
+        self._daemon()
+        return self.receipt()
 
     def _admit(self):
         if self.retired or self.held:
@@ -323,7 +329,7 @@ class Environment:
                 command = guardian_command(self.identity['nonce'], self.limits['lease_seconds'])
                 expected_user, expected_init, expected_stdin = '0:0', False, True
                 expected_workdir = '/'
-            elif self.recovering and 'io.oslit.guardian' not in config['Labels']:
+            elif self.recovering and not self.lab_artifact and 'io.oslit.guardian' not in config['Labels']:
                 command = ['/bin/sh', '-c', 'while :; do sleep 3600; done']
                 expected_user = f"{self.profile['uid']}:{self.profile['gid']}"
                 expected_init, expected_stdin = True, False
@@ -347,6 +353,12 @@ class Environment:
                     host.get('Binds') or info.get('Mounts') or host.get('PortBindings') or
                     host['Tmpfs'] != expected_tmpfs):
                 raise ValueError('configuration')
+            if self.lab_artifact:
+                if (config['Labels'].get('io.oslit.engagement') != self.identity['nonce']
+                        or config['Labels'].get('io.oslit.profile') != self.identity['profile_sha256']):
+                    raise ValueError('artifact_owner')
+                from engagement_lab_artifacts import validate_configuration
+                validate_configuration(info, self.limits)
         except (KeyError, TypeError, ValueError):
             raise EnvironmentUnavailable('environment_configuration_mismatch') from None
 
@@ -513,6 +525,10 @@ class Environment:
                     '--memory', str(self.limits['memory_bytes']), '--memory-swap', str(self.limits['memory_bytes']),
                     '--cpus', str(self.limits['cpu_count']), '--user', '0:0',
                     '--workdir', '/', '--entrypoint', guardian[0], '--init=false', '--interactive']
+            if self.lab_artifact:
+                from engagement_lab_artifacts import storage_policy
+                args.extend(['--ipc', 'private', '--cgroupns', 'private',
+                    '--shm-size', str(storage_policy(self.limits)['shm_bytes'])])
             for path, options in self._tmpfs().items():
                 args.extend(['--tmpfs', path + ':' + options])
             image_argument = len(args)
@@ -722,6 +738,29 @@ class Environment:
             self.revoke()
             raise
         return process
+
+    def artifact_state_readback(self):
+        from engagement_lab_artifacts import validate_inventory, configuration_snapshot
+        if not self.lab_artifact:
+            raise EnvironmentUnavailable('lab_artifact_class_missing')
+        self._admit()
+        info = self._inspect()
+        self._verify_configuration(info)
+        if not info['State']['Running']:
+            raise EnvironmentUnavailable('lab_artifact_not_running')
+        program = Path(__file__).with_name('engagement_lab_inventory.py').read_text()
+        result = self._run(['container', 'exec', '--user', f"{self.profile['uid']}:{self.profile['gid']}",
+            '--workdir', '/', '--env', 'PATH=/usr/local/bin:/usr/bin:/bin', self.identity['container_id'],
+            'python3', '-I', '-S', '-B', '-c', program], dispatch=True, output_limit=65536)
+        try:
+            if result['status'] != 'settled' or result['returncode']:
+                raise ValueError()
+            inventory = json.loads(result['output'])
+        except (ValueError, TypeError):
+            raise EnvironmentUnavailable('lab_artifact_storage_unavailable') from None
+        validate_inventory(inventory, self.profile, self.limits)
+        return {'kind': 'owned-lab-state-readback-v1', 'identity': self.receipt(),
+            'configuration': configuration_snapshot(info), 'inventory': inventory}
 
     def readback(self):
         info = self._inspect(absent_ok=True)

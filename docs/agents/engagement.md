@@ -10,7 +10,9 @@ Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
 claiming support or readiness. The complete M0–M6 engineering assignment remains
 unfinished. The repository impact-artifact and escalation-review gates still
 apply: a signed ceiling and the internal evidence-review checks do not replace
-operator review, fresh artifact confirmation or an artifact cleanup ledger.
+operator review or fresh artifact confirmation. The candidate owned-lab-state
+ledger described below records physical lifecycle; it does not adopt broader
+artifact authority.
 
 ## Prepare the host and tool lab
 
@@ -206,7 +208,8 @@ containment remain separate verification requirements.
 `engagement_capture` runs a pinned probe in a separate reserved lab over a nonempty
 subset of the worker's resources. For source/binary-only capture, optional
 `effect_id` selects a signed local execution effect; omission uses the initial
-read effect. Setup requires exactly one account-free `read` effect at
+read effect unless the signed owned-lab-state class below requires a separate
+`execute` effect. Setup requires exactly one account-free `read` effect at
 `source_only` or `self` covering the selected resources and environment. Capture
 with application resources rejects this local selector. Its target requests use
 `X-OSLit-Effect` to select a signed effect; omission requires exactly one compatible
@@ -260,11 +263,45 @@ current escalation review of the independently confirmed preceding claim and
 exact next signed effect. The frozen worker protocol describes the request and
 review evidence. Reopened claims, superseded instruments or a replacement review
 request invalidate the old transition's admission. Matching late observations
-and owned cleanup remain recordable. Generic `artifact_create` is unsupported;
-the repository's operator review and fresh artifact-approval gates remain active.
+and owned cleanup remain recordable. Generic `artifact_create` remains unsupported;
+the narrow class below has a separate lifecycle. The repository's operator review
+and fresh artifact-approval gates remain active.
 The [source capture workflow](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md)
 checks declared adjacent rungs using harmless local probes and simulated native,
 container and reviewer behavior. It does not establish a security escalation.
+
+## Track explicitly signed disposable lab state
+
+The candidate `owned-lab-state-v1` class treats one owned source/binary lab and all
+its mutable state as the artifact. It includes native writes from their first
+creation inside `/work`, `/tmp`, bounded shared memory and private IPC. It does
+not classify content or register each generated file separately. Use it only
+within current operator gates; implementation does not activate a new policy.
+
+The signed source/binary access needs `write` permission, plus a matching
+`artifact_create` effect with `artifact_classes:["owned-lab-state-v1"]`,
+`cleanup_required:true`, no accounts and a `source_only` or `self` rung. Keep the
+separate setup `read` effect and execution `execute` effect. Main startup requires
+one matching class effect. Capture may use `artifact_effect_id` to choose between
+matching class effects; its existing `effect_id` selects execution. Creation-only
+authority cannot start native tools or run a probe.
+
+The host persists intent before allocation and checks actual Docker configuration
+and every supported writable/kernel mount before native admission. Additional
+mounts/devices, shared host namespaces, application resources and explicit
+unsupported class selections refuse. Class workspace capacity must be a multiple of 4096 bytes. The
+[contract](../research/oslit-v2-contract-2026-11-14.md#candidate-owned-lab-state-class)
+records the precise storage bounds and exclusions.
+
+Status exposes `lab_state_artifacts` with the instance count, pending cleanup and
+retained evidence-object count. A ready instance may survive a specialist's next
+related assignment. Final settlement and resource reconciliation require exact
+container, staging container, prepared image and registered host capture staging
+absence. A failed host cleanup remains held even when the container is gone.
+Recovery uses the recorded owner, including intent-only preparation. Evidence
+objects and published workspace copies remain retained; “clean” describes the
+disposable instance. Run the [repeatable workflow](../../evals/native-qualification/OWNED-LAB-STATE-E2E.md)
+to distinguish contained journal checks from actual Linux readback evidence.
 
 ## Inspect and run
 

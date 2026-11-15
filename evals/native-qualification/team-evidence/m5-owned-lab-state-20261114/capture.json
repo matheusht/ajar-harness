@@ -1,0 +1,41 @@
+{
+  "classification": "composed_source_capture_engineering_simulation",
+  "provider_calls": 0,
+  "docker_calls": 0,
+  "ssh_calls": 0,
+  "external_target_calls": 0,
+  "scenarios": [
+    {
+      "scenario": "initial-setup",
+      "status": "pass"
+    },
+    {
+      "scenario": "invalid-selectors",
+      "status": "pass"
+    },
+    {
+      "scenario": "setup-refusal",
+      "status": "pass"
+    },
+    {
+      "scenario": "without-review",
+      "status": "pass"
+    },
+    {
+      "scenario": "full-chain",
+      "status": "pass"
+    },
+    {
+      "scenario": "application-selector",
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "source_sha256": {
+    "tools/engagement_native_boundary.py": "sha256:4f3464a03fbff1b6d103dd80079ed0511a5e0561775c900aef3bc5d79cbb5d60",
+    "tools/engagement_controller.py": "sha256:117bbb319fff16bfe64366445905a77780006624f6771a4b8447546d8627bfcc",
+    "tools/engagement_evidence.py": "sha256:5565704036cf7274436fbdd542a9c8b3b9d68c3dc2e7b868a2079536d9bf6c20",
+    "tools/engagement_runner.py": "sha256:16637e9b8b63ca71f0f6b6eb93877313009441111397f149f80576a974f65937",
+    "evals/native-qualification/smoke/check_native_capture_effects_e2e.py": "sha256:760bdfb053192ae5c7c0f9ca06c348a02c91a1456526eaa8a92737895b4a7689"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "checks": 900,
+  "failing": 0,
+  "command": "PYTHONDONTWRITEBYTECODE=1 /tmp/pr209-conformance-venv/bin/python tools/check-conformance.py",
+  "log_sha256": "sha256:fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf",
+  "scope": "structural conformance after final documentation edits; native class/boundary refinements have separate final E2E receipts",
+  "doc_sha256": {
+    "docs/agents/engagement.md": "sha256:34aa307d1b6616e61585a6e29ceb993f1024be1fcdfb35a09cd5076603d1cb54",
+    "docs/research/oslit-v2-contract-2026-11-14.md": "sha256:660280e49fa095ec09351a5aa0dec38a864966d70cb035d902f732acd8498812",
+    "engine/native-engagement-protocol.md": "sha256:9dcf6920586ce5d437318c7ee5c7efb0fd52ccfc82dbf0c90d934ce88e45307e",
+    "examples/native-engagement-v2/README.md": "sha256:19967bb1c5dceaadf5d2ec2cccd045a5f1129634247050f702300abc562f8de2",
+    "evals/native-qualification/OWNED-LAB-STATE-E2E.md": "sha256:8592f440491649f546b40f1537079ac7a3b884f59441815e00fbc264551323b5"
+  }
+}

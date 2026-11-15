@@ -249,6 +249,44 @@ environment owners. They replace the descriptive field-table examples above:
   before use. Source inventory checks metadata again after its byte scan; its
   observation cannot promise that an external directory remains immutable later.
 
+### Candidate owned lab state class
+
+The implementation now recognizes the explicitly signed `owned-lab-state-v1`
+class on an `artifact_create` effect. The artifact is one exact disposable lab
+instance and its mutable files, processes and private IPC state. It covers first
+creation inside that instance; publication is a later content snapshot. Status
+counts lab instances and pending cleanup, never individually registered files.
+This candidate mechanism does not adopt a replacement for current operator gates.
+
+The class supports account-free source/binary resources in the existing owned
+Docker or pinned SSH-Docker environment. The effect must require cleanup and use
+`source_only` or `self`. A separate matching `execute` effect is required before
+native tools or a capture probe starts. Capture's optional `artifact_effect_id`
+selects creation authority; `effect_id` continues to select execution. Explicit unsupported or ambiguous
+class selections refuse. Unselected unsupported grants confer no class capability;
+scopes without this class preserve their existing meaning.
+Application state, model-owner state, persistent storage and external effects are
+outside this class.
+
+The host records intent before allocation, then exact owner IDs, verified Docker
+configuration and a fixed mount inventory before native admission. The inventory
+covers `/work`, `/tmp`, `/dev/shm`, `/dev/pts`, `/dev/mqueue`, Docker-managed files
+and restricted kernel mounts. Workspace capacity must be a positive multiple of
+4096 bytes for this class. `/tmp` and shared memory each use
+`min(workspace_bytes, 64 MiB)`; `/dev` is bounded at 64 MiB. These are separate
+capacities within the signed memory/swap ceiling, not one combined workspace cap.
+Unknown writable mounts, host/shared namespaces and additional devices refuse.
+
+The immutable journal owns `lab_artifacts`: intended, ready and clean states,
+exact environment nonce, initial dispatch/worker/generation/resources and named
+host capture staging owners. Renewal or same-owner specialist continuation reuses
+that record. Full container, staging-container, prepared-image and registered host
+staging absence is required before final settlement, resource reconciliation or
+unused preparation refund. Cleanup remains possible after revocation; uncertainty
+retains the hold. Frozen evidence objects and published workspace copies remain
+retained and are explicitly outside disposable lab cleanup. Physical Linux
+qualification is separate from the [contained workflow](../../evals/native-qualification/OWNED-LAB-STATE-E2E.md).
+
 ## One journal and replay
 
 Private root layout:

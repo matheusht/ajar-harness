@@ -1,0 +1,66 @@
+{
+  "kind": "owned-lab-state-contained-e2e-v1",
+  "evidence_class": "engineering_simulation",
+  "docker_contacted": false,
+  "provider_contacted": false,
+  "physical_mount_qualification": false,
+  "passed": true,
+  "results": [
+    {
+      "case": "signed_selection",
+      "status": "passed"
+    },
+    {
+      "case": "journal_lifecycle",
+      "status": "passed"
+    },
+    {
+      "case": "separate_execution",
+      "status": "passed"
+    },
+    {
+      "case": "namespace_configuration",
+      "status": "passed"
+    },
+    {
+      "case": "complete_writable_inventory",
+      "status": "passed"
+    },
+    {
+      "case": "host_staging_cleanup",
+      "status": "passed"
+    },
+    {
+      "case": "intent_only_recovery",
+      "status": "passed"
+    },
+    {
+      "case": "journal_trust",
+      "status": "passed"
+    },
+    {
+      "case": "renewal_preserves_artifact",
+      "status": "passed"
+    },
+    {
+      "case": "native_boundary_order",
+      "status": "passed"
+    },
+    {
+      "case": "retained_specialist",
+      "status": "passed"
+    },
+    {
+      "case": "capture_cleanup_order",
+      "status": "passed"
+    },
+    {
+      "case": "interrupted_workflows",
+      "status": "passed"
+    },
+    {
+      "case": "existing_without_class",
+      "status": "passed"
+    }
+  ]
+}

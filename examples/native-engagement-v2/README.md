@@ -60,3 +60,12 @@ definitions may use the optional pinned `model_catalog`. Actual Linux native
 startup and joined containment/recovery remain unverified. The
 [dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md) separates
 implementation, contained checks and qualification work.
+
+The templates intentionally omit `owned-lab-state-v1`. Its candidate lifecycle
+requires an explicit signed `artifact_create` effect, source/binary `write`
+permission and a separate `execute` effect; adding an artifact label to an execute
+effect does not grant creation. The artifact means the complete owned disposable
+lab state, including first native writes, rather than each file. Application and
+credentialed model state remain separate. See the [class contract](../../docs/research/oslit-v2-contract-2026-11-14.md#candidate-owned-lab-state-class)
+and [repeatable engineering checks](../../evals/native-qualification/OWNED-LAB-STATE-E2E.md).
+Current operator gates and explicit qualification requirements still apply.

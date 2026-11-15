@@ -311,6 +311,15 @@ class Controller:
                 holds = state['resource_holds'].setdefault(operation['intent']['access_id'], [])
                 if dispatch['dispatch_id'] not in holds:
                     holds.append(dispatch['dispatch_id'])
+        for artifact in state['lab_artifacts'].values():
+            if artifact['state'] == 'clean':
+                continue
+            state['cleanup'] = 'pending'
+            if state['dispatches'][artifact['dispatch_id']]['status'] != 'pending':
+                for resource in artifact['resources']:
+                    holds = state['resource_holds'].setdefault(resource, [])
+                    if artifact['dispatch_id'] not in holds:
+                        holds.append(artifact['dispatch_id'])
         return state
 
     def state(self):
@@ -1169,6 +1178,12 @@ class Controller:
             dispatch = state['dispatches'][grant['dispatch_id']]
             if not dispatch.get('preparation') or not dispatch.get('setup_started_at'):
                 fail('preparation_phase_missing')
+            from engagement_lab_artifacts import execute_effect
+            for row in state['lab_artifacts'].values():
+                if row['dispatch_id'] == grant['dispatch_id']:
+                    if row['state'] != 'ready':
+                        fail('lab_artifact_not_ready')
+                    execute_effect(state['scope'], grant, row['environment_profile_id'])
             if dispatch.get('native_admitted'):
                 return {'status': 'recorded'}
             return self._host('preparation_native_admitted', {'dispatch_id': grant['dispatch_id']})
@@ -1216,6 +1231,8 @@ class Controller:
                 fail('preparation_cleanup_unverified')
             expected = {row['identity']['nonce'] for row in state['environment_operations'].values()
                         if row['grant']['dispatch_id'] == grant['dispatch_id']}
+            expected.update(row['nonce'] for row in state['lab_artifacts'].values()
+                if row['dispatch_id'] == grant['dispatch_id'])
             observed = set()
             for row in environments:
                 keys(row, ('profile_id', 'environment', 'cleanup'), 'preparation_cleanup_unverified')
@@ -1233,6 +1250,8 @@ class Controller:
                 observed.add(nonce)
             if observed != expected:
                 fail('preparation_cleanup_unverified')
+            from engagement_lab_artifacts import require_clean
+            require_clean(state, grant['dispatch_id'])
             sha = self.store_object(canonical({'kind': 'native-preparation-settled-v1', 'grant': grant,
                 'environments': environments, 'worker_seconds': worker_seconds, 'native_admitted': False}))
             return self._host('preparation_settled', {'dispatch_id': grant['dispatch_id'],
@@ -1256,7 +1275,8 @@ class Controller:
                     or worker.get('runtime_owner_sha256') or worker.get('session_id')
                     or any(row['grant']['dispatch_id'] == grant['dispatch_id']
                            for row in [*state['environment_operations'].values(), *state['network_operations'].values()])
-                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())):
+                    or any(row.get('parent_dispatch_id') == grant['dispatch_id'] for row in state['dispatches'].values())
+                    or any(row['dispatch_id'] == grant['dispatch_id'] for row in state['lab_artifacts'].values())):
                 fail('preparation_already_admitted')
             sha = self.store_object(canonical(document))
             return self._host('preparation_cancelled', {'dispatch_id': grant['dispatch_id'], 'receipt_sha256': sha})
@@ -1381,6 +1401,10 @@ class Controller:
                     or any(value not in ('unchanged', 'reset', 'unknown', 'retained') for value in observation['resources'].values())
                     or observation['cleanup'] not in ('pending', 'verified', 'unresolved')):
                 fail('receipt_invalid')
+            if (observation['status'] == 'settled' or observation['cleanup'] == 'verified'
+                    or any(value != 'unknown' for value in observation['resources'].values())):
+                from engagement_lab_artifacts import require_clean
+                require_clean(state, dispatch_id)
             retained = {name for name, value in observation['resources'].items() if value == 'retained'}
             if retained:
                 parent = state['dispatches'].get(dispatch.get('parent_dispatch_id'))
@@ -1422,11 +1446,29 @@ class Controller:
                 fail('readback_invalid')
             if any(value not in ('unchanged', 'reset') for value in resources.values()):
                 fail('readback_invalid')
+            from engagement_lab_artifacts import require_clean
+            require_clean(state, dispatch_id)
             data = {'dispatch_id': dispatch_id, 'resources': resources, 'adapter_id': adapter_id}
             evidence = self.store_object(canonical(data))
             event = self._append(events, Principal('environment', adapter_id), uuid.uuid4().hex,
                 evidence, 'effect_reconciled', dict(data, evidence=evidence))
             return self._receipt(event)
+
+    def record_lab_artifact_intent(self, grant, profile_id, effect_id, identity):
+        from engagement_lab_artifacts import record_intent
+        return record_intent(self, grant, profile_id, effect_id, identity)
+
+    def record_lab_artifact_ready(self, grant, profile_id, readback):
+        from engagement_lab_artifacts import record_ready
+        return record_ready(self, grant, profile_id, readback)
+
+    def record_artifact_staging(self, grant, artifact_nonce, path, paths):
+        from engagement_lab_artifacts import record_staging
+        return record_staging(self, grant, artifact_nonce, path, paths)
+
+    def record_lab_artifact_cleanup(self, grant, profile_id, readback):
+        from engagement_lab_artifacts import record_cleanup
+        return record_cleanup(self, grant, profile_id, readback)
 
     def record_environment_observation(self, grant, environment_profile_id, observation, output=None, *, effect_id, account_refs=()):
         from engagement_evidence import record_environment_observation
@@ -1545,7 +1587,8 @@ class Controller:
                 fail('closure_stale')
             if any(row['status'] != 'stopped' for row in state['workers'].values()) or state['cleanup'] != 'verified':
                 fail('closure_cleanup_unverified')
-            if state['resource_holds'] or any(d['status'] != 'settled' for d in state['dispatches'].values()):
+            if (any(row['state'] != 'clean' for row in state['lab_artifacts'].values())
+                    or state['resource_holds'] or any(d['status'] != 'settled' for d in state['dispatches'].values())):
                 fail('closure_effects_unsettled')
             return self._host('evidence_recorded', {'action': 'closure_finalized', 'data': {
                 'closure_id': closure_id}, '_objects': []})
@@ -1630,6 +1673,9 @@ class Controller:
                 'summaries_truncated': {name: len(state[name]) > summary_limit for name in fields},
                 'usage': state['usage'], 'resource_holds': state['resource_holds'], 'cleanup': state['cleanup'],
                 'replacement_required': state['replacement_required'],
+                'lab_state_artifacts': {'class': 'owned-lab-state-v1', 'count': len(state['lab_artifacts']),
+                    'pending_cleanup': sum(row['state'] != 'clean' for row in state['lab_artifacts'].values()),
+                    'retained_evidence_objects': len(state['evidence_objects'])},
                 'updates': updates, 'has_more': end < len(events),
                 'next_cursor': self._encode_cursor(state, events[end - 1]) if updates else since}
 
@@ -1661,6 +1707,8 @@ class Controller:
                 'claims': state['claims'], 'closures': state['closures'], 'reviews': state['reviews'],
                 'obligations': state['obligations'], 'experiments': state['experiments'], 'patches': state['patches'],
                 'network_operations': state['network_operations'],
+                'lab_artifacts': state['lab_artifacts'],
+                'retained_evidence_objects': len(state['evidence_objects']),
                 'research_guidance': {name: events[0]['payload']['contract_files'][name]
                     for name in ('methodology.md', 'protocol.md') if name in events[0]['payload']['contract_files']},
                 'directions': state['directions'], 'usage': state['usage'], 'cleanup': state['cleanup'],

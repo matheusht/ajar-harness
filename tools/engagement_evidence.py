@@ -16,7 +16,7 @@ REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'c
 LEAD_ONLY = {'review_request', 'review_response', 'closure_request'}
 COLLECTIONS = ('instruments', 'experiments', 'comparisons', 'claims', 'obligations', 'reviews',
                'closures', 'patches', 'environment_operations', 'network_operations', 'environments', 'support_inputs',
-               'application_starts')
+               'application_starts', 'lab_artifacts')
 CLEANUP_OPERATIONS = {'revoke', 'remove', 'stop_stage', 'remove_stage', 'remove_input_image'}
 OPERATIONS = CLEANUP_OPERATIONS | {'create_stage', 'stage_input', 'snapshot_input', 'create',
     'execute', 'start', 'renew', 'launch_stdio', 'readback_input', 'stage_support', 'readback_support',
@@ -113,6 +113,8 @@ def identity(c, state, grant, profile_id, value):
             fail('environment_owner_mismatch')
         for key in IDENTITY_KEYS - {'unsettled'}:
             old = prior['identity'][key]
+            if prior.get('allocation_pending') and key in ('access', 'support_inputs') and old == []:
+                continue
             if old is not None and old != value[key]:
                 fail('environment_identity_changed')
     return signed
@@ -160,6 +162,8 @@ def record_environment_observation(c, grant, profile_id, observation, output=Non
             else:
                 c._authorize(state, grant)
                 admit_effect(state, effect, profile_id=profile_id, access_ids=access_ids, account_refs=accounts)
+                from engagement_lab_artifacts import admit_operation
+                admit_operation(state, grant, profile_id, observation, effect)
         elif prior:
             if (prior['grant'] != grant or prior['profile_id'] != profile_id or prior['operation'] != op
                     or prior['effect_id'] != effect_id or prior['account_refs'] != accounts):
@@ -709,7 +713,21 @@ def reduce_request(state, actor, kind, data):
 def reduce_host(state, payload):
     action, data = payload['action'], payload['data']
     state['evidence_objects'].update({sha: True for sha in payload.get('_objects', [])})
-    if action == 'support_inputs_registered':
+    if action == 'lab_artifact_intended':
+        state['lab_artifacts'][data['nonce']] = dict(data, state='intended', staging=[])
+        state['environments'][data['nonce']] = {'identity': data['identity'],
+            'profile_id': data['environment_profile_id'], 'worker_id': data['worker_id'],
+            'generation': data['generation'], 'allocation_pending': True}
+        state['cleanup'] = 'pending'
+    elif action == 'lab_artifact_ready':
+        state['lab_artifacts'][data['nonce']].update(state='ready', ready=data['readback'])
+    elif action == 'lab_artifact_staging':
+        state['lab_artifacts'][data['nonce']]['staging'].append(data['owner'])
+    elif action == 'lab_artifact_cleanup_observed':
+        state['lab_artifacts'][data['nonce']].update(state='clean', cleanup=data['readback'])
+        state['cleanup'] = 'verified' if (all(row.get('cleanup') == 'verified' for row in state['environments'].values())
+            and all(row['state'] == 'clean' for row in state['lab_artifacts'].values())) else 'pending'
+    elif action == 'support_inputs_registered':
         state['support_inputs'][data['grant']['dispatch_id']] = data['inputs']
     elif action == 'network_observation':
         observation = data['observation']
@@ -725,7 +743,8 @@ def reduce_host(state, payload):
         observation, grant = data['observation'], data['grant']
         nonce, opid = observation['identity']['nonce'], observation['operation_id']
         state['environments'][nonce] = dict(state['environments'].get(nonce, {}),
-            identity=observation['identity'], profile_id=data['profile_id'], worker_id=grant['worker_id'], generation=grant['generation'])
+            identity=observation['identity'], profile_id=data['profile_id'], worker_id=grant['worker_id'], generation=grant['generation'],
+            allocation_pending=False)
         operation = state['environment_operations'].setdefault(opid, {'grant': grant, 'profile_id': data['profile_id'],
             'operation': observation['operation'], 'effect_id': data['effect_id'], 'account_refs': data['account_refs'],
             'session_id': data['session_id'], 'receipts': [], 'result': None})
@@ -762,7 +781,8 @@ def reduce_host(state, payload):
     elif action == 'environment_cleanup':
         state['environments'][data['nonce']]['cleanup'] = 'verified'
         state['environments'][data['nonce']]['cleanup_receipt'] = data['receipt_sha256']
-        state['cleanup'] = 'verified' if all(row.get('cleanup') == 'verified' for row in state['environments'].values()) else 'pending'
+        state['cleanup'] = 'verified' if (all(row.get('cleanup') == 'verified' for row in state['environments'].values())
+            and all(row['state'] == 'clean' for row in state['lab_artifacts'].values())) else 'pending'
     elif action == 'lead_replaced':
         old = state['workers'][data['worker_id']]
         old.setdefault('history', []).append({key: value for key, value in old.items() if key != 'history'})

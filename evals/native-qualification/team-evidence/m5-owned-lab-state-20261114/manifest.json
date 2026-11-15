@@ -1,0 +1,35 @@
+{
+  "kind": "owned-lab-state-evidence-manifest-v1",
+  "base": "9f0f342ebc7688af26aa2f049ee4eac61357d987",
+  "evidence_class": "engineering_simulation_with_real_controller_and_host_staging",
+  "physical_linux_qualified": false,
+  "source_sha256": {
+    "docs/agents/engagement.md": "sha256:34aa307d1b6616e61585a6e29ceb993f1024be1fcdfb35a09cd5076603d1cb54",
+    "docs/research/oslit-v2-contract-2026-11-14.md": "sha256:660280e49fa095ec09351a5aa0dec38a864966d70cb035d902f732acd8498812",
+    "engine/native-engagement-protocol.md": "sha256:9dcf6920586ce5d437318c7ee5c7efb0fd52ccfc82dbf0c90d934ce88e45307e",
+    "evals/native-qualification/OWNED-LAB-STATE-E2E.md": "sha256:8592f440491649f546b40f1537079ac7a3b884f59441815e00fbc264551323b5",
+    "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:0bbdb747eff1f3191dc38df10794e351ac92ac120490a5cfe4e07f1aac44d764",
+    "evals/native-qualification/smoke/check_owned_lab_state_e2e.py": "sha256:5f360abad6f85a66f8e4d1b2d4ae6c7a8e675cadb5aae558d361e67df3b51033",
+    "examples/native-engagement-v2/README.md": "sha256:19967bb1c5dceaadf5d2ec2cccd045a5f1129634247050f702300abc562f8de2",
+    "tools/engagement_controller.py": "sha256:117bbb319fff16bfe64366445905a77780006624f6771a4b8447546d8627bfcc",
+    "tools/engagement_evidence.py": "sha256:5565704036cf7274436fbdd542a9c8b3b9d68c3dc2e7b868a2079536d9bf6c20",
+    "tools/engagement_lab_artifacts.py": "sha256:b01bbcaf6a83da5395e8cb9e10f9ed47ddda0c95a7922554d38c7644c282ee8c",
+    "tools/engagement_lab_inventory.py": "sha256:c2dc32f77c07529c26d56eaab28af93e099fccec9231dd65c8fe7061839a82f0",
+    "tools/engagement_native_boundary.py": "sha256:4f3464a03fbff1b6d103dd80079ed0511a5e0561775c900aef3bc5d79cbb5d60",
+    "tools/research_environment.py": "sha256:a3540b103a5facb61c0b404a18ccb36352224eef2737d2ca7c432346632b2c53"
+  },
+  "evidence_sha256": {
+    "README.md": "sha256:8abe29e94ccd26623ff08b08d8db816ad3d94c00a93b461c2b821143595902f4",
+    "boundary.json": "sha256:ddd3eca56d5e10a6b446b233038efa75f7fa3365dd42f6e37d145618104ecbe0",
+    "capture.json": "sha256:5ede96f0e58552303eb76363c7ee06cce1b29a70fe124f09667a133e02fa821e",
+    "conformance.json": "sha256:96fd81a83a51bcaeea498f8de224586afb015aa53ff47b833ccf391af091a0ec",
+    "conformance.txt": "sha256:fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf",
+    "contained-final.json": "sha256:a9098bcac7e39bd78af9f6d369350640f9552c3706777dec257942f0f410bf12",
+    "contract.json": "sha256:b436314c0ae18f132e35ccb5fc6a92e12d15915133bef9e021f881181adec768",
+    "failure-first.json": "sha256:0784b8c6b9a74bff459dcd9ba61757283192ef03627f9b80e61f2b6e9d55133e",
+    "intent-retry-before.json": "sha256:8b11aa56652b91a709503a5a1e96f5b7bb13eda3505bd2d6095114530c779841",
+    "preparation.json": "sha256:88dd26dc5a1fb5ea920575bf3c7c604a4f310540cfc3fe75a0497fd7c1ff33a7",
+    "reconciliation-before.json": "sha256:59ca76c024be5f59db76c8fab2d8a8c1c60384147a5c0027a47e89a78eba1fba",
+    "retention.json": "sha256:5fe8f95f3b316c7f1097f3b9bc7685922b36278363b655c520418567a0716cc4"
+  }
+}

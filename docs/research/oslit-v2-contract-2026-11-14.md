@@ -172,6 +172,16 @@ SSH additionally binds host-key fingerprint. Adapter owners define the remaining
 schema before implementation. Unknown profile kind/capability is unsupported,
 not passed through as an arbitrary command.
 
+The environment profile may include `codex_tool_policy: docker-confined-v1`.
+This optional field is included in the signed profile digest and selects fixed,
+digest-checked seccomp bytes and a preinstalled named AppArmor profile only for
+the main Codex tool container. Other containers retain their existing policy.
+Omission preserves the old document contract; unknown values refuse admission.
+The host operator owns profile installation. The runtime verifies configuration
+and active enforcing mode, and never installs host policy. Receipt recovery
+remains cleanup-only without activating this setting. See the
+[operator prerequisites](../agents/engagement.md#codex-tool-policy-on-docker).
+
 `limits` is exactly `{hard, max_workers, max_worker_lease_seconds, informational}`.
 The initial hard map supports `invocations` and `worker_seconds`; positive integers
 only, booleans excluded. Informational dimensions may include token counts/cost

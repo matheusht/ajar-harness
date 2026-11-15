@@ -161,13 +161,31 @@ jobs:
           printf 'OSLIT_FIXTURE_IMAGE=%s\n' "$image_id" >> "$GITHUB_ENV"
       - name: Prove missing Codex profile refuses environment startup and recovers
         if: matrix.runtime == 'codex'
+        id: missing_profile
         run: |
+          set +e
           python3 evals/native-qualification/smoke/check_codex_tool_policy_missing_profile_e2e.py \
             --endpoint unix:///var/run/docker.sock \
             --image-id "$OSLIT_FIXTURE_IMAGE" \
             --output "$RUNNER_TEMP/oslit-native-e2e-codex/missing-profile.json"
+          helper_status=$?
+          set -e
+          summary=$(python3 - "$RUNNER_TEMP/oslit-native-e2e-codex/missing-profile.json" "$helper_status" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding='utf-8') as source:
+              result = json.load(source)
+          status = 'passed' if sys.argv[2] == '0' and result.get('status') == 'passed' else 'failed'
+          cleanup = result.get('cleanup_status')
+          if cleanup not in ('clean', 'unresolved'):
+              cleanup = 'unresolved'
+          print(status)
+          print(cleanup)
+          PY
+          )
+          mapfile -t result_state <<< "$summary"
+          printf 'status=%s\ncleanup_status=%s\n' "${result_state[0]}" "${result_state[1]}" >> "$GITHUB_OUTPUT"
       - name: Add the reviewed Codex tool profile to this runner
-        if: matrix.runtime == 'codex'
+        if: ${{ matrix.runtime == 'codex' && steps.missing_profile.outputs.cleanup_status == 'clean' }}
         id: codex_profile_setup
         run: |
           python3 evals/native-qualification/smoke/manage_codex_tool_policy_host.py install \
@@ -228,6 +246,9 @@ jobs:
           python3 evals/native-qualification/smoke/manage_codex_tool_policy_host.py cleanup \
             --marker "$RUNNER_TEMP/oslit-codex-profile-owner.json" \
             --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-cleanup.json"
+      - name: Require the absent-profile refusal check to pass
+        if: ${{ always() && matrix.runtime == 'codex' }}
+        run: test "${{ steps.missing_profile.outputs.status }}" = passed
       - name: Preserve native observations without private or large build assets
         if: always()
         uses: actions/upload-artifact@v4

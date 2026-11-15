@@ -6,8 +6,10 @@ three archived probes. Five failure-first regression scenarios passed; archived
 bytes remain unchanged. The earlier failure below is retained as a checkpoint.
 The assembly is published on `codex/oslit-integrated-e2e-20261115`. Hosted structural
 conformance passed at `eedb24c9`; the full workflow later refused the stale v4
-checker pin. A v5 successor preserves every preexisting v4 byte.
-Neither native runtime has completed the joined workflow.
+checker pin. A v5 successor preserves every preexisting v4 byte. The full hosted
+conformance workflow subsequently passed at `9415de22` (899 structural checks,
+zero failures; v5 frozen inputs intact). Neither native runtime has completed
+the joined workflow.
 
 This is a local implementation candidate, not an accepted release or qualified
 research workflow. It combines the source at `5d290d19`, the staged bounded
@@ -129,7 +131,11 @@ existing successor procedure; a local tamper control still rejects drift and all
 preexisting v4 bytes remain unchanged. A later full run at `2640d491` hit the
 legacy review staging deadline before structural conformance. That same gate
 passed on the earlier hosted run and locally; no timeout was widened. There is
-no full hosted conformance pass yet. Neither native runtime is qualified.
+a [full hosted conformance pass at `9415de22`](https://github.com/matheusht/redteam-harness/actions/runs/43731100402):
+899 structural checks, zero failures, and v5 frozen inputs intact. The schema and
+retrospective gates also passed under hosted Python 3.15.2. This verifies that
+repository workflow at that revision; subsequent commits add diagnostics, and a
+final check must cover the finished repair. Neither native runtime is qualified.
 
 ## Remaining implementation and delivery
 
@@ -139,7 +145,7 @@ no full hosted conformance pass yet. Neither native runtime is qualified.
 | M3 | Exercise actual acquisition, setup failure and repair, all access modes, reset/replay and cleanup through the joined workflow. Verify loss/reconnection against a separate authorized SSH host. |
 | M4 | Qualify physical owned-lab state, independent replay and cleanup in that workflow. Unsupported artifact classes still stop; existing operator gates remain active until policy adoption. |
 | M5 | Run the sustained restart/multiday scenario. Provider request totals and billed spend are still unavailable; invocation and worker-second enforcement must not be described as complete monetary accounting. |
-| M6 | Conformance's archived-fixture scan failure is resolved without rewriting historical evidence. Promote the candidate through required hosted checks and an operator install-to-export/cleanup handoff. Retire redundant callers only after parity. |
+| M6 | Full hosted conformance passed at `9415de22` without rewriting historical evidence. Finish native checks, verify the final revision and complete the operator install-to-export/cleanup handoff. Retire redundant callers only after parity. |
 | Research acceptance | The operator owns the fresh-target test and fair native-agent comparison. It has not run. |
 
 The review found no additional missing major subsystem. It did not prove every

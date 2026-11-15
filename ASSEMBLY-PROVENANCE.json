@@ -25,7 +25,7 @@
     "canonical export fixture roots and simulated Linux diagnostic fields",
     "account resolver closure fixture and delivery documentation reconciliation"
   ],
-  "verification": "GPT-6 Luna local workflows and hosted structural conformance passed at eedb24c9; hosted Docker/loopback SSH/reset passed; Codex and OMP native work remain blocked before provider invocation; failed-run exports and cleanup verified",
+  "verification": "GPT-6 Luna local workflows and full hosted conformance passed at 9415de22; hosted Docker, loopback SSH and reset passed; Codex and OMP native work still fail before model requests; failed-run exports and cleanup verified",
   "status": "published implementation test candidate on codex/oslit-integrated-e2e-20261115; not merged, adopted or research-accepted",
   "conformance": "900 checks, 0 failing after exact path/full-file hash/literal exceptions for three synthetic archived probes; five regression scenarios passed; archived bytes unchanged",
   "new_implementation": "M3 signed acquisition classification, provenance journal and reader separation",
@@ -37,7 +37,7 @@
     "namespace_diagnostic_run": 43726713247,
     "codex_blocker": "faithful native-flag probe reproduces namespace denial, AppArmor mount denial, and both-relaxed loopback denial under unprivileged_userns; production policy unchanged",
     "omp_blocker": "startup passed; model invocation returned403 before any model POST; startup model-discoveryGET observed separately; gate/route diagnosis pending",
-    "full_conformance": "eedb24c9 passed structural 899/0 then refused stale canonical v4 checker pin; 2640d491 hit a legacy review staging deadline; no full green result",
+    "full_conformance": "Passed at 9415de223d77aa1bce122b08056c73a2a5a964f2, run 43731100402: 899 structural checks, zero failures; canonical v5 frozen inputs intact; schema and retrospective gates passed under Python 3.15.2. Later diagnostic commits are not a final repaired-head pass.",
     "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally",
     "latest_native_head": "9430bc343c6a3a14de8fded24a0e97f8421ae95b",
     "latest_native_run": 43732699926,

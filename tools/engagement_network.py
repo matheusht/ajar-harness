@@ -28,16 +28,24 @@ def _request(stream):
     headers, total = {}, 0
     while True:
         row = stream.readline(8193); total += len(row)
-        if not row.endswith(b'\r\n') or len(row) > 8192 or total > 16384:
-            raise NetworkDenied('network_headers_invalid')
+        if not row.endswith(b'\r\n') or len(row) > 8192:
+            raise NetworkDenied('network_header_line_invalid')
+        if total > 16384:
+            raise NetworkDenied('network_headers_too_large')
         if row == b'\r\n':
             return method, target, headers
         key, value = row.decode('ascii').rstrip('\r\n').split(':', 1)
         key, value = key.lower(), value.strip()
-        if (not re.fullmatch('[a-z0-9-]+', key) or key in headers or
-                key in ('proxy-authorization', 'expect') or
-                any(ord(c) < 32 or ord(c) == 127 for c in value)):
-            raise NetworkDenied('network_headers_invalid')
+        if not re.fullmatch('[a-z0-9-]+', key):
+            raise NetworkDenied('network_header_name_invalid')
+        if key in headers:
+            raise NetworkDenied('network_header_duplicate')
+        if key == 'proxy-authorization':
+            raise NetworkDenied('network_header_proxy_authorization_unavailable')
+        if key == 'expect':
+            raise NetworkDenied('network_header_expect_unavailable')
+        if any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise NetworkDenied('network_header_value_invalid')
         headers[key] = value
 
 
@@ -53,10 +61,14 @@ def _forward_headers(headers, *, request=False):
     total = 0
     for key, value in headers:
         total += len(key) + len(value) + 4
-        if (total > 16384 or len(key) + len(value) > 8192 or
-                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key) or
-                any(ord(c) < 32 or ord(c) == 127 for c in value)):
-            raise NetworkDenied('network_headers_invalid')
+        if total > 16384:
+            raise NetworkDenied('network_headers_too_large')
+        if len(key) + len(value) > 8192:
+            raise NetworkDenied('network_header_line_invalid')
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key):
+            raise NetworkDenied('network_header_name_invalid')
+        if any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise NetworkDenied('network_header_value_invalid')
         if key.lower() not in blocked:
             yield key, value
 

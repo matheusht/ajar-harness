@@ -196,8 +196,8 @@ def main():
                              ('1.4.4', 'other_numeric_version'), ('unpublished 18.20.0 detail', 'unrecognized'),
                              ('18.20.0\n1.4.4', 'unrecognized')]:
         assert driver.version_output_category(output) == expected
-    for output, accepted in [('{"work_available_bytes":0,"native_files":1,"native_bytes":128}', True),
-        ('{"work_available_bytes":0,"native_files":true,"native_bytes":128}', False),
+    for output, accepted in [('{"work_noexec":false,"work_available_bytes":0,"native_files":1,"native_bytes":128}', True),
+        ('{"work_noexec":false,"work_available_bytes":0,"native_files":true,"native_bytes":128}', False),
         ('{"secret":"unpublished"}', False), ('unpublished', False)]:
         row = driver.model_storage_outcome({'status':'settled','returncode':0,'output':output})
         assert ('native_bytes' in row) == accepted and 'unpublished' not in str(row)
@@ -208,7 +208,7 @@ def main():
                 if denied:
                     raise Failure('unpublished refusal')
                 return {'status':'settled','returncode':0,
-                        'output':'{"work_available_bytes":0,"native_files":1,"native_bytes":128}'}
+                        'output':'{"work_noexec":false,"work_available_bytes":0,"native_files":1,"native_bytes":128}'}
         cleanup = []
         class Model:
             def _startup_failed(self, error):
@@ -253,7 +253,8 @@ def main():
             raise AssertionError('missing cache reported complete')
     for chunks, expected in [([b'unpublished-secret'], set()), ([b'EN', b'OSPC'], {'enospc_marker'}),
                              ([b'EENOENT'], {'enoent_marker'}),
-                             ([b'No space left on device'], {'no_space_marker'})]:
+                             ([b'No space left on device'], {'no_space_marker'}),
+                             ([b'failed to map segment from shared object'], {'addon_mapping_marker'})]:
         categories = driver.ErrorCategories()
         for chunk in chunks:
             categories.feed(chunk)
@@ -276,7 +277,7 @@ def main():
     assert module.subprocess is original
     assert result['omp_model_stderr_categories'] == [{'markers':['enospc_marker'], 'bytes':180006, 'truncated':True, 'complete':True}]
     assert 'unpublished' not in str(result)
-    print('passed: 52 offline diagnostic cases; no native or provider calls')
+    print('passed: 53 offline diagnostic cases; no native or provider calls')
 
 
 if __name__ == '__main__':

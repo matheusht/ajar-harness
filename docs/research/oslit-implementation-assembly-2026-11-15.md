@@ -160,6 +160,13 @@ therefore invokes that native helper, preserving its default behavior. This
 component result does not establish successful Codex execution or enable the
 candidate policy in production.
 
+The [native-helper replay at `c8cd74d4`](https://github.com/matheusht/redteam-harness/actions/runs/43742239085)
+completed Codex's read-only sandbox command under the confined candidate policy.
+The outer mount remained denied with zero effective capabilities; container and
+host-profile cleanup verified. The artifact explicitly leaves the silent proc
+fallback branch unobserved. The full Codex workflow still used the default tool
+policy and refused namespace creation. Signed tool-policy integration is next.
+
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later
 refused revision 4's checker pin. Revision 5 records the changed checker under the
@@ -178,6 +185,16 @@ The [full conformance run at `dd63fe81`](https://github.com/matheusht/redteam-ha
 also passed. The canonical lifecycle step completed after 16m29s, within a 31m45s
 workflow; it was ongoing work, not a stalled process. A separate intermittent
 signed-review staging deadline remains under repair without raising the deadline.
+
+The schema setup repair now reuses parsed schemas and the registry only for an
+exact matching filename/byte snapshot. Every record and current schema bytes remain
+checked. Twelve focused mutation/refusal checks and the full signed-review self-test
+passed. Five alternating pairs of real synthetic signed-review writes completed
+and independently verified on both versions; local median command time fell from
+7.967846s to 3.714510s. The 10-second prewrite deadline is unchanged. See the
+[saved comparison and repeat commands](../../evals/native-qualification/team-evidence/schema-cache-20261115/README.md).
+These macOS timings are not a hosted Linux performance claim; the changed revision
+still requires full hosted verification.
 
 ## Remaining implementation and delivery
 

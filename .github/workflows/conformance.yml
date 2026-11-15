@@ -52,7 +52,9 @@ jobs:
           path: ${{ runner.temp }}/oslit-v2-checks/*.json
           if-no-files-found: warn
       - name: Decision 0005 engagement-record schema gate (self-test)
-        run: python3 tools/run-engagement.py --self-test
+        run: |
+          python3 tools/engagement-schema-cache-test.py --expect-cache
+          python3 tools/run-engagement.py --self-test
       - name: Decision 0006 frozen old/new gate replay
         run: python3 tools/decision6_replay.py --self-test
       - name: Decision 0006 fail-closed capability matrix

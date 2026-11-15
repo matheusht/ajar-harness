@@ -401,7 +401,9 @@ class NativeBoundary:
         self.execution_admitted = True
         self.environment = Environment(self.environment_profile, self.environment_reference['limits'],
             self.context.authorize, self._observe, grant=self.context.grant,
-            dispatch_guard=self.context.guard, lab_artifact=bool(self.artifact_effect), **self._environment_options())
+            dispatch_guard=self.context.guard, lab_artifact=bool(self.artifact_effect),
+            codex_tool_policy=(self.profile['kind'] == 'codex'
+                and 'codex_tool_policy' in self.environment_profile), **self._environment_options())
         if self.artifact_effect:
             self.controller.record_lab_artifact_intent(self.context.grant, self.environment_id, self.artifact_effect,
                 self.environment.allocation_identity())

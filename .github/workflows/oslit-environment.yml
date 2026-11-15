@@ -29,7 +29,10 @@ on:
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
-      - evals/native-qualification/fixtures/codex-tool-policy-v1/**
+      - evals/native-qualification/smoke/check_codex_tool_policy*.py
+      - evals/native-qualification/smoke/manage_codex_tool_policy_host.py
+      - engine/codex-tool-policy-v1/**
+      - tools/codex_tool_policy.py
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
@@ -69,7 +72,10 @@ on:
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
-      - evals/native-qualification/fixtures/codex-tool-policy-v1/**
+      - evals/native-qualification/smoke/check_codex_tool_policy*.py
+      - evals/native-qualification/smoke/manage_codex_tool_policy_host.py
+      - engine/codex-tool-policy-v1/**
+      - tools/codex_tool_policy.py
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
@@ -95,6 +101,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Check dormant Codex policy contract offline
+        run: python3 evals/native-qualification/smoke/check_codex_tool_policy.py
       - name: Select the disposable fixture image
         run: |
           docker --host unix:///var/run/docker.sock pull python:3.11-slim-bookworm
@@ -147,8 +155,26 @@ jobs:
           python-version: '3.11'
       - name: Install the pinned base on this disposable runner
         run: |
-          docker --host unix:///var/run/docker.sock pull \
-            python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
+          image=python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39
+          docker --host unix:///var/run/docker.sock pull "$image"
+          image_id=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$image")
+          printf 'OSLIT_FIXTURE_IMAGE=%s\n' "$image_id" >> "$GITHUB_ENV"
+      - name: Prove missing Codex profile refuses environment startup and recovers
+        if: matrix.runtime == 'codex'
+        run: |
+          python3 evals/native-qualification/smoke/check_codex_tool_policy_missing_profile_e2e.py \
+            --endpoint unix:///var/run/docker.sock \
+            --image-id "$OSLIT_FIXTURE_IMAGE" \
+            --output "$RUNNER_TEMP/oslit-native-e2e-codex/missing-profile.json"
+      - name: Add the reviewed Codex tool profile to this runner
+        if: matrix.runtime == 'codex'
+        id: codex_profile_setup
+        run: |
+          python3 evals/native-qualification/smoke/manage_codex_tool_policy_host.py install \
+            --marker "$RUNNER_TEMP/oslit-codex-profile-owner.json" \
+            --startup-result "$RUNNER_TEMP/oslit-native-codex/result.json" \
+            --joined-result "$RUNNER_TEMP/oslit-native-e2e-codex/result.json" \
+            --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-setup.json"
       - name: Check bounded loader-preflight contract
         if: matrix.runtime == 'omp'
         run: |
@@ -168,26 +194,40 @@ jobs:
             --output "$RUNNER_TEMP/oslit-apparmor-inventory/result.json"
           python3 evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py --self-check
       - name: Check pinned native startup without model invocation
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (matrix.runtime == 'omp' || steps.codex_profile_setup.outcome == 'success') }}
         run: |
+          policy_args=()
+          if [ "${{ matrix.runtime }}" = codex ]; then
+            policy_args=(--codex-tool-policy docker-confined-v1)
+          fi
           script=evals/native-qualification/smoke/check_omp_loader_preflight.py
           python3 "$script" \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-model-assets-${{ matrix.runtime }}" \
-            --output "$RUNNER_TEMP/oslit-native-${{ matrix.runtime }}/result.json"
+            --output "$RUNNER_TEMP/oslit-native-${{ matrix.runtime }}/result.json" \
+            "${policy_args[@]}"
       - name: Run joined native engagement through work, stop and cleanup
-        if: ${{ !cancelled() }}
-        env:
-          OSLIT_CODEX_POLICY_REPLAY: '1'
+        if: ${{ !cancelled() && (matrix.runtime == 'omp' || steps.codex_profile_setup.outcome == 'success') }}
         run: |
+          policy_args=()
+          if [ "${{ matrix.runtime }}" = codex ]; then
+            policy_args=(--codex-tool-policy docker-confined-v1)
+          fi
           python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-native-e2e-assets-${{ matrix.runtime }}" \
-            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/result.json"
+            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/result.json" \
+            "${policy_args[@]}"
+      - name: Remove only this run's Codex host profile after native cleanup
+        if: ${{ always() && matrix.runtime == 'codex' }}
+        run: |
+          python3 evals/native-qualification/smoke/manage_codex_tool_policy_host.py cleanup \
+            --marker "$RUNNER_TEMP/oslit-codex-profile-owner.json" \
+            --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-cleanup.json"
       - name: Preserve native observations without private or large build assets
         if: always()
         uses: actions/upload-artifact@v4
@@ -199,4 +239,5 @@ jobs:
             ${{ runner.temp }}/oslit-network-header-denials/result.json
             ${{ runner.temp }}/oslit-provider-discovery/result.json
             ${{ runner.temp }}/oslit-apparmor-inventory/result.json
+            ${{ runner.temp }}/oslit-native-e2e-codex/*.json
           if-no-files-found: warn

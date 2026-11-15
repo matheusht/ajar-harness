@@ -22,6 +22,7 @@ from operator_signature import verify_operator_signature_bytes
 INPUT_KIND = 'native-engagement-inputs-v2'
 SCOPE_KIND = 'native-engagement-scope-v2'
 SIGNATURE_NAMESPACE = 'llm-redteam-harness-native-engagement-v2'
+CODEX_TOOL_POLICY = 'docker-confined-v1'
 MAX_PUBLICATION_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_BYTES = 8 * 1024 * 1024 * 1024
 MAX_SOURCE_FILES = 200000
@@ -436,7 +437,10 @@ def validate_model_host(host: dict) -> dict:
 def validate_environment_profile(profile: dict) -> dict:
     code = 'environment_profile_invalid'
     _object(profile, ('kind', 'transport', 'docker_binary', 'docker_endpoint', 'daemon_id',
-                      'image_id', 'platform', 'uid', 'gid', 'ssh'), code)
+                      'image_id', 'platform', 'uid', 'gid', 'ssh',
+                      *(('codex_tool_policy',) if isinstance(profile, dict) and 'codex_tool_policy' in profile else ())), code)
+    if 'codex_tool_policy' in profile:
+        _require(profile['codex_tool_policy'] == CODEX_TOOL_POLICY, code)
     _require(profile['kind'] == 'research-environment-profile-v2'
              and profile['transport'] in ('docker', 'ssh-docker')
              and profile['platform'] in ('linux/arm64', 'linux/amd64'), code)

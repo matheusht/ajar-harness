@@ -76,10 +76,16 @@ class Environment:
     """
 
     def __init__(self, profile, limits, authorize, observe, *, grant=None, dispatch_guard=None, receipt=None,
-                 known_hosts_file=None, lab_artifact=False):
-        from engagement_contract import validate_environment_profile
+                 known_hosts_file=None, lab_artifact=False, codex_tool_policy=False):
+        from engagement_contract import CODEX_TOOL_POLICY, validate_environment_profile
         validate_environment_profile(profile)
         self.profile = json.loads(json.dumps(profile))
+        self.tool_policy = None
+        if codex_tool_policy:
+            if profile.get('codex_tool_policy') != CODEX_TOOL_POLICY:
+                raise EnvironmentUnavailable('codex_tool_policy_not_authorized')
+            from codex_tool_policy import load_policy
+            self.tool_policy = load_policy()
         if known_hosts_file is not None and profile['transport'] != 'ssh-docker':
             raise EnvironmentUnavailable('ssh_host_override_invalid')
         self.known_hosts_file = known_hosts_file
@@ -359,6 +365,17 @@ class Environment:
                     raise ValueError('artifact_owner')
                 from engagement_lab_artifacts import validate_configuration
                 validate_configuration(info, self.limits)
+            if self.tool_policy and not stage:
+                from codex_tool_policy import verify_configuration
+                verify_configuration(info, self.tool_policy)
+                if info['State']['Running'] and not self.retired and not self.held:
+                    observed = self._run(['container', 'exec', '--user',
+                        f"{self.profile['uid']}:{self.profile['gid']}", self.identity['container_id'],
+                        '/bin/cat', '/proc/self/attr/current'], output_limit=256, dispatch=True)
+                    expected = (self.tool_policy['apparmor_profile'] + ' (enforce)').encode()
+                    if (observed['status'] != 'settled' or observed['returncode']
+                            or observed['output'].strip() != expected):
+                        raise ValueError('codex_tool_policy_not_enforcing')
         except (KeyError, TypeError, ValueError):
             raise EnvironmentUnavailable('environment_configuration_mismatch') from None
 
@@ -555,7 +572,15 @@ class Environment:
             args[args.index('--name') + 1] = self.identity['container_name']
             args[image_argument] = self.identity['prepared_image_id']
             args.insert(2, '--read-only')
-            created = self._effect('create', args, timeout=self._admit())
+            if self.tool_policy:
+                args[2:2] = ['--security-opt', 'apparmor=' + self.tool_policy['apparmor_profile'],
+                             '--security-opt', 'seccomp=/dev/stdin']
+                with tempfile.TemporaryFile() as policy_input:
+                    policy_input.write(self.tool_policy['seccomp'])
+                    policy_input.seek(0)
+                    created = self._effect('create', args, timeout=self._admit(), input_file=policy_input)
+            else:
+                created = self._effect('create', args, timeout=self._admit())
             if created['status'] != 'settled' or created['returncode']:
                 self.held = True
                 raise EnvironmentUnavailable('environment_create_unknown')

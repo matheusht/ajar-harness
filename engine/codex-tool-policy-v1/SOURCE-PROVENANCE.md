@@ -25,7 +25,13 @@ Relevant source facts, from this commit:
 - The capability-gated group includes `mount`, `mount_setattr`, `move_mount`, `open_tree`, `setns`, `umount`, `umount2`, and `unshare` under CAP_SYS_ADMIN. This branch's top-level container drops every capability, so these calls remain blocked until a candidate makes a narrow syscall allowance; kernel capability checks must still decide whether the operation is allowed in the caller's current user namespace.
 - The exact source does not establish the required bwrap syscall or mount argument set. No candidate allowance should be treated as qualified until directly observed and replayed.
 
-The immutable archive URL above supplies the derivation source. The candidate profiles and license are retained beside this document. Loading this named profile is limited to the disposable-host replay; it does not replace Docker defaults or change production environment settings.
+The immutable archive URL above supplies the derivation source. The fixed profiles
+and license are retained beside this document. The optional signed
+`codex_tool_policy: docker-confined-v1` setting selects these policies for the
+main Codex tool container. The operator preinstalls the named AppArmor profile;
+the runtime supplies digest-checked seccomp bytes. See the
+[operator setup](../../docs/agents/engagement.md#codex-tool-policy-on-docker).
+Docker defaults remain the configuration for every other container.
 
 The actual tested bwrap binary is supported by two files at the immutable Codex source commit used by the diagnostic:
 
@@ -38,15 +44,17 @@ For this exact path, bubblewrap.c forms one clone() flags value containing NEWNS
 
 ## Repeat the harmless replay
 
-Use the `OSLit owned environment` workflow on Ubuntu 24.04 with its pinned base
-image and Codex assets. Its joined Codex step sets `OSLIT_CODEX_POLICY_REPLAY=1`;
-without that explicit setting the native E2E does not load a host profile. The
+Use the candidate replay with Ubuntu 24.04 and the pinned base image and Codex
+assets. Set `OSLIT_CODEX_POLICY_REPLAY=1` without `--codex-tool-policy` to select
+the standalone diagnostic. The current `OSLit owned environment` workflow instead
+installs the profile in an owned setup step and selects the signed policy for
+the full native workflow, so it skips this standalone diagnostic. The
 host needs Docker, AppArmor and noninteractive sudo for the fixed inventory read
 and profile load/remove commands. The replay refuses an already loaded candidate
 name and never replaces `docker-default`.
 
 Run `python3 evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py --self-check`
-for the offline contract check. The full workflow preserves the replay under
+for the offline contract check. The standalone diagnostic preserves the replay under
 `codex_policy_candidate` in the joined Codex JSON artifact, with policy and helper
 source hashes. The candidate now invokes `/runtime/bin/model sandbox --permission-profile :read-only -- /bin/true`
 (the image's installed Codex executable), with a private home on the existing

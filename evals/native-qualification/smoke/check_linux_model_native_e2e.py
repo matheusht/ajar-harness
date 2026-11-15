@@ -443,7 +443,7 @@ def validate_omp_fixture_catalog(content, provider_url, secret):
         raise ValueError('omp_fixture_model_catalog_invalid')
 
 
-def signed_inputs(root, fixture, provider, bundle):
+def signed_inputs(root, fixture, provider, bundle, codex_tool_policy=None):
     from native_runtime_codex import _DISABLED_FEATURES
     inputs_path = make_fixture(root / 'input')
     inputs = json.loads(inputs_path.read_bytes())
@@ -508,6 +508,8 @@ env_key = "OPENAI_API_KEY"
     environment = {'kind': 'research-environment-profile-v2', 'transport': 'docker',
         'docker_binary': fixture.docker, 'docker_endpoint': fixture.endpoint, 'daemon_id': fixture.daemon_id,
         'image_id': fixture.base_id, 'platform': fixture.platform, 'uid': 1000, 'gid': 1000, 'ssh': None}
+    if codex_tool_policy is not None:
+        environment['codex_tool_policy'] = codex_tool_policy
     write(Path(inputs['environment_profiles']['lab-main']), canonical(environment))
     scope = fixture_scope(inputs_path)
     scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(source)))
@@ -520,6 +522,61 @@ env_key = "OPENAI_API_KEY"
         'port': provider.server.server_port, 'address_policy': {'public_only': False, 'cidrs': [PROVIDER_HOST + '/32']}}]
     resign_fixture(inputs_path, scope)
     return inputs_path
+
+
+def policy_readback(fixture, tool_container_id, model_container_id, selected_policy, expected_seccomp):
+    """Publish policy names and hashes only, never Docker's serialized policy blob."""
+    import hashlib
+    import json
+    from codex_tool_policy import APPARMOR_PROFILE
+
+    def inspect(container_id):
+        observed = subprocess.run([fixture.docker, '--host', fixture.endpoint, 'container',
+            'inspect', container_id], check=True, capture_output=True, text=True, timeout=10)
+        rows = json.loads(observed.stdout)
+        if len(rows) != 1:
+            raise ValueError('container_policy_readback_invalid')
+        info = rows[0]
+        host = info['HostConfig']
+        security = host.get('SecurityOpt') or []
+        seccomp = [value[len('seccomp='):] for value in security
+                   if isinstance(value, str) and value.startswith('seccomp=')]
+        parsed, seccomp_kind, seccomp_digest = None, 'missing', None
+        if len(seccomp) == 1:
+            if seccomp[0] == 'unconfined':
+                seccomp_kind = 'unconfined'
+            else:
+                try:
+                    parsed = json.loads(seccomp[0])
+                    seccomp_kind = 'json'
+                    seccomp_digest = 'sha256:' + hashlib.sha256(
+                        json.dumps(parsed, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                except (ValueError, TypeError):
+                    seccomp_kind = 'invalid'
+        return {'apparmor_profile': info.get('AppArmorProfile'),
+            'cap_add': sorted(host.get('CapAdd') or []), 'cap_drop': sorted(host.get('CapDrop') or []),
+            'security_opt_names': sorted('no-new-privileges' if value in (
+                'no-new-privileges', 'no-new-privileges=true', 'no-new-privileges:true')
+                else 'apparmor' if value.startswith('apparmor=')
+                else 'seccomp' if value.startswith('seccomp=') else 'other'
+                for value in security if isinstance(value, str)),
+            'seccomp_kind': seccomp_kind, 'seccomp_sha256': seccomp_digest,
+            'seccomp_matches_codex_policy': parsed == expected_seccomp,
+            'codex_tool_policy_applied': info.get('AppArmorProfile') == APPARMOR_PROFILE
+                and host.get('CapAdd') in (None, [])
+                and sorted(host.get('CapDrop') or []) == ['ALL']
+                and parsed == expected_seccomp}
+
+    tool, model = inspect(tool_container_id), inspect(model_container_id)
+    model_policy_is_default = (model['apparmor_profile'] != APPARMOR_PROFILE
+        and model['cap_add'] == [] and model['cap_drop'] == ['ALL']
+        and model['security_opt_names'] == ['no-new-privileges']
+        and model['seccomp_matches_codex_policy'] is False)
+    return {'signed_policy': selected_policy, 'tool_container': tool, 'model_container': model,
+        'tool_policy_verified': tool['codex_tool_policy_applied'] is True,
+        'tool_apparmor_enforcement_verified_by_prepare': True,
+        'model_container_separate': tool_container_id != model_container_id,
+        'model_policy_is_default': model_policy_is_default}
 
 
 def invoke(context, boundary, prompt, result):
@@ -639,7 +696,8 @@ def run_native(root, fixture, result):
                     'classification': 'diagnostic_only', 'qualification': False,
                     'status': 'failed', 'error': 'diagnostic_integration_error',
                     'cleanup': 'unresolved'}
-            if os.environ.get('OSLIT_CODEX_POLICY_REPLAY') == '1':
+            if (os.environ.get('OSLIT_CODEX_POLICY_REPLAY') == '1'
+                    and getattr(fixture, 'codex_tool_policy', None) is None):
                 from check_codex_sandbox_policy_candidate import run_candidate
                 try:
                     result['codex_policy_candidate'] = run_candidate(
@@ -664,7 +722,8 @@ def run_native(root, fixture, result):
     native_runtime_codex.Transport = diagnostic_transport(result['native_request_errors'], (secret.encode(),))
     started = time.monotonic()
     try:
-        inputs = signed_inputs(root, fixture, provider, bundle)
+        codex_tool_policy = getattr(fixture, 'codex_tool_policy', None)
+        inputs = signed_inputs(root, fixture, provider, bundle, codex_tool_policy)
         controller = Controller.initialize(root / 'engagement', load_inputs(inputs))
         if fixture.runtime == 'omp':
             frozen_catalog = controller.root / 'contract/runtimes/runtime-main.models.yml'
@@ -700,6 +759,17 @@ def run_native(root, fixture, result):
         model = boundary.model_owner
         model_receipt = model.receipt(identity['session_id'])
         lab_identity = boundary.environment.receipt()
+        if fixture.runtime == 'codex' and codex_tool_policy is not None:
+            from codex_tool_policy import load_policy
+            policy = load_policy()
+            result['codex_tool_policy_readback'] = policy_readback(
+                fixture, lab_identity['container_id'],
+                model_receipt['owner']['environment']['container_id'],
+                codex_tool_policy, policy['seccomp_document'])
+            check(result, 'signed Codex policy observed on tool container and separate model container',
+                result['codex_tool_policy_readback']['tool_policy_verified']
+                and result['codex_tool_policy_readback']['model_container_separate']
+                and result['codex_tool_policy_readback']['model_policy_is_default'])
         check(result, 'actual separate model and tool containers',
               model_receipt['boundary'] == 'linux-docker-model-v1'
               and model_receipt['owner']['environment']['container_id'] != lab_identity['container_id'])
@@ -904,6 +974,7 @@ def main(*, classify_result=None):
     parser.add_argument('--endpoint', required=True)
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -913,6 +984,7 @@ def main(*, classify_result=None):
     try:
         fixture = prepare_image(runtime=args.runtime, platform=args.platform, base_image=args.base_image,
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
+        fixture.codex_tool_policy = args.codex_tool_policy
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:
@@ -935,7 +1007,9 @@ def main(*, classify_result=None):
             [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_candidate.py'),
-             *sorted((ROOT / 'evals/native-qualification/fixtures/codex-tool-policy-v1').glob('*')),
+             Path(__file__).with_name('check_codex_tool_policy_missing_profile_e2e.py'),
+             Path(__file__).with_name('manage_codex_tool_policy_host.py'),
+             *sorted((ROOT / 'engine/codex-tool-policy-v1').glob('*')),
              Path(__file__).with_name('check_omp_loader_preflight.py'),
              Path(__file__).with_name('check_model_image_docker_e2e.py'),
              *sorted((ROOT / 'tools').glob('*.py')), ROOT / 'tools/native_runtime_codex_exec.mjs',

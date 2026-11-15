@@ -20,7 +20,7 @@ import struct
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
-POLICY_DIR = ROOT / 'evals/native-qualification/fixtures/codex-tool-policy-v1'
+POLICY_DIR = ROOT / 'engine/codex-tool-policy-v1'
 APPARMOR_FILE = POLICY_DIR / 'oslit-codex-tool-v1.apparmor'
 SECCOMP_FILE = POLICY_DIR / 'oslit-codex-tool-v1.seccomp.json'
 APPARMOR_PROFILE = 'oslit-codex-tool-v1'

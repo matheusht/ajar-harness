@@ -91,6 +91,36 @@ private nonsecret `models.yml`; settings still use `config_file`. Both are froze
 at initialization. See the [runtime contract](../research/oslit-v2-contract-2026-11-14.md)
 for exact fields and retained compatibility.
 
+### Codex tool policy on Docker
+
+If the Docker host's defaults block Codex's native user namespace, the environment
+profile can include `"codex_tool_policy": "docker-confined-v1"`. Select it before
+pinning and signing the profile. It applies only to the main Codex tool container;
+staging, model, application and OMP containers retain their existing configuration.
+An omitted setting preserves the existing profile and receipt contract.
+
+On the authorized tool Docker host, verify the pinned policy files and install
+the named AppArmor profile once, from the repository root:
+
+```sh
+PYTHONPATH=tools python3 -c 'from codex_tool_policy import load_policy; load_policy()'
+sudo apparmor_parser -Ka engine/codex-tool-policy-v1/oslit-codex-tool-v1.apparmor
+```
+
+The add-only install refuses a preexisting name. Keep the profile installed while
+its owned containers run; remove it only after their cleanup is verified. The
+runtime supplies the pinned seccomp bytes to Docker and checks the exact security
+options, absent added capabilities, AppArmor name and active enforcing mode.
+Missing or mismatched policy stops setup or execution; recovery remains cleanup-only.
+The runtime does not install host policy or switch to an unconfined mode.
+
+The host operator owns the loaded policy bytes. Runtime readback establishes the
+name and enforcing mode, not a kernel content hash. See the
+[fixed policy's provenance](../../engine/codex-tool-policy-v1/SOURCE-PROVENANCE.md)
+and the [dated integrated evidence](../research/oslit-implementation-assembly-2026-11-15.md)
+before making qualification claims. The harmless native-helper replay passed;
+the signed full-workflow integration is awaiting execution.
+
 ## Fill and sign the inputs
 
 1. Copy the [source, binary, application or combined template](../../examples/native-engagement-v2/README.md)

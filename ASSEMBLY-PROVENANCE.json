@@ -35,12 +35,12 @@
     "conformance_run": 43725604808,
     "namespace_diagnostic_head": "2a0f04b57438ab8300be2fd0e3cbdadf8809d5eb",
     "namespace_diagnostic_run": 43726713247,
-    "codex_blocker": "default seccomp blocks user namespaces; removing seccomp exposes AppArmor mount denial; both-relaxed loopback refusal remains unattributed; faithful native-flag probe pending; production policy unchanged",
-    "omp_blocker": "startup passed; joined invocation incomplete with zero controlled provider requests; bounded event diagnosis pending",
+    "codex_blocker": "faithful native-flag probe reproduces namespace denial, AppArmor mount denial, and both-relaxed loopback denial under unprivileged_userns; production policy unchanged",
+    "omp_blocker": "startup passed; model invocation returned403 before any model POST; startup model-discoveryGET observed separately; gate/route diagnosis pending",
     "full_conformance": "eedb24c9 passed structural 899/0 then refused stale canonical v4 checker pin; 2640d491 hit a legacy review staging deadline; no full green result",
     "canonical_successor": "v5 generated from committed 2640d491; old bytes unchanged; integrity and tamper control checked locally",
-    "latest_native_head": "9415de223d77aa1bce122b08056c73a2a5a964f2",
-    "latest_native_run": 43731100404,
+    "latest_native_head": "9430bc343c6a3a14de8fded24a0e97f8421ae95b",
+    "latest_native_run": 43732699926,
     "latest_conformance_run": 43731100402
   }
 }

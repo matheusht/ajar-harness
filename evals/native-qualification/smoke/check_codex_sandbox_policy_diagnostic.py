@@ -6,6 +6,7 @@ This is diagnostic evidence only. It never qualifies native execution or changes
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -30,6 +31,10 @@ SHA_RE = re.compile(r'(?:sha256:)?[0-9a-f]{64}\Z')
 MAX_OUTPUT = 2048
 MAX_COMMAND_OUTPUT = 65536
 TIMEOUT = 25
+AUDIT_TIMEOUT = 10
+MAX_AUDIT_ROWS = 32
+MAX_AUDIT_ROW_BYTES = 2048
+AUDIT_TOKEN = re.compile(r'[A-Za-z0-9_.:-]{1,96}\Z')
 
 SCENARIOS = (
     ('default', ()),
@@ -75,8 +80,8 @@ def _text(raw: bytes) -> str:
     return value.strip()
 
 
-def _command(docker, endpoint, *args, timeout=TIMEOUT):
-    command = [docker, '--host', endpoint, *args]
+def _command(docker, endpoint, *args, timeout=TIMEOUT, direct=False):
+    command = [docker, *args] if direct else [docker, '--host', endpoint, *args]
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    bufsize=0)
@@ -128,6 +133,62 @@ def _command(docker, endpoint, *args, timeout=TIMEOUT):
     selector.close()
     return subprocess.CompletedProcess(command, process.wait(),
         bytes(buffers.get(process.stdout, b'')), bytes(buffers.get(process.stderr, b'')))
+
+
+def _parse_kernel_denials(output: bytes):
+    rows = []
+    fields = re.compile(r'\b(operation|profile|comm|capname)="([^"]{1,96})"|\berror=(-?[0-9]{1,5})\b')
+    for line in output.splitlines():
+        if b'apparmor="DENIED"' not in line or b'comm="bwrap"' not in line:
+            continue
+        if len(line) > MAX_AUDIT_ROW_BYTES:
+            return None
+        try:
+            text = line.decode('ascii', 'strict')
+        except UnicodeDecodeError:
+            return None
+        row = {}
+        for match in fields.finditer(text):
+            key, value, error = match.groups()
+            key = key or 'error'
+            value = value if key != 'error' else error
+            if key in row or not AUDIT_TOKEN.fullmatch(value):
+                return None
+            row[key] = value if key != 'error' else int(value)
+        if row.get('comm') != 'bwrap' or not all(key in row for key in ('operation', 'profile', 'comm')):
+            return None
+        rows.append(row)
+        if len(rows) > MAX_AUDIT_ROWS:
+            return None
+    return rows
+
+
+def _kernel_denial_snapshot(started_at):
+    result = {'status': 'unavailable', 'reason': 'kernel_journal_unavailable',
+              'attribution': 'host time window and comm filter only; not exact process attribution',
+              'rows': []}
+    if not isinstance(started_at, str) or not re.fullmatch(
+            r'20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} UTC', started_at):
+        result['reason'] = 'kernel_window_invalid'
+        return result
+    try:
+        response = _command('sudo', None, '-n', 'journalctl', '-k', '--since', started_at,
+            '--grep', 'apparmor="DENIED".*comm="bwrap"', '-n', str(MAX_AUDIT_ROWS),
+            '--no-pager', '-o', 'cat', timeout=AUDIT_TIMEOUT, direct=True)
+    except Exception:
+        return result
+    if response.returncode != 0:
+        return result
+    if len(response.stdout) >= MAX_COMMAND_OUTPUT or len(response.stderr) >= MAX_COMMAND_OUTPUT:
+        result['reason'] = 'kernel_journal_output_limited'
+        return result
+    rows = _parse_kernel_denials(response.stdout)
+    if rows is None:
+        result['reason'] = 'kernel_journal_record_invalid'
+        return result
+    result.update(status='observed', reason=None, rows=rows,
+                  truncated=len(rows) == MAX_AUDIT_ROWS)
+    return result
 
 
 def _inspect(docker, endpoint, kind, identity):
@@ -353,6 +414,7 @@ def run_diagnostic(docker: str, endpoint: str, image_id: str, bwrap_sha256: str)
     except DiagnosticFailure as error:
         result.update(error=error.code, cleanup='not_started')
         return result
+    kernel_window_started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     for name, options in SCENARIOS:
         try:
             row = _run_one(docker, endpoint, image_id, run_id, name, options, normalized_sha)
@@ -361,6 +423,7 @@ def run_diagnostic(docker: str, endpoint: str, image_id: str, bwrap_sha256: str)
                    'classification': 'diagnostic_only', 'qualification': False,
                    'container_cleanup': 'unresolved'}
         result['scenarios'].append(row)
+    result['host_kernel_denials'] = _kernel_denial_snapshot(kernel_window_started_at)
     clean = all(row.get('container_cleanup') == 'verified' for row in result['scenarios'])
     result['cleanup'] = 'verified' if clean else 'unresolved'
     matrix = len(result['scenarios']) == len(SCENARIOS) and all(
@@ -421,6 +484,36 @@ def _self_check():
                 raise AssertionError('unexpected security option accepted')
     assert _userns_result(b'OSLIT_USERNS={"status":"denied","errno":1,"errno_name":"EPERM"}\n') == {
         'status': 'denied', 'errno': 1, 'errno_name': 'EPERM'}
+    audit_line = (b'type=AVC apparmor="DENIED" operation="capable" profile="docker-default" '
+                  b'pid=123 comm="bwrap" capability=12 capname="net_admin" error=-13 '
+                  b'name="/private/secret/path" argv="token=secret-value"')
+    audit_rows = _parse_kernel_denials(audit_line + b'\n')
+    assert audit_rows == [{'operation': 'capable', 'profile': 'docker-default', 'comm': 'bwrap',
+                           'capname': 'net_admin', 'error': -13}]
+    published_rows = json.dumps(audit_rows, sort_keys=True)
+    assert all(value not in published_rows for value in ('/private', 'secret-value', 'pid', 'argv'))
+    assert _parse_kernel_denials((audit_line + b'\n') * (MAX_AUDIT_ROWS + 1)) is None
+    assert _parse_kernel_denials(b'apparmor="DENIED" operation="capable" profile="/private/path" comm="bwrap"') is None
+    original_command = _command
+    try:
+        captured = {}
+        def unavailable_command(program, endpoint, *args, **kwargs):
+            captured.update(program=program, endpoint=endpoint, args=args, kwargs=kwargs)
+            return subprocess.CompletedProcess([program, *args], 1, b'', b'sudo password required: secret-value')
+        globals()['_command'] = unavailable_command
+        unavailable = _kernel_denial_snapshot('2026-11-15 12:00:00 UTC')
+        assert unavailable['status'] == 'unavailable' and unavailable['rows'] == []
+        assert unavailable['reason'] == 'kernel_journal_unavailable'
+        assert 'secret-value' not in json.dumps(unavailable)
+        assert captured['program'] == 'sudo' and captured['kwargs']['direct'] is True
+        assert captured['args'][:4] == ('-n', 'journalctl', '-k', '--since')
+        assert captured['args'][4] == '2026-11-15 12:00:00 UTC'
+        globals()['_command'] = lambda *args, **kwargs: (_ for _ in ()).throw(DiagnosticFailure('docker_timeout'))
+        assert _kernel_denial_snapshot('2026-11-15 12:00:00 UTC')['status'] == 'unavailable'
+    finally:
+        globals()['_command'] = original_command
+    assert _kernel_denial_snapshot('2026-11-15T12:00:00Z')['status'] == 'unavailable'
+    assert _kernel_denial_snapshot('not-a-time')['status'] == 'unavailable'
     assert run_diagnostic('unused', 'unused', 'sha256:' + 'a' * 64, 'wrong')['error'] == 'bwrap_digest_invalid'
     assert run_diagnostic('docker', 'tcp://example.invalid:2375',
                           'sha256:' + 'a' * 64, 'a' * 64)['error'] == 'docker_path_invalid'
@@ -435,7 +528,8 @@ def _self_check():
         assert verified_bwrap_asset(helper, 'sha256:' + '0' * 64) is None
         assert verified_bwrap_asset(helper, 'invalid') is None
     return {'status': 'passed', 'scenarios': 4, 'docker_contact': False,
-            'asset_hash_path': 'passed', 'qualification': False}
+            'asset_hash_path': 'passed', 'kernel_denial_redaction': 'passed',
+            'kernel_denial_unavailable': 'passed', 'qualification': False}
 
 
 def main():

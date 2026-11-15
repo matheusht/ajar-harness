@@ -147,7 +147,7 @@ jobs:
           python3 evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
           python3 evals/native-qualification/smoke/check_omp_public_credential_reference.py
           python3 evals/native-qualification/smoke/check_omp_model_addon_assets.py
-      - name: Check pinned native startup without provider invocation
+      - name: Check pinned native startup without model invocation
         if: ${{ !cancelled() }}
         run: |
           script=evals/native-qualification/smoke/check_omp_loader_preflight.py

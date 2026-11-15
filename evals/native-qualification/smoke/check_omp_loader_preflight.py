@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run provider-free native startup with bounded OMP observations."""
+"""Run native startup without model invocation, with bounded OMP observations."""
 from contextlib import contextmanager
 import json
 import os

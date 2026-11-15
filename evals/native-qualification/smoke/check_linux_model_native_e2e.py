@@ -83,9 +83,9 @@ def diagnostic_omp_frame(frame, known_secrets):
         row = {'event': 'prompt_result', 'status': status}
         if type(frame.get('sessionSettled')) is bool:
             row['session_settled'] = frame['sessionSettled']
-        error = frame.get('errorMessage')
-        if isinstance(error, str) and error:
-            row.update(_diagnostic_omp_error(error, known_secrets))
+        error = frame.get('error')
+        if status == 'error' and isinstance(error, dict) and isinstance(error.get('message'), str) and error['message']:
+            row.update(_diagnostic_omp_error(error['message'], known_secrets))
         return row
     if frame.get('type') != 'message_end':
         return None
@@ -130,6 +130,63 @@ def observe_omp_native_events(runtime, result, known_secrets):
         original(frame)
 
     transport.on_event = observe
+
+
+def provider_request_diagnostic(method, target, headers):
+    method = method if method in ('GET', 'POST') else 'other'
+    path, separator, _query = target.partition('?') if isinstance(target, str) else ('', '', '')
+    routes = {('GET', '/v1/models'): 'openai_models_v1',
+              ('POST', '/v1/chat/completions'): 'openai_chat_completions_v1',
+              ('POST', '/v1/responses'): 'openai_responses_v1'}
+    return {'method': method, 'route': routes.get((method, path), 'other'),
+            'query_present': bool(separator),
+            'authorization_present': any(name.lower() == 'authorization' for name in headers)}
+
+
+def diagnostic_omp_model_state(model, expected_base_url, expected_provider, expected_model):
+    api = model.get('api')
+    return {'api': api if api in ('openai-completions', 'openai-responses') else 'other',
+            'base_url_matches': model.get('baseUrl') == expected_base_url,
+            'provider_matches': model.get('provider') == expected_provider,
+            'model_matches': model.get('id') == expected_model}
+
+
+class NetworkDenialObserver:
+    """Test-only replacement subclass that records bounded NetworkDenied codes."""
+    def __init__(self, module):
+        self.module = module
+        self.maximum = 16
+        self.codes = []
+        self.total = 0
+        self.original_type = module.NetworkDenied
+        self.installed_type = None
+        self.lock = threading.Lock()
+
+    def install(self):
+        observer = self
+        original = self.original_type
+
+        class ObservedNetworkDenied(original):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                value = args[0] if args else None
+                code = value if isinstance(value, str) and re.fullmatch(r'[a-z_]{1,100}', value) else 'unclassified'
+                with observer.lock:
+                    observer.total += 1
+                    if len(observer.codes) < observer.maximum:
+                        observer.codes.append(code)
+
+        self.installed_type = ObservedNetworkDenied
+        self.module.NetworkDenied = ObservedNetworkDenied
+
+    def restore(self):
+        if self.installed_type is not None and self.module.NetworkDenied is self.installed_type:
+            self.module.NetworkDenied = self.original_type
+
+    def snapshot(self):
+        with self.lock:
+            return {'codes': list(self.codes), 'total': self.total,
+                    'truncated': self.total > len(self.codes)}
 
 
 def environment_diagnostics(controller, known_secrets):
@@ -232,7 +289,9 @@ class Provider:
         directory.mkdir(mode=0o700)
         self.ca, certificate, key = _certificates(directory, [PROVIDER_HOST], lifetime_seconds=3600)
         self.runtime, self.secret = runtime, secret
-        self.requests, self.errors, self.escapes = [], [], 0
+        self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
+        self.request_observation_total = 0
+        self.request_observation_lock = threading.Lock()
         self.command = None
         fixture = self
 
@@ -242,10 +301,12 @@ class Provider:
 
             def do_GET(self):
                 fixture.escapes += 1
+                fixture.observe_request('GET', self.path, self.headers)
                 self.send_response(403); self.end_headers()
 
             def do_POST(self):
                 try:
+                    fixture.observe_request('POST', self.path, self.headers)
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 2 * 1024 * 1024:
                         raise ValueError('provider_request_size')
@@ -277,6 +338,18 @@ class Provider:
         self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+
+    def observe_request(self, method, target, headers):
+        row = provider_request_diagnostic(method, target, headers)
+        with self.request_observation_lock:
+            self.request_observation_total += 1
+            if len(self.request_observations) < 16:
+                self.request_observations.append(row)
+
+    def request_snapshot(self):
+        with self.request_observation_lock:
+            return {'total': self.request_observation_total, 'events': list(self.request_observations),
+                    'truncated': self.request_observation_total > len(self.request_observations)}
 
     @property
     def origin(self):
@@ -559,6 +632,7 @@ def run_native(root, fixture, result):
     original = {name: os.environ.get(name) for name in ('OPENAI_API_KEY', 'SSL_CERT_FILE')}
     os.environ['OPENAI_API_KEY'], os.environ['SSL_CERT_FILE'] = secret, str(provider.ca)
     boundary = context = runner = controller = None
+    denial_observer = None
     original_transport = native_runtime_codex.Transport
     original_subprocess = research_environment.subprocess
     executor_diagnostics = ExecutorDiagnostics(original_subprocess)
@@ -578,6 +652,10 @@ def run_native(root, fixture, result):
         grant = controller.prepare_worker_dispatch(worker['id'], worker['generation'], workspace,
             seconds=LEASE, resources=['source-main'], adapter_id='native-runner')
         context = WorkerContext(runner, worker, grant, workspace)
+        if fixture.runtime == 'omp':
+            import engagement_network
+            denial_observer = NetworkDenialObserver(engagement_network)
+            denial_observer.install()
         boundary = NativeBoundary(context)
         try:
             identity = boundary.start()
@@ -586,6 +664,12 @@ def run_native(root, fixture, result):
                 if boundary.environment is not None else {'classification': 'environment_unavailable'})
         if fixture.runtime == 'omp':
             observe_omp_native_events(boundary.runtime, result, (secret.encode(),))
+            state = boundary.runtime._read_state()
+            model_state = state.get('model') or {}
+            result['omp_native_model_state'] = diagnostic_omp_model_state(model_state,
+                provider.origin + '/v1', 'openai', 'fixture-model')
+            result['omp_provider_requests_before_prompt'] = provider.request_snapshot()
+            result['omp_network_denials_before_prompt'] = denial_observer.snapshot()
         result['native_execution'] = 'initialized'
         controller.record_worker_started(worker['id'], worker['generation'], identity['session_id'], workspace,
                                          owner_receipt=identity['owner_receipt'])
@@ -599,7 +683,18 @@ def run_native(root, fixture, result):
         outside = root / 'outside.txt'; write(outside, b'HOST_ONLY_MARKER\n')
         provider.command = '/usr/local/bin/python3 /input/source-main/probe.py ' + shlex.quote(str(outside)) + ' ' + str(
             provider.server.server_port) + ' ' + str(model_receipt['owner']['init']['host_pid']) + ' ' + str(boundary.proxy.port)
-        invoke(context, boundary, FIRST_PROMPT, result)
+        if fixture.runtime == 'omp':
+            try:
+                invoke(context, boundary, FIRST_PROMPT, result)
+            finally:
+                result['omp_prompt_request_diagnostic'] = {
+                    'provider_requests_before': result['omp_provider_requests_before_prompt'],
+                    'provider_requests_after': provider.request_snapshot(),
+                    'network_denials_before': result['omp_network_denials_before_prompt'],
+                    'network_denials_after': denial_observer.snapshot(),
+                }
+        else:
+            invoke(context, boundary, FIRST_PROMPT, result)
         text = json.dumps(provider.requests)
         check(result, 'owned TLS provider credential and native tool outputs',
               len(provider.requests) == 2 and not provider.errors and secret not in text and 'NATIVE_PROBE=' in text)
@@ -690,6 +785,8 @@ def run_native(root, fixture, result):
         check(result, 'verified recovery releases dispatch reservation', current['usage']['reserved_worker_seconds'] == 0
               and not current['resource_holds'])
     finally:
+        if denial_observer is not None:
+            denial_observer.restore()
         native_runtime_codex.Transport = original_transport
         research_environment.subprocess = original_subprocess
         known_secrets = [secret.encode()]

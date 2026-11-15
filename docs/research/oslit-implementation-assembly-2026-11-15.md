@@ -109,6 +109,19 @@ outer capability: [vendored Bubblewrap](https://github.com/openai/codex/blob/6ff
 sets up loopback before dropping final sandbox capabilities. These disposable component
 diagnostics do not qualify a runtime or change production sandbox policy.
 
+The [faithful-probe run](https://github.com/matheusht/redteam-harness/actions/runs/43732699926)
+at `9430bc34` reproduced the Codex restrictions, including loopback failure with
+both outer filters relaxed. The child namespace reported AppArmor profile
+`unprivileged_userns`; the exact loopback denial remains unattributed. Production
+sandbox settings remain unchanged. OMP startup passed; its first model invocation
+finished with status `error` and `403 status code (no body)`. The provider observed
+one GET during startup and no model POST. `src/config/model-registry.ts` in the
+[pinned OMP package](https://registry.npmjs.org/@oh-my-pi/pi-coding-agent/-/pi-coding-agent-18.20.0.tgz)
+wires builtin OpenAI model discovery at `/v1/models`; that startup request does not establish the
+cause of the later invocation refusal. Bounded route and gate diagnostics are next.
+Both failed-run exports again verified and cleanup settled. Docker's ancillary
+workflow passed. No native work or retention qualification follows from these runs.
+
 The [conformance run](https://github.com/matheusht/redteam-harness/actions/runs/43725604808)
 at `eedb24c9` passed structural conformance (899 checks, no failures) but later
 refused revision 4's checker pin. Revision 5 records the changed checker under the

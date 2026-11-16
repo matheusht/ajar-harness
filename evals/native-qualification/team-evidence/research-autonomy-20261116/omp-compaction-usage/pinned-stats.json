@@ -1,0 +1,49 @@
+{
+  "kind": "pinned-omp-active-window-stats-replay-v1",
+  "version": "18.20.0",
+  "source_sha256": "3304c091832469ce191d0c767d675c4963d3555a6249e1374dfbccc4bc27d7d9",
+  "before": {
+    "tokens": {
+      "input": 100,
+      "output": 100,
+      "reasoning": 0,
+      "cacheRead": 100,
+      "cacheWrite": 0,
+      "total": 300
+    },
+    "cost": 1
+  },
+  "normal": {
+    "tokens": {
+      "input": 110,
+      "output": 110,
+      "reasoning": 0,
+      "cacheRead": 110,
+      "cacheWrite": 0,
+      "total": 330
+    },
+    "cost": 1.1
+  },
+  "compacted": {
+    "tokens": {
+      "input": 5,
+      "output": 5,
+      "reasoning": 0,
+      "cacheRead": 5,
+      "cacheWrite": 0,
+      "total": 15
+    },
+    "cost": 0.05
+  },
+  "compactedPositive": {
+    "tokens": {
+      "input": 120,
+      "output": 120,
+      "reasoning": 0,
+      "cacheRead": 120,
+      "cacheWrite": 0,
+      "total": 360
+    },
+    "cost": 1.2
+  }
+}

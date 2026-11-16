@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -53,6 +54,7 @@ class Runtime(Session):
         self.ready = False
         self.pending_completion = None
         self.stats_before = None
+        self.usage_window_changed = False
         command = [*command_prefix, model_owner.paths.executable if model_owner else profile['executable']['path'], '--mode', 'rpc', '--no-ui',
                    '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-context-files',
                    '--no-title', '--no-lsp', '--no-pty', '--no-session', '--cwd', str(self.process_workspace),
@@ -126,6 +128,7 @@ class Runtime(Session):
                 raise RuntimeError('native_session_changed')
             self._begin(invocation_id, prompt)
             self.pending_completion = None
+            self.usage_window_changed = False
             try:
                 self.stats_before = self.transport.request('get_session_stats')
                 self.native_turn = self.transport.next_id()
@@ -186,8 +189,11 @@ class Runtime(Session):
         values = {}
         for key in ('input', 'output', 'cacheRead', 'cacheWrite', 'reasoning', 'total'):
             a, b = tokens.get(key), before_tokens.get(key)
-            if type(a) is int and type(b) is int and a >= b >= 0:
-                values[key] = a - b
+            if type(a) is int and type(b) is int and a >= 0 and b >= 0:
+                if not self.usage_window_changed:
+                    if a < b:
+                        raise RuntimeError('native_usage_invalid')
+                    values[key] = a - b
             elif a is not None or b is not None:
                 raise RuntimeError('native_usage_invalid')
         # OMP separates uncached input from cache reads/writes; the common total includes all three.
@@ -195,14 +201,15 @@ class Runtime(Session):
         values['input'] = sum(values[key] for key in inputs) if all(key in values for key in inputs) else None
         cost_after, cost_before = after.get('cost'), (self.stats_before or {}).get('cost')
         cost = None
-        if type(cost_after) in (int, float) and type(cost_before) in (int, float):
-            if cost_after < 0 or cost_before < 0:
+        for value in (cost_after, cost_before):
+            if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0):
                 raise RuntimeError('native_usage_invalid')
+        if cost_after is not None and cost_before is not None and not self.usage_window_changed:
             cost = cost_after - cost_before
         self._usage(values, {'input_tokens': 'input', 'output_tokens': 'output',
                              'cached_input_tokens': 'cacheRead', 'cache_write_input_tokens': 'cacheWrite',
                              'reasoning_output_tokens': 'reasoning', 'total_tokens': 'total'}, cost=cost)
-        self._emit('completed', status=status, usage_available=self.usage is not None,
+        self._emit('completed', status=status, usage_available=any(value is not None for value in values.values()) or cost is not None,
                    resource_settlement='environment_readback_required')
         self.active = False
         self.pending_completion = None
@@ -229,7 +236,12 @@ class Runtime(Session):
             return
         if not self.active:
             return
-        if kind == 'message_end':
+        if (kind in ('auto_compaction_end', 'manual_compaction_end')
+                and isinstance(frame.get('result'), dict) and frame.get('aborted') is False
+                and frame.get('skipped') is not True):
+            # Session stats total the active transcript window, not lifetime use.
+            self.usage_window_changed = True
+        elif kind == 'message_end':
             message = frame.get('message', {})
             if message.get('role') == 'assistant':
                 parts = [part.get('text', '') for part in message.get('content', [])

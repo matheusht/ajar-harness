@@ -191,6 +191,29 @@ def compact_self_check():
         pass
 
 
+def public_worker_failures_acceptable(failures, status, cleanup, review_status):
+    if not isinstance(failures, dict):
+        return False
+    if not failures:
+        return True
+    return (status == 'closed' and cleanup == 'verified' and review_status == 'accepted'
+            and all(worker in ('lead-1', 'reviewer-1') and code == 'engagement_stopped'
+                    for worker, code in failures.items()))
+
+
+def worker_failure_self_check():
+    assert public_worker_failures_acceptable({}, 'closed', 'verified', 'accepted')
+    assert public_worker_failures_acceptable({'lead-1': 'engagement_stopped'}, 'closed', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable({'lead-1': 'native_usage_invalid'}, 'closed', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable({'lead-1': 'engagement_stopped'}, 'active', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable({'lead-1': 'engagement_stopped'}, 'closed', 'pending', 'accepted')
+    assert not public_worker_failures_acceptable({'lead-1': 'engagement_stopped'}, 'closed', 'verified', 'pending')
+    assert not public_worker_failures_acceptable({'unknown': 'engagement_stopped'}, 'closed', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable({'lead-1': None}, 'closed', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable(['native_usage_invalid'], 'closed', 'verified', 'accepted')
+    assert not public_worker_failures_acceptable(None, 'closed', 'verified', 'accepted')
+
+
 def cancellation_self_check():
     start = datetime.fromisoformat('2026-11-16T12:00:00+00:00')
     end = datetime.fromisoformat('2026-11-16T12:00:02+00:00')
@@ -462,6 +485,7 @@ def run_public(root, fixture, result):
     routing_self_check()
     packet_self_check()
     cancellation_self_check()
+    worker_failure_self_check()
     compact_self_check()
     fixture.public_run = True
     root.mkdir(mode=0o700)
@@ -500,10 +524,10 @@ def run_public(root, fixture, result):
         cli_code = cli.get('code')
         if not isinstance(cli_code, str) or not re.fullmatch(r'[a-z_]{1,100}', cli_code):
             cli_code = None
-        failures = cli.get('failures') if isinstance(cli.get('failures'), dict) else {}
+        failures = cli.get('failures')
         safe_failures = {worker: code for worker, code in failures.items()
                          if worker in ('lead-1', 'reviewer-1') and isinstance(code, str)
-                         and re.fullmatch(r'[a-z_]{1,100}', code)}
+                         and re.fullmatch(r'[a-z_]{1,100}', code)} if isinstance(failures, dict) else {}
         result['public_cli'] = {'returncode': child.returncode, 'status': cli_status, 'code': cli_code,
                                 'worker_failures': safe_failures}
         state = Controller(engagement).state()
@@ -530,6 +554,8 @@ def run_public(root, fixture, result):
         result['public_runner'] = public
         if state['cleanup'] != 'verified':
             result['boundary_cleanup_error'] = 'public_cleanup_unresolved'
+        check(result, 'public Runner has no unexpected worker failures',
+              public_worker_failures_acceptable(failures, state['status'], state['cleanup'], public['review_status']))
         check(result, 'public CLI closes reviewed owned fixture', child.returncode == 0 and state['status'] == 'closed'
               and state['cleanup'] == 'verified' and public['review_status'] == 'accepted'
               and public['lead_session_present'] and public['reviewer_session_present'] and public['sessions_distinct']

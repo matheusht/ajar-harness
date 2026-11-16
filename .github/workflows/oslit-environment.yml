@@ -30,6 +30,8 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py
+      - evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json
       - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
@@ -80,6 +82,8 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py
+      - evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json
       - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
@@ -223,6 +227,12 @@ jobs:
             --startup-result "$RUNNER_TEMP/oslit-native-codex/result.json" \
             --joined-result "$RUNNER_TEMP/oslit-native-e2e-codex/result.json" \
             --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-setup.json"
+      - name: Verify OMP compaction usage accounting
+        if: matrix.runtime == 'omp'
+        run: |
+          python3 evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py \
+            --stats evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json \
+            --output "$RUNNER_TEMP/oslit-native-e2e-omp/compaction-usage.json"
       - name: Verify OMP Responses tool-call identity
         if: matrix.runtime == 'omp'
         run: |

@@ -1,0 +1,54 @@
+{
+  "kind": "omp-compaction-usage-e2e-v1",
+  "classification": "actual_adapter_with_pinned_stats_and_simulated_native_events",
+  "status": "failed",
+  "checks": [
+    {
+      "name": "normal invocation retains exact delta",
+      "passed": true
+    },
+    {
+      "name": "committed compaction with falling totals completes with unavailable usage",
+      "passed": false,
+      "error": "native_usage_invalid"
+    },
+    {
+      "name": "committed compaction with growing totals does not fabricate a delta",
+      "passed": false,
+      "error": "AssertionError"
+    },
+    {
+      "name": "repeated compactions stay unavailable and next invocation resets accounting",
+      "passed": false,
+      "error": "native_usage_invalid"
+    },
+    {
+      "name": "committed manual compaction uses the same accounting boundary",
+      "passed": false,
+      "error": "native_usage_invalid"
+    },
+    {
+      "name": "counter reset without native compaction evidence remains refused",
+      "passed": true
+    },
+    {
+      "name": "skipped aborted malformed and unrelated events do not excuse reset",
+      "passed": true
+    },
+    {
+      "name": "malformed counters remain refused before and after compaction",
+      "passed": true
+    },
+    {
+      "name": "malformed cost remains refused before and after compaction",
+      "passed": false,
+      "error": "AssertionError"
+    }
+  ],
+  "stats_sha256": "9040c9d453013056b387f64b2b5281d15b42e23c688c033acfc14fa2dc3e3d82",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py": "f2a823e0b811a020488b92460d26a88ed6227a1af6647a594db6cbf1955d6a52",
+    "tools/native_runtime_omp.py": "7929a3d985368443cf2b7efbdc4eba5292b30591e538fcda093bb72e086234f7",
+    "tools/native_runtime_transport.py": "b1b18b9d3058c1203603695b7a89be62deb19c61c9bc01ce0e15b3df8e2be60b"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "kind": "native-renewal-bounds-e2e-v1",
+  "classification": "actual_boundary_and_environment_with_controlled_clock_and_owned_owners",
+  "checks": [
+    {
+      "name": "each owner renewal uses its current admitted remaining grant",
+      "passed": false,
+      "error": "TypeError"
+    },
+    {
+      "name": "explicit duration exceeding grant refused",
+      "passed": true
+    },
+    {
+      "name": "revoked grant refused",
+      "passed": false,
+      "error": "AssertionError"
+    },
+    {
+      "name": "expired grant refused",
+      "passed": false,
+      "error": "AssertionError"
+    }
+  ],
+  "status": "failed",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py": "0afe0b5a0af60cf33ce49a6387ad7ca81cdea0a39a0cd4e0a3c0cd39862bdf21",
+    "tools/engagement_native_boundary.py": "6d67065f5ade3f285681c2e84e86903917fcea4132a04a6122a1c2f16d50fe23",
+    "tools/research_environment.py": "484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "kind": "native-adapter-regression-summary-v1",
+  "classification": "controlled_protocol_subprocesses",
+  "results": [
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ]
+    },
+    {
+      "runtime": "omp",
+      "status": "passed",
+      "checks": [
+        "fresh",
+        "live_resume",
+        "usage",
+        "duplicate_callback",
+        "revoked_dispatch",
+        "guarded_acceptance",
+        "unlocked_completion",
+        "responsive_tool_wait",
+        "host_cancellation",
+        "redaction",
+        "reasoning_omission",
+        "malformed_frame",
+        "oversized_frame",
+        "pin_mismatch",
+        "process_exit"
+      ]
+    },
+    {
+      "runtime": "codex",
+      "status": "passed",
+      "checks": [
+        "peer_waited_for_executor_send",
+        "turn_start_guarded",
+        "executor_send_guarded",
+        "turn_response_after_guard_release",
+        "revoked_send_refused_before_peer"
+      ]
+    }
+  ],
+  "source_hashes": {
+    "evals/native-qualification/smoke/check_native_runtime_adapters.py": "sha256:712b05088df4b1f1e0bef1a2f9887a865cc2bfb6980b3d41774131e7758c6225",
+    "tools/native_runtime_bootstrap.py": "sha256:8d333b4b0b55577069020a37078c07bccec390bbd92edc17884ace4d77d3120f",
+    "tools/native_runtime_codex.py": "sha256:e12bea93ac61a5b91bc0a7cdc5eb185c3ff682e60ddf80a91804d161aebc3d50",
+    "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+    "tools/native_runtime_helpers.py": "sha256:0d3b140647a92e7a0859f67dc0c75637d58592a18f14c822b0f9ddc0c3795504",
+    "tools/native_runtime_linux.py": "sha256:485fa1a7be086841bf91657e535b75bdcd1d704f95eb0433bec2275914c140f6",
+    "tools/native_runtime_omp.py": "sha256:7929a3d985368443cf2b7efbdc4eba5292b30591e538fcda093bb72e086234f7",
+    "tools/native_runtime_omp_tools.mjs": "sha256:62c20f894b7de475a6339bc86e44fa03bdb893bbbfbf1c727addaf18fce0c37e",
+    "tools/native_runtime_owner.py": "sha256:c020a07159206e2c620e702825c3f8b1e2d816cb070c4bb9ce740b63175a63ca",
+    "tools/native_runtime_transport.py": "sha256:b1b18b9d3058c1203603695b7a89be62deb19c61c9bc01ce0e15b3df8e2be60b"
+  }
+}

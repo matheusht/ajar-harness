@@ -351,7 +351,7 @@ def runner_workflow(x, *, resume='valid', delayed=False):
         def steer(self, message):
             self.context.authorize()
 
-        def renew(self, seconds):
+        def renew(self, seconds=None):
             self.context.authorize()
 
         def finish(self):

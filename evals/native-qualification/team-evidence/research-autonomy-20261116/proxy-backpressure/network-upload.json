@@ -1,0 +1,73 @@
+{
+  "kind": "network-upload-e2e-v1",
+  "classification": "actual_owned_tls_proxy_and_stdio",
+  "checks": [
+    {
+      "name": "fragmented 652488-byte HTTPS upload survives consumer pause intact",
+      "passed": true
+    },
+    {
+      "name": "authority revocation precedes partial EOF and marks request unknown",
+      "passed": true
+    },
+    {
+      "name": "both owned relay processes stop",
+      "passed": true
+    }
+  ],
+  "not_covered": [
+    "Docker isolation",
+    "native model behavior",
+    "external provider"
+  ],
+  "complete": {
+    "expected_bytes": 652488,
+    "observations": [
+      {
+        "request_id": "3f4acbb8910c4ad2bc1a62cd6979434e",
+        "status": "started"
+      },
+      {
+        "request_id": "3f4acbb8910c4ad2bc1a62cd6979434e",
+        "status": "completed"
+      }
+    ],
+    "request_started": 15741.630724,
+    "body_read_ended": 15743.037844083,
+    "received_bytes": 652488,
+    "exact_bytes": true,
+    "received_sha256": "a8e0745dc594587514db7bbe4aa165aa990bbaf1f75001b0a67d3bc80452d8fb",
+    "client_status": 200,
+    "expected_sha256": "a8e0745dc594587514db7bbe4aa165aa990bbaf1f75001b0a67d3bc80452d8fb",
+    "cleanup": true
+  },
+  "revoked": {
+    "expected_bytes": 652488,
+    "observations": [
+      {
+        "request_id": "b0387853c3014fa88c0c9fa77031e3b0",
+        "status": "started"
+      },
+      {
+        "request_id": "b0387853c3014fa88c0c9fa77031e3b0",
+        "status": "unknown"
+      }
+    ],
+    "request_started": 15743.664341041,
+    "authority_revoked_at": 15743.815241,
+    "body_read_ended": 15743.863044458,
+    "received_bytes": 98304,
+    "exact_bytes": false,
+    "received_sha256": "f6f9bec5303fe09bf6e2dffe8f610321e364b7b20fdd43552427f8c544d7bc6f",
+    "receiver_error": "SSLEOFError",
+    "client_error": "BrokenPipeError",
+    "expected_sha256": "a8e0745dc594587514db7bbe4aa165aa990bbaf1f75001b0a67d3bc80452d8fb",
+    "cleanup": true
+  },
+  "status": "passed",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_network_upload_e2e.py": "0bda30103fc15878f40437e9ce0e95bcfa1ea2cf0b10fa8821e0d1b242ccb589",
+    "tools/engagement_network.py": "edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+    "tools/engagement_network_bridge.py": "7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a"
+  }
+}

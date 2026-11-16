@@ -10,6 +10,7 @@ import time
 from native_runtime_transport import RuntimeError
 
 PROVIDER_ENV = {'openai': 'OPENAI_API_KEY', 'anthropic': 'ANTHROPIC_API_KEY',
+                'mistral': 'MISTRAL_API_KEY',
                 'opencode-go': 'OPENCODE_API_KEY', 'opencode-zen': 'OPENCODE_API_KEY'}
 
 

@@ -75,7 +75,7 @@ class OwnedHttpEnvironment:
         return process
 
     def readback(self): return {'status': self.status, 'identity': self.receipt()}
-    def renew(self, seconds): self.authorize(); return {'status': 'renewal_sent'}
+    def renew(self, seconds=None): self.authorize(); return {'status': 'renewal_sent'}
 
     def cleanup(self):
         for process in self.processes:

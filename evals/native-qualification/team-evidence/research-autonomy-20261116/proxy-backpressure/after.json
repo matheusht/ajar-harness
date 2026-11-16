@@ -1,0 +1,50 @@
+{
+  "kind": "proxy-backpressure-e2e-v1",
+  "classification": "actual_owned_socket_and_stdio_transfer",
+  "checks": [
+    {
+      "name": "paused consumer retains stream and all 200 KiB without truncation or duplication",
+      "passed": true
+    },
+    {
+      "name": "revocation stops a backpressured stream promptly",
+      "passed": true
+    },
+    {
+      "name": "owned relays and sender work settle",
+      "passed": true
+    }
+  ],
+  "not_covered": [
+    "Docker isolation",
+    "TLS provider behavior",
+    "research efficacy"
+  ],
+  "drain": {
+    "peer_retained_during_pause": true,
+    "expected_bytes": 204800,
+    "received_bytes": 204800,
+    "exact_bytes": true,
+    "expected_sha256": "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54",
+    "received_sha256": "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54",
+    "sender_settled": true,
+    "relay_stopped": true
+  },
+  "revocation": {
+    "peer_retained_during_pause": true,
+    "revoked_in_seconds": 0.146,
+    "revoked": true,
+    "expected_bytes": 204800,
+    "received_bytes": 4096,
+    "exact_bytes": false,
+    "expected_sha256": "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54",
+    "received_sha256": "c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193",
+    "sender_settled": true,
+    "relay_stopped": true
+  },
+  "status": "passed",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_proxy_backpressure_e2e.py": "ce271ac6b0843760b6bd180592883242e0ff0416410266c93eddd5029d70a029",
+    "tools/engagement_network_bridge.py": "7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a"
+  }
+}

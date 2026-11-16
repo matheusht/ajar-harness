@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import errno
+import base64
 import hashlib
 import ipaddress
 import json
@@ -33,13 +34,37 @@ RUNTIME_CAPABILITIES = {'startup', 'fresh_session', 'resume', 'steer', 'interrup
 ENVIRONMENT_CAPABILITIES = {'source', 'binary', 'application', 'acquisition',
                             'network_proxy', 'shared_write', 'renewable_lease'}
 RUNGS = ('source_only', 'self', 'stored', 'cross_user')
+AUTONOMY_POLICY = 'research-autonomy-v1'
+
+
+def research_autonomy(scope):
+    return scope.get('authority_policy') == AUTONOMY_POLICY
+
+
+def initial_authority(scope):
+    return scope.get('authority_policy') in ('initial-scope-v1', AUTONOMY_POLICY)
+
 SENSITIVE_TEXT = re.compile(
     rb'(?i)(?:\b(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)["\']?\s*[:=]|'
     rb'\b(?:password|passwd|api[_-]?key|access[_-]?token|secret)["\']?\s*[:=]\s*\S+|'
-    rb'\b(?:bearer|basic)\s+[A-Za-z0-9+/._=-]{8,}|'
+    rb'\bbearer\s+[A-Za-z0-9+/._=-]{8,}|'
     rb'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|'
     rb'[?&](?:x-amz-signature|x-goog-signature|signature|sig)=|'
     rb'-----BEGIN [A-Z ]*PRIVATE KEY-----)')
+
+
+def credential_syntax(data):
+    """Remove only empty syntax and explicit redaction markers from the scan view."""
+    names = rb'(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|password|passwd|api[_-]?key|access[_-]?token|secret)'
+    placeholder = rb'(?:\[REDACTED\]|<REDACTED>|<TOKEN>|<PASSWORD>|<API_KEY>|REDACTED|SYNTHETIC_PLACEHOLDER)'
+    pattern = re.compile(rb'(?im)(\b' + names + rb'["\']?[ \t]*[:=])[ \t]*["\']?(?:(?:bearer|basic)[ \t]+)?' +
+        placeholder + rb'["\']?(?=[ \t]*(?:$|[,}]))')
+    data = pattern.sub(b'[credential example omitted]', data)
+    data = re.sub(rb'([\'"`])' + names + rb':[ \t]*\1', b'[quoted empty header syntax]', data, flags=re.I)
+    data = re.sub(rb'(?i)\bbasic[ \t]+authentication\b', b'HTTP authentication syntax', data)
+    data = re.sub(rb'(?i)(\b' + names + rb'[ \t]*=[ \t]*)(?=get[A-Z][A-Za-z0-9_]*\([\'"][A-Za-z0-9_.-]+[\'"]\))',
+                  b'[configuration key lookup] ', data)
+    return re.sub(rb'(?im)\b' + names + rb'[ \t]*:[ \t]*(?=$)', b'[empty header syntax]', data)
 
 
 class ContractError(ValueError):
@@ -210,6 +235,37 @@ def read_json(path: Path, *, private: bool = False, max_bytes: int = 1024 * 1024
     return _decode(read_bytes(path, private=private, max_bytes=max_bytes))
 
 
+def _omit_schema_type_declarations(value):
+    """Remove value-free property declarations only from the sensitive syntax view."""
+    if type(value) is not dict or value.get('$schema') not in (
+            'https://json-schema.org/draft/2020-12/schema', 'http://json-schema.org/draft-07/schema#'):
+        return
+    pending = [value]
+    while pending:
+        schema = pending.pop()
+        if type(schema) is not dict:
+            continue
+        properties = schema.get('properties')
+        if type(properties) is dict:
+            for name, declaration in list(properties.items()):
+                if (type(declaration) is dict and 'type' in declaration
+                        and set(declaration) <= {'type', 'description'}
+                        and ('description' not in declaration or type(declaration['description']) is str)
+                        and declaration['type'] in ('string', 'boolean', 'integer', 'number', 'null', 'object', 'array')):
+                    del properties[name]
+                else:
+                    pending.append(declaration)
+        for key in ('$defs', 'definitions', 'patternProperties', 'dependentSchemas'):
+            if type(schema.get(key)) is dict:
+                pending.extend(schema[key].values())
+        for key in ('items', 'contains', 'additionalProperties', 'unevaluatedProperties',
+                    'propertyNames', 'unevaluatedItems', 'if', 'then', 'else', 'not'):
+            pending.append(schema.get(key))
+        for key in ('allOf', 'anyOf', 'oneOf', 'prefixItems'):
+            if type(schema.get(key)) is list:
+                pending.extend(schema[key])
+
+
 def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> bytes:
     _require(type(data) is bytes and len(data) <= MAX_PUBLICATION_BYTES, 'publication_invalid')
     _require(all(type(value) is bytes and value for value in known_secrets), 'known_secrets_invalid')
@@ -243,11 +299,20 @@ def safe_publication(data: bytes, *, known_secrets: tuple[bytes, ...] = ()) -> b
                 # OMP's exact public environment reference is not a credential value.
                 if item.get('apiKey') == 'OPENAI_API_KEY':
                     del item['apiKey']
+        _omit_schema_type_declarations(value)
         sensitive_views.append(canonical(value))
     for view in views:
-        _require(not detect_secret_classes(view)
+        _require(not detect_secret_classes(credential_syntax(view))
                  and not any(value in view for value in known_secrets), 'publication_secret')
-    _require(not any(SENSITIVE_TEXT.search(view) for view in sensitive_views), 'publication_secret')
+    # Basic credentials are encoded user:password, not prose such as 'basic cross-origin'.
+    for view in sensitive_views:
+        for token in re.findall(rb'(?i)\bbasic[ \t]+([A-Za-z0-9+/]+={0,2})(?![A-Za-z0-9+/_-])', credential_syntax(view)):
+            try:
+                decoded = base64.b64decode(token, validate=True)
+            except ValueError:
+                continue
+            _require(b':' not in decoded, 'publication_secret')
+    _require(not any(SENSITIVE_TEXT.search(credential_syntax(view)) for view in sensitive_views), 'publication_secret')
     return data
 
 
@@ -476,9 +541,10 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
                     'network', 'effects', 'escalation_ceiling', 'benign_objectives',
                     'runtime_assignments', 'limits', 'revocation',
                     *(('application_states',) if isinstance(scope, dict) and 'application_states' in scope else ()),
-                    *(('authority_policy',) if isinstance(scope, dict) and 'authority_policy' in scope else ())), 'scope_invalid')
+                    *(('authority_policy',) if isinstance(scope, dict) and 'authority_policy' in scope else ()),
+                    *(('reference_web',) if isinstance(scope, dict) and 'reference_web' in scope else ())), 'scope_invalid')
     _require(scope['kind'] == SCOPE_KIND, 'scope_kind_invalid')
-    _require('authority_policy' not in scope or scope['authority_policy'] == 'initial-scope-v1',
+    _require('authority_policy' not in scope or initial_authority(scope),
              'scope_authority_policy_invalid')
     _identifier(scope['engagement_id'], 'scope_invalid')
     _require(type(scope['operator_id']) is str and re.fullmatch(
@@ -513,7 +579,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
                                       'informational'), 'scope_limits_invalid')
     _require(type(limits['hard']) is dict, 'scope_limits_invalid')
     _require(not set(limits['hard']) - {'invocations', 'worker_seconds'}, 'hard_limit_unsupported')
-    _require(set(limits['hard']) == {'invocations', 'worker_seconds'}, 'scope_limits_invalid')
+    _require(research_autonomy(scope) or set(limits['hard']) == {'invocations', 'worker_seconds'}, 'scope_limits_invalid')
     for value in (*limits['hard'].values(), limits['max_workers'], limits['max_worker_lease_seconds']):
         _integer(value, 'scope_limits_invalid')
     _require(type(limits['informational']) is dict and set(limits['informational']) <= {
@@ -567,6 +633,11 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         _require(limits['lease_seconds'] <= scope['limits']['max_worker_lease_seconds'], code)
         cleanup = _object(environment['cleanup'], ('owned_resources', 'owned_workspace'), code)
         _require(all(value is True for value in cleanup.values()), code)
+    if 'reference_web' in scope:
+        reference = _object(scope['reference_web'], ('public_sources', 'max_bytes', 'timeout_seconds'), 'scope_reference_web_invalid')
+        _require(research_autonomy(scope) and reference['public_sources'] is True, 'scope_reference_web_invalid')
+        _integer(reference['max_bytes'], 'scope_reference_web_invalid', maximum=64 * 1024 * 1024)
+        _integer(reference['timeout_seconds'], 'scope_reference_web_invalid', maximum=300)
     _object(scope['network'], ('provider', 'acquisition', 'target'), 'scope_network_invalid')
     target_routes = set()
     for kind, routes in scope['network'].items():
@@ -622,7 +693,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         if effect['kind'] == 'artifact_create':
             _require(bool(effect['artifact_classes']), code)
             if 'owned-lab-state-v2' in effect['artifact_classes']:
-                _require(scope.get('authority_policy') == 'initial-scope-v1', 'scope_authority_policy_required')
+                _require(initial_authority(scope), 'scope_authority_policy_required')
         permission = 'write' if effect['kind'] == 'artifact_create' else effect['kind']
         for access_id in effect['access_ids']:
             access = accesses[access_id]
@@ -637,7 +708,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
         code = 'scope_application_state_invalid'
         _object(reference, ('access_id', 'profile_sha256', 'environment_id', 'reset_effect_id',
             *(('artifact_effect_id',) if isinstance(reference, dict) and 'artifact_effect_id' in reference else ())), code)
-        _require(scope.get('authority_policy') != 'initial-scope-v1' or 'artifact_effect_id' in reference, code)
+        _require(not initial_authority(scope) or 'artifact_effect_id' in reference, code)
         for key in ('access_id', 'environment_id', 'reset_effect_id'):
             _identifier(reference[key], code)
         access = accesses.get(reference['access_id'])
@@ -654,7 +725,7 @@ def _scope(scope: dict, now: datetime, allow_expired: bool) -> None:
             _require(artifact is not None and artifact['kind'] == 'artifact_create' and
                 artifact['access_ids'] == [access['id']] and artifact['environment_ids'] == [reference['environment_id']] and
                 artifact['artifact_classes'] == ['owned-application-state-v1'] and not artifact['account_refs'] and
-                artifact['cleanup_required'] and artifact['rung'] in ('source_only', 'self'), code)
+                artifact['cleanup_required'] and (research_autonomy(scope) or artifact['rung'] in ('source_only', 'self')), code)
         origin = _url(access['identity']['base_url'], code)
         _require(sum(other['kind'] == 'application' and _url(other['identity']['base_url'], code) == origin
                      for other in accesses.values()) == 1, code)

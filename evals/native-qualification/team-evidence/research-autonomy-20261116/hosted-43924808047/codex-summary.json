@@ -1,0 +1,589 @@
+{
+  "run_id": "43924808047",
+  "source_commit": "ba0a9a7438cd090b5bf767db1e9240c5a1140e48",
+  "runtime": "codex",
+  "classification": "actual_linux_native_runtime_scripted_provider",
+  "artifacts": {
+    "result.json": {
+      "artifact_sha256": "sha256:fd5570eeac305f51d06f63a471b893894486bb54361bc63fb9567af6e0135788",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "signed Codex policy observed on tool container and separate model container",
+          "passed": true
+        },
+        {
+          "name": "actual separate model and tool containers",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "owned TLS provider credential and native tool outputs",
+          "passed": true
+        },
+        {
+          "name": "native tool produced structured probe result",
+          "passed": true
+        },
+        {
+          "name": "tool input, credential, process and provider separation",
+          "passed": true
+        },
+        {
+          "name": "actual laboratory gate refuses the provider route",
+          "passed": true
+        },
+        {
+          "name": "same native session and model owner retained",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "earlier conversation and laboratory artifact retained",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "helper wait retains a known parent transport",
+          "passed": true
+        },
+        {
+          "name": "native helper completes under parent authority",
+          "passed": true
+        },
+        {
+          "name": "native helper reports usage totals",
+          "passed": true
+        },
+        {
+          "name": "replayed helper cumulative usage is counted once",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "parent reads helper through native tool",
+          "passed": true
+        },
+        {
+          "name": "native helper materializes exact retained reference",
+          "passed": true
+        },
+        {
+          "name": "materialized reference bytes verified",
+          "passed": true
+        },
+        {
+          "name": "same-name source update selects a new immutable version",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "native read selected version delivered",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "native read selected version delivered",
+          "passed": true
+        },
+        {
+          "name": "selected immutable version retains exact bytes",
+          "passed": true
+        },
+        {
+          "name": "selected immutable version retains exact bytes",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "second helper created for active stop",
+          "passed": true
+        },
+        {
+          "name": "second helper reaches the held native provider request",
+          "passed": true
+        },
+        {
+          "name": "native invocation completed",
+          "passed": true
+        },
+        {
+          "name": "active native helper stops and releases its session",
+          "passed": true
+        },
+        {
+          "name": "synthetic credential absent from container config and host evidence",
+          "passed": true
+        },
+        {
+          "name": "synthetic credential absent from native state",
+          "passed": true
+        },
+        {
+          "name": "detached model descendant created",
+          "passed": true
+        },
+        {
+          "name": "model guardian stops namespace after exact watcher loss",
+          "passed": true
+        },
+        {
+          "name": "revoked native invocation refused",
+          "passed": true
+        },
+        {
+          "name": "reopened controller recovers exact owner receipts",
+          "passed": true
+        },
+        {
+          "name": "receipt recovery remains idempotent",
+          "passed": true
+        },
+        {
+          "name": "verified recovery releases dispatch reservation",
+          "passed": true
+        },
+        {
+          "name": "same engagement export integrity, references and result verified",
+          "passed": true
+        },
+        {
+          "name": "same engagement export verified",
+          "passed": true
+        },
+        {
+          "name": "native boundary cleanup verified",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "config/native-tool-lock.json": "sha256:592a3f9421df62c442df934361298ea54024869776a04ff28cfb4a7dad7c0e8d",
+        "engine/codex-tool-policy-v1/MOBY-LICENSE": "sha256:7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8",
+        "engine/codex-tool-policy-v1/SOURCE-PROVENANCE.md": "sha256:d7168011e9b76334e6c802d01b22993ff7043e3737d9dfc2e83149468efde053",
+        "engine/codex-tool-policy-v1/oslit-codex-tool-v1.apparmor": "sha256:416fa88e0a55d80ba102e7d7ba4205281dff504e9021e66d21bae9c7feb4960f",
+        "engine/codex-tool-policy-v1/oslit-codex-tool-v1.seccomp.json": "sha256:ce43ad043604a1d352bb505633df3087630716dfb9af894841faadef6021275a",
+        "evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py": "sha256:eb268baca57c2eb72b86bd1e09cad9b2eaf66d9711ea1b5f21984c0770e41ad9",
+        "evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py": "sha256:7a2f8b4decf14b0b64241f9937c56d55dc321cd13bde8c28075df3ec225484fa",
+        "evals/native-qualification/smoke/check_codex_tool_policy_missing_profile_e2e.py": "sha256:0fca8aa811f409b61d4f985a309877d24d5ef6f1fd862ed1262143d71aa16d28",
+        "evals/native-qualification/smoke/check_linux_model_native_e2e.py": "sha256:39d1a73ccc15066fda5de40a2ae717f6b44351de10911b6a4c12b3d6f3b08664",
+        "evals/native-qualification/smoke/check_model_image_docker_e2e.py": "sha256:2ca8cee90db0335ac90caad4142c5ca58dc25ff5a43a7c817db3c9a1a1a1a80e",
+        "evals/native-qualification/smoke/check_native_userns_probe.py": "sha256:1e3bb46d8ae92e3601eecd1057ea8af321c98e9617632f9f32339d187442a2d1",
+        "evals/native-qualification/smoke/check_omp_loader_preflight.py": "sha256:efe7243408d79fc3c0242f0693e75b9ab90ff4a64e7ab72c2713fe34660772d1",
+        "evals/native-qualification/smoke/check_research_autonomy_public_e2e.py": "sha256:69688cc6ffa0233ab0f368a85c1f64334005547cb38e84bf2730f0d349cb1e13",
+        "evals/native-qualification/smoke/manage_codex_tool_policy_host.py": "sha256:df313467ebf68b9394251bda3e7146f45ec301dae88df3bd8beadc14177354c1",
+        "tools/_docker_session_watchdog.py": "sha256:1aedcf8dc35259457cfac4aa4e9fa1f8009e2f8fe5d6801de7846cac23ac9ea1",
+        "tools/_fd_exec.py": "sha256:c48edf942e3a56138ce6f91b45a2de08e6da06fe07d3419de23ba29158e379df",
+        "tools/_session_watchdog.py": "sha256:ba5f7da189fa190c50ac21475beb932a8e2fd4fa17d8090d80834e5c2af2bce9",
+        "tools/ablation.py": "sha256:ae6f5a1c6b3886c40661f98a7fd19ed0a2564c85a327126a8f113ffff9cd10f3",
+        "tools/acquisition_network.py": "sha256:f9592b495eb86b868dfb4f82a53398d8a3c1b6e5d5188c9bf1758e3f51fed82c",
+        "tools/adjudication_audit.py": "sha256:e8e4eb4cb138079788ee4f3635875f7883c286db23e28c07f63c711e7afad9b0",
+        "tools/application_state.py": "sha256:9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+        "tools/application_volumes.py": "sha256:4bab7e20015d49ea600741199ab943eca03c4192c2055cdd0e94219436558c39",
+        "tools/apply-candidate-eval.py": "sha256:ccf5f8c7a44d79843186bd8ec5039b7c4bf2d3db07b68774446beaef79cba0e7",
+        "tools/build-behavioral-campaign.py": "sha256:ddf625f21654c4d2a162db5bd48acf6adca1329428dd2d85df79bcfe6cd7d664",
+        "tools/casebook-provenance-test.py": "sha256:691cd4b7933d36dc3a1a389f31dae29f6779ecf842d92ecf38488aa289b3ab62",
+        "tools/casebook-retrieval-index.py": "sha256:a3f762faf26ee32e2d3a277a553da74c2c22c62d6ac76a4d4c2e81ead2fc21d4",
+        "tools/check-campaign.py": "sha256:b0d0cef778358917322dd4248979e481f7bd241c9c3d23a4950cb497bce6005c",
+        "tools/check-conformance.py": "sha256:50f60510ebec8b85914e1f4d32cdaba157ed3dd7e7c21840a9d811a4bdf099a7",
+        "tools/check_engagement_export.py": "sha256:2b54ecbc328418e9967cfce0731b2e0ce65d11a063d0692e4652e5b2445b3ee8",
+        "tools/check_knowledge_contract.py": "sha256:372a28c34698d7ee5e917de332341bb334ab8f811b78f93e53c6c8f1ee5348ea",
+        "tools/check_native_runtime_helpers.py": "sha256:857080bf1e3b5d0168ee96e2c4891b20baaf84728bf20f640209be7ac8c801ba",
+        "tools/check_native_source_mode.py": "sha256:dc37df6611b373db2343c190dee0e95c549e7020e4e506349b6a58c0fd659003",
+        "tools/claude-researcher-cli.py": "sha256:a0778136ae0584a816545089da91e939c8363c2d414caa0621d2cf19e5698bb8",
+        "tools/claude-stop-hook-test.py": "sha256:ac2457f07a9b738b21a8ba626181f939c7226bcb6964916fbd163410607f032c",
+        "tools/claude-stop-hook.py": "sha256:ad1fe4048497aca8a27b138d471ccaa3b479e610b7bddda7fd18583816f1b03d",
+        "tools/claude-work-session-test.py": "sha256:2e52e7d79f3dc091e1a949368ff0afbd0f165e40623a395a5da14e66dc733acc",
+        "tools/claude_work_session.py": "sha256:527daec093f62b726bc14033725e9c25aabf6ca2629861ec1c3d9eb4872bf2c2",
+        "tools/codex_tool_policy.py": "sha256:9918d0dd4e2b6ee8cfeaf4ceee315a9484366b3177f3b20c84768f40fc4cd296",
+        "tools/communication-packet-test.py": "sha256:451adacf9effb3b02392802b44ec190ab8cf1182509ac61b1171fa24d3acacd7",
+        "tools/completion-claims-test.py": "sha256:98bea4a18cd87f1448a0eb6c0957257f21169a96552e63cc181b4b5773c69f6b",
+        "tools/completion_claims.py": "sha256:72e610de1bb541d0786e2e577d60f2f26503a3ef1e8d9a4501e5decc0292a428",
+        "tools/container-broker-protocol-test.py": "sha256:4a26206920e0b70494b7a11310826213c105307327b6136974dde38ee3a6e426",
+        "tools/container-session-supervisor-test.py": "sha256:dc6e09bbea850548064ab835a1441f9e4b5f35e74d729f996cef288f45215e12",
+        "tools/container_broker_client.py": "sha256:a26bb7f8699d5091d770630877497e20819e262302df667b2d6ccc684bed50e8",
+        "tools/container_session_supervisor.py": "sha256:a4cf0e4bcfed3d8d0dd71df7d92086dc364f7aa474ec9b6a5fdc1c68339bedd4",
+        "tools/corpus_enumeration.py": "sha256:35842a314d16177337023d7878d6ccf6dedee77745e52916ca1b19f94e0ee816",
+        "tools/covert-channel-converter.py": "sha256:784deb62ac544451da3443c66dada508971a89f4c751eaec1c87a2c8bc616176",
+        "tools/covert-channel-evidence.py": "sha256:3d9ec5aec3c9ddfddd89bf48315835682647eef99217730073dee3faae2a5cda",
+        "tools/darwin-read-isolation-test.py": "sha256:7f383e4ddc7bfdcb3c401471d98dd6bd0c6cf008d55d65f90ed5b27c3330a90a",
+        "tools/darwin_process_containment.py": "sha256:964a0be616f3b53b28ab4e574d9f1ed138380fe55a384883c213982062bb63f4",
+        "tools/darwin_read_isolation.py": "sha256:066899660858ce383e7281219619cb7e91271a94c80dc06a61281b1c4ff4eb03",
+        "tools/decision6_capabilities.py": "sha256:acc072c9515fa634b43e2bb03cf60184a201896e0fc0305cee61a2b043af6f95",
+        "tools/decision6_replay.py": "sha256:4bdff93122430bd1bc7362086405d95c7d66656ac02b54341889858661a6685e",
+        "tools/disposition_ledger.py": "sha256:980ee5983ea5e711ca9ef7a5a30e239a402bf5566cd41898a039934a391ea8b6",
+        "tools/docker-session-runtime-test.py": "sha256:0fae8ed3ff32a9397a0c09102946b2b6e8a6075b433a4100cb58d85fc1b52525",
+        "tools/docker-work-queue-drain-test.py": "sha256:5b493e4990ddcb8cfbe6347578df1c6dc82d8f1fd53c5acc839ba94003cca17d",
+        "tools/docker-work-queue-integration-test.py": "sha256:95a63692bfd6e9ace4fc005b29690a7f58c194bf4e4ad4717abe5fc9441ada2b",
+        "tools/docker_session_runtime.py": "sha256:9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651",
+        "tools/dossier-inspector-test.py": "sha256:77eb5ffc72b0d1abfc0988e356ca3b7d931f798de16ca1b46365680eb7fac802",
+        "tools/driver_action_admission.py": "sha256:bc74e2bd881b52e0e5148b932e2abeb2c9154722b398ef2df8ec65fcb8231c6f",
+        "tools/encoding-robustness-eval.py": "sha256:9dd0f930653e3981bacf9f80489b130cd19bc6b6e4c059171c57c0f574520159",
+        "tools/engagement-lock-race-test.py": "sha256:659ccd9a1bf49c512adacb233970cee07f2aad05dd1421aec8f2bbc08721814a",
+        "tools/engagement-schema-cache-test.py": "sha256:fd20785c4b0b294e6077fcf9e996fe6aa85e7de7dedb8bfb5bc07cf24d029868",
+        "tools/engagement_acquisition.py": "sha256:f2c5e60f6a4f8803d6ed609c8a95582cd5899b4c77b27f79aa54944bcea64d57",
+        "tools/engagement_board.py": "sha256:54c316c378ceea3089b6340e0375e1ed65a0c9fa51ac5992ffc58980d3e43f72",
+        "tools/engagement_contract.py": "sha256:d2d11460853085f817bda2125bb7ce180441c19ec8e291443d8f476667b3d211",
+        "tools/engagement_controller.py": "sha256:bd8bfc5feaffd8c1043392833e005302f532ea4e8a6f31c55b00cb8772e241ec",
+        "tools/engagement_evidence.py": "sha256:63df0c46045e4d38acf9164444c23a26ee81990588337bd43a06148ea7aef46a",
+        "tools/engagement_knowledge.py": "sha256:cb11d425235713216b5ac0863dafa3ccf07d689055007bfb26750f8cf2b89d94",
+        "tools/engagement_knowledge_delivery.py": "sha256:7c7a66d79b9258f6eb8eb9ef835de7fa9f4eec7a02a7271f84d2be53a2c50e38",
+        "tools/engagement_lab_artifacts.py": "sha256:21c4a11eefcc0f402c73783d5096201966bf24c58c82466eeb7a66d2cfaf4d5c",
+        "tools/engagement_lab_inventory.py": "sha256:1b96ef56359d2cf4a72cc943b8a2ce797f381d3431f8b750c53f8353c8e98e01",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_native_boundary.py": "sha256:6d67065f5ade3f285681c2e84e86903917fcea4132a04a6122a1c2f16d50fe23",
+        "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+        "tools/engagement_network_bridge.py": "sha256:7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a",
+        "tools/engagement_preflight.py": "sha256:e9089395882217065d3a0fd70b8288442fb2548953d67d358d25042dd794c539",
+        "tools/engagement_quarantine.py": "sha256:4e9c12d77b275faef0bdc5c70fe3cc9c842d6a8a09bdd28e818f75c91f8c11db",
+        "tools/engagement_records.py": "sha256:0ac48c1f47da33b2c3439184a9f96d202e5eea911d0e81c5a8cffb1b7127e1c3",
+        "tools/engagement_runner.py": "sha256:60528ea5a26de5135072af960b5e9c62e9d7c233b8fd915676a90bd895cffe7d",
+        "tools/engagement_state.py": "sha256:e026a5194983c278f9934d77722ebbfb58f8519dd82d20c96ad4884fca949b74",
+        "tools/engagement_views.py": "sha256:70ba222a527c284a9dab9151fcb27f035f030a16c401939a0cada168de8bc729",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919",
+        "tools/engineering-guidance-test.py": "sha256:36c57c3d2eda4c3f73ae17f6bb67afafc4d4426f10251c0c5eea95a68aae2433",
+        "tools/environment_preflight.py": "sha256:bc925b79b3af071cd0b6ecc4a1a2a7122620fc0cf633c63a907c2b21efc4a70c",
+        "tools/evaluate-retrospective.py": "sha256:5fad1ed49252565bf827ea2ae3c6d21e89f14c77b53fdc6fd7b74a6383664468",
+        "tools/fake-researcher-cli.py": "sha256:8d3c54c2411be815f50fc6cc0e02276fa056c51f06ed02886df02583489e599a",
+        "tools/finding_lifecycle.py": "sha256:3c8281274882d095a03864bb114393de23cfda061c10f8f4f53455cd0dae651d",
+        "tools/finding_review.py": "sha256:ee360ae16083fda9c1a1f02462005785ae209bde00ab51e2176512e796b46703",
+        "tools/flow_telemetry.py": "sha256:d766f752efe3a5ff111bec1494d10214f2002ec47e243b076e6fae683c53a166",
+        "tools/framing_probe.py": "sha256:4aead8af2823fb2956051689ec41476bd69eb856a8267346b4b0a2074cb85c87",
+        "tools/frozen-corpus-test.py": "sha256:466a75ba76896a25f5eb90f0c0d2be9fc7144db2a78917269abb1323c9a55d56",
+        "tools/frozen_corpus.py": "sha256:4727c74b44d902c3ace344c49ade00a044d16e5abe9830dc87accf3c813287e2",
+        "tools/frozen_inputs.py": "sha256:0d49dc97ce58ba1b6b38c11a2700f35001ab98755c59e944b671f9834ad98cb3",
+        "tools/gate_block_audit.py": "sha256:88101e9e754adcfa5621aa4191a3a6742a8f16d0110eb42015dd307c1dab9452",
+        "tools/generate-payload-proposal.py": "sha256:c0e39afa0cabf9aea7250b0fc82b330284b250e139035ecb4b57c66739be074b",
+        "tools/hash-campaign-inputs.py": "sha256:28bc07a3b056e516bb23346453b4d4e59bba7567e928f41ee38772b62a160e2f",
+        "tools/ideation.py": "sha256:be50e9ef1580bda7cd3cef5ce4631fbe5bdcef302a568b973c858b57b2b6be33",
+        "tools/inspect-dossier.py": "sha256:b319471764bdd20b395f60c03bd045a132d695792bbf419a0eab8fcdc77d7bd3",
+        "tools/install_native_tools.py": "sha256:2137c881a4ac24e0c40d74be9a2f4bac20865e55b2c16231ebcf0d77d4c109d0",
+        "tools/intervention_ledger.py": "sha256:ce89ffa5023750e88b1484e5f6803d383d38aa378024de6598fcf4d1a2e1381b",
+        "tools/kb.py": "sha256:72d52dbd75b260e2e40c66233def487d5e13ec7f632993f5519d3cca444f85d4",
+        "tools/ledger_health.py": "sha256:0981ad5419129f6780c7095511c0aab2041add334c06f1577428cb00027b7d6d",
+        "tools/memory_disposition.py": "sha256:baa626baa5decec541f5194cd1ad04d358de568a7a47a14112a4a8c127c80274",
+        "tools/migrate-decision5.py": "sha256:9293bb230009dc9ace5fdcd561906c48774e0b43ed2a8ca76f6fee63274f2380",
+        "tools/native_closeout.py": "sha256:7190978e6cf8f4db84f784aa5b4d5b3cc90f3d7cc0de3d71dba7852f250ed4df",
+        "tools/native_continuation.py": "sha256:cfa44f393a0a045db0cd40db7009862b665a06899928fe93cf92a05d54dc58a7",
+        "tools/native_credentials.py": "sha256:b592d4860d71e2ed58fbab99aa51117d7cb80ac18814cffb8765de4df1d1c2a4",
+        "tools/native_effect_recovery.py": "sha256:a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c",
+        "tools/native_engagement.py": "sha256:47af193adc2e46335ba2bc9f8066972c19e26a6cb61a0fcfcb819e72abb4cf31",
+        "tools/native_kanboard_origin_gate.py": "sha256:bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e",
+        "tools/native_model_addon.py": "sha256:bbcce7fc406a59cc7cb422ceeb9c234574f4adf4e24a418ca26ba2a351f5456e",
+        "tools/native_patch_check.py": "sha256:5be6ef4406f5292d41b4fde913938c5d9794337b376a696d98b68cb570e0269f",
+        "tools/native_provider_gateway.py": "sha256:2c2b409b2c33b44b507983406134f5c48d56b934187a0c1c0be420ff2da4935c",
+        "tools/native_research.py": "sha256:afb890b7fa53443f554d406a6c775393ea2a898159f07a43c53c8ab5c5f48d43",
+        "tools/native_runtime_bootstrap.py": "sha256:8d333b4b0b55577069020a37078c07bccec390bbd92edc17884ace4d77d3120f",
+        "tools/native_runtime_codex.py": "sha256:e12bea93ac61a5b91bc0a7cdc5eb185c3ff682e60ddf80a91804d161aebc3d50",
+        "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+        "tools/native_runtime_helpers.py": "sha256:0d3b140647a92e7a0859f67dc0c75637d58592a18f14c822b0f9ddc0c3795504",
+        "tools/native_runtime_linux.py": "sha256:485fa1a7be086841bf91657e535b75bdcd1d704f95eb0433bec2275914c140f6",
+        "tools/native_runtime_omp.py": "sha256:7929a3d985368443cf2b7efbdc4eba5292b30591e538fcda093bb72e086234f7",
+        "tools/native_runtime_omp_tools.mjs": "sha256:62c20f894b7de475a6339bc86e44fa03bdb893bbbfbf1c727addaf18fce0c37e",
+        "tools/native_runtime_owner.py": "sha256:c020a07159206e2c620e702825c3f8b1e2d816cb070c4bb9ce740b63175a63ca",
+        "tools/native_runtime_transport.py": "sha256:b1b18b9d3058c1203603695b7a89be62deb19c61c9bc01ce0e15b3df8e2be60b",
+        "tools/native_setup_builder.py": "sha256:4320f75ead024223353ac3beca46e6e1000b62b613cce4b68b2b143c7cdb501b",
+        "tools/obfuscation-converter.py": "sha256:ec688033236b068fec2f36a3b6e78670b6bd8eb38899f7a1c98372eab07671e0",
+        "tools/ollama-researcher-cli.py": "sha256:b680b611ebcb5e118d0b949e5e4346862ba41a4ecba0f81f34c773ec2bff1dfc",
+        "tools/operator_signature.py": "sha256:2e5d0717e9123a517adf14eea50125289da1963e3ff635faf2fdafe3fd421f37",
+        "tools/overlay_pins.py": "sha256:e89232bfb71b08685eecc4d5e93f2adbdbf330fc1e0f7d462f261e180a9ea029",
+        "tools/payload-proposal-hermetic-test.py": "sha256:60079e11c08c183de7b99a19f0cf6ca92b6873cfe0beabb38bffa9430c9d6868",
+        "tools/preflight_holdout.py": "sha256:376e5b66d0dfa82e702134a651cac1e3dd809b7f04dc0245205f6a0b4dfd9819",
+        "tools/prepare-ab-study.py": "sha256:3fa7255775348c4fe0095f44d7cedb4fe696a76c825a1b33d893a6988af2626a",
+        "tools/q02-admission-self-test.py": "sha256:8ddd20d7628b1d61b1b2bccb7de07b3f8c84c18eb76c1801bec36618ed38e4c4",
+        "tools/q02_compare.py": "sha256:e3df8a860653d183cb1b51e43e522cb7282fe27ccc14d4c9556c2debb317d37a",
+        "tools/quarantine-self-test.py": "sha256:b1c666c2d79d61d4fa1ac2ec2081fa887903c61ef1fac96c6abf07f842ffe288",
+        "tools/reachability_corpus.py": "sha256:57da0a4bc85c65800f8737ab017f1fb7a118156a8b96aec680894226d31d6536",
+        "tools/record-review-atomicity-test.py": "sha256:523c9b169d8d2de0859e154e3026105fe4df509ca520a13d3deaa4b927d1b7fe",
+        "tools/recovery-packet-test.py": "sha256:2fc1d843e2c34acb697d58421a0db2c741c19b783a418de587948331144add4a",
+        "tools/render-promotion-bundle.py": "sha256:dd785b35d706bd445dcfa3bd47c2cbe86b5719d9edcad580b6d2996cb1ad9b08",
+        "tools/replay-candidate.py": "sha256:f550719107cd8a7a9c6c079f4b0e91955b6f85da4dfdf9164d4c94bfd2f09f2c",
+        "tools/reporting.py": "sha256:9a304bbbf4054f73edda61ff4d52b2292ccccbc407e51cbcfa63beb3dc45a129",
+        "tools/research-lifecycle-test.py": "sha256:c4cd9eff268ff764732a365bd27aeef26aa9e714b42816eb1d8b71848429e5b4",
+        "tools/research_environment.py": "sha256:484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c",
+        "tools/research_telemetry.py": "sha256:69c43cf4157d7ce6f4826e9dbec3f9129796cb45e49a905aae67b4fc5fbcf80b",
+        "tools/researcher_adapter.py": "sha256:c683aa9f77f185ee8d8a2bad676e0b05be33456822e90aafde7ac92cd1015379",
+        "tools/run-behavioral-eval.py": "sha256:c7c6feab8b6b321292ead34b32e23c2aaf22ce6f17fa494dbbafa9e3f559b645",
+        "tools/run-engagement.py": "sha256:728371c7c081900651fc5cf86dce848b036e02c14e60a69da4c3998c4a103ce0",
+        "tools/run-experiment-lifecycle.py": "sha256:2a0174ec142b4655d0cf13161249254af30a64e69127e38f6bf9ceb2a5f94339",
+        "tools/run-gepa-real.py": "sha256:2415ca35b392669bb3f4ec9387e83c5534534915315a5d12f65d486df37c48ab",
+        "tools/run-gepa-shadow.py": "sha256:e5da15f7d7ea88c86ab801adc6839c66d3a40669c33c0d2b065f8e43b2e3d79d",
+        "tools/run-hermetic-api.py": "sha256:2e84fa1ccac849a1c8ad54103a76c6314465572149756bb6a91c0c05c9114a40",
+        "tools/run-hermetic-bola.py": "sha256:7059958939b50030c85dbce039eb533b9d463e2d298d824d503495455ea9c1fc",
+        "tools/run-hermetic-fakemodel.py": "sha256:43c845de5659c0ed6247bb4f9cf8e40014895c8b3b32cfe2e66765a2034080ad",
+        "tools/run-qualification.py": "sha256:37a8c5313dadbc6822cb304e74e43ec0afa6fc3c265b73fc3ae953d018c9108e",
+        "tools/run-work-queue.py": "sha256:71f128e9eec0db7919b194ddaad69c5d7fca25d1ed844a03ad9bea03f93c60ad",
+        "tools/score-candidate.py": "sha256:954a842f350335451130804bd336481a195ff1ccec28009caa46e8de2140b65a",
+        "tools/score-false-discovery.py": "sha256:e59a227309d0238bacab7ef1abe00b6c2748e504993f6403f77c81e23e6e5c2f",
+        "tools/score-routing.py": "sha256:43725a16e40d59bd9640b417a9d20553af9e46afb6b4141c5337be5286363a6c",
+        "tools/score_finding.py": "sha256:b63feaa02197d57c22c131de88a07344ac8177df76dce08f85e70f2cfe44b238",
+        "tools/source-admission-race-test.py": "sha256:c9597e029d7c068e560ad8b623344324e52163c692066a2ae9dd93ea37cc46b8",
+        "tools/stego-converter.py": "sha256:d1f42c7cd024eee4bf32c52c16d5c365c4d4d7a4ca1743bc17e0592375b45ba9",
+        "tools/study-report-test.py": "sha256:610b0e4b299eb6b55eed22a2b50a3fcb350b9f43a9aae5ca088dd823d1fbc6a0",
+        "tools/study-report.py": "sha256:09dfc850f56366a3a3a5c7ee0e6c1b4bc8d62adcbbe44d3c0696b3844fcd4554",
+        "tools/t01_semantic_reconcile.py": "sha256:efbfa97dbc9d9f1e6acdd74f40c66e5cd98e343baf8bf713760198c8f84a613a",
+        "tools/target_accounts.py": "sha256:b6f18a29a264f7f1317f348170717f00e3d5671b2db0cbd5140f827a3ed9efb7",
+        "tools/test_native_continuation.py": "sha256:974ee667cc94337f5c3bc4c1aa17ca5ac319638dc2e7b1512dcad8743fb107c4",
+        "tools/test_native_source_sdk.py": "sha256:6e3a6527803ac7c9b4c14a539f8b0219a9001ce4c4f3b21cf711d44fc7ff3ec0",
+        "tools/tollbooth-digest-adapter.py": "sha256:6432288d61cc6abcf9d883a86f3b498ee8cb4bbe5ea4c9c90a45989d8807028e",
+        "tools/transcript_distill.py": "sha256:22847d0a174897477ba2926db0115bfbc66b1278cd6df8b716f129be13323203",
+        "tools/verify_engagement_export_references.py": "sha256:42dad803932218d2d8ea753ae45f18a0704d7c9746edc6046bd2f628af88a185",
+        "tools/work-queue-admission-test.py": "sha256:f849354bc9af37d36d2b660c96703ade5702a0432d5a87aca4096a5ad4c089c3",
+        "tools/work-queue-driver-test.py": "sha256:6296fd3dde858db932c9fa38b1f8d6b172c470d5a956b7880b9a4b25a05fcb6d",
+        "tools/work_queue_actions.py": "sha256:70732a8dcc720b4fc0a541288eb6b4560158f7b9eec01a02887c50b93b8fe6fc",
+        "tools/work_queue_admission.py": "sha256:62b2b4bf7d771bc1748009f29294fdb3904b1feedd914d2c914bc643e777ae66",
+        "tools/work_queue_driver.py": "sha256:9790dfbd3a98d372bea14d886f2d6efba5c79516b57d13de86304860185d9cd3"
+      },
+      "export": {
+        "status": "passed",
+        "revision": 140,
+        "file_count": 229
+      }
+    },
+    "public-result.json": {
+      "artifact_sha256": "sha256:27dcc00c494cbcaffbf48c9b55913a74fdf2e51fdfae090be9882aa6d2ad0a2a",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "public CLI closes reviewed owned fixture",
+          "passed": true
+        },
+        {
+          "name": "public Runner provider has no unexpected transport or fixture errors",
+          "passed": true
+        },
+        {
+          "name": "public Runner native helper completes",
+          "passed": true
+        },
+        {
+          "name": "same engagement export integrity, references and result verified",
+          "passed": true
+        },
+        {
+          "name": "public Runner export verified",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "config/native-tool-lock.json": "sha256:592a3f9421df62c442df934361298ea54024869776a04ff28cfb4a7dad7c0e8d",
+        "engine/codex-tool-policy-v1/MOBY-LICENSE": "sha256:7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8",
+        "engine/codex-tool-policy-v1/SOURCE-PROVENANCE.md": "sha256:d7168011e9b76334e6c802d01b22993ff7043e3737d9dfc2e83149468efde053",
+        "engine/codex-tool-policy-v1/oslit-codex-tool-v1.apparmor": "sha256:416fa88e0a55d80ba102e7d7ba4205281dff504e9021e66d21bae9c7feb4960f",
+        "engine/codex-tool-policy-v1/oslit-codex-tool-v1.seccomp.json": "sha256:ce43ad043604a1d352bb505633df3087630716dfb9af894841faadef6021275a",
+        "evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py": "sha256:eb268baca57c2eb72b86bd1e09cad9b2eaf66d9711ea1b5f21984c0770e41ad9",
+        "evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py": "sha256:7a2f8b4decf14b0b64241f9937c56d55dc321cd13bde8c28075df3ec225484fa",
+        "evals/native-qualification/smoke/check_codex_tool_policy_missing_profile_e2e.py": "sha256:0fca8aa811f409b61d4f985a309877d24d5ef6f1fd862ed1262143d71aa16d28",
+        "evals/native-qualification/smoke/check_linux_model_native_e2e.py": "sha256:39d1a73ccc15066fda5de40a2ae717f6b44351de10911b6a4c12b3d6f3b08664",
+        "evals/native-qualification/smoke/check_model_image_docker_e2e.py": "sha256:2ca8cee90db0335ac90caad4142c5ca58dc25ff5a43a7c817db3c9a1a1a1a80e",
+        "evals/native-qualification/smoke/check_native_userns_probe.py": "sha256:1e3bb46d8ae92e3601eecd1057ea8af321c98e9617632f9f32339d187442a2d1",
+        "evals/native-qualification/smoke/check_omp_loader_preflight.py": "sha256:efe7243408d79fc3c0242f0693e75b9ab90ff4a64e7ab72c2713fe34660772d1",
+        "evals/native-qualification/smoke/check_research_autonomy_public_e2e.py": "sha256:69688cc6ffa0233ab0f368a85c1f64334005547cb38e84bf2730f0d349cb1e13",
+        "evals/native-qualification/smoke/manage_codex_tool_policy_host.py": "sha256:df313467ebf68b9394251bda3e7146f45ec301dae88df3bd8beadc14177354c1",
+        "tools/_docker_session_watchdog.py": "sha256:1aedcf8dc35259457cfac4aa4e9fa1f8009e2f8fe5d6801de7846cac23ac9ea1",
+        "tools/_fd_exec.py": "sha256:c48edf942e3a56138ce6f91b45a2de08e6da06fe07d3419de23ba29158e379df",
+        "tools/_session_watchdog.py": "sha256:ba5f7da189fa190c50ac21475beb932a8e2fd4fa17d8090d80834e5c2af2bce9",
+        "tools/ablation.py": "sha256:ae6f5a1c6b3886c40661f98a7fd19ed0a2564c85a327126a8f113ffff9cd10f3",
+        "tools/acquisition_network.py": "sha256:f9592b495eb86b868dfb4f82a53398d8a3c1b6e5d5188c9bf1758e3f51fed82c",
+        "tools/adjudication_audit.py": "sha256:e8e4eb4cb138079788ee4f3635875f7883c286db23e28c07f63c711e7afad9b0",
+        "tools/application_state.py": "sha256:9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+        "tools/application_volumes.py": "sha256:4bab7e20015d49ea600741199ab943eca03c4192c2055cdd0e94219436558c39",
+        "tools/apply-candidate-eval.py": "sha256:ccf5f8c7a44d79843186bd8ec5039b7c4bf2d3db07b68774446beaef79cba0e7",
+        "tools/build-behavioral-campaign.py": "sha256:ddf625f21654c4d2a162db5bd48acf6adca1329428dd2d85df79bcfe6cd7d664",
+        "tools/casebook-provenance-test.py": "sha256:691cd4b7933d36dc3a1a389f31dae29f6779ecf842d92ecf38488aa289b3ab62",
+        "tools/casebook-retrieval-index.py": "sha256:a3f762faf26ee32e2d3a277a553da74c2c22c62d6ac76a4d4c2e81ead2fc21d4",
+        "tools/check-campaign.py": "sha256:b0d0cef778358917322dd4248979e481f7bd241c9c3d23a4950cb497bce6005c",
+        "tools/check-conformance.py": "sha256:50f60510ebec8b85914e1f4d32cdaba157ed3dd7e7c21840a9d811a4bdf099a7",
+        "tools/check_engagement_export.py": "sha256:2b54ecbc328418e9967cfce0731b2e0ce65d11a063d0692e4652e5b2445b3ee8",
+        "tools/check_knowledge_contract.py": "sha256:372a28c34698d7ee5e917de332341bb334ab8f811b78f93e53c6c8f1ee5348ea",
+        "tools/check_native_runtime_helpers.py": "sha256:857080bf1e3b5d0168ee96e2c4891b20baaf84728bf20f640209be7ac8c801ba",
+        "tools/check_native_source_mode.py": "sha256:dc37df6611b373db2343c190dee0e95c549e7020e4e506349b6a58c0fd659003",
+        "tools/claude-researcher-cli.py": "sha256:a0778136ae0584a816545089da91e939c8363c2d414caa0621d2cf19e5698bb8",
+        "tools/claude-stop-hook-test.py": "sha256:ac2457f07a9b738b21a8ba626181f939c7226bcb6964916fbd163410607f032c",
+        "tools/claude-stop-hook.py": "sha256:ad1fe4048497aca8a27b138d471ccaa3b479e610b7bddda7fd18583816f1b03d",
+        "tools/claude-work-session-test.py": "sha256:2e52e7d79f3dc091e1a949368ff0afbd0f165e40623a395a5da14e66dc733acc",
+        "tools/claude_work_session.py": "sha256:527daec093f62b726bc14033725e9c25aabf6ca2629861ec1c3d9eb4872bf2c2",
+        "tools/codex_tool_policy.py": "sha256:9918d0dd4e2b6ee8cfeaf4ceee315a9484366b3177f3b20c84768f40fc4cd296",
+        "tools/communication-packet-test.py": "sha256:451adacf9effb3b02392802b44ec190ab8cf1182509ac61b1171fa24d3acacd7",
+        "tools/completion-claims-test.py": "sha256:98bea4a18cd87f1448a0eb6c0957257f21169a96552e63cc181b4b5773c69f6b",
+        "tools/completion_claims.py": "sha256:72e610de1bb541d0786e2e577d60f2f26503a3ef1e8d9a4501e5decc0292a428",
+        "tools/container-broker-protocol-test.py": "sha256:4a26206920e0b70494b7a11310826213c105307327b6136974dde38ee3a6e426",
+        "tools/container-session-supervisor-test.py": "sha256:dc6e09bbea850548064ab835a1441f9e4b5f35e74d729f996cef288f45215e12",
+        "tools/container_broker_client.py": "sha256:a26bb7f8699d5091d770630877497e20819e262302df667b2d6ccc684bed50e8",
+        "tools/container_session_supervisor.py": "sha256:a4cf0e4bcfed3d8d0dd71df7d92086dc364f7aa474ec9b6a5fdc1c68339bedd4",
+        "tools/corpus_enumeration.py": "sha256:35842a314d16177337023d7878d6ccf6dedee77745e52916ca1b19f94e0ee816",
+        "tools/covert-channel-converter.py": "sha256:784deb62ac544451da3443c66dada508971a89f4c751eaec1c87a2c8bc616176",
+        "tools/covert-channel-evidence.py": "sha256:3d9ec5aec3c9ddfddd89bf48315835682647eef99217730073dee3faae2a5cda",
+        "tools/darwin-read-isolation-test.py": "sha256:7f383e4ddc7bfdcb3c401471d98dd6bd0c6cf008d55d65f90ed5b27c3330a90a",
+        "tools/darwin_process_containment.py": "sha256:964a0be616f3b53b28ab4e574d9f1ed138380fe55a384883c213982062bb63f4",
+        "tools/darwin_read_isolation.py": "sha256:066899660858ce383e7281219619cb7e91271a94c80dc06a61281b1c4ff4eb03",
+        "tools/decision6_capabilities.py": "sha256:acc072c9515fa634b43e2bb03cf60184a201896e0fc0305cee61a2b043af6f95",
+        "tools/decision6_replay.py": "sha256:4bdff93122430bd1bc7362086405d95c7d66656ac02b54341889858661a6685e",
+        "tools/disposition_ledger.py": "sha256:980ee5983ea5e711ca9ef7a5a30e239a402bf5566cd41898a039934a391ea8b6",
+        "tools/docker-session-runtime-test.py": "sha256:0fae8ed3ff32a9397a0c09102946b2b6e8a6075b433a4100cb58d85fc1b52525",
+        "tools/docker-work-queue-drain-test.py": "sha256:5b493e4990ddcb8cfbe6347578df1c6dc82d8f1fd53c5acc839ba94003cca17d",
+        "tools/docker-work-queue-integration-test.py": "sha256:95a63692bfd6e9ace4fc005b29690a7f58c194bf4e4ad4717abe5fc9441ada2b",
+        "tools/docker_session_runtime.py": "sha256:9e8d36eed18387d4106d02a62b3ef7489845cb6da9ccbf57256c3a4432f47651",
+        "tools/dossier-inspector-test.py": "sha256:77eb5ffc72b0d1abfc0988e356ca3b7d931f798de16ca1b46365680eb7fac802",
+        "tools/driver_action_admission.py": "sha256:bc74e2bd881b52e0e5148b932e2abeb2c9154722b398ef2df8ec65fcb8231c6f",
+        "tools/encoding-robustness-eval.py": "sha256:9dd0f930653e3981bacf9f80489b130cd19bc6b6e4c059171c57c0f574520159",
+        "tools/engagement-lock-race-test.py": "sha256:659ccd9a1bf49c512adacb233970cee07f2aad05dd1421aec8f2bbc08721814a",
+        "tools/engagement-schema-cache-test.py": "sha256:fd20785c4b0b294e6077fcf9e996fe6aa85e7de7dedb8bfb5bc07cf24d029868",
+        "tools/engagement_acquisition.py": "sha256:f2c5e60f6a4f8803d6ed609c8a95582cd5899b4c77b27f79aa54944bcea64d57",
+        "tools/engagement_board.py": "sha256:54c316c378ceea3089b6340e0375e1ed65a0c9fa51ac5992ffc58980d3e43f72",
+        "tools/engagement_contract.py": "sha256:d2d11460853085f817bda2125bb7ce180441c19ec8e291443d8f476667b3d211",
+        "tools/engagement_controller.py": "sha256:bd8bfc5feaffd8c1043392833e005302f532ea4e8a6f31c55b00cb8772e241ec",
+        "tools/engagement_evidence.py": "sha256:63df0c46045e4d38acf9164444c23a26ee81990588337bd43a06148ea7aef46a",
+        "tools/engagement_knowledge.py": "sha256:cb11d425235713216b5ac0863dafa3ccf07d689055007bfb26750f8cf2b89d94",
+        "tools/engagement_knowledge_delivery.py": "sha256:7c7a66d79b9258f6eb8eb9ef835de7fa9f4eec7a02a7271f84d2be53a2c50e38",
+        "tools/engagement_lab_artifacts.py": "sha256:21c4a11eefcc0f402c73783d5096201966bf24c58c82466eeb7a66d2cfaf4d5c",
+        "tools/engagement_lab_inventory.py": "sha256:1b96ef56359d2cf4a72cc943b8a2ce797f381d3431f8b750c53f8353c8e98e01",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_native_boundary.py": "sha256:6d67065f5ade3f285681c2e84e86903917fcea4132a04a6122a1c2f16d50fe23",
+        "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+        "tools/engagement_network_bridge.py": "sha256:7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a",
+        "tools/engagement_preflight.py": "sha256:e9089395882217065d3a0fd70b8288442fb2548953d67d358d25042dd794c539",
+        "tools/engagement_quarantine.py": "sha256:4e9c12d77b275faef0bdc5c70fe3cc9c842d6a8a09bdd28e818f75c91f8c11db",
+        "tools/engagement_records.py": "sha256:0ac48c1f47da33b2c3439184a9f96d202e5eea911d0e81c5a8cffb1b7127e1c3",
+        "tools/engagement_runner.py": "sha256:60528ea5a26de5135072af960b5e9c62e9d7c233b8fd915676a90bd895cffe7d",
+        "tools/engagement_state.py": "sha256:e026a5194983c278f9934d77722ebbfb58f8519dd82d20c96ad4884fca949b74",
+        "tools/engagement_views.py": "sha256:70ba222a527c284a9dab9151fcb27f035f030a16c401939a0cada168de8bc729",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919",
+        "tools/engineering-guidance-test.py": "sha256:36c57c3d2eda4c3f73ae17f6bb67afafc4d4426f10251c0c5eea95a68aae2433",
+        "tools/environment_preflight.py": "sha256:bc925b79b3af071cd0b6ecc4a1a2a7122620fc0cf633c63a907c2b21efc4a70c",
+        "tools/evaluate-retrospective.py": "sha256:5fad1ed49252565bf827ea2ae3c6d21e89f14c77b53fdc6fd7b74a6383664468",
+        "tools/fake-researcher-cli.py": "sha256:8d3c54c2411be815f50fc6cc0e02276fa056c51f06ed02886df02583489e599a",
+        "tools/finding_lifecycle.py": "sha256:3c8281274882d095a03864bb114393de23cfda061c10f8f4f53455cd0dae651d",
+        "tools/finding_review.py": "sha256:ee360ae16083fda9c1a1f02462005785ae209bde00ab51e2176512e796b46703",
+        "tools/flow_telemetry.py": "sha256:d766f752efe3a5ff111bec1494d10214f2002ec47e243b076e6fae683c53a166",
+        "tools/framing_probe.py": "sha256:4aead8af2823fb2956051689ec41476bd69eb856a8267346b4b0a2074cb85c87",
+        "tools/frozen-corpus-test.py": "sha256:466a75ba76896a25f5eb90f0c0d2be9fc7144db2a78917269abb1323c9a55d56",
+        "tools/frozen_corpus.py": "sha256:4727c74b44d902c3ace344c49ade00a044d16e5abe9830dc87accf3c813287e2",
+        "tools/frozen_inputs.py": "sha256:0d49dc97ce58ba1b6b38c11a2700f35001ab98755c59e944b671f9834ad98cb3",
+        "tools/gate_block_audit.py": "sha256:88101e9e754adcfa5621aa4191a3a6742a8f16d0110eb42015dd307c1dab9452",
+        "tools/generate-payload-proposal.py": "sha256:c0e39afa0cabf9aea7250b0fc82b330284b250e139035ecb4b57c66739be074b",
+        "tools/hash-campaign-inputs.py": "sha256:28bc07a3b056e516bb23346453b4d4e59bba7567e928f41ee38772b62a160e2f",
+        "tools/ideation.py": "sha256:be50e9ef1580bda7cd3cef5ce4631fbe5bdcef302a568b973c858b57b2b6be33",
+        "tools/inspect-dossier.py": "sha256:b319471764bdd20b395f60c03bd045a132d695792bbf419a0eab8fcdc77d7bd3",
+        "tools/install_native_tools.py": "sha256:2137c881a4ac24e0c40d74be9a2f4bac20865e55b2c16231ebcf0d77d4c109d0",
+        "tools/intervention_ledger.py": "sha256:ce89ffa5023750e88b1484e5f6803d383d38aa378024de6598fcf4d1a2e1381b",
+        "tools/kb.py": "sha256:72d52dbd75b260e2e40c66233def487d5e13ec7f632993f5519d3cca444f85d4",
+        "tools/ledger_health.py": "sha256:0981ad5419129f6780c7095511c0aab2041add334c06f1577428cb00027b7d6d",
+        "tools/memory_disposition.py": "sha256:baa626baa5decec541f5194cd1ad04d358de568a7a47a14112a4a8c127c80274",
+        "tools/migrate-decision5.py": "sha256:9293bb230009dc9ace5fdcd561906c48774e0b43ed2a8ca76f6fee63274f2380",
+        "tools/native_closeout.py": "sha256:7190978e6cf8f4db84f784aa5b4d5b3cc90f3d7cc0de3d71dba7852f250ed4df",
+        "tools/native_continuation.py": "sha256:cfa44f393a0a045db0cd40db7009862b665a06899928fe93cf92a05d54dc58a7",
+        "tools/native_credentials.py": "sha256:b592d4860d71e2ed58fbab99aa51117d7cb80ac18814cffb8765de4df1d1c2a4",
+        "tools/native_effect_recovery.py": "sha256:a9a000be18229660f779912ec625ae753233f0ed78107265db9eeb8bf021db7c",
+        "tools/native_engagement.py": "sha256:47af193adc2e46335ba2bc9f8066972c19e26a6cb61a0fcfcb819e72abb4cf31",
+        "tools/native_kanboard_origin_gate.py": "sha256:bb59962e022e59cd6994149c2a2eaf1d26d0bf7b3963c41289520df13ff0658e",
+        "tools/native_model_addon.py": "sha256:bbcce7fc406a59cc7cb422ceeb9c234574f4adf4e24a418ca26ba2a351f5456e",
+        "tools/native_patch_check.py": "sha256:5be6ef4406f5292d41b4fde913938c5d9794337b376a696d98b68cb570e0269f",
+        "tools/native_provider_gateway.py": "sha256:2c2b409b2c33b44b507983406134f5c48d56b934187a0c1c0be420ff2da4935c",
+        "tools/native_research.py": "sha256:afb890b7fa53443f554d406a6c775393ea2a898159f07a43c53c8ab5c5f48d43",
+        "tools/native_runtime_bootstrap.py": "sha256:8d333b4b0b55577069020a37078c07bccec390bbd92edc17884ace4d77d3120f",
+        "tools/native_runtime_codex.py": "sha256:e12bea93ac61a5b91bc0a7cdc5eb185c3ff682e60ddf80a91804d161aebc3d50",
+        "tools/native_runtime_codex_exec.mjs": "sha256:467d9bd563d8c9b77f849159be5e5d5e4f1e999bbd68fef66a89f5acc1b9c533",
+        "tools/native_runtime_helpers.py": "sha256:0d3b140647a92e7a0859f67dc0c75637d58592a18f14c822b0f9ddc0c3795504",
+        "tools/native_runtime_linux.py": "sha256:485fa1a7be086841bf91657e535b75bdcd1d704f95eb0433bec2275914c140f6",
+        "tools/native_runtime_omp.py": "sha256:7929a3d985368443cf2b7efbdc4eba5292b30591e538fcda093bb72e086234f7",
+        "tools/native_runtime_omp_tools.mjs": "sha256:62c20f894b7de475a6339bc86e44fa03bdb893bbbfbf1c727addaf18fce0c37e",
+        "tools/native_runtime_owner.py": "sha256:c020a07159206e2c620e702825c3f8b1e2d816cb070c4bb9ce740b63175a63ca",
+        "tools/native_runtime_transport.py": "sha256:b1b18b9d3058c1203603695b7a89be62deb19c61c9bc01ce0e15b3df8e2be60b",
+        "tools/native_setup_builder.py": "sha256:4320f75ead024223353ac3beca46e6e1000b62b613cce4b68b2b143c7cdb501b",
+        "tools/obfuscation-converter.py": "sha256:ec688033236b068fec2f36a3b6e78670b6bd8eb38899f7a1c98372eab07671e0",
+        "tools/ollama-researcher-cli.py": "sha256:b680b611ebcb5e118d0b949e5e4346862ba41a4ecba0f81f34c773ec2bff1dfc",
+        "tools/operator_signature.py": "sha256:2e5d0717e9123a517adf14eea50125289da1963e3ff635faf2fdafe3fd421f37",
+        "tools/overlay_pins.py": "sha256:e89232bfb71b08685eecc4d5e93f2adbdbf330fc1e0f7d462f261e180a9ea029",
+        "tools/payload-proposal-hermetic-test.py": "sha256:60079e11c08c183de7b99a19f0cf6ca92b6873cfe0beabb38bffa9430c9d6868",
+        "tools/preflight_holdout.py": "sha256:376e5b66d0dfa82e702134a651cac1e3dd809b7f04dc0245205f6a0b4dfd9819",
+        "tools/prepare-ab-study.py": "sha256:3fa7255775348c4fe0095f44d7cedb4fe696a76c825a1b33d893a6988af2626a",
+        "tools/q02-admission-self-test.py": "sha256:8ddd20d7628b1d61b1b2bccb7de07b3f8c84c18eb76c1801bec36618ed38e4c4",
+        "tools/q02_compare.py": "sha256:e3df8a860653d183cb1b51e43e522cb7282fe27ccc14d4c9556c2debb317d37a",
+        "tools/quarantine-self-test.py": "sha256:b1c666c2d79d61d4fa1ac2ec2081fa887903c61ef1fac96c6abf07f842ffe288",
+        "tools/reachability_corpus.py": "sha256:57da0a4bc85c65800f8737ab017f1fb7a118156a8b96aec680894226d31d6536",
+        "tools/record-review-atomicity-test.py": "sha256:523c9b169d8d2de0859e154e3026105fe4df509ca520a13d3deaa4b927d1b7fe",
+        "tools/recovery-packet-test.py": "sha256:2fc1d843e2c34acb697d58421a0db2c741c19b783a418de587948331144add4a",
+        "tools/render-promotion-bundle.py": "sha256:dd785b35d706bd445dcfa3bd47c2cbe86b5719d9edcad580b6d2996cb1ad9b08",
+        "tools/replay-candidate.py": "sha256:f550719107cd8a7a9c6c079f4b0e91955b6f85da4dfdf9164d4c94bfd2f09f2c",
+        "tools/reporting.py": "sha256:9a304bbbf4054f73edda61ff4d52b2292ccccbc407e51cbcfa63beb3dc45a129",
+        "tools/research-lifecycle-test.py": "sha256:c4cd9eff268ff764732a365bd27aeef26aa9e714b42816eb1d8b71848429e5b4",
+        "tools/research_environment.py": "sha256:484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c",
+        "tools/research_telemetry.py": "sha256:69c43cf4157d7ce6f4826e9dbec3f9129796cb45e49a905aae67b4fc5fbcf80b",
+        "tools/researcher_adapter.py": "sha256:c683aa9f77f185ee8d8a2bad676e0b05be33456822e90aafde7ac92cd1015379",
+        "tools/run-behavioral-eval.py": "sha256:c7c6feab8b6b321292ead34b32e23c2aaf22ce6f17fa494dbbafa9e3f559b645",
+        "tools/run-engagement.py": "sha256:728371c7c081900651fc5cf86dce848b036e02c14e60a69da4c3998c4a103ce0",
+        "tools/run-experiment-lifecycle.py": "sha256:2a0174ec142b4655d0cf13161249254af30a64e69127e38f6bf9ceb2a5f94339",
+        "tools/run-gepa-real.py": "sha256:2415ca35b392669bb3f4ec9387e83c5534534915315a5d12f65d486df37c48ab",
+        "tools/run-gepa-shadow.py": "sha256:e5da15f7d7ea88c86ab801adc6839c66d3a40669c33c0d2b065f8e43b2e3d79d",
+        "tools/run-hermetic-api.py": "sha256:2e84fa1ccac849a1c8ad54103a76c6314465572149756bb6a91c0c05c9114a40",
+        "tools/run-hermetic-bola.py": "sha256:7059958939b50030c85dbce039eb533b9d463e2d298d824d503495455ea9c1fc",
+        "tools/run-hermetic-fakemodel.py": "sha256:43c845de5659c0ed6247bb4f9cf8e40014895c8b3b32cfe2e66765a2034080ad",
+        "tools/run-qualification.py": "sha256:37a8c5313dadbc6822cb304e74e43ec0afa6fc3c265b73fc3ae953d018c9108e",
+        "tools/run-work-queue.py": "sha256:71f128e9eec0db7919b194ddaad69c5d7fca25d1ed844a03ad9bea03f93c60ad",
+        "tools/score-candidate.py": "sha256:954a842f350335451130804bd336481a195ff1ccec28009caa46e8de2140b65a",
+        "tools/score-false-discovery.py": "sha256:e59a227309d0238bacab7ef1abe00b6c2748e504993f6403f77c81e23e6e5c2f",
+        "tools/score-routing.py": "sha256:43725a16e40d59bd9640b417a9d20553af9e46afb6b4141c5337be5286363a6c",
+        "tools/score_finding.py": "sha256:b63feaa02197d57c22c131de88a07344ac8177df76dce08f85e70f2cfe44b238",
+        "tools/source-admission-race-test.py": "sha256:c9597e029d7c068e560ad8b623344324e52163c692066a2ae9dd93ea37cc46b8",
+        "tools/stego-converter.py": "sha256:d1f42c7cd024eee4bf32c52c16d5c365c4d4d7a4ca1743bc17e0592375b45ba9",
+        "tools/study-report-test.py": "sha256:610b0e4b299eb6b55eed22a2b50a3fcb350b9f43a9aae5ca088dd823d1fbc6a0",
+        "tools/study-report.py": "sha256:09dfc850f56366a3a3a5c7ee0e6c1b4bc8d62adcbbe44d3c0696b3844fcd4554",
+        "tools/t01_semantic_reconcile.py": "sha256:efbfa97dbc9d9f1e6acdd74f40c66e5cd98e343baf8bf713760198c8f84a613a",
+        "tools/target_accounts.py": "sha256:b6f18a29a264f7f1317f348170717f00e3d5671b2db0cbd5140f827a3ed9efb7",
+        "tools/test_native_continuation.py": "sha256:974ee667cc94337f5c3bc4c1aa17ca5ac319638dc2e7b1512dcad8743fb107c4",
+        "tools/test_native_source_sdk.py": "sha256:6e3a6527803ac7c9b4c14a539f8b0219a9001ce4c4f3b21cf711d44fc7ff3ec0",
+        "tools/tollbooth-digest-adapter.py": "sha256:6432288d61cc6abcf9d883a86f3b498ee8cb4bbe5ea4c9c90a45989d8807028e",
+        "tools/transcript_distill.py": "sha256:22847d0a174897477ba2926db0115bfbc66b1278cd6df8b716f129be13323203",
+        "tools/verify_engagement_export_references.py": "sha256:42dad803932218d2d8ea753ae45f18a0704d7c9746edc6046bd2f628af88a185",
+        "tools/work-queue-admission-test.py": "sha256:f849354bc9af37d36d2b660c96703ade5702a0432d5a87aca4096a5ad4c089c3",
+        "tools/work-queue-driver-test.py": "sha256:6296fd3dde858db932c9fa38b1f8d6b172c470d5a956b7880b9a4b25a05fcb6d",
+        "tools/work_queue_actions.py": "sha256:70732a8dcc720b4fc0a541288eb6b4560158f7b9eec01a02887c50b93b8fe6fc",
+        "tools/work_queue_admission.py": "sha256:62b2b4bf7d771bc1748009f29294fdb3904b1feedd914d2c914bc643e777ae66",
+        "tools/work_queue_driver.py": "sha256:9790dfbd3a98d372bea14d886f2d6efba5c79516b57d13de86304860185d9cd3"
+      },
+      "export": {
+        "status": "passed",
+        "revision": 145,
+        "file_count": 245
+      },
+      "public_runner": {
+        "status": "closed",
+        "cleanup": "verified",
+        "helper_statuses": [
+          "completed"
+        ],
+        "review_status": "accepted",
+        "sessions_distinct": true,
+        "source_output_observed": true,
+        "review_packet_observed": true,
+        "helper_read_observed": true,
+        "helper_status_observed": true,
+        "provider_errors": [],
+        "tool_error_codes": [],
+        "verified_closure_cancellations": 0,
+        "compaction_count": 0
+      }
+    }
+  }
+}

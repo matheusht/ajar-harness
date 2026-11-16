@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "owned HTTPS GET returns original bytes",
+      "passed": true
+    },
+    {
+      "name": "complete receipt binds exact bytes",
+      "passed": true
+    },
+    {
+      "name": "credential header refused before origin",
+      "passed": true
+    },
+    {
+      "name": "mutation refused before origin",
+      "passed": true
+    },
+    {
+      "name": "ungranted host refused before origin",
+      "passed": true
+    },
+    {
+      "name": "interrupted transfer is not complete",
+      "passed": true
+    }
+  ],
+  "classification": "actual_local_tls_and_acquisition_binder",
+  "docker_lab": false,
+  "kind": "owned-local-acquisition-e2e",
+  "native_runtime": false,
+  "source_sha256": {
+    "evals/native-qualification/team-evidence/research-autonomy-20261116/acquisition-local.py": "sha256:3731b7e8a1ce4852ece00f6d3d9a4ed32a237769a9b380885a28fa830a690f61",
+    "tools/acquisition_network.py": "sha256:f9592b495eb86b868dfb4f82a53398d8a3c1b6e5d5188c9bf1758e3f51fed82c",
+    "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8"
+  },
+  "status": "passed"
+}

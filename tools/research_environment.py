@@ -745,7 +745,7 @@ class Environment:
         from engagement_contract import canonical, safe_publication
         self._admit()
         if role not in ('native_tools', 'network_proxy', 'model', 'model_provider_proxy', 'model_codex_bridge',
-                        'application', 'application_connector'):
+                        'application', 'application_connector') and not re.fullmatch(r'model_helper_[0-9a-f]{32}', role):
             raise EnvironmentUnavailable('host_pipe_role_invalid')
         if role in self.stdio_processes:
             raise EnvironmentUnavailable('host_pipe_already_started')
@@ -816,8 +816,10 @@ class Environment:
         return {'status': 'held' if self.held else ('running' if info['State']['Running'] else 'stopped'),
                 'running': info['State']['Running'], 'identity': self.receipt()}
 
-    def renew(self, seconds):
+    def renew(self, seconds=None):
         remaining = self._admit()
+        if seconds is None:
+            seconds = remaining
         if type(seconds) not in (float, int) or not math.isfinite(seconds) or not 0 < seconds <= remaining:
             raise EnvironmentUnavailable('environment_lease_exceeds_grant')
         if not self.owner:

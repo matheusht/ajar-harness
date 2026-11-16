@@ -53,13 +53,13 @@ def _file(path, expected):
     return path
 
 
-def _environment(public, private, runtime):
+def _environment(public, private, runtime, state=STATE):
     if not isinstance(public, dict) or not isinstance(private, dict) or len(public) + len(private) > 64:
         raise ValueError('environment')
-    if set(public) - PUBLIC_ENV or public.get('HOME') != STATE or public.get('TMPDIR') != '/tmp':
+    if set(public) - PUBLIC_ENV or public.get('HOME') != state or public.get('TMPDIR') != '/tmp':
         raise ValueError('environment')
     state_key = 'CODEX_HOME' if runtime == 'codex' else 'PI_CODING_AGENT_DIR'
-    if public.get(state_key) != STATE:
+    if public.get(state_key) != state:
         raise ValueError('environment')
     for key, value in {**public, **private}.items():
         if (not isinstance(key, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}', key)
@@ -77,7 +77,7 @@ def _launch():
     if not 0 < size <= MAX_BOOTSTRAP:
         raise ValueError('size')
     frame = json.loads(_read(size), object_pairs_hook=_pairs)
-    optional = {'model_catalog_sha256'} if isinstance(frame, dict) and 'model_catalog_sha256' in frame else set()
+    optional = set(frame) & {'model_catalog_sha256', 'helper_id'} if isinstance(frame, dict) else set()
     if (not isinstance(frame, dict) or set(frame) != {'kind', 'runtime', 'argv', 'environment',
             'credentials', 'executable_sha256', 'config_sha256'} | optional
             or frame['kind'] != 'native-model-bootstrap-v1' or frame['runtime'] not in CONFIGS):
@@ -89,13 +89,17 @@ def _launch():
     _file(MODEL, frame['executable_sha256'])
     config = _file(CONFIGS[frame['runtime']], frame['config_sha256'])
     copies = [('config.toml', config, frame['config_sha256'])] if frame['runtime'] == 'codex' else []
-    if optional:
+    if 'model_catalog_sha256' in optional:
         if frame['runtime'] != 'omp':
             raise ValueError('catalog_runtime')
         copies.append(('models.yml', _file(MODEL_CATALOG, frame['model_catalog_sha256']), frame['model_catalog_sha256']))
-    environment = _environment(frame['environment'], frame['credentials'], frame['runtime'])
+    helper = frame.get('helper_id')
+    if helper is not None and (frame['runtime'] != 'omp' or not isinstance(helper, str) or not re.fullmatch(r'[0-9a-f]{32}', helper)):
+        raise ValueError('helper')
+    selected_state = STATE + '-helper-' + helper if helper is not None else STATE
+    environment = _environment(frame['environment'], frame['credentials'], frame['runtime'], selected_state)
     os.umask(0o077)
-    state = Path(STATE)
+    state = Path(selected_state)
     if state.is_symlink() or state.resolve() != state:
         raise ValueError('state')
     state.mkdir(mode=0o700, exist_ok=True)

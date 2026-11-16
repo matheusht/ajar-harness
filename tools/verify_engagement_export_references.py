@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path, PurePosixPath
 
-from engagement_contract import ContractError, MAX_PUBLICATION_BYTES, canonical, read_json
+from engagement_contract import ContractError, MAX_PUBLICATION_BYTES, canonical, read_json, research_autonomy
 from engagement_controller import Controller, ControllerError, private_directory
 
 
@@ -40,14 +40,22 @@ def verify(root, *, check_result=False):
     if check_result:
         fields = ('engagement_id', 'scope_sha256', 'evidence_class', 'status', 'tasks',
                   'claims', 'closures', 'reviews', 'obligations', 'experiments', 'patches',
-                  'network_operations', 'directions', 'usage', 'cleanup', 'resource_holds')
+                  'network_operations', 'directions', 'messages', 'usage', 'cleanup', 'resource_holds',
+                  'helpers', 'knowledge_deliveries')
         expected = {name: state[name] for name in fields}
         expected.update(claim_acceptance='per_claim', external_action_authorized=False,
+                        authority_policy=state['scope'].get('authority_policy', 'legacy-confirmation'),
                         lab_artifacts=state['lab_artifacts'],
                         retained_evidence_objects=len(state['evidence_objects']),
                         research_guidance={name: contract_files[name]
                             for name in ('methodology.md', 'protocol.md') if name in contract_files})
-        if canonical(read_json(root / 'result.json', private=True, max_bytes=MAX_PUBLICATION_BYTES)) != canonical(expected):
+        actual = read_json(root / 'result.json', private=True, max_bytes=MAX_PUBLICATION_BYTES)
+        historical_fields = {'helpers', 'knowledge_deliveries'}
+        if (isinstance(actual, dict) and not research_autonomy(state['scope'])
+                and not any(state[name] for name in ('helpers', 'knowledge_deliveries', 'knowledge', 'techniques'))
+                and set(actual) == set(expected) - historical_fields):
+            expected = {name: value for name, value in expected.items() if name not in historical_fields}
+        if canonical(actual) != canonical(expected):
             raise ValueError('export_result_mismatch')
     return {'status': 'verified', 'engagement_id': state['engagement_id'],
             'revision': state['revision'], 'check': 'journal_reference_closure',

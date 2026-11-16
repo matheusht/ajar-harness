@@ -1,0 +1,16 @@
+{
+  "kind": "public-worker-failure-acceptance-v1",
+  "classification": "saved_hosted_result_rechecked_by_current_fixture_predicate",
+  "hosted_run": "43928320912",
+  "artifact_sha256": "sha256:9382baa5fcd3f651e7f6cce0ca9b46c37237983697e73ccd02c4f3ab5dc35ce9",
+  "fixture_sha256": "sha256:1441d6889e0ba526f0a30248ef45781345c13ab0a55c03c4c6171087cd6dd983",
+  "saved_worker_failures": {
+    "lead-1": "native_usage_invalid",
+    "reviewer-1": "engagement_stopped"
+  },
+  "saved_status": "closed",
+  "saved_cleanup": "verified",
+  "saved_review_status": "accepted",
+  "new_predicate_accepts": false,
+  "failure_cases_passed": true
+}

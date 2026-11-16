@@ -126,7 +126,7 @@ class ApplicationOwner:
                 raise ApplicationStateError('application_owner_changed')
             return self.bridge.connect()
 
-    def renew(self, seconds):
+    def renew(self, seconds=None):
         return self.environment.renew(seconds)
 
     def cleanup(self):

@@ -1,0 +1,473 @@
+{
+  "run_id": "43924808047",
+  "source_commit": "ba0a9a7438cd090b5bf767db1e9240c5a1140e48",
+  "classification": "hosted_owned_docker_fixtures",
+  "artifacts": {
+    "application-owner.json": {
+      "artifact_sha256": "sha256:5e133c602558f7251b3ebb60004679d7d804b2584c30e3c36b7e00e15457e5b9",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "supplied baseline is an exact installed Linux image",
+          "passed": true
+        },
+        {
+          "name": "actual target is isolated with no persistent state or published port",
+          "passed": true
+        },
+        {
+          "name": "private connector observes baseline and actual mutation",
+          "passed": true
+        },
+        {
+          "name": "wrong-origin attempt preserved exact target identity",
+          "passed": true
+        },
+        {
+          "name": "first exact target and derived image are absent",
+          "passed": true
+        },
+        {
+          "name": "recreation reaches baseline in a distinct actual container",
+          "passed": true
+        },
+        {
+          "name": "recovery cleans exact target after authority ends",
+          "passed": true
+        },
+        {
+          "name": "all preexisting containers and supplied base image remain",
+          "passed": true
+        },
+        {
+          "name": "all owned containers are absent",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "tools/application_state.py": "sha256:9413af1b8e79331fadc8cf16ccd4837e27bd328a4850bfa6b4d2cf93b2a22b67",
+        "tools/engagement_network_bridge.py": "sha256:7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a",
+        "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+        "tools/research_environment.py": "sha256:484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "evals/native-qualification/smoke/check_application_owner_e2e.py": "sha256:1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b",
+        "evals/native-qualification/smoke/check_application_owner_docker_e2e.py": "sha256:c20bc25c48ccba71635ea31cf012902d68248c4150a6f237e4e164b17d6b2777"
+      }
+    },
+    "guardian.json": {
+      "artifact_sha256": "sha256:a4366e305d7aefa4670109a7cf82d40082bd9e07842d2af79ffbf1027dace238",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "unconfigured guardian expires cleanly",
+          "passed": true
+        },
+        {
+          "name": "initial acknowledged lease expires without renewal",
+          "passed": true
+        },
+        {
+          "name": "valid renewal keeps owner alive past initial expiry",
+          "passed": true
+        },
+        {
+          "name": "renewed owner still has a finite expiry",
+          "passed": true
+        },
+        {
+          "name": "control channel EOF ends the guardian",
+          "passed": true
+        },
+        {
+          "name": "explicit revocation ends the guardian",
+          "passed": true
+        },
+        {
+          "name": "partial frame cannot block the expiry clock",
+          "passed": true
+        },
+        {
+          "name": "a different owner nonce is rejected",
+          "passed": true
+        },
+        {
+          "name": "replayed renewal sequence is rejected",
+          "passed": true
+        },
+        {
+          "name": "renewal above the fixed maximum is rejected",
+          "passed": true
+        },
+        {
+          "name": "skipped sequence is rejected",
+          "passed": true
+        },
+        {
+          "name": "boolean duration is rejected",
+          "passed": true
+        },
+        {
+          "name": "nonfinite expiry is rejected",
+          "passed": true
+        },
+        {
+          "name": "unexpected field is rejected",
+          "passed": true
+        },
+        {
+          "name": "expired queued renewal is not rebased on receipt",
+          "passed": true
+        },
+        {
+          "name": "live queued renewal retains its original absolute expiry",
+          "passed": true
+        },
+        {
+          "name": "oversized input fails closed without blocking",
+          "passed": true
+        },
+        {
+          "name": "explicit local daemon selected",
+          "passed": true
+        },
+        {
+          "name": "Linux image pinned by complete content identity",
+          "passed": true
+        },
+        {
+          "name": "guardian is actual root PID 1 without Docker init",
+          "passed": true
+        },
+        {
+          "name": "adopted_children_reaped",
+          "passed": true
+        },
+        {
+          "name": "effective_guardian_command",
+          "passed": true
+        },
+        {
+          "name": "effective_guardian_no_capabilities",
+          "passed": true
+        },
+        {
+          "name": "effective_guardian_root",
+          "passed": true
+        },
+        {
+          "name": "guardian_control_fd_denied",
+          "passed": true
+        },
+        {
+          "name": "guardian_signal_denied",
+          "passed": true
+        },
+        {
+          "name": "worker_nonroot",
+          "passed": true
+        },
+        {
+          "name": "worker exec stream is independent from renewal attach",
+          "passed": true
+        },
+        {
+          "name": "guardian expiry ends its Docker attach stream",
+          "passed": true
+        },
+        {
+          "name": "guardian expiry stops the entire container",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_container_guardian_e2e.py": "388950a176ba044eb4cbdd15ba703971bf9ba5838f2c4aaa85659243c26dd615",
+        "tools/engagement_lease_owner.py": "268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a"
+      }
+    },
+    "network-upload.json": {
+      "artifact_sha256": "sha256:26e07f3cc9645773b97803381c55ceec598c682b2bc10aa35b96aff46da74118",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "fragmented 652488-byte HTTPS upload survives consumer pause intact",
+          "passed": true
+        },
+        {
+          "name": "authority revocation precedes partial EOF and marks request unknown",
+          "passed": true
+        },
+        {
+          "name": "both owned relay processes stop",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_network_upload_e2e.py": "0bda30103fc15878f40437e9ce0e95bcfa1ea2cf0b10fa8821e0d1b242ccb589",
+        "tools/engagement_network.py": "edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+        "tools/engagement_network_bridge.py": "7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a"
+      }
+    },
+    "proxy-backpressure.json": {
+      "artifact_sha256": "sha256:95590751f80d10c9c924fc8096f183101542bf6ecc3cbfea0e0088e49363e150",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "paused consumer retains stream and all 200 KiB without truncation or duplication",
+          "passed": true
+        },
+        {
+          "name": "revocation stops a backpressured stream promptly",
+          "passed": true
+        },
+        {
+          "name": "owned relays and sender work settle",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_proxy_backpressure_e2e.py": "ce271ac6b0843760b6bd180592883242e0ff0416410266c93eddd5029d70a029",
+        "tools/engagement_network_bridge.py": "7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a"
+      }
+    },
+    "result.json": {
+      "artifact_sha256": "sha256:24d5e0fa0342bac675c988814f45a5b708e3c7367a5a745fb039632be57d1bb0",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "image is an exact Linux content identity",
+          "passed": true
+        },
+        {
+          "name": "no authorization creates no container",
+          "passed": true
+        },
+        {
+          "name": "production staging starts the exact owned environment",
+          "passed": true
+        },
+        {
+          "name": "actual container has bounded immutable configuration",
+          "passed": true
+        },
+        {
+          "name": "actual probe completes inside the production environment",
+          "passed": true
+        },
+        {
+          "name": "capabilities_dropped",
+          "passed": true
+        },
+        {
+          "name": "host_loopback_unreachable",
+          "passed": true
+        },
+        {
+          "name": "input_readonly",
+          "passed": true
+        },
+        {
+          "name": "no_admin_socket",
+          "passed": true
+        },
+        {
+          "name": "no_network_interface",
+          "passed": true
+        },
+        {
+          "name": "no_new_privileges",
+          "passed": true
+        },
+        {
+          "name": "root_readonly",
+          "passed": true
+        },
+        {
+          "name": "unprivileged",
+          "passed": true
+        },
+        {
+          "name": "published bytes come from the actual worker filesystem",
+          "passed": true
+        },
+        {
+          "name": "input staging preserves the supplied source",
+          "passed": true
+        },
+        {
+          "name": "detached child exists before revocation",
+          "passed": true
+        },
+        {
+          "name": "revocation stops the container and its detached child",
+          "passed": true
+        },
+        {
+          "name": "receipt-based recovery observes exact resource cleanup",
+          "passed": true
+        },
+        {
+          "name": "owned cleanup preserves all preexisting containers",
+          "passed": true
+        },
+        {
+          "name": "owned container and staging container are absent",
+          "passed": true
+        },
+        {
+          "name": "owned prepared image is absent and the base image remains",
+          "passed": true
+        },
+        {
+          "name": "owner-loss fixture starts a detached child",
+          "passed": true
+        },
+        {
+          "name": "owner-loss fixture has a live owned watcher",
+          "passed": true
+        },
+        {
+          "name": "owned watcher was terminated by the injected SIGKILL",
+          "passed": true
+        },
+        {
+          "name": "container lease survives loss of the host watcher",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:0bbdb747eff1f3191dc38df10794e351ac92ac120490a5cfe4e07f1aac44d764",
+        "tools/research_environment.py": "sha256:484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919",
+        "tools/engagement_lab_artifacts.py": "sha256:21c4a11eefcc0f402c73783d5096201966bf24c58c82466eeb7a66d2cfaf4d5c",
+        "tools/engagement_lab_inventory.py": "sha256:1b96ef56359d2cf4a72cc943b8a2ce797f381d3431f8b750c53f8353c8e98e01"
+      }
+    },
+    "ssh-listener-cleanup.json": {
+      "artifact_sha256": "sha256:566a205fe67a63a536c2847c4c32a82134516ed38f5351adf240b4f981c39e50",
+      "status": null,
+      "checks": [],
+      "source_sha256": {},
+      "listener_stopped": true,
+      "fixture_removed": true
+    },
+    "ssh-result.json": {
+      "artifact_sha256": "sha256:e3538ca9088cf82602c9aa60768f7bf896365f81d35867d0166b4ad254a4e5ec",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "image is an exact Linux content identity",
+          "passed": true
+        },
+        {
+          "name": "actual SSH connection reaches the selected daemon",
+          "passed": true
+        },
+        {
+          "name": "no authorization creates no container",
+          "passed": true
+        },
+        {
+          "name": "production staging starts the exact owned environment",
+          "passed": true
+        },
+        {
+          "name": "actual container has bounded immutable configuration",
+          "passed": true
+        },
+        {
+          "name": "actual probe completes inside the production environment",
+          "passed": true
+        },
+        {
+          "name": "capabilities_dropped",
+          "passed": true
+        },
+        {
+          "name": "host_loopback_unreachable",
+          "passed": true
+        },
+        {
+          "name": "input_readonly",
+          "passed": true
+        },
+        {
+          "name": "no_admin_socket",
+          "passed": true
+        },
+        {
+          "name": "no_network_interface",
+          "passed": true
+        },
+        {
+          "name": "no_new_privileges",
+          "passed": true
+        },
+        {
+          "name": "root_readonly",
+          "passed": true
+        },
+        {
+          "name": "unprivileged",
+          "passed": true
+        },
+        {
+          "name": "published bytes come from the actual worker filesystem",
+          "passed": true
+        },
+        {
+          "name": "input staging preserves the supplied source",
+          "passed": true
+        },
+        {
+          "name": "detached child exists before revocation",
+          "passed": true
+        },
+        {
+          "name": "revocation stops the container and its detached child",
+          "passed": true
+        },
+        {
+          "name": "receipt-based recovery observes exact resource cleanup",
+          "passed": true
+        },
+        {
+          "name": "owned cleanup preserves all preexisting containers",
+          "passed": true
+        },
+        {
+          "name": "owned container and staging container are absent",
+          "passed": true
+        },
+        {
+          "name": "owned prepared image is absent and the base image remains",
+          "passed": true
+        },
+        {
+          "name": "owner-loss fixture starts a detached child",
+          "passed": true
+        },
+        {
+          "name": "owner-loss fixture has a live owned watcher",
+          "passed": true
+        },
+        {
+          "name": "owned watcher was terminated by the injected SIGKILL",
+          "passed": true
+        },
+        {
+          "name": "container lease survives loss of the host watcher",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_docker_e2e.py": "sha256:0bbdb747eff1f3191dc38df10794e351ac92ac120490a5cfe4e07f1aac44d764",
+        "tools/research_environment.py": "sha256:484d14900eaef8e1c2f7dff4c7df846cdb1a541885eed62754cb3306c4b7f31c",
+        "tools/engagement_lease_owner.py": "sha256:268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a",
+        "tools/engagement_workspace.py": "sha256:cfe35ed7e6732e488b77247807805cb2623dc0b7e2482d4e47e48d6f485a6919",
+        "tools/engagement_lab_artifacts.py": "sha256:21c4a11eefcc0f402c73783d5096201966bf24c58c82466eeb7a66d2cfaf4d5c",
+        "tools/engagement_lab_inventory.py": "sha256:1b96ef56359d2cf4a72cc943b8a2ce797f381d3431f8b750c53f8353c8e98e01"
+      }
+    }
+  }
+}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections import deque
 
 from native_runtime_transport import PendingTool, RuntimeError, Session, Transport, identifier, text_content, write_pipe
 
@@ -27,6 +28,7 @@ class Runtime(Session):
             raise RuntimeError('native_credential_tool_boundary_unavailable')
         env['CODEX_HOME'] = str(self.process_state)
         self.authentication = 'not_requested'
+        self.helpers = {}
         self.totals = {}
         self.before = {}
         config = self.state_dir / 'config.toml'
@@ -52,14 +54,15 @@ class Runtime(Session):
             self.transport.send({'jsonrpc': '2.0', 'method': 'initialized'})
             if native_executor is not None:
                 validate_native_config(self.transport.request('config/read', {'includeLayers': False})['config'])
-                self.transport.request('environment/add', native_executor.registration())
-                self.transport.request('environment/info', {'environmentId': native_executor.environment_id})
-                native_executor.check_ready()
             if self.credential_binding and self.credential_binding.login():
                 reply = self.transport.request('account/login/start', self.credential_binding.login())
                 if reply != {'type': 'chatgptAuthTokens'}:
                     raise RuntimeError('native_external_auth_not_accepted')
                 self.authentication = 'external_tokens_accepted'
+            if native_executor is not None:
+                self.transport.request('environment/add', native_executor.registration())
+                self.transport.request('environment/info', {'environmentId': native_executor.environment_id})
+                native_executor.check_ready()
         except Exception as error:
             self._startup_failed(error)
             raise
@@ -78,6 +81,26 @@ class Runtime(Session):
         self._publish_owner()
         return {'session_id': session, 'runtime': self.kind, 'model': self.profile['model'],
                 'provider': self.profile['provider'], 'history': 'ephemeral'}
+
+    def create_helper(self, helper_id):
+        with self.transport.io_lock:
+            result = self.transport.request('thread/start', {
+                'ephemeral': True, 'cwd': str(self.process_workspace), 'model': self.profile['model'],
+                'modelProvider': self.profile['provider'], 'approvalPolicy': 'never',
+                'permissions': 'oslit-worker', 'environments': [self.native_executor.selection()],
+                'allowProviderModelFallback': False,
+                'dynamicTools': [{'type': 'function', 'name': t['name'], 'description': t['description'],
+                                  'inputSchema': t['inputSchema']} for t in self.host_tools.values()]}, defer_events=True, dispatch_guard=self._admission)
+            thread = result.get('thread', {})
+            session = identifier(thread.get('id'))
+            if (session == self.session_id or session in self.helpers or result.get('model') != self.profile['model'] or
+                    result.get('modelProvider') != self.profile['provider'] or
+                    result.get('activePermissionProfile', {}).get('id') != 'oslit-worker' or
+                    thread.get('environments') != [self.native_executor.selection()]):
+                raise RuntimeError('native_helper_identity_invalid')
+            child = Helper(self, helper_id, session)
+            self.helpers[session] = child
+            return child
 
     def fresh(self):
         self._idle()
@@ -102,23 +125,20 @@ class Runtime(Session):
             **({'activePermissionProfile': {'id': 'oslit-worker'}} if self.native_executor else {})))
 
     def invoke(self, prompt, invocation_id):
-        with self._admission():
+        with self.transport.io_lock, self._admission():
             self._begin(invocation_id, prompt)
             self.before = dict(self.totals.get(self.session_id, {}))
         try:
-            # The reply may require an executor callback through the same admission lock.
-            result = self.transport.request('turn/start', {'threadId': self.session_id,
-                      'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]},
-                      defer_events=True, dispatch_guard=self._admission)
-        except Exception:
-            self._emit('unknown', reason='native_dispatch_not_settled')
-            raise
-        try:
-            turn = identifier(result.get('turn', {}).get('id'))
-            if self.native_turn not in (None, turn):
-                raise RuntimeError('native_turn_mismatch')
-            self.native_turn = turn
-            self._emit('started')
+            # Bind the turn before another helper dispatches its deferred events.
+            with self.transport.io_lock:
+                result = self.transport.request('turn/start', {'threadId': self.session_id,
+                    'model': self.profile['model'], 'input': [{'type': 'text', 'text': prompt}]},
+                    defer_events=True, dispatch_guard=self._admission)
+                turn = identifier(result.get('turn', {}).get('id'))
+                if self.native_turn not in (None, turn):
+                    raise RuntimeError('native_turn_mismatch')
+                self.native_turn = turn
+                self._emit('started')
         except Exception:
             self._emit('unknown', reason='native_dispatch_not_settled')
             raise
@@ -144,6 +164,10 @@ class Runtime(Session):
         method, params = frame.get('method'), frame.get('params', {})
         if not isinstance(params, dict):
             raise RuntimeError('native_event_invalid')
+        child = self.helpers.get(params.get('threadId'))
+        if child is not None:
+            child.event(frame)
+            return
         if method == 'item/tool/call' and 'id' in frame:
             if (params.get('threadId') != self.session_id or not self.active or
                     params.get('turnId') != self.native_turn):
@@ -202,6 +226,101 @@ class Runtime(Session):
                 raise RuntimeError('native_host_tool_content_unsupported')
         self.transport.send({'jsonrpc': '2.0', 'id': request_id, 'result': {
             'contentItems': content, 'success': not result.get('isError', False)}})
+
+
+class Helper:
+    """A host-created native thread, bound to the parent's executor and tool identity."""
+    def __init__(self, parent, helper_id, session_id):
+        self.parent, self.helper_id, self.session_id = parent, helper_id, session_id
+        self.events, self.usage = deque(), None
+        self.active, self.native_turn = False, None
+        self.accepting_tools = True
+        self.invocation_id = helper_id
+
+    _usage = Session._usage
+
+    def _emit(self, event, **fields):
+        if len(self.events) >= 128:
+            raise RuntimeError('native_helper_backlog_overflow')
+        self.events.append({'event': event, **fields})
+
+    def invoke(self, prompt, invocation_id):
+        if self.active:
+            raise RuntimeError('native_invocation_in_progress')
+        self.active = True
+        self.invocation_id = identifier(invocation_id)
+        with self.parent.transport.io_lock:
+            result = self.parent.transport.request('turn/start', {'threadId': self.session_id,
+                'model': self.parent.profile['model'], 'input': [{'type': 'text', 'text': prompt}]},
+                defer_events=True, dispatch_guard=self.parent._admission)
+            self.native_turn = identifier(result.get('turn', {}).get('id'))
+
+    def event(self, frame):
+        method, params = frame.get('method'), frame.get('params', {})
+        turn = params.get('turnId') or params.get('turn', {}).get('id')
+        if method == 'item/tool/call' and 'id' in frame:
+            pending = self.parent._tool(params.get('callId'), params.get('tool'), params.get('arguments'),
+                session_id=self.session_id, invocation_id=self.invocation_id,
+                active=self.accepting_tools and self.active and turn == self.native_turn)
+            self.parent._queue_tool_reply(frame['id'], pending, lambda result: self.parent._tool_reply(frame['id'], result))
+            return
+        if 'id' in frame:
+            self.parent.transport.send({'jsonrpc': '2.0', 'id': frame['id'], 'error': {'code': -32601, 'message': 'Host operation unavailable'}})
+            return
+        if not self.active or turn != self.native_turn:
+            return
+        if method == 'thread/tokenUsage/updated':
+            self._usage(params.get('tokenUsage', {}).get('total', {}), {
+                'input_tokens': 'inputTokens', 'output_tokens': 'outputTokens',
+                'cached_input_tokens': 'cachedInputTokens', 'cache_write_input_tokens': 'cacheWriteInputTokens',
+                'reasoning_output_tokens': 'reasoningOutputTokens', 'total_tokens': 'totalTokens'})
+        elif method == 'item/completed' and params.get('item', {}).get('type') == 'agentMessage':
+            self._emit('text', text=text_content(params['item'].get('text')))
+        elif method == 'turn/completed':
+            if params.get('turn', {}).get('status') not in {'completed', 'interrupted', 'failed'}:
+                raise RuntimeError('native_completion_invalid')
+            self.active = False
+            self._emit('completed', status=params.get('turn', {}).get('status'))
+
+    def observe(self, timeout_seconds=0):
+        import time
+        if not self.events and timeout_seconds:
+            time.sleep(min(timeout_seconds, .05))
+        events = []
+        while self.events:
+            events.append(self.events.popleft())
+        return events
+
+    def steer(self, message):
+        return self.parent.transport.request('turn/steer', {'threadId': self.session_id,
+            'expectedTurnId': self.native_turn, 'input': [{'type': 'text', 'text': text_content(message)}]},
+            defer_events=True, dispatch_guard=self.parent._admission)
+
+    def interrupt(self):
+        with self.parent.transport.io_lock:
+            self.accepting_tools = False
+            if self.active:
+                self.parent.transport.request('turn/interrupt', {'threadId': self.session_id, 'turnId': self.native_turn}, defer_events=True)
+
+    def close(self):
+        import time
+        self.interrupt()
+        deadline = time.monotonic() + 5
+        while True:
+            with self.parent.transport.io_lock:
+                self.parent._flush_tool_replies_locked()
+                pending = {item for key, (_, item) in self.parent.calls.items() if key[0] == self.session_id}
+                unsettled = any(not item.ready.is_set() for item in pending)
+                replies = any(item in pending for _, item, _ in self.parent.tool_replies)
+                if not self.active and not unsettled and not replies:
+                    break
+            if time.monotonic() >= deadline:
+                self.parent._emit('unknown', reason='native_helper_stop_unverified')
+                raise RuntimeError('native_helper_stop_unverified')
+            self.parent.transport.receive(.05)
+        self.parent.transport.request('thread/unsubscribe', {'threadId': self.session_id}, defer_events=True)
+        self.parent.helpers.pop(self.session_id, None)
+        return {'turn_settled': True, 'child_absence': 'parent_process_cleanup_required'}
 
 
 def inspect_tool_bundle(profile, profile_id='runtime-main'):

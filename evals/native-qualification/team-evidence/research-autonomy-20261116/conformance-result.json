@@ -1,0 +1,26 @@
+{
+  "kind": "local-conformance-result-v1",
+  "source_commit": "5df9010bb1a756e232b2011258965fb711212a24",
+  "status": "passed",
+  "checks": 900,
+  "failing": 0,
+  "classification": "local_structural_and_retained_fixture_checks",
+  "command": "/private/tmp/oslit-autonomy-e2e-20261116/venv/bin/python tools/check-conformance.py",
+  "working_directory": "repository root",
+  "python_version": "3.14.6",
+  "dependency_file": "requirements-ci.txt",
+  "dependency_file_sha256": "55291de46fee26e0d71d677b820e8aa325902eb9d2c8626b4b1607764584bb67",
+  "environment_requirements": [
+    "Python virtual environment with requirements-ci.txt installed",
+    "Repository inputs and retained fixtures",
+    "Local subprocess and filesystem access"
+  ],
+  "raw_log": "/private/tmp/oslit-autonomy-e2e-20261116/conformance-checkpoint7.log",
+  "raw_log_sha256": "fd0308ead6a6bcda5da1657788882700ed796a311dbe461b558e1940e2f85edf",
+  "not_established": [
+    "hosted CI result",
+    "live provider behavior",
+    "production deployment",
+    "fresh-target research benefit"
+  ]
+}

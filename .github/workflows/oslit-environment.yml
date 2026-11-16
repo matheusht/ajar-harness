@@ -2,7 +2,7 @@ name: OSLit owned environment
 
 on:
   push:
-    branches: [main, codex/oslit-team-contract, codex/oslit-integrated-e2e-20261115]
+    branches: [main, codex/oslit-team-contract, codex/oslit-integrated-e2e-20261115, codex/oslit-research-autonomy-20261116]
     paths:
       - .github/workflows/oslit-environment.yml
       - tools/research_environment.py
@@ -11,6 +11,7 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_knowledge*.py
       - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
@@ -25,8 +26,13 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
+      - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py
+      - evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json
+      - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -37,6 +43,8 @@ on:
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
+      - evals/native-qualification/smoke/check_proxy_backpressure_e2e.py
+      - evals/native-qualification/smoke/check_network_upload_e2e.py
       - evals/native-qualification/smoke/check_provider_discovery_fixture_e2e.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
@@ -55,6 +63,7 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_knowledge*.py
       - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
@@ -69,8 +78,13 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
+      - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py
+      - evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json
+      - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -81,6 +95,8 @@ on:
       - evals/native-qualification/smoke/check_omp_stderr_diagnostic.py
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
+      - evals/native-qualification/smoke/check_proxy_backpressure_e2e.py
+      - evals/native-qualification/smoke/check_network_upload_e2e.py
       - evals/native-qualification/smoke/check_provider_discovery_fixture_e2e.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
@@ -135,6 +151,16 @@ jobs:
             --endpoint unix:///var/run/docker.sock \
             --image-id "$OSLIT_FIXTURE_IMAGE" \
             --output "$RUNNER_TEMP/oslit-docker/application-owner.json"
+      - name: Verify network proxy backpressure and cancellation
+        if: ${{ !cancelled() && env.OSLIT_FIXTURE_IMAGE != '' }}
+        run: |
+          python3 evals/native-qualification/smoke/check_proxy_backpressure_e2e.py \
+            --output "$RUNNER_TEMP/oslit-docker/proxy-backpressure.json"
+      - name: Verify TLS upload and authority revocation
+        if: ${{ !cancelled() && env.OSLIT_FIXTURE_IMAGE != '' }}
+        run: |
+          python3 evals/native-qualification/smoke/check_network_upload_e2e.py \
+            --output "$RUNNER_TEMP/oslit-docker/network-upload.json"
       - name: Preserve actual environment observations
         if: always()
         uses: actions/upload-artifact@v4
@@ -145,7 +171,7 @@ jobs:
 
   native-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -201,6 +227,21 @@ jobs:
             --startup-result "$RUNNER_TEMP/oslit-native-codex/result.json" \
             --joined-result "$RUNNER_TEMP/oslit-native-e2e-codex/result.json" \
             --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-setup.json"
+      - name: Verify OMP compaction usage accounting
+        if: matrix.runtime == 'omp'
+        run: |
+          python3 evals/native-qualification/smoke/check_omp_compaction_usage_e2e.py \
+            --stats evals/native-qualification/team-evidence/research-autonomy-20261116/omp-compaction-usage/pinned-stats.json \
+            --output "$RUNNER_TEMP/oslit-native-e2e-omp/compaction-usage.json"
+      - name: Verify OMP Responses tool-call identity
+        if: matrix.runtime == 'omp'
+        run: |
+          python3 evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py \
+            --output "$RUNNER_TEMP/oslit-native-e2e-omp/responses-tool-id.json"
+      - name: Verify renewal stays within current grant
+        run: |
+          python3 evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py \
+            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/renewal-bounds.json"
       - name: Check bounded loader-preflight contract
         if: matrix.runtime == 'omp'
         run: |
@@ -243,10 +284,25 @@ jobs:
           fi
           python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
+            --autonomy \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-native-e2e-assets-${{ matrix.runtime }}" \
             --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/result.json" \
+            "${policy_args[@]}"
+      - name: Run the public CLI through native reviewed closure
+        if: ${{ always() && !cancelled() && (matrix.runtime == 'omp' || steps.codex_profile_setup.outcome == 'success') }}
+        run: |
+          policy_args=()
+          if [ "${{ matrix.runtime }}" = codex ]; then
+            policy_args=(--codex-tool-policy docker-confined-v1)
+          fi
+          python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
+            --runtime "${{ matrix.runtime }}" --platform linux/amd64 --public-run-only \
+            --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
+            --endpoint unix:///var/run/docker.sock \
+            --directory "$RUNNER_TEMP/oslit-public-e2e-assets-${{ matrix.runtime }}" \
+            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/public-result.json" \
             "${policy_args[@]}"
       - name: Remove only this run's Codex host profile after native cleanup
         if: ${{ always() && matrix.runtime == 'codex' }}

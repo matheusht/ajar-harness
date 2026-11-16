@@ -28,6 +28,7 @@ def run(base):
     with sqlite3.connect(db) as conn:
         conn.execute('CREATE TABLE auth_credentials(provider TEXT,credential_type TEXT,data TEXT,disabled_cause TEXT)')
         conn.execute('INSERT INTO auth_credentials VALUES(?,?,?,NULL)',('opencode-go','api_key',json.dumps({'key':'fake-omp-private-key'})))
+        conn.execute('INSERT INTO auth_credentials VALUES(?,?,?,NULL)',('mistral','api_key',json.dumps({'key':'fake-mistral-key'})))
     db.chmod(0o600)
     resolver=HostCredentialResolver(environment={'OPENAI_API_KEY':'fake-env-private-key'},codex_auth_path=auth,omp_db_path=db)
     rows=[]
@@ -40,6 +41,12 @@ def run(base):
     refuse('missing_env',profile('omp','env_ANTHROPIC_API_KEY','anthropic'),'native_credential_unavailable')
     env=resolver(profile('codex','env_OPENAI_API_KEY','openai'));assert env.environment()=={'OPENAI_API_KEY':'fake-env-private-key'}
     omp=resolver(profile('omp','omp_default','opencode-go'));assert omp.environment()=={'OPENCODE_API_KEY':'fake-omp-private-key'}
+    mistral=resolver(profile('omp','omp_default','mistral'));assert mistral.environment()=={'MISTRAL_API_KEY':'fake-mistral-key'}
+    refuse('mistral_wrong_provider',profile('omp','env_MISTRAL_API_KEY','openai'),'native_credential_provider_mismatch')
+    with sqlite3.connect(db) as conn:conn.execute('INSERT INTO auth_credentials VALUES(?,?,?,NULL)',('mistral','api_key',json.dumps({'key':'second-fake-key'})))
+    refuse('ambiguous_mistral',profile('omp','omp_default','mistral'),'native_credential_unavailable')
+    with sqlite3.connect(db) as conn:conn.execute("UPDATE auth_credentials SET disabled_cause='disabled' WHERE provider='mistral'")
+    refuse('disabled_mistral',profile('omp','omp_default','mistral'),'native_credential_unavailable')
     codex=resolver(profile('codex','codex_default','openai'));assert codex.login()['chatgptAccountId']=='fixture-account'
     assert all('fake-' not in repr(x) and 'accessToken' not in repr(x) for x in (env,omp,codex))
     try:pickle.dumps(codex);raise AssertionError('credential binding serialized')

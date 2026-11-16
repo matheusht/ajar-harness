@@ -1,6 +1,6 @@
 # Product and engineering direction
 
-Maintained synthesis, updated 15 November 2026. Read this before changing the harness's product
+Maintained synthesis, updated 16 November 2026. Read this before changing the harness's product
 scope, research workflow, runtime architecture, or engineering plan. Accepted
 [decision records](../decisions/README.md) retain their authority. The
 [discussion record](../research/research-direction-discussion-2026-10.md) attributes
@@ -18,7 +18,8 @@ all-30 traceability. The operator endorsed its direction with two corrections:
 Codex and OMP are the intended runtimes, and research continues while authorized
 and resourced without a fixed 24-hour ceiling. The plan incorporates those corrections;
 the current implementation and remaining qualification are tracked in
-[the v2 delivery state](oslit-v2-delivery-2026-11-14.md). For architecture changes, follow
+[the current delivery state](oslit-research-autonomy-delivery-2026-11-16.md); the
+[14 November page](oslit-v2-delivery-2026-11-14.md) remains a historical snapshot. For architecture changes, follow
 the [architecture instructions](../decisions/AGENTS.md), including when to ask the founder.
 
 [Q30](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)
@@ -27,6 +28,22 @@ reuse. The record retains the paper's evidence limits, alternatives and rational
 The plan specifies durable relevant updates, versioned shared instruments and
 execution-enforced ownership/role/resource boundaries; implementation and focused
 controlled checks are retained in the [completion evidence](../../evals/native-qualification/team-evidence/nonpricing-completion-20261115/README.md).
+
+[Decision 0016](../decisions/0016-research-autonomy.md) records the operator's
+16 November correction and full-plan implementation authorization. New signed
+`research-autonomy-v1` engagements use advisory strategy discussion, independent
+scientific judgment over exact observed facts, optional total limits and native
+helpers sharing their parent's authority. Ordinary notes preserve partial effects
+and changing assumptions. Active source-backed references and experimental
+techniques support research; optional independent transfer/counterexample evaluation
+controls exact-version recommendation, never investigation closure. A retention
+failure is visible `not_retained` delivery and does not itself stop permitted work.
+See the [consolidated plan](../research/oslit-research-autonomy-plan-2026-11-16.md)
+and [library guide](../agents/knowledge-library.md). The operator subsequently
+authorized full E2E, rebuilt runtimes, repairs and a PR. The
+[16 November delivery report](oslit-research-autonomy-delivery-2026-11-16.md) separates
+implemented behavior, actual verification and remaining limits. Fresh-target
+research and benefit comparisons remain operator-owned.
 
 **Authority status:** this page is a maintained synthesis of operator choices, not an
 accepted ADR. It does not create or change a gate. A durable gate change needs a
@@ -76,13 +93,13 @@ This policy adoption is not physical runtime qualification or research acceptanc
 
 | Choice | Consequence for a change |
 | --- | --- |
-| New research uses the v2 Codex/OMP engagement entry. | Follow the [initial-scope policy and caller map](../decisions/0015-initial-scope-autonomy.md). Existing v1 native and queue contracts remain compatibility routes; physical qualification stays separate. |
+| New research uses the v2 Codex/OMP engagement entry. | Select [research-autonomy-v1](../decisions/0016-research-autonomy.md) for new inputs. Existing v1 native and queue contracts remain compatibility routes; physical qualification stays separate. |
 | Model/provider access is distinct from agent runtime integration. | Codex and OMP are the selected new-route runtimes. Reuse their native execution, tools, sessions and delegation; add missing engagement behavior. OpenCode remains an existing compatibility route and optional provider source, not a required new runtime. Verify each actual runtime/provider combination. |
 | The researcher chooses the investigation. | Tools, cards, graphs, and prior results inform choices. Stages describe evidence maturity; they do not impose a fixed order or mandatory roster. |
 | Scored search serves a task; the engagement remains evidence-directed. | Use native instruments and local metrics where useful. No universal finding score or leaderboard determines priorities or acceptance. |
 | Native reuse must preserve enforceable boundaries. | Start with native tools and minimal status/claim/typed-submit operations. Verify actor identity, roles, updates, shared-target writes and instrument provenance; interface names alone enforce nothing. |
 | Ordinary working files carry native continuity. | Save scripts, results, interpretation, and unfinished work once and link them. Native history can help; it does not replace material state or independent evidence. |
-| Independent challenge covers consequential acceptance and strong-lead dismissal. | Bind review to the checked claim and evidence. A fresh context must inspect a material link; a model name, signature, or accepted file alone cannot prove that happened. |
+| Independent review covers consequential acceptance. | Bind review to actual evidence and fresh identity. Strategy challenges remain advice; disagreement alone does not deny resources, force replacement or block closure. |
 | Evidence properties survive process simplification. | Preserve authority, effect provenance, resource limits, uncertain-effect recovery, cleanup, and historical integrity while retiring unnecessary ceremony. |
 | Multi-day research is a required capability. | Continue while authority and resources permit and the goal requires work. Honor an operator deadline when supplied; renewable short worker leases control failure, not total engagement age. Account for all roles and preserve unfinished work when a real limit ends the run. The existing v1 cap remains until replaced in code. |
 | Existing engagements retain their supported route. | Use the explicit [legacy procedure](../agents/legacy-local-research.md) for queue/record work. Preserve its callers and immutable history; native notes do not become canonical legacy findings. |

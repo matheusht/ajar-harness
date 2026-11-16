@@ -1,0 +1,36 @@
+{
+  "kind": "omp-responses-tool-id-e2e-v1",
+  "classification": "actual_native_adapter_with_owned_host_operation",
+  "checks": [
+    {
+      "name": "composite call reaches tool and correlates reply",
+      "passed": true
+    },
+    {
+      "name": "same composite and arguments dispatch once",
+      "passed": true
+    },
+    {
+      "name": "same composite with changed arguments refused",
+      "passed": true
+    },
+    {
+      "name": "distinct second component remains distinct",
+      "passed": true
+    },
+    {
+      "name": "maximum valid composite identifier accepted",
+      "passed": true
+    },
+    {
+      "name": "empty multi-pipe control slash backslash and oversized identifiers refused",
+      "passed": true
+    }
+  ],
+  "status": "passed",
+  "source_sha256": {
+    "evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py": "3dc037b7ac887945fc387731f08a2c33a9e2272425a44e6906252d116c08b48d",
+    "tools/native_runtime_omp.py": "7929a3d985368443cf2b7efbdc4eba5292b30591e538fcda093bb72e086234f7",
+    "tools/native_runtime_transport.py": "b1b18b9d3058c1203603695b7a89be62deb19c61c9bc01ce0e15b3df8e2be60b"
+  }
+}

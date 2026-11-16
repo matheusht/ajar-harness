@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -19,10 +20,22 @@ class Runtime(Session):
 
     def __init__(self, profile, state_dir, workspace, *, command_prefix=(), host_tools=(),
                  host_call=None, dispatch_guard=None, credential_resolver=None, protected_model=False,
-                 profile_sha256=None, provider_environment=None, owner_observer=None, model_owner=None):
+                 profile_sha256=None, provider_environment=None, owner_observer=None, model_owner=None, helper_parent=None, helper_id=None):
         if model_owner is not None and command_prefix:
             raise RuntimeError('native_model_boundary_override_refused')
         env = self._prepare(profile, state_dir, workspace, host_tools, host_call, dispatch_guard, model_owner)
+        self.helper_parent = helper_parent
+        self.accepting_tools = True
+        if helper_parent is not None:
+            if (not isinstance(helper_parent, Runtime) or helper_parent.profile != profile or
+                    helper_parent.model_owner is not model_owner or not isinstance(helper_id, str)):
+                raise RuntimeError('native_helper_identity_invalid')
+            if model_owner is not None:
+                self.process_state = Path(str(self.process_state) + '-helper-' + helper_id)
+            env['HOME'] = str(self.process_state)
+        self.helper_options = dict(command_prefix=command_prefix, host_tools=host_tools, host_call=host_call,
+            dispatch_guard=dispatch_guard, credential_resolver=credential_resolver, protected_model=protected_model,
+            profile_sha256=profile_sha256, provider_environment=provider_environment, model_owner=model_owner)
         if owner_observer is not None and (not protected_model or not callable(owner_observer)):
             raise RuntimeError('native_owner_observer_invalid')
         self.owner_observer = owner_observer
@@ -41,6 +54,7 @@ class Runtime(Session):
         self.ready = False
         self.pending_completion = None
         self.stats_before = None
+        self.usage_window_changed = False
         command = [*command_prefix, model_owner.paths.executable if model_owner else profile['executable']['path'], '--mode', 'rpc', '--no-ui',
                    '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-context-files',
                    '--no-title', '--no-lsp', '--no-pty', '--no-session', '--cwd', str(self.process_workspace),
@@ -49,7 +63,7 @@ class Runtime(Session):
             profile_sha256=profile_sha256, credential_resolver=credential_resolver,
             provider_environment=provider_environment)
         try:
-            launcher = (lambda command: model_owner.launch_model(command, env, self.credential_binding)) if model_owner else None
+            launcher = (lambda command: model_owner.launch_model(command, env, self.credential_binding, helper_id=helper_id)) if model_owner else None
             self.transport = Transport(command, env, str(self.workspace), self._event, omp=True, launcher=launcher)
             self._capture_owner()
             deadline = time.monotonic() + 15
@@ -65,6 +79,14 @@ class Runtime(Session):
         except Exception as error:
             self._startup_failed(error)
             raise
+
+    def create_helper(self, helper_id):
+        with self._admission():
+            child = Runtime(self.profile, self.state_dir / ('helper-' + helper_id), self.workspace,
+                            helper_parent=self, helper_id=helper_id,
+                            owner_observer=lambda receipt: self.helper_observer(helper_id, receipt), **self.helper_options)
+            child.fresh()
+            return child
 
     def _read_state(self):
         state = self.transport.request('get_state')
@@ -101,11 +123,12 @@ class Runtime(Session):
         return result
 
     def invoke(self, prompt, invocation_id):
-        with self._admission():
+        with self.transport.io_lock, self._admission():
             if self._read_state().get('sessionId') != self.session_id:
                 raise RuntimeError('native_session_changed')
             self._begin(invocation_id, prompt)
             self.pending_completion = None
+            self.usage_window_changed = False
             try:
                 self.stats_before = self.transport.request('get_session_stats')
                 self.native_turn = self.transport.next_id()
@@ -126,14 +149,38 @@ class Runtime(Session):
     def steer(self, message):
         if not self.active:
             raise RuntimeError('native_invocation_not_active')
-        with self._admission():
-            self.transport.request('steer', {'message': text_content(message)}, defer_events=True)
+        self.transport.request('steer', {'message': text_content(message)},
+                               defer_events=True, dispatch_guard=self._admission)
         return {'delivered': True, 'invocation_id': self.invocation_id}
 
     def interrupt(self):
-        self._cancel_tools()
-        self.transport.request('abort_and_restore_queue')
+        with self.transport.io_lock:
+            if self.helper_parent is None:
+                self._cancel_tools()
+            else:
+                self.accepting_tools = False
+            self.transport.request('abort_and_restore_queue')
         return {'requested': True, 'lab_cleanup': 'not_observed'}
+
+    def close(self):
+        if self.helper_parent is None or not self.transport:
+            return super().close()
+        try:
+            self.interrupt()
+            deadline = time.monotonic() + 5
+            while True:
+                with self.transport.io_lock:
+                    self._flush_tool_replies_locked()
+                    unsettled = any(not pending.ready.is_set() for _, pending in self.calls.values())
+                    if not self.active and not unsettled and not self.tool_replies:
+                        break
+                if time.monotonic() >= deadline:
+                    self.helper_parent._emit('unknown', reason='native_helper_stop_unverified')
+                    raise RuntimeError('native_helper_stop_unverified')
+                self.transport.receive(.05)
+        finally:
+            result = super().close()
+        return result
 
     def _finish(self, status):
         after = self.transport.request('get_session_stats', defer_events=True)
@@ -142,8 +189,11 @@ class Runtime(Session):
         values = {}
         for key in ('input', 'output', 'cacheRead', 'cacheWrite', 'reasoning', 'total'):
             a, b = tokens.get(key), before_tokens.get(key)
-            if type(a) is int and type(b) is int and a >= b >= 0:
-                values[key] = a - b
+            if type(a) is int and type(b) is int and a >= 0 and b >= 0:
+                if not self.usage_window_changed:
+                    if a < b:
+                        raise RuntimeError('native_usage_invalid')
+                    values[key] = a - b
             elif a is not None or b is not None:
                 raise RuntimeError('native_usage_invalid')
         # OMP separates uncached input from cache reads/writes; the common total includes all three.
@@ -151,14 +201,15 @@ class Runtime(Session):
         values['input'] = sum(values[key] for key in inputs) if all(key in values for key in inputs) else None
         cost_after, cost_before = after.get('cost'), (self.stats_before or {}).get('cost')
         cost = None
-        if type(cost_after) in (int, float) and type(cost_before) in (int, float):
-            if cost_after < 0 or cost_before < 0:
+        for value in (cost_after, cost_before):
+            if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0):
                 raise RuntimeError('native_usage_invalid')
+        if cost_after is not None and cost_before is not None and not self.usage_window_changed:
             cost = cost_after - cost_before
         self._usage(values, {'input_tokens': 'input', 'output_tokens': 'output',
                              'cached_input_tokens': 'cacheRead', 'cache_write_input_tokens': 'cacheWrite',
                              'reasoning_output_tokens': 'reasoning', 'total_tokens': 'total'}, cost=cost)
-        self._emit('completed', status=status, usage_available=self.usage is not None,
+        self._emit('completed', status=status, usage_available=any(value is not None for value in values.values()) or cost is not None,
                    resource_settlement='environment_readback_required')
         self.active = False
         self.pending_completion = None
@@ -171,7 +222,8 @@ class Runtime(Session):
             self.ready = True
             return
         if kind == 'host_tool_call':
-            pending = self._tool(frame.get('toolCallId'), frame.get('toolName'), frame.get('arguments'))
+            pending = self._tool(frame.get('toolCallId'), frame.get('toolName'), frame.get('arguments'),
+                                 active=self.active and self.accepting_tools)
             self._queue_tool_reply(frame['id'], pending, lambda result: self.transport.send({
                 'type': 'host_tool_result', 'id': frame['id'], 'result': result,
                 'isError': result.get('isError', False)}))
@@ -179,12 +231,17 @@ class Runtime(Session):
         if kind == 'host_tool_cancel':
             pending = self.tool_requests.get(frame.get('targetId'))
             self._emit('host_tool_cancel', pending=pending is not None)
-            if pending:
+            if pending and self.helper_parent is None:
                 pending.cancel()
             return
         if not self.active:
             return
-        if kind == 'message_end':
+        if (kind in ('auto_compaction_end', 'manual_compaction_end')
+                and isinstance(frame.get('result'), dict) and frame.get('aborted') is False
+                and frame.get('skipped') is not True):
+            # Session stats total the active transcript window, not lifetime use.
+            self.usage_window_changed = True
+        elif kind == 'message_end':
             message = frame.get('message', {})
             if message.get('role') == 'assistant':
                 parts = [part.get('text', '') for part in message.get('content', [])
@@ -400,8 +457,13 @@ class ToolOwner:
 
     def host_call(self, tool, arguments):
         """HostOperation factory, called with the runtime's admission guard held."""
-        call_id = uuid.uuid4().hex
-        self._accept(tool, arguments, call_id)
+        with self.lock:
+            if len(self.active) >= 8 or len(self.seen) >= 4000:
+                return HostOperation(lambda: {'content': [{'type': 'text', 'text':
+                    'Native tools are at capacity. Wait for outstanding work; finish this turn if session maintenance is needed.'}],
+                    'isError': True}, lambda: None)
+            call_id = uuid.uuid4().hex
+            self._accept_locked(tool, arguments, call_id)
         def wait():
             while not self.closed:
                 with self.lock:
@@ -438,8 +500,12 @@ class ToolOwner:
                 status = frame.get('status')
                 if status not in {'returned', 'unknown'}:
                     raise RuntimeError('native_tool_result_invalid')
-            except RuntimeError:
-                result, status = None, 'unknown'
+            except RuntimeError as error:
+                if error.code == 'native_publication_rejected' and frame.get('status') == 'returned':
+                    result, status = {'content': [{'type': 'text', 'text': 'Native tool returned; its content was withheld.'}],
+                                      'isError': True, 'content_status': 'withheld'}, 'returned'
+                else:
+                    result, status = None, 'unknown'
             row = {'call_id': call_id, 'status': status, 'result': result}
             self.results[call_id] = row
             self.events.append(row)

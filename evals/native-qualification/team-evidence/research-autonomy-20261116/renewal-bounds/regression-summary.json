@@ -1,0 +1,64 @@
+{
+  "kind": "renewal-regressions-summary-v1",
+  "classification": "local controlled fixtures, not hosted native qualification",
+  "results": [
+    {
+      "receipt": "application-renewal-fixed.json",
+      "status": "passed",
+      "count": 13,
+      "source_sha256": "1f9a22c99c7abb8c99dec7aa925c9560bd13c137cfee6c898f2ca345a550b91b"
+    },
+    {
+      "receipt": "check_environment_renewed_execute_e2e.py.renewal.json",
+      "status": "passed",
+      "count": 5,
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_environment_renewed_execute_e2e.py": "2ad1e49f672dbf13a3035910d4ded89ace07d82c1db8e0730e577bd733e623a8",
+        "tools/research_environment.py": "0e3352b2f84d4bcb0579a1b461629dd707be0bad8b86795fa24c54108b267120",
+        "tools/engagement_lease_owner.py": "268f427c59c2d34f72d04f437b4a4e92e2dba34c34115718f51023d73105d36a"
+      }
+    },
+    {
+      "receipt": "check_linux_model_host_e2e.py.renewal-fixed.json",
+      "status": "passed",
+      "count": 14,
+      "source_sha256": {}
+    },
+    {
+      "receipt": "check_engagement_coordination_e2e.py.renewal-fixed.json",
+      "status": "pass",
+      "count": 10,
+      "source_sha256": {}
+    },
+    {
+      "receipt": "check_engagement_retained_specialist_e2e.py.renewal-fixed.json",
+      "status": "pass",
+      "count": 26,
+      "source_sha256": {
+        "tools/engagement_controller.py": "sha256:bd8bfc5feaffd8c1043392833e005302f532ea4e8a6f31c55b00cb8772e241ec",
+        "tools/engagement_runner.py": "sha256:f447971c29c9ad0e6efe0c83d5045e920f5748dfe489b2753dbd24438ea1a03d",
+        "evals/native-qualification/smoke/check_engagement_retained_specialist_e2e.py": "sha256:2c82e2d3fa87c50a8a6ab275017fac1bd97157057ebe3f91e5a55d2ad5c2ce94"
+      }
+    },
+    {
+      "receipt": "check_engagement_runner_e2e.py.renewal-fixed.json",
+      "status": "pass",
+      "count": 16,
+      "source_sha256": {}
+    },
+    {
+      "receipt": "boundary-renewal-fixed-2.json",
+      "status": "passed",
+      "count": 23,
+      "source_sha256": {
+        "evals/native-qualification/smoke/check_engagement_native_boundary_e2e.py": "sha256:bf34b9b417e1649c2050272575d06b6b704f373b1cafa4eef47ade55d52cd874",
+        "tools/engagement_controller.py": "sha256:bd8bfc5feaffd8c1043392833e005302f532ea4e8a6f31c55b00cb8772e241ec",
+        "tools/engagement_evidence.py": "sha256:63df0c46045e4d38acf9164444c23a26ee81990588337bd43a06148ea7aef46a",
+        "tools/engagement_native_boundary.py": "sha256:c70ea2b962e53a504cf3a075a68186c8c91a4e3d87b643f425f190a6058c6865",
+        "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8",
+        "tools/engagement_runner.py": "sha256:f447971c29c9ad0e6efe0c83d5045e920f5748dfe489b2753dbd24438ea1a03d",
+        "tools/research_environment.py": "sha256:0e3352b2f84d4bcb0579a1b461629dd707be0bad8b86795fa24c54108b267120"
+      }
+    }
+  ]
+}

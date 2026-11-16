@@ -22,7 +22,7 @@ import stat
 import threading
 import uuid
 
-from engagement_contract import (ContractError, VerifiedInputs, canonical, digest,
+from engagement_contract import (research_autonomy, ContractError, VerifiedInputs, canonical, digest,
                                  read_bytes, read_json, safe_publication, MAX_PUBLICATION_BYTES)
 
 ID = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z')
@@ -37,6 +37,13 @@ GRANT_KEYS = {'dispatch_id', 'worker_id', 'generation', 'assignment', 'profile_i
 BUNDLED_GUIDANCE = {name: Path(__file__).resolve().parents[1] / 'engine' / source
                     for name, source in (('methodology.md', 'native-engagement-method.md'),
                                          ('protocol.md', 'native-engagement-protocol.md'))}
+
+
+def bundled_guidance(scope):
+    if not research_autonomy(scope):
+        return BUNDLED_GUIDANCE
+    return {name: path.with_name(path.name.replace('native-engagement-', 'native-engagement-autonomy-'))
+            for name, path in BUNDLED_GUIDANCE.items()}
 
 
 class ControllerError(ValueError):
@@ -148,7 +155,7 @@ class Controller:
             fail('research_guidance_conflict')
         try:
             frozen.update({name: safe_publication(read_bytes(path, max_bytes=1024 * 1024))
-                           for name, path in BUNDLED_GUIDANCE.items()})
+                           for name, path in bundled_guidance(contract.scope).items()})
         except ContractError:
             fail('research_guidance_unavailable')
         root.mkdir(mode=0o700)
@@ -255,6 +262,7 @@ class Controller:
                  'scope_sha256': initial['scope_sha256'], 'evidence_class': initial['evidence_class'],
                  'status': 'active', 'revision': 0, 'workers': {}, 'tasks': {}, 'publications': {}, 'messages': {},
                  'directions': [], 'dispatches': {}, 'invocations': {}, 'provider_requests': {},
+                 'helpers': {}, 'knowledge_deliveries': [], 'knowledge': {}, 'techniques': {},
                  'resource_holds': {}, 'cleanup': 'pending',
                  'usage': {'invocations': 0, 'worker_seconds': 0, 'reserved_worker_seconds': 0,
                            'tokens': {}, 'cost': None, 'known_estimated_cost': 0,
@@ -285,13 +293,15 @@ class Controller:
                 self.read_object(event['payload']['receipt'])
             elif event['type'] == 'effect_reconciled':
                 self.read_object(event['payload']['evidence'])
-        state['usage']['native_invocations_admitted'] = len(state['invocations'])
+        native_rows = list(state['invocations'].values()) + [dict(row, status='pending' if row['status'] in ('starting', 'active') else
+            'stopped_unobserved' if row['usage']['tokens'] is None else row['status']) for row in state['helpers'].values()]
+        state['usage']['native_invocations_admitted'] = len(native_rows)
         state['usage']['native_invocations_observed'] = sum(row['status'] not in ('pending', 'stopped_unobserved')
-                                                         for row in state['invocations'].values())
+                                                         for row in native_rows)
         state['usage']['native_usage_incomplete'] = any(
             row['status'] in ('pending', 'stopped_unobserved') or
             'total' not in (row.get('usage', {}).get('tokens') or {})
-            for row in state['invocations'].values())
+            for row in native_rows)
         usage = state['usage']
         requests = list(state['provider_requests'].values())
         usage['provider_requests'] = len(requests)
@@ -302,12 +312,15 @@ class Controller:
             usage['missing'].remove('provider_requests')
         usage['billed_cost'] = None
         usage['billed_cost_unavailable_reason'] = 'provider_billing_receipt_unavailable'
-        usage['native_usage_observations'] = sum(row['status'] != 'pending' for row in state['invocations'].values())
-        usage['native_token_totals_complete'] = bool(state['invocations']) and all(
-            'total' in (row.get('usage', {}).get('tokens') or {}) for row in state['invocations'].values())
-        usage['estimated_cost_complete'] = bool(state['invocations']) and all(
-            row.get('usage', {}).get('cost') is not None for row in state['invocations'].values())
+        usage['native_usage_observations'] = sum(row['status'] != 'pending' for row in native_rows)
+        usage['native_token_totals_complete'] = bool(native_rows) and all(
+            'total' in (row.get('usage', {}).get('tokens') or {}) for row in native_rows)
+        usage['estimated_cost_complete'] = bool(native_rows) and all(
+            row.get('usage', {}).get('cost') is not None for row in native_rows)
         usage['cost'] = usage['known_estimated_cost'] if usage['estimated_cost_complete'] else None
+        if research_autonomy(state['scope']):
+            usage['worker_seconds_meaning'] = 'elapsed_parent_dispatches_including_native_helpers'
+            usage['helper_invocations'] = len(state['helpers'])
         for operation in state['environment_operations'].values():
             if (operation.get('result') or {}).get('status') != 'unknown':
                 continue
@@ -434,11 +447,13 @@ class Controller:
             grant = payload['grant']
             state['dispatches'][grant['dispatch_id']] = dict(grant, status='pending', receipt=None,
                 parent_dispatch_id=payload['parent_dispatch_id'], session_id=payload['session_id'])
-            state['usage']['reserved_worker_seconds'] += grant['seconds']
+            if not research_autonomy(state['scope']):
+                state['usage']['reserved_worker_seconds'] += grant['seconds']
         elif kind == 'dispatch_renewed':
             dispatch = state['dispatches'][payload['grant']['dispatch_id']]
             dispatch.setdefault('prior_grants', []).append(payload['previous'])
-            state['usage']['reserved_worker_seconds'] += payload['grant']['seconds'] - dispatch['seconds']
+            if not (research_autonomy(state['scope']) and dispatch.get('parent_dispatch_id')):
+                state['usage']['reserved_worker_seconds'] += payload['grant']['seconds'] - dispatch['seconds']
             dispatch.update(payload['grant'])
         elif kind == 'invocation_intended':
             dispatch = state['dispatches'][payload['dispatch_id']]
@@ -450,6 +465,35 @@ class Controller:
             invocation = state['invocations'][payload['invocation_id']]
             invocation.update(payload['observation'])
             self._accumulate_usage(state['usage'], payload['observation']['usage'])
+        elif kind == 'helper_observed':
+            identity, action, data = payload['helper_id'], payload['action'], payload['data']
+            if action == 'intended':
+                state['helpers'][identity] = dict(data, helper_id=identity, status='starting', usage={'tokens': None, 'cost': None})
+                state['usage']['invocations'] += 1
+            else:
+                row = state['helpers'][identity]
+                if action == 'usage':
+                    prior, current = row['usage'], data['usage']
+                    delta = {'tokens': {key: value - (prior.get('tokens') or {}).get(key, 0)
+                        for key, value in (current.get('tokens') or {}).items()},
+                        'cost': current['cost'] - (prior.get('cost') or 0) if current['cost'] is not None else None}
+                    self._accumulate_usage(state['usage'], delta)
+                row.update(data)
+                for key in ('output_sha256', 'owner_receipt_sha256'):
+                    if data.get(key):
+                        state['evidence_objects'][data[key]] = True
+        elif kind == 'knowledge_observed':
+            row = payload['record']
+            state['knowledge_deliveries'].append(row)
+            if row.get('version'):
+                state['knowledge'][row['version']] = dict(state['knowledge'].get(row['version'], {}), **row)
+            if row.get('kind') == 'technique' and row.get('retention') == 'retained':
+                state['techniques'][row['version']] = row
+        elif kind == 'technique_evaluated':
+            state['reviews'][payload['review_id']].update(status='accepted', result=payload['evaluation'])
+            version = payload['evaluation']['version']
+            if version in state['knowledge']:
+                state['knowledge'][version].update(technique_status=payload['evaluation']['status'], status_reason=payload['evaluation']['reason'])
         elif kind == 'provider_request_started':
             state['provider_requests'][payload['request_id']] = dict(payload, status='started')
         elif kind == 'provider_request_finished':
@@ -470,6 +514,11 @@ class Controller:
         elif kind == 'runtime_stop_observed':
             state['workers'][payload['worker_id']].update(status='stopped', stop_receipt=payload['receipt'])
             state['evidence_objects'][payload['receipt']] = True
+            for helper in state['helpers'].values():
+                if helper['worker_id'] == payload['worker_id'] and helper['generation'] == state['workers'][payload['worker_id']]['generation']:
+                    helper['parent_stop_verified'] = True
+                    if helper['status'] in ('starting', 'active'):
+                        helper['status'] = 'stopped'
             if not state['environments'] and all(row['status'] == 'stopped' for row in state['workers'].values()):
                 state['cleanup'] = 'verified'
         elif kind == 'dispatch_observed':
@@ -478,8 +527,9 @@ class Controller:
             dispatch.update(status=observation['status'], receipt=payload['receipt'],
                             adapter_id=payload['adapter_id'], observation=observation)
             if observation['status'] == 'settled':
-                state['usage']['reserved_worker_seconds'] -= dispatch['seconds']
-                state['usage']['worker_seconds'] += observation['worker_seconds']
+                if not (research_autonomy(state['scope']) and dispatch.get('parent_dispatch_id')):
+                    state['usage']['reserved_worker_seconds'] -= dispatch['seconds']
+                    state['usage']['worker_seconds'] += observation['worker_seconds']
                 if not dispatch.get('invocations'):
                     self._accumulate_usage(state['usage'], observation['usage'])
             for resource, status in observation['resources'].items():
@@ -632,7 +682,7 @@ class Controller:
     def _dispatch_resources(self, state, worker, resources):
         self._resources(state, resources)
         review = next((row for row in state['reviews'].values() if row['reviewer_id'] == worker['id'] and row['status'] == 'pending'), None)
-        if worker['role'] != 'reviewer' and any(row['state'] in ('pending', 'disputed') and set(resources) & set(row['resources']) for row in state['obligations'].values()):
+        if not research_autonomy(state['scope']) and worker['role'] != 'reviewer' and any(row['state'] in ('pending', 'disputed') and set(resources) & set(row['resources']) for row in state['obligations'].values()):
             fail('direction_held')
         assignment = worker['assignment']
         if assignment is None:
@@ -771,7 +821,7 @@ class Controller:
         identifier(principal.id)
         keys(request, ('request_id', 'expected_revision', 'type', 'payload'), 'request_invalid')
         identifier(request['request_id'])
-        if not integer(request['expected_revision']) or not isinstance(request['type'], str) or not isinstance(request['payload'], dict):
+        if (request['expected_revision'] is not None and not integer(request['expected_revision'])) or not isinstance(request['type'], str) or not isinstance(request['payload'], dict):
             fail('request_invalid')
         try:
             raw = safe_publication(canonical(request))
@@ -792,7 +842,7 @@ class Controller:
             worker = self._worker(state, principal)
             if worker.get('outcome_pending'):
                 fail('worker_finishing')
-            if request['expected_revision'] != state['revision']:
+            if request['expected_revision'] != state['revision'] and not (research_autonomy(state['scope']) and request['expected_revision'] is None):
                 fail('revision_conflict')
             data = self._validate_request(state, worker, request['type'], request['payload'])
             if request['type'] == 'task_result' and any(dispatch['worker_id'] == worker['id'] and
@@ -920,8 +970,8 @@ class Controller:
                (d['worker_id'] == worker['id'] or self._shared(state, d['resources']) & set(resources))
                for d in state['dispatches'].values()):
             fail('dispatch_conflict')
-        if ((parent is None and usage['invocations'] >= limits['hard']['invocations']) or
-                usage['worker_seconds'] + usage['reserved_worker_seconds'] + seconds > limits['hard']['worker_seconds']):
+        if ((parent is None and 'invocations' in limits['hard'] and usage['invocations'] >= limits['hard']['invocations']) or
+                ('worker_seconds' in limits['hard'] and not (research_autonomy(state['scope']) and parent is not None) and usage['worker_seconds'] + usage['reserved_worker_seconds'] + seconds > limits['hard']['worker_seconds'])):
             fail('resource_exhausted')
         lease = self.clock() + timedelta(seconds=seconds)
         if state['scope'].get('expires_at') is not None:
@@ -1140,11 +1190,83 @@ class Controller:
             extra = max(0, math.ceil((expiry - instant(grant['lease_expires_at'])).total_seconds()))
             if extra == 0:
                 return grant
-            if usage['worker_seconds'] + usage['reserved_worker_seconds'] + extra > limits['hard']['worker_seconds']:
+            if ('worker_seconds' in limits['hard'] and not (research_autonomy(state['scope']) and parent) and
+                    usage['worker_seconds'] + usage['reserved_worker_seconds'] + extra > limits['hard']['worker_seconds']):
                 fail('resource_exhausted')
             renewed = dict(grant, seconds=grant['seconds'] + extra, lease_expires_at=expiry.isoformat())
             self._host('dispatch_renewed', {'previous': grant, 'grant': renewed})
             return renewed
+
+    def record_helper(self, grant, helper_id, action, data):
+        """Native adapters supply identity and observations; helpers are never workers."""
+        identifier(helper_id)
+        with self.lock():
+            state = self.state()
+            self.bind_grant(state, grant)
+            if not research_autonomy(state['scope']):
+                fail('helper_policy_required')
+            worker = state['workers'][grant['worker_id']]
+            row = state['helpers'].get(helper_id)
+            if action == 'intended':
+                self._authorize(state, grant)
+                if row is not None:
+                    fail('helper_exists')
+                active = sum(w['status'] in ('pending', 'preparing', 'active') for w in state['workers'].values())
+                active += sum(h['status'] in ('starting', 'active') for h in state['helpers'].values())
+                limits = state['scope']['limits']
+                if active >= limits['max_workers'] or ('invocations' in limits['hard'] and state['usage']['invocations'] >= limits['hard']['invocations']):
+                    fail('resource_exhausted')
+                data = {'dispatch_id': grant['dispatch_id'], 'worker_id': worker['id'], 'generation': worker['generation'],
+                        'parent_session_id': worker['session_id'], 'session_id': None}
+            else:
+                if row is None or row['dispatch_id'] != grant['dispatch_id']:
+                    fail('helper_identity_invalid')
+                if action == 'started':
+                    self._authorize(state, grant)
+                    keys(data, ('session_id',))
+                    identifier(data['session_id'])
+                    if data['session_id'] == row['parent_session_id'] or any(h['session_id'] == data['session_id'] for h in state['helpers'].values()):
+                        fail('helper_identity_invalid')
+                    data = dict(data, status='active')
+                elif action == 'owner':
+                    keys(data, ('owner_receipt',))
+                    from engagement_evidence import runtime_owner
+                    receipt = data['owner_receipt']
+                    sha = runtime_owner(self, state, worker, receipt.get('session_id'), receipt, preparing=True)
+                    data = {'owner_receipt_sha256': sha}
+                elif action == 'usage':
+                    keys(data, ('usage',)); self._check_usage(data['usage'])
+                    prior, current = row['usage'], data['usage']
+                    if any(value < (prior.get('tokens') or {}).get(key, 0) for key, value in (current['tokens'] or {}).items()) or (current['cost'] is not None and current['cost'] < (prior['cost'] or 0)):
+                        fail('helper_usage_regression')
+                    if current == prior:
+                        return {'status': 'recorded'}
+                elif action == 'finished':
+                    keys(data, ('status', 'output', 'reason'))
+                    if data['status'] not in ('completed', 'stopped', 'failed') or not isinstance(data['output'], str) or len(data['output'].encode()) > 65536:
+                        fail('helper_result_invalid')
+                    data = {'status': data['status'], 'reason': data['reason'], 'output_sha256': self.store_object(data['output'].encode())}
+                else:
+                    fail('helper_event_invalid')
+            return self._host('helper_observed', {'helper_id': helper_id, 'action': action, 'data': data})
+
+    def record_knowledge(self, grant, record):
+        with self.lock():
+            state = self.state(); self._authorize(state, grant)
+            if not research_autonomy(state['scope']):
+                fail('knowledge_policy_required')
+            record = dict(record, worker_id=grant['worker_id'], generation=grant['generation'], resources=grant['resources'])
+            safe_publication(canonical(record))
+            return self._host('knowledge_observed', {'record': record})
+
+    def record_technique_evaluation(self, grant, review_id, evaluation):
+        with self.lock():
+            state = self.state(); self._authorize(state, grant)
+            review = state['reviews'].get(review_id)
+            if (review is None or review['kind'] != 'technique' or review['status'] != 'pending' or
+                    review['reviewer_id'] != grant['worker_id'] or evaluation['version'] != review['subject_id']):
+                fail('review_identity_invalid')
+            return self._host('technique_evaluated', {'review_id': review_id, 'evaluation': evaluation})
 
     def begin_invocation(self, grant):
         with self.lock():
@@ -1154,7 +1276,8 @@ class Controller:
             prior = dispatch.get('invocations', [])
             if any(state['invocations'][identity]['status'] == 'pending' for identity in prior):
                 fail('invocation_unsettled')
-            if prior and state['usage']['invocations'] >= state['scope']['limits']['hard']['invocations']:
+            if (prior and 'invocations' in state['scope']['limits']['hard'] and
+                    state['usage']['invocations'] >= state['scope']['limits']['hard']['invocations']):
                 fail('resource_exhausted')
             identity = uuid.uuid4().hex
             self._host('invocation_intended', {'invocation_id': identity, 'dispatch_id': grant['dispatch_id'],
@@ -1742,7 +1865,8 @@ class Controller:
             for event in events[start:start + limit]:
                 item = {key: event[key] for key in ('sequence', 'sha256', 'at', 'type', 'actor')}
                 if event['type'] in ('request_accepted', 'direction_recorded', 'stop_requested', 'evidence_recorded',
-                                     'task_claimed', 'worker_resumed', 'specialist_continued', 'closure_stopping'):
+                                     'task_claimed', 'worker_resumed', 'specialist_continued', 'closure_stopping',
+                                     'knowledge_observed', 'helper_observed', 'technique_evaluated'):
                     item['payload'] = event['payload']
                 size = len(canonical(item))
                 if updates and page_bytes + size > 512 * 1024:
@@ -1755,7 +1879,9 @@ class Controller:
                       'workers': ('id', 'role', 'generation', 'profile_id', 'status', 'assignment'),
                       'claims': ('claim_id', 'state'), 'reviews': ('review_id', 'kind', 'subject_id', 'reviewer_id', 'status', 'packet_sha256'),
                       'obligations': ('obligation_id', 'kind', 'state', 'opportunities', 'resources'),
-                      'closures': ('closure_id', 'outcome', 'state'), 'patches': ('patch_id', 'claim_id', 'state')}
+                      'closures': ('closure_id', 'outcome', 'state'), 'patches': ('patch_id', 'claim_id', 'state'),
+                      'helpers': ('helper_id', 'worker_id', 'parent_session_id', 'session_id', 'status', 'usage'),
+                      'knowledge': ('version', 'retention')}
             summaries = {name: {key: {field: row[field] for field in selected}
                                 for key, row in list(state[name].items())[:summary_limit]}
                          for name, selected in fields.items()}
@@ -1801,6 +1927,9 @@ class Controller:
                     files['objects/' + sha[7:]] = self.read_object(sha)
             for sha in state['evidence_objects']:
                 files['objects/' + sha[7:]] = self.read_object(sha)
+            if research_autonomy(state['scope']):
+                from engagement_knowledge_delivery import export_files
+                files.update(export_files(self, state))
             from engagement_board import rows as board_rows
             files['board.json'] = canonical({'engagement_id': state['engagement_id'],
                 'snapshot_revision': state['revision'], 'evidence_class': state['evidence_class'],
@@ -1817,11 +1946,16 @@ class Controller:
                 'research_guidance': {name: events[0]['payload']['contract_files'][name]
                     for name in ('methodology.md', 'protocol.md') if name in events[0]['payload']['contract_files']},
                 'directions': state['directions'], 'messages': state['messages'],
-                'usage': state['usage'], 'cleanup': state['cleanup'],
+                'usage': state['usage'], 'helpers': state['helpers'], 'knowledge_deliveries': state['knowledge_deliveries'],
+                'cleanup': state['cleanup'],
                 'resource_holds': state['resource_holds'], 'external_action_authorized': False})
-            for data in files.values():
+            for name, data in files.items():
                 try:
-                    safe_publication(data)
+                    if name.startswith('knowledge/files/'):
+                        from engagement_knowledge import _safe
+                        _safe(data)
+                    else:
+                        safe_publication(data)
                 except ContractError:
                     fail('publication_secret')
             output.mkdir(mode=0o700)

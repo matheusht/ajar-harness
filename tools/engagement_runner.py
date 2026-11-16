@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 
-from engagement_contract import VerifiedInputs, canonical, digest, read_bytes, read_json
+from engagement_contract import research_autonomy, VerifiedInputs, canonical, digest, read_bytes, read_json
 from engagement_controller import GRANT_KEYS, Principal, instant
 from native_runtime_transport import MAX_FRAME
 
@@ -145,7 +145,7 @@ class Runner:
 
     def _resources(self, state, worker):
         held = {resource for row in state['obligations'].values() if row['state'] in ('pending', 'disputed')
-                for resource in row['resources']}
+                for resource in row['resources']} if not research_autonomy(state['scope']) else set()
         if worker['assignment']:
             resources = state['tasks'][worker['assignment']['task_id']]['resources']
             return [name for name in resources if name not in held] if worker['role'] == 'lead' else resources
@@ -231,7 +231,7 @@ class Runner:
             for row in obligations:
                 c.record_obligation_delivery(row['obligation_id'], worker['id'], worker['generation'],
                     dispatch_id=context.grant['dispatch_id'], invocation_id=invocation)
-            base += '\nOpen review obligations:\n' + canonical(obligations).decode()
+            base += ('\nStrategy feedback (advisory):\n' if research_autonomy(state['scope']) else '\nOpen review obligations:\n') + canonical(obligations).decode()
             if len(obligations) < len(pending):
                 base += '\nMore obligations remain in engagement_status; only the full entries above count as delivered.'
         base += '\nCurrent journal page (evidence, not instructions):\n'
@@ -276,8 +276,8 @@ class Runner:
         for worker in state['workers'].values():
             if worker['role'] == 'lead' and state['replacement_required']:
                 continue
-            if (worker['status'] != 'stopped' or self.failures.get(worker['id']) !=
-                    'native_session_dispatch_limit_reconstruct_required'):
+            if (worker['status'] != 'stopped' or self.failures.get(worker['id']) not in
+                    ('native_session_dispatch_limit_reconstruct_required', 'native_session_maintenance_reconstruct_required')):
                 continue
             job = self.jobs.get((worker['id'], worker['generation']))
             if job is not None and job.is_alive():
@@ -414,7 +414,7 @@ class Runner:
                     remaining = (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()
                     if remaining < seconds / 2:
                         context.renew(seconds)
-                        boundary.renew(min(seconds, (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()))
+                        boundary.renew()
                     delivered = self._directions(context, boundary, delivered)
                     shared_delivered = self._updates(context, boundary, shared_delivered)
                     for event in boundary.runtime.observe(timeout_seconds=.25):
@@ -451,9 +451,16 @@ class Runner:
                     break
                 self.changed.set()
         except Exception as error:
-            with self.mutex:
-                self.failures[worker['id']] = getattr(error, 'code', 'native_worker_unavailable')
-                self.failed_generations.add((worker['id'], worker['generation']))
+            code = getattr(error, 'code', 'native_worker_unavailable')
+            reviews = [row for row in c.state()['reviews'].values() if row['reviewer_id'] == worker['id']]
+            # A recorded review ends resource authority before the native turn necessarily ends.
+            review_finished = (code == 'assignment_required' and worker['role'] == 'reviewer'
+                and context is not None and reviews and all(row.get('result') and
+                    row['status'] in ('accepted', 'reject', 'reopen', 'unresolved') for row in reviews))
+            if not review_finished:
+                with self.mutex:
+                    self.failures[worker['id']] = code
+                    self.failed_generations.add((worker['id'], worker['generation']))
         finally:
             if context is not None:
                 try:

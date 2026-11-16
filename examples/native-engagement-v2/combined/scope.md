@@ -179,10 +179,7 @@ additional confirmations; remote application mutations need their own effects.
     }
   ],
   "limits": {
-    "hard": {
-      "invocations": "REPLACE_POSITIVE_INVOCATION_BUDGET",
-      "worker_seconds": "REPLACE_POSITIVE_TOTAL_WORKER_SECONDS"
-    },
+    "hard": {},
     "max_workers": 3,
     "max_worker_lease_seconds": 600,
     "informational": {}
@@ -191,6 +188,6 @@ additional confirmations; remote application mutations need their own effects.
     "operator_stop": true,
     "disconnected_worker": "lease_expiry"
   },
-  "authority_policy": "initial-scope-v1"
+  "authority_policy": "research-autonomy-v1"
 }
 ```

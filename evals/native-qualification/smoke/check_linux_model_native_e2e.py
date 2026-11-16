@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -45,6 +46,65 @@ def check(result, name, condition):
 def error_code(error):
     value = getattr(error, 'code', None)
     return value if isinstance(value, str) and re.fullmatch('[a-z_]{1,100}', value) else type(error).__name__
+
+
+HELPER_BOOTSTRAP_PROBE = '''import json,os,runpy
+ns=runpy.run_path('/runtime/native_runtime_bootstrap.py',run_name='oslit_diagnostic')
+try: ns['_launch']()
+except BaseException as error:
+ allowed={'truncated','duplicate','file','pin','environment','credential_environment','size','frame','command','catalog_runtime','helper','state','workspace'}
+ kinds={'ValueError','PermissionError','FileNotFoundError','FileExistsError','OSError','MemoryError'}
+ category=str(error) if type(error) is ValueError and str(error) in allowed else 'other'
+ kind=type(error).__name__ if type(error).__name__ in kinds else 'other'
+ trace=[];tb=error.__traceback__
+ while tb is not None:
+  code=tb.tb_frame.f_code
+  if code.co_filename=='/runtime/native_runtime_bootstrap.py': trace.append({'function':code.co_name,'line':tb.tb_lineno})
+  tb=tb.tb_next
+ errno=error.errno if isinstance(error,OSError) and type(error.errno) is int else None
+ os.write(2,('OSLIT_BOOTSTRAP_DIAGNOSTIC '+json.dumps({'kind':kind,'category':category,'errno':errno,'frames':trace[-5:]})+'\\n').encode())
+ raise SystemExit(2) from None
+'''
+
+
+def helper_stderr_diagnostic(content, known_secrets):
+    try:
+        safe_publication(content, known_secrets=known_secrets)
+    except ContractError:
+        return {'withheld': True}
+    allowed = {'truncated', 'duplicate', 'file', 'pin', 'environment', 'credential_environment',
+               'size', 'frame', 'command', 'catalog_runtime', 'helper', 'state', 'workspace', 'other'}
+    kinds = {'ValueError', 'PermissionError', 'FileNotFoundError', 'FileExistsError', 'OSError', 'MemoryError', 'other'}
+    functions = {'_launch', '_read', '_pairs', '_file', '_environment'}
+    result = {'withheld': False}
+    for line in content.splitlines():
+        if not line.startswith(b'OSLIT_BOOTSTRAP_DIAGNOSTIC '):
+            continue
+        try:
+            row = json.loads(line.split(b' ', 1)[1])
+            if (set(row) != {'kind', 'category', 'errno', 'frames'} or row['kind'] not in kinds or row['category'] not in allowed
+                    or row['errno'] is not None and (type(row['errno']) is not int or not 0 <= row['errno'] <= 4096)
+                    or not isinstance(row['frames'], list) or len(row['frames']) > 5
+                    or any(not isinstance(frame, dict) or set(frame) != {'function', 'line'}
+                           or frame['function'] not in functions or type(frame['line']) is not int
+                           or not 0 < frame['line'] < 10000 for frame in row['frames'])):
+                raise ValueError()
+            result['bootstrap'] = row
+        except (ValueError, TypeError, KeyError):
+            result['bootstrap'] = 'invalid'
+        break
+    lower = content.lower()
+    result['docker_categories'] = [name for name in ('oci', 'permission denied', 'no such file',
+        'not running', 'resource temporarily unavailable', 'out of memory') if name.encode() in lower]
+    return result
+
+
+def helper_diagnostic_self_check():
+    sample = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"ValueError","category":"state","errno":null,"frames":[{"function":"_launch","line":1}]}\n'
+    assert helper_stderr_diagnostic(sample, ())['bootstrap']['category'] == 'state'
+    disk = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"OSError","category":"other","errno":28,"frames":[]}\n'
+    assert helper_stderr_diagnostic(disk, ())['bootstrap']['errno'] == 28
+    assert helper_stderr_diagnostic(b'fake-sensitive-sentinel', (b'fake-sensitive-sentinel',)) == {'withheld': True}
 
 
 def diagnostic_transport(observations, known_secrets):
@@ -308,10 +368,16 @@ class Provider:
         self.ca, certificate, key = _certificates(directory, [PROVIDER_HOST], lifetime_seconds=3600)
         self.runtime, self.secret = runtime, secret
         self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
+        self.error_frames = []
+        self.public_error_codes = []
+        self.json_parse_diagnostics = []
         self.discovery_requests = 0
         self.request_observation_total = 0
         self.request_observation_lock = threading.Lock()
         self.command = None
+        self.autonomy = None
+        self.public_frames = None
+        self.autonomy_lock = threading.Lock()
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -335,30 +401,68 @@ class Provider:
                 self.send_response(403); self.end_headers()
 
             def do_POST(self):
+                incomplete_authenticated = False
                 try:
                     fixture.observe_request('POST', self.path, self.headers)
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 2 * 1024 * 1024:
                         raise ValueError('provider_request_size')
-                    body = json.loads(self.rfile.read(size))
+                    read_started = datetime.now(timezone.utc)
+                    raw = self.rfile.read(size)
+                    read_finished = datetime.now(timezone.utc)
+                    try:
+                        body = json.loads(raw)
+                    except json.JSONDecodeError as error:
+                        if len(fixture.json_parse_diagnostics) < 8:
+                            encoding = self.headers.get('Content-Encoding', 'identity').lower()
+                            transfer = self.headers.get('Transfer-Encoding', 'none').lower()
+                            content_type = self.headers.get('Content-Type', '').split(';', 1)[0].lower()
+                            fixture.json_parse_diagnostics.append({'expected_bytes': size, 'received_bytes': len(raw),
+                                'error_position': error.pos,
+                                'content_encoding': encoding if encoding in ('identity', 'gzip', 'deflate', 'br') else 'other',
+                                'transfer_encoding': transfer if transfer in ('none', 'chunked') else 'other',
+                                'content_type': content_type if content_type in ('application/json', '') else 'other'})
+                            if len(raw) < size and fixture.public_frames is not None:
+                                incomplete_authenticated = (self.headers.get('Authorization') == 'Bearer ' + fixture.secret
+                                    and content_type == 'application/json' and encoding == 'identity' and transfer == 'none')
+                                fixture.json_parse_diagnostics[-1]['authenticated'] = incomplete_authenticated
+                                fixture.json_parse_diagnostics[-1]['controller_snapshot'] = fixture.public_frames.status_snapshot(read_started, read_finished)
+                        raise
                     if self.headers.get('Authorization') != 'Bearer ' + fixture.secret:
                         raise ValueError('provider_credential_missing')
                     if fixture.secret in json.dumps(body) or not fixture.command:
                         raise ValueError('provider_body_invalid')
                     fixture.requests.append(body)
                     seq = len(fixture.requests)
-                    if seq > 4:
+                    if self.path == '/v1/responses/compact' and fixture.public_frames is not None:
+                        response = canonical(fixture.public_frames.compact_response(body))
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Content-Length', str(len(response)))
+                        self.end_headers(); self.wfile.write(response); self.wfile.flush()
+                        return
+                    if seq > 4 and fixture.autonomy is None and fixture.public_frames is None:
                         raise ValueError('provider_unexpected_request')
                     command = fixture.command if seq == 1 else 'cat /work/first-turn.txt'
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/event-stream')
                     self.end_headers()
-                    frames = fixture.frames(seq, command)
+                    frames = (fixture.public_frames(body, seq, self.path) if fixture.public_frames is not None else
+                              fixture.autonomy_frames(body) if seq > 4 else fixture.frames(seq, command))
                     for frame in frames:
                         self.wfile.write(frame)
                     self.wfile.flush()
                 except Exception as error:
-                    fixture.errors.append(error_code(error))
+                    fixture.errors.append('incomplete_authenticated_request' if incomplete_authenticated else error_code(error))
+                    public_codes = {'public_lane_unavailable', 'source_output_not_observed',
+                        'helper_not_completed', 'helper_output_not_observed', 'helper_authority_not_observed',
+                        'review_packet_not_observed', 'review_packet_invalid', 'public_compaction_unqualified'}
+                    if str(error) in public_codes and len(fixture.public_error_codes) < 8:
+                        fixture.public_error_codes.append(str(error))
+                    import traceback
+                    if len(fixture.error_frames) < 8:
+                        fixture.error_frames.append([{'file': Path(frame.filename).name, 'line': frame.lineno,
+                            'function': frame.name} for frame in traceback.extract_tb(error.__traceback__)[-6:]])
                     self.close_connection = True
 
         self.server = ThreadingHTTPServer((PROVIDER_HOST, 0), Handler)
@@ -409,6 +513,58 @@ class Provider:
                     'created': 0, 'model': 'fixture-model', 'choices': [{'index': 0, **frame}]}) + '\n\n').encode()
                 for frame in frames] + [b'data: [DONE]\n\n']
 
+    def autonomy_frames(self, body):
+        """Route independent native sessions without making provider output a model claim."""
+        raw = json.dumps(body)
+        previous = body.get('previous_response_id', '')
+        child = 'internal helper acting under the parent' in raw or previous.startswith('autonomy-child-')
+        hold = False
+        with self.autonomy_lock:
+            if child and self.autonomy.get('hold_next_child'):
+                self.autonomy['hold_next_child'] = False
+                hold = True
+        if hold:
+            self.autonomy['child_held'].set()
+            if not self.autonomy['child_release'].wait(15):
+                raise ValueError('fixture_child_release_timeout')
+        with self.autonomy_lock:
+            state = self.autonomy
+            lane = 'child' if child else 'parent'
+            count = state[lane]
+            state[lane] += 1
+            identity = 'autonomy-' + lane + '-' + str(count)
+            if child and count == 0:
+                name, arguments = 'engagement_knowledge', {'action': 'read', 'version': state['version'], 'materialize': True}
+            elif not child and count == 0:
+                name, arguments = 'engagement_helper', {'action': 'spawn', 'prompt': 'Read the owned fixture reference.'}
+            elif not child and count == 2:
+                name, arguments = 'engagement_helper', {'action': 'read', 'helper_id': state['helper_id']}
+            elif not child and state.get('next_parent_action'):
+                name, arguments = state.pop('next_parent_action')
+            else:
+                name, arguments = None, None
+            if self.runtime == 'codex':
+                item = ({'id': 'fc_' + identity, 'type': 'function_call', 'call_id': 'call-' + identity,
+                         'name': name, 'arguments': json.dumps(arguments)} if name else
+                        {'id': 'msg_' + identity, 'type': 'message', 'role': 'assistant',
+                         'content': [{'type': 'output_text', 'text': 'Owned fixture complete.'}]})
+                response = {'id': identity, 'object': 'response', 'status': 'completed', 'output': [item],
+                            'usage': {'input_tokens': 10, 'output_tokens': 10, 'total_tokens': 20}}
+                frames = [{'type': 'response.created', 'response': {**response, 'status': 'in_progress', 'output': []}},
+                          {'type': 'response.output_item.added', 'output_index': 0, 'item': item},
+                          {'type': 'response.output_item.done', 'output_index': 0, 'item': item},
+                          {'type': 'response.completed', 'response': response}]
+                return [('event: ' + frame['type'] + '\ndata: ' + json.dumps(dict(frame, sequence_number=i)) + '\n\n').encode()
+                        for i, frame in enumerate(frames)]
+            delta = ({'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'call-' + identity, 'type': 'function',
+                      'function': {'name': name, 'arguments': json.dumps(arguments)}}]} if name else
+                     {'role': 'assistant', 'content': 'Owned fixture complete.'})
+            frames = [{'delta': delta, 'finish_reason': None},
+                      {'delta': {}, 'finish_reason': 'tool_calls' if name else 'stop'}]
+            return [('data: ' + json.dumps({'id': identity, 'object': 'chat.completion.chunk', 'created': 0,
+                    'model': 'fixture-model', 'choices': [{'index': 0, **frame}]}) + '\n\n').encode()
+                    for frame in frames] + [b'data: [DONE]\n\n']
+
     def close(self):
         self.server.shutdown(); self.server.server_close(); self.thread.join(timeout=3)
 
@@ -443,18 +599,18 @@ def tool_bundle(fixture, result):
     return result['tool_installation']['profile_fields']['tool_bundle']
 
 
-def omp_fixture_catalog(provider_url):
+def omp_fixture_catalog(provider_url, context_window=32768, api='openai-completions'):
     return canonical({'providers': {'openai': {'baseUrl': provider_url + '/v1',
-        'api': 'openai-completions', 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
+        'api': api, 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
             'reasoning': False, 'input': ['text'], 'supportsTools': True,
-            'contextWindow': 32768, 'maxTokens': 1024,
+            'contextWindow': context_window, 'maxTokens': 1024,
             'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}})
 
 
-def validate_omp_fixture_catalog(content, provider_url, secret):
+def validate_omp_fixture_catalog(content, provider_url, secret, api='openai-completions'):
     catalog = json.loads(content)
     provider = catalog['providers']['openai']
-    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != 'openai-completions'
+    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != api
             or provider.get('apiKey') != 'OPENAI_API_KEY'
             or [model.get('id') for model in provider.get('models', [])] != ['fixture-model']
             or secret.encode() in content):
@@ -515,11 +671,14 @@ env_key = "OPENAI_API_KEY"
         'model_host': {'kind': 'linux-docker-model-v1', 'docker_binary': fixture.docker,
             'docker_endpoint': fixture.endpoint, 'daemon_id': fixture.daemon_id, 'image_id': fixture.image_id,
             'platform': fixture.platform, 'uid': 1000, 'gid': 1000,
-            'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128, 'workspace_bytes': 134217728}}}
+            'limits': {'memory_bytes': 1610612736 if fixture.runtime == 'omp' else 1073741824, 'cpu_count': 2, 'pids': 128,
+                       'workspace_bytes': 1073741824 if fixture.runtime == 'omp' else 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
-        catalog_content = omp_fixture_catalog(provider.origin)
-        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret)
+        public = getattr(fixture, 'public_run', False)
+        api = 'openai-responses' if public else 'openai-completions'
+        catalog_content = omp_fixture_catalog(provider.origin, 131072 if public else 32768, api)
+        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret, api)
         write(catalog, catalog_content)
         profile['model_catalog'] = {'path': str(catalog), 'sha256': digest(catalog.read_bytes())}
     write(Path(inputs['runtime_profiles']['runtime-main']), canonical(profile))
@@ -530,6 +689,10 @@ env_key = "OPENAI_API_KEY"
         environment['codex_tool_policy'] = codex_tool_policy
     write(Path(inputs['environment_profiles']['lab-main']), canonical(environment))
     scope = fixture_scope(inputs_path)
+    if getattr(fixture, 'autonomy', False):
+        from check_owned_lab_state_e2e import scope_with_artifact
+        scope = scope_with_artifact(scope)
+        scope['authority_policy'] = 'research-autonomy-v1'
     scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(source)))
     scope['runtime_assignments'][0]['profile_sha256'] = digest(canonical(profile))
     scope['environments'][0]['profile_sha256'] = digest(canonical(environment))
@@ -645,6 +808,7 @@ def verify_engagement_export(controller, root, result):
     import subprocess
 
     bundle = root / 'export'
+    stage = 'export'
     try:
         exported = controller.export(bundle)
         commands = {
@@ -655,6 +819,7 @@ def verify_engagement_export(controller, root, result):
         }
         reports = {}
         for name, command in commands.items():
+            stage = name
             completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
             if completed.returncode != 0:
                 raise ValueError('export_' + name + '_verification_failed')
@@ -678,7 +843,7 @@ def verify_engagement_export(controller, root, result):
         if result['export_verification']['status'] != 'passed':
             result['status'] = 'failed'
     except Exception as error:
-        result['export_verification'] = {'status': 'failed', 'error': error_code(error)}
+        result['export_verification'] = {'status': 'failed', 'error': error_code(error), 'stage': stage}
 
 
 def run_native(root, fixture, result):
@@ -843,6 +1008,276 @@ def run_native(root, fixture, result):
               and (FIRST_PROMPT in json.dumps(provider.requests[2])
                    or provider.requests[2].get('previous_response_id') == 'fixture-2')
               and 'LINUX_NATIVE_FIRST_TURN' in json.dumps(provider.requests[3]) and not provider.errors)
+        if getattr(fixture, 'autonomy', False):
+            from engagement_knowledge import KnowledgeLibrary
+            boundary._knowledge_shared = KnowledgeLibrary(root / 'shared-library', corpus_root=None)
+            boundary._knowledge_local = KnowledgeLibrary(controller.root / 'knowledge', corpus_root=None)
+            reference = b'Owned benign native helper reference.\n'
+            selected = boundary._knowledge_shared.retain(reference, origin='fixture:owned', title='Owned fixture')
+            provider.autonomy = {'version': selected['version'], 'parent': 0, 'child': 0}
+            if fixture.runtime == 'omp':
+                create_helper = boundary.runtime.create_helper
+                def sample_omp_workspace(stage):
+                    owner = boundary.model_owner
+                    sample = '''import json,os,pathlib
+s=os.statvfs('/work');p=pathlib.Path('/sys/fs/cgroup')
+print(json.dumps({'total_bytes':s.f_blocks*s.f_frsize,'available_bytes':s.f_bavail*s.f_frsize,
+ 'memory_current':int((p/'memory.current').read_text()),'pids_current':int((p/'pids.current').read_text())}))'''
+                    try:
+                        observed = owner.environment._run(['container', 'exec', '--user', '0:0',
+                            owner.environment.identity['container_id'], 'python3', '-I', '-S', '-c', sample],
+                            timeout=5, output_limit=1024)
+                        values = json.loads(observed['output'])
+                        if (observed['returncode'] != 0 or set(values) != {'total_bytes', 'available_bytes',
+                                'memory_current', 'pids_current'} or
+                                any(type(value) is not int or value < 0 for value in values.values())):
+                            raise ValueError('fixture_workspace_sample_invalid')
+                        result.setdefault('omp_workspace_samples', []).append({'stage': stage, **values})
+                    except Exception:
+                        result.setdefault('omp_workspace_samples', []).append({'stage': stage, 'status': 'unavailable'})
+                def observe_helper(helper_id):
+                    sample_omp_workspace('before_helper_launch')
+                    owner = boundary.model_owner
+                    original_model_launch = owner.launch_model
+                    diagnostic = result['omp_helper_bootstrap'] = {'launched': False, 'acknowledgment': 'not_observed'}
+                    def observe_model_launch(command, public_environment, binding, *, helper_id=None):
+                        from contextlib import contextmanager
+                        import native_runtime_linux
+                        expected = str(owner.paths.state) + '-helper-' + str(helper_id)
+                        diagnostic.update(helper_id_valid=bool(re.fullmatch(r'[0-9a-f]{32}', str(helper_id))),
+                            home_matches=public_environment.get('HOME') == expected,
+                            state_matches=public_environment.get('PI_CODING_AGENT_DIR') == expected,
+                            guard_entered=False, guard_body_finished=False, frame_write_completed=False)
+                        try:
+                            binding.check()
+                            diagnostic['binding_available'] = True
+                        except Exception:
+                            diagnostic['binding_available'] = False
+                        launch_stdio = owner.environment.launch_stdio
+                        guard, write_pipe = owner.guard, native_runtime_linux.write_pipe
+                        launch_thread = threading.get_ident()
+                        process_ref = []
+                        stderr_capture = {'content': bytearray(), 'thread': None}
+                        @contextmanager
+                        def observed_guard():
+                            with guard():
+                                if threading.get_ident() == launch_thread:
+                                    diagnostic['guard_entered'] = True
+                                try:
+                                    yield
+                                finally:
+                                    if threading.get_ident() == launch_thread:
+                                        diagnostic['guard_body_finished'] = True
+                        def observed_write(pipe, data):
+                            written = write_pipe(pipe, data)
+                            if (threading.get_ident() == launch_thread and process_ref
+                                    and pipe is process_ref[0].stdin):
+                                diagnostic['frame_write_completed'] = True
+                            return written
+                        class ObservedOutput:
+                            def __init__(self, stream): self.stream = stream
+                            def __getattr__(self, name): return getattr(self.stream, name)
+                            def readline(self, *args):
+                                value = self.stream.readline(*args)
+                                diagnostic['acknowledgment'] = ('ready' if value == b'{"native_model_bootstrap":"ready"}\n'
+                                    else 'empty' if not value else 'unexpected')
+                                return value
+                        def observed_stdio(*args, **kwargs):
+                            if not str(kwargs.get('role', '')).startswith('model_helper_'):
+                                return launch_stdio(*args, **kwargs)
+                            if not getattr(fixture, 'diagnostic_bootstrap', False):
+                                process = launch_stdio(*args, **kwargs)
+                                diagnostic.update(instrumented_bootstrap=False, launched=True)
+                                process.stdout = ObservedOutput(process.stdout)
+                                process_ref.append(process)
+                                return process
+                            argv = list(args[0])
+                            if not argv or argv[-1] != '/runtime/native_runtime_bootstrap.py':
+                                raise ValueError('fixture_bootstrap_command_invalid')
+                            argv[-1:] = ['-c', HELPER_BOOTSTRAP_PROBE]
+                            real_popen = research_environment.subprocess.Popen
+                            def diagnostic_popen(command, *inner_args, **inner_kwargs):
+                                selected = (threading.get_ident() == launch_thread and isinstance(command, list)
+                                            and HELPER_BOOTSTRAP_PROBE in command
+                                            and inner_kwargs.get('stderr') == research_environment.subprocess.DEVNULL)
+                                if selected:
+                                    inner_kwargs['stderr'] = research_environment.subprocess.PIPE
+                                process = real_popen(command, *inner_args, **inner_kwargs)
+                                if selected:
+                                    def drain():
+                                        try:
+                                            while chunk := process.stderr.read(4096):
+                                                available = max(0, 4096 - len(stderr_capture['content']))
+                                                stderr_capture['content'].extend(chunk[:available])
+                                        finally:
+                                            process.stderr.close()
+                                    stderr_capture['thread'] = threading.Thread(target=drain, daemon=True)
+                                    stderr_capture['thread'].start()
+                                return process
+                            research_environment.subprocess.Popen = diagnostic_popen
+                            try:
+                                process = launch_stdio(argv, *args[1:], **kwargs)
+                            finally:
+                                research_environment.subprocess.Popen = real_popen
+                            diagnostic['instrumented_bootstrap'] = True
+                            diagnostic['launched'] = True
+                            process.stdout = ObservedOutput(process.stdout)
+                            process_ref.append(process)
+                            return process
+                        owner.environment.launch_stdio = observed_stdio
+                        owner.guard = observed_guard
+                        native_runtime_linux.write_pipe = observed_write
+                        try:
+                            return original_model_launch(command, public_environment, binding, helper_id=helper_id)
+                        except Exception as error:
+                            diagnostic['error'] = error_code(error)
+                            diagnostic['process_exited'] = bool(process_ref and process_ref[0].poll() is not None)
+                            if stderr_capture['thread'] is not None:
+                                stderr_capture['thread'].join(timeout=1)
+                                diagnostic['stderr'] = helper_stderr_diagnostic(bytes(stderr_capture['content']), (secret.encode(),))
+                            counters = '''import json,os,pathlib
+p=pathlib.Path('/sys/fs/cgroup');out={}
+for name in ('memory.current','pids.current'):
+ try: out[name]=int((p/name).read_text().strip())
+ except (OSError,ValueError): pass
+for name in ('memory.events','pids.events'):
+ try: out[name]={k:int(v) for k,v in (line.split() for line in (p/name).read_text().splitlines())}
+ except (OSError,ValueError): pass
+for name,path in (('work','/work'),('tmp','/tmp')):
+ try:
+  s=os.statvfs(path);out[name]={'available_bytes':s.f_bavail*s.f_frsize,'total_bytes':s.f_blocks*s.f_frsize,'available_inodes':s.f_favail,'total_inodes':s.f_files}
+ except OSError: pass
+print(json.dumps(out))'''
+                            try:
+                                observed = owner.environment._run(['container', 'exec', '--user', '0:0',
+                                    owner.environment.identity['container_id'], 'python3', '-I', '-S', '-c', counters],
+                                    timeout=5, output_limit=4096)
+                                values = json.loads(observed['output'])
+                                if (not isinstance(values, dict) or set(values) - {'memory.current', 'pids.current', 'memory.events', 'pids.events', 'work', 'tmp'}
+                                        or any(not (type(value) is int and value >= 0 or isinstance(value, dict)
+                                            and all(isinstance(key, str) and re.fullmatch(r'[a-z_]{1,32}', key)
+                                                    and type(number) is int and number >= 0 for key, number in value.items()))
+                                               for value in values.values())):
+                                    raise ValueError('fixture_cgroup_invalid')
+                                diagnostic['cgroup'] = {'status': observed['status'], 'returncode': observed['returncode'],
+                                    'values': values}
+                            except Exception:
+                                diagnostic['cgroup'] = {'status': 'unavailable'}
+                            raise
+                        finally:
+                            owner.environment.launch_stdio = launch_stdio
+                            owner.guard = guard
+                            native_runtime_linux.write_pipe = write_pipe
+                    owner.launch_model = observe_model_launch
+                    try:
+                        child = create_helper(helper_id)
+                    finally:
+                        owner.launch_model = original_model_launch
+                    diagnostic = {}
+                    observe_omp_native_events(child, diagnostic, (secret.encode(),))
+                    result['omp_helper_native_events'] = diagnostic['omp_native_events']
+                    return child
+                boundary.runtime.create_helper = observe_helper
+            invoke(context, boundary, 'Use a helper for the owned fixture reference.', result)
+            deadline = time.monotonic() + 45
+            unknown_event = False
+            while time.monotonic() < deadline:
+                helpers = list(controller.state()['helpers'].values())
+                if helpers and helpers[0].get('status') in ('completed', 'failed', 'stopped'):
+                    break
+                events = boundary.runtime.observe(timeout_seconds=.1)
+                unknown_event |= any(event.get('event') == 'unknown' for event in events)
+            if fixture.runtime == 'omp':
+                sample_omp_workspace('after_first_helper')
+            check(result, 'helper wait retains a known parent transport', not unknown_event)
+            state = controller.state()
+            helpers = list(state['helpers'].values())
+            deliveries = state.get('knowledge_deliveries', [])
+            result['autonomy_diagnostic'] = {'provider_lanes': {key: provider.autonomy[key] for key in ('parent', 'child')},
+                'helpers': [{key: row.get(key) for key in ('status', 'reason', 'parent_session_id', 'session_id', 'owner_receipt_sha256')}
+                            for row in helpers],
+                'delivery_count': len(deliveries), 'provider_errors': provider.errors[:8],
+                'tool_error_codes': sorted(set(re.findall(r'\b(?:native|helper|worker|knowledge)_[a-z_]{3,80}\b',
+                                                          json.dumps(provider.requests))))[:20]}
+            check(result, 'native helper completes under parent authority', len(helpers) == 1
+                  and helpers[0].get('status') == 'completed' and helpers[0].get('worker_id') == worker['id']
+                  and helpers[0].get('parent_session_id') == identity['session_id'])
+            helper_usage = helpers[0].get('usage', {})
+            check(result, 'native helper reports usage totals',
+                  type((helper_usage.get('tokens') or {}).get('total')) is int)
+            def helper_usage_count():
+                return sum(event['type'] == 'helper_observed' and event['payload']['helper_id'] == helpers[0]['helper_id']
+                           and event['payload']['action'] == 'usage' for event in controller._events())
+            before_count = helper_usage_count()
+            before_tokens = controller.state()['usage']['tokens']
+            controller.record_helper(context.grant, helpers[0]['helper_id'], 'usage', {'usage': helper_usage})
+            check(result, 'replayed helper cumulative usage is counted once', before_count > 0
+                  and helper_usage_count() == before_count and controller.state()['usage']['tokens'] == before_tokens)
+            provider.autonomy['helper_id'] = helpers[0]['helper_id']
+            invoke(context, boundary, 'Read the completed owned helper result.', result)
+            check(result, 'parent reads helper through native tool', provider.autonomy['parent'] == 4
+                  and helpers[0]['helper_id'] in json.dumps(provider.requests))
+            check(result, 'native helper materializes exact retained reference', any(
+                item.get('version') == selected['version'] and item.get('action') == 'delivery'
+                and item.get('materialization', {}).get('status') == 'materialized' for item in deliveries))
+            readback = boundary.environment.execute(['cat', '/work/knowledge/' + selected['version'][7:] + '/reference.bin'], timeout_seconds=10)
+            check(result, 'materialized reference bytes verified', readback['status'] == 'settled'
+                  and readback.get('output', '').encode() == reference)
+            revised = b'Owned revised native helper reference.\n'
+            updated = boundary._knowledge_shared.retain(revised, origin='fixture:owned', title='Owned fixture')
+            check(result, 'same-name source update selects a new immutable version', updated['version'] != selected['version'])
+            for version in (selected['version'], updated['version']):
+                before_deliveries = len(controller.state().get('knowledge_deliveries', []))
+                provider.autonomy['next_parent_action'] = ('engagement_knowledge',
+                    {'action': 'read', 'version': version, 'materialize': True})
+                invoke(context, boundary, 'Read the selected owned reference version.', result)
+                check(result, 'native read selected version delivered', any(
+                    item.get('version') == version and item.get('action') == 'delivery'
+                    and item.get('materialization', {}).get('status') == 'materialized'
+                    for item in controller.state().get('knowledge_deliveries', [])[before_deliveries:]))
+            for record, expected in ((selected, reference), (updated, revised)):
+                readback = boundary.environment.execute(['cat', '/work/knowledge/' + record['version'][7:] + '/reference.bin'],
+                    timeout_seconds=10)
+                check(result, 'selected immutable version retains exact bytes', readback['status'] == 'settled'
+                      and readback.get('output', '').encode() == expected)
+            provider.autonomy.update(hold_next_child=True, child_held=threading.Event(), child_release=threading.Event())
+            provider.autonomy['next_parent_action'] = ('engagement_helper',
+                {'action': 'spawn', 'prompt': 'Wait with the owned test provider until stopped.'})
+            try:
+                invoke(context, boundary, 'Start a second helper for the owned stop fixture.', result)
+                rows = list(controller.state()['helpers'].values())
+                check(result, 'second helper created for active stop', len(rows) == 2)
+                second = next(row for row in rows if row['helper_id'] != helpers[0]['helper_id'])
+                deadline = time.monotonic() + 30
+                while not provider.autonomy['child_held'].is_set() and time.monotonic() < deadline:
+                    boundary.runtime.observe(timeout_seconds=.1)
+                check(result, 'second helper reaches the held native provider request', provider.autonomy['child_held'].is_set())
+                def release_on_stop():
+                    job = boundary.helpers.jobs.get(second['helper_id'])
+                    if job is not None:
+                        job['stop'].wait(12)
+                    provider.autonomy['child_release'].set()
+                releaser = threading.Thread(target=release_on_stop, daemon=True); releaser.start()
+                provider.autonomy['next_parent_action'] = ('engagement_helper',
+                    {'action': 'stop', 'helper_id': second['helper_id']})
+                invoke(context, boundary, 'Stop the active owned test helper.', result)
+                releaser.join(timeout=15)
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    stopped = controller.state()['helpers'][second['helper_id']]
+                    if stopped.get('status') in ('stopped', 'failed', 'completed'):
+                        break
+                    boundary.runtime.observe(timeout_seconds=.1)
+                check(result, 'active native helper stops and releases its session',
+                      stopped.get('status') == 'stopped' and second['helper_id'] not in boundary.helpers.jobs)
+            finally:
+                provider.autonomy['child_release'].set()
+            result['autonomy_coverage'] = {'helper_and_reference': 'passed', 'provider': 'scripted',
+                'duplicate_helper_usage': 'passed',
+                'reference_version_update': 'passed',
+                'active_helper_stop': 'passed',
+                'not_covered': ['live_model_direction', 'fetch_retention_failure',
+                                'independent_technique_review', 'reviewed_closure']}
         result['native_execution'] = 'two_invocations_completed'
         result['controlled_provider_requests'] = len(provider.requests)
         result['controlled_provider_discovery_requests'] = provider.discovery_requests
@@ -875,12 +1310,13 @@ def run_native(root, fixture, result):
         result['watcher_loss'] = {'guardian_stop_seconds': round(time.monotonic() - fault_started, 3),
                                  'renewed_owner_lease_seconds': 8, 'detached_child_started': True}
         controller.revoke_worker(worker['id'], worker['generation'], reason='fixture-recovery')
+        requests_before_refusal = len(provider.requests)
         refused = False
         try:
             boundary.runtime.invoke('Must refuse after revocation.', 'after-revocation')
         except Exception as error:
             refused = getattr(error, 'code', None) == 'worker_stale'
-        check(result, 'revoked native invocation refused', refused and len(provider.requests) == 4)
+        check(result, 'revoked native invocation refused', refused and len(provider.requests) == requests_before_refusal)
         reopened = Controller(controller.root)
         recovery_runner = Runner(reopened)
         current = reopened.state()
@@ -993,6 +1429,9 @@ def main(*, classify_result=None):
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
+    parser.add_argument('--autonomy', action='store_true', help='Exercise a native helper and retained reference with scripted provider replies')
+    parser.add_argument('--public-run-only', action='store_true', help='Exercise the signed public CLI and Runner with scripted native responses')
+    parser.add_argument('--diagnostic-bootstrap', action='store_true', help='Instrument the OMP helper bootstrap for a failed-start diagnosis')
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -1003,15 +1442,26 @@ def main(*, classify_result=None):
         fixture = prepare_image(runtime=args.runtime, platform=args.platform, base_image=args.base_image,
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
         fixture.codex_tool_policy = args.codex_tool_policy
+        fixture.autonomy = args.autonomy or args.public_run_only
+        fixture.diagnostic_bootstrap = args.diagnostic_bootstrap
+        result['model_workspace_bytes'] = 1073741824 if args.runtime == 'omp' else 134217728
+        result['model_memory_bytes'] = 1610612736 if args.runtime == 'omp' else 1073741824
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:
-            run_native(Path(temporary).resolve(), fixture, result)
-        check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
-        check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
+            if args.public_run_only:
+                from check_research_autonomy_public_e2e import run_public
+                run_public(Path(temporary).resolve() / 'public', fixture, result)
+            else:
+                run_native(Path(temporary).resolve(), fixture, result)
+                check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
+                check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
         result['status'] = 'passed'
     except Exception as error:
         result['error'] = error_code(error)
+        import traceback
+        result['error_frames'] = [{'file': Path(frame.filename).name, 'line': frame.lineno, 'function': frame.name}
+                                  for frame in traceback.extract_tb(error.__traceback__)[-8:]]
     finally:
         if fixture is not None:
             if (result.get('boundary_cleanup_error') or result.get('boundary_cleanup', {}).get('cleanup') == 'unresolved'):
@@ -1023,6 +1473,7 @@ def main(*, classify_result=None):
             if result['image']['status'] != 'passed':result['status'] = 'failed'
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
             [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
+             Path(__file__).with_name('check_research_autonomy_public_e2e.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_candidate.py'),
              Path(__file__).with_name('check_codex_tool_policy_missing_profile_e2e.py'),

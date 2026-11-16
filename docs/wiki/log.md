@@ -941,3 +941,57 @@ and [caller](../../evals/native-qualification/smoke/NATIVE-CALLER-MIGRATION-E2E.
 checks retain before/after results. Pricing, hosted CI and fresh-target research
 were excluded by the operator. This adoption does not certify physical Docker,
 external providers or sustained operation.
+
+## 2026-11-16 — research autonomy, active references and experimental reuse
+
+[Decision 0016](../decisions/0016-research-autonomy.md) records the operator's
+approved full-plan revision. New signed `research-autonomy-v1` inputs remove the
+strategy veto/fixed replacement counter and universal escalation ladder, retain
+exact execution facts with independent scientific review, and make total caps
+optional. Native helpers share parent authority and elapsed time; actual provider
+usage still includes them. Historical signed contracts and frozen guidance remain.
+
+The [library guide](../agents/knowledge-library.md) covers active selected-version
+retention, large source files, honest not-retained delivery and optional technique
+transfer/counterexample review. The historical reference pack includes a contents
+page and interpretation corrections rather than inheriting past verification labels.
+Failure cases were defined before implementation; Luna owns minimal local checks.
+This is local implementation work, not hosted CI, full E2E, live provider qualification,
+sustained operation, research benefit or fresh-target acceptance. Those runs remain
+deferred by the operator.
+
+
+## 2026-11-16 — full verification authorization and observed repairs
+
+The operator's later instruction supersedes the initial E2E/provider deferral:
+Terra owns full workflow checks and prerequisite/image preparation; Astra owns
+implementation repairs; PR publication is authorized. The
+[dated delivery page](oslit-research-autonomy-delivery-2026-11-16.md) maps all M0–M6
+capabilities and the autonomy/helper/knowledge changes to their evidence.
+
+At `5df9010b`, local full conformance passed 900 checks with zero failures.
+Failure-first execution repaired byte loss under socket backpressure and Codex
+external-authentication/executor ordering; the latter exposed a separate Mac Docker
+namespace prerequisite. One actual OMP/Mistral source-read turn completed with
+cleanup. Hosted run 43915587129 passed the Docker job and both 42-check direct native
+suites. Public workflow qualification remains open: Codex closed but retained an
+unclassified partial provider upload; OMP encountered fixture continuation handling. Historical failed receipts are preserved. These
+observations do not establish fresh-target research benefit or multiday operation.
+
+
+## 2026-11-16 — final bounded native workflow verification
+
+At `0983d8b1`, [hosted run 43934112061](https://github.com/matheusht/redteam-harness/actions/runs/43934112061)
+passed Docker and both native jobs. Codex and OMP each passed 42 direct checks;
+the public workflows passed six and seven checks respectively through completed
+helpers, separate accepted review, closure, all three export verifiers and cleanup.
+Each public run retained one verified closure cancellation and no unexpected worker
+failure. OMP completed one native remote compaction without `native_usage_invalid`.
+Its affected native token/cost delta is explicitly unavailable; earlier usage and
+the provider-request ledger remain intact.
+
+Local conformance passed 900 checks with zero failures at `2b7dc8ac`; the later
+change only adjusted the public fixture's completion window and timing diagnostics.
+The [dated delivery report](oslit-research-autonomy-delivery-2026-11-16.md) maps all
+implementation areas and preserves live-provider, full research-effectiveness,
+separate-host outage and multiday gaps. Historical failed receipts remain retained.

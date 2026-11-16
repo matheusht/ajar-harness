@@ -9,7 +9,8 @@ direction with Codex/OMP and duration corrections; the operator has now
 [assigned implementation](../research/oslit-implementation-2026-11-14.md).
 The [Q30 rationale](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)
 records why scored search stays within tasks and native reuse requires a minimal,
-enforced controller interface. This planning direction does not amend runtime gates.
+enforced controller interface. The later [research-autonomy decision](0016-research-autonomy.md) selects a new
+versioned policy; historical signed policies retain their gates.
 
 Use this folder for choices that are more specific than `docs/architecture.md`, but more durable
 than a one-off field note. Decision docs should explain:
@@ -39,6 +40,8 @@ For the maintained engineering synthesis and implementation evidence, start with
 - [0013 — One versioned signed finding activation](0013-canonical-filing-contract.md) — **interim fail-closed draft; new positive filings unavailable because original G3/G6 producer is missing; #85 incomplete**
 - [0014 — One durable engagement controller with native research runtimes](0014-native-engagement-team.md) — **accepted implementation direction; capability enforcement required before v2 activation; old routes unchanged**
 - [0015 — Initial signed authority for autonomous internal research](0015-initial-scope-autonomy.md) — **accepted v2 initial-scope policy and default caller migration; no repeated human artifact/rung approvals inside the signed envelope; historical contracts retained**
+
+- [0016 — Research autonomy within initial authority](0016-research-autonomy.md) — **accepted new signed policy; advisory strategy, reviewer scientific judgment, optional totals, native helpers and versioned reference/technique reuse; local implementation, qualification deferred**
 
 New research uses the [v2 engagement entry](../agents/engagement.md). Existing v1
 native inputs and queue/record work retain their compatibility entries and immutable

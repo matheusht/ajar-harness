@@ -509,12 +509,19 @@ def run_public(root, fixture, result):
         command = [sys.executable, str(ROOT / 'tools/native_engagement.py'), 'run', '--inputs', str(inputs),
                    '--engagement-root', str(engagement)]
         child = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        started = time.monotonic()
+        timing = result['public_timing'] = {'timeout_seconds': 360, 'timed_out': False, 'stop_returncode': None}
         try:
-            stdout, _ = child.communicate(timeout=200)
-        except subprocess.TimeoutExpired:
-            subprocess.run([sys.executable, str(ROOT / 'tools/native_engagement.py'), 'stop', '--engagement-root', str(engagement)],
+            try:
+                stdout, _ = child.communicate(timeout=timing['timeout_seconds'])
+            except subprocess.TimeoutExpired:
+                timing['timed_out'] = True
+                stopped = subprocess.run([sys.executable, str(ROOT / 'tools/native_engagement.py'), 'stop', '--engagement-root', str(engagement)],
                            env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-            stdout, _ = child.communicate(timeout=30)
+                timing['stop_returncode'] = stopped.returncode
+                stdout, _ = child.communicate(timeout=30)
+        finally:
+            timing['elapsed_seconds'] = round(time.monotonic() - started, 3)
         try:
             cli = json.loads(stdout)
         except (ValueError, TypeError):
@@ -556,7 +563,7 @@ def run_public(root, fixture, result):
             result['boundary_cleanup_error'] = 'public_cleanup_unresolved'
         check(result, 'public Runner has no unexpected worker failures',
               public_worker_failures_acceptable(failures, state['status'], state['cleanup'], public['review_status']))
-        check(result, 'public CLI closes reviewed owned fixture', child.returncode == 0 and state['status'] == 'closed'
+        check(result, 'public CLI closes reviewed owned fixture', not timing['timed_out'] and child.returncode == 0 and state['status'] == 'closed'
               and state['cleanup'] == 'verified' and public['review_status'] == 'accepted'
               and public['lead_session_present'] and public['reviewer_session_present'] and public['sessions_distinct']
               and public['source_output_observed'] and public['review_packet_observed'])

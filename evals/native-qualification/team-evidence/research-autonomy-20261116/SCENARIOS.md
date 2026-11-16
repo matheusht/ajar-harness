@@ -14,6 +14,7 @@ OMP. A result is a mechanics observation, not research success.
 | Fetch succeeds but retention fails | Delivery is marked not retained and durable journal/export reports the limitation. |
 | Technique published and challenged | Separate reviewer identity and changed-case/counterexample evidence are required for recommendation; later withdrawal is visible while old version and evaluation remain retained. |
 | Lost owner and recovery | A new controller reopens the exact journal and reconciles worker and helper ownership without repeating an uncertain effect. |
+| Public workflow timeout | A run finishing within its bounded wall-clock limit records no timeout; on expiry the fixture records elapsed time and stop outcome, then fails rather than treating a stopped engagement as closure. Signed lease and authority limits remain unchanged. |
 | Reviewed closure and export | A fresh reviewer, independently retained evidence and clean result are checked; same engagement export has exact selected bytes, complete journal references and cleanup readback. |
 
 A partial sequence must report its exact passed checks and missing rows. A scripted

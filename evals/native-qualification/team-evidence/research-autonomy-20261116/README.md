@@ -23,6 +23,25 @@ The real-runtime deterministic-provider workflow and simulated fixture checks ar
 mechanics evidence, not model-directed behavior or research qualification. Private
 raw outputs live outside this repository in `/private/tmp/oslit-autonomy-e2e-20261116`.
 
+Hosted run [43901988169](https://github.com/matheusht/redteam-harness/actions/runs/43901988169)
+on commit `e0d47ece0065c51bd89fbd88a521cc8fd8c35e30` passed the direct-boundary
+Codex scenario, including helper, selected reference materialization, recovery,
+export and cleanup, using scripted provider responses. Its OMP scenario failed
+while starting the child model owner, before the child had a session or provider
+request. The public CLI and independent reviewed closure are not proven by that
+direct-boundary run. Hosted artifacts and later retests are separate evidence.
+
+The [local acquisition scenario](acquisition-local.py) passed six checks against an
+owned TLS server; the [result](acquisition-local-result.json) records source hashes.
+Run it with Python 3 and OpenSSL from the repository root:
+
+```sh
+python3 evals/native-qualification/team-evidence/research-autonomy-20261116/acquisition-local.py /tmp/oslit-acquisition-result.json
+```
+
+It checks transfer bytes and digest, route/method/credential refusal, and incomplete
+transfer recording. It does not run an agent or Docker lab.
+
 ## Local prerequisites and checks
 
 Pinned dependencies were installed into a private virtual environment with

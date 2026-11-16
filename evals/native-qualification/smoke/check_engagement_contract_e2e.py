@@ -497,6 +497,21 @@ print(json.dumps(result),flush=True)
             check('non_schema_secret_declaration_refused', 'publication', publication, {'publication_secret'})
             write(publication, encoded({'secret': 'harmless12345678'}))
             check('json_secret_value_refused', 'publication', publication, {'publication_secret'})
+            draft7 = {'$schema': 'http://json-schema.org/draft-07/schema#', 'definitions': {
+                'LoginAccountParams': {'oneOf': [{'properties': {'apiKey': {'type': 'string'},
+                    'accessToken': {'type': 'string', 'description': 'External access value'}}}]}}}
+            write(publication, encoded(draft7))
+            check('draft7_schema_credential_declarations', 'publication', publication)
+            check('draft7_known_secret_refused', 'publication', publication, {'publication_secret'},
+                  known_secrets=['External access value'])
+            unsafe_draft7 = copy.deepcopy(draft7)
+            unsafe_draft7['definitions']['LoginAccountParams']['oneOf'][0]['properties']['apiKey']['default'] = 'harmless12345678'
+            write(publication, encoded(unsafe_draft7))
+            check('draft7_credential_default_refused', 'publication', publication, {'publication_secret'})
+            unsafe_description = copy.deepcopy(draft7)
+            unsafe_description['definitions']['LoginAccountParams']['oneOf'][0]['properties']['accessToken']['description'] = 'Authorization: Bearer harmless12345678'
+            write(publication, encoded(unsafe_description))
+            check('draft7_credential_description_refused', 'publication', publication, {'publication_secret'})
             sentinels = [b'Authorization: ' + b' '.join((b'Bearer', b'harmless12345678')), b'Cookie: auth=harmless12345678',
                          b'Set-Cookie: session=harmless12345678', b'password=harmless12345678',
                          b'https://example.test/a?X-Amz-Signature=' + b'a' * 64,

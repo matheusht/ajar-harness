@@ -313,6 +313,7 @@ class Provider:
         self.request_observation_lock = threading.Lock()
         self.command = None
         self.autonomy = None
+        self.public_frames = None
         self.autonomy_lock = threading.Lock()
         fixture = self
 
@@ -349,13 +350,14 @@ class Provider:
                         raise ValueError('provider_body_invalid')
                     fixture.requests.append(body)
                     seq = len(fixture.requests)
-                    if seq > 4 and fixture.autonomy is None:
+                    if seq > 4 and fixture.autonomy is None and fixture.public_frames is None:
                         raise ValueError('provider_unexpected_request')
                     command = fixture.command if seq == 1 else 'cat /work/first-turn.txt'
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/event-stream')
                     self.end_headers()
-                    frames = fixture.autonomy_frames(body) if seq > 4 else fixture.frames(seq, command)
+                    frames = (fixture.public_frames(body, seq) if fixture.public_frames is not None else
+                              fixture.autonomy_frames(body) if seq > 4 else fixture.frames(seq, command))
                     for frame in frames:
                         self.wfile.write(frame)
                     self.wfile.flush()
@@ -899,6 +901,83 @@ def run_native(root, fixture, result):
             reference = b'Owned benign native helper reference.\n'
             selected = boundary._knowledge_shared.retain(reference, origin='fixture:owned', title='Owned fixture')
             provider.autonomy = {'version': selected['version'], 'parent': 0, 'child': 0}
+            if fixture.runtime == 'omp':
+                create_helper = boundary.runtime.create_helper
+                def observe_helper(helper_id):
+                    owner = boundary.model_owner
+                    original_model_launch = owner.launch_model
+                    diagnostic = result['omp_helper_bootstrap'] = {'launched': False, 'acknowledgment': 'not_observed'}
+                    def observe_model_launch(command, public_environment, binding, *, helper_id=None):
+                        from contextlib import contextmanager
+                        import native_runtime_linux
+                        expected = str(owner.paths.state) + '-helper-' + str(helper_id)
+                        diagnostic.update(helper_id_valid=bool(re.fullmatch(r'[0-9a-f]{32}', str(helper_id))),
+                            home_matches=public_environment.get('HOME') == expected,
+                            state_matches=public_environment.get('PI_CODING_AGENT_DIR') == expected,
+                            guard_entered=False, guard_body_finished=False, frame_write_completed=False)
+                        try:
+                            binding.check()
+                            diagnostic['binding_available'] = True
+                        except Exception:
+                            diagnostic['binding_available'] = False
+                        launch_stdio = owner.environment.launch_stdio
+                        guard, write_pipe = owner.guard, native_runtime_linux.write_pipe
+                        launch_thread = threading.get_ident()
+                        process_ref = []
+                        @contextmanager
+                        def observed_guard():
+                            with guard():
+                                if threading.get_ident() == launch_thread:
+                                    diagnostic['guard_entered'] = True
+                                try:
+                                    yield
+                                finally:
+                                    if threading.get_ident() == launch_thread:
+                                        diagnostic['guard_body_finished'] = True
+                        def observed_write(pipe, data):
+                            written = write_pipe(pipe, data)
+                            if (threading.get_ident() == launch_thread and process_ref
+                                    and pipe is process_ref[0].stdin):
+                                diagnostic['frame_write_completed'] = True
+                            return written
+                        class ObservedOutput:
+                            def __init__(self, stream): self.stream = stream
+                            def __getattr__(self, name): return getattr(self.stream, name)
+                            def readline(self, *args):
+                                value = self.stream.readline(*args)
+                                diagnostic['acknowledgment'] = ('ready' if value == b'{"native_model_bootstrap":"ready"}\n'
+                                    else 'empty' if not value else 'unexpected')
+                                return value
+                        def observed_stdio(*args, **kwargs):
+                            process = launch_stdio(*args, **kwargs)
+                            if str(kwargs.get('role', '')).startswith('model_helper_'):
+                                diagnostic['launched'] = True
+                                process.stdout = ObservedOutput(process.stdout)
+                                process_ref.append(process)
+                            return process
+                        owner.environment.launch_stdio = observed_stdio
+                        owner.guard = observed_guard
+                        native_runtime_linux.write_pipe = observed_write
+                        try:
+                            return original_model_launch(command, public_environment, binding, helper_id=helper_id)
+                        except Exception as error:
+                            diagnostic['error'] = error_code(error)
+                            diagnostic['process_exited'] = bool(process_ref and process_ref[0].poll() is not None)
+                            raise
+                        finally:
+                            owner.environment.launch_stdio = launch_stdio
+                            owner.guard = guard
+                            native_runtime_linux.write_pipe = write_pipe
+                    owner.launch_model = observe_model_launch
+                    try:
+                        child = create_helper(helper_id)
+                    finally:
+                        owner.launch_model = original_model_launch
+                    diagnostic = {}
+                    observe_omp_native_events(child, diagnostic, (secret.encode(),))
+                    result['omp_helper_native_events'] = diagnostic['omp_native_events']
+                    return child
+                boundary.runtime.create_helper = observe_helper
             invoke(context, boundary, 'Use a helper for the owned fixture reference.', result)
             deadline = time.monotonic() + 45
             unknown_event = False
@@ -1086,6 +1165,7 @@ def main(*, classify_result=None):
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
     parser.add_argument('--autonomy', action='store_true', help='Exercise a native helper and retained reference with scripted provider replies')
+    parser.add_argument('--public-run-only', action='store_true', help='Exercise the signed public CLI and Runner with scripted native responses')
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -1096,13 +1176,17 @@ def main(*, classify_result=None):
         fixture = prepare_image(runtime=args.runtime, platform=args.platform, base_image=args.base_image,
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
         fixture.codex_tool_policy = args.codex_tool_policy
-        fixture.autonomy = args.autonomy
+        fixture.autonomy = args.autonomy or args.public_run_only
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:
-            run_native(Path(temporary).resolve(), fixture, result)
-        check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
-        check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
+            if args.public_run_only:
+                from check_research_autonomy_public_e2e import run_public
+                run_public(Path(temporary).resolve() / 'public', fixture, result)
+            else:
+                run_native(Path(temporary).resolve(), fixture, result)
+                check(result, 'same engagement export verified', result.get('export_verification', {}).get('status') == 'passed')
+                check(result, 'native boundary cleanup verified', result.get('boundary_cleanup', {}).get('cleanup') == 'verified')
         result['status'] = 'passed'
     except Exception as error:
         result['error'] = error_code(error)
@@ -1120,6 +1204,7 @@ def main(*, classify_result=None):
             if result['image']['status'] != 'passed':result['status'] = 'failed'
         result['source_hashes'] = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in
             [Path(__file__), Path(__file__).with_name('check_native_userns_probe.py'),
+             Path(__file__).with_name('check_research_autonomy_public_e2e.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_diagnostic.py'),
              Path(__file__).with_name('check_codex_sandbox_policy_candidate.py'),
              Path(__file__).with_name('check_codex_tool_policy_missing_profile_e2e.py'),

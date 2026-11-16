@@ -26,6 +26,7 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
@@ -71,6 +72,7 @@ on:
       - engine/native-engagement-*.md
       - evals/native-qualification/smoke/check_model_image_docker_e2e.py
       - evals/native-qualification/smoke/check_linux_model_native_e2e.py
+      - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
@@ -147,7 +149,7 @@ jobs:
 
   native-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -250,6 +252,20 @@ jobs:
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-native-e2e-assets-${{ matrix.runtime }}" \
             --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/result.json" \
+            "${policy_args[@]}"
+      - name: Run the public CLI through native reviewed closure
+        if: ${{ always() && !cancelled() && (matrix.runtime == 'omp' || steps.codex_profile_setup.outcome == 'success') }}
+        run: |
+          policy_args=()
+          if [ "${{ matrix.runtime }}" = codex ]; then
+            policy_args=(--codex-tool-policy docker-confined-v1)
+          fi
+          python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
+            --runtime "${{ matrix.runtime }}" --platform linux/amd64 --public-run-only \
+            --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
+            --endpoint unix:///var/run/docker.sock \
+            --directory "$RUNNER_TEMP/oslit-public-e2e-assets-${{ matrix.runtime }}" \
+            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/public-result.json" \
             "${policy_args[@]}"
       - name: Remove only this run's Codex host profile after native cleanup
         if: ${{ always() && matrix.runtime == 'codex' }}

@@ -237,7 +237,8 @@ def read_json(path: Path, *, private: bool = False, max_bytes: int = 1024 * 1024
 
 def _omit_schema_type_declarations(value):
     """Remove value-free property declarations only from the sensitive syntax view."""
-    if type(value) is not dict or value.get('$schema') != 'https://json-schema.org/draft/2020-12/schema':
+    if type(value) is not dict or value.get('$schema') not in (
+            'https://json-schema.org/draft/2020-12/schema', 'http://json-schema.org/draft-07/schema#'):
         return
     pending = [value]
     while pending:
@@ -247,12 +248,14 @@ def _omit_schema_type_declarations(value):
         properties = schema.get('properties')
         if type(properties) is dict:
             for name, declaration in list(properties.items()):
-                if (type(declaration) is dict and set(declaration) == {'type'}
+                if (type(declaration) is dict and 'type' in declaration
+                        and set(declaration) <= {'type', 'description'}
+                        and ('description' not in declaration or type(declaration['description']) is str)
                         and declaration['type'] in ('string', 'boolean', 'integer', 'number', 'null', 'object', 'array')):
                     del properties[name]
                 else:
                     pending.append(declaration)
-        for key in ('$defs', 'patternProperties', 'dependentSchemas'):
+        for key in ('$defs', 'definitions', 'patternProperties', 'dependentSchemas'):
             if type(schema.get(key)) is dict:
                 pending.extend(schema[key].values())
         for key in ('items', 'contains', 'additionalProperties', 'unevaluatedProperties',

@@ -19,3 +19,11 @@ OMP. A result is a mechanics observation, not research success.
 A partial sequence must report its exact passed checks and missing rows. A scripted
 provider cannot establish model-directed behavior. A live-provider smoke is a
 separate result, not a replacement for a missing failure case or independent review.
+
+## Local acquisition transport
+
+Before implementing the local transport scenario: a signed-style acquisition route
+must allow an owned TLS GET and retain the exact response digest; a credential
+header, ungranted destination, and mutation request must not reach the receiver;
+an interrupted response must not be recorded as complete. This checks local network
+transport and binding only, not a native agent or Docker lab.

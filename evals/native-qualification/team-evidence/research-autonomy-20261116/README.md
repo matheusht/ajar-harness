@@ -31,6 +31,13 @@ while starting the child model owner, before the child had a session or provider
 request. The public CLI and independent reviewed closure are not proven by that
 direct-boundary run. Hosted artifacts and later retests are separate evidence.
 
+Hosted run [43908789970](https://github.com/matheusht/redteam-harness/actions/runs/43908789970)
+on `d075ca29219c9a961755f8960dd131cddeb1c4f2` passed 42 Codex direct-boundary
+checks, including active helper stop, version update and replayed usage. The
+separate public Runner scenario reached a lead, helper and distinct reviewer but
+did not verify the reviewer packet or close. OMP's child bootstrap failed in this
+run. These are scripted-provider observations, not live-model results.
+
 The [local acquisition scenario](acquisition-local.py) passed six checks against an
 owned TLS server; the [result](acquisition-local-result.json) records source hashes.
 Run it with Python 3 and OpenSSL from the repository root:

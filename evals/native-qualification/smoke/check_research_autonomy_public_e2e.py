@@ -6,6 +6,7 @@ signed fixture, native runtimes, tool boundary, reviewer and cleanup are real.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -54,6 +55,37 @@ def classify_lane(body):
     raise ValueError('public_lane_unavailable')
 
 
+def lane_shape(body):
+    allowed = {'messages', 'input', 'previous_response_id', 'metadata', 'user', 'model', 'stream'}
+    messages = body.get('messages', body.get('input', []))
+    messages = [{'role': 'user', 'content': messages}] if isinstance(messages, str) else messages
+    messages = messages if isinstance(messages, list) else []
+    roles, user_markers = [], []
+    omp_compaction_system = compaction_conversation = False
+    for message in messages[:128]:
+        if not isinstance(message, dict):
+            roles.append('non_object')
+            continue
+        role = message.get('role')
+        roles.append(role if role in ('user', 'assistant', 'system', 'developer', 'tool') else 'other')
+        text = '\n'.join(content_strings(message.get('content', '')))
+        if role in ('system', 'developer'):
+            omp_compaction_system |= text.startswith('Summarize user–AI coding-assistant conversations in the exact specified structured format.')
+        if role == 'user':
+            compaction_conversation |= text.startswith('<conversation>\n')
+            user_markers.append({'assignment': 'Role and assignment:\n' in text,
+                'helper': 'internal helper acting under the parent' in text,
+                'continuation': 'Continue the assigned research using the current native context.' in text})
+    metadata = body.get('metadata')
+    return {'keys': sorted(key for key in body if key in allowed), 'message_count': len(messages),
+            'roles': roles, 'user_markers': user_markers,
+            'omp_compaction_system': omp_compaction_system, 'compaction_conversation': compaction_conversation,
+            'has_tools': bool(body.get('tools')),
+            'metadata_keys': sorted(key for key in metadata if key in ('session_id', 'thread_id', 'user_id'))
+                if isinstance(metadata, dict) else [],
+            'has_previous_response_id': isinstance(body.get('previous_response_id'), str)}
+
+
 def routing_self_check():
     lead = 'Role and assignment:\n{"id":"lead-1","role":"lead","assignment":null}'
     reviewer = 'Role and assignment:\n{"id":"reviewer-1","role":"reviewer","assignment":null}'
@@ -64,6 +96,74 @@ def routing_self_check():
     assert classify_lane({'messages': [{'role': 'user', 'content': reviewer}]}) == 'reviewer'
     assert classify_lane({'input': helper}) == 'helper'
     assert classify_lane({'previous_response_id': 'public-lead-2', 'input': reviewer}) == 'lead'
+    shape = lane_shape({'messages': [{'role': 'user', 'content': 'private fixture sentinel'}],
+                        'metadata': {'session_id': 'private fixture sentinel'}})
+    assert 'private fixture sentinel' not in json.dumps(shape)
+
+
+def packet_read_update(current, row, sha):
+    try:
+        if row['sha256'] != sha or row['source'] != 'published_evidence' or row['encoding'] != 'utf-8':
+            raise ValueError()
+        offset, size, total, following = (row[key] for key in ('offset', 'bytes', 'total_bytes', 'next_offset'))
+        raw = row['content'].encode('utf-8')
+        if (any(type(value) is not int for value in (offset, size, total)) or offset < 0
+                or size != len(raw) or offset + size > total or offset > len(current)):
+            raise ValueError()
+        if offset < len(current):
+            if current[offset:offset + size] != raw:
+                raise ValueError()
+            return current, False
+        current += raw
+        if following is not None:
+            if type(following) is not int or following != len(current) or following >= total:
+                raise ValueError()
+            return current, False
+        if (len(current) != total or 'sha256:' + hashlib.sha256(current).hexdigest() != sha
+                or json.loads(current).get('kind') != 'engagement-review-packet-v2'):
+            raise ValueError()
+        return current, True
+    except (KeyError, TypeError, AttributeError, ValueError, UnicodeError):
+        raise ValueError('review_packet_invalid') from None
+
+
+def json_objects(value, depth=0):
+    if depth > 12:
+        return
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from json_objects(child, depth + 1)
+    elif isinstance(value, list):
+        for child in value:
+            yield from json_objects(child, depth + 1)
+    elif isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (ValueError, TypeError):
+            return
+        if isinstance(decoded, (dict, list)):
+            yield from json_objects(decoded, depth + 1)
+
+
+def packet_self_check():
+    raw = b'{"kind":"engagement-review-packet-v2","data":"fixture"}'
+    sha = 'sha256:' + hashlib.sha256(raw).hexdigest()
+    def chunk(start, end):
+        return {'sha256': sha, 'source': 'published_evidence', 'encoding': 'utf-8',
+                'offset': start, 'bytes': end - start, 'total_bytes': len(raw),
+                'next_offset': end if end < len(raw) else None, 'content': raw[start:end].decode()}
+    content, done = packet_read_update(b'', chunk(0, 20), sha)
+    assert not done and content == raw[:20]
+    assert packet_read_update(content, chunk(20, len(raw)), sha) == (raw, True)
+    nested = [{'output': json.dumps({'content': [{'type': 'text', 'text': json.dumps(chunk(0, 20))}]})}]
+    assert any(row.get('sha256') == sha for row in json_objects(nested))
+    corrupt = chunk(20, len(raw)); corrupt['content'] = 'x' * (len(raw) - 20)
+    try:
+        packet_read_update(content, corrupt, sha)
+        raise AssertionError('changed packet bytes were accepted')
+    except ValueError:
+        pass
 
 
 class Script:
@@ -75,10 +175,17 @@ class Script:
         self.source_observed = self.packet_observed = False
         self.helper_read = self.helper_read_observed = False
         self.helper_status_observed = False
+        self.packet_bytes = b''
+        self.lane_diagnostics = []
 
     def __call__(self, body, sequence):
         with self.lock:
-            lane = classify_lane(body)
+            try:
+                lane = classify_lane(body)
+            except ValueError:
+                if len(self.lane_diagnostics) < 8:
+                    self.lane_diagnostics.append(lane_shape(body))
+                raise
             self.counts[lane] += 1
             identity = 'public-' + lane + '-' + str(self.counts[lane])
             controller = Controller(self.engagement)
@@ -93,9 +200,13 @@ class Script:
             self.helper_read_observed |= bool(self.helper_read and helpers and helpers[0]['helper_id'] in output_text
                                               and '"status":"completed"' in output_text)
             review = state['reviews'].get('review-dry', {})
-            self.packet_observed |= bool(review.get('packet_sha256') and review['packet_sha256'] in output_text
-                                         and 'published_evidence' in output_text
-                                         and 'engagement-review-packet-v2' in output_text)
+            if lane == 'reviewer' and review.get('packet_sha256') and not self.packet_observed:
+                for row in json_objects(outputs):
+                    if row.get('sha256') == review['packet_sha256'] and row.get('source') == 'published_evidence':
+                        self.packet_bytes, self.packet_observed = packet_read_update(
+                            self.packet_bytes, row, review['packet_sha256'])
+                        if self.packet_observed:
+                            break
             name, arguments = self.action(lane, state)
             return frames(self.runtime, identity, name, arguments)
 
@@ -110,12 +221,11 @@ class Script:
             review = state['reviews'].get('review-dry')
             if not review:
                 return None, None
-            if not self.reviewer_read:
+            if not self.packet_observed:
                 self.reviewer_read = True
-                return 'engagement_read', {'sha256': review['packet_sha256']}
+                return 'engagement_read', {'sha256': review['packet_sha256'],
+                                           'offset': len(self.packet_bytes), 'max_bytes': 4096}
             if review['status'] == 'pending':
-                if not self.packet_observed:
-                    raise ValueError('review_packet_not_observed')
                 return self.submit(state, 'review_result', {'review_id': 'review-dry',
                     'packet_sha256': review['packet_sha256'], 'disposition': 'accept',
                     'evidence_refs': [], 'contrary_refs': ['owned-observation'],
@@ -190,6 +300,7 @@ def frames(runtime, identity, name, arguments):
 def run_public(root, fixture, result):
     from check_linux_model_native_e2e import tool_bundle
     routing_self_check()
+    packet_self_check()
     root.mkdir(mode=0o700)
     installed = result.get('tool_installation', {})
     bundle = installed.get('tool_bundle') or installed.get('profile_fields', {}).get('tool_bundle')
@@ -240,7 +351,9 @@ def run_public(root, fixture, result):
                   'sessions_distinct': state['workers']['lead-1'].get('session_id') !=
                                        state['workers'].get('reviewer-1', {}).get('session_id'),
                   'provider_errors': provider.errors[:8], 'provider_error_frames': provider.error_frames,
-                  'provider_fixture_error_codes': provider.public_error_codes}
+                  'provider_fixture_error_codes': provider.public_error_codes,
+                  'provider_json_parse_diagnostics': provider.json_parse_diagnostics,
+                  'provider_lane_diagnostics': script.lane_diagnostics}
         result['public_runner'] = public
         if state['cleanup'] != 'verified':
             result['boundary_cleanup_error'] = 'public_cleanup_unresolved'

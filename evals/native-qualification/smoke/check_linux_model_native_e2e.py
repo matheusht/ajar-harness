@@ -60,7 +60,8 @@ except BaseException as error:
   code=tb.tb_frame.f_code
   if code.co_filename=='/runtime/native_runtime_bootstrap.py': trace.append({'function':code.co_name,'line':tb.tb_lineno})
   tb=tb.tb_next
- os.write(2,('OSLIT_BOOTSTRAP_DIAGNOSTIC '+json.dumps({'kind':kind,'category':category,'frames':trace[-5:]})+'\\n').encode())
+ errno=error.errno if isinstance(error,OSError) and type(error.errno) is int else None
+ os.write(2,('OSLIT_BOOTSTRAP_DIAGNOSTIC '+json.dumps({'kind':kind,'category':category,'errno':errno,'frames':trace[-5:]})+'\\n').encode())
  raise SystemExit(2) from None
 '''
 
@@ -80,7 +81,8 @@ def helper_stderr_diagnostic(content, known_secrets):
             continue
         try:
             row = json.loads(line.split(b' ', 1)[1])
-            if (set(row) != {'kind', 'category', 'frames'} or row['kind'] not in kinds or row['category'] not in allowed
+            if (set(row) != {'kind', 'category', 'errno', 'frames'} or row['kind'] not in kinds or row['category'] not in allowed
+                    or row['errno'] is not None and (type(row['errno']) is not int or not 0 <= row['errno'] <= 4096)
                     or not isinstance(row['frames'], list) or len(row['frames']) > 5
                     or any(not isinstance(frame, dict) or set(frame) != {'function', 'line'}
                            or frame['function'] not in functions or type(frame['line']) is not int
@@ -97,8 +99,10 @@ def helper_stderr_diagnostic(content, known_secrets):
 
 
 def helper_diagnostic_self_check():
-    sample = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"ValueError","category":"state","frames":[{"function":"_launch","line":1}]}\n'
+    sample = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"ValueError","category":"state","errno":null,"frames":[{"function":"_launch","line":1}]}\n'
     assert helper_stderr_diagnostic(sample, ())['bootstrap']['category'] == 'state'
+    disk = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"OSError","category":"other","errno":28,"frames":[]}\n'
+    assert helper_stderr_diagnostic(disk, ())['bootstrap']['errno'] == 28
     assert helper_stderr_diagnostic(b'fake-sensitive-sentinel', (b'fake-sensitive-sentinel',)) == {'withheld': True}
 
 
@@ -365,6 +369,7 @@ class Provider:
         self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
         self.error_frames = []
         self.public_error_codes = []
+        self.json_parse_diagnostics = []
         self.discovery_requests = 0
         self.request_observation_total = 0
         self.request_observation_lock = threading.Lock()
@@ -400,7 +405,20 @@ class Provider:
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 2 * 1024 * 1024:
                         raise ValueError('provider_request_size')
-                    body = json.loads(self.rfile.read(size))
+                    raw = self.rfile.read(size)
+                    try:
+                        body = json.loads(raw)
+                    except json.JSONDecodeError as error:
+                        if len(fixture.json_parse_diagnostics) < 8:
+                            encoding = self.headers.get('Content-Encoding', 'identity').lower()
+                            transfer = self.headers.get('Transfer-Encoding', 'none').lower()
+                            content_type = self.headers.get('Content-Type', '').split(';', 1)[0].lower()
+                            fixture.json_parse_diagnostics.append({'expected_bytes': size, 'received_bytes': len(raw),
+                                'error_position': error.pos,
+                                'content_encoding': encoding if encoding in ('identity', 'gzip', 'deflate', 'br') else 'other',
+                                'transfer_encoding': transfer if transfer in ('none', 'chunked') else 'other',
+                                'content_type': content_type if content_type in ('application/json', '') else 'other'})
+                        raise
                     if self.headers.get('Authorization') != 'Bearer ' + fixture.secret:
                         raise ValueError('provider_credential_missing')
                     if fixture.secret in json.dumps(body) or not fixture.command:
@@ -422,7 +440,7 @@ class Provider:
                     fixture.errors.append(error_code(error))
                     public_codes = {'public_lane_unavailable', 'source_output_not_observed',
                         'helper_not_completed', 'helper_output_not_observed', 'helper_authority_not_observed',
-                        'review_packet_not_observed'}
+                        'review_packet_not_observed', 'review_packet_invalid'}
                     if str(error) in public_codes and len(fixture.public_error_codes) < 8:
                         fixture.public_error_codes.append(str(error))
                     import traceback
@@ -637,7 +655,8 @@ env_key = "OPENAI_API_KEY"
         'model_host': {'kind': 'linux-docker-model-v1', 'docker_binary': fixture.docker,
             'docker_endpoint': fixture.endpoint, 'daemon_id': fixture.daemon_id, 'image_id': fixture.image_id,
             'platform': fixture.platform, 'uid': 1000, 'gid': 1000,
-            'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128, 'workspace_bytes': 134217728}}}
+            'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128,
+                       'workspace_bytes': 536870912 if fixture.runtime == 'omp' else 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
         catalog_content = omp_fixture_catalog(provider.origin)
@@ -1029,6 +1048,12 @@ def run_native(root, fixture, result):
                         def observed_stdio(*args, **kwargs):
                             if not str(kwargs.get('role', '')).startswith('model_helper_'):
                                 return launch_stdio(*args, **kwargs)
+                            if not getattr(fixture, 'diagnostic_bootstrap', False):
+                                process = launch_stdio(*args, **kwargs)
+                                diagnostic.update(instrumented_bootstrap=False, launched=True)
+                                process.stdout = ObservedOutput(process.stdout)
+                                process_ref.append(process)
+                                return process
                             argv = list(args[0])
                             if not argv or argv[-1] != '/runtime/native_runtime_bootstrap.py':
                                 raise ValueError('fixture_bootstrap_command_invalid')
@@ -1073,7 +1098,7 @@ def run_native(root, fixture, result):
                             if stderr_capture['thread'] is not None:
                                 stderr_capture['thread'].join(timeout=1)
                                 diagnostic['stderr'] = helper_stderr_diagnostic(bytes(stderr_capture['content']), (secret.encode(),))
-                            counters = '''import json,pathlib
+                            counters = '''import json,os,pathlib
 p=pathlib.Path('/sys/fs/cgroup');out={}
 for name in ('memory.current','pids.current'):
  try: out[name]=int((p/name).read_text().strip())
@@ -1081,13 +1106,17 @@ for name in ('memory.current','pids.current'):
 for name in ('memory.events','pids.events'):
  try: out[name]={k:int(v) for k,v in (line.split() for line in (p/name).read_text().splitlines())}
  except (OSError,ValueError): pass
+for name,path in (('work','/work'),('tmp','/tmp')):
+ try:
+  s=os.statvfs(path);out[name]={'available_bytes':s.f_bavail*s.f_frsize,'total_bytes':s.f_blocks*s.f_frsize,'available_inodes':s.f_favail,'total_inodes':s.f_files}
+ except OSError: pass
 print(json.dumps(out))'''
                             try:
                                 observed = owner.environment._run(['container', 'exec', '--user', '0:0',
                                     owner.environment.identity['container_id'], 'python3', '-I', '-S', '-c', counters],
                                     timeout=5, output_limit=4096)
                                 values = json.loads(observed['output'])
-                                if (not isinstance(values, dict) or set(values) - {'memory.current', 'pids.current', 'memory.events', 'pids.events'}
+                                if (not isinstance(values, dict) or set(values) - {'memory.current', 'pids.current', 'memory.events', 'pids.events', 'work', 'tmp'}
                                         or any(not (type(value) is int and value >= 0 or isinstance(value, dict)
                                             and all(isinstance(key, str) and re.fullmatch(r'[a-z_]{1,32}', key)
                                                     and type(number) is int and number >= 0 for key, number in value.items()))
@@ -1363,6 +1392,7 @@ def main(*, classify_result=None):
     parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
     parser.add_argument('--autonomy', action='store_true', help='Exercise a native helper and retained reference with scripted provider replies')
     parser.add_argument('--public-run-only', action='store_true', help='Exercise the signed public CLI and Runner with scripted native responses')
+    parser.add_argument('--diagnostic-bootstrap', action='store_true', help='Instrument the OMP helper bootstrap for a failed-start diagnosis')
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -1374,6 +1404,8 @@ def main(*, classify_result=None):
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
         fixture.codex_tool_policy = args.codex_tool_policy
         fixture.autonomy = args.autonomy or args.public_run_only
+        fixture.diagnostic_bootstrap = args.diagnostic_bootstrap
+        result['model_workspace_bytes'] = 536870912 if args.runtime == 'omp' else 134217728
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:

@@ -35,7 +35,7 @@ def content_strings(value):
             yield from content_strings(child)
 
 
-def classify_lane(body, issued=None):
+def classify_lane(body, issued=None, compact_markers=None):
     previous = body.get('previous_response_id', '')
     for lane in ('lead', 'reviewer', 'helper'):
         if previous.startswith('public-' + lane + '-'):
@@ -44,7 +44,18 @@ def classify_lane(body, issued=None):
     messages = [{'role': 'user', 'content': messages}] if isinstance(messages, str) else messages
     matches = set()
     for message in messages:
-        if not isinstance(message, dict) or message.get('role') != 'assistant':
+        if not isinstance(message, dict):
+            continue
+        if message.get('type') == 'function_call':
+            recorded = (issued or {}).get(message.get('call_id'))
+            if recorded and message.get('name') == recorded[1]:
+                matches.add(recorded[0])
+        if message.get('role') == 'user':
+            for value in content_strings(message.get('content', '')):
+                for marker, lane in (compact_markers or {}).items():
+                    if marker == value:
+                        matches.add(lane)
+        if message.get('role') != 'assistant':
             continue
         for call in message.get('tool_calls', []):
             if not isinstance(call, dict):
@@ -134,6 +145,15 @@ def routing_self_check():
         raise AssertionError('ambiguous issued calls accepted')
     except ValueError:
         pass
+    compact = {'input': [{'type': 'function_call', 'call_id': 'call-public-lead-1',
+                          'name': 'bash', 'arguments': '{}'}]}
+    assert classify_lane(compact, {'call-public-lead-1': ('lead', 'bash')}) == 'lead'
+    for body in ({'input': []}, {'input': [{'type': 'function_call', 'call_id': 'call-public-lead-1', 'name': 'other'}]}):
+        try:
+            classify_lane(body, {'call-public-lead-1': ('lead', 'bash')})
+            raise AssertionError('unrecognized compact history accepted')
+        except ValueError:
+            pass
     shape = lane_shape({'messages': [{'role': 'user', 'content': 'private fixture sentinel'}],
                         'metadata': {'session_id': 'private fixture sentinel'}})
     assert 'private fixture sentinel' not in json.dumps(shape)
@@ -155,6 +175,20 @@ def expected_closure_cancellation(*, authorized, expected_bytes, received_bytes,
         except (KeyError, TypeError, ValueError):
             continue
     return False
+
+
+def compact_self_check():
+    script = Script('omp', None)
+    script.issued_calls['call-public-lead-1'] = ('lead', 'bash')
+    compact = {'input': [{'type': 'function_call', 'call_id': 'call-public-lead-1', 'name': 'bash'}]}
+    output = script.compact_response(compact)['output']
+    assert output[-1]['type'] == 'compaction_summary' and script.compaction_count == 1
+    assert classify_lane({'messages': [output[0]]}, script.issued_calls, script.compact_markers) == 'lead'
+    try:
+        script.compact_response({'input': []})
+        raise AssertionError('unknown compact history accepted')
+    except ValueError:
+        pass
 
 
 def cancellation_self_check():
@@ -250,37 +284,66 @@ class Script:
         self.packet_bytes = b''
         self.lane_diagnostics = []
         self.issued_calls = {}
+        self.compact_markers = {}
+        self.compaction_count = 0
         self.tool_error_codes = set()
 
     def status_snapshot(self, started, finished):
         try:
-            state = Controller(self.engagement).state()
-            allowed = {'active', 'blocked', 'closed', 'completed', 'pending', 'rejected', 'running',
+            controller = Controller(self.engagement)
+            with controller.lock():
+                journal = controller._events()
+                state = controller._replay(journal)
+            allowed = {'active', 'blocked', 'closed', 'closing', 'completed', 'pending', 'preparing', 'rejected', 'running',
                        'started', 'stopped', 'stopping', 'revoked'}
             def safe(value):
                 return value if value in allowed else 'other'
-            events = [event for event in Controller(self.engagement)._events()
+            events = [event for event in journal
                       if event.get('type') in ('closure_stopping', 'stop_requested')
                       and started <= datetime.fromisoformat(event['at']) <= finished]
+            lifecycle = []
+            for event in journal:
+                if event.get('type') not in ('worker_revoked', 'worker_resumed', 'worker_started'):
+                    continue
+                if datetime.fromisoformat(event['at']) > finished:
+                    continue
+                payload = event.get('payload', {})
+                worker = payload.get('worker_id')
+                reason = payload.get('reason')
+                lifecycle.append({'sequence': event['sequence'], 'sha256': event['sha256'],
+                    'type': event['type'], 'at': event['at'],
+                    'worker_id': worker if worker in ('lead-1', 'reviewer-1') else 'other',
+                    'generation': payload.get('generation') if type(payload.get('generation')) is int else None,
+                    'reason': reason if reason in ('worker_segment_ended', 'coordinator_exit', 'controller_resume', 'next_task',
+                                         'review_obligation', 'native-boundary-finish', 'native-boundary-recovery') else 'other'})
             return {'read_started': started.isoformat(), 'read_finished': finished.isoformat(),
+                    'worker_lifecycle': lifecycle[-12:],
                     'stop_events': [{**{key: event[key] for key in ('sequence', 'sha256', 'type', 'at')},
                                      'payload': {'reason': 'reviewed_closure'}} for event in events
                                     if event.get('type') == 'closure_stopping'
                                     and event.get('payload', {}).get('reason') == 'reviewed_closure'],
                     'engagement': safe(state.get('status')),
                     'lead': safe(state.get('workers', {}).get('lead-1', {}).get('status')),
-                    'reviewer': safe(state.get('workers', {}).get('reviewer-1', {}).get('status'))}
+                    'reviewer': safe(state.get('workers', {}).get('reviewer-1', {}).get('status')),
+                    'lead_generation': state.get('workers', {}).get('lead-1', {}).get('generation'),
+                    'reviewer_generation': state.get('workers', {}).get('reviewer-1', {}).get('generation')}
         except Exception:
             return {'status': 'unavailable'}
 
+    def compact_response(self, body):
+        with self.lock:
+            lane = classify_lane(body, self.issued_calls, self.compact_markers)
+            marker = 'owned-fixture-compact-' + uuid.uuid4().hex
+            self.compact_markers[marker] = lane
+            self.compaction_count += 1
+            return {'output': [{'type': 'message', 'role': 'user',
+                                'content': [{'type': 'input_text', 'text': marker}]},
+                               {'type': 'compaction_summary', 'summary': 'Owned deterministic fixture continuation.'}]}
+
     def __call__(self, body, sequence, path=None):
         with self.lock:
-            if path == '/v1/responses/compact':
-                if len(self.lane_diagnostics) < 8:
-                    self.lane_diagnostics.append(lane_shape(body, path))
-                raise ValueError('public_compaction_unqualified')
             try:
-                lane = classify_lane(body, self.issued_calls)
+                lane = classify_lane(body, self.issued_calls, self.compact_markers)
             except ValueError:
                 if len(self.lane_diagnostics) < 8:
                     self.lane_diagnostics.append(lane_shape(body, path))
@@ -314,7 +377,7 @@ class Script:
             name, arguments = self.action(lane, state)
             if name:
                 self.issued_calls['call-' + identity] = (lane, name)
-            return frames(self.runtime, identity, name, arguments)
+            return responses_frames(identity, name, arguments)
 
     def action(self, lane, state):
         if lane == 'helper':
@@ -380,34 +443,26 @@ class Script:
             'expected_revision': state['revision'], 'type': kind, 'payload': payload}}
 
 
-def frames(runtime, identity, name, arguments):
-    if runtime == 'codex':
-        item = ({'id': 'fc_' + identity, 'type': 'function_call', 'call_id': 'call-' + identity,
-                 'name': name, 'arguments': json.dumps(arguments)} if name else
-                {'id': 'msg_' + identity, 'type': 'message', 'role': 'assistant',
-                 'content': [{'type': 'output_text', 'text': 'Fixture turn complete.'}]})
-        response = {'id': identity, 'object': 'response', 'status': 'completed', 'output': [item],
-                    'usage': {'input_tokens': 10, 'output_tokens': 10, 'total_tokens': 20}}
-        events = [{'type': 'response.created', 'response': {**response, 'status': 'in_progress', 'output': []}},
-                  {'type': 'response.output_item.added', 'output_index': 0, 'item': item},
-                  {'type': 'response.output_item.done', 'output_index': 0, 'item': item},
-                  {'type': 'response.completed', 'response': response}]
-        return [('event: ' + event['type'] + '\ndata: ' + json.dumps(dict(event, sequence_number=i)) + '\n\n').encode()
-                for i, event in enumerate(events)]
-    delta = ({'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'call-' + identity, 'type': 'function',
-              'function': {'name': name, 'arguments': json.dumps(arguments)}}]} if name else
-             {'role': 'assistant', 'content': 'Fixture turn complete.'})
-    chunks = [{'delta': delta, 'finish_reason': None}, {'delta': {}, 'finish_reason': 'tool_calls' if name else 'stop'}]
-    return [('data: ' + json.dumps({'id': identity, 'object': 'chat.completion.chunk', 'created': 0,
-            'model': 'fixture-model', 'choices': [{'index': 0, **chunk}]}) + '\n\n').encode()
-            for chunk in chunks] + [b'data: [DONE]\n\n']
-
+def responses_frames(identity, name, arguments):
+    item = ({'id': 'fc_' + identity, 'type': 'function_call', 'call_id': 'call-' + identity,
+             'name': name, 'arguments': json.dumps(arguments)} if name else
+            {'id': 'msg_' + identity, 'type': 'message', 'role': 'assistant',
+             'content': [{'type': 'output_text', 'text': 'Fixture turn complete.'}]})
+    response = {'id': identity, 'object': 'response', 'status': 'completed', 'output': [item],
+                'usage': {'input_tokens': 10, 'output_tokens': 10, 'total_tokens': 20}}
+    events = [{'type': 'response.created', 'response': {**response, 'status': 'in_progress', 'output': []}},
+              {'type': 'response.output_item.added', 'output_index': 0, 'item': item},
+              {'type': 'response.output_item.done', 'output_index': 0, 'item': item},
+              {'type': 'response.completed', 'response': response}]
+    return [('event: ' + event['type'] + '\ndata: ' + json.dumps(dict(event, sequence_number=i)) + '\n\n').encode()
+            for i, event in enumerate(events)]
 
 def run_public(root, fixture, result):
     from check_linux_model_native_e2e import tool_bundle
     routing_self_check()
     packet_self_check()
     cancellation_self_check()
+    compact_self_check()
     fixture.public_run = True
     root.mkdir(mode=0o700)
     installed = result.get('tool_installation', {})
@@ -459,6 +514,7 @@ def run_public(root, fixture, result):
                   'sessions_distinct': state['workers']['lead-1'].get('session_id') !=
                                        state['workers'].get('reviewer-1', {}).get('session_id'),
                   'provider_errors': provider.errors[:8], 'tool_error_codes': sorted(script.tool_error_codes)[:32],
+                  'compaction_count': script.compaction_count,
                   'provider_error_frames': provider.error_frames,
                   'provider_fixture_error_codes': provider.public_error_codes,
                   'provider_json_parse_diagnostics': provider.json_parse_diagnostics,

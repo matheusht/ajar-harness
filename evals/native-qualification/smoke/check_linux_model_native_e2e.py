@@ -434,6 +434,13 @@ class Provider:
                         raise ValueError('provider_body_invalid')
                     fixture.requests.append(body)
                     seq = len(fixture.requests)
+                    if self.path == '/v1/responses/compact' and fixture.public_frames is not None:
+                        response = canonical(fixture.public_frames.compact_response(body))
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Content-Length', str(len(response)))
+                        self.end_headers(); self.wfile.write(response); self.wfile.flush()
+                        return
                     if seq > 4 and fixture.autonomy is None and fixture.public_frames is None:
                         raise ValueError('provider_unexpected_request')
                     command = fixture.command if seq == 1 else 'cat /work/first-turn.txt'
@@ -592,18 +599,18 @@ def tool_bundle(fixture, result):
     return result['tool_installation']['profile_fields']['tool_bundle']
 
 
-def omp_fixture_catalog(provider_url, context_window=32768):
+def omp_fixture_catalog(provider_url, context_window=32768, api='openai-completions'):
     return canonical({'providers': {'openai': {'baseUrl': provider_url + '/v1',
-        'api': 'openai-completions', 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
+        'api': api, 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
             'reasoning': False, 'input': ['text'], 'supportsTools': True,
             'contextWindow': context_window, 'maxTokens': 1024,
             'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}})
 
 
-def validate_omp_fixture_catalog(content, provider_url, secret):
+def validate_omp_fixture_catalog(content, provider_url, secret, api='openai-completions'):
     catalog = json.loads(content)
     provider = catalog['providers']['openai']
-    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != 'openai-completions'
+    if (provider.get('baseUrl') != provider_url + '/v1' or provider.get('api') != api
             or provider.get('apiKey') != 'OPENAI_API_KEY'
             or [model.get('id') for model in provider.get('models', [])] != ['fixture-model']
             or secret.encode() in content):
@@ -668,8 +675,10 @@ env_key = "OPENAI_API_KEY"
                        'workspace_bytes': 1073741824 if fixture.runtime == 'omp' else 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
-        catalog_content = omp_fixture_catalog(provider.origin, 131072 if getattr(fixture, 'public_run', False) else 32768)
-        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret)
+        public = getattr(fixture, 'public_run', False)
+        api = 'openai-responses' if public else 'openai-completions'
+        catalog_content = omp_fixture_catalog(provider.origin, 131072 if public else 32768, api)
+        validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret, api)
         write(catalog, catalog_content)
         profile['model_catalog'] = {'path': str(catalog), 'sha256': digest(catalog.read_bytes())}
     write(Path(inputs['runtime_profiles']['runtime-main']), canonical(profile))

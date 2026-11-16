@@ -666,9 +666,8 @@ class Environment:
             safe_publication(output)
             result['output'] = output.decode('utf-8')
         except (ValueError, UnicodeError):
-            self.held = True
-            result['status'] = 'unknown'
             result['output'] = '[output withheld]'
+            result['output_status'] = 'withheld'
         result['identity'] = self.receipt()
         return result
 
@@ -883,3 +882,4 @@ class Environment:
             from application_volumes import cleanup
             cleanup(self)
         return {'status': 'clean', 'identity': self.receipt(), 'owned_workspace': 'container_removed'}
+

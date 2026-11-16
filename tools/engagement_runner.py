@@ -451,9 +451,16 @@ class Runner:
                     break
                 self.changed.set()
         except Exception as error:
-            with self.mutex:
-                self.failures[worker['id']] = getattr(error, 'code', 'native_worker_unavailable')
-                self.failed_generations.add((worker['id'], worker['generation']))
+            code = getattr(error, 'code', 'native_worker_unavailable')
+            reviews = [row for row in c.state()['reviews'].values() if row['reviewer_id'] == worker['id']]
+            # A recorded review ends resource authority before the native turn necessarily ends.
+            review_finished = (code == 'assignment_required' and worker['role'] == 'reviewer'
+                and context is not None and reviews and all(row.get('result') and
+                    row['status'] in ('accepted', 'reject', 'reopen', 'unresolved') for row in reviews))
+            if not review_finished:
+                with self.mutex:
+                    self.failures[worker['id']] = code
+                    self.failed_generations.add((worker['id'], worker['generation']))
         finally:
             if context is not None:
                 try:

@@ -38,7 +38,8 @@ def main():
                  'frozen-contract', 'unavailable-boundary', 'private-source-parallel',
                  'renewal', 'invocation-accounting', 'task-finish', 'receipt-double-count',
                  'renewal-boundary', 'capture-admission', 'native-prerequisite-code',
-                 'environment-prerequisite-code', 'unexpected-private-error')
+                 'environment-prerequisite-code', 'unexpected-private-error',
+                 'review-finish-accept', 'review-finish-reopen', 'review-unexpected-failure')
     for scenario in scenarios:
         if args.scenario not in ('all', scenario):
             continue
@@ -110,6 +111,25 @@ def main():
                         return {'invocation_id': invocation_id, 'session_id': self.session_id}
 
                     def observe(self, timeout_seconds=0):
+                        if scenario.startswith('review-') and self.active:
+                            if scenario == 'review-unexpected-failure':
+                                raise ControllerError('assignment_required')
+                            from engagement_evidence import CHECKS
+                            review = c.state()['reviews']['review-dry']
+                            if review['status'] == 'pending':
+                                result = self.context.submit({'request_id': 'review-result',
+                                    'expected_revision': c.state()['revision'], 'type': 'review_result',
+                                    'payload': {'review_id': 'review-dry', 'packet_sha256': review['packet_sha256'],
+                                        'disposition': scenario.removeprefix('review-finish-'),
+                                        'checks': dict.fromkeys(CHECKS, True), 'evidence_refs': [],
+                                        'contrary_refs': [], 'reason': 'Bounded harmless fixture review.'}})
+                                require(result['status'] == 'accepted', 'review result rejected')
+                                try:
+                                    self.context.authorize()
+                                    raise AssertionError('completed reviewer retained tool authority')
+                                except ControllerError as error:
+                                    require(error.code == 'assignment_required', error.code)
+                                return []  # The decision precedes the native turn's final event.
                         if scenario == 'direction-stop' and not self.directions:
                             time.sleep(min(timeout_seconds, .02))
                             return []
@@ -140,7 +160,8 @@ def main():
                         return {'runtime': {'session_id': self.session_id,
                             'owner_receipt_sha256': digest(canonical(self.owner_receipt())),
                             'process_exited': True, 'child_absence': 'verified', 'capabilities_revoked': True},
-                            'environment': None, 'cleanup': 'verified', 'resources': {}}
+                            'environment': None, 'cleanup': 'verified',
+                            'resources': {name: 'reset' for name in self.context.grant['resources']}}
 
                 def run_thread(runner):
                     result = []
@@ -238,7 +259,22 @@ def main():
                         serial += 1
                         return c.submit(lead, {'request_id': str(serial), 'expected_revision': c.state()['revision'],
                                              'type': kind, 'payload': payload})
-                    if scenario == 'renewal':
+                    if scenario.startswith('review-'):
+                        submit('closure_request', {'closure_id': 'dry', 'outcome': 'covered_dry',
+                            'claim_ids': [], 'remaining': [], 'reason': 'Bounded harmless fixture.'})
+                        submit('worker_request', {'worker_id': 'reviewer-1', 'role': 'reviewer',
+                            'profile_id': 'runtime-main', 'question': 'Review the bounded fixture.'})
+                        submit('review_request', {'review_id': 'review-dry', 'kind': 'closure',
+                            'subject_id': 'dry', 'reviewer_id': 'reviewer-1'})
+                        runner._work(c.state()['workers']['reviewer-1'])
+                        expected = {'reviewer-1': 'assignment_required'} if scenario == 'review-unexpected-failure' else {}
+                        require(runner.failures == expected, 'review completion misclassified: ' + repr(runner.failures))
+                        require(peers[-1].closed and peers[-1].count == 1, 'reviewer continued or escaped cleanup')
+                        dispatch = next(row for row in c.state()['dispatches'].values() if row['worker_id'] == 'reviewer-1')
+                        require(dispatch['status'] == 'settled', 'review dispatch not settled')
+                        require(all(c.state()['invocations'][name]['status'] != 'pending'
+                                    for name in dispatch['invocations']), 'review invocation left pending')
+                    elif scenario == 'renewal':
                         c.clock = lambda: now + timedelta(seconds=15)
                         renewed = c.renew_dispatch(grant, seconds=30)
                         require(renewed['seconds'] > grant['seconds'], 'renewal reset reservation')

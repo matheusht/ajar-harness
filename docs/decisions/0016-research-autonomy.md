@@ -1,6 +1,6 @@
 # 0016 — Research autonomy within initial authority
 
-Status: **accepted operator direction, 16 November 2026; implemented, verification in progress**.
+Status: **accepted operator direction, 16 November 2026; implemented; bounded native workflows verified**.
 The initial implementation instruction deferred full E2E and provider runs. A later
 16 November instruction explicitly authorized Terra to run full E2E, repair
 prerequisites and rebuild runtime images, with Astra handling implementation fixes,

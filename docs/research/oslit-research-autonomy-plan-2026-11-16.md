@@ -311,3 +311,16 @@ The [dated delivery report](../wiki/oslit-research-autonomy-delivery-2026-11-16.
 records current source, local checks, hosted native mechanics, live-provider
 observations and unresolved limits separately. Historical execution records and
 signed engagements remain unchanged.
+
+
+## Completed bounded verification, 16 November 2026
+
+The implementation is complete in the candidate branch. Hosted run
+[43934112061](https://github.com/matheusht/redteam-harness/actions/runs/43934112061)
+passed both native public workflows through fresh review, closure, verified export
+and cleanup at `0983d8b1`, alongside both direct native suites and the Docker job.
+The [delivery report](../wiki/oslit-research-autonomy-delivery-2026-11-16.md) retains
+the exact local/hosted evidence and incomplete compaction-interval accounting.
+These controlled provider workflows do not establish fresh-target research benefit,
+a fair native-agent advantage, useful multiday research or whole-team live-provider
+qualification. Those evidence boundaries remain unchanged.

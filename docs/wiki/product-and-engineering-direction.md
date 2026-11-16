@@ -18,7 +18,8 @@ all-30 traceability. The operator endorsed its direction with two corrections:
 Codex and OMP are the intended runtimes, and research continues while authorized
 and resourced without a fixed 24-hour ceiling. The plan incorporates those corrections;
 the current implementation and remaining qualification are tracked in
-[the v2 delivery state](oslit-v2-delivery-2026-11-14.md). For architecture changes, follow
+[the current delivery state](oslit-research-autonomy-delivery-2026-11-16.md); the
+[14 November page](oslit-v2-delivery-2026-11-14.md) remains a historical snapshot. For architecture changes, follow
 the [architecture instructions](../decisions/AGENTS.md), including when to ask the founder.
 
 [Q30](../research/oslit-harness-grilling-2026-11-13.md#q30--scored-search-within-a-task-minimal-native-tool-integration)

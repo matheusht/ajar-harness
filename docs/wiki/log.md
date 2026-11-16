@@ -977,3 +977,21 @@ cleanup. Hosted run 43915587129 passed the Docker job and both 42-check direct n
 suites. Public workflow qualification remains open: Codex closed but retained an
 unclassified partial provider upload; OMP encountered fixture continuation handling. Historical failed receipts are preserved. These
 observations do not establish fresh-target research benefit or multiday operation.
+
+
+## 2026-11-16 — final bounded native workflow verification
+
+At `0983d8b1`, [hosted run 43934112061](https://github.com/matheusht/redteam-harness/actions/runs/43934112061)
+passed Docker and both native jobs. Codex and OMP each passed 42 direct checks;
+the public workflows passed six and seven checks respectively through completed
+helpers, separate accepted review, closure, all three export verifiers and cleanup.
+Each public run retained one verified closure cancellation and no unexpected worker
+failure. OMP completed one native remote compaction without `native_usage_invalid`.
+Its affected native token/cost delta is explicitly unavailable; earlier usage and
+the provider-request ledger remain intact.
+
+Local conformance passed 900 checks with zero failures at `2b7dc8ac`; the later
+change only adjusted the public fixture's completion window and timing diagnostics.
+The [dated delivery report](oslit-research-autonomy-delivery-2026-11-16.md) maps all
+implementation areas and preserves live-provider, full research-effectiveness,
+separate-host outage and multiday gaps. Historical failed receipts remain retained.

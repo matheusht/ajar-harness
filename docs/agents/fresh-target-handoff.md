@@ -112,7 +112,9 @@ live in the journal. The ledger stores no request bodies, URLs or credentials.
 Old journals retain `provider_requests_complete:false` for unobserved history.
 
 Native tokens and `known_estimated_cost` are observed subtotals, with completeness
-flags. `cost` is null when a complete native estimate is unavailable. `billed_cost`
+flags. After OMP compacts its active history, that invocation's native token/cost
+delta is unavailable; earlier observed usage and provider-attempt records remain.
+`cost` is null when a complete native estimate is unavailable. `billed_cost`
 remains null with `provider_billing_receipt_unavailable`; native estimates are
 not invoices. Hard dollar/token caps are unsupported and rejected at input
 validation. Use provider-side limits when those constraints are necessary.

@@ -22,8 +22,9 @@ Optional `limits.hard` entries select total caps; `{}` adds none. A supplied
 `worker_seconds` budget measures elapsed parent execution time including concurrent
 helpers, not the sum of their overlapping durations. Provider requests and tokens
 include all helper activity. Renewable short leases still control abandoned owners.
-Full E2E and provider checks are authorized and underway; the dated delivery page
-records their actual outcomes. Fresh-target acceptance and the research comparison
+Both bounded native public workflows passed with controlled provider responses;
+the dated delivery page records the exact revisions and narrower live-provider
+observations. Fresh-target acceptance and the research comparison
 remain separate operator-owned work.
 
 ## Prepare the host and tool lab

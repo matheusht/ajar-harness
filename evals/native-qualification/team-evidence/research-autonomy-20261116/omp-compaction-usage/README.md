@@ -29,7 +29,10 @@ token/cost deltas unavailable and explicit missing dimensions. The next invocati
 starts from its current statistics. It does not replace unavailable usage with
 zero, reuse the post-compaction total as a delta, change earlier journal usage or
 alter the independent provider-request ledger. Other malformed counters remain
-errors. Native replay of this repair through remote compaction remains to be checked.
+errors. The subsequent [hosted OMP public run](../hosted-43934112061/omp-summary.json)
+completed one compaction and reached reviewed closure, verified export and cleanup
+without `native_usage_invalid`. Usage across that compaction remains unavailable;
+the hosted result is scripted-provider mechanics evidence.
 
 ## Repeat
 

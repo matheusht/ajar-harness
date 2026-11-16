@@ -239,7 +239,8 @@ def run_public(root, fixture, result):
                   'helper_status_observed': script.helper_status_observed,
                   'sessions_distinct': state['workers']['lead-1'].get('session_id') !=
                                        state['workers'].get('reviewer-1', {}).get('session_id'),
-                  'provider_errors': provider.errors[:8]}
+                  'provider_errors': provider.errors[:8], 'provider_error_frames': provider.error_frames,
+                  'provider_fixture_error_codes': provider.public_error_codes}
         result['public_runner'] = public
         if state['cleanup'] != 'verified':
             result['boundary_cleanup_error'] = 'public_cleanup_unresolved'

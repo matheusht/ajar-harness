@@ -30,7 +30,7 @@
   "kind": "owned-local-acquisition-e2e",
   "native_runtime": false,
   "source_sha256": {
-    "evals/native-qualification/team-evidence/research-autonomy-20261116/acquisition-local.py": "sha256:32cfc923761fcfed573dc1d68628cc33f54096349da3d4b0af2d4617d4558e65",
+    "evals/native-qualification/team-evidence/research-autonomy-20261116/acquisition-local.py": "sha256:3731b7e8a1ce4852ece00f6d3d9a4ed32a237769a9b380885a28fa830a690f61",
     "tools/acquisition_network.py": "sha256:f9592b495eb86b868dfb4f82a53398d8a3c1b6e5d5188c9bf1758e3f51fed82c",
     "tools/engagement_network.py": "sha256:edc33fd0e8dde19e658acac9b7adfaaf4d504a431f8d8899db4b054c3afa82d8"
   },

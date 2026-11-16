@@ -47,6 +47,61 @@ def error_code(error):
     return value if isinstance(value, str) and re.fullmatch('[a-z_]{1,100}', value) else type(error).__name__
 
 
+HELPER_BOOTSTRAP_PROBE = '''import json,os,runpy
+ns=runpy.run_path('/runtime/native_runtime_bootstrap.py',run_name='oslit_diagnostic')
+try: ns['_launch']()
+except BaseException as error:
+ allowed={'truncated','duplicate','file','pin','environment','credential_environment','size','frame','command','catalog_runtime','helper','state','workspace'}
+ kinds={'ValueError','PermissionError','FileNotFoundError','FileExistsError','OSError','MemoryError'}
+ category=str(error) if type(error) is ValueError and str(error) in allowed else 'other'
+ kind=type(error).__name__ if type(error).__name__ in kinds else 'other'
+ trace=[];tb=error.__traceback__
+ while tb is not None:
+  code=tb.tb_frame.f_code
+  if code.co_filename=='/runtime/native_runtime_bootstrap.py': trace.append({'function':code.co_name,'line':tb.tb_lineno})
+  tb=tb.tb_next
+ os.write(2,('OSLIT_BOOTSTRAP_DIAGNOSTIC '+json.dumps({'kind':kind,'category':category,'frames':trace[-5:]})+'\\n').encode())
+ raise SystemExit(2) from None
+'''
+
+
+def helper_stderr_diagnostic(content, known_secrets):
+    try:
+        safe_publication(content, known_secrets=known_secrets)
+    except ContractError:
+        return {'withheld': True}
+    allowed = {'truncated', 'duplicate', 'file', 'pin', 'environment', 'credential_environment',
+               'size', 'frame', 'command', 'catalog_runtime', 'helper', 'state', 'workspace', 'other'}
+    kinds = {'ValueError', 'PermissionError', 'FileNotFoundError', 'FileExistsError', 'OSError', 'MemoryError', 'other'}
+    functions = {'_launch', '_read', '_pairs', '_file', '_environment'}
+    result = {'withheld': False}
+    for line in content.splitlines():
+        if not line.startswith(b'OSLIT_BOOTSTRAP_DIAGNOSTIC '):
+            continue
+        try:
+            row = json.loads(line.split(b' ', 1)[1])
+            if (set(row) != {'kind', 'category', 'frames'} or row['kind'] not in kinds or row['category'] not in allowed
+                    or not isinstance(row['frames'], list) or len(row['frames']) > 5
+                    or any(not isinstance(frame, dict) or set(frame) != {'function', 'line'}
+                           or frame['function'] not in functions or type(frame['line']) is not int
+                           or not 0 < frame['line'] < 10000 for frame in row['frames'])):
+                raise ValueError()
+            result['bootstrap'] = row
+        except (ValueError, TypeError, KeyError):
+            result['bootstrap'] = 'invalid'
+        break
+    lower = content.lower()
+    result['docker_categories'] = [name for name in ('oci', 'permission denied', 'no such file',
+        'not running', 'resource temporarily unavailable', 'out of memory') if name.encode() in lower]
+    return result
+
+
+def helper_diagnostic_self_check():
+    sample = b'OSLIT_BOOTSTRAP_DIAGNOSTIC {"kind":"ValueError","category":"state","frames":[{"function":"_launch","line":1}]}\n'
+    assert helper_stderr_diagnostic(sample, ())['bootstrap']['category'] == 'state'
+    assert helper_stderr_diagnostic(b'fake-sensitive-sentinel', (b'fake-sensitive-sentinel',)) == {'withheld': True}
+
+
 def diagnostic_transport(observations, known_secrets):
     from native_runtime_transport import Transport
 
@@ -308,6 +363,8 @@ class Provider:
         self.ca, certificate, key = _certificates(directory, [PROVIDER_HOST], lifetime_seconds=3600)
         self.runtime, self.secret = runtime, secret
         self.requests, self.errors, self.escapes, self.request_observations = [], [], 0, []
+        self.error_frames = []
+        self.public_error_codes = []
         self.discovery_requests = 0
         self.request_observation_total = 0
         self.request_observation_lock = threading.Lock()
@@ -363,6 +420,15 @@ class Provider:
                     self.wfile.flush()
                 except Exception as error:
                     fixture.errors.append(error_code(error))
+                    public_codes = {'public_lane_unavailable', 'source_output_not_observed',
+                        'helper_not_completed', 'helper_output_not_observed', 'helper_authority_not_observed',
+                        'review_packet_not_observed'}
+                    if str(error) in public_codes and len(fixture.public_error_codes) < 8:
+                        fixture.public_error_codes.append(str(error))
+                    import traceback
+                    if len(fixture.error_frames) < 8:
+                        fixture.error_frames.append([{'file': Path(frame.filename).name, 'line': frame.lineno,
+                            'function': frame.name} for frame in traceback.extract_tb(error.__traceback__)[-6:]])
                     self.close_connection = True
 
         self.server = ThreadingHTTPServer((PROVIDER_HOST, 0), Handler)
@@ -415,11 +481,20 @@ class Provider:
 
     def autonomy_frames(self, body):
         """Route independent native sessions without making provider output a model claim."""
+        raw = json.dumps(body)
+        previous = body.get('previous_response_id', '')
+        child = 'internal helper acting under the parent' in raw or previous.startswith('autonomy-child-')
+        hold = False
+        with self.autonomy_lock:
+            if child and self.autonomy.get('hold_next_child'):
+                self.autonomy['hold_next_child'] = False
+                hold = True
+        if hold:
+            self.autonomy['child_held'].set()
+            if not self.autonomy['child_release'].wait(15):
+                raise ValueError('fixture_child_release_timeout')
         with self.autonomy_lock:
             state = self.autonomy
-            raw = json.dumps(body)
-            previous = body.get('previous_response_id', '')
-            child = 'internal helper acting under the parent' in raw or previous.startswith('autonomy-child-')
             lane = 'child' if child else 'parent'
             count = state[lane]
             state[lane] += 1
@@ -430,6 +505,8 @@ class Provider:
                 name, arguments = 'engagement_helper', {'action': 'spawn', 'prompt': 'Read the owned fixture reference.'}
             elif not child and count == 2:
                 name, arguments = 'engagement_helper', {'action': 'read', 'helper_id': state['helper_id']}
+            elif not child and state.get('next_parent_action'):
+                name, arguments = state.pop('next_parent_action')
             else:
                 name, arguments = None, None
             if self.runtime == 'codex':
@@ -924,6 +1001,7 @@ def run_native(root, fixture, result):
                         guard, write_pipe = owner.guard, native_runtime_linux.write_pipe
                         launch_thread = threading.get_ident()
                         process_ref = []
+                        stderr_capture = {'content': bytearray(), 'thread': None}
                         @contextmanager
                         def observed_guard():
                             with guard():
@@ -949,11 +1027,40 @@ def run_native(root, fixture, result):
                                     else 'empty' if not value else 'unexpected')
                                 return value
                         def observed_stdio(*args, **kwargs):
-                            process = launch_stdio(*args, **kwargs)
-                            if str(kwargs.get('role', '')).startswith('model_helper_'):
-                                diagnostic['launched'] = True
-                                process.stdout = ObservedOutput(process.stdout)
-                                process_ref.append(process)
+                            if not str(kwargs.get('role', '')).startswith('model_helper_'):
+                                return launch_stdio(*args, **kwargs)
+                            argv = list(args[0])
+                            if not argv or argv[-1] != '/runtime/native_runtime_bootstrap.py':
+                                raise ValueError('fixture_bootstrap_command_invalid')
+                            argv[-1:] = ['-c', HELPER_BOOTSTRAP_PROBE]
+                            real_popen = research_environment.subprocess.Popen
+                            def diagnostic_popen(command, *inner_args, **inner_kwargs):
+                                selected = (threading.get_ident() == launch_thread and isinstance(command, list)
+                                            and HELPER_BOOTSTRAP_PROBE in command
+                                            and inner_kwargs.get('stderr') == research_environment.subprocess.DEVNULL)
+                                if selected:
+                                    inner_kwargs['stderr'] = research_environment.subprocess.PIPE
+                                process = real_popen(command, *inner_args, **inner_kwargs)
+                                if selected:
+                                    def drain():
+                                        try:
+                                            while chunk := process.stderr.read(4096):
+                                                available = max(0, 4096 - len(stderr_capture['content']))
+                                                stderr_capture['content'].extend(chunk[:available])
+                                        finally:
+                                            process.stderr.close()
+                                    stderr_capture['thread'] = threading.Thread(target=drain, daemon=True)
+                                    stderr_capture['thread'].start()
+                                return process
+                            research_environment.subprocess.Popen = diagnostic_popen
+                            try:
+                                process = launch_stdio(argv, *args[1:], **kwargs)
+                            finally:
+                                research_environment.subprocess.Popen = real_popen
+                            diagnostic['instrumented_bootstrap'] = True
+                            diagnostic['launched'] = True
+                            process.stdout = ObservedOutput(process.stdout)
+                            process_ref.append(process)
                             return process
                         owner.environment.launch_stdio = observed_stdio
                         owner.guard = observed_guard
@@ -963,6 +1070,33 @@ def run_native(root, fixture, result):
                         except Exception as error:
                             diagnostic['error'] = error_code(error)
                             diagnostic['process_exited'] = bool(process_ref and process_ref[0].poll() is not None)
+                            if stderr_capture['thread'] is not None:
+                                stderr_capture['thread'].join(timeout=1)
+                                diagnostic['stderr'] = helper_stderr_diagnostic(bytes(stderr_capture['content']), (secret.encode(),))
+                            counters = '''import json,pathlib
+p=pathlib.Path('/sys/fs/cgroup');out={}
+for name in ('memory.current','pids.current'):
+ try: out[name]=int((p/name).read_text().strip())
+ except (OSError,ValueError): pass
+for name in ('memory.events','pids.events'):
+ try: out[name]={k:int(v) for k,v in (line.split() for line in (p/name).read_text().splitlines())}
+ except (OSError,ValueError): pass
+print(json.dumps(out))'''
+                            try:
+                                observed = owner.environment._run(['container', 'exec', '--user', '0:0',
+                                    owner.environment.identity['container_id'], 'python3', '-I', '-S', '-c', counters],
+                                    timeout=5, output_limit=4096)
+                                values = json.loads(observed['output'])
+                                if (not isinstance(values, dict) or set(values) - {'memory.current', 'pids.current', 'memory.events', 'pids.events'}
+                                        or any(not (type(value) is int and value >= 0 or isinstance(value, dict)
+                                            and all(isinstance(key, str) and re.fullmatch(r'[a-z_]{1,32}', key)
+                                                    and type(number) is int and number >= 0 for key, number in value.items()))
+                                               for value in values.values())):
+                                    raise ValueError('fixture_cgroup_invalid')
+                                diagnostic['cgroup'] = {'status': observed['status'], 'returncode': observed['returncode'],
+                                    'values': values}
+                            except Exception:
+                                diagnostic['cgroup'] = {'status': 'unavailable'}
                             raise
                         finally:
                             owner.environment.launch_stdio = launch_stdio
@@ -1000,6 +1134,17 @@ def run_native(root, fixture, result):
             check(result, 'native helper completes under parent authority', len(helpers) == 1
                   and helpers[0].get('status') == 'completed' and helpers[0].get('worker_id') == worker['id']
                   and helpers[0].get('parent_session_id') == identity['session_id'])
+            helper_usage = helpers[0].get('usage', {})
+            check(result, 'native helper reports usage totals',
+                  type((helper_usage.get('tokens') or {}).get('total')) is int)
+            def helper_usage_count():
+                return sum(event['type'] == 'helper_observed' and event['payload']['helper_id'] == helpers[0]['helper_id']
+                           and event['payload']['action'] == 'usage' for event in controller._events())
+            before_count = helper_usage_count()
+            before_tokens = controller.state()['usage']['tokens']
+            controller.record_helper(context.grant, helpers[0]['helper_id'], 'usage', {'usage': helper_usage})
+            check(result, 'replayed helper cumulative usage is counted once', before_count > 0
+                  and helper_usage_count() == before_count and controller.state()['usage']['tokens'] == before_tokens)
             provider.autonomy['helper_id'] = helpers[0]['helper_id']
             invoke(context, boundary, 'Read the completed owned helper result.', result)
             check(result, 'parent reads helper through native tool', provider.autonomy['parent'] == 4
@@ -1010,9 +1155,61 @@ def run_native(root, fixture, result):
             readback = boundary.environment.execute(['cat', '/work/knowledge/' + selected['version'][7:] + '/reference.bin'], timeout_seconds=10)
             check(result, 'materialized reference bytes verified', readback['status'] == 'settled'
                   and readback.get('output', '').encode() == reference)
+            revised = b'Owned revised native helper reference.\n'
+            updated = boundary._knowledge_shared.retain(revised, origin='fixture:owned', title='Owned fixture')
+            check(result, 'same-name source update selects a new immutable version', updated['version'] != selected['version'])
+            for version in (selected['version'], updated['version']):
+                before_deliveries = len(controller.state().get('knowledge_deliveries', []))
+                provider.autonomy['next_parent_action'] = ('engagement_knowledge',
+                    {'action': 'read', 'version': version, 'materialize': True})
+                invoke(context, boundary, 'Read the selected owned reference version.', result)
+                check(result, 'native read selected version delivered', any(
+                    item.get('version') == version and item.get('action') == 'delivery'
+                    and item.get('materialization', {}).get('status') == 'materialized'
+                    for item in controller.state().get('knowledge_deliveries', [])[before_deliveries:]))
+            for record, expected in ((selected, reference), (updated, revised)):
+                readback = boundary.environment.execute(['cat', '/work/knowledge/' + record['version'][7:] + '/reference.bin'],
+                    timeout_seconds=10)
+                check(result, 'selected immutable version retains exact bytes', readback['status'] == 'settled'
+                      and readback.get('output', '').encode() == expected)
+            provider.autonomy.update(hold_next_child=True, child_held=threading.Event(), child_release=threading.Event())
+            provider.autonomy['next_parent_action'] = ('engagement_helper',
+                {'action': 'spawn', 'prompt': 'Wait with the owned test provider until stopped.'})
+            try:
+                invoke(context, boundary, 'Start a second helper for the owned stop fixture.', result)
+                rows = list(controller.state()['helpers'].values())
+                check(result, 'second helper created for active stop', len(rows) == 2)
+                second = next(row for row in rows if row['helper_id'] != helpers[0]['helper_id'])
+                deadline = time.monotonic() + 30
+                while not provider.autonomy['child_held'].is_set() and time.monotonic() < deadline:
+                    boundary.runtime.observe(timeout_seconds=.1)
+                check(result, 'second helper reaches the held native provider request', provider.autonomy['child_held'].is_set())
+                def release_on_stop():
+                    job = boundary.helpers.jobs.get(second['helper_id'])
+                    if job is not None:
+                        job['stop'].wait(12)
+                    provider.autonomy['child_release'].set()
+                releaser = threading.Thread(target=release_on_stop, daemon=True); releaser.start()
+                provider.autonomy['next_parent_action'] = ('engagement_helper',
+                    {'action': 'stop', 'helper_id': second['helper_id']})
+                invoke(context, boundary, 'Stop the active owned test helper.', result)
+                releaser.join(timeout=15)
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    stopped = controller.state()['helpers'][second['helper_id']]
+                    if stopped.get('status') in ('stopped', 'failed', 'completed'):
+                        break
+                    boundary.runtime.observe(timeout_seconds=.1)
+                check(result, 'active native helper stops and releases its session',
+                      stopped.get('status') == 'stopped' and second['helper_id'] not in boundary.helpers.jobs)
+            finally:
+                provider.autonomy['child_release'].set()
             result['autonomy_coverage'] = {'helper_and_reference': 'passed', 'provider': 'scripted',
-                'not_covered': ['live_model_direction', 'fetch_retention_failure', 'version_update',
-                                'independent_technique_review', 'reviewed_closure', 'active_helper_stop']}
+                'duplicate_helper_usage': 'passed',
+                'reference_version_update': 'passed',
+                'active_helper_stop': 'passed',
+                'not_covered': ['live_model_direction', 'fetch_retention_failure',
+                                'independent_technique_review', 'reviewed_closure']}
         result['native_execution'] = 'two_invocations_completed'
         result['controlled_provider_requests'] = len(provider.requests)
         result['controlled_provider_discovery_requests'] = provider.discovery_requests

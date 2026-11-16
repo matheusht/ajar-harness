@@ -90,7 +90,7 @@ def main(output):
             check('complete receipt binds exact bytes', record is not None and record['body_complete']
                   and record['response_sha256'] == 'sha256:' + hashlib.sha256(body).hexdigest())
             prior = len(hits)
-            status, _ = request('GET', '/credential', 'Authorization: Bearer harmless-test\r\n')
+            status, _ = request('GET', '/credential', 'Authorization: Bearer fixture\r\n')
             check('credential header refused before origin', status == 403 and len(hits) == prior)
             status, _ = request('POST', '/mutation')
             check('mutation refused before origin', status == 403 and len(hits) == prior)

@@ -42,6 +42,17 @@ python3 evals/native-qualification/team-evidence/research-autonomy-20261116/acqu
 It checks transfer bytes and digest, route/method/credential refusal, and incomplete
 transfer recording. It does not run an agent or Docker lab.
 
+The [knowledge host scenario](knowledge-host-e2e.py) and its
+[result](knowledge-host-result.json) exercise two signed cases and real controller
+journals. A fresh reviewer recommends an exact technique version using distinct
+synthetic changed-case and counterexample artifacts; another withdraws it. The
+scenario also simulates a fetch and retention failure, then verifies the recorded
+gap and export. It uses simulated environments and no native runtime or network.
+
+```sh
+python3 evals/native-qualification/team-evidence/research-autonomy-20261116/knowledge-host-e2e.py /tmp/oslit-knowledge-result.json
+```
+
 ## Local prerequisites and checks
 
 Pinned dependencies were installed into a private virtual environment with

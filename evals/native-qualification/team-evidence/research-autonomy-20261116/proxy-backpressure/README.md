@@ -45,3 +45,25 @@ seconds. The second records all ten checks passing. The saved before/after
 backpressure receipts carry both scenario and bridge source hashes; the scenario
 hash is identical across the pair. These are local transport checks, with no
 container-isolation or research-efficacy claim. Original receipts are preserved.
+
+
+## Large HTTPS upload and explicit cancellation
+
+The [full TLS scenario](../../../smoke/check_network_upload_e2e.py) sends the same
+652,488-byte size as the later public fixture request through actual ProxyBridge,
+NetworkGate and an owned TLS receiver. On the current product source, fragmented
+writes and a 1.4-second consumer pause preserved every byte and the expected digest;
+the proxy recorded started then completed. A separate explicit authority revocation
+preceded partial EOF and recorded started then unknown. Both owned relays stopped.
+See the [result](network-upload.json), including the exact timing and source hashes.
+
+```sh
+python3 evals/native-qualification/smoke/check_network_upload_e2e.py --output /tmp/oslit-network-upload.json
+```
+
+Requirements are Python 3, OpenSSL and local sockets/subprocesses. Expected: all three
+checks pass. This discriminator leaves production network timeouts unchanged. It
+shows that intentional cancellation can produce a partial upstream body; it does
+not retroactively classify a hosted failure. Hosted classification requires a
+verified authority-ending event inside that exact request-read interval. Unexpected
+active-authority truncation and malformed complete bodies remain failures.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -400,12 +401,15 @@ class Provider:
                 self.send_response(403); self.end_headers()
 
             def do_POST(self):
+                incomplete_authenticated = False
                 try:
                     fixture.observe_request('POST', self.path, self.headers)
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 2 * 1024 * 1024:
                         raise ValueError('provider_request_size')
+                    read_started = datetime.now(timezone.utc)
                     raw = self.rfile.read(size)
+                    read_finished = datetime.now(timezone.utc)
                     try:
                         body = json.loads(raw)
                     except json.JSONDecodeError as error:
@@ -418,6 +422,11 @@ class Provider:
                                 'content_encoding': encoding if encoding in ('identity', 'gzip', 'deflate', 'br') else 'other',
                                 'transfer_encoding': transfer if transfer in ('none', 'chunked') else 'other',
                                 'content_type': content_type if content_type in ('application/json', '') else 'other'})
+                            if len(raw) < size and fixture.public_frames is not None:
+                                incomplete_authenticated = (self.headers.get('Authorization') == 'Bearer ' + fixture.secret
+                                    and content_type == 'application/json' and encoding == 'identity' and transfer == 'none')
+                                fixture.json_parse_diagnostics[-1]['authenticated'] = incomplete_authenticated
+                                fixture.json_parse_diagnostics[-1]['controller_snapshot'] = fixture.public_frames.status_snapshot(read_started, read_finished)
                         raise
                     if self.headers.get('Authorization') != 'Bearer ' + fixture.secret:
                         raise ValueError('provider_credential_missing')
@@ -431,16 +440,16 @@ class Provider:
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/event-stream')
                     self.end_headers()
-                    frames = (fixture.public_frames(body, seq) if fixture.public_frames is not None else
+                    frames = (fixture.public_frames(body, seq, self.path) if fixture.public_frames is not None else
                               fixture.autonomy_frames(body) if seq > 4 else fixture.frames(seq, command))
                     for frame in frames:
                         self.wfile.write(frame)
                     self.wfile.flush()
                 except Exception as error:
-                    fixture.errors.append(error_code(error))
+                    fixture.errors.append('incomplete_authenticated_request' if incomplete_authenticated else error_code(error))
                     public_codes = {'public_lane_unavailable', 'source_output_not_observed',
                         'helper_not_completed', 'helper_output_not_observed', 'helper_authority_not_observed',
-                        'review_packet_not_observed', 'review_packet_invalid'}
+                        'review_packet_not_observed', 'review_packet_invalid', 'public_compaction_unqualified'}
                     if str(error) in public_codes and len(fixture.public_error_codes) < 8:
                         fixture.public_error_codes.append(str(error))
                     import traceback
@@ -583,11 +592,11 @@ def tool_bundle(fixture, result):
     return result['tool_installation']['profile_fields']['tool_bundle']
 
 
-def omp_fixture_catalog(provider_url):
+def omp_fixture_catalog(provider_url, context_window=32768):
     return canonical({'providers': {'openai': {'baseUrl': provider_url + '/v1',
         'api': 'openai-completions', 'apiKey': 'OPENAI_API_KEY', 'models': [{'id': 'fixture-model', 'name': 'Owned fixture',
             'reasoning': False, 'input': ['text'], 'supportsTools': True,
-            'contextWindow': 32768, 'maxTokens': 1024,
+            'contextWindow': context_window, 'maxTokens': 1024,
             'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}}]}}})
 
 
@@ -659,7 +668,7 @@ env_key = "OPENAI_API_KEY"
                        'workspace_bytes': 1073741824 if fixture.runtime == 'omp' else 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
-        catalog_content = omp_fixture_catalog(provider.origin)
+        catalog_content = omp_fixture_catalog(provider.origin, 131072 if getattr(fixture, 'public_run', False) else 32768)
         validate_omp_fixture_catalog(catalog_content, provider.origin, provider.secret)
         write(catalog, catalog_content)
         profile['model_catalog'] = {'path': str(catalog), 'sha256': digest(catalog.read_bytes())}

@@ -1,7 +1,11 @@
 # 0016 — Research autonomy within initial authority
 
-Status: **accepted operator direction, 16 November 2026; local implementation**.
-Full E2E, provider runs and research comparisons are explicitly deferred. This
+Status: **accepted operator direction, 16 November 2026; implemented, verification in progress**.
+The initial implementation instruction deferred full E2E and provider runs. A later
+16 November instruction explicitly authorized Terra to run full E2E, repair
+prerequisites and rebuild runtime images, with Astra handling implementation fixes,
+followed by PR publication. See the [dated delivery evidence](../wiki/oslit-research-autonomy-delivery-2026-11-16.md).
+Fresh-target research and the native-agent comparison remain operator-owned. This
 record grants no engagement or external-action authority.
 
 ## Decision and reason

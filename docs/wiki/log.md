@@ -959,3 +959,21 @@ Failure cases were defined before implementation; Luna owns minimal local checks
 This is local implementation work, not hosted CI, full E2E, live provider qualification,
 sustained operation, research benefit or fresh-target acceptance. Those runs remain
 deferred by the operator.
+
+
+## 2026-11-16 — full verification authorization and observed repairs
+
+The operator's later instruction supersedes the initial E2E/provider deferral:
+Terra owns full workflow checks and prerequisite/image preparation; Astra owns
+implementation repairs; PR publication is authorized. The
+[dated delivery page](oslit-research-autonomy-delivery-2026-11-16.md) maps all M0–M6
+capabilities and the autonomy/helper/knowledge changes to their evidence.
+
+At `5df9010b`, local full conformance passed 900 checks with zero failures.
+Failure-first execution repaired byte loss under socket backpressure and Codex
+external-authentication/executor ordering; the latter exposed a separate Mac Docker
+namespace prerequisite. One actual OMP/Mistral source-read turn completed with
+cleanup. Hosted run 43915587129 passed the Docker job and both 42-check direct native
+suites. Public workflow qualification remains open: Codex closed but retained an
+unclassified partial provider upload; OMP encountered fixture continuation handling. Historical failed receipts are preserved. These
+observations do not establish fresh-target research benefit or multiday operation.

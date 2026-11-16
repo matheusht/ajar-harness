@@ -16,6 +16,7 @@ This is curated topic coverage, not a complete repository ingestion or a live tr
 | How should architecture changes preserve founder intent, and when should an agent ask? | [Architecture guidance](../decisions/AGENTS.md) |
 | Which initial authority policy and caller route apply to new research? | [Initial-scope autonomy and caller migration](../decisions/0015-initial-scope-autonomy.md) |
 | What does the candidate Codex/OMP v2 route deliver, and what remains open? | [14 November v2 delivery state](oslit-v2-delivery-2026-11-14.md) and [operator guide](../agents/engagement.md) |
+| What did the autonomy implementation and latest full verification deliver? | [16 November autonomy delivery](oslit-research-autonomy-delivery-2026-11-16.md) |
 | What is implemented and what is actually qualified? | [Native research status](native-research-status.md) |
 | What did the October discussion and external research establish? | [Discussion record and research lessons](../research/research-direction-discussion-2026-10.md) |
 | What did the September offline engineering package deliver? | [Offline engineering evidence](engineering-evidence.md) |
@@ -33,7 +34,8 @@ This is curated topic coverage, not a complete repository ingestion or a live tr
 ## Current direction and dated delivery
 
 The [direction page](product-and-engineering-direction.md) owns durable rationale.
-The [v2 delivery state](oslit-v2-delivery-2026-11-14.md) records the November
+The [16 November autonomy delivery](oslit-research-autonomy-delivery-2026-11-16.md) records the latest implementation and verification pass.
+The [v2 delivery state](oslit-v2-delivery-2026-11-14.md) records the earlier November
 Codex/OMP candidate and its remaining engineering and qualification gaps. The
 [native status page](native-research-status.md) preserves the separate 23 October
 candidate, including implemented continuation and its missing live evidence. The

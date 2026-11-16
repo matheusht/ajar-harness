@@ -38,8 +38,11 @@ techniques support research; optional independent transfer/counterexample evalua
 controls exact-version recommendation, never investigation closure. A retention
 failure is visible `not_retained` delivery and does not itself stop permitted work.
 See the [consolidated plan](../research/oslit-research-autonomy-plan-2026-11-16.md)
-and [library guide](../agents/knowledge-library.md). This revision has local
-implementation/checks only; full E2E, provider and benefit comparisons are deferred.
+and [library guide](../agents/knowledge-library.md). The operator subsequently
+authorized full E2E, rebuilt runtimes, repairs and a PR. The
+[16 November delivery report](oslit-research-autonomy-delivery-2026-11-16.md) separates
+implemented behavior, actual verification and remaining limits. Fresh-target
+research and benefit comparisons remain operator-owned.
 
 **Authority status:** this page is a maintained synthesis of operator choices, not an
 accepted ADR. It does not create or change a gate. A durable gate change needs a

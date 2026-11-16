@@ -6,7 +6,7 @@ The intended improvement is an investigation that changes direction from evidenc
 
 The existing native execution, shared evidence and independent review remain the foundation. First remove restrictions that confuse research judgment with enforceable facts. Then make existing shared notes easier to use and recover, and provide selective access to a useful knowledge library. Model routing, training, pricing and the operator's future fresh-target comparison remain separate decisions. The operator's latest correction explicitly reopens unnecessary requirements in the earlier implementation, without reopening that plan's entire delivery effort.
 
-Supporting detail: [source lessons](oslit-research-autonomy-sources-2026-11-16.md) and [code integration map](oslit-requirements-deletion-map-2026-11-16.md). The operator approved implementation. [Decision 0016](../decisions/0016-research-autonomy.md) records the selected `research-autonomy-v1` policy; the working tree now contains its local implementation. Historical signatures keep their original behavior. Full E2E, live provider runs and research comparisons remain deferred.
+Supporting detail: [source lessons](oslit-research-autonomy-sources-2026-11-16.md) and [code integration map](oslit-requirements-deletion-map-2026-11-16.md). The operator approved implementation. [Decision 0016](../decisions/0016-research-autonomy.md) records the selected `research-autonomy-v1` policy; the working tree now contains its local implementation. Historical signatures keep their original behavior. The later 16 November verification authorization below supersedes the initial E2E/provider deferral; the [dated delivery report](../wiki/oslit-research-autonomy-delivery-2026-11-16.md) separates implementation and executed evidence. Fresh-target research and the native-agent comparison remain operator-owned.
 
 ## Selected direction
 
@@ -274,7 +274,7 @@ Do not add a graph database, universal vulnerability ontology, permanent semanti
 
 The core product choices for this phase are selected; model routing is deliberately deferred. Native helper ownership, optional total limits, the knowledge-oracle starting point and continued reading with “not retained” status are settled. The operator completed that review and authorized implementation, as recorded below. Exact field names, file layout and search libraries are implementation choices unless they change those behaviors.
 
-## Implementation authorization, 16 November 2026
+## Initial implementation authorization, 16 November 2026
 
 The operator confirmed shared understanding and authorized Astra to implement the full plan, reusing PRs #221–#223. Luna owns minimal verification. Full E2E, provider runs and research comparisons remain deferred until explicitly requested. Selective formal verification is an optional engineering aid, not a runtime feature or universal gate. No Omega proposals are included.
 
@@ -283,7 +283,7 @@ The operator selected ten minutes for a parent and two helpers running concurren
 Define failure cases before implementation. Reuse existing small checks and add only focused checks necessary for changed nontrivial behavior; do not run full E2E. Report implementation, local checks and deferred verification separately.
 
 
-## Local implementation update, 16 November 2026
+## Initial local implementation update, 16 November 2026
 
 The working tree contains policy-selected guidance/defaults, advisory strategy
 handling, independent scientific review over retained execution facts, optional
@@ -296,3 +296,18 @@ search returns available results. Native materialization, full E2E, provider run
 sustained operation and research comparisons remain unverified/deferred. The
 [preimplementation failure cases](knowledge-library-failure-cases-2026-11-16.md)
 remain the verification contract; no historical result was rewritten.
+
+
+## Subsequent verification authorization, 16 November 2026
+
+The operator subsequently requested full E2E now: Terra repairs missing dependencies,
+rebuilds runtime images and exercises the complete workflow in Codex and OMP; Astra
+handles implementation fixes. The operator also requested a PR and progress across
+all implementation areas. This supersedes the initial limited-check instruction
+and E2E/provider deferral above. It does not authorize a merge or replace the
+operator-owned fresh-target investigation and fair native-agent comparison.
+
+The [dated delivery report](../wiki/oslit-research-autonomy-delivery-2026-11-16.md)
+records current source, local checks, hosted native mechanics, live-provider
+observations and unresolved limits separately. Historical execution records and
+signed engagements remain unchanged.

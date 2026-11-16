@@ -40,6 +40,7 @@ on:
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
       - evals/native-qualification/smoke/check_proxy_backpressure_e2e.py
+      - evals/native-qualification/smoke/check_network_upload_e2e.py
       - evals/native-qualification/smoke/check_provider_discovery_fixture_e2e.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
@@ -87,6 +88,7 @@ on:
       - evals/native-qualification/smoke/check_omp_invocation_diagnostics.py
       - evals/native-qualification/smoke/check_network_header_denials_e2e.py
       - evals/native-qualification/smoke/check_proxy_backpressure_e2e.py
+      - evals/native-qualification/smoke/check_network_upload_e2e.py
       - evals/native-qualification/smoke/check_provider_discovery_fixture_e2e.py
       - evals/native-qualification/smoke/check_omp_public_credential_reference.py
       - evals/native-qualification/smoke/check_omp_loader_preflight*.py
@@ -146,6 +148,11 @@ jobs:
         run: |
           python3 evals/native-qualification/smoke/check_proxy_backpressure_e2e.py \
             --output "$RUNNER_TEMP/oslit-docker/proxy-backpressure.json"
+      - name: Verify TLS upload and authority revocation
+        if: ${{ !cancelled() && env.OSLIT_FIXTURE_IMAGE != '' }}
+        run: |
+          python3 evals/native-qualification/smoke/check_network_upload_e2e.py \
+            --output "$RUNNER_TEMP/oslit-docker/network-upload.json"
       - name: Preserve actual environment observations
         if: always()
         uses: actions/upload-artifact@v4

@@ -6,6 +6,7 @@ signed fixture, native runtimes, tool boundary, reviewer and cleanup are real.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import hashlib
 import os
 from pathlib import Path
@@ -70,7 +71,7 @@ def classify_lane(body, issued=None):
     raise ValueError('public_lane_unavailable')
 
 
-def lane_shape(body):
+def lane_shape(body, path=None):
     allowed = {'messages', 'input', 'previous_response_id', 'metadata', 'user', 'model', 'stream'}
     messages = body.get('messages', body.get('input', []))
     messages = [{'role': 'user', 'content': messages}] if isinstance(messages, str) else messages
@@ -92,7 +93,8 @@ def lane_shape(body):
                 'helper': 'internal helper acting under the parent' in text,
                 'continuation': 'Continue the assigned research using the current native context.' in text})
     metadata = body.get('metadata')
-    return {'keys': sorted(key for key in body if key in allowed), 'message_count': len(messages),
+    return {'path': path if path in ('/v1/chat/completions', '/v1/responses/compact', '/v1/responses') else 'other',
+            'keys': sorted(key for key in body if key in allowed), 'message_count': len(messages),
             'roles': roles, 'user_markers': user_markers,
             'omp_compaction_system': omp_compaction_system, 'compaction_conversation': compaction_conversation,
             'has_tools': bool(body.get('tools')),
@@ -135,6 +137,40 @@ def routing_self_check():
     shape = lane_shape({'messages': [{'role': 'user', 'content': 'private fixture sentinel'}],
                         'metadata': {'session_id': 'private fixture sentinel'}})
     assert 'private fixture sentinel' not in json.dumps(shape)
+
+
+def expected_closure_cancellation(*, authorized, expected_bytes, received_bytes, started, finished, events, status, workers):
+    if (authorized is not True or type(expected_bytes) is not int or type(received_bytes) is not int
+            or not 0 <= received_bytes < expected_bytes or status not in ('closing', 'closed')
+            or not workers or any(worker not in ('revoked', 'stopped') for worker in workers)
+            or not isinstance(started, datetime) or not isinstance(finished, datetime) or finished < started):
+        return False
+    for event in events:
+        try:
+            if (event['type'] == 'closure_stopping' and event['payload']['reason'] == 'reviewed_closure'
+                    and type(event['sequence']) is int and event['sequence'] > 0
+                    and re.fullmatch(r'sha256:[0-9a-f]{64}', event['sha256'])
+                    and started <= datetime.fromisoformat(event['at']) <= finished):
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
+
+
+def cancellation_self_check():
+    start = datetime.fromisoformat('2026-11-16T12:00:00+00:00')
+    end = datetime.fromisoformat('2026-11-16T12:00:02+00:00')
+    event = {'type': 'closure_stopping', 'at': '2026-11-16T12:00:01+00:00',
+             'sequence': 7, 'sha256': 'sha256:' + '1' * 64, 'payload': {'reason': 'reviewed_closure'}}
+    good = {'authorized': True, 'expected_bytes': 100, 'received_bytes': 30,
+            'started': start, 'finished': end, 'events': [event], 'status': 'closed',
+            'workers': ['revoked', 'stopped']}
+    assert expected_closure_cancellation(**good)
+    for changes in ({'authorized': False}, {'received_bytes': 100}, {'events': []},
+                    {'finished': start}, {'status': 'active'}, {'workers': ['running']},
+                    {'events': [{**event, 'at': '2026-11-16T12:00:03+00:00'}]},
+                    {'events': [{**event, 'payload': {'reason': 'other'}}]}):
+        assert not expected_closure_cancellation(**{**good, **changes})
 
 
 def packet_read_update(current, row, sha):
@@ -214,14 +250,40 @@ class Script:
         self.packet_bytes = b''
         self.lane_diagnostics = []
         self.issued_calls = {}
+        self.tool_error_codes = set()
 
-    def __call__(self, body, sequence):
+    def status_snapshot(self, started, finished):
+        try:
+            state = Controller(self.engagement).state()
+            allowed = {'active', 'blocked', 'closed', 'completed', 'pending', 'rejected', 'running',
+                       'started', 'stopped', 'stopping', 'revoked'}
+            def safe(value):
+                return value if value in allowed else 'other'
+            events = [event for event in Controller(self.engagement)._events()
+                      if event.get('type') in ('closure_stopping', 'stop_requested')
+                      and started <= datetime.fromisoformat(event['at']) <= finished]
+            return {'read_started': started.isoformat(), 'read_finished': finished.isoformat(),
+                    'stop_events': [{**{key: event[key] for key in ('sequence', 'sha256', 'type', 'at')},
+                                     'payload': {'reason': 'reviewed_closure'}} for event in events
+                                    if event.get('type') == 'closure_stopping'
+                                    and event.get('payload', {}).get('reason') == 'reviewed_closure'],
+                    'engagement': safe(state.get('status')),
+                    'lead': safe(state.get('workers', {}).get('lead-1', {}).get('status')),
+                    'reviewer': safe(state.get('workers', {}).get('reviewer-1', {}).get('status'))}
+        except Exception:
+            return {'status': 'unavailable'}
+
+    def __call__(self, body, sequence, path=None):
         with self.lock:
+            if path == '/v1/responses/compact':
+                if len(self.lane_diagnostics) < 8:
+                    self.lane_diagnostics.append(lane_shape(body, path))
+                raise ValueError('public_compaction_unqualified')
             try:
                 lane = classify_lane(body, self.issued_calls)
             except ValueError:
                 if len(self.lane_diagnostics) < 8:
-                    self.lane_diagnostics.append(lane_shape(body))
+                    self.lane_diagnostics.append(lane_shape(body, path))
                 raise
             self.counts[lane] += 1
             identity = 'public-' + lane + '-' + str(self.counts[lane])
@@ -229,6 +291,11 @@ class Script:
             state = controller.state()
             outputs = [row.get('output') for row in body.get('input', []) if isinstance(row, dict) and row.get('call_id')]
             outputs += [row.get('content') for row in body.get('messages', []) if isinstance(row, dict) and row.get('role') == 'tool']
+            for row in json_objects(outputs):
+                for key in ('code', 'error'):
+                    value = row.get(key)
+                    if isinstance(value, str) and re.fullmatch(r'[a-z][a-z_]{2,79}', value):
+                        self.tool_error_codes.add(value)
             output_text = '\n'.join(content_strings(outputs))
             if lane == 'helper' and self.counts[lane] > 1:
                 self.helper_status_observed |= 'lead-1' in output_text and '"assignment":' in output_text
@@ -340,6 +407,8 @@ def run_public(root, fixture, result):
     from check_linux_model_native_e2e import tool_bundle
     routing_self_check()
     packet_self_check()
+    cancellation_self_check()
+    fixture.public_run = True
     root.mkdir(mode=0o700)
     installed = result.get('tool_installation', {})
     bundle = installed.get('tool_bundle') or installed.get('profile_fields', {}).get('tool_bundle')
@@ -389,7 +458,8 @@ def run_public(root, fixture, result):
                   'helper_status_observed': script.helper_status_observed,
                   'sessions_distinct': state['workers']['lead-1'].get('session_id') !=
                                        state['workers'].get('reviewer-1', {}).get('session_id'),
-                  'provider_errors': provider.errors[:8], 'provider_error_frames': provider.error_frames,
+                  'provider_errors': provider.errors[:8], 'tool_error_codes': sorted(script.tool_error_codes)[:32],
+                  'provider_error_frames': provider.error_frames,
                   'provider_fixture_error_codes': provider.public_error_codes,
                   'provider_json_parse_diagnostics': provider.json_parse_diagnostics,
                   'provider_lane_diagnostics': script.lane_diagnostics}
@@ -400,7 +470,23 @@ def run_public(root, fixture, result):
               and state['cleanup'] == 'verified' and public['review_status'] == 'accepted'
               and public['lead_session_present'] and public['reviewer_session_present'] and public['sessions_distinct']
               and public['source_output_observed'] and public['review_packet_observed'])
-        check(result, 'public Runner provider has no transport or fixture errors', not provider.errors)
+        cancellation_rows = []
+        for row in provider.json_parse_diagnostics:
+            snapshot = row.get('controller_snapshot', {})
+            try:
+                matched = expected_closure_cancellation(
+                    authorized=row.get('authenticated'), expected_bytes=row['expected_bytes'],
+                    received_bytes=row['received_bytes'], started=datetime.fromisoformat(snapshot['read_started']),
+                    finished=datetime.fromisoformat(snapshot['read_finished']), events=snapshot['stop_events'],
+                    status=state['status'], workers=[worker['status'] for worker in state['workers'].values()])
+            except (KeyError, TypeError, ValueError):
+                matched = False
+            cancellation_rows.append(matched)
+        cancellation_count = provider.errors.count('incomplete_authenticated_request')
+        public['verified_closure_cancellations'] = sum(cancellation_rows)
+        check(result, 'public Runner provider has no unexpected transport or fixture errors',
+              len(provider.errors) == cancellation_count == len(cancellation_rows)
+              and all(cancellation_rows))
         check(result, 'public Runner native helper completes', public['helper_statuses'] == ['completed']
               and public['helper_read_observed'] and public['helper_status_observed'])
         result['native_execution'] = 'public_runner_native_sessions_completed'

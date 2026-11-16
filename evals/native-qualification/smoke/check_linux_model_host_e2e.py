@@ -279,7 +279,8 @@ def adapter(root, kind):
         paths = SimpleNamespace(executable='/runtime/bin/model', state='/work/.model', workspace='/work',
             config='/input/model/config.toml' if kind == 'codex' else '/input/model/config.json', ca='/input/model/ca.pem')
         def check_authority(self): pass
-        def launch_model(self, command, public_environment, binding):
+        def launch_model(self, command, public_environment, binding, *, helper_id=None):
+            require(helper_id is None, 'fixture accepts parent launch only')
             require(command[0] == self.paths.executable, 'adapter used host executable in container')
             require(public_environment['HOME'] == self.paths.state, 'host home leaked into container')
             require('OPENAI_API_KEY' not in public_environment, 'credential crossed public environment')

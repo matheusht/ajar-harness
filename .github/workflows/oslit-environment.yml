@@ -30,6 +30,7 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -79,6 +80,7 @@ on:
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
       - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
+      - evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -226,6 +228,10 @@ jobs:
         run: |
           python3 evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py \
             --output "$RUNNER_TEMP/oslit-native-e2e-omp/responses-tool-id.json"
+      - name: Verify renewal stays within current grant
+        run: |
+          python3 evals/native-qualification/smoke/check_native_renewal_bounds_e2e.py \
+            --output "$RUNNER_TEMP/oslit-native-e2e-${{ matrix.runtime }}/renewal-bounds.json"
       - name: Check bounded loader-preflight contract
         if: matrix.runtime == 'omp'
         run: |

@@ -505,8 +505,8 @@ class NativeBoundary:
         self.owner_receipt = self.runtime.owner_receipt()
         return {'session_id': identity['session_id'], 'owner_receipt': self.owner_receipt}
 
-    def renew(self, seconds):
-        if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
+    def renew(self, seconds=None):
+        if seconds is not None and (type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0):
             raise BoundaryError('native_renewal_invalid')
         self.context.authorize()
         if research_autonomy(self.scope) and (time.monotonic() - self.session_started >= 86400 or
@@ -779,12 +779,10 @@ class NativeBoundary:
                         for owner in list(owners.values()):
                             owner.environment.grant = copy.deepcopy(grant)
                     if prepared.is_set():
-                        remaining = (instant(grant['lease_expires_at']) - self.controller.clock()).total_seconds()
-                        environment.renew(min(remaining, self.environment_reference['limits']['lease_seconds']))
+                        environment.renew()
                     for access_id, owner in list(owners.items()):
                         if owner.start_receipt is not None:
-                            remaining = (instant(grant['lease_expires_at']) - self.controller.clock()).total_seconds()
-                            owner.renew(min(remaining, control['reset_profiles'][access_id][2]['limits']['lease_seconds']))
+                            owner.renew()
                 except Exception as error:
                     renewal_failure.append(getattr(error, 'code', 'native_capture_renewal_unavailable'))
                     control['cancelled'].set()

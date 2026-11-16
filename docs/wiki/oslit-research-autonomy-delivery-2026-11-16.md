@@ -1,7 +1,7 @@
 # Research autonomy delivery — 16 November 2026
 
 The autonomy implementation is complete in the candidate branch. Final native
-verification is in progress at `5df9010bb1a756e232b2011258965fb711212a24`;
+verification is in progress after `ba0a9a7438cd090b5bf767db1e9240c5a1140e48`;
 PR publication is authorized and pending. The operator closed the preceding
 engineering plan, then approved the autonomy plan and explicitly requested full
 E2E verification, dependency repair, rebuilt runtime images and implementation
@@ -18,11 +18,12 @@ simulated judgments, provider responses and environments.
 
 | Execution | Observed outcome |
 | --- | --- |
-| Local full conformance | [900 checks, zero failures](../../evals/native-qualification/team-evidence/research-autonomy-20261116/conformance-result.json) on `5df9010b`, using the pinned dependencies. This is local verification. |
-| Current hosted workflow | [Run 43915587129](https://github.com/matheusht/redteam-harness/actions/runs/43915587129), at `5df9010b`, passed its Docker job and both direct native suites. Public workflow qualification remains open for the reasons below. |
-| Codex direct native workflow | All 42 checks passed at `5df9010b`, including helper activity, selected reference/version handling, usage, recovery, export and cleanup, with scripted provider responses. |
-| OMP direct native workflow | All 42 checks passed at `5df9010b`, with normal bootstrap and the corrected signed fixture capacity. The same bounded helper/reference/usage/recovery/export/cleanup mechanics passed. |
-| Public CLI → Runner → lead/helper → fresh reviewer → reviewed dry closure → export/cleanup | Codex reached accepted review, closed state and verified cleanup, but an unclassified partial provider upload failed the strict error check. OMP remains blocked by fixture continuation/lane handling. Neither public workflow is qualified by this run. A later run must demonstrate the repaired acceptance checks; the current failure is preserved. |
+| Local full conformance | The last full run at `ba0a9a74` completed 900 checks with one stale draft AGENTS.md pin. The draft-only refresh passed its affected overlay check. Earlier `b4740419` passed all 900; final conformance remains pending. |
+| Current hosted workflow | [Run 43924808047](https://github.com/matheusht/redteam-harness/actions/runs/43924808047), at `ba0a9a74`, passed its Docker job, both direct native suites and the public Codex workflow. Public OMP stopped on the renewal defect below. |
+| Codex direct native workflow | All 42 checks passed at `ba0a9a74`, including helper activity, selected reference/version handling, usage, recovery, export and cleanup, with scripted provider responses. |
+| OMP direct native workflow | All 42 checks passed at `ba0a9a74`, with normal bootstrap and signed fixture capacity. Its Chat Completions profile covers the bounded helper/reference/usage/recovery/export/cleanup mechanics. |
+| Public Codex CLI → Runner → lead/helper → fresh reviewer → reviewed dry closure → export/cleanup | All five checks passed at `ba0a9a74`: source and completed-helper output observed, separate review accepted, closure completed, export verified and cleanup verified. This run recorded zero provider errors. |
+| Public OMP workflow | The Responses profile read source, completed its helper and observed the helper result, with zero provider/tool errors. Renewal then stopped the lead with `environment_lease_exceeds_grant`, before the reviewer. Cleanup was verified. The current renewal repair awaits rerun; public OMP remains unqualified. |
 | Live OMP provider | [One actual source-read turn](../../evals/native-qualification/team-evidence/research-autonomy-20261116/LIVE-OMP-SOURCE-READ.md) completed using OMP 18.20.0, Mistral `mistral-small-2603` and an owned Docker tool lab, with verified cleanup. It did not exercise the full public Runner/team workflow. |
 | Live Codex provider | External authentication succeeded. The [repaired executor registration](../../evals/native-qualification/team-evidence/research-autonomy-20261116/codex-external-auth-order/README.md) remained healthy through thread creation, which then failed at an unavailable sandbox namespace in the Mac Docker tool lab. No model turn ran; cleanup was verified. |
 
@@ -42,7 +43,7 @@ been run here.
 | M3 — environments | Source/binary/application/combined access; permitted acquisition, setup/repair, local/SSH Docker, accounts, owned reset and disposable lab-state cleanup. | Actual Docker, loopback SSH and application-reset checks; six owned local TLS acquisition checks. Broader joined access combinations and loss/reconnection to a separate remote SSH host remain verification gaps. |
 | M4 — evidence and review | Protected observations, control/replay provenance, independent review, patch checks, reviewed closure and bounded lab-artifact ownership. New scopes remove the generic escalation order and universal scientific checklists. | Local evidence/review scenarios and the joined dry-closure fixture. Broader physical lab-state combinations and model-directed scientific adequacy need their own evidence. |
 | M5 — continuation and usage | Renewable leases, optional total invocation/elapsed-parent-time caps, restart/reconstruction, provider-attempt journal, tokens/estimates, helper accounting, operator stop and uncertain-outcome recovery. | Saved recovery/accounting scenarios exercise mechanics. Multiday operation remains unverified. Real billing receipts and hard dollar/token caps are unsupported. |
-| M6 — delivery | Installer, preflight, public run/resume/status/stop/export, examples, frozen reusable instructions, guides, CI and preserved historical callers. | Dependencies installed, runtime images rebuilt and current local conformance passed. Both current direct native suites passed; public workflow qualification and PR publication are pending. Merge/adoption remain separate. |
+| M6 — delivery | Installer, preflight, public run/resume/status/stop/export, examples, frozen reusable instructions, guides, CI and preserved historical callers. | Dependencies installed and runtime images rebuilt. Both current direct native suites and public Codex passed; public OMP, final conformance and PR publication remain pending. Merge/adoption remain separate. |
 
 ## Research-autonomy changes
 
@@ -103,10 +104,34 @@ A later full TLS discriminator transferred all 652,488 fragmented bytes through 
 actual proxy/relay to an owned TLS receiver after a consumer pause. Explicit
 revocation during a separate upload produced partial EOF and an unknown request
 receipt. The [result](../../evals/native-qualification/team-evidence/research-autonomy-20261116/proxy-backpressure/network-upload.json)
-shows why cancellation needs separate evidence. It does not retroactively explain
-the current hosted partial upload. A new fixture must tie cancellation to a verified
-authority-ending event inside that exact request-read interval; active-authority
-truncation and malformed complete requests remain failures.
+shows why cancellation needs separate evidence. Historical failed uploads remain
+unclassified. The current fixture accepts a partial upload only when a verified
+authority-ending closure event falls inside that exact request-read interval and
+all workers have stopped or been revoked; other truncation and malformed complete
+requests remain failures. The latest Codex public pass used no cancellation exemption.
+
+The [OMP Responses tool-ID repair](../../evals/native-qualification/team-evidence/research-autonomy-20261116/omp-composite-tool-id/README.md)
+preserves the native `callId|itemId` identity through tool dispatch and reply
+correlation. The prior common identifier check rejected it before executing the
+first tool. A dedicated tool-call check accepts the two bounded components while
+preserving duplicate detection, changed-argument refusal and the original rules
+for session, profile, environment and internal owner identifiers. The failure-first
+adapter scenario and current hosted six-case regression passed.
+
+The public OMP fixture uses Responses because the pinned runtime replays remote
+compaction's replacement history through that API. Its direct fixture still uses
+Chat Completions. The saved offline serializer check is narrower than native
+compaction execution; long-context continuity through remote compaction on Chat
+Completions remains unqualified.
+
+The current renewal repair addresses an elapsed-time race: the Runner calculated
+a remaining duration before the model and tool owners renewed in sequence, so a
+later owner compared that stale duration against a shorter live grant. Ordinary
+renewal now asks each environment for its current admitted bound. Explicit duration
+requests retain their previous over-grant refusal, and the final guarded check
+still enforces current authority. No signed expiry, machine lease or total budget
+increased. The prewritten controlled-clock workflow and hosted rerun determine this
+repair's qualification; completion is not yet claimed.
 
 ## Evidence boundary
 

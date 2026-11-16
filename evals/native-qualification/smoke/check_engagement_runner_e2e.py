@@ -127,7 +127,7 @@ def main():
                         self.directions.append(message)
                         return {'delivered': True}
 
-                    def renew(self, seconds):
+                    def renew(self, seconds=None):
                         self.context.authorize()
                         calls.append(('renew', seconds))
 

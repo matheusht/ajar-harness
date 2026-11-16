@@ -414,7 +414,7 @@ class Runner:
                     remaining = (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()
                     if remaining < seconds / 2:
                         context.renew(seconds)
-                        boundary.renew(min(seconds, (instant(context.grant['lease_expires_at']) - c.clock()).total_seconds()))
+                        boundary.renew()
                     delivered = self._directions(context, boundary, delivered)
                     shared_delivered = self._updates(context, boundary, shared_delivered)
                     for event in boundary.runtime.observe(timeout_seconds=.25):

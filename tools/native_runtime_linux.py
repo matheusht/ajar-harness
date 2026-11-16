@@ -488,7 +488,7 @@ class LinuxModelOwner:
             raise RuntimeError('native_model_bootstrap_unavailable') from None
         return process
 
-    def renew(self, grant, seconds):
+    def renew(self, grant, seconds=None):
         self.check_authority()
         if any(grant[key] != self.grant[key] for key in ('dispatch_id', 'worker_id', 'generation', 'scope_sha256')):
             raise RuntimeError('native_owner_identity_changed')

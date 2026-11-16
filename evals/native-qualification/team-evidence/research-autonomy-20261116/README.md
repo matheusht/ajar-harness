@@ -1,42 +1,58 @@
-# Research autonomy: verification in progress
+# Research autonomy: owned fixture evidence
 
-This file records the state of the owned engineering fixture checks. It is not a
-claim that either runtime has completed the new research-autonomy workflow, that
-a live provider is qualified, or that a fresh-target investigation succeeded.
-Initial implementation commit: `5684d9b4578d7681239f1bcb497560f53c93df4e`.
-The fixes and checks below were performed on top of that commit; the final source
-commit must be recorded alongside the final rerun.
+The implementation began at `5684d9b4578d7681239f1bcb497560f53c93df4e`.
+The hosted results below tested source commit `ba0a9a7438cd090b5bf767db1e9240c5a1140e48`.
+These owned, benign fixtures verify workflow mechanics; they do not establish
+fresh-target research success or qualify a model's research judgment.
 
-| Area | Current evidence | Outstanding proof |
+| Area | Observed evidence | Remaining boundary |
 | --- | --- | --- |
-| M0 signed contract and preparation | Local public CLI signed fixtures passed; no real native boundary in this lane. | Joined new-policy preparation in both runtimes. |
-| M1 research turns and source/tool boundaries | Existing Linux CI scenario can exercise pinned native runtimes against a deterministic provider. | Current-head results and separate model-directed live runs. |
-| M2 teams and native helpers | Local team and recovery fixtures passed as engineering simulations. | Real Codex and OMP helper sessions, inherited tool authority, once-only usage and stop. |
-| M3 environment and accounts | Native-boundary fixture passed 23 scenarios; mostly simulated, two local host cases. | Joined runtime environment and cleanup readback for this revision. |
-| M4 evidence, experiments and closure | Export integrity checks passed locally. | Joined reviewed closure with independent evidence on the same signed engagement. |
-| M5 continuity and recovery | Local runner recovery fixture passed three simulated scenarios. | Interruption and recovery of the new-policy joined run in both runtimes. |
-| M6 public entry and export | Public CLI fixture and local export integrity checks passed. | Same-run verified export and cleanup after reviewed closure. |
-| Active knowledge | Local implementation checks were reported separately before this run. | Native-wire read/fetch/materialize, version update, retention failure, independent evaluation and withdrawal in both runtimes. |
-| Live providers | Codex native credential and one supported OMP provider credential resolve on the private host. | Actual provider acceptance, model-directed research turns and completion in both runtimes. No secret is included here. |
+| M0: signed preparation | Signed new-policy fixture used by the hosted Codex native and public runs. | OMP public run stopped on lease renewal before review. |
+| M1: research turns and source | Codex native tools read the actual harmless source through scripted provider turns. | Model-directed full research is not established. |
+| M2: helpers | Codex native helper inherited authority, completed, reported usage, avoided duplicate accounting and stopped while active. | OMP public run stopped on lease renewal before review. |
+| M3: environment and accounts | Hosted Docker environment, guardian, SSH, application reset, proxy and TLS checks passed. | These owned fixtures are not a claim about every access mode or production target. |
+| M4: evidence and closure | Codex public Runner used a distinct reviewer, read its actual packet, accepted the bounded negative closure, and verified export. | Native independent technique evaluation and withdrawal remain unproven. |
+| M5: recovery | Codex direct native fixture recovered exact owner receipts and verified cleanup. | Public-run interruption is not separately proven. |
+| M6: public entry and export | Codex public CLI reached reviewed closure, verified export and cleanup. | OMP public run stopped on lease renewal before review. |
+| Active knowledge | Codex direct native helper materialized and read the retained reference, including a new version. Separate host-only fixtures cover simulated fetch failure, independent technique evaluation and withdrawal. | Those latter knowledge cases have not been joined to both native public runs. |
+| Live providers | [OMP live source read](LIVE-OMP-SOURCE-READ.md) reached an actual provider and observed the native tool output. | Complete live model-directed workflow in either runtime remains unproven. |
 
-The real-runtime deterministic-provider workflow and simulated fixture checks are
-mechanics evidence, not model-directed behavior or research qualification. Private
-raw outputs live outside this repository in `/private/tmp/oslit-autonomy-e2e-20261116`.
+[Hosted run 43924808047](https://github.com/matheusht/redteam-harness/actions/runs/43924808047)
+passed 42 Codex direct native checks and all five public Runner checks, with
+verified cleanup and export. It used a scripted provider; its public run recorded
+zero provider errors. [Codex summary](hosted-43924808047/codex-summary.json)
+and [Docker summary](hosted-43924808047/docker-summary.json) retain check names,
+source and artifact hashes, and bounded outcomes. The Docker job passed 96 checks
+and verified the owned SSH listener and fixture cleanup.
 
-Hosted run [43901988169](https://github.com/matheusht/redteam-harness/actions/runs/43901988169)
-on commit `e0d47ece0065c51bd89fbd88a521cc8fd8c35e30` passed the direct-boundary
-Codex scenario, including helper, selected reference materialization, recovery,
-export and cleanup, using scripted provider responses. Its OMP scenario failed
-while starting the child model owner, before the child had a session or provider
-request. The public CLI and independent reviewed closure are not proven by that
-direct-boundary run. Hosted artifacts and later retests are separate evidence.
+Earlier hosted OMP direct native checks passed, but public runs exposed tool-call
+identity and provider-protocol failures. The [failure-first identity regression](omp-composite-tool-id/README.md)
+records the host-side fix and its local retest. The latest OMP direct suite passed all 42 checks. Its public run completed source
+and helper work with zero provider errors, then stopped before review with
+`environment_lease_exceeds_grant`; cleanup was verified. The
+[renewal regression](renewal-bounds/README.md) records the current repair and
+controlled-clock evidence; native requalification is pending. Direct OMP uses Chat Completions; the public fixture uses Responses to
+exercise that native wire path. Chat Completions remote-compaction continuity is
+not qualified by this scenario.
 
-Hosted run [43908789970](https://github.com/matheusht/redteam-harness/actions/runs/43908789970)
-on `d075ca29219c9a961755f8960dd131cddeb1c4f2` passed 42 Codex direct-boundary
-checks, including active helper stop, version update and replayed usage. The
-separate public Runner scenario reached a lead, helper and distinct reviewer but
-did not verify the reviewer packet or close. OMP's child bootstrap failed in this
-run. These are scripted-provider observations, not live-model results.
+The real-runtime scripted-provider workflow, simulated checks, and live-provider
+smoke have different evidentiary scope. Private raw outputs remain outside the
+repository in `/private/tmp/oslit-autonomy-e2e-20261116`.
+
+To repeat the hosted joined scenarios at the tested commit, use the
+[OSLit environment workflow](../../../../.github/workflows/oslit-environment.yml),
+which provisions Ubuntu 24.04, Docker and the pinned runtime bundles. An
+operator with repository access can rerun the exact hosted job set:
+
+```sh
+gh run rerun 43924808047
+```
+
+At that historical commit, Docker and Codex passed; OMP public renewal failed as
+recorded above. Acceptance for the repaired revision requires both direct and
+public JSON results to report `passed`, with cleanup and export verified.
+The workflow uploads its result artifacts. This is a scripted-provider mechanics
+check; the live OMP source-read receipt has separate requirements and scope.
 
 The [local acquisition scenario](acquisition-local.py) passed six checks against an
 owned TLS server; the [result](acquisition-local-result.json) records source hashes.
@@ -63,13 +79,14 @@ python3 evals/native-qualification/team-evidence/research-autonomy-20261116/know
 ## Local prerequisites and checks
 
 Pinned dependencies were installed into a private virtual environment with
-`python3 -m venv` and `pip install -r requirements-ci.txt`. Full conformance
-reported 900 checks and zero failures. Current-bootstrap ARM64 Linux model images
-were built with network disabled from the installer-generated contexts. The
-bootstrap SHA-256 was `8d333b4b0b55577069020a37078c07bccec390bbd92edc17884ace4d77d3120f`.
-Image IDs: Codex `sha256:6de3fed4b65ea168fd49d1263a1314992fdee1c0b88aad18943ad2d96e6adc9a`;
-OMP `sha256:55420c73830e07a6d0704e528b7803ddadcd9163b007f316df977b8c5a6459cc`.
-These are build receipts only. Docker Desktop on the Mac is not a Linux controller
+`python3 -m venv` and `pip install -r requirements-ci.txt`. Full conformance at checkpoint `b4740419` reported 900 checks and zero failures. ARM64 Linux model images were rebuilt from installer-generated contexts and
+checked with network disabled: Codex 0.166.0
+`sha256:31f1ef4b686216ceea3653afce7dbd364f1424e673708253cbb7b2942139e4a0`,
+OMP 18.20.0 `sha256:3296813f4dc38b1a98267b6f5d6fc0dd9ea8aa51c12f3c1d8539f2dcdfe616c9`.
+Both contained network bridge SHA-256
+`7ce9705ea788de89bed6d7bb2bf0660f1d665896863c54f872227568b76ec91a`.
+The subsequent tool-call ID fix runs on the host and is not embedded in these
+images. These are build and version receipts, not complete workflow proof. Docker Desktop on the Mac is not a Linux controller
 host with the required shared cgroup identity; hosted Ubuntu is required for the
 Linux model-owner scenario.
 

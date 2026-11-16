@@ -148,7 +148,7 @@ class SimulatedEnvironment:
         return {'status': 'settled', 'returncode': completed.returncode,
             'output': output.decode('utf-8'), 'identity': self.receipt()}
 
-    def renew(self, seconds):
+    def renew(self, seconds=None):
         self.renewals.append(seconds)
         return {'status': 'renewal_sent', 'seconds': seconds, 'identity': self.identity}
 

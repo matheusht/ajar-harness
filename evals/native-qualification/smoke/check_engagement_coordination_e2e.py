@@ -198,7 +198,7 @@ def check(path, scenario):
         def interrupt(self):
             self.active = False
 
-        def renew(self, seconds):
+        def renew(self, seconds=None):
             self.context.authorize()
 
         def steer(self, message):

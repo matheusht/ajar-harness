@@ -816,8 +816,10 @@ class Environment:
         return {'status': 'held' if self.held else ('running' if info['State']['Running'] else 'stopped'),
                 'running': info['State']['Running'], 'identity': self.receipt()}
 
-    def renew(self, seconds):
+    def renew(self, seconds=None):
         remaining = self._admit()
+        if seconds is None:
+            seconds = remaining
         if type(seconds) not in (float, int) or not math.isfinite(seconds) or not 0 < seconds <= remaining:
             raise EnvironmentUnavailable('environment_lease_exceeds_grant')
         if not self.owner:

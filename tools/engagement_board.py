@@ -92,6 +92,29 @@ def page(controller, events, state, worker, *, query, kinds, since, limit):
             'has_more': more, 'next_cursor': cursor}
 
 
+def recovery_context(state, events, worker, *, max_bytes=65536):
+    assignment = worker.get('assignment') or {}
+    task_id = assignment.get('task_id')
+    records = rows(state, events)
+
+    def priority(row):
+        record = row['record']
+        assigned = task_id is not None and (row['id'] == task_id or record.get('task_id') == task_id)
+        addressed = worker['id'] in record.get('recipient_ids', [])
+        owned = row['author'] == worker['id'] or record.get('reviewer_id') == worker['id']
+        sequence = (row['source_event'] or {}).get('sequence', 0)
+        return (not assigned, not addressed, not owned, -sequence, row['kind'], row['id'])
+
+    result = {'items': [], 'total_records': len(records), 'omitted_records': len(records),
+              'read_request': {'view': 'board', 'limit': 30}}
+    for row in sorted(records, key=priority):
+        candidate = dict(result, items=[*result['items'], row],
+                         omitted_records=result['omitted_records'] - 1)
+        if len(canonical(candidate)) <= max_bytes:
+            result = candidate
+    return result
+
+
 def notices(controller, events, state, worker, *, since, limit):
     if not integer(since, 0, len(events)) or not integer(limit, 1, 100):
         fail('notice_cursor_invalid')
@@ -126,3 +149,4 @@ def notices(controller, events, state, worker, *, since, limit):
             truncated=len(subject) > 256 or len(preview) > 1024,
             read_since=controller._encode_cursor(state, events[event['sequence'] - 2]) if event['sequence'] > 1 else None)
     return {'items': items, 'next_sequence': start + len(selected)}
+

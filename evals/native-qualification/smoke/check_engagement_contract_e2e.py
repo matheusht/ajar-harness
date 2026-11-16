@@ -483,6 +483,20 @@ print(json.dumps(result),flush=True)
             assert success, ('source_changed_during_inventory', observed, stderr)
 
             publication = base / 'publication'
+            schema = {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                      '$defs': {'InputUiRequest': {'properties': {'secret': {'type': 'boolean'}}}}}
+            write(publication, encoded(schema))
+            check('public_schema_secret_boolean_declaration', 'publication', publication)
+            check('schema_known_secret_still_refused', 'publication', publication, {'publication_secret'},
+                  known_secrets=['InputUiRequest'])
+            unsafe_schema = copy.deepcopy(schema)
+            unsafe_schema['$defs']['InputUiRequest']['properties']['secret']['default'] = 'harmless12345678'
+            write(publication, encoded(unsafe_schema))
+            check('schema_secret_default_refused', 'publication', publication, {'publication_secret'})
+            write(publication, encoded({'properties': {'secret': {'type': 'boolean'}}}))
+            check('non_schema_secret_declaration_refused', 'publication', publication, {'publication_secret'})
+            write(publication, encoded({'secret': 'harmless12345678'}))
+            check('json_secret_value_refused', 'publication', publication, {'publication_secret'})
             sentinels = [b'Authorization: ' + b' '.join((b'Bearer', b'harmless12345678')), b'Cookie: auth=harmless12345678',
                          b'Set-Cookie: session=harmless12345678', b'password=harmless12345678',
                          b'https://example.test/a?X-Amz-Signature=' + b'a' * 64,

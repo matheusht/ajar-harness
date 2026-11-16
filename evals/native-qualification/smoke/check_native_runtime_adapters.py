@@ -341,7 +341,9 @@ def codex_executor_admission(root, capture_red=False):
         if outcome == 'passed':
             require(send_times and send_times[0] < wait_finished_at[0],
                     'executor admission did not release the native response wait')
-            runtime.observe(.1)
+            deadline = time.monotonic() + 2
+            while runtime.active and time.monotonic() < deadline:
+                runtime.observe(.1)
             require(not runtime.active, 'controlled turn did not settle before revoked-send check')
             allowed[0] = False
             try:

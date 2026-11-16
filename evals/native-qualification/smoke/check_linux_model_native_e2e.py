@@ -912,6 +912,12 @@ def run_native(root, fixture, result):
             state = controller.state()
             helpers = list(state['helpers'].values())
             deliveries = state.get('knowledge_deliveries', [])
+            result['autonomy_diagnostic'] = {'provider_lanes': {key: provider.autonomy[key] for key in ('parent', 'child')},
+                'helpers': [{key: row.get(key) for key in ('status', 'reason', 'parent_session_id', 'session_id', 'owner_receipt_sha256')}
+                            for row in helpers],
+                'delivery_count': len(deliveries), 'provider_errors': provider.errors[:8],
+                'tool_error_codes': sorted(set(re.findall(r'\b(?:native|helper|worker|knowledge)_[a-z_]{3,80}\b',
+                                                          json.dumps(provider.requests))))[:20]}
             check(result, 'native helper completes under parent authority', len(helpers) == 1
                   and helpers[0].get('status') == 'completed' and helpers[0].get('worker_id') == worker['id']
                   and helpers[0].get('parent_session_id') == identity['session_id'])

@@ -2,7 +2,7 @@ name: OSLit owned environment
 
 on:
   push:
-    branches: [main, codex/oslit-team-contract, codex/oslit-integrated-e2e-20261115]
+    branches: [main, codex/oslit-team-contract, codex/oslit-integrated-e2e-20261115, codex/oslit-research-autonomy-20261116]
     paths:
       - .github/workflows/oslit-environment.yml
       - tools/research_environment.py
@@ -11,6 +11,7 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_knowledge*.py
       - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
@@ -55,6 +56,7 @@ on:
       - tools/engagement_contract.py
       - tools/engagement_controller.py
       - tools/engagement_evidence.py
+      - tools/engagement_knowledge*.py
       - tools/engagement_runner.py
       - tools/engagement_native_boundary.py
       - tools/engagement_network*.py
@@ -243,6 +245,7 @@ jobs:
           fi
           python3 evals/native-qualification/smoke/check_linux_model_native_e2e.py \
             --runtime "${{ matrix.runtime }}" --platform linux/amd64 \
+            --autonomy \
             --base-image python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 \
             --endpoint unix:///var/run/docker.sock \
             --directory "$RUNNER_TEMP/oslit-native-e2e-assets-${{ matrix.runtime }}" \

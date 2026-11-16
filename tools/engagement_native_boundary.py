@@ -595,7 +595,7 @@ class NativeBoundary:
         try:
             body.update(encoding='utf-8', content=part.decode('utf-8'))
         except UnicodeError:
-            body.update(encoding='binary', content=None, notice='Binary evidence retained; use the published artifact path with native file tools.')
+            body.update(encoding='base64', content=base64.b64encode(part).decode('ascii'))
         return _completed(body)
 
     def _artifact(self, arguments):

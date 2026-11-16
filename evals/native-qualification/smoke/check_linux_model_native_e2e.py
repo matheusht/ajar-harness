@@ -312,6 +312,8 @@ class Provider:
         self.request_observation_total = 0
         self.request_observation_lock = threading.Lock()
         self.command = None
+        self.autonomy = None
+        self.autonomy_lock = threading.Lock()
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -347,13 +349,13 @@ class Provider:
                         raise ValueError('provider_body_invalid')
                     fixture.requests.append(body)
                     seq = len(fixture.requests)
-                    if seq > 4:
+                    if seq > 4 and fixture.autonomy is None:
                         raise ValueError('provider_unexpected_request')
                     command = fixture.command if seq == 1 else 'cat /work/first-turn.txt'
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/event-stream')
                     self.end_headers()
-                    frames = fixture.frames(seq, command)
+                    frames = fixture.autonomy_frames(body) if seq > 4 else fixture.frames(seq, command)
                     for frame in frames:
                         self.wfile.write(frame)
                     self.wfile.flush()
@@ -408,6 +410,47 @@ class Provider:
         return [('data: ' + json.dumps({'id': 'fixture-' + str(seq), 'object': 'chat.completion.chunk',
                     'created': 0, 'model': 'fixture-model', 'choices': [{'index': 0, **frame}]}) + '\n\n').encode()
                 for frame in frames] + [b'data: [DONE]\n\n']
+
+    def autonomy_frames(self, body):
+        """Route independent native sessions without making provider output a model claim."""
+        with self.autonomy_lock:
+            state = self.autonomy
+            raw = json.dumps(body)
+            previous = body.get('previous_response_id', '')
+            child = 'internal helper acting under the parent' in raw or previous.startswith('autonomy-child-')
+            lane = 'child' if child else 'parent'
+            count = state[lane]
+            state[lane] += 1
+            identity = 'autonomy-' + lane + '-' + str(count)
+            if child and count == 0:
+                name, arguments = 'engagement_knowledge', {'action': 'read', 'version': state['version'], 'materialize': True}
+            elif not child and count == 0:
+                name, arguments = 'engagement_helper', {'action': 'spawn', 'prompt': 'Read the owned fixture reference.'}
+            elif not child and count == 2:
+                name, arguments = 'engagement_helper', {'action': 'read', 'helper_id': state['helper_id']}
+            else:
+                name, arguments = None, None
+            if self.runtime == 'codex':
+                item = ({'id': 'fc_' + identity, 'type': 'function_call', 'call_id': 'call-' + identity,
+                         'name': name, 'arguments': json.dumps(arguments)} if name else
+                        {'id': 'msg_' + identity, 'type': 'message', 'role': 'assistant',
+                         'content': [{'type': 'output_text', 'text': 'Owned fixture complete.'}]})
+                response = {'id': identity, 'object': 'response', 'status': 'completed', 'output': [item],
+                            'usage': {'input_tokens': 10, 'output_tokens': 10, 'total_tokens': 20}}
+                frames = [{'type': 'response.created', 'response': {**response, 'status': 'in_progress', 'output': []}},
+                          {'type': 'response.output_item.added', 'output_index': 0, 'item': item},
+                          {'type': 'response.output_item.done', 'output_index': 0, 'item': item},
+                          {'type': 'response.completed', 'response': response}]
+                return [('event: ' + frame['type'] + '\ndata: ' + json.dumps(dict(frame, sequence_number=i)) + '\n\n').encode()
+                        for i, frame in enumerate(frames)]
+            delta = ({'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'call-' + identity, 'type': 'function',
+                      'function': {'name': name, 'arguments': json.dumps(arguments)}}]} if name else
+                     {'role': 'assistant', 'content': 'Owned fixture complete.'})
+            frames = [{'delta': delta, 'finish_reason': None},
+                      {'delta': {}, 'finish_reason': 'tool_calls' if name else 'stop'}]
+            return [('data: ' + json.dumps({'id': identity, 'object': 'chat.completion.chunk', 'created': 0,
+                    'model': 'fixture-model', 'choices': [{'index': 0, **frame}]}) + '\n\n').encode()
+                    for frame in frames] + [b'data: [DONE]\n\n']
 
     def close(self):
         self.server.shutdown(); self.server.server_close(); self.thread.join(timeout=3)
@@ -530,6 +573,8 @@ env_key = "OPENAI_API_KEY"
         environment['codex_tool_policy'] = codex_tool_policy
     write(Path(inputs['environment_profiles']['lab-main']), canonical(environment))
     scope = fixture_scope(inputs_path)
+    if getattr(fixture, 'autonomy', False):
+        scope['authority_policy'] = 'research-autonomy-v1'
     scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(source)))
     scope['runtime_assignments'][0]['profile_sha256'] = digest(canonical(profile))
     scope['environments'][0]['profile_sha256'] = digest(canonical(environment))
@@ -843,6 +888,39 @@ def run_native(root, fixture, result):
               and (FIRST_PROMPT in json.dumps(provider.requests[2])
                    or provider.requests[2].get('previous_response_id') == 'fixture-2')
               and 'LINUX_NATIVE_FIRST_TURN' in json.dumps(provider.requests[3]) and not provider.errors)
+        if getattr(fixture, 'autonomy', False):
+            from engagement_knowledge import KnowledgeLibrary
+            boundary._knowledge_shared = KnowledgeLibrary(root / 'shared-library', corpus_root=None)
+            boundary._knowledge_local = KnowledgeLibrary(controller.root / 'knowledge', corpus_root=None)
+            reference = b'Owned benign native helper reference.\n'
+            selected = boundary._knowledge_shared.retain(reference, origin='fixture:owned', title='Owned fixture')
+            provider.autonomy = {'version': selected['version'], 'parent': 0, 'child': 0}
+            invoke(context, boundary, 'Use a helper for the owned fixture reference.', result)
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                helpers = list(controller.state()['helpers'].values())
+                if helpers and helpers[0].get('status') in ('completed', 'failed', 'stopped'):
+                    break
+                time.sleep(.1)
+            state = controller.state()
+            helpers = list(state['helpers'].values())
+            deliveries = state.get('knowledge_deliveries', [])
+            check(result, 'native helper completes under parent authority', len(helpers) == 1
+                  and helpers[0].get('status') == 'completed' and helpers[0].get('worker_id') == worker['id']
+                  and helpers[0].get('parent_session_id') == identity['session_id'])
+            provider.autonomy['helper_id'] = helpers[0]['helper_id']
+            invoke(context, boundary, 'Read the completed owned helper result.', result)
+            check(result, 'parent reads helper through native tool', provider.autonomy['parent'] == 4
+                  and helpers[0]['helper_id'] in json.dumps(provider.requests))
+            check(result, 'native helper materializes exact retained reference', any(
+                item.get('version') == selected['version'] and item.get('action') == 'delivery'
+                and item.get('materialization', {}).get('status') == 'materialized' for item in deliveries))
+            readback = boundary.environment.execute(['cat', '/work/knowledge/' + selected['version'][7:] + '/reference.bin'], timeout_seconds=10)
+            check(result, 'materialized reference bytes verified', readback['status'] == 'settled'
+                  and readback.get('output', '').encode() == reference)
+            result['autonomy_coverage'] = {'helper_and_reference': 'passed', 'provider': 'scripted',
+                'not_covered': ['live_model_direction', 'fetch_retention_failure', 'version_update',
+                                'independent_technique_review', 'reviewed_closure', 'active_helper_stop']}
         result['native_execution'] = 'two_invocations_completed'
         result['controlled_provider_requests'] = len(provider.requests)
         result['controlled_provider_discovery_requests'] = provider.discovery_requests
@@ -875,12 +953,13 @@ def run_native(root, fixture, result):
         result['watcher_loss'] = {'guardian_stop_seconds': round(time.monotonic() - fault_started, 3),
                                  'renewed_owner_lease_seconds': 8, 'detached_child_started': True}
         controller.revoke_worker(worker['id'], worker['generation'], reason='fixture-recovery')
+        requests_before_refusal = len(provider.requests)
         refused = False
         try:
             boundary.runtime.invoke('Must refuse after revocation.', 'after-revocation')
         except Exception as error:
             refused = getattr(error, 'code', None) == 'worker_stale'
-        check(result, 'revoked native invocation refused', refused and len(provider.requests) == 4)
+        check(result, 'revoked native invocation refused', refused and len(provider.requests) == requests_before_refusal)
         reopened = Controller(controller.root)
         recovery_runner = Runner(reopened)
         current = reopened.state()
@@ -993,6 +1072,7 @@ def main(*, classify_result=None):
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--codex-tool-policy', choices=('docker-confined-v1',))
+    parser.add_argument('--autonomy', action='store_true', help='Exercise a native helper and retained reference with scripted provider replies')
     args = parser.parse_args()
     result = {'kind': 'linux-model-native-e2e-v1', 'classification': 'actual_native_with_owned_simulated_provider',
               'runtime': args.runtime, 'status': 'failed', 'checks': [], 'external_provider_calls': 0,
@@ -1003,6 +1083,7 @@ def main(*, classify_result=None):
         fixture = prepare_image(runtime=args.runtime, platform=args.platform, base_image=args.base_image,
                                 endpoint=args.endpoint, directory=args.directory, result=result['image'])
         fixture.codex_tool_policy = args.codex_tool_policy
+        fixture.autonomy = args.autonomy
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:

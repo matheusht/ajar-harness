@@ -717,6 +717,7 @@ def native_reply_peer(boundary, context, transport, kind):
     peer.transport = transport
     peer.session_id, peer.invocation_id = 'reply-session-' + kind, 'reply-turn'
     peer.calls, peer.events, peer.active = {}, [], True
+    peer.accepting_tools = True
     peer.tool_replies, peer.tool_requests = [], {}
     peer.host_tools = {tool['name']: tool for tool in boundary.TOOLS}
     peer.host_call, peer._admission = context['instance'].host_call, context['context'].guard

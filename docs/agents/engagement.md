@@ -3,19 +3,26 @@
 Use this guide for the versioned Codex/OMP engagement route. It is candidate
 implementation work: local checks, packaging and preflight do not establish
 runtime qualification or research success. Policy adoption is recorded separately
-in [Decision 0015](../decisions/0015-initial-scope-autonomy.md). Existing native/legacy records keep
+in [Decision 0016](../decisions/0016-research-autonomy.md). Existing native/legacy records keep
 their original contract. The signed scope defines authority; repository access and
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
 Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
 claiming support or readiness. Start with the [fresh-target handoff](fresh-target-handoff.md)
 for installation, input preparation and run/recovery commands. Select
-`authority_policy: "initial-scope-v1"` in the initial scope before signing once.
-That grant covers every artifact type inside its permitted owned lab state and
-effects. No new confirmation or signature is needed for creation, setup, resume
-or an already signed internal escalation. Fresh independent agent evidence review
-still governs escalation and consequential claims. Scope expansion and external
-actions remain separate; scopes without this policy retain their original gates.
+`authority_policy: "research-autonomy-v1"` in the initial scope before signing once.
+The initial grant covers its permitted owned lab state and exact effects. Scientific
+adequacy belongs to fresh independent review; preserved execution facts and actual
+permissions remain enforced. Strategy advice cannot hold resources or force lead
+replacement, and signed effects need no universal self/stored/cross-user sequence.
+Existing signed policies keep their original rules. New authority and external
+actions still require the operator's explicit authorization.
+
+Optional `limits.hard` entries select total caps; `{}` adds none. A supplied
+`worker_seconds` budget measures elapsed parent execution time including concurrent
+helpers, not the sum of their overlapping durations. Provider requests and tokens
+include all helper activity. Renewable short leases still control abandoned owners.
+The new policy's full E2E, provider and research comparisons are deferred.
 
 ## Prepare the host and tool lab
 
@@ -34,7 +41,8 @@ the selected pinned native CLI, and its signed config/protocol schema. Codex
 0.166.0 uses host Bun on macOS or pinned image Bun for its private Linux executor
 bridge. OMP 18.20.0 uses the
 pinned Linux SDK bundle with Bun 1.4.4. Preserve the reviewed
-`engine/native-engagement-method.md` and `engine/native-engagement-protocol.md`
+policy-selected guidance: new scopes freeze `engine/native-engagement-autonomy-method.md`
+and `engine/native-engagement-autonomy-protocol.md`; earlier scopes retain their original files
 from the pinned repository. `/tmp` must permit
 short private Unix-socket directories.
 
@@ -131,7 +139,7 @@ behavior, broader access modes and research acceptance require their own evidenc
 
 1. Copy the [source, binary, application or combined template](../../examples/native-engagement-v2/README.md)
    into a private directory. Replace every `REPLACE_` value, including the actual
-   goal, resource budgets, selected model, access identities and absolute paths.
+   goal, any selected total budgets, machine limits, selected model, access identities and absolute paths.
    Review permitted routes/effects, benign objectives, cleanup rights and the
    escalation ceiling. For authenticated applications, configure the private
    account references below; target account identity still needs an observation.
@@ -253,8 +261,8 @@ effect. The host strips that selector before forwarding.
 
 An application capture without an owned reset profile records `clean_start:false`
 and `remote_application_reset_unverified`. A fresh client lab does not reset the
-application, so this capture cannot establish clean independent remote replay or
-the confirmed predecessor required for escalation. A source-only subset of
+application, so that capture alone cannot establish a clean independent remote replay.
+Under historical policies it also cannot supply a required escalation predecessor. A source-only subset of
 combined access can use its separately created local input as a clean start.
 See the [capture evidence and limits](../../evals/native-qualification/team-evidence/m5-application-capture-20261114/README.md).
 
@@ -294,7 +302,7 @@ and container peers. The separate opt-in
 requires an already installed Python image and exercises the production owner.
 Neither fixture is a fresh-target research acceptance test.
 
-Before a new `stored` or `cross_user` intent, the controller requires an accepted
+For preserved historical scopes, before a new `stored` or `cross_user` intent the controller requires an accepted
 current escalation review of the independently confirmed preceding claim and
 exact next signed effect. The frozen worker protocol describes the request and
 review evidence. Reopened claims, superseded instruments or a replacement review
@@ -305,6 +313,14 @@ creation uses the owned-state lifecycle below, not a generic network effect.
 The [source capture workflow](../../evals/native-qualification/team-evidence/m5-capture-effects-20261114/README.md)
 checks declared adjacent rungs using harmless local probes and simulated native,
 container and reviewer behavior. It does not establish a security escalation.
+
+For `research-autonomy-v1`, each effect instead checks its actual signed resources,
+accounts, destinations, ownership and limits. Actual state dependencies still
+matter to the experiment. Independent claim review evaluates the causal relevance
+of controls and reproductions; different valid probe bytes or account conditions
+need not match mechanically. The clean reproducer must be an actual distinct
+worker/session, but need not be the final reviewer personally. Requested patch
+review requires relevant actual original/patched evidence, not a universal matrix.
 
 ## Track explicitly signed disposable lab state
 
@@ -407,6 +423,36 @@ typed `team_message` submissions. Relevant peer updates are delivered through
 native steering; durable acknowledgments recover missed updates after restart.
 The board retains source references and review state, and export includes it.
 
+## Active knowledge and native helpers
+
+`engagement_knowledge` searches, reads exact versions, fetches permitted public
+sources, publishes experimental procedures and records independent evaluations.
+Read the [library guide](knowledge-library.md) for retention gaps, helper files,
+applicability and narrowed/withdrawn status. A source above the evidence-object
+limit is retained as a file and read in bounded parts. The optional signed
+`reference_web` grant is separate from target and provider access; its template is
+in the [input examples](../../examples/native-engagement-v2/README.md).
+
+`engagement_helper` exposes spawn/read/steer/stop for native children under their
+authenticated parent. Their permissions, resource ownership and total limits come
+from that parent. They are not independent reviewers or separate controller workers.
+Parent revocation stops descendants. Use a fresh controller reviewer for independent
+claim or technique evaluation. Optional technique evaluation never blocks closure.
+The adapter creates native Codex threads in the parent's app-server and native OMP
+RPC sessions with the same protected host tools. It does not enable the upstream
+spawn/task tool UI; those paths do not provide the required inherited tool binding.
+
+For a new Linux autonomy run, rebuild the model image with the current
+`install_native_tools.py model-image-context` output and pin its actual image ID.
+The updated bootstrap supports isolated helper session state. Startup verifies its
+bytes and refuses an incompatible old image. Existing no-helper scopes retain
+support for their exact original bootstrap; their signatures are not rewritten.
+
+After lost context, status supplies current orientation alongside durable notes and
+source links. An acknowledged notice may need rereading in the replacement context;
+its earlier acknowledgment does not establish current understanding. Adapter-owned
+request identities and exact retries keep transport chores out of research notes.
+
 ## Stop, recover and export
 
 ```sh
@@ -434,7 +480,9 @@ Export requires a new output directory and takes a snapshot at one journal
 revision. `manifest.json` has kind `engagement-result-bundle-v2` and a SHA-256 digest
 for every exported file. `contract/` contains the frozen scope/signature, goal,
 profiles and input manifests; `events/` preserves the ordered journal; `objects/`
-contains referenced evidence/receipts. `result.json` includes per-claim acceptance,
+contains referenced evidence/receipts. The engagement-local `knowledge/` archive
+contains selected retained source/package versions; delivery records identify
+retention gaps instead of implying a complete archive. `result.json` includes per-claim acceptance,
 tasks, experiments, reviews, patches, closure/coverage obligations, directions,
 usage completeness, cleanup and resource holds. Its `research_guidance` map pins
 `contract/methodology.md` and `contract/protocol.md`. Give a native comparison the

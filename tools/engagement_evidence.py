@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from engagement_contract import canonical, digest, read_json
+from engagement_contract import research_autonomy, canonical, digest, read_json
 from engagement_controller import ControllerError, GRANT_KEYS, Principal, fail, identifier, integer, keys
 
 REQUESTS = {'instrument_register', 'experiment_record', 'experiment_compare', 'claim_propose',
@@ -328,7 +328,13 @@ def comparable(left, right):
         and left.get('application_state', {}) == right.get('application_state', {}))
 
 
-def related(left, right, purpose, *, independent=False):
+def related(left, right, purpose, *, independent=False, autonomy=False):
+    if autonomy:
+        explains = right.get('explains')
+        return (right['purpose'] == purpose and bool(explains) and
+            explains['experiment_id'] == left['experiment_id'] and
+            (not independent or (right['worker_id'] != left['worker_id'] and
+                                right['session_id'] != left['session_id'])))
     if not comparable(left, right) or right['purpose'] != purpose:
         return False
     explains = right['explains']
@@ -409,6 +415,11 @@ def admit_effect(state, effect, *, profile_id, access_ids, account_refs):
     """Called under the controller lock before each new protected effect."""
     if effect['kind'] == 'artifact_create':
         fail('artifact_effect_unsupported')
+    if research_autonomy(state['scope']):
+        if (effect not in state['scope']['effects'] or profile_id not in effect['environment_ids'] or
+                not set(access_ids) <= set(effect['access_ids']) or not set(account_refs) <= set(effect['account_refs'])):
+            fail('effect_forbidden')
+        return
     if effect['rung'] in ('source_only', 'self'):
         return
     for review in state['reviews'].values():
@@ -431,7 +442,7 @@ def dependencies(state, kind, subject):
         return {'claim': claim, 'experiments': experiments,
             'instruments': [state['instruments'][name] for name in sorted({row['instrument_id'] for row in experiments})],
             'contrary': {name: state['publications'][name] for name in claim['contrary']}}
-    collection = {'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches'}[kind]
+    collection = {'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches', 'technique': 'techniques'}[kind]
     return {kind: state[collection][subject]}
 
 
@@ -521,9 +532,9 @@ def validate_request(c, state, worker, kind, data):
         effect = state['experiments'].get(data['effect'])
         if effect and (effect['purpose'] != 'effect' or set(data['resources']) != set(effect['resources'])):
             fail('claim_evidence_invalid')
-        if data['control'] and (not effect or not related(effect, state['experiments'][data['control']], 'control')):
+        if data['control'] and (not effect or not related(effect, state['experiments'][data['control']], 'control', autonomy=research_autonomy(state['scope']))):
             fail('claim_control_invalid')
-        if data['replay'] and (not effect or not related(effect, state['experiments'][data['replay']], 'replay', independent=True)):
+        if data['replay'] and (not effect or not related(effect, state['experiments'][data['replay']], 'replay', independent=True, autonomy=research_autonomy(state['scope']))):
             fail('claim_replay_invalid')
         data = dict(data, state='supported' if effect else 'unconfirmed')
     elif kind == 'strategy_challenge':
@@ -533,7 +544,7 @@ def validate_request(c, state, worker, kind, data):
             fail('obligation_kind_invalid')
         references(state, data['refs'], ('publications', 'experiments', 'claims'), nonempty=True)
         c._resources(state, data['resources']); text(data['reason'])
-        if data['kind'] == 'repetition':
+        if data['kind'] == 'repetition' and not research_autonomy(state['scope']):
             rows = [state['experiments'].get(name) for name in data['refs']]
             if len(rows) < 2 or any(row is None for row in rows) or any(
                     not comparable(rows[0], row) or any(rows[0][k] != row[k] for k in ('candidate_sha256', 'probe_sha256')) for row in rows[1:]):
@@ -544,7 +555,7 @@ def validate_request(c, state, worker, kind, data):
             fields.add('next_effect_id')
         keys(data, fields)
         unique(state, 'reviews', data['review_id'])
-        collection = {'claim': 'claims', 'escalation': 'claims', 'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches'}.get(data['kind'])
+        collection = {'claim': 'claims', 'escalation': 'claims', 'strategy': 'obligations', 'closure': 'closures', 'patch': 'patches', 'technique': 'techniques'}.get(data['kind'])
         if collection is None or data['subject_id'] not in state[collection]:
             fail('review_subject_missing')
         reviewer = state['workers'].get(data['reviewer_id'])
@@ -567,7 +578,8 @@ def validate_request(c, state, worker, kind, data):
         if data['kind'] == 'escalation':
             data['material_sha256'] = digest(canonical(material))
     elif kind == 'review_result':
-        keys(data, ('review_id', 'packet_sha256', 'disposition', 'checks', 'evidence_refs', 'contrary_refs', 'reason'))
+        keys(data, ('review_id', 'packet_sha256', 'disposition', 'evidence_refs', 'contrary_refs', 'reason',
+            *(('checks',) if not research_autonomy(state['scope']) or 'checks' in data else ())))
         review = state['reviews'].get(data['review_id'])
         if (review is not None and review['kind'] == 'escalation' and review['status'] == 'stale'
                 and review['reviewer_id'] == worker['id']):
@@ -575,15 +587,18 @@ def validate_request(c, state, worker, kind, data):
         if (review is None or review['reviewer_id'] != worker['id'] or worker['role'] != 'reviewer'
                 or review['status'] != 'pending' or data['packet_sha256'] != review['packet_sha256']):
             fail('review_identity_invalid')
+        if review['kind'] == 'technique':
+            fail('technique_evaluation_tool_required')
         if data['disposition'] not in ('accept', 'reject', 'reopen', 'unresolved'):
             fail('review_disposition_invalid')
-        keys(data['checks'], CHECKS)
-        if any(type(value) is not bool for value in data['checks'].values()):
-            fail('review_checks_invalid')
+        if not research_autonomy(state['scope']):
+            keys(data['checks'], CHECKS)
+            if any(type(value) is not bool for value in data['checks'].values()):
+                fail('review_checks_invalid')
         text(data['reason']); references(state, data['evidence_refs'], ('experiments',))
         references(state, data['contrary_refs'], ('publications',))
         if data['disposition'] == 'accept':
-            if not all(data['checks'].values()):
+            if not research_autonomy(state['scope']) and not all(data['checks'].values()):
                 fail('review_checks_incomplete')
             if review['kind'] == 'claim':
                 claim = state['claims'][review['subject_id']]
@@ -592,9 +607,9 @@ def validate_request(c, state, worker, kind, data):
                 effect = state['experiments'].get(claim['effect'])
                 control = state['experiments'].get(claim['control'])
                 replays = [state['experiments'][name] for name in data['evidence_refs']]
-                if (not effect or not control or not related(effect, control, 'control') or
-                    not any(row['worker_id'] == worker['id'] and row['session_id'] == worker['session_id']
-                        and related(effect, row, 'replay', independent=True) for row in replays)):
+                if (not effect or not control or not related(effect, control, 'control', autonomy=research_autonomy(state['scope'])) or
+                    not any((research_autonomy(state['scope']) or (row['worker_id'] == worker['id'] and row['session_id'] == worker['session_id']))
+                        and related(effect, row, 'replay', independent=True, autonomy=research_autonomy(state['scope'])) for row in replays)):
                     fail('review_evidence_incomplete')
                 if state['instruments'][effect['instrument_id']].get('superseded_by'):
                     fail('review_stale')
@@ -623,7 +638,11 @@ def validate_request(c, state, worker, kind, data):
         if data['action'] == 'review' and any(state['reviews'][name]['subject_id'] != data['obligation_id'] for name in data['refs']):
             fail('obligation_response_invalid')
     elif kind == 'closure_request':
-        keys(data, ('closure_id', 'outcome', 'claim_ids', 'remaining', 'reason'))
+        keys(data, ('closure_id', 'outcome', 'claim_ids', 'reason',
+            *(('remaining',) if not research_autonomy(state['scope']) or 'remaining' in data else ())))
+        if research_autonomy(state['scope']):
+            data = dict(data, remaining=sorted(name for name, row in state['tasks'].items()
+                if row['status'] not in ('completed', 'reviewed_complete')))
         unique(state, 'closures', data['closure_id'])
         if data['outcome'] not in ('goal_met', 'covered_dry', 'blocked'):
             fail('closure_outcome_invalid')
@@ -712,7 +731,7 @@ def reduce_request(state, actor, kind, data):
     elif kind == 'review_response':
         obligation = state['obligations'][data['obligation_id']]
         obligation.update(state='disputed' if data['action'] == 'rebuttal' else 'responded', response=data)
-        state['replacement_required'] = any(o['state'] == 'pending' and o['opportunities'] >= 2 for o in state['obligations'].values())
+        state['replacement_required'] = not research_autonomy(state['scope']) and any(o['state'] == 'pending' and o['opportunities'] >= 2 for o in state['obligations'].values())
     elif kind == 'review_result':
         review = state['reviews'][data['review_id']]
         review.update(status='accepted' if data['disposition'] == 'accept' else data['disposition'], result=data)
@@ -729,7 +748,7 @@ def reduce_request(state, actor, kind, data):
             closure = state['closures'][review['subject_id']]
             closure['state'] = 'reviewed' if data['disposition'] == 'accept' else 'reopened'
             closure['review_id'] = data['review_id']
-            if data['disposition'] != 'accept':
+            if data['disposition'] != 'accept' and not research_autonomy(state['scope']):
                 name = 'reopen-' + review['subject_id']
                 state['obligations'][name] = {'obligation_id': name, 'kind': 'reopen', 'refs': [review['subject_id']],
                     'resources': closure['resources'], 'reason': data['reason'], 'state': 'pending',
@@ -799,10 +818,15 @@ def reduce_host(state, payload):
             row['checkpoints'].append(checkpoint)
             if row['state'] == 'pending':
                 row['opportunities'] += 1
-        state['replacement_required'] = any(o['state'] == 'pending' and o['opportunities'] >= 2 for o in state['obligations'].values())
+        state['replacement_required'] = not research_autonomy(state['scope']) and any(o['state'] == 'pending' and o['opportunities'] >= 2 for o in state['obligations'].values())
     elif action == 'worker_stopped':
         state['environments'][data['nonce']]['stopped'] = True
         worker = state['workers'][data['worker_id']]
+        for helper in state.get('helpers', {}).values():
+            if helper['worker_id'] == worker['id'] and helper['generation'] == worker['generation']:
+                helper['parent_stop_verified'] = True
+                if helper['status'] in ('starting', 'active'):
+                    helper['status'] = 'stopped'
         owned = [row for row in state['environments'].values() if row['worker_id'] == worker['id'] and row['generation'] == worker['generation']]
         if all(row.get('stopped') or row.get('cleanup') == 'verified' for row in owned):
             worker.update(status='stopped', stop_receipt=data['receipt_sha256'])
@@ -1021,6 +1045,12 @@ def record_patch_execution(c, grant, profile_id, operation_id, patch_id, arm, ma
 def patch_checks(state, review, worker, references):
     patch_id = review['subject_id']
     rows = [state['experiments'][name] for name in references]
+    if research_autonomy(state['scope']):
+        arms = {row['patch_copy']['arm'] for row in rows if row.get('patch_copy') and
+            row['patch_copy']['patch_id'] == patch_id and row['worker_id'] != state['patches'][patch_id]['author']}
+        if arms != {'original', 'patched'}:
+            fail('patch_checks_incomplete')
+        return
     for purpose in ('effect', 'control', 'normal_function', 'variant'):
         arms = {}
         for row in rows:
@@ -1148,7 +1178,7 @@ def current_closure(state, closure):
         if state['scope']['patch_required'] and not all(any(patch['claim_id'] == name and patch['state'] == 'accepted'
                 for patch in state['patches'].values()) for name in closure['claim_ids']):
             return False
-    return not any(row['state'] in ('pending', 'disputed') for row in state['obligations'].values())
+    return research_autonomy(state['scope']) or not any(row['state'] in ('pending', 'disputed') for row in state['obligations'].values())
 
 
 def register_support_inputs(c, grant, inputs):

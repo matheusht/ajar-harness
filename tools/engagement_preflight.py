@@ -11,8 +11,8 @@ import shutil
 import sys
 import tomllib
 
-from engagement_contract import ContractError, digest, load_inputs, read_bytes, safe_publication
-from engagement_controller import overlap
+from engagement_contract import research_autonomy, initial_authority, ContractError, digest, load_inputs, read_bytes, safe_publication
+from engagement_controller import overlap, bundled_guidance
 from native_credentials import HostCredentialResolver
 from native_runtime_transport import RuntimeError
 from research_environment import inspect_profile
@@ -36,8 +36,9 @@ def inspect_engagement(inputs: Path) -> dict:
     if not SOCKET_PARENT.is_dir() or not os.access(SOCKET_PARENT, os.W_OK | os.X_OK):
         host_missing.append('native_private_socket_directory_unavailable')
     guidance = {}
-    for name, path, code in (('methodology', METHODOLOGY, 'native_methodology_unavailable'),
-                             ('protocol', PROTOCOL, 'native_protocol_guidance_unavailable')):
+    for filename, path in bundled_guidance(verified.scope).items():
+        name = filename[:-3]
+        code = 'native_' + name + '_unavailable'
         try:
             guidance[name] = digest(safe_publication(read_bytes(path, max_bytes=1024 * 1024)))
         except (ContractError, OSError):
@@ -120,7 +121,7 @@ def inspect_engagement(inputs: Path) -> dict:
             if verified.environment_profiles[row['profile_id']]['platform'] == profile['tool_bundle']['platform']
             and initial_kinds <= set(row['capabilities'])
             and sum(row['profile_id'] in effect['environment_ids'] and not effect['account_refs']
-                    and effect['kind'] == 'read' and effect['rung'] in ('source_only', 'self')
+                    and effect['kind'] == 'read' and (research_autonomy(verified.scope) or effect['rung'] in ('source_only', 'self'))
                     and initial_resources <= set(effect['access_ids'])
                     for effect in verified.scope['effects']) == 1]
         if not candidates:

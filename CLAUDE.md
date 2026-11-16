@@ -15,7 +15,7 @@ Pick the route from the work in front of you, then open its entry. One trigger p
 | Trigger | Route | Entry |
 | --- | --- | --- |
 | Repository engineering, research, documentation or planning | Ground the work in current code and sources; keep the requested scope; separate observed, proposed and implemented work. | This file, [layout](README.md#layout), [decisions](docs/decisions/README.md) |
-| New research, versioned v2 Codex/OMP inputs or an existing v2 journal | Use the v2 entry and its signed authority policy; qualification gaps remain explicit. | [v2 operator guide](docs/agents/engagement.md), [initial-scope policy](docs/decisions/0015-initial-scope-autonomy.md), [dated delivery state](docs/wiki/oslit-v2-delivery-2026-11-14.md) |
+| New research, versioned v2 Codex/OMP inputs or an existing v2 journal | Use the v2 entry and its signed authority policy; qualification gaps remain explicit. | [v2 operator guide](docs/agents/engagement.md), [research-autonomy policy](docs/decisions/0016-research-autonomy.md), [dated delivery state](docs/wiki/oslit-v2-delivery-2026-11-14.md) |
 | Explicit v1 native inputs or an existing v1 run | Preserve its frozen contract and approval requirements. This compatibility route is not the default for new research. | [v1 native research](docs/agents/native-local-research.md), [historical status](docs/wiki/native-research-status.md) |
 | Existing queue/record engagement, or work assigned to that runtime | Decision 0005/0006 kernel, admitted readers, immutable history and the Docker queue. | [legacy entry](docs/agents/legacy-local-research.md) |
 | Attempt, negative-result or evidence-bundle records | `attempt-start` → `attempt-finish`; an exhausted lane uses `record-negative`; external evidence uses `register-bundle`. These are notebook records, not findings or coverage verdicts. | [research lifecycle](docs/research-lifecycle.md) |
@@ -52,15 +52,17 @@ cannot supply execution evidence. Keep claim state, unfinished search, and bound
    benign `safe_signal`. The LLM-application examples are in
    [LLM domain scope](docs/agents/llm-domain-scope.md); source research uses the bootstrap's
    source-only gate.
-3. **Artifact authority** — a v2 scope signed with `authority_policy: initial-scope-v1`
-   preauthorizes all artifact types within its granted effects and owned lab state. Record the
-   composite artifact and cleanup obligation before creation; do not ask for another confirmation
-   or signature for an in-scope Zone-2 artifact. New authority or unsupported containment stops
-   the affected action. Other scopes retain their fresh-human-confirmation gate. See
-   [initial-scope policy](docs/decisions/0015-initial-scope-autonomy.md).
-4. **Review gate** — under that v2 policy, fresh independent agent review admits the next
-   already signed internal rung after its predecessor succeeds; no repeated operator approval.
-   Other routes retain operator review. Evidence, scope and cleanup checks apply throughout.
+3. **Artifact authority** — new v2 scopes select `authority_policy: research-autonomy-v1`.
+   The initial signature authorizes artifacts inside its exact effects and owned lab state.
+   Record the artifact and cleanup obligation before creation. New authority or unsupported
+   containment stops the affected action; no repeated approval is needed inside the grant.
+   Existing `initial-scope-v1` and older scopes preserve their original contracts.
+4. **Evidence review** — preserve actual execution identity, permissions, conditions and
+   independent evidence. Fresh reviewers assess causal controls, clean reproduction and
+   scientific adequacy. Under `research-autonomy-v1`, strategy advice does not deny resources
+   or force lead replacement, and no universal self/stored/cross-user ladder gates signed
+   effects. Historical scopes retain their original review and transition rules. See the
+   [research-autonomy decision](docs/decisions/0016-research-autonomy.md).
 5. **External-action gate** — filing, disclosure, vendor contact, deployment, publication and other
    effects outside the signed local task require explicit operator authorization.
 

@@ -20,6 +20,8 @@ from research_environment import Environment
 BOUNDARY = 'linux-docker-model-v1'
 OWNER_KIND = 'native-runtime-owner-v2'
 CONTROL_BYTES = 4 * 1024 * 1024
+# Frozen v2 images before research-autonomy-v1 used this bootstrap (4af08a20).
+LEGACY_BOOTSTRAP_SHA256 = 'sha256:6920a825d0933212ee4629b2b2d5b696ff8ca0e6cfd853aed00e66245104a0c4'
 ENVIRONMENT_KEYS = {'kind', 'nonce', 'container_id', 'container_name', 'stage_container_id',
     'stage_container_name', 'prepared_image_id', 'prepared_image_name', 'unsettled',
     'daemon_id', 'image_id', 'profile_sha256', 'access', 'support_inputs'}
@@ -253,13 +255,14 @@ class LinuxModelOwner:
     boundary = BOUNDARY
 
     def __init__(self, profile, profile_sha256, grant, *, authorize, dispatch_guard, observe_owner,
-                 maximum_lease_seconds, support_directory=None, receipt=None):
+                 maximum_lease_seconds, support_directory=None, receipt=None, helpers_enabled=False):
         self.profile = copy.deepcopy(profile)
         self.profile_sha256, self.grant = profile_sha256, copy.deepcopy(grant)
         self.authorize, self.guard, self.observe_owner = authorize, dispatch_guard, observe_owner
         if not _integer(maximum_lease_seconds) or not _sha(profile_sha256):
             raise RuntimeError('native_model_owner_configuration_invalid')
         self.maximum_lease_seconds = maximum_lease_seconds
+        self.helpers_enabled = helpers_enabled
         self.support_directory = Path(support_directory) if support_directory is not None else None
         self.paths = SimpleNamespace(executable=MODEL, state=STATE, workspace=WORKSPACE,
                                      config=CONFIGS[profile['kind']], ca='/input/model/ca.pem')
@@ -382,7 +385,9 @@ class LinuxModelOwner:
                 if (not isinstance(entry, dict) or set(entry) != {'sha256', 'mode', 'uid', 'gid'}
                         or entry['uid'] != 0 or entry['gid'] != 0
                         or entry['mode'] != (0o555 if path.startswith('/runtime/bin/') else 0o444)
-                        or not _sha(entry['sha256']) or path in expected and entry['sha256'] != expected[path]):
+                        or not _sha(entry['sha256']) or (path in expected and entry['sha256'] != expected[path]
+                            and not (path == '/runtime/native_runtime_bootstrap.py' and not self.helpers_enabled
+                                     and entry['sha256'] == LEGACY_BOOTSTRAP_SHA256))):
                     raise ValueError()
         except (ValueError, KeyError, TypeError):
             raise RuntimeError('native_model_image_files_changed') from None
@@ -443,13 +448,16 @@ class LinuxModelOwner:
         return self.environment.launch_stdio(['/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin',
             'HOME=/work', 'TMPDIR=/tmp', *command], role=slot)
 
-    def launch_model(self, command, public_environment, binding):
+    def launch_model(self, command, public_environment, binding, *, helper_id=None):
         self.check_authority()
         if not isinstance(command, list) or not command or command[0] != MODEL:
             raise RuntimeError('native_model_command_invalid')
         safe_publication(canonical(public_environment))
+        if helper_id is not None and (not self.helpers_enabled or self.profile['kind'] != 'omp' or not re.fullmatch(r'[0-9a-f]{32}', helper_id)):
+            raise RuntimeError('native_helper_identity_invalid')
         process = self.environment.launch_stdio(['/usr/bin/env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin',
-            'python3', '-I', '-S', '/runtime/native_runtime_bootstrap.py'], role='model')
+            'python3', '-I', '-S', '/runtime/native_runtime_bootstrap.py'],
+            role='model' if helper_id is None else 'model_helper_' + helper_id)
         try:
             with self.guard():
                 self.check_authority()
@@ -459,6 +467,7 @@ class LinuxModelOwner:
                     'argv': command, 'environment': public_environment, 'credentials': private,
                     'executable_sha256': self.profile['executable']['sha256'],
                     'config_sha256': self.profile['config_sha256'],
+                    **({'helper_id': helper_id} if helper_id is not None else {}),
                     **({'model_catalog_sha256': self.profile['model_catalog']['sha256']}
                        if 'model_catalog' in self.profile else {})}, separators=(',', ':')).encode()
                 if len(frame) > MAX_BOOTSTRAP:
@@ -470,7 +479,10 @@ class LinuxModelOwner:
                     raise RuntimeError('native_model_bootstrap_unavailable')
         except Exception:
             try:
-                self.revoke_and_verify()
+                if helper_id is None:
+                    self.revoke_and_verify()
+                elif process.poll() is None:
+                    process.kill()
             except Exception:
                 pass
             raise RuntimeError('native_model_bootstrap_unavailable') from None

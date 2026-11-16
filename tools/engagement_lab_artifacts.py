@@ -10,7 +10,7 @@ import re
 import shutil
 import stat
 
-from engagement_contract import canonical, read_json
+from engagement_contract import research_autonomy, initial_authority, canonical, read_json
 from engagement_controller import fail
 
 CLASS = 'owned-lab-state-v1'
@@ -39,7 +39,7 @@ def select_effect(scope, grant, profile_id, selector=None, *, resources=None, ar
     if selector is None:
         effects = [row for row in effects if any(name in row['artifact_classes'] for name in classes)]
         if not effects:
-            if scope.get('authority_policy') == 'initial-scope-v1':
+            if initial_authority(scope):
                 fail('lab_artifact_effect_unavailable')
             return None
     else:
@@ -48,7 +48,7 @@ def select_effect(scope, grant, profile_id, selector=None, *, resources=None, ar
     if len(effects) != 1 or len(effects[0]['artifact_classes']) != 1 or effects[0]['artifact_classes'][0] not in classes:
         fail('lab_artifact_class_unsupported')
     artifact_class = effects[0]['artifact_classes'][0]
-    if artifact_class == ALL_ACCESS_CLASS and scope.get('authority_policy') != 'initial-scope-v1':
+    if artifact_class == ALL_ACCESS_CLASS and not initial_authority(scope):
         fail('lab_artifact_policy_required')
     kinds = ('source', 'binary', 'application') if artifact_class == ALL_ACCESS_CLASS else (
         ('application',) if artifact_class == APPLICATION_CLASS else ('source', 'binary'))
@@ -57,7 +57,7 @@ def select_effect(scope, grant, profile_id, selector=None, *, resources=None, ar
         fail('lab_artifact_effect_unavailable')
     effect = effects[0]
     if (effect['artifact_classes'] != [artifact_class] or effect['account_refs'] or not effect['cleanup_required']
-            or effect['rung'] not in ('source_only', 'self')):
+            or (not research_autonomy(scope) and effect['rung'] not in ('source_only', 'self'))):
         fail('lab_artifact_class_unsupported')
     if artifact_class == APPLICATION_CLASS and (len(accesses) != 1 or not any(
             row['access_id'] == accesses[0]['id'] and row['environment_id'] == profile_id and
@@ -69,7 +69,7 @@ def select_effect(scope, grant, profile_id, selector=None, *, resources=None, ar
 def execute_effect(scope, grant, profile_id):
     effects = [row for row in scope['effects'] if row['kind'] == 'execute'
         and profile_id in row['environment_ids'] and set(grant['resources']) <= set(row['access_ids'])
-        and not row['account_refs'] and row['rung'] in ('source_only', 'self')]
+        and not row['account_refs'] and (research_autonomy(scope) or row['rung'] in ('source_only', 'self'))]
     if len(effects) != 1:
         fail('lab_artifact_execute_effect_unavailable')
     return effects[0]['id']

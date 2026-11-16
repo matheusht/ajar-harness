@@ -793,7 +793,7 @@ def _v2_main(argv: list[str]) -> int:
             command.add_argument('--file', type=Path, required=True)
         if name == 'export':
             command.add_argument('--output', type=Path, required=True)
-    status = commands.add_parser('status', help='read state or one authenticated worker update page')
+    status = commands.add_parser('status', help='read current state, helpers and knowledge, or an authenticated update/board page')
     origin = status.add_mutually_exclusive_group(required=True)
     origin.add_argument('--engagement-root', type=Path)
     origin.add_argument('--socket', type=Path)
@@ -801,7 +801,7 @@ def _v2_main(argv: list[str]) -> int:
     status.add_argument('--limit', type=int, default=100)
     status.add_argument('--view', choices=('updates', 'board'), default='updates')
     status.add_argument('--query', default='')
-    status.add_argument('--kind', action='append', dest='kinds')
+    status.add_argument('--kind', action='append', dest='kinds', help='board kind, including knowledge or helper; repeat to combine')
     claim = commands.add_parser('claim', help='claim ready work through the worker endpoint')
     claim.add_argument('--socket', type=Path, required=True)
     claim.add_argument('--request-id', required=True)

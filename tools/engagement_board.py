@@ -10,7 +10,7 @@ from engagement_controller import fail, integer
 
 COLLECTIONS = {'task': 'tasks', 'publication': 'publications', 'instrument': 'instruments',
                'experiment': 'experiments', 'claim': 'claims', 'review': 'reviews',
-               'obligation': 'obligations', 'message': 'messages'}
+               'obligation': 'obligations', 'message': 'messages', 'knowledge': 'knowledge', 'helper': 'helpers'}
 CREATES = {'task_create': ('task', 'task_id'), 'publish': ('publication', 'publication_id'),
            'instrument_register': ('instrument', 'instrument_id'), 'experiment_record': ('experiment', 'experiment_id'),
            'claim_propose': ('claim', 'claim_id'), 'review_request': ('review', 'review_id'),
@@ -20,6 +20,11 @@ CREATES = {'task_create': ('task', 'task_id'), 'publish': ('publication', 'publi
 def rows(state, events):
     sources = {}
     for event in events:
+        if event['type'] in ('knowledge_observed', 'helper_observed', 'technique_evaluated'):
+            payload = event['payload']
+            identity = (payload.get('record') or payload.get('evaluation') or {}).get('version') or payload.get('helper_id')
+            kind = 'helper' if event['type'] == 'helper_observed' else 'knowledge'
+            sources[kind, identity] = {name: event[name] for name in ('sequence', 'sha256', 'actor', 'at')}
         request = event['payload'] if event['type'] == 'request_accepted' else {}
         if request.get('type') in CREATES:
             kind, key = CREATES[request['type']]
@@ -28,10 +33,10 @@ def rows(state, events):
     result = []
     for kind, collection in COLLECTIONS.items():
         corrections = {}
-        for identity, record in state[collection].items():
+        for identity, record in state.get(collection, {}).items():
             for old in record.get('supersedes', []):
                 corrections.setdefault(old, []).append(identity)
-        for identity, record in state[collection].items():
+        for identity, record in state.get(collection, {}).items():
             source = sources.get((kind, identity))
             result.append({'kind': kind, 'id': identity, 'record': copy.deepcopy(record),
                 'author': record.get('author') or (source['actor']['id'] if source else None),
@@ -129,7 +134,10 @@ def notices(controller, events, state, worker, *, since, limit):
             continue
         request = event['payload'] if event['type'] == 'request_accepted' else {}
         kind, data = request.get('type'), request.get('payload', {})
-        if kind not in CREATES and kind not in ('task_result', 'review_result', 'review_response', 'task_assign'):
+        if event['type'] in ('knowledge_observed', 'technique_evaluated'):
+            kind = event['type']
+            data = event['payload'].get('record', event['payload'].get('evaluation', {}))
+        if kind not in CREATES and kind not in ('task_result', 'review_result', 'review_response', 'task_assign', 'knowledge_observed', 'technique_evaluated'):
             continue
         if kind == 'team_message':
             relevant = worker['id'] in data['recipient_ids']
@@ -137,12 +145,12 @@ def notices(controller, events, state, worker, *, since, limit):
             task = state['tasks'].get(data.get('task_id'), {})
             review = state['reviews'].get(data.get('review_id'), {})
             related = set(data.get('resources', task.get('resources', review.get('resources', []))))
-            relevant = (worker['role'] == 'lead' or kind in ('publish', 'instrument_register') or
+            relevant = (worker['role'] == 'lead' or kind in ('publish', 'instrument_register', 'knowledge_observed', 'technique_evaluated') or
                         data.get('worker_id') == worker['id'] or review.get('reviewer_id') == worker['id'] or
                         bool(resources & related))
         if not relevant:
             continue
-        preview = str(data.get('body', data.get('result', data.get('reason', ''))))
+        preview = str(data.get('body', data.get('result', data.get('reason', data.get('status_reason', '')))))
         subject = str(data.get('subject', data.get('question', kind)))
         items.append({name: event[name] for name in ('sequence', 'sha256', 'actor')})
         items[-1].update(type=kind, subject=subject[:256], preview=preview[:1024],

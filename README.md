@@ -17,8 +17,10 @@ byte-identical to it.
 
 The Decision 0005/0006 record kernel and [research lifecycle](docs/research-lifecycle.md)
 remain for existing contracts. New research enters the candidate Codex/OMP v2
-workflow. [Decision 0015](docs/decisions/0015-initial-scope-autonomy.md) adopts its
-explicit initial-scope authority policy and default caller routing. Runtime
+workflow. [Decision 0016](docs/decisions/0016-research-autonomy.md) selects
+`research-autonomy-v1` for new signed inputs, with model-directed research, optional
+total limits and active [reference/technique access](docs/agents/knowledge-library.md).
+Existing signed contracts retain their original policy. Runtime
 qualification, sustained operation and the operator's fresh-target study remain
 separate from that policy decision; the candidate branch is not a release.
 
@@ -30,7 +32,7 @@ cards.
 | Boundary | What | Gate |
 | --- | --- | --- |
 | ✅ **Authorized local research** | a benign objective set declared in the signed target-local scope, run only inside the declared local environment | signed scope **+** a benign `safe_signal` for every used card **+** the declared effect, containment and cleanup ceiling |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed scope **+** containment **+** recorded cleanup; v2 `initial-scope-v1` preauthorizes in-scope artifacts, other routes require fresh human confirmation |
+| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed scope **+** containment **+** recorded cleanup; v2 `research-autonomy-v1` and `initial-scope-v1` preauthorize in-scope artifacts, other routes require fresh human confirmation |
 | ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
 
 **Authorization is mandatory.** No filled and signed `scope.md` → the legacy loop refuses to run.
@@ -47,7 +49,7 @@ across domains.
 | Repository engineering, research, docs or planning | [`AGENTS.md`](AGENTS.md), then [the layout](#layout) and [decision index](docs/decisions/README.md) |
 | Existing queue/record engagement | [legacy queue and record entry](docs/agents/legacy-local-research.md) |
 | Attempts, bounded negatives, evidence bundles | [research lifecycle](docs/research-lifecycle.md) |
-| New source, binary, application or combined research | [v2 engagement guide](docs/agents/engagement.md) and [initial-scope autonomy](docs/decisions/0015-initial-scope-autonomy.md); runtime qualification remains separate |
+| New source, binary, application or combined research | [v2 engagement guide](docs/agents/engagement.md) and [research autonomy](docs/decisions/0016-research-autonomy.md); runtime qualification remains separate |
 | Explicit v1 native inputs or existing v1 run | [v1 compatibility guide](docs/agents/native-local-research.md) |
 | Capability, readiness or qualification claim | [engineering wiki](docs/wiki/index.md), then its source evidence |
 

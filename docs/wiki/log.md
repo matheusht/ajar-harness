@@ -941,3 +941,21 @@ and [caller](../../evals/native-qualification/smoke/NATIVE-CALLER-MIGRATION-E2E.
 checks retain before/after results. Pricing, hosted CI and fresh-target research
 were excluded by the operator. This adoption does not certify physical Docker,
 external providers or sustained operation.
+
+## 2026-11-16 — research autonomy, active references and experimental reuse
+
+[Decision 0016](../decisions/0016-research-autonomy.md) records the operator's
+approved full-plan revision. New signed `research-autonomy-v1` inputs remove the
+strategy veto/fixed replacement counter and universal escalation ladder, retain
+exact execution facts with independent scientific review, and make total caps
+optional. Native helpers share parent authority and elapsed time; actual provider
+usage still includes them. Historical signed contracts and frozen guidance remain.
+
+The [library guide](../agents/knowledge-library.md) covers active selected-version
+retention, large source files, honest not-retained delivery and optional technique
+transfer/counterexample review. The historical reference pack includes a contents
+page and interpretation corrections rather than inheriting past verification labels.
+Failure cases were defined before implementation; Luna owns minimal local checks.
+This is local implementation work, not hosted CI, full E2E, live provider qualification,
+sustained operation, research benefit or fresh-target acceptance. Those runs remain
+deferred by the operator.

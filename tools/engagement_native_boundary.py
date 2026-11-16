@@ -22,7 +22,7 @@ import time
 from urllib.parse import urlsplit
 import uuid
 
-from engagement_contract import canonical, digest, read_bytes, read_json, source_manifest
+from engagement_contract import research_autonomy, initial_authority, canonical, digest, read_bytes, read_json, source_manifest
 from engagement_controller import ControllerError, instant, overlap
 from engagement_lab_artifacts import select_effect as select_artifact_effect, execute_effect, cleanup_staging
 from engagement_network import NetworkGate
@@ -54,6 +54,18 @@ def _recover_owner(receipt, *, profile=None, maximum_lease_seconds=None):
     if receipt.get('kind') == 'native-runtime-owner-v2':
         return recover_runtime_owner(receipt, profile=profile, maximum_lease_seconds=maximum_lease_seconds)
     return recover_runtime_owner(receipt)
+
+
+def _recover_helpers(context, dispatch_id):
+    """macOS helper processes have separate exact owners; Linux shares the parent cgroup."""
+    for row in context.controller.state()['helpers'].values():
+        if row['dispatch_id'] != dispatch_id or not row.get('owner_receipt_sha256'):
+            continue
+        receipt = json.loads(context.controller.read_object(row['owner_receipt_sha256']))
+        if receipt['kind'] == 'native-runtime-owner-v1':
+            readback = _recover_owner(receipt)
+            if readback.get('process_exited') is not True or readback.get('child_absence') != 'verified':
+                raise BoundaryError('native_helper_stop_unverified')
 
 
 def _inspect_bundle(profile, identity):
@@ -114,9 +126,9 @@ TOOLS = [
         {'since': {'type': ['string', 'null']}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
          'view': {'type': 'string', 'enum': ['updates', 'board']}, 'query': {'type': 'string', 'maxLength': 1024},
          'kinds': {'type': 'array', 'items': {'type': 'string', 'enum': [
-             'task', 'publication', 'instrument', 'experiment', 'claim', 'review', 'obligation', 'message']},
-                   'minItems': 1, 'maxItems': 8, 'uniqueItems': True}}, ['since', 'limit']),
-    _tool('engagement_submit', 'Submit a typed request using your authenticated worker identity and the current revision.',
+             'task', 'publication', 'instrument', 'experiment', 'claim', 'review', 'obligation', 'message', 'knowledge', 'helper']},
+                   'minItems': 1, 'maxItems': 10, 'uniqueItems': True}}, ['since', 'limit']),
+    _tool('engagement_submit', 'Submit a typed request. For research-autonomy-v1 provide request type and payload; the adapter supplies request identity and revision.',
         {'request': {'type': 'object'}}, ['request']),
     _tool('engagement_read', 'Read a published evidence object or current ephemeral status view in byte ranges. Follow next_offset until null; default max_bytes is 65536.',
         {'sha256': {'type': 'string', 'pattern': '^sha256:[0-9a-f]{64}$'},
@@ -134,6 +146,22 @@ TOOLS = [
          'effect_id': {'type': 'string', 'description': 'Optional signed local effect for source/binary capture execution; later rungs require current evidence review. Application requests select their own effect.'},
          'patch_id': {'type': ['string', 'null']}, 'patch_arm': {'type': ['string', 'null']}},
         ['instrument_id', 'candidate_path', 'probe_path', 'interpreter', 'arguments', 'conditions', 'seconds', 'patch_id', 'patch_arm'])]
+
+
+AUTONOMY_TOOLS = [
+    _tool('engagement_helper', 'Use a native helper with your current permissions and shared limits. Helpers act as you and cannot independently review your work.',
+        {'action': {'type': 'string', 'enum': ['spawn', 'read', 'steer', 'stop']},
+         'prompt': {'type': 'string', 'maxLength': 65536}, 'helper_id': {'type': 'string'},
+         'message': {'type': 'string', 'maxLength': 65536}}, ['action']),
+    _tool('engagement_knowledge', 'Search and read versioned references and experimental techniques, fetch authorized public references, publish a reusable technique, or record an independent evaluation. Selected bytes are retained automatically; retention gaps remain visible.',
+        {'action': {'type': 'string', 'enum': ['search', 'read', 'fetch', 'publish', 'evaluate']},
+         'query': {'type': 'string'}, 'limit': {'type': 'integer'}, 'version': {'type': 'string'},
+         'offset': {'type': 'integer'}, 'file': {'type': 'string'}, 'materialize': {'type': 'boolean'},
+         'url': {'type': 'string'}, 'title': {'type': 'string'}, 'path': {'type': 'string'},
+         'helpers': {'type': 'array', 'items': {'type': 'string'}}, 'applicability': {'type': 'string'},
+         'review_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['recommended', 'experimental', 'narrowed', 'withdrawn']},
+         'transfer_refs': {'type': 'array', 'items': {'type': 'string'}},
+         'counterexample_refs': {'type': 'array', 'items': {'type': 'string'}}, 'reason': {'type': 'string'}}, ['action'])]
 
 
 def _write(path, data, mode=0o600):
@@ -217,6 +245,8 @@ class NativeBoundary:
         self.model_owner = self.model_proxy = None
         self.provider_gate = self.lab_gate = None
         self.owner_receipt = None
+        self.helpers = None
+        self.session_started = time.monotonic()
         self.execution_admitted = False
         self.artifact_effect = None
         self.status_read_view = None
@@ -262,7 +292,7 @@ class NativeBoundary:
     def _effect(self, profile_id, grant):
         candidates = [row for row in self.scope['effects'] if profile_id in row['environment_ids']
             and set(grant['resources']) <= set(row['access_ids']) and not row['account_refs'] and row['kind'] == 'read'
-            and row['rung'] in ('source_only', 'self')]
+            and (research_autonomy(self.scope) or row['rung'] in ('source_only', 'self'))]
         if len(candidates) != 1:
             raise BoundaryError('native_effect_grant_unavailable')
         return candidates[0]['id']
@@ -374,7 +404,7 @@ class NativeBoundary:
         self.socket_dir = Path(tempfile.mkdtemp(prefix='oslit-net-', dir='/tmp')).resolve()
         tls = self.state_dir / 'tls'; tls.mkdir(mode=0o700)
         ca, certificate, key = _certificates(tls, [row['host'] for rows in self.routes.values() for row in rows],
-            lifetime_seconds=self.scope['limits']['hard']['worker_seconds'])
+            lifetime_seconds=self.scope['limits']['hard'].get('worker_seconds', 86400))
         bootstrap = self.state_dir / 'bootstrap'; bootstrap.mkdir(mode=0o700)
         _write(bootstrap / 'ca.pem', ca.read_bytes())
         _write(bootstrap / 'bridge.py', read_bytes(Path(__file__).with_name('engagement_network_bridge.py')))
@@ -420,7 +450,7 @@ class NativeBoundary:
             self.model_owner = LinuxModelOwner(self.profile, self.context.assignment['profile_sha256'],
                 self.context.grant, authorize=self.context.authorize, dispatch_guard=self.context.guard,
                 observe_owner=self._runtime_owner, maximum_lease_seconds=self.scope['limits']['max_worker_lease_seconds'],
-                support_directory=self.state_dir / 'model-input')
+                support_directory=self.state_dir / 'model-input', helpers_enabled=research_autonomy(self.scope))
             self.model_owner.prepare(config_bytes=read_bytes(self.profile['config_file']), ca_bytes=ca.read_bytes())
         self.credential_binding = _credential_resolver()(self.profile)
         self.credential_binding.check()
@@ -438,7 +468,8 @@ class NativeBoundary:
             model_environment = {'HTTP_PROXY': provider_url, 'HTTPS_PROXY': provider_url,
                 'NO_PROXY': 'localhost,127.0.0.1,::1', 'SSL_CERT_FILE': str(ca),
                 'CURL_CA_BUNDLE': str(ca), 'NODE_EXTRA_CA_CERTS': str(ca)}
-        runtime_options = {'host_tools': TOOLS, 'host_call': self.host_call,
+        selected_tools = TOOLS + (AUTONOMY_TOOLS if research_autonomy(self.scope) else [])
+        runtime_options = {'host_tools': selected_tools, 'host_call': self.host_call,
             'dispatch_guard': self.context.guard, 'protected_model': True,
             'profile_sha256': self.context.assignment['profile_sha256'],
             'credential_resolver': lambda profile: self.credential_binding, 'provider_environment': model_environment,
@@ -463,11 +494,14 @@ class NativeBoundary:
                 command=_clean_environment(tool_environment, omp_state=True) + bundle['command'],
                 target_platform=self.profile['tool_bundle']['platform'], expected_ready=bundle['expected_ready'],
                 dispatch_guard=self.context.guard)
-            runtime_options.update(host_tools=[*self.native_owner.catalog, *TOOLS])
+            runtime_options.update(host_tools=[*self.native_owner.catalog, *selected_tools])
             if self.model_owner is None:
                 runtime_options['command_prefix'] = _model_policy(provider_url)
             self.runtime = omp.Runtime(self.profile, self.state_dir / 'model', self.context.workspace, **runtime_options)
         identity = self.runtime.fresh()
+        if research_autonomy(self.scope):
+            from native_runtime_helpers import HelperSessions
+            self.helpers = HelperSessions(self)
         self.owner_receipt = self.runtime.owner_receipt()
         return {'session_id': identity['session_id'], 'owner_receipt': self.owner_receipt}
 
@@ -475,6 +509,9 @@ class NativeBoundary:
         if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
             raise BoundaryError('native_renewal_invalid')
         self.context.authorize()
+        if research_autonomy(self.scope) and (time.monotonic() - self.session_started >= 86400 or
+                len(getattr(self.native_owner, 'seen', ())) >= 4000):
+            raise BoundaryError('native_session_maintenance_reconstruct_required')
         if self.environment is None or self.finished is not None:
             raise BoundaryError('native_boundary_inactive')
         self.environment.grant = copy.deepcopy(self.context.grant)
@@ -485,6 +522,11 @@ class NativeBoundary:
     def host_call(self, name, arguments):
         try:
             self.context.authorize()
+            if name == 'engagement_helper' and self.helpers is not None:
+                return HostOperation(lambda: _result(self.helpers.handle(arguments)), self.helpers.close)
+            if name == 'engagement_knowledge' and research_autonomy(self.scope):
+                from engagement_knowledge_delivery import handle
+                return HostOperation(lambda: _result(handle(self, arguments)), lambda: None)
             if name == 'engagement_status':
                 return self._status(arguments)
             if name == 'engagement_submit':
@@ -540,12 +582,20 @@ class NativeBoundary:
         if type(offset) is not int or not 0 <= offset <= len(content) or type(size) is not int or not 1 <= size <= 65536:
             raise BoundaryError('native_evidence_range_invalid')
         part = content[offset:offset + size]
+        if offset + len(part) < len(content):
+            for trim in range(min(4, len(part))):
+                try:
+                    part[:len(part) - trim].decode('utf-8')
+                    part = part[:len(part) - trim]
+                    break
+                except UnicodeError:
+                    pass
         body = {'sha256': sha, 'source': source, 'offset': offset, 'bytes': len(part), 'total_bytes': len(content),
             'next_offset': offset + len(part) if offset + len(part) < len(content) else None}
         try:
             body.update(encoding='utf-8', content=part.decode('utf-8'))
         except UnicodeError:
-            body.update(encoding='base64', content=base64.b64encode(part).decode())
+            body.update(encoding='binary', content=None, notice='Binary evidence retained; use the published artifact path with native file tools.')
         return _completed(body)
 
     def _artifact(self, arguments):
@@ -983,6 +1033,12 @@ class NativeBoundary:
                     self.target_accounts.close()
                 except Exception:
                     transports_closed = False
+            if self.helpers is not None:
+                self.helpers.close()
+                try:
+                    _recover_helpers(self.context, self.context.grant['dispatch_id'])
+                except Exception:
+                    transports_closed = False
             runtime_readback = {'session_id': self.owner_receipt.get('session_id') if self.owner_receipt else None,
                 'process_exited': False, 'child_absence': 'not_observed', 'capabilities_revoked': True}
             if self.runtime is not None:
@@ -1097,6 +1153,7 @@ def recover_boundary(context, dispatch):
         c.revoke_worker(worker['id'], worker['generation'], reason='native-boundary-recovery')
     try:
         if not auxiliary and not pre_native:
+            _recover_helpers(context, context.grant['dispatch_id'])
             options = {}
             if owner.get('kind') == 'native-runtime-owner-v2':
                 options = {'profile': context.contract.runtime_profiles[context.grant['profile_id']],

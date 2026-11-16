@@ -7,6 +7,7 @@ A dispatch guard or successful interrupt is not evidence that those controls wor
 from __future__ import annotations
 
 import base64
+from collections import deque
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
@@ -68,6 +69,11 @@ class PendingTool:
                     'isError': True, 'content_status': 'withheld'}
                 return
             self.response = response
+        except ContractError as error:
+            if error.code != 'publication_secret':
+                self.unknown = True
+            self.response = {'content': [{'type': 'text', 'text': 'Tool content withheld by the shared scanner.'}],
+                             'isError': True, 'content_status': 'withheld'}
         except Exception:
             self.unknown = True
             self.response = {'content': [{'type': 'text', 'text':
@@ -176,6 +182,7 @@ class Transport:
         self.deferred = []
         self.sequence = 0
         self.write_lock = threading.Lock()
+        self.io_lock = threading.RLock()
         self.failure = None
         self.closed = False
         self.process = (launcher(command) if launcher is not None else
@@ -253,6 +260,10 @@ class Transport:
             raise RuntimeError('native_transport_closed') from None
 
     def receive(self, timeout, *, defer_events=False):
+        with self.io_lock:
+            return self._receive(timeout, defer_events=defer_events)
+
+    def _receive(self, timeout, *, defer_events=False):
         if self.failure:
             raise RuntimeError(self.failure)
         if self.deferred and not defer_events:
@@ -283,6 +294,12 @@ class Transport:
 
     def request(self, operation, params=None, *, request_id=None, timeout=15, defer_events=False,
                 dispatch_guard=None):
+        with self.io_lock:
+            return self._request(operation, params, request_id=request_id, timeout=timeout,
+                                 defer_events=defer_events, dispatch_guard=dispatch_guard)
+
+    def _request(self, operation, params=None, *, request_id=None, timeout=15, defer_events=False,
+                 dispatch_guard=None):
         request_id = request_id or self.next_id()
         value = {'id': request_id, 'type': operation, **(params or {})} if self.omp else {
             'jsonrpc': '2.0', 'id': request_id, 'method': operation, 'params': params or {}}
@@ -362,7 +379,7 @@ class Session:
         self.native_turn = None
         self.invocation_id = None
         self.invocations = set()
-        self.events = []
+        self.events = deque()
         self.calls = {}
         self.tool_replies = []
         self.tool_requests = {}
@@ -376,6 +393,7 @@ class Session:
         self.model_identity = None
         self.profile_sha256 = None
         self.native_executor = None
+        self.helper_parent = None
         self.owner_observer = None
         self.process_workspace = Path(model_owner.paths.workspace) if model_owner else self.workspace
         self.process_state = Path(model_owner.paths.state) if model_owner else self.state_dir
@@ -466,7 +484,7 @@ class Session:
             self.owner_observer(self.owner_receipt())
 
     def _startup_failed(self, error):
-        error.owner_receipt = self.owner_receipt() if self.model_identity or self.model_owner else None
+        error.owner_receipt = self.owner_receipt() if self.model_identity or (self.helper_parent is None and self.model_owner) else None
         try:
             error.cleanup_result = self.close()
         except Exception:
@@ -475,6 +493,8 @@ class Session:
 
     def owner_receipt(self):
         if self.model_owner is not None:
+            if self.helper_parent is not None:
+                return dict(self.model_owner.receipt(), session_id=self.session_id)
             return self.model_owner.receipt(self.session_id)
         if not self.model_boundary or self.model_identity is None:
             raise RuntimeError('native_owner_receipt_unavailable')
@@ -492,7 +512,8 @@ class Session:
                 'native_tools': 'environment_owned_native_executor' if native else 'withheld_until_isolated_tool_owner',
                 'execution_boundary': self.model_boundary or 'external_owner_required',
                 'child_inventory': 'contained_descendants' if self.model_owner else
-                                   ('children_prohibited' if self.model_boundary else 'unverified'),
+                                   ('host_created_sessions' if 'engagement_helper' in self.host_tools else
+                                    'children_prohibited' if self.model_boundary else 'unverified'),
                 'usage_cost_estimate': 'reported' if self.kind == 'omp' else 'unavailable',
                 'provider_inference': 'unverified'}
 
@@ -519,7 +540,8 @@ class Session:
     def _idle(self):
         if self.active:
             raise RuntimeError('native_invocation_in_progress')
-        if self.tool_replies or any(not pending.ready.is_set() for _, pending in self.calls.values()):
+        own = {pending for key, (_, pending) in self.calls.items() if key[0] == self.session_id}
+        if any(pending in own for _, pending, _ in self.tool_replies) or any(not pending.ready.is_set() for pending in own):
             raise RuntimeError('native_tool_outcome_unsettled')
 
     def _begin(self, invocation_id, prompt):
@@ -532,7 +554,7 @@ class Session:
             raise RuntimeError('native_prompt_invalid')
         if invocation_id in self.invocations:
             raise RuntimeError('native_invocation_already_dispatched')
-        if len(self.invocations) >= 4096:
+        if len(self.invocations) >= 4096 or len(self.calls) >= 4000:
             raise RuntimeError('native_session_dispatch_limit_reconstruct_required')
         self.invocations.add(invocation_id)
         self.invocation_id = invocation_id
@@ -540,9 +562,9 @@ class Session:
         self.usage = None
         self.active = True
 
-    def _tool(self, call_id, name, arguments):
+    def _tool(self, call_id, name, arguments, *, session_id=None, invocation_id=None, active=None):
         identifier(call_id)
-        call_key = (self.session_id, self.invocation_id, call_id)
+        call_key = (session_id or self.session_id, invocation_id or self.invocation_id, call_id)
         fingerprint = json.dumps([name, arguments], sort_keys=True, separators=(',', ':'), allow_nan=False)
         if call_key in self.calls:
             previous, response = self.calls[call_key]
@@ -550,11 +572,13 @@ class Session:
                 raise RuntimeError('native_tool_call_changed')
             return response
         if len(self.calls) >= 4096:
-            raise RuntimeError('native_tool_call_limit')
+            return PendingTool(response={'content': [{'type': 'text', 'text':
+                'Session bookkeeping is full. Finish this turn; the host will restore your published context in a fresh session.'}], 'isError': True})
         if sum(not pending.ready.is_set() for _, pending in self.calls.values()) >= 8:
-            raise RuntimeError('native_tool_concurrency_limit')
+            return PendingTool(response={'content': [{'type': 'text', 'text':
+                'All tool slots are busy. Wait for an outstanding result before retrying.'}], 'isError': True})
         try:
-            if not self.active or name not in self.host_tools or self.host_call is None:
+            if not (self.active if active is None else active) or name not in self.host_tools or self.host_call is None:
                 raise RuntimeError('native_host_tool_denied')
             public(arguments)
         except Exception:
@@ -563,6 +587,17 @@ class Session:
         else:
             try:
                 with self._admission():
+                    if name in ('engagement_submit', 'engagement_knowledge'):
+                        arguments = dict(arguments)
+                        identity = hashlib.sha256(json.dumps(call_key).encode()).hexdigest()
+                        if name == 'engagement_submit':
+                            request = dict(arguments.get('request', {}))
+                            if 'engagement_helper' in self.host_tools:
+                                request['request_id'] = 'native-' + identity
+                                request['expected_revision'] = None
+                            arguments['request'] = request
+                        else:
+                            arguments['_delivery_id'] = 'native-' + identity
                     operation = self.host_call(name, arguments)
                 if (not isinstance(operation, HostOperation) or not callable(operation.wait)
                         or not callable(operation.cancel)):
@@ -583,6 +618,10 @@ class Session:
         self.tool_replies.append((request_id, pending, reply))
 
     def _flush_tool_replies(self):
+        with self.transport.io_lock:
+            self._flush_tool_replies_locked()
+
+    def _flush_tool_replies_locked(self):
         waiting = []
         for request_id, pending, reply in self.tool_replies:
             if not pending.ready.is_set():
@@ -596,7 +635,7 @@ class Session:
         self.tool_replies = waiting
 
     def _cancel_tools(self):
-        for _, pending in self.calls.values():
+        for _, pending in list(self.calls.values()):
             pending.cancel()
 
     def _usage(self, value, names, *, cost=None):
@@ -626,21 +665,24 @@ class Session:
             if time.monotonic() >= deadline and self.transport.frames.empty():
                 break
         self._flush_tool_replies()
-        events, self.events = self.events, []
+        events = []
+        while self.events:
+            events.append(self.events.popleft())
         return events
 
     def close(self):
-        receipt = self.owner_receipt() if self.model_identity or self.model_owner else None
+        receipt = self.owner_receipt() if self.model_identity or (self.helper_parent is None and self.model_owner) else None
         self.closed = True
         self.active = False
-        self._cancel_tools()
-        if self.native_executor:self.native_executor.close()
-        if self.credential_binding:self.credential_binding.revoke()
+        if self.helper_parent is None:
+            self._cancel_tools()
+        if self.native_executor and self.helper_parent is None:self.native_executor.close()
+        if self.credential_binding and self.helper_parent is None:self.credential_binding.revoke()
         result = self.transport.close() if self.transport else {
             'process_exited': True, 'exit_code': None, 'lab_cleanup': 'not_observed', 'child_absence': 'not_observed'}
-        if self.model_owner is not None:
+        if self.model_owner is not None and self.helper_parent is None:
             result.update(self.model_owner.revoke_and_verify(self.session_id))
-        elif receipt:
+        elif receipt and self.model_owner is None:
             from native_runtime_owner import recover_runtime_owner
             result.update(recover_runtime_owner(receipt))
         return result

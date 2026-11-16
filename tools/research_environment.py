@@ -745,7 +745,7 @@ class Environment:
         from engagement_contract import canonical, safe_publication
         self._admit()
         if role not in ('native_tools', 'network_proxy', 'model', 'model_provider_proxy', 'model_codex_bridge',
-                        'application', 'application_connector'):
+                        'application', 'application_connector') and not re.fullmatch(r'model_helper_[0-9a-f]{32}', role):
             raise EnvironmentUnavailable('host_pipe_role_invalid')
         if role in self.stdio_processes:
             raise EnvironmentUnavailable('host_pipe_already_started')

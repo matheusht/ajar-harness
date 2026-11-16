@@ -15,8 +15,8 @@ Every `REPLACE_` occurrence must be resolved before signing.
 Each directory includes complete inputs, scope, goal, runtime, native config and
 environment fields. The initial `read-inputs` effect covers every supplied input
 in its selected environment, so the lead can receive the combined source/binary
-assignment. Local execution is a separate effect. The sample authorizes neither
-external writes nor an impact artifact. Add permitted setup/acquisition routes,
+assignment. Local execution is a separate effect. The sample permits its declared disposable client-lab artifacts; it grants no
+external writes or remote target-state mutation. Add permitted setup/acquisition routes,
 effects or a different scope ceiling only through the operator's signed decision.
 For acquisition, update the signed routes, environment capabilities and native
 network policy together; source/binary configs start with tool networking disabled.
@@ -62,7 +62,7 @@ startup and joined source containment/recovery with controlled provider replies;
 [dated delivery state](../../docs/wiki/oslit-v2-delivery-2026-11-14.md) separates
 implementation, contained checks and qualification work.
 
-The templates select `authority_policy: "initial-scope-v1"` and an explicit
+The templates select `authority_policy: "research-autonomy-v1"` and an explicit
 `owned-lab-state-v2` creation effect for the owned tool/client lab. This covers
 all artifact contents in that lab without per-file confirmation. The separate
 execution grant starts tools/probes. Application resource IDs in this client-lab
@@ -77,3 +77,21 @@ initial-scope policy declares `application_states`, each reference must name its
 exact `artifact_effect_id`. Set the real database command,
 image baseline and state paths before pinning and signing; an external database
 or existing volume is not reset by this descriptor.
+
+The default `limits.hard: {}` imposes no total invocation or duration cap. Add only
+operator-selected totals before signing. `worker_seconds` measures elapsed parent
+execution time; concurrent native helpers do not multiply that duration. Provider
+requests and token use still include all helpers. Short worker leases and machine
+capacity remain bounded independently of optional total research limits.
+
+Optional public reference research is a separate signed capability:
+
+```json
+"reference_web": {"public_sources": true, "max_bytes": 16777216, "timeout_seconds": 30}
+```
+
+Omit it for offline references. This permits public credential-free reads under the
+reference tool, not target/provider access or private-data transfer to a search or
+embedding service. Existing signed scopes are never upgraded by editing a template.
+[Decision 0016](../../docs/decisions/0016-research-autonomy.md) records the behavior;
+full E2E, provider and research comparisons for this revision remain deferred.

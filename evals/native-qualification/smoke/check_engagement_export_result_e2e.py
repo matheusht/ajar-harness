@@ -64,6 +64,21 @@ class ResultConsistency(unittest.TestCase):
     def test_original(self):
         self.check(valid=True)
 
+    def test_historical_projection(self):
+        def omit_new_fields(data):
+            data.pop('helpers')
+            data.pop('knowledge_deliveries')
+        self.change(omit_new_fields)
+        self.check(valid=True)
+
+    def test_forged_helper(self):
+        self.change(lambda data: data.update(helpers={'forged': {'status': 'completed'}}))
+        self.check()
+
+    def test_forged_knowledge_delivery(self):
+        self.change(lambda data: data.update(knowledge_deliveries=[{'version': 'forged'}]))
+        self.check()
+
     def test_false_cleanup(self):
         self.change(lambda data: data.update(cleanup='verified'))
         self.check()

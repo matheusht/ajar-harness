@@ -574,6 +574,8 @@ env_key = "OPENAI_API_KEY"
     write(Path(inputs['environment_profiles']['lab-main']), canonical(environment))
     scope = fixture_scope(inputs_path)
     if getattr(fixture, 'autonomy', False):
+        from check_owned_lab_state_e2e import scope_with_artifact
+        scope = scope_with_artifact(scope)
         scope['authority_policy'] = 'research-autonomy-v1'
     scope['access'][0]['identity']['manifest_sha256'] = digest(canonical(source_manifest(source)))
     scope['runtime_assignments'][0]['profile_sha256'] = digest(canonical(profile))
@@ -690,6 +692,7 @@ def verify_engagement_export(controller, root, result):
     import subprocess
 
     bundle = root / 'export'
+    stage = 'export'
     try:
         exported = controller.export(bundle)
         commands = {
@@ -700,6 +703,7 @@ def verify_engagement_export(controller, root, result):
         }
         reports = {}
         for name, command in commands.items():
+            stage = name
             completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
             if completed.returncode != 0:
                 raise ValueError('export_' + name + '_verification_failed')
@@ -723,7 +727,7 @@ def verify_engagement_export(controller, root, result):
         if result['export_verification']['status'] != 'passed':
             result['status'] = 'failed'
     except Exception as error:
-        result['export_verification'] = {'status': 'failed', 'error': error_code(error)}
+        result['export_verification'] = {'status': 'failed', 'error': error_code(error), 'stage': stage}
 
 
 def run_native(root, fixture, result):
@@ -897,11 +901,14 @@ def run_native(root, fixture, result):
             provider.autonomy = {'version': selected['version'], 'parent': 0, 'child': 0}
             invoke(context, boundary, 'Use a helper for the owned fixture reference.', result)
             deadline = time.monotonic() + 45
+            unknown_event = False
             while time.monotonic() < deadline:
                 helpers = list(controller.state()['helpers'].values())
                 if helpers and helpers[0].get('status') in ('completed', 'failed', 'stopped'):
                     break
-                time.sleep(.1)
+                events = boundary.runtime.observe(timeout_seconds=.1)
+                unknown_event |= any(event.get('event') == 'unknown' for event in events)
+            check(result, 'helper wait retains a known parent transport', not unknown_event)
             state = controller.state()
             helpers = list(state['helpers'].values())
             deliveries = state.get('knowledge_deliveries', [])
@@ -1093,6 +1100,9 @@ def main(*, classify_result=None):
         result['status'] = 'passed'
     except Exception as error:
         result['error'] = error_code(error)
+        import traceback
+        result['error_frames'] = [{'file': Path(frame.filename).name, 'line': frame.lineno, 'function': frame.name}
+                                  for frame in traceback.extract_tb(error.__traceback__)[-8:]]
     finally:
         if fixture is not None:
             if (result.get('boundary_cleanup_error') or result.get('boundary_cleanup', {}).get('cleanup') == 'unresolved'):

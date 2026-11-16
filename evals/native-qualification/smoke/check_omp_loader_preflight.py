@@ -197,7 +197,7 @@ def version_output_category(output):
 def observe_model_version(owner_class, result):
     original = owner_class.launch_model
 
-    def launch(owner, command, public_environment, binding):
+    def launch(owner, command, public_environment, binding, **kwargs):
         if owner.profile['kind'] == 'omp':
             owner.check_authority()
             result['omp_model_version_preflight'] = {'status': 'attempted'}
@@ -209,7 +209,7 @@ def observe_model_version(owner_class, result):
                 'pinned_version_matches': observation['output'].strip() == 'omp/18.20.0',
                 'pinned_version_line_present': 'omp/18.20.0' in observation['output'].splitlines(),
                 'output_category': version_output_category(observation['output'])}
-        return original(owner, command, public_environment, binding)
+        return original(owner, command, public_environment, binding, **kwargs)
 
     owner_class.launch_model = launch
     try:

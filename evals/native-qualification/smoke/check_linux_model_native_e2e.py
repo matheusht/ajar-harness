@@ -655,8 +655,8 @@ env_key = "OPENAI_API_KEY"
         'model_host': {'kind': 'linux-docker-model-v1', 'docker_binary': fixture.docker,
             'docker_endpoint': fixture.endpoint, 'daemon_id': fixture.daemon_id, 'image_id': fixture.image_id,
             'platform': fixture.platform, 'uid': 1000, 'gid': 1000,
-            'limits': {'memory_bytes': 1073741824, 'cpu_count': 2, 'pids': 128,
-                       'workspace_bytes': 536870912 if fixture.runtime == 'omp' else 134217728}}}
+            'limits': {'memory_bytes': 1610612736 if fixture.runtime == 'omp' else 1073741824, 'cpu_count': 2, 'pids': 128,
+                       'workspace_bytes': 1073741824 if fixture.runtime == 'omp' else 134217728}}}
     if fixture.runtime == 'omp':
         catalog = root / 'models.yml'
         catalog_content = omp_fixture_catalog(provider.origin)
@@ -999,7 +999,26 @@ def run_native(root, fixture, result):
             provider.autonomy = {'version': selected['version'], 'parent': 0, 'child': 0}
             if fixture.runtime == 'omp':
                 create_helper = boundary.runtime.create_helper
+                def sample_omp_workspace(stage):
+                    owner = boundary.model_owner
+                    sample = '''import json,os,pathlib
+s=os.statvfs('/work');p=pathlib.Path('/sys/fs/cgroup')
+print(json.dumps({'total_bytes':s.f_blocks*s.f_frsize,'available_bytes':s.f_bavail*s.f_frsize,
+ 'memory_current':int((p/'memory.current').read_text()),'pids_current':int((p/'pids.current').read_text())}))'''
+                    try:
+                        observed = owner.environment._run(['container', 'exec', '--user', '0:0',
+                            owner.environment.identity['container_id'], 'python3', '-I', '-S', '-c', sample],
+                            timeout=5, output_limit=1024)
+                        values = json.loads(observed['output'])
+                        if (observed['returncode'] != 0 or set(values) != {'total_bytes', 'available_bytes',
+                                'memory_current', 'pids_current'} or
+                                any(type(value) is not int or value < 0 for value in values.values())):
+                            raise ValueError('fixture_workspace_sample_invalid')
+                        result.setdefault('omp_workspace_samples', []).append({'stage': stage, **values})
+                    except Exception:
+                        result.setdefault('omp_workspace_samples', []).append({'stage': stage, 'status': 'unavailable'})
                 def observe_helper(helper_id):
+                    sample_omp_workspace('before_helper_launch')
                     owner = boundary.model_owner
                     original_model_launch = owner.launch_model
                     diagnostic = result['omp_helper_bootstrap'] = {'launched': False, 'acknowledgment': 'not_observed'}
@@ -1150,6 +1169,8 @@ print(json.dumps(out))'''
                     break
                 events = boundary.runtime.observe(timeout_seconds=.1)
                 unknown_event |= any(event.get('event') == 'unknown' for event in events)
+            if fixture.runtime == 'omp':
+                sample_omp_workspace('after_first_helper')
             check(result, 'helper wait retains a known parent transport', not unknown_event)
             state = controller.state()
             helpers = list(state['helpers'].values())
@@ -1405,7 +1426,8 @@ def main(*, classify_result=None):
         fixture.codex_tool_policy = args.codex_tool_policy
         fixture.autonomy = args.autonomy or args.public_run_only
         fixture.diagnostic_bootstrap = args.diagnostic_bootstrap
-        result['model_workspace_bytes'] = 536870912 if args.runtime == 'omp' else 134217728
+        result['model_workspace_bytes'] = 1073741824 if args.runtime == 'omp' else 134217728
+        result['model_memory_bytes'] = 1610612736 if args.runtime == 'omp' else 1073741824
         verify_image(fixture, result['image'])
         result['image']['status'] = 'passed'
         with tempfile.TemporaryDirectory(prefix='oslit-linux-native-') as temporary:

@@ -157,7 +157,8 @@ class _Channel:
             self.stop('bridge_protocol_invalid')
 
     def _add(self, peer, identity, *, start=True):
-        peer.settimeout(1)
+        # Stop shuts down owned sockets; ordinary backpressure must not drop bytes.
+        peer.settimeout(None)
         with self.lock:
             if self.closed.is_set():
                 peer.close(); return False

@@ -1,0 +1,54 @@
+{
+  "kind": "environment-proxy-bridge-e2e-v2",
+  "classification": "actual_local_socket_and_stdio_controls",
+  "checks": [
+    {
+      "name": "ordinary proxy client crosses relay and fixed worker gate",
+      "passed": true
+    },
+    {
+      "name": "simultaneous streams remain distinct",
+      "passed": true
+    },
+    {
+      "name": "relay cannot change the fixed gateway policy",
+      "passed": true
+    },
+    {
+      "name": "bridge cancellation closes active client stream",
+      "passed": true
+    },
+    {
+      "name": "revoked grant retires relay listener",
+      "passed": true
+    },
+    {
+      "name": "malformed worker frames fail closed",
+      "passed": true
+    },
+    {
+      "name": "oversized worker frames fail closed",
+      "passed": true
+    },
+    {
+      "name": "relay rejects oversized host frames",
+      "passed": true
+    },
+    {
+      "name": "HTTPS crosses bounded relay with verified upstream TLS",
+      "passed": true
+    },
+    {
+      "name": "inner HTTPS host escape remains denied through relay",
+      "passed": true
+    }
+  ],
+  "unverified": [
+    "Docker network-none containment",
+    "SSH transport",
+    "native client CA configuration",
+    "provider behavior"
+  ],
+  "status": "passed",
+  "source_sha256": "0b68937e7457a4ea5ec05cfa1df7981e04539b8e0cdf508077fef0baeb705e6b"
+}

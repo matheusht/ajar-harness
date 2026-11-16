@@ -34,13 +34,28 @@ def content_strings(value):
             yield from content_strings(child)
 
 
-def classify_lane(body):
+def classify_lane(body, issued=None):
     previous = body.get('previous_response_id', '')
     for lane in ('lead', 'reviewer', 'helper'):
         if previous.startswith('public-' + lane + '-'):
             return lane
     messages = body.get('messages', body.get('input', []))
     messages = [{'role': 'user', 'content': messages}] if isinstance(messages, str) else messages
+    matches = set()
+    for message in messages:
+        if not isinstance(message, dict) or message.get('role') != 'assistant':
+            continue
+        for call in message.get('tool_calls', []):
+            if not isinstance(call, dict):
+                continue
+            recorded = (issued or {}).get(call.get('id'))
+            function = call.get('function')
+            if recorded and isinstance(function, dict) and function.get('name') == recorded[1]:
+                matches.add(recorded[0])
+    if len(matches) > 1:
+        raise ValueError('public_lane_unavailable')
+    if matches:
+        return matches.pop()
     for message in messages:
         if not isinstance(message, dict) or message.get('role') != 'user':
             continue
@@ -96,6 +111,27 @@ def routing_self_check():
     assert classify_lane({'messages': [{'role': 'user', 'content': reviewer}]}) == 'reviewer'
     assert classify_lane({'input': helper}) == 'helper'
     assert classify_lane({'previous_response_id': 'public-lead-2', 'input': reviewer}) == 'lead'
+    continued = {'messages': [{'role': 'system', 'content': 'fixture'},
+        {'role': 'system', 'content': 'fixture'}, {'role': 'user', 'content': 'fixture'},
+        {'role': 'assistant', 'tool_calls': [{'id': 'call-public-lead-1', 'type': 'function',
+            'function': {'name': 'bash', 'arguments': '{}'}}]},
+        {'role': 'tool', 'content': 'result'}, {'role': 'assistant', 'content': 'done'},
+        {'role': 'user', 'content': 'Continue the assigned research using the current native context.'}]}
+    assert classify_lane(continued, {'call-public-lead-1': ('lead', 'bash')}) == 'lead'
+    for issued in ({}, {'call-public-lead-1': ('lead', 'engagement_status')}):
+        try:
+            classify_lane(continued, issued)
+            raise AssertionError('unknown or mismatched call accepted')
+        except ValueError:
+            pass
+    mixed = {'messages': continued['messages'] + [{'role': 'assistant', 'tool_calls': [
+        {'id': 'call-public-reviewer-1', 'function': {'name': 'engagement_read'}}]}]}
+    try:
+        classify_lane(mixed, {'call-public-lead-1': ('lead', 'bash'),
+                              'call-public-reviewer-1': ('reviewer', 'engagement_read')})
+        raise AssertionError('ambiguous issued calls accepted')
+    except ValueError:
+        pass
     shape = lane_shape({'messages': [{'role': 'user', 'content': 'private fixture sentinel'}],
                         'metadata': {'session_id': 'private fixture sentinel'}})
     assert 'private fixture sentinel' not in json.dumps(shape)
@@ -177,11 +213,12 @@ class Script:
         self.helper_status_observed = False
         self.packet_bytes = b''
         self.lane_diagnostics = []
+        self.issued_calls = {}
 
     def __call__(self, body, sequence):
         with self.lock:
             try:
-                lane = classify_lane(body)
+                lane = classify_lane(body, self.issued_calls)
             except ValueError:
                 if len(self.lane_diagnostics) < 8:
                     self.lane_diagnostics.append(lane_shape(body))
@@ -208,6 +245,8 @@ class Script:
                         if self.packet_observed:
                             break
             name, arguments = self.action(lane, state)
+            if name:
+                self.issued_calls['call-' + identity] = (lane, name)
             return frames(self.runtime, identity, name, arguments)
 
     def action(self, lane, state):
@@ -361,6 +400,7 @@ def run_public(root, fixture, result):
               and state['cleanup'] == 'verified' and public['review_status'] == 'accepted'
               and public['lead_session_present'] and public['reviewer_session_present'] and public['sessions_distinct']
               and public['source_output_observed'] and public['review_packet_observed'])
+        check(result, 'public Runner provider has no transport or fixture errors', not provider.errors)
         check(result, 'public Runner native helper completes', public['helper_statuses'] == ['completed']
               and public['helper_read_observed'] and public['helper_status_observed'])
         result['native_execution'] = 'public_runner_native_sessions_completed'

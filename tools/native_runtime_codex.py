@@ -54,14 +54,15 @@ class Runtime(Session):
             self.transport.send({'jsonrpc': '2.0', 'method': 'initialized'})
             if native_executor is not None:
                 validate_native_config(self.transport.request('config/read', {'includeLayers': False})['config'])
-                self.transport.request('environment/add', native_executor.registration())
-                self.transport.request('environment/info', {'environmentId': native_executor.environment_id})
-                native_executor.check_ready()
             if self.credential_binding and self.credential_binding.login():
                 reply = self.transport.request('account/login/start', self.credential_binding.login())
                 if reply != {'type': 'chatgptAuthTokens'}:
                     raise RuntimeError('native_external_auth_not_accepted')
                 self.authentication = 'external_tokens_accepted'
+            if native_executor is not None:
+                self.transport.request('environment/add', native_executor.registration())
+                self.transport.request('environment/info', {'environmentId': native_executor.environment_id})
+                native_executor.check_ready()
         except Exception as error:
             self._startup_failed(error)
             raise

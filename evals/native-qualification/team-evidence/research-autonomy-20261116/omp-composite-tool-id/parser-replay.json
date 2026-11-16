@@ -1,0 +1,17 @@
+{
+  "eventTypes": [
+    "start",
+    "toolcall_start",
+    "toolcall_end",
+    "done"
+  ],
+  "stopReason": "toolUse",
+  "toolCount": 1,
+  "toolNames": [
+    "bash"
+  ],
+  "toolIds": [
+    "call-public-lead-1|fc_public-lead-1"
+  ],
+  "script_sha256": "sha256:f33c8a8dade39fbdad8a87a29bbbc6593568d5f3348d510994c65b4f22407d19"
+}

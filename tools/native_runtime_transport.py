@@ -101,6 +101,14 @@ def identifier(value):
     return value
 
 
+def tool_call_identifier(value):
+    # OMP Responses preserves both provider call and output-item identity.
+    parts = value.split('|') if isinstance(value, str) else []
+    if not 1 <= len(parts) <= 2 or any(not ID.fullmatch(part) for part in parts):
+        raise RuntimeError('native_identifier_invalid')
+    return value
+
+
 def public(value):
     try:
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
@@ -563,7 +571,7 @@ class Session:
         self.active = True
 
     def _tool(self, call_id, name, arguments, *, session_id=None, invocation_id=None, active=None):
-        identifier(call_id)
+        tool_call_identifier(call_id)
         call_key = (session_id or self.session_id, invocation_id or self.invocation_id, call_id)
         fingerprint = json.dumps([name, arguments], sort_keys=True, separators=(',', ':'), allow_nan=False)
         if call_key in self.calls:

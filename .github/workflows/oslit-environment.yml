@@ -29,6 +29,7 @@ on:
       - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
+      - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -77,6 +78,7 @@ on:
       - evals/native-qualification/smoke/check_research_autonomy_public_e2e.py
       - evals/native-qualification/smoke/check_native_userns_probe.py
       - evals/native-qualification/smoke/check_native_runtime_adapters.py
+      - evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_diagnostic.py
       - evals/native-qualification/smoke/check_codex_sandbox_policy_candidate.py
       - evals/native-qualification/smoke/check_codex_profile_inventory_readback.py
@@ -219,6 +221,11 @@ jobs:
             --startup-result "$RUNNER_TEMP/oslit-native-codex/result.json" \
             --joined-result "$RUNNER_TEMP/oslit-native-e2e-codex/result.json" \
             --output "$RUNNER_TEMP/oslit-native-e2e-codex/profile-setup.json"
+      - name: Verify OMP Responses tool-call identity
+        if: matrix.runtime == 'omp'
+        run: |
+          python3 evals/native-qualification/smoke/check_omp_responses_tool_id_e2e.py \
+            --output "$RUNNER_TEMP/oslit-native-e2e-omp/responses-tool-id.json"
       - name: Check bounded loader-preflight contract
         if: matrix.runtime == 'omp'
         run: |

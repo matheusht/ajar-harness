@@ -500,8 +500,16 @@ def run_public(root, fixture, result):
         cli_code = cli.get('code')
         if not isinstance(cli_code, str) or not re.fullmatch(r'[a-z_]{1,100}', cli_code):
             cli_code = None
-        result['public_cli'] = {'returncode': child.returncode, 'status': cli_status, 'code': cli_code}
+        failures = cli.get('failures') if isinstance(cli.get('failures'), dict) else {}
+        safe_failures = {worker: code for worker, code in failures.items()
+                         if worker in ('lead-1', 'reviewer-1') and isinstance(code, str)
+                         and re.fullmatch(r'[a-z_]{1,100}', code)}
+        result['public_cli'] = {'returncode': child.returncode, 'status': cli_status, 'code': cli_code,
+                                'worker_failures': safe_failures}
         state = Controller(engagement).state()
+        result['public_cli']['invocation_statuses'] = [
+            row.get('status') if row.get('status') in ('pending', 'completed', 'aborted', 'error', 'local_only', 'unknown') else 'other'
+            for row in list(state.get('invocations', {}).values())[-16:]]
         public = {'cli_returncode': child.returncode, 'cli_status': cli_status,
                   'status': state['status'], 'cleanup': state['cleanup'], 'provider_lanes': script.counts,
                   'helper_statuses': [row.get('status') for row in state['helpers'].values()],

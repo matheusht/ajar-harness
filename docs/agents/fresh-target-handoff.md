@@ -1,9 +1,11 @@
 # Fresh-target operator handoff
 
-Use the candidate integration branch `codex/oslit-integrated-e2e-20261115`
-([PR #220](https://github.com/matheusht/redteam-harness/pull/220)). It contains the
-M0–M6 implementation. The operator owns the fresh-target investigation and
-full-day run. A passing engineering fixture is not research acceptance.
+Use the candidate branch `codex/oslit-research-autonomy-20261116`. It extends the
+M0–M6 implementation with research autonomy, native helpers and the active knowledge
+library. Read the [dated delivery and verification state](../wiki/oslit-research-autonomy-delivery-2026-11-16.md)
+for the checked revision and runtime profiles before claiming support. The operator
+owns the fresh-target investigation, native-agent comparison and sustained research
+acceptance. A passing engineering fixture does not establish those outcomes.
 
 ## Prepare once
 
@@ -17,11 +19,14 @@ full-day run. A passing engineering fixture is not research acceptance.
    binary, application and combined access are supported. Choose Codex or OMP;
    both are unnecessary for one run. Keep credentials in the host's private
    environment/store, referenced by name only.
-3. Select `authority_policy: "initial-scope-v1"` for standing internal authority.
+3. Select `authority_policy: "research-autonomy-v1"` for a new autonomy engagement.
    Fill the target, goal, provider/model, access, permitted effects, cleanup rights,
-   budgets and real paths. Set no overall expiry if the authorized investigation
-   should continue without a deadline; worker leases still renew and shared
-   invocation/worker-second limits still apply. Choose budgets for the whole team.
+   machine capacity and real paths. Choose total research limits only when needed:
+   `limits.hard: {}` adds none; supplied `invocations` or `worker_seconds` caps apply
+   across workers and recovery. Worker seconds measure elapsed parent execution,
+   including concurrent helpers without summing their overlapping time. Set no
+   overall expiry when no deadline is intended; short worker leases still renew.
+   Existing signed engagements retain their original policy and limits.
 4. Follow [input pinning and signing](engagement.md#fill-and-sign-the-inputs).
    Every `REPLACE_` must be resolved. Keep the private operator key separate;
    signing is the operator's decision and is never done on their behalf.
@@ -35,8 +40,9 @@ them from its pinned image inside the memory-limited container. An optional
 signed application artifact effect records their creation and cleanup lifecycle.
 External databases and persistent state outside that owner need their own reset;
 an ordinary restart does not establish clean replay. Unsupported artifact classes
-remain refused. The initial-scope policy needs no repeated artifact confirmation
-or signature; independent agent reviews and all signed boundaries still apply.
+remain refused. The research-autonomy policy admits initially signed effects without
+repeated artifact confirmation or a generic escalation order. Independent review
+and all signed boundaries still apply; additional authority requires the operator.
 
 ## Inspect, start and observe
 
@@ -93,7 +99,10 @@ reconciliation. Never delete historical engagement records to retry.
 
 ## Read accounting correctly
 
-Status/export reports shared invocation and worker-second use and reservations.
+Status/export reports shared invocation and elapsed-parent worker-second use and
+reservations under the autonomy policy. Optional total caps keep their signed
+meaning, and older policies retain their original accounting. Helpers share the
+parent's authority; their provider requests and tokens are still counted.
 For new engagements, `provider_requests` counts proxy attempts journaled before
 request bytes are sent, including retries and startup/model-discovery requests.
 Completed means the HTTP response was fully read, not that inference succeeded.
@@ -110,16 +119,17 @@ validation. Use provider-side limits when those constraints are necessary.
 
 ## What is already checked
 
-The [integrated evidence](../research/oslit-implementation-assembly-2026-11-15.md)
-records real pinned Linux Codex/OMP source workflows with deterministic provider
-replies, continuity, isolation, owner-loss recovery and cleanup. The focused
-[accounting scenario](../../evals/native-qualification/smoke/PROVIDER-ACCOUNTING-E2E.md)
-covers proxy attempts and journal replay with an owned local provider.
-The [shared-board workflow](../../evals/native-qualification/smoke/ENGAGEMENT-BOARD-STEERING-E2E.md)
-checks searchable snapshots, native tool access, addressed messages, steering,
-acknowledgments and export with a simulated runtime. The
-[state-volume workflow](../../evals/native-qualification/APPLICATION-STATE-VOLUMES-SCENARIOS.md)
-uses the signed controller/capture path and a real local HTTP service with simulated
-Docker ownership. Physical Docker volume behavior still needs qualification.
-Live-model investigation quality, separate-host outages and full-day operation
-are deliberately left to the operator's test. No fresh target was run here.
+The [current delivery page](../wiki/oslit-research-autonomy-delivery-2026-11-16.md)
+separates local conformance, hosted native workflows, live-provider smoke checks and
+remaining gaps. Its [verification record](../../evals/native-qualification/team-evidence/research-autonomy-20261116/README.md)
+contains repeat commands and saved results. Historical
+[integrated evidence](../research/oslit-implementation-assembly-2026-11-15.md) remains
+valid for its recorded revision; it is not the current branch's qualification.
+
+The current public OMP fixture uses the Responses API; the direct OMP fixture uses
+Chat Completions. Remote-compaction continuity with Chat Completions remains
+unqualified. Preserve the pinned native runtime's supported API/profile when using
+its saved evidence. The live OMP source-read smoke is narrower than a full team
+investigation; live Codex encountered a separate Mac Docker namespace prerequisite.
+Live-model research quality, separate-host outages and sustained operation remain
+unverified. No fresh target was run here.

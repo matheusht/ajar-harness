@@ -7,7 +7,7 @@ in [Decision 0016](../decisions/0016-research-autonomy.md). Existing native/lega
 their original contract. The signed scope defines authority; repository access and
 these instructions grant none.
 The field and authority contract is recorded in [Decision 0014](../decisions/0014-native-engagement-team.md).
-Read the [dated delivery state](../wiki/oslit-v2-delivery-2026-11-14.md) before
+Read the [current dated delivery state](../wiki/oslit-research-autonomy-delivery-2026-11-16.md) before
 claiming support or readiness. Start with the [fresh-target handoff](fresh-target-handoff.md)
 for installation, input preparation and run/recovery commands. Select
 `authority_policy: "research-autonomy-v1"` in the initial scope before signing once.
@@ -22,7 +22,9 @@ Optional `limits.hard` entries select total caps; `{}` adds none. A supplied
 `worker_seconds` budget measures elapsed parent execution time including concurrent
 helpers, not the sum of their overlapping durations. Provider requests and tokens
 include all helper activity. Renewable short leases still control abandoned owners.
-The new policy's full E2E, provider and research comparisons are deferred.
+Full E2E and provider checks are authorized and underway; the dated delivery page
+records their actual outcomes. Fresh-target acceptance and the research comparison
+remain separate operator-owned work.
 
 ## Prepare the host and tool lab
 
@@ -32,8 +34,12 @@ the host awake during a run. The protected model owner uses either macOS
 Docker model owner. The model container and target/tool lab are separate owners.
 Both pinned runtimes have actual Linux startup and joined source-workflow
 evidence with controlled provider replies, including owner-loss recovery and cleanup.
-See the [integrated results](../research/oslit-implementation-assembly-2026-11-15.md#signed-codex-integration-and-repeated-turn-repair).
-Live-provider behavior and sustained operation remain for operator testing.
+Read the [current verification record](../../evals/native-qualification/team-evidence/research-autonomy-20261116/README.md)
+for the tested revision, profiles and limits. The public OMP fixture uses Responses;
+the direct OMP fixture uses Chat Completions. Chat Completions continuity through
+remote compaction remains unqualified. A live OMP source-read turn completed; live
+Codex reached a separate Mac Docker namespace prerequisite before a model turn.
+Full live-team research and sustained operation remain unverified.
 
 Runtime prerequisites are Python 3.11+ with its standard library, OpenSSH
 `ssh-keygen` for local signature verification, OpenSSL for private proxy trust,
@@ -151,8 +157,9 @@ behavior, broader access modes and research acceptance require their own evidenc
    copies in the selected lab; disposable working copies live under `/work`.
 3. Pin each runtime/environment profile's final bytes into the scope. Pin the goal
    bytes. The scope's `issued_at` must be current or past; `expires_at` is optional.
-   Renewable worker leases do not impose an overall engagement-age limit. Aggregate
-   invocation and worker-second budgets still apply across workers and recovery.
+   Renewable worker leases do not impose an overall engagement-age limit. Any selected
+   total invocation and elapsed-parent worker-second caps apply across workers and
+   recovery; omit them under `research-autonomy-v1` when none are intended.
 4. Put the operator's **public** key and exact `operator_id` in `allowed_signers`.
    Add the hash of that file to the scope's `Operator allowed signers SHA256` line.
    Set `inputs.trusted_fingerprint` to the trusted key's SHA-256 fingerprint as

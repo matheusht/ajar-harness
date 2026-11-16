@@ -55,9 +55,18 @@ class PendingTool:
 
     def _wait(self):
         try:
-            response = public(self.operation.wait())
+            response = self.operation.wait()
             if not isinstance(response, dict) or len(json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()) > MAX_MESSAGE:
                 raise RuntimeError('native_host_tool_result_invalid')
+            try:
+                response = public(response)
+            except RuntimeError as error:
+                if error.code != 'native_publication_rejected':
+                    raise
+                self.response = {'content': [{'type': 'text', 'text':
+                    'Host tool returned; response content was withheld. Do not infer success from this response.'}],
+                    'isError': True, 'content_status': 'withheld'}
+                return
             self.response = response
         except Exception:
             self.unknown = True
@@ -635,3 +644,4 @@ class Session:
             from native_runtime_owner import recover_runtime_owner
             result.update(recover_runtime_owner(receipt))
         return result
+

@@ -267,6 +267,30 @@ class Runner:
                     c.claim_ready_task(worker['id'], worker['generation'])
                 state = c.state()
 
+    def _reconstruct_exhausted_sessions(self):
+        c = self.controller
+        state = c.state()
+        if state['status'] != 'active':
+            return False
+        resumed = False
+        for worker in state['workers'].values():
+            if worker['role'] == 'lead' and state['replacement_required']:
+                continue
+            if (worker['status'] != 'stopped' or self.failures.get(worker['id']) !=
+                    'native_session_dispatch_limit_reconstruct_required'):
+                continue
+            job = self.jobs.get((worker['id'], worker['generation']))
+            if job is not None and job.is_alive():
+                continue
+            try:
+                c.resume_worker(worker['id'], worker['generation'], reason='controller_resume')
+            except ValueError as error:
+                self.failures[worker['id']] = getattr(error, 'code', 'worker_resume_unavailable')
+            else:
+                self.failures.pop(worker['id'], None)
+                resumed = True
+        return resumed
+
     @staticmethod
     def _usage(runtime):
         usage = runtime.usage or {}
@@ -376,7 +400,13 @@ class Runner:
                 if current.get('outcome_pending'):
                     break
                 invocation = c.begin_invocation(context.grant)
-                boundary.runtime.invoke(self._prompt(context, first, invocation), invocation)
+                try:
+                    boundary.runtime.invoke(self._prompt(context, first, invocation), invocation)
+                except Exception as error:
+                    if getattr(error, 'code', None) == 'native_session_dispatch_limit_reconstruct_required':
+                        c.record_invocation_observed(context.grant, invocation,
+                            {'status': 'local_only', 'usage': {'tokens': {'total': 0}, 'cost': 0}})
+                    raise
                 first = False
                 completed = None
                 while completed is None:
@@ -449,6 +479,8 @@ class Runner:
                             self.controller.begin_closure(reviewed['closure_id'])
                             continue
                     if state['status'] == 'active':
+                        self._reconstruct_exhausted_sessions()
+                        state = self.controller.state()
                         for worker in state['workers'].values():
                             if worker['role'] != 'lead' or worker['status'] != 'stopped' or not worker.get('stop_receipt'):
                                 continue
@@ -479,6 +511,8 @@ class Runner:
                             job.start()
                     active = [job for job in self.jobs.values() if job.is_alive()]
                     if not active:
+                        if self._reconstruct_exhausted_sessions():
+                            continue
                         state = self.controller.state()
                         if state['status'] == 'closing':
                             try:

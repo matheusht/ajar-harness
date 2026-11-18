@@ -133,23 +133,38 @@ def check_guarded_primitive_dry_block(
     if not guarded:
         return (True, "ok")
 
+    cur_tid = str(task_row["task_id"])
     for gp in guarded:
         gloc = str(gp["guarded_by_locus"])
+        ploc = str(gp["locus"])
+        pid = str(gp["primitive_id"])
+        if t_loc == gloc and ploc != gloc and dry_locus.strip() == gloc:
+            continue
         tracked = conn.execute(
             """
             SELECT 1 FROM tasks
-            WHERE (status = 'conditional_blocked' AND blocker_check_locus = ? AND task_id != ?)
-               OR (kind = 'chain' AND status IN ('open', 'leased', 'done', 'dry'))
+            WHERE task_id != ?
+              AND (
+                  (status = 'conditional_blocked' AND blocker_check_locus = ?)
+                  OR (
+                      kind = 'chain' AND status IN ('done', 'dry')
+                      AND (locus = ? OR summary LIKE '%' || ? || '%' OR summary LIKE '%' || ? || '%')
+                  )
+                  OR (
+                      kind = 'investigate' AND status IN ('done', 'dry')
+                      AND locus = ?
+                  )
+              )
             LIMIT 1
             """,
-            (gloc, str(task_row["task_id"])),
+            (cur_tid, gloc, gloc, gloc, pid, gloc),
         ).fetchone()
         if not tracked:
             return (
                 False,
-                f"Anti-premature-dry gate: guarded primitive {gp['primitive_id']} ({gp['kind']} @ {gp['locus']}) "
-                f"is only blocked by upstream guard {gloc}. Park this task via `ajar task block {task_row['task_id']} "
-                f"--predicate 'break guard {gloc}' --check-locus {gloc}` or enqueue a `chain` task instead of closing `dry`.",
+                f"Anti-premature-dry gate: guarded primitive {pid} ({gp['kind']} @ {gp['locus']}) "
+                f"is only blocked by upstream guard {gloc}. Park this task via `ajar task block {cur_tid} "
+                f"--predicate 'break guard {gloc}' --check-locus {gloc}` or complete a `chain`/guard-audit task on {gloc} before closing `dry`.",
             )
     return (True, "ok")
 
@@ -280,8 +295,15 @@ def check_all_gates(
     g2_issues: list[str] = []
     unresolved_claims = conn.execute(
         """
-        SELECT claim_id, status, title FROM claims
-        WHERE status IN ('proposed', 'survived_falsify', 'needs_instrumentation')
+        SELECT c.claim_id, c.status, c.title FROM claims c
+        WHERE c.status IN ('proposed', 'survived_falsify', 'needs_instrumentation')
+           OR (
+               c.status = 'config_gated'
+               AND EXISTS (
+                   SELECT 1 FROM tasks t
+                   WHERE t.parent_claim_id = c.claim_id AND t.status IN ('open', 'leased')
+               )
+           )
         """
     ).fetchall()
     if unresolved_claims:
@@ -290,7 +312,7 @@ def check_all_gates(
     gates["G2_claim_resolution"] = {"passed": len(g2_issues) == 0, "issues": g2_issues}
     all_blockers.extend(f"[G2] {m}" for m in g2_issues)
 
-    # --- G3: 4-Arm Causal Proof + Fresh Falsifier Separation ---
+    # --- G3: 4-Arm Causal Proof + Fresh Falsifier Separation + Release UB Gate ---
     g3_issues: list[str] = []
     finding_rows = conn.execute(
         """
@@ -310,6 +332,11 @@ def check_all_gates(
             )
         if not (f["falsification_prediction"] or "").strip() or not (f["falsification_test"] or "").strip():
             g3_issues.append(f"Finding {fid} missing pre-reproduction falsification prediction/test.")
+        ub_cls = str(f["ub_divergence_class"] or "") if "ub_divergence_class" in f.keys() else ""
+        if ub_cls == "debug_assert_only" and str(f["severity"]) in ("critical", "high"):
+            g3_issues.append(
+                f"Finding {fid} classified as debug_assert_only under --release-cmd; cannot hold {f['severity']} severity."
+            )
         for arm_col in ("arm1_clean_poc_json", "arm2_clean_ctrl_json", "arm3_patch_poc_json", "arm4_patch_ctrl_json"):
             try:
                 arm_data = json.loads(f[arm_col] or "{}")

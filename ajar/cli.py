@@ -21,6 +21,7 @@ from ajar.db import (
     AjarError,
     add_steer,
     check_dead_end_repetition,
+    checkpoint_task,
     compute_task_salience,
     infer_subsystem,
     lease_next_task,
@@ -31,6 +32,7 @@ from ajar.db import (
     new_id,
     normalize_mechanism_key,
     open_run_db,
+    record_coverage_span,
     record_repro_failure,
     render_task_context,
     rescope_claim,
@@ -40,6 +42,18 @@ from ajar.db import (
     run_pulse,
     set_certified_binding,
     utc_now_iso,
+)
+from ajar.epistemic_hooks import (
+    claim_requires_release_ub_diff,
+    consume_hooks_for_locus,
+    on_anomaly_or_claim_recorded,
+    on_claim_config_gated,
+    on_claim_survived,
+    on_finding_confirmed,
+    on_primitive_added,
+    parse_tag_list,
+    register_epistemic_hook,
+    scan_source_for_epistemic_signals,
 )
 from ajar.gates import (
     check_all_gates,
@@ -56,6 +70,12 @@ from ajar.redact import scrub_text, scrubbed_subprocess_env
 from ajar.repomap import build_repomap, compute_quote_summary
 from ajar.report import build_report_data, render_markdown_report
 from ajar.repro_binary_live import run_binary_reproduction, run_live_reproduction
+from ajar.repro_compose import (
+    _parse_step_micropatches,
+    promote_primitive_helper,
+    run_chain_reproduction,
+    run_claim_instrumentation,
+)
 from ajar.repro_source import run_source_reproduction, unshare_netns_available
 from ajar.runner import run_autonomous_schedule
 from ajar.workspace import init_run_workspace
@@ -93,7 +113,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "sqlite_version": sqlite3.sqlite_version,
         "sqlite_fts5_ok": fts5_ok,
         "unshare_netns_available": unshare_netns_available(),
-        "isolation_mode": "unshare_netns" if unshare_netns_available() else "ephemeral_port_pgid_reaper",
+        "isolation_mode": "unshare_netns" if unshare_netns_available() else "loopback_socket_guard_pgid_reaper",
         "toolchains": {k: bool(v) for k, v in found.items()},
         "toolchain_paths": {k: v for k, v in found.items() if v},
     }
@@ -126,6 +146,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         allow_live_requests=bool(args.allow_live_requests),
         allow_live_mutations=bool(args.allow_live_mutations),
         run_id=args.run_id,
+        diff_range=args.diff,
+        parent_run_id=args.parent_run,
     )
     if args.json:
         _emit(info, True)
@@ -137,6 +159,8 @@ def cmd_init(args: argparse.Namespace) -> int:
             f"  In-scope LoC:           {info['in_scope_loc']} "
             f"(Code quote: ${info['code_quote_usd']:.2f}, COGS cap: ${info['cogs_cap_usd']:.2f} [{info['pricing_mode']}])"
         )
+        if info.get("diff_range"):
+            print(f"  PR Diff Range:          {info['diff_range']}")
         print(f"  Commitment SHA-256:     {info['commitment_hash']}")
         print(f"  Export for shell:       export AJAR_RUN_ID={info['run_id']}")
     return EXIT_OK
@@ -162,6 +186,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             },
             "unexplained_anomalies": conn.execute(
                 "SELECT COUNT(*) AS c FROM anomalies WHERE status = 'unexplained'"
+            ).fetchone()["c"],
+            "active_epistemic_hooks": conn.execute(
+                "SELECT COUNT(*) AS c FROM epistemic_hooks WHERE status = 'active'"
             ).fetchone()["c"],
             "findings_count": gates["findings_count"],
             "gates_passed": gates["passed"],
@@ -213,6 +240,7 @@ def cmd_map(args: argparse.Namespace) -> int:
             focus_files=args.focus_file or (),
             focus_symbols=args.focus_symbol or (),
             budget_tokens=args.budget_tokens,
+            slice_cap=args.slice_cap,
         )
     finally:
         conn.close()
@@ -242,10 +270,14 @@ def cmd_surface(args: argparse.Namespace) -> int:
             sid = new_id("surf")
             now_iso = utc_now_iso()
             sub = args.subsystem or infer_subsystem(args.locus)
+            req_tags = parse_tag_list(getattr(args, "requires_tags", None))
             conn.execute(
                 """
-                INSERT INTO surfaces(surface_id, name, kind, subsystem, locus, priority, trust_boundary, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO surfaces(
+                    surface_id, name, kind, subsystem, locus, priority,
+                    trust_boundary, requires_tags_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sid,
@@ -255,11 +287,52 @@ def cmd_surface(args: argparse.Namespace) -> int:
                     args.locus,
                     args.priority,
                     scrub_text(args.trust_boundary or ""),
+                    json.dumps(req_tags),
                     now_iso,
                 ),
             )
-            log_event(conn, "worker", "surface_added", sid, {"name": args.name, "locus": args.locus})
-            _emit({"surface_id": sid, "subsystem": sub, "priority": args.priority}, True)
+            fired_codes: list[str] = []
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"]) if run else None
+            rel_file = args.locus.split(":", 1)[0].strip().lstrip("./")
+            if tpath is not None and rel_file:
+                cand = (tpath / rel_file).resolve()
+                try:
+                    cand.relative_to(tpath.resolve())
+                    if cand.is_file():
+                        src_txt = cand.read_text(encoding="utf-8", errors="ignore")
+                        for hcode, directive, kill_r in scan_source_for_epistemic_signals(rel_file, src_txt):
+                            register_epistemic_hook(
+                                conn,
+                                hook_code=hcode,
+                                trigger_cmd="surface.add",
+                                source_entity_id=sid,
+                                dedup_material=f"{rel_file}:{hcode}",
+                                subsystem=sub,
+                                target_locus=args.locus,
+                                directive_text=directive,
+                                kill_rule=kill_r,
+                            )
+                            fired_codes.append(hcode)
+                except ValueError:
+                    pass
+            log_event(
+                conn,
+                "worker",
+                "surface_added",
+                sid,
+                {"name": args.name, "locus": args.locus, "requires_tags": req_tags, "hooks": fired_codes},
+            )
+            _emit(
+                {
+                    "surface_id": sid,
+                    "subsystem": sub,
+                    "priority": args.priority,
+                    "requires_tags": req_tags,
+                    "hooks_triggered": fired_codes,
+                },
+                True,
+            )
             return EXIT_OK
         rows = list_rows(conn, "SELECT * FROM surfaces ORDER BY created_at ASC")
         _emit({"surfaces": rows}, True)
@@ -353,8 +426,26 @@ def cmd_task(args: argparse.Namespace) -> int:
                 recover=bool(args.recover),
             )
             if leased is not None:
-                leased["context"] = render_task_context(conn, leased["task_id"])["rendered"]
+                leased["context"] = render_task_context(
+                    conn, leased["task_id"], record_exposure=not bool(args.recover)
+                )["rendered"]
             _emit({"leased": leased}, True)
+            return EXIT_OK
+
+        if args.task_cmd == "checkpoint":
+            try:
+                parsed_state = json.loads(args.state_json)
+            except json.JSONDecodeError as exc:
+                raise AjarError(f"Invalid --state-json JSON object: {exc}", EXIT_USER_ERROR) from exc
+            if not isinstance(parsed_state, dict):
+                raise AjarError("--state-json must decode to a JSON object (`{...}`).", EXIT_USER_ERROR)
+            res = checkpoint_task(
+                conn,
+                task_id=args.task_id,
+                worker_id=args.worker,
+                state_dict=parsed_state,
+            )
+            _emit(res, True)
             return EXIT_OK
 
         if args.task_cmd == "done":
@@ -383,6 +474,8 @@ def cmd_task(args: argparse.Namespace) -> int:
                     """,
                     (now_iso, cur["locus"]),
                 )
+            if cur["kind"] == "escalate" and cur["locus"]:
+                consume_hooks_for_locus(conn, locus=str(cur["locus"]), hook_code="H5_POST_CONFIRM_ESCALATION")
             log_event(conn, args.worker, "task_done", args.task_id, {"kind": cur["kind"]})
             pulse = maybe_auto_pulse(conn, tpath)
             _emit({"task_id": args.task_id, "status": "done", "pulse": pulse}, True)
@@ -417,6 +510,9 @@ def cmd_task(args: argparse.Namespace) -> int:
                     args.task_id,
                 ),
             )
+            consume_hooks_for_locus(conn, locus=args.locus)
+            if cur["locus"]:
+                consume_hooks_for_locus(conn, locus=str(cur["locus"]))
             log_event(conn, args.worker, "task_dry", args.task_id, {"locus": args.locus})
             pulse = maybe_auto_pulse(conn, tpath)
             _emit({"task_id": args.task_id, "status": "dry", "pulse": pulse}, True)
@@ -450,11 +546,39 @@ def cmd_task(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_coverage(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.coverage_cmd == "record":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"])
+            res = record_coverage_span(
+                conn,
+                target_dir=tpath,
+                task_id=args.task,
+                worker_id=args.worker,
+                rel_path=args.rel_path,
+                start_line=int(args.start_line),
+                end_line=int(args.end_line),
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        rows = list_rows(conn, "SELECT * FROM coverage_spans ORDER BY rel_path ASC, start_line ASC")
+        _emit({"coverage_spans": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
 def cmd_anomaly(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
     conn = open_run_db(rid)
     try:
         if args.anomaly_cmd == "add":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"]) if run else None
             aid = new_id("anom")
             now_iso = utc_now_iso()
             sub = infer_subsystem(args.locus)
@@ -488,8 +612,25 @@ def cmd_anomaly(args: argparse.Namespace) -> int:
                     """,
                     (now_iso, args.claim),
                 )
+            hooks = on_anomaly_or_claim_recorded(
+                conn,
+                entity_id=aid,
+                trigger_cmd="anomaly.add",
+                subsystem=sub,
+                locus=args.locus,
+                text_blob=args.observation,
+                target_dir=tpath,
+            )
             log_event(conn, "worker", "anomaly_added", aid, {"locus": args.locus})
-            _emit({"anomaly_id": aid, "status": "unexplained", "subsystem": sub}, True)
+            _emit(
+                {
+                    "anomaly_id": aid,
+                    "status": "unexplained",
+                    "subsystem": sub,
+                    "hooks_triggered": [h["hook_code"] for h in hooks],
+                },
+                True,
+            )
             return EXIT_OK
 
         if args.anomaly_cmd == "explain":
@@ -517,6 +658,7 @@ def cmd_anomaly(args: argparse.Namespace) -> int:
 
 def cmd_primitive(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
     conn = open_run_db(rid)
     try:
         if args.primitive_cmd == "add":
@@ -524,12 +666,15 @@ def cmd_primitive(args: argparse.Namespace) -> int:
             sub = infer_subsystem(args.locus)
             guarded_by = (getattr(args, "guarded_by", None) or "").strip()
             guard_assumption = scrub_text(getattr(args, "guard_assumption", None) or "")
+            prov_tags = parse_tag_list(getattr(args, "provides_tags", None))
+            req_tags = parse_tag_list(getattr(args, "requires_tags", None))
             conn.execute(
                 """
                 INSERT INTO primitives(
                     primitive_id, surface_id, subsystem, locus, kind, preconditions, postconditions,
-                    guarded_by_locus, guard_assumption, evidence_cmd, evidence_output, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    guarded_by_locus, guard_assumption, provides_tags_json, requires_tags_json,
+                    evidence_cmd, evidence_output, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pid,
@@ -541,19 +686,71 @@ def cmd_primitive(args: argparse.Namespace) -> int:
                     scrub_text(args.postconditions),
                     guarded_by,
                     guard_assumption,
+                    json.dumps(prov_tags),
+                    json.dumps(req_tags),
                     scrub_text(args.evidence_cmd),
                     scrub_text(args.evidence_output or ""),
                     utc_now_iso(),
                 ),
+            )
+            hooks = on_primitive_added(
+                conn,
+                primitive_id=pid,
+                subsystem=sub,
+                locus=args.locus,
+                kind=args.kind,
+                guarded_by_locus=guarded_by,
+                provides_tags=prov_tags,
+                requires_tags=req_tags,
             )
             log_event(
                 conn,
                 "worker",
                 "primitive_added",
                 pid,
-                {"locus": args.locus, "kind": args.kind, "guarded_by_locus": guarded_by},
+                {
+                    "locus": args.locus,
+                    "kind": args.kind,
+                    "guarded_by_locus": guarded_by,
+                    "provides_tags": prov_tags,
+                    "requires_tags": req_tags,
+                },
             )
-            _emit({"primitive_id": pid, "subsystem": sub, "guarded_by_locus": guarded_by}, True)
+            _emit(
+                {
+                    "primitive_id": pid,
+                    "subsystem": sub,
+                    "guarded_by_locus": guarded_by,
+                    "provides_tags": prov_tags,
+                    "requires_tags": req_tags,
+                    "hooks_triggered": [h["hook_code"] for h in hooks],
+                },
+                True,
+            )
+            return EXIT_OK
+
+        if args.primitive_cmd == "promote-helper":
+            run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tpath = pathlib.Path(run["target_path"])
+            res = promote_primitive_helper(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                primitive_id=args.primitive_id,
+                helper_file=pathlib.Path(args.file),
+                callable_name=args.callable,
+                provides_tags=args.provides_tags,
+                requires_tags=args.requires_tags,
+                self_test_cmd=args.self_test_cmd or "",
+                timeout_sec=args.timeout,
+                worker_id=args.worker,
+            )
+            _emit(res, True)
+            return EXIT_OK
+
+        if args.primitive_cmd == "helpers":
+            rows = list_rows(conn, "SELECT * FROM primitive_helpers ORDER BY created_at ASC")
+            _emit({"primitive_helpers": rows}, True)
             return EXIT_OK
 
         rows = list_rows(conn, "SELECT * FROM primitives ORDER BY created_at ASC")
@@ -642,8 +839,25 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     "UPDATE anomalies SET status = 'consumed_by_claim', consumed_by_id = ?, updated_at = ? WHERE anomaly_id = ?",
                     (cid, now_iso, args.consume_anomaly),
                 )
+            hooks = on_anomaly_or_claim_recorded(
+                conn,
+                entity_id=cid,
+                trigger_cmd="claim.propose",
+                subsystem=sub,
+                locus=args.locus,
+                text_blob=f"{args.title} {args.mechanism}",
+                target_dir=tpath if tmode == "source" else None,
+            )
             log_event(conn, args.worker, "claim_proposed", cid, {"locus": args.locus, "severity": args.severity})
-            _emit({"claim_id": cid, "status": "proposed", "subsystem": sub}, True)
+            _emit(
+                {
+                    "claim_id": cid,
+                    "status": "proposed",
+                    "subsystem": sub,
+                    "hooks_triggered": [h["hook_code"] for h in hooks],
+                },
+                True,
+            )
             return EXIT_OK
 
         if args.claim_cmd == "rescope":
@@ -672,6 +886,44 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     EXIT_GATE_BLOCKED,
                 )
             now_iso = utc_now_iso()
+            cfg_gate = (getattr(args, "config_gate", None) or "").strip()
+            if cfg_gate:
+                conn.execute(
+                    """
+                    UPDATE claims
+                    SET status = 'config_gated', config_gate = ?, falsifier_worker_id = ?,
+                        falsify_notes = ?, falsify_control_locus = ?,
+                        research_state = 'candidate', evidence_state = 'unverified', updated_at = ?
+                    WHERE claim_id = ?
+                    """,
+                    (
+                        scrub_text(cfg_gate),
+                        args.worker,
+                        scrub_text(args.notes),
+                        args.control_locus,
+                        now_iso,
+                        args.claim_id,
+                    ),
+                )
+                probe = on_claim_config_gated(conn, claim_row=clm, config_predicate=cfg_gate)
+                log_event(
+                    conn,
+                    args.worker,
+                    "claim_config_gated",
+                    args.claim_id,
+                    {"config_gate": cfg_gate, "probe_task_id": probe["probe_task_id"]},
+                )
+                _emit(
+                    {
+                        "claim_id": args.claim_id,
+                        "status": "config_gated",
+                        "config_gate": cfg_gate,
+                        "probe_task_id": probe["probe_task_id"],
+                    },
+                    True,
+                )
+                return EXIT_OK
+
             conn.execute(
                 """
                 UPDATE claims
@@ -691,6 +943,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 """,
                 (now_iso, args.claim_id),
             )
+            consume_hooks_for_locus(conn, source_entity_id=args.claim_id)
             log_event(conn, args.worker, "claim_falsified", args.claim_id, {})
             _emit({"claim_id": args.claim_id, "status": "falsified"}, True)
             return EXIT_OK
@@ -715,8 +968,34 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 "UPDATE claims SET status = 'survived_falsify', falsifier_worker_id = ?, falsify_notes = ?, updated_at = ? WHERE claim_id = ?",
                 (args.worker, scrub_text(args.notes), now_iso, args.claim_id),
             )
+            updated_clm = conn.execute("SELECT * FROM claims WHERE claim_id = ?", (args.claim_id,)).fetchone()
+            hooks = on_claim_survived(conn, claim_row=updated_clm)
             log_event(conn, args.worker, "claim_survived_falsify", args.claim_id, {})
-            _emit({"claim_id": args.claim_id, "status": "survived_falsify"}, True)
+            _emit(
+                {
+                    "claim_id": args.claim_id,
+                    "status": "survived_falsify",
+                    "hooks_triggered": [h["hook_code"] for h in hooks],
+                },
+                True,
+            )
+            return EXIT_OK
+
+        if args.claim_cmd == "instrument":
+            if tmode != "source":
+                raise AjarError("`ajar claim instrument` requires source mode.", EXIT_USER_ERROR)
+            probe_p = pathlib.Path(args.probe_patch) if args.probe_patch else None
+            res = run_claim_instrumentation(
+                conn,
+                run_dir=rdir,
+                target_dir=tpath,
+                claim_id=args.claim_id,
+                probe_cmd=args.probe_cmd,
+                probe_patch=probe_p,
+                timeout_sec=args.timeout,
+                worker_id=args.worker,
+            )
+            _emit(res, True)
             return EXIT_OK
 
         if args.claim_cmd == "block":
@@ -744,7 +1023,7 @@ def cmd_claim(args: argparse.Namespace) -> int:
             if clm["status"] == "needs_instrumentation" and int(clm["instrumented_since_fail"] or 0) == 0:
                 raise AjarError(
                     f"Telemetry-pivot gate (`KVMEscape` rule): claim {args.claim_id} failed 2 PoC runs with unchanged observation. "
-                    "Complete its `instrument` task or record a target trace (`ajar anomaly add --claim` / `ajar binding set`) before retrying.",
+                    "Run `ajar claim instrument` or record a target trace (`ajar anomaly add --claim` / `ajar binding set`) before retrying.",
                     EXIT_GATE_BLOCKED,
                 )
             if clm["status"] not in ("survived_falsify", "reproduced"):
@@ -761,6 +1040,26 @@ def cmd_claim(args: argparse.Namespace) -> int:
             if eff_mode == "source":
                 if not args.micropatch:
                     raise AjarError("Source reproduction requires --micropatch <patch_file>.", EXIT_USER_ERROR)
+                rel_cmd = (getattr(args, "release_cmd", None) or "").strip()
+                rel_ctrl_cmd = (getattr(args, "release_control_cmd", None) or "").strip()
+                h6_active = conn.execute(
+                    """
+                    SELECT hook_id FROM epistemic_hooks
+                    WHERE hook_code = 'H6_RELEASE_UB_DIFF' AND source_entity_id = ? AND status = 'active'
+                    LIMIT 1
+                    """,
+                    (args.claim_id,),
+                ).fetchone()
+                if (
+                    h6_active is not None
+                    and claim_requires_release_ub_diff(str(clm["locus"]), f"{clm['title']} {clm['mechanism']}")
+                    and not rel_cmd
+                ):
+                    raise AjarError(
+                        f"H6_RELEASE_UB_DIFF gate: compiled UB/overflow claim {args.claim_id} requires --release-cmd "
+                        "(`-O2` / `--release` without debug asserts or `-ftrapv`) to classify production impact.",
+                        EXIT_GATE_BLOCKED,
+                    )
                 siblings = [
                     {"claim_id": r["claim_id"], "poc_cmd": args.sibling_poc_cmd or ""}
                     for r in conn.execute(
@@ -782,6 +1081,8 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     warm_cross_kill_claims=siblings,
                     claim_locus=str(clm["locus"]),
                     shared_guard_locus=str(getattr(args, "shared_guard_locus", None) or ""),
+                    release_cmd=rel_cmd,
+                    release_control_cmd=rel_ctrl_cmd,
                 )
             elif eff_mode == "binary":
                 bin_p = pathlib.Path(args.binary) if args.binary else tpath
@@ -831,6 +1132,15 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 _emit({"reproduction": res, "claim_update": pivot}, True)
                 return EXIT_GATE_BLOCKED
 
+            ub_div = str(res.get("ub_divergence_class") or "")
+            if ub_div == "debug_assert_only" and str(clm["severity"]) in ("critical", "high"):
+                raise AjarError(
+                    f"Release-profile UB differential classified {args.claim_id} as debug_assert_only "
+                    f"(clean --release-cmd exited 0 without post-state violation); rescope severity to low/medium "
+                    "via `ajar claim rescope` before confirming.",
+                    EXIT_GATE_BLOCKED,
+                )
+
             # Promote to `findings`!
             now_iso = utc_now_iso()
             existing_f = conn.execute("SELECT finding_id FROM findings WHERE claim_id = ?", (args.claim_id,)).fetchone()
@@ -851,8 +1161,10 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 INSERT OR REPLACE INTO findings(
                     finding_id, claim_id, title, severity, locus, root_cause, poc_cmd, control_cmd,
                     micropatch_path, micropatch_diff, arm1_clean_poc_json, arm2_clean_ctrl_json,
-                    arm3_patch_poc_json, arm4_patch_ctrl_json, attribution, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    arm3_patch_poc_json, arm4_patch_ctrl_json, oracle_json,
+                    arm5a_release_poc_json, arm5b_release_ctrl_json, ub_divergence_class,
+                    attribution, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fid,
@@ -869,6 +1181,10 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     json.dumps(res["arm2_clean_control"], sort_keys=True),
                     json.dumps(res["arm3_patch_poc"], sort_keys=True),
                     json.dumps(res["arm4_patch_control"], sort_keys=True),
+                    json.dumps(oracle_dict or {}, sort_keys=True),
+                    json.dumps(res.get("arm5a_release_poc") or {}, sort_keys=True),
+                    json.dumps(res.get("arm5b_release_control") or {}, sort_keys=True),
+                    ub_div,
                     attr,
                     now_iso,
                 ),
@@ -884,8 +1200,18 @@ def cmd_claim(args: argparse.Namespace) -> int:
                     """,
                     (args.claim_id, now_iso, dup_id),
                 )
-            log_event(conn, args.worker, "finding_reproduced", fid, {"claim_id": args.claim_id, "attribution": attr})
-            _emit({"finding_id": fid, "attribution": attr, "reproduction": res}, True)
+            esc = on_finding_confirmed(conn, finding_id=fid, claim_row=clm)
+            log_event(
+                conn,
+                args.worker,
+                "finding_reproduced",
+                fid,
+                {"claim_id": args.claim_id, "attribution": attr, "ub_divergence_class": ub_div},
+            )
+            out_payload: dict[str, Any] = {"finding_id": fid, "attribution": attr, "reproduction": res}
+            if esc is not None:
+                out_payload["post_confirm_escalation"] = esc
+            _emit(out_payload, True)
             return EXIT_OK
 
         rows = list_rows(conn, "SELECT * FROM claims ORDER BY created_at ASC")
@@ -897,16 +1223,40 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
 def cmd_chain(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
     conn = open_run_db(rid)
     try:
         if args.chain_cmd == "propose":
             run = conn.execute("SELECT * FROM runs LIMIT 1").fetchone()
+            tmode = str(run["target_mode"]) if run else "source"
+            steps = [s.strip() for s in args.steps.split(",") if s.strip()]
+            oracle_dict = json.loads(args.oracle_json) if getattr(args, "oracle_json", None) else None
+
+            if run is not None and tmode == "source":
+                patch_map = _parse_step_micropatches(getattr(args, "step_micropatch", None))
+                res = run_chain_reproduction(
+                    conn,
+                    run_dir=rdir,
+                    target_dir=pathlib.Path(run["target_path"]),
+                    title=args.title,
+                    steps=steps,
+                    poc_cmd=args.poc_cmd,
+                    control_cmd=args.control_cmd,
+                    severity=args.severity,
+                    oracle=oracle_dict,
+                    step_micropatches=patch_map,
+                    ablate_steps=not bool(getattr(args, "no_ablate", False)),
+                    timeout_sec=int(getattr(args, "timeout", 60)),
+                    worker_id=str(getattr(args, "worker", "worker")),
+                )
+                _emit(res, True)
+                return EXIT_OK if res["verified"] else EXIT_GATE_BLOCKED
+
             cwd = run["workspace_path"] if run else "."
             env = scrubbed_subprocess_env()
             p1 = subprocess.run(["bash", "-c", args.poc_cmd], cwd=cwd, env=env, capture_output=True, timeout=60, check=False)
             p2 = subprocess.run(["bash", "-c", args.control_cmd], cwd=cwd, env=env, capture_output=True, timeout=60, check=False)
             verified = p1.returncode != 0 and p2.returncode == 0
-            steps = [s.strip() for s in args.steps.split(",") if s.strip()]
             cid = new_id("chn")
             now_iso = utc_now_iso()
             ev = {
@@ -944,6 +1294,24 @@ def cmd_chain(args: argparse.Namespace) -> int:
 
         rows = list_rows(conn, "SELECT * FROM chains ORDER BY created_at ASC")
         _emit({"chains": rows}, True)
+        return EXIT_OK
+    finally:
+        conn.close()
+
+
+def cmd_epistemic_hooks(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    conn = open_run_db(rid)
+    try:
+        if args.status:
+            rows = list_rows(
+                conn,
+                "SELECT * FROM epistemic_hooks WHERE status = ? ORDER BY created_at ASC",
+                (args.status,),
+            )
+        else:
+            rows = list_rows(conn, "SELECT * FROM epistemic_hooks ORDER BY created_at ASC")
+        _emit({"epistemic_hooks": rows}, True)
         return EXIT_OK
     finally:
         conn.close()
@@ -1053,6 +1421,8 @@ def cmd_patch(args: argparse.Namespace) -> int:
                 variant_cmds=args.variant_cmd or [],
                 caller_audit=args.caller_audit,
                 sibling_audit=args.sibling_audit,
+                caller_cmd=args.caller_cmd or "",
+                sibling_cmd=args.sibling_cmd or "",
                 oracle=oracle_dict,
                 shared_guard_locus=args.shared_guard_locus or "",
                 max_changed_lines=args.max_changed_lines,
@@ -1236,6 +1606,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
     p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
+    p_init.add_argument("--diff", help="Optional git diff range (`base..head`) for PR differential Code runs.")
+    p_init.add_argument("--parent-run", help="Optional baseline/parent run ID to carry forward kept findings and guards.")
     p_init.add_argument("--allow-host", action="append", help="Allowed live target hostname.")
     p_init.add_argument("--allow-live-requests", action="store_true")
     p_init.add_argument("--allow-live-mutations", action="store_true")
@@ -1267,6 +1639,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_map.add_argument("--focus-file", action="append")
     p_map.add_argument("--focus-symbol", action="append")
     p_map.add_argument("--budget-tokens", type=int, default=1500)
+    p_map.add_argument("--slice-cap", type=int, default=3500, help="Maximum LoC per partitioned call slice.")
     p_map.add_argument("--run")
     p_map.add_argument("--json", action="store_true")
     p_map.set_defaults(func=cmd_map)
@@ -1299,6 +1672,7 @@ def build_parser() -> argparse.ArgumentParser:
     ps_add.add_argument("--locus", required=True)
     ps_add.add_argument("--priority", choices=("critical", "high", "medium", "low"), default="high")
     ps_add.add_argument("--trust-boundary", default="")
+    ps_add.add_argument("--requires-tags", default="", help="Comma-separated capability tags required to reach or trigger this sink.")
     ps_add.add_argument("--run")
     ps_list = surf_sub.add_parser("list")
     ps_list.add_argument("--run")
@@ -1319,10 +1693,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_drv.set_defaults(func=cmd_driver)
 
     # task
-    p_tsk = sub.add_parser("task", help="Coordinate bounded work tasks (`lease`, `done`, `dry`, `block`).")
+    task_kinds = ("map", "investigate", "falsify", "reproduce", "instrument", "chain", "patch", "escalate")
+    p_tsk = sub.add_parser("task", help="Coordinate bounded work tasks (`lease`, `checkpoint`, `done`, `dry`, `block`).")
     tsk_sub = p_tsk.add_subparsers(dest="task_cmd", required=True)
     pt_add = tsk_sub.add_parser("add")
-    pt_add.add_argument("--kind", choices=("map", "investigate", "falsify", "reproduce", "instrument", "chain", "patch"), required=True)
+    pt_add.add_argument("--kind", choices=task_kinds, required=True)
     pt_add.add_argument(
         "--direction",
         choices=("outside_in", "inside_out", "native_ffi", "peer_symmetry"),
@@ -1339,10 +1714,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     pt_lease = tsk_sub.add_parser("lease")
     pt_lease.add_argument("--worker", required=True)
-    pt_lease.add_argument("--kind", choices=("map", "investigate", "falsify", "reproduce", "instrument", "chain", "patch"))
+    pt_lease.add_argument("--kind", choices=task_kinds)
     pt_lease.add_argument("--ttl", type=int, default=900)
     pt_lease.add_argument("--recover", action="store_true")
     pt_lease.add_argument("--run")
+
+    pt_chk = tsk_sub.add_parser("checkpoint")
+    pt_chk.add_argument("task_id")
+    pt_chk.add_argument("--worker", required=True)
+    pt_chk.add_argument("--state-json", required=True, help="Concise JSON object (`<= 2 KB`) persisting progress for session resume.")
+    pt_chk.add_argument("--run")
 
     pt_done = tsk_sub.add_parser("done")
     pt_done.add_argument("task_id")
@@ -1368,6 +1749,20 @@ def build_parser() -> argparse.ArgumentParser:
     pt_lst.add_argument("--run")
     p_tsk.set_defaults(func=cmd_task)
 
+    # coverage
+    p_cov = sub.add_parser("coverage", help="Record or inspect audited source line spans (`coverage_spans`).")
+    cov_sub = p_cov.add_subparsers(dest="coverage_cmd", required=True)
+    pcv_r = cov_sub.add_parser("record")
+    pcv_r.add_argument("rel_path", help="Relative file path inside target.")
+    pcv_r.add_argument("--start-line", type=int, required=True)
+    pcv_r.add_argument("--end-line", type=int, required=True)
+    pcv_r.add_argument("--task")
+    pcv_r.add_argument("--worker", default="worker")
+    pcv_r.add_argument("--run")
+    pcv_l = cov_sub.add_parser("list")
+    pcv_l.add_argument("--run")
+    p_cov.set_defaults(func=cmd_coverage)
+
     # anomaly
     p_an = sub.add_parser("anomaly", help="Record or explain execution anomalies (decoupled from claim survival).")
     an_sub = p_an.add_subparsers(dest="anomaly_cmd", required=True)
@@ -1388,7 +1783,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.set_defaults(func=cmd_anomaly)
 
     # primitive
-    p_pr = sub.add_parser("primitive", help="Register verified non-standalone behaviors for multi-step chaining.")
+    p_pr = sub.add_parser("primitive", help="Register verified non-standalone behaviors and promote composable helpers.")
     pr_sub = p_pr.add_subparsers(dest="primitive_cmd", required=True)
     pp_add = pr_sub.add_parser("add")
     pp_add.add_argument("--locus", required=True)
@@ -1400,7 +1795,24 @@ def build_parser() -> argparse.ArgumentParser:
     pp_add.add_argument("--surface", help="Optional associated surface ID.")
     pp_add.add_argument("--guarded-by", help="Upstream guard locus (`file:lines`) blocking standalone exploitation.")
     pp_add.add_argument("--guard-assumption", default="", help="Invariant assumed by the upstream guard.")
+    pp_add.add_argument("--provides-tags", default="", help="Comma-separated capability tags provided by this primitive (`ns:name`).")
+    pp_add.add_argument("--requires-tags", default="", help="Comma-separated capability tags required by this primitive (`ns:name`).")
     pp_add.add_argument("--run")
+
+    pp_prm = pr_sub.add_parser("promote-helper", help="Verify and mount a read-only `StageContext` Python helper outside `slot-<k>`.")
+    pp_prm.add_argument("primitive_id")
+    pp_prm.add_argument("--file", required=True, help="Path to Python helper module.")
+    pp_prm.add_argument("--callable", required=True, help="Callable function name accepting `(ctx: StageContext)`.")
+    pp_prm.add_argument("--provides-tags", default="", help="Additional comma-separated `provides_tags`.")
+    pp_prm.add_argument("--requires-tags", default="", help="Additional comma-separated `requires_tags`.")
+    pp_prm.add_argument("--self-test-cmd", default="", help="Optional custom dual-mode verification command.")
+    pp_prm.add_argument("--timeout", type=int, default=30)
+    pp_prm.add_argument("--worker", default="worker")
+    pp_prm.add_argument("--run")
+
+    pp_hlp = pr_sub.add_parser("helpers", help="List promoted `StageContext` helpers.")
+    pp_hlp.add_argument("--run")
+
     pp_lst = pr_sub.add_parser("list")
     pp_lst.add_argument("--run")
     p_pr.set_defaults(func=cmd_primitive)
@@ -1419,7 +1831,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bd.set_defaults(func=cmd_binding)
 
     # claim
-    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `reproduce`).")
+    p_cl = sub.add_parser("claim", help="Manage vulnerability hypotheses (`propose`, `rescope`, `falsify`, `survive`, `instrument`, `reproduce`).")
     cl_sub = p_cl.add_subparsers(dest="claim_cmd", required=True)
     pc_prop = cl_sub.add_parser("propose")
     pc_prop.add_argument("--worker", required=True)
@@ -1451,6 +1863,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc_fal.add_argument("--worker", required=True)
     pc_fal.add_argument("--notes", required=True)
     pc_fal.add_argument("--control-locus")
+    pc_fal.add_argument("--config-gate", default="", help="Optional runtime config predicate gating reachability (`config_gated` probe).")
     pc_fal.add_argument("--run")
 
     pc_sur = cl_sub.add_parser("survive")
@@ -1458,6 +1871,14 @@ def build_parser() -> argparse.ArgumentParser:
     pc_sur.add_argument("--worker", required=True)
     pc_sur.add_argument("--notes", required=True)
     pc_sur.add_argument("--run")
+
+    pc_ins = cl_sub.add_parser("instrument", help="Run an isolated diagnostic probe inside scratch `slot-inst` to unblock `needs_instrumentation`.")
+    pc_ins.add_argument("claim_id")
+    pc_ins.add_argument("--worker", required=True)
+    pc_ins.add_argument("--probe-cmd", required=True)
+    pc_ins.add_argument("--probe-patch", default="", help="Optional temporary diagnostic diff applied only inside `slot-inst`.")
+    pc_ins.add_argument("--timeout", type=int, default=60)
+    pc_ins.add_argument("--run")
 
     pc_blk = cl_sub.add_parser("block")
     pc_blk.add_argument("claim_id")
@@ -1473,6 +1894,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc_rep.add_argument("--control-cmd", default="")
     pc_rep.add_argument("--micropatch", help="Path to 1-5 line counterfactual unified diff (source mode).")
     pc_rep.add_argument("--shared-guard-locus", default="", help="Optional shared upstream guard locus when micropatch fixes a shared chokepoint.")
+    pc_rep.add_argument("--release-cmd", default="", help="Arm 5A release-profile PoC command (`-O2` / `--release` without debug asserts).")
+    pc_rep.add_argument("--release-control-cmd", default="", help="Arm 5B release-profile benign control command.")
     pc_rep.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
     pc_rep.add_argument("--determinism", choices=("deterministic", "probabilistic_race"), default="deterministic")
     pc_rep.add_argument("--trials", type=int, default=8)
@@ -1493,7 +1916,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cl.set_defaults(func=cmd_claim)
 
     # chain
-    p_ch = sub.add_parser("chain", help="Compose verified primitives and findings into multi-step chains.")
+    p_ch = sub.add_parser("chain", help="Compose verified primitives and findings into ablated multi-step chains.")
     ch_sub = p_ch.add_subparsers(dest="chain_cmd", required=True)
     pch_p = ch_sub.add_parser("propose")
     pch_p.add_argument("--title", required=True)
@@ -1501,21 +1924,36 @@ def build_parser() -> argparse.ArgumentParser:
     pch_p.add_argument("--poc-cmd", required=True)
     pch_p.add_argument("--control-cmd", required=True)
     pch_p.add_argument("--severity", choices=("critical", "high", "medium", "low"), default="critical")
+    pch_p.add_argument("--oracle-json", help="Optional JSON oracle rules (`expect_regex`, `expect_exit_code`).")
+    pch_p.add_argument("--step-micropatch", action="append", help="Per-step counterfactual patch `<step_id>:<path/to/step.diff>` for compiled causal ablation.")
+    pch_p.add_argument("--no-ablate", action="store_true", help="Skip automated per-step ablation (single-anomaly chains only).")
+    pch_p.add_argument("--timeout", type=int, default=60)
+    pch_p.add_argument("--worker", default="worker")
     pch_p.add_argument("--run")
     pch_l = ch_sub.add_parser("list")
     pch_l.add_argument("--run")
     p_ch.set_defaults(func=cmd_chain)
 
-    # patch (8-Arm Production Fixes Gate)
-    p_ptc = sub.add_parser("patch", help="Verify production Fixes with the 8-Arm Remediation Gate (`ajar patch verify`).")
+    # hooks (epistemic micro-hooks inspection)
+    p_eh = sub.add_parser("hooks", help="Inspect event-driven epistemic micro-hooks (`H1`–`H8`).")
+    eh_sub = p_eh.add_subparsers(dest="hooks_cmd", required=True)
+    peh_l = eh_sub.add_parser("list")
+    peh_l.add_argument("--status", choices=("active", "consumed", "expired"))
+    peh_l.add_argument("--run")
+    p_eh.set_defaults(func=cmd_epistemic_hooks)
+
+    # patch (9-Arm Production Fixes Gate)
+    p_ptc = sub.add_parser("patch", help="Verify production Fixes with the hardened 9-Arm Remediation Gate (`ajar patch verify`).")
     ptc_sub = p_ptc.add_subparsers(dest="patch_cmd", required=True)
     ppt_v = ptc_sub.add_parser("verify")
     ppt_v.add_argument("finding_id")
     ppt_v.add_argument("--patch", required=True, help="Path to unified diff production patch.")
     ppt_v.add_argument("--suite-cmd", required=True, help="Arm 5 full project test suite command.")
-    ppt_v.add_argument("--variant-cmd", action="append", required=True, help="Arm 6 bypass variant command (repeat >= 3 times).")
+    ppt_v.add_argument("--variant-cmd", action="append", required=True, help="Arm 6 bypass variant command (repeat >= 3 times; >= 1 must trigger on clean HEAD).")
     ppt_v.add_argument("--caller-audit", required=True, help="Arm 7 caller NULL/error-return safety audit note (>= 20 chars).")
     ppt_v.add_argument("--sibling-audit", required=True, help="Arm 8 sibling-route / peer-hook symmetry audit note (>= 20 chars).")
+    ppt_v.add_argument("--caller-cmd", default="", help="Optional executable Arm 7 caller error-propagation test command.")
+    ppt_v.add_argument("--sibling-cmd", default="", help="Optional executable Arm 8 sibling-route symmetry test command.")
     ppt_v.add_argument("--oracle-json", help="Optional JSON oracle rules for PoC/variant checks.")
     ppt_v.add_argument("--shared-guard-locus", default="", help="Optional shared guard locus when patching a common chokepoint.")
     ppt_v.add_argument("--max-changed-lines", type=int, default=120)

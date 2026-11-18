@@ -9,16 +9,17 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 1. Inputs, Quote, and Orientation
 
-1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff:
+1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (and carry forward prior verified state on PR runs via `--parent-run`):
    ```bash
    ajar quote <target_dir> [--diff <base..head>]
+   ajar init <target_dir> [--diff <base..head>] [--parent-run <baseline_run_id>]
    ```
-2. Inspect the Personalized PageRank symbol graph within a bounded token budget:
+2. Inspect the Personalized PageRank symbol graph and `<= 3,500` LoC call slices within a bounded token budget:
    ```bash
-   ajar map --budget-tokens 1500
+   ajar map --budget-tokens 1500 --slice-cap 3500
    ajar map --focus-file <rel_path> --focus-symbol <symbol> --budget-tokens 1500
    ```
-3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous:
+3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous (target docs carry `[UNTRUSTED_TARGET_DOC: verify in code]` so prose claims are always verified in code):
    ```bash
    ajar ref query --kind intent "<subsystem or symbol>"
    ajar ref query --kind reachability "<entrypoint or sink>"
@@ -43,12 +44,12 @@ Do not map external HTTP/RPC routes alone. Enqueue `investigate` tasks across al
 
 1. **`outside_in` (Entrypoint -> Sink):** Trace untrusted inputs from HTTP/RPC/CLI/contract entrypoints through middleware to state transitions.
 2. **`inside_out` (High-Value Sink -> Callers):** Start at sensitive state mutations, accounting/settlement math, role/permission writes, SQL/command/template builders, and cache deserializers; trace backward to find unguarded callers.
-3. **`native_ffi` (Memory / Unsafe / FFI Boundary):** Target `ext/`, `cgo`, `ctypes`, `wasm`, JNI/N-API bridges, `unsafe` Rust blocks, and custom binary/archive parsers.
-4. **`peer_symmetry` (Sibling Routes & Lifecycle Hooks):** Compare parallel endpoints (`v1` vs `v2`, REST vs GraphQL/batch) and paired lifecycle hooks (`create`/`update`/`delete`, `deposit`/`withdraw`, `lock`/`unlock`) for missing checks present on peers.
+3. **`native_ffi` (Memory / Unsafe / FFI Boundary):** Target `ext/`, `cgo`, `ctypes`, `wasm`, JNI/N-API bridges, `unsafe` Rust blocks, `@IntrinsicCandidate` intrinsics, and custom binary/archive parsers.
+4. **`peer_symmetry` (Sibling Routes & Lifecycle Hooks):** Compare parallel endpoints (`v1` vs `v2`, REST vs GraphQL/batch), outbound client response parsers, and paired lifecycle hooks (`create`/`update`/`delete`, `deposit`/`withdraw`, `lock`/`unlock`) for missing checks present on peers.
 
 ## 4. Recording Surfaces, Drivers, and Tasks
 
-1. Register every distinct attack surface with its `file:line` locus and explicit trust boundary:
+1. Register every distinct attack surface with its `file:line` locus, explicit trust boundary, and optional `--requires-tags` (`ns:name` preconditions needed to trigger guarded sinks):
    ```bash
    ajar surface add \
      --name "<surface_name>" \
@@ -56,7 +57,8 @@ Do not map external HTTP/RPC routes alone. Enqueue `investigate` tasks across al
      --subsystem "<module>" \
      --locus "<file:line>" \
      --priority critical \
-     --trust-boundary "<untrusted caller -> guarded resource>"
+     --trust-boundary "<untrusted caller -> guarded resource>" \
+     [--requires-tags "<ns:tag1,ns:tag2>"]
    ```
 2. Attach an executable surface driver whenever a test target, fuzz harness, local server, or Foundry test reaches the surface:
    ```bash

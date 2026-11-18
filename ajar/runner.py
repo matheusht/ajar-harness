@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import subprocess
 import urllib.request
 from typing import Any
@@ -37,7 +38,7 @@ from ajar.redact import scrub_text
 from ajar.report import build_report_data, render_markdown_report
 from ajar.workspace import init_run_workspace
 
-REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "patch"})
+REASON_TASK_KINDS: frozenset[str] = frozenset({"map", "falsify", "chain", "patch", "escalate"})
 REFUSAL_MARKERS: tuple[str, ...] = (
     "i cannot assist",
     "i can't assist",
@@ -46,9 +47,32 @@ REFUSAL_MARKERS: tuple[str, ...] = (
     "cannot fulfill this request",
 )
 
+SOLILOQUY_FENCE_RE = re.compile(
+    r"```(?:console|shell-session|bash|sh|gdb)?\n\s*(?:\$\s+\S+|\(gdb\)\s+\S+|root@\S+[:#])",
+    re.IGNORECASE,
+)
+
+
+def detect_soliloquy_transcript(text: str, *, state_mutations_recorded: int = 0) -> tuple[bool, str]:
+    """Detect fabricated shell/gdb transcripts (`OmegaPWN` anti-soliloquizing guard) or zero-tool monologues."""
+    if not text:
+        return (False, "")
+    if state_mutations_recorded == 0 and SOLILOQUY_FENCE_RE.search(text):
+        return (
+            True,
+            "Fabricated shell/debugger transcript detected with zero real execution or SQLite state mutations.",
+        )
+    est_tokens = len(text) // 4
+    if state_mutations_recorded == 0 and est_tokens > 3000:
+        return (
+            True,
+            f"Extended monologue ({est_tokens} est. tokens) with zero ajar state mutations; checkpoint and run real commands.",
+        )
+    return (False, "")
+
 
 def select_model_for_task(task: dict[str, Any], *, fallback: bool = False) -> str:
-    """Route tasks across reasoning (`map`/`falsify`/`chain`/`patch` + `zero_skill` `investigate`), hunting, and refusal fallback tiers."""
+    """Route tasks across reasoning (`map`/`falsify`/`chain`/`patch`/`escalate` + `zero_skill` `investigate`), hunting, and refusal fallback tiers."""
     default_model = os.environ.get("AJAR_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
     if fallback:
         return os.environ.get("AJAR_MODEL_FALLBACK", "").strip() or default_model

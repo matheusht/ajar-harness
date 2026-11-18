@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS runs (
     domain_skill_leases INTEGER NOT NULL DEFAULT 0,
     consecutive_stall_checks INTEGER NOT NULL DEFAULT 0,
     last_stop_event_id INTEGER NOT NULL DEFAULT 0,
+    diff_range TEXT NOT NULL DEFAULT '',
+    base_sha TEXT NOT NULL DEFAULT '',
+    head_sha TEXT NOT NULL DEFAULT '',
+    parent_run_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     finished_at TEXT
 );
@@ -83,6 +87,7 @@ CREATE TABLE IF NOT EXISTS surfaces (
         CHECK(priority IN ('critical', 'high', 'medium', 'low')),
     trust_boundary TEXT NOT NULL DEFAULT '',
     invariants_json TEXT NOT NULL DEFAULT '[]',
+    requires_tags_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL
 );
 
@@ -101,9 +106,10 @@ CREATE TABLE IF NOT EXISTS surface_drivers (
 CREATE TABLE IF NOT EXISTS tasks (
     task_id TEXT PRIMARY KEY,
     parent_task_id TEXT,
+    parent_claim_id TEXT,
     surface_id TEXT,
     kind TEXT NOT NULL
-        CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch')),
+        CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
     direction TEXT NOT NULL DEFAULT 'outside_in'
         CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
     title TEXT NOT NULL,
@@ -124,6 +130,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     salience_score INTEGER NOT NULL DEFAULT 60,
     reopened_boost INTEGER NOT NULL DEFAULT 0,
     attempt_count INTEGER NOT NULL DEFAULT 0,
+    slice_loc INTEGER NOT NULL DEFAULT 0,
+    checkpoint_json TEXT NOT NULL DEFAULT '{}',
+    diff_state TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -157,9 +166,62 @@ CREATE TABLE IF NOT EXISTS primitives (
     postconditions TEXT NOT NULL,
     guarded_by_locus TEXT NOT NULL DEFAULT '',
     guard_assumption TEXT NOT NULL DEFAULT '',
+    provides_tags_json TEXT NOT NULL DEFAULT '[]',
+    requires_tags_json TEXT NOT NULL DEFAULT '[]',
+    helper_id TEXT NOT NULL DEFAULT '',
     evidence_cmd TEXT NOT NULL,
     evidence_output TEXT NOT NULL DEFAULT '',
     chained INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS primitive_helpers (
+    helper_id TEXT PRIMARY KEY,
+    primitive_id TEXT NOT NULL,
+    module_name TEXT NOT NULL UNIQUE,
+    rel_helper_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    callable_name TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'python',
+    requires_tags_json TEXT NOT NULL DEFAULT '[]',
+    provides_tags_json TEXT NOT NULL DEFAULT '[]',
+    state_in_keys_json TEXT NOT NULL DEFAULT '[]',
+    state_out_keys_json TEXT NOT NULL DEFAULT '[]',
+    self_test_cmd TEXT NOT NULL DEFAULT '',
+    verified INTEGER NOT NULL DEFAULT 0,
+    verification_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(primitive_id) REFERENCES primitives(primitive_id)
+);
+
+CREATE TABLE IF NOT EXISTS epistemic_hooks (
+    hook_id TEXT PRIMARY KEY,
+    hook_code TEXT NOT NULL,
+    trigger_cmd TEXT NOT NULL,
+    source_entity_id TEXT NOT NULL DEFAULT '',
+    dedup_key TEXT NOT NULL UNIQUE,
+    subsystem TEXT NOT NULL DEFAULT '',
+    target_locus TEXT NOT NULL DEFAULT '',
+    spawned_task_id TEXT,
+    directive_text TEXT NOT NULL,
+    kill_rule TEXT NOT NULL,
+    token_estimate INTEGER NOT NULL DEFAULT 30,
+    max_leases INTEGER NOT NULL DEFAULT 2,
+    leases_seen INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'consumed', 'expired')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coverage_spans (
+    span_id TEXT PRIMARY KEY,
+    task_id TEXT,
+    worker_id TEXT NOT NULL DEFAULT '',
+    rel_path TEXT NOT NULL,
+    start_line INTEGER NOT NULL,
+    end_line INTEGER NOT NULL,
+    file_sha256 TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -200,11 +262,14 @@ CREATE TABLE IF NOT EXISTS claims (
             'reproduced',
             'rejected_repro',
             'duplicate_root_cause',
-            'blocked'
+            'blocked',
+            'config_gated'
         )),
     falsifier_worker_id TEXT,
     falsify_notes TEXT NOT NULL DEFAULT '',
     falsify_control_locus TEXT,
+    config_gate TEXT NOT NULL DEFAULT '',
+    diff_state TEXT NOT NULL DEFAULT '',
     failed_repro_count INTEGER NOT NULL DEFAULT 0,
     last_observation_hash TEXT NOT NULL DEFAULT '',
     instrumented_since_fail INTEGER NOT NULL DEFAULT 0,
@@ -237,6 +302,11 @@ CREATE TABLE IF NOT EXISTS findings (
     arm2_clean_ctrl_json TEXT NOT NULL,
     arm3_patch_poc_json TEXT NOT NULL,
     arm4_patch_ctrl_json TEXT NOT NULL,
+    oracle_json TEXT NOT NULL DEFAULT '{}',
+    arm5a_release_poc_json TEXT NOT NULL DEFAULT '{}',
+    arm5b_release_ctrl_json TEXT NOT NULL DEFAULT '{}',
+    ub_divergence_class TEXT NOT NULL DEFAULT '',
+    diff_state TEXT NOT NULL DEFAULT '',
     attribution TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY(claim_id) REFERENCES claims(claim_id)
@@ -252,6 +322,9 @@ CREATE TABLE IF NOT EXISTS chains (
     control_cmd TEXT NOT NULL,
     verified INTEGER NOT NULL DEFAULT 0,
     evidence_json TEXT NOT NULL DEFAULT '{}',
+    slot_index INTEGER NOT NULL DEFAULT -1,
+    oracle_json TEXT NOT NULL DEFAULT '{}',
+    ablation_matrix_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL
 );
 
@@ -304,6 +377,10 @@ CREATE TABLE IF NOT EXISTS patch_verifications (
     caller_audit TEXT NOT NULL,
     sibling_audit TEXT NOT NULL,
     arms_json TEXT NOT NULL,
+    baseline_suite_json TEXT NOT NULL DEFAULT '{}',
+    arm7_caller_cmd TEXT NOT NULL DEFAULT '',
+    arm8_sibling_cmd TEXT NOT NULL DEFAULT '',
+    arm9_revert_poc_json TEXT NOT NULL DEFAULT '{}',
     passed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY(finding_id) REFERENCES findings(finding_id),
@@ -341,7 +418,8 @@ CREATE TABLE IF NOT EXISTS oracle_docs (
     kind TEXT NOT NULL CHECK(kind IN ('intent', 'reachability', 'precedent')),
     title TEXT NOT NULL,
     locus TEXT NOT NULL,
-    body TEXT NOT NULL
+    body TEXT NOT NULL,
+    provenance TEXT NOT NULL DEFAULT 'untrusted_target'
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS oracle_fts USING fts5(
@@ -355,6 +433,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS oracle_fts USING fts5(
 CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
 CREATE INDEX IF NOT EXISTS idx_claims_locus_mech ON claims(locus, mechanism_key);
 CREATE INDEX IF NOT EXISTS idx_anomalies_status ON anomalies(status, subsystem);
+CREATE INDEX IF NOT EXISTS idx_hooks_status_sub ON epistemic_hooks(status, subsystem);
+CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_line, end_line);
 """
 
 
@@ -492,6 +572,218 @@ def _ensure_v31_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_v32_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently migrate v3.1 SQLite databases to include v3.2 columns, tables, and CHECK enums."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if not tables:
+        return
+    alter_specs = (
+        ("runs", "diff_range", "TEXT NOT NULL DEFAULT ''"),
+        ("runs", "base_sha", "TEXT NOT NULL DEFAULT ''"),
+        ("runs", "head_sha", "TEXT NOT NULL DEFAULT ''"),
+        ("runs", "parent_run_id", "TEXT NOT NULL DEFAULT ''"),
+        ("surfaces", "requires_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("tasks", "parent_claim_id", "TEXT"),
+        ("tasks", "slice_loc", "INTEGER NOT NULL DEFAULT 0"),
+        ("tasks", "checkpoint_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("tasks", "diff_state", "TEXT NOT NULL DEFAULT ''"),
+        ("primitives", "provides_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("primitives", "requires_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("primitives", "helper_id", "TEXT NOT NULL DEFAULT ''"),
+        ("claims", "config_gate", "TEXT NOT NULL DEFAULT ''"),
+        ("claims", "diff_state", "TEXT NOT NULL DEFAULT ''"),
+        ("findings", "oracle_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("findings", "arm5a_release_poc_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("findings", "arm5b_release_ctrl_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("findings", "ub_divergence_class", "TEXT NOT NULL DEFAULT ''"),
+        ("findings", "diff_state", "TEXT NOT NULL DEFAULT ''"),
+        ("chains", "slot_index", "INTEGER NOT NULL DEFAULT -1"),
+        ("chains", "oracle_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("chains", "ablation_matrix_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("patch_verifications", "baseline_suite_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("patch_verifications", "arm7_caller_cmd", "TEXT NOT NULL DEFAULT ''"),
+        ("patch_verifications", "arm8_sibling_cmd", "TEXT NOT NULL DEFAULT ''"),
+        ("patch_verifications", "arm9_revert_poc_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("oracle_docs", "provenance", "TEXT NOT NULL DEFAULT 'untrusted_target'"),
+    )
+    for tbl, col, col_def in alter_specs:
+        if tbl in tables:
+            existing_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_def}")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS primitive_helpers (
+            helper_id TEXT PRIMARY KEY,
+            primitive_id TEXT NOT NULL,
+            module_name TEXT NOT NULL UNIQUE,
+            rel_helper_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            callable_name TEXT NOT NULL,
+            language TEXT NOT NULL DEFAULT 'python',
+            requires_tags_json TEXT NOT NULL DEFAULT '[]',
+            provides_tags_json TEXT NOT NULL DEFAULT '[]',
+            state_in_keys_json TEXT NOT NULL DEFAULT '[]',
+            state_out_keys_json TEXT NOT NULL DEFAULT '[]',
+            self_test_cmd TEXT NOT NULL DEFAULT '',
+            verified INTEGER NOT NULL DEFAULT 0,
+            verification_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(primitive_id) REFERENCES primitives(primitive_id)
+        );
+        CREATE TABLE IF NOT EXISTS epistemic_hooks (
+            hook_id TEXT PRIMARY KEY,
+            hook_code TEXT NOT NULL,
+            trigger_cmd TEXT NOT NULL,
+            source_entity_id TEXT NOT NULL DEFAULT '',
+            dedup_key TEXT NOT NULL UNIQUE,
+            subsystem TEXT NOT NULL DEFAULT '',
+            target_locus TEXT NOT NULL DEFAULT '',
+            spawned_task_id TEXT,
+            directive_text TEXT NOT NULL,
+            kill_rule TEXT NOT NULL,
+            token_estimate INTEGER NOT NULL DEFAULT 30,
+            max_leases INTEGER NOT NULL DEFAULT 2,
+            leases_seen INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'consumed', 'expired')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS coverage_spans (
+            span_id TEXT PRIMARY KEY,
+            task_id TEXT,
+            worker_id TEXT NOT NULL DEFAULT '',
+            rel_path TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL,
+            file_sha256 TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_hooks_status_sub ON epistemic_hooks(status, subsystem);
+        CREATE INDEX IF NOT EXISTS idx_cov_rel_path ON coverage_spans(rel_path, start_line, end_line);
+        """
+    )
+
+    # Upgrade legacy CHECK constraints on `tasks.kind` (`'escalate'`) and `claims.status` (`'config_gated'`) if needed.
+    tasks_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
+    if tasks_ddl and "'escalate'" not in str(tasks_ddl[0] or ""):
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        csv_cols = ", ".join(cols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE tasks RENAME TO _tasks_v31_old;
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                parent_task_id TEXT,
+                parent_claim_id TEXT,
+                surface_id TEXT,
+                kind TEXT NOT NULL
+                    CHECK(kind IN ('map', 'investigate', 'falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')),
+                direction TEXT NOT NULL DEFAULT 'outside_in'
+                    CHECK(direction IN ('outside_in', 'inside_out', 'native_ffi', 'peer_symmetry')),
+                title TEXT NOT NULL,
+                subsystem TEXT NOT NULL DEFAULT '',
+                locus TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL DEFAULT 'high'
+                    CHECK(priority IN ('critical', 'high', 'medium', 'low')),
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open', 'leased', 'done', 'dry', 'conditional_blocked')),
+                worker_id TEXT,
+                skill_mode TEXT NOT NULL DEFAULT 'domain'
+                    CHECK(skill_mode IN ('domain', 'zero_skill')),
+                lease_expires_at REAL,
+                dry_control_locus TEXT,
+                dry_control_reason TEXT,
+                blocker_predicate TEXT,
+                blocker_check_locus TEXT,
+                salience_score INTEGER NOT NULL DEFAULT 60,
+                reopened_boost INTEGER NOT NULL DEFAULT 0,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                slice_loc INTEGER NOT NULL DEFAULT 0,
+                checkpoint_json TEXT NOT NULL DEFAULT '{{}}',
+                diff_state TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                closed_epoch REAL
+            );
+            INSERT INTO tasks({csv_cols}) SELECT {csv_cols} FROM _tasks_v31_old;
+            DROP TABLE _tasks_v31_old;
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_salience ON tasks(status, salience_score DESC);
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    claims_ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='claims'").fetchone()
+    if claims_ddl and "'config_gated'" not in str(claims_ddl[0] or ""):
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(claims)").fetchall()]
+        csv_cols = ", ".join(cols)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE claims RENAME TO _claims_v31_old;
+            CREATE TABLE claims (
+                claim_id TEXT PRIMARY KEY,
+                surface_id TEXT,
+                proposer_worker_id TEXT NOT NULL,
+                seeded_by_human INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL,
+                subsystem TEXT NOT NULL DEFAULT '',
+                locus TEXT NOT NULL,
+                mechanism TEXT NOT NULL,
+                mechanism_key TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'high'
+                    CHECK(severity IN ('critical', 'high', 'medium', 'low')),
+                falsification_prediction TEXT NOT NULL,
+                falsification_test TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'proposed'
+                    CHECK(status IN (
+                        'proposed',
+                        'survived_falsify',
+                        'falsified',
+                        'needs_instrumentation',
+                        'reproduced',
+                        'rejected_repro',
+                        'duplicate_root_cause',
+                        'blocked',
+                        'config_gated'
+                    )),
+                falsifier_worker_id TEXT,
+                falsify_notes TEXT NOT NULL DEFAULT '',
+                falsify_control_locus TEXT,
+                config_gate TEXT NOT NULL DEFAULT '',
+                diff_state TEXT NOT NULL DEFAULT '',
+                failed_repro_count INTEGER NOT NULL DEFAULT 0,
+                last_observation_hash TEXT NOT NULL DEFAULT '',
+                instrumented_since_fail INTEGER NOT NULL DEFAULT 0,
+                research_state TEXT NOT NULL DEFAULT 'candidate'
+                    CHECK(research_state IN ('candidate', 'rejected_during_research', 'confirmed')),
+                evidence_state TEXT NOT NULL DEFAULT 'unverified'
+                    CHECK(evidence_state IN ('unverified', 'falsified', 'reproduced')),
+                customer_state TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(customer_state IN ('pending', 'accepted', 'disputed')),
+                remediation_state TEXT NOT NULL DEFAULT 'unpatched'
+                    CHECK(remediation_state IN ('unpatched', 'micropatched', 'maintainer_patched')),
+                duplicate_of_claim_id TEXT,
+                blocker_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO claims({csv_cols}) SELECT {csv_cols} FROM _claims_v31_old;
+            DROP TABLE _claims_v31_old;
+            CREATE INDEX IF NOT EXISTS idx_claims_locus_mech ON claims(locus, mechanism_key);
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+
+
 def open_run_db(
     run_id_or_path: str | pathlib.Path,
     *,
@@ -524,6 +816,7 @@ def open_run_db(
         conn.executescript(SCHEMA_SQL)
     else:
         _ensure_v31_schema(conn)
+        _ensure_v32_schema(conn)
     return conn
 
 
@@ -694,12 +987,16 @@ def lease_next_task(
     now_iso = utc_now_iso()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        # Expire stale leases first.
+        # Expire stale leases first (`escalate` tasks are single-pass `max_leases=1` and close instead of looping).
         conn.execute(
             """
             UPDATE tasks
-            SET status = 'open', worker_id = NULL, lease_expires_at = NULL,
-                attempt_count = attempt_count + 1, updated_at = ?
+            SET status = CASE WHEN kind = 'escalate' THEN 'done' ELSE 'open' END,
+                worker_id = CASE WHEN kind = 'escalate' THEN worker_id ELSE NULL END,
+                lease_expires_at = NULL,
+                attempt_count = attempt_count + 1,
+                summary = CASE WHEN kind = 'escalate' AND summary = '' THEN 'Single-pass escalate lease expired' ELSE summary END,
+                updated_at = ?
             WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
             """,
             (now_iso, now),
@@ -740,7 +1037,7 @@ def lease_next_task(
             row = conn.execute(
                 """
                 SELECT * FROM tasks
-                WHERE status = 'open' AND kind IN ('falsify', 'reproduce', 'instrument', 'patch')
+                WHERE status = 'open' AND kind IN ('falsify', 'reproduce', 'instrument', 'chain', 'patch', 'escalate')
                 ORDER BY salience_score DESC, created_at ASC
                 LIMIT 1
                 """
@@ -1094,13 +1391,83 @@ def rescope_claim(
     }
 
 
-def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
+def checkpoint_task(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    worker_id: str,
+    state_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist structured trajectory checkpoint JSON onto `tasks.checkpoint_json` for clean session resume."""
+    row = conn.execute("SELECT task_id FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+    if row is None:
+        raise AjarError(f"Unknown task_id: {task_id}", EXIT_USER_ERROR)
+    clean_json = scrub_text(json.dumps(state_dict, sort_keys=True))
+    if len(clean_json.encode("utf-8")) > 2048:
+        raise AjarError("Task checkpoint exceeds 2 KB limit; store concise loci and verified facts only.", EXIT_USER_ERROR)
+    now_iso = utc_now_iso()
+    conn.execute(
+        "UPDATE tasks SET checkpoint_json = ?, updated_at = ? WHERE task_id = ?",
+        (clean_json, now_iso, task_id),
+    )
+    log_event(conn, worker_id, "task_checkpointed", task_id, {"keys": sorted(state_dict.keys())})
+    return {"task_id": task_id, "checkpoint": json.loads(clean_json), "updated_at": now_iso}
+
+
+def record_coverage_span(
+    conn: sqlite3.Connection,
+    *,
+    target_dir: pathlib.Path,
+    task_id: str | None,
+    worker_id: str,
+    rel_path: str,
+    start_line: int,
+    end_line: int,
+) -> dict[str, Any]:
+    """Record an audited source line range (`coverage_spans`) bound to file SHA-256."""
+    clean_rel = rel_path.strip().lstrip("./")
+    if start_line < 1 or end_line < start_line:
+        raise AjarError(f"Invalid line span {start_line}..{end_line} for {clean_rel}.", EXIT_USER_ERROR)
+    sha, s_ln, e_ln = file_locus_sha256(target_dir, f"{clean_rel}:{start_line}-{end_line}")
+    if not sha:
+        raise AjarError(f"Target file not found for coverage span: {clean_rel}", EXIT_USER_ERROR)
+    sid = new_id("cov")
+    now_iso = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO coverage_spans(span_id, task_id, worker_id, rel_path, start_line, end_line, file_sha256, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (sid, task_id, scrub_text(worker_id), clean_rel, s_ln, e_ln, sha, now_iso),
+    )
+    return {
+        "span_id": sid,
+        "task_id": task_id,
+        "rel_path": clean_rel,
+        "start_line": s_ln,
+        "end_line": e_ln,
+        "file_sha256": sha,
+    }
+
+
+def render_task_context(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    record_exposure: bool = False,
+) -> dict[str, Any]:
     """Build a prefix-stable `< 4 KB` (`<= 50` lines) certified context projection.
 
     Places run-invariant sections (`Goal`, `Active Workspace Steers`, sorted `Certified Bindings`)
     at the top of the prompt so multi-worker LLM calls hit provider KV prompt caches, followed
-    by the task-specific delta at the tail.
+    by the task-specific delta (`Capability Bridges`, `Active Epistemic Hooks`, `Dead Ends`) at the tail.
     """
+    from ajar.epistemic_hooks import (
+        detect_capability_bridges,
+        record_hook_lease_exposure,
+        select_active_hooks_for_task,
+    )
+
     task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
     if task is None:
         raise AjarError(f"Unknown task_id: {task_id}", EXIT_USER_ERROR)
@@ -1122,30 +1489,34 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
     ).fetchall()
     sub = task["subsystem"] or infer_subsystem(task["locus"] or "")
     direction = str(task["direction"] if "direction" in task.keys() and task["direction"] else "outside_in")
-    steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))[:5]
+    # Global steers only in the invariant prefix so cross-subsystem tasks share identical top bytes;
+    # path/subsystem steers appear in Task Delta if present.
+    all_active_steers = list_steers(conn, active_only=True, subsystem=sub, locus=str(task["locus"] or ""))[:5]
+    global_steers = [s for s in all_active_steers if s["scope"] == "global"]
+    scoped_steers = [s for s in all_active_steers if s["scope"] != "global"]
 
     anomalies = conn.execute(
         """
         SELECT anomaly_id, locus, observation FROM anomalies
         WHERE status = 'unexplained' AND (subsystem = ? OR subsystem = '')
-        ORDER BY created_at DESC LIMIT 4
+        ORDER BY created_at DESC LIMIT 3
         """,
         (sub,),
     ).fetchall()
     guarded_prims = conn.execute(
         """
         SELECT primitive_id, locus, kind, guarded_by_locus FROM primitives
-        WHERE chained = 0 AND guarded_by_locus != '' AND (subsystem = ? OR locus = ?)
+        WHERE chained = 0 AND guarded_by_locus != '' AND (subsystem = ? OR locus = ? OR guarded_by_locus = ?)
         ORDER BY created_at DESC LIMIT 3
         """,
-        (sub, task["locus"]),
+        (sub, task["locus"], task["locus"]),
     ).fetchall()
     dead_claims = conn.execute(
         """
-        SELECT claim_id, locus, mechanism, status FROM claims
+        SELECT claim_id, locus, mechanism, status, diff_state FROM claims
         WHERE (subsystem = ? OR locus = ?)
-          AND status IN ('falsified', 'rejected_repro', 'duplicate_root_cause')
-        ORDER BY updated_at DESC LIMIT 4
+          AND status IN ('falsified', 'rejected_repro', 'duplicate_root_cause', 'config_gated')
+        ORDER BY updated_at DESC LIMIT 3
         """,
         (sub, task["locus"]),
     ).fetchall()
@@ -1153,55 +1524,94 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
         """
         SELECT task_id, dry_control_locus, dry_control_reason FROM tasks
         WHERE status = 'dry' AND subsystem = ?
-        ORDER BY updated_at DESC LIMIT 4
+        ORDER BY updated_at DESC LIMIT 3
         """,
         (sub,),
     ).fetchall()
 
-    # 1. Run-Invariant Cacheable Prefix
-    lines: list[str] = [
+    bridges = detect_capability_bridges(conn, subsystem=sub, locus=str(task["locus"] or ""), limit=2)
+    active_hooks = select_active_hooks_for_task(conn, task, limit=2)
+    if active_hooks and record_exposure:
+        record_hook_lease_exposure(conn, [str(h["hook_id"]) for h in active_hooks])
+
+    # 1. Run-Invariant Cacheable Prefix (100% byte-identical across all tasks in the run!)
+    prefix_lines: list[str] = [
         f"# Certified Run Prefix: {(run['run_id'] if run else 'run')}",
         f"Goal: {(run['goal'] if run else '')[:160]}",
     ]
-    if steers:
-        lines.append("## Active Workspace Steers (operator threat-model boundaries)")
-        for st in steers:
-            lines.append(f"- [{st['scope']}:{st['target_filter'] or '*'}] {st['rule_text'][:110]}")
+    if global_steers:
+        prefix_lines.append("## Active Workspace Steers (operator threat-model boundaries)")
+        for st in global_steers:
+            prefix_lines.append(f"- [{st['scope']}:{st['target_filter'] or '*'}] {st['rule_text'][:110]}")
     if bindings:
-        lines.append("## Certified Bindings (valid=1)")
+        prefix_lines.append("## Certified Bindings (valid=1)")
         for b in bindings:
-            lines.append(f"- {b['name']} = {b['value'][:90]} @ {b['locus']}")
+            prefix_lines.append(f"- {b['name']} = {b['value'][:90]} @ {b['locus']}")
 
     # 2. Task-Specific Delta
-    lines.extend(
-        [
-            f"## Task Delta: {task['task_id']}",
-            f"Mode: skill_mode={task['skill_mode']} | kind={task['kind']} | direction={direction} | salience={task['salience_score']}",
-        ]
-    )
+    delta_lines: list[str] = [
+        f"## Task Delta: {task['task_id']}",
+        f"Mode: skill_mode={task['skill_mode']} | kind={task['kind']} | direction={direction} | salience={task['salience_score']}",
+    ]
     if task["skill_mode"] == "zero_skill":
-        lines.append("Rule: ZERO-SKILL FIRST-PRINCIPLES LEASE. Do NOT read skills/domains/*; derive invariants strictly from target code.")
-    lines.append(f"Target Locus: {task['locus'] or '(unassigned)'} (subsystem: {sub or 'root'})")
-    lines.append("Lineage: " + " -> ".join(lineage))
+        delta_lines.append("Rule: ZERO-SKILL FIRST-PRINCIPLES LEASE. Do NOT read skills/domains/*; derive invariants strictly from target code.")
+    delta_lines.append(f"Target Locus: {task['locus'] or '(unassigned)'} (subsystem: {sub or 'root'})")
+    delta_lines.append("Lineage: " + " -> ".join(lineage))
+    if scoped_steers:
+        for st in scoped_steers[:2]:
+            delta_lines.append(f"Subsystem Steer [{st['scope']}:{st['target_filter']}]: {st['rule_text'][:100]}")
+
+    raw_ckpt = str(task["checkpoint_json"] if "checkpoint_json" in task.keys() else "{}") or "{}"
+    if raw_ckpt != "{}":
+        delta_lines.append(f"## Trajectory Checkpoint: {raw_ckpt[:180]}")
+
+    if bridges:
+        delta_lines.append("## Cross-Subsystem Capability Bridges")
+        for br in bridges:
+            if br["bridge_type"] == "guarded_sink_upstream_audit":
+                delta_lines.append(
+                    f"- [guard_ref] {br['sink_id']}@{br['sink_locus']} ({br['sink_subsystem']}) blocked by {br['guard_locus']}"
+                )
+            elif br["providers"]:
+                pv = br["providers"][0]
+                hlp = f" helper={pv['helper']}" if pv.get("helper") else ""
+                mtags = ",".join(br["matched_tags"][:2])
+                delta_lines.append(
+                    f"- [{br['bridge_type']}] {pv['primitive_id']}@{pv['locus']} ({pv['subsystem']}) -> "
+                    f"{br['sink_id']}@{br['sink_locus']} tags=[{mtags}]{hlp}"
+                )
+            else:
+                delta_lines.append(
+                    f"- [missing_provider] {br['sink_id']}@{br['sink_locus']} needs tags=[{','.join(br['missing_tags'][:2])}]"
+                )
+
+    if active_hooks:
+        delta_lines.append("## Active Epistemic Hooks (obey Kill Rule to close dry fast)")
+        for hk in active_hooks:
+            delta_lines.append(f"- [{hk['hook_code']}] {hk['directive_text']} | Kill Rule: {hk['kill_rule']}")
 
     if guarded_prims:
-        lines.append("## Guarded Primitives (anti-premature-dry: test guard break before closing dry)")
+        delta_lines.append("## Guarded Primitives (anti-premature-dry: test guard break before closing dry)")
         for gp in guarded_prims:
-            lines.append(f"- {gp['primitive_id']} [{gp['kind']}] @ {gp['locus']} guarded_by={gp['guarded_by_locus']}")
+            delta_lines.append(f"- {gp['primitive_id']} [{gp['kind']}] @ {gp['locus']} guarded_by={gp['guarded_by_locus']}")
     if anomalies:
-        lines.append("## Unexplained Anomalies (must explain or consume)")
+        delta_lines.append("## Unexplained Anomalies (must explain or consume)")
         for a in anomalies:
-            lines.append(f"- {a['anomaly_id']} @ {a['locus']}: {a['observation'][:100]}")
+            delta_lines.append(f"- {a['anomaly_id']} @ {a['locus']}: {a['observation'][:100]}")
     if dead_claims or dry_controls:
-        lines.append("## Subsystem Dead Ends (do NOT repeat)")
+        delta_lines.append("## Subsystem Dead Ends (do NOT repeat)")
         for dc in dead_claims:
-            lines.append(f"- {dc['claim_id']} [{dc['status']}] @ {dc['locus']}: {dc['mechanism'][:80]}")
+            dtag = f"{dc['status']}:{dc['diff_state']}" if dc["diff_state"] else str(dc["status"])
+            delta_lines.append(f"- {dc['claim_id']} [{dtag}] @ {dc['locus']}: {dc['mechanism'][:80]}")
         for dr in dry_controls:
-            lines.append(f"- {dr['task_id']} [dry] guard @ {dr['dry_control_locus']}: {(dr['dry_control_reason'] or '')[:80]}")
+            delta_lines.append(f"- {dr['task_id']} [dry] guard @ {dr['dry_control_locus']}: {(dr['dry_control_reason'] or '')[:80]}")
 
     # Enforce strict <= 50 lines and < 4096 bytes.
-    lines = lines[:48]
-    markdown = "\n".join(lines)
+    max_delta = max(4, 48 - len(prefix_lines))
+    delta_lines = delta_lines[:max_delta]
+    certified_prefix = "\n".join(prefix_lines)
+    task_delta = "\n".join(delta_lines)
+    markdown = certified_prefix + "\n" + task_delta
     if len(markdown.encode("utf-8")) > 3900:
         markdown = markdown.encode("utf-8")[:3900].decode("utf-8", errors="ignore")
 
@@ -1211,29 +1621,40 @@ def render_task_context(conn: sqlite3.Connection, task_id: str) -> dict[str, Any
         "direction": direction,
         "suppress_domain_skills": task["skill_mode"] == "zero_skill",
         "salience_score": task["salience_score"],
-        "steers_count": len(steers),
+        "steers_count": len(all_active_steers),
         "bindings_count": len(bindings),
+        "bridges_count": len(bridges),
+        "active_hooks_count": len(active_hooks),
+        "active_hooks": [str(h["hook_code"]) for h in active_hooks],
         "unexplained_anomalies_count": len(anomalies),
         "dead_ends_count": len(dead_claims) + len(dry_controls),
+        "certified_prefix": certified_prefix,
+        "task_delta": task_delta,
         "rendered": markdown,
     }
 
 
 def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = None) -> dict[str, Any]:
-    """Deterministic maintenance sweep: expire leases, verify bindings, reopen unblocked tasks, rescore salience."""
+    """Deterministic maintenance sweep: expire leases/hooks, verify bindings, bridge tags, reopen unblocked tasks."""
+    from ajar.epistemic_hooks import expire_stale_hooks, parse_tag_list
+
     now = time.time()
     now_iso = utc_now_iso()
 
     cur_exp = conn.execute(
         """
         UPDATE tasks
-        SET status = 'open', worker_id = NULL, lease_expires_at = NULL,
-            attempt_count = attempt_count + 1, updated_at = ?
+        SET status = CASE WHEN kind = 'escalate' THEN 'done' ELSE 'open' END,
+            worker_id = CASE WHEN kind = 'escalate' THEN worker_id ELSE NULL END,
+            lease_expires_at = NULL,
+            attempt_count = attempt_count + 1,
+            updated_at = ?
         WHERE status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
         """,
         (now_iso, now),
     )
     expired_leases = int(cur_exp.rowcount or 0)
+    expired_hooks = expire_stale_hooks(conn)
 
     invalidated_bindings = 0
     if target_dir is not None and target_dir.is_dir():
@@ -1247,13 +1668,20 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
                     )
                     invalidated_bindings += 1
 
-    # Check `conditional_blocked` tasks against newly discovered primitives, anomalies, and findings.
+    # Check `conditional_blocked` tasks against newly discovered capability tags, primitives, anomalies, and findings.
     reopened_tasks: list[str] = []
     blocked_rows = conn.execute("SELECT * FROM tasks WHERE status = 'conditional_blocked'").fetchall()
     if blocked_rows:
         signal_blobs: list[str] = []
-        for p in conn.execute("SELECT locus, kind, postconditions, guarded_by_locus FROM primitives").fetchall():
-            signal_blobs.append(f"{p['locus']} {p['kind']} {p['postconditions']} {p['guarded_by_locus']}".lower())
+        provided_tag_set: set[str] = set()
+        for p in conn.execute(
+            "SELECT locus, kind, postconditions, guarded_by_locus, provides_tags_json FROM primitives"
+        ).fetchall():
+            ptags = parse_tag_list(p["provides_tags_json"])
+            provided_tag_set.update(ptags)
+            signal_blobs.append(
+                f"{p['locus']} {p['kind']} {p['postconditions']} {p['guarded_by_locus']} {' '.join(ptags)}".lower()
+            )
         for a in conn.execute("SELECT locus, observation FROM anomalies WHERE status = 'unexplained'").fetchall():
             signal_blobs.append(f"{a['locus']} {a['observation']}".lower())
         for f in conn.execute("SELECT locus, title, root_cause FROM findings").fetchall():
@@ -1264,7 +1692,10 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
             check_loc = (brow["blocker_check_locus"] or "").strip().lower()
             pred = (brow["blocker_predicate"] or "").strip().lower()
             matched = False
-            if check_loc and check_loc in combined_signals:
+            pred_tags = [t for t in parse_tag_list(pred) if ":" in t]
+            if pred_tags and any(pt in provided_tag_set for pt in pred_tags):
+                matched = True
+            elif check_loc and check_loc in combined_signals:
                 matched = True
             elif pred:
                 pred_tokens = [t for t in re.findall(r"[a-z0-9_]{4,}", pred) if t not in {"need", "when", "until", "with", "from"}]
@@ -1284,6 +1715,7 @@ def run_pulse(conn: sqlite3.Connection, *, target_dir: pathlib.Path | None = Non
     rescored = recompute_all_open_salience(conn)
     result = {
         "expired_leases": expired_leases,
+        "expired_hooks": expired_hooks,
         "invalidated_bindings": invalidated_bindings,
         "reopened_tasks": reopened_tasks,
         "rescored_open_tasks": rescored,
@@ -1329,12 +1761,13 @@ def record_repro_failure(
         conn.execute(
             """
             INSERT INTO tasks(
-                task_id, surface_id, kind, title, subsystem, locus, priority,
+                task_id, parent_claim_id, surface_id, kind, title, subsystem, locus, priority,
                 status, salience_score, summary, created_at, updated_at
-            ) VALUES (?, ?, 'instrument', ?, ?, ?, 'critical', 'open', 85, ?, ?, ?)
+            ) VALUES (?, ?, ?, 'instrument', ?, ?, ?, 'critical', 'open', 85, ?, ?, ?)
             """,
             (
                 instrument_task_id,
+                claim_id,
                 claim["surface_id"],
                 f"Instrument target state for stalled reproduction of {claim_id}",
                 sub,

@@ -1,20 +1,25 @@
-"""8-Arm Production Remediation Verifier (`ajar patch verify` — `Fixes` gate).
+"""9-Arm Production Remediation Verifier (`ajar patch verify` — `Fixes` gate).
 
 Separates fast finding reproduction (`ajar claim reproduce`, Arms 1–4) from
 maintainer-ready `Fixes` promotion (`remediation_state = 'maintainer_patched'`):
 - Arms 1–4: Counterfactual root-cause & locus-match proof (`clean+PoC`, `clean+control`,
   `patch+PoC`, `patch+control`)
-- Arm 5: Full project test suite passes on the patched tree (`--suite-cmd`)
-- Arm 6: `>= 3` distinct bypass variants all blocked on the patched tree (`--variant-cmd`)
-- Arm 7: Caller NULL/error-return path safety audit (`GhostLock` regression guard)
-- Arm 8: Sibling-route / peer-hook symmetry audit across parallel entrypoints
+- Arm 5: Full project test suite passes on patched tree or introduces zero new test
+  regressions relative to cached clean-`HEAD` baseline (`repro/baseline_suite.json`)
+- Arm 6: `>= 3` distinct `--variant-cmd` bypass probes (`>= 1` proven to trigger on
+  unpatched `HEAD`, blocking trivial `true` commands) all blocked on patched tree
+- Arm 7: Caller NULL/error-return safety audit + optional executable `--caller-cmd`
+- Arm 8: Sibling-route / peer-hook symmetry audit + optional executable `--sibling-cmd`
+- Arm 9: `git apply -R` patch-revert re-failure proof (`poc_cmd` triggers again after revert)
 """
 
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import pathlib
+import re
 import sqlite3
 import subprocess
 from typing import Any, Sequence
@@ -32,6 +37,62 @@ from ajar.repro_source import (
     run_source_reproduction,
 )
 
+FAILURE_MARKER_RE = re.compile(
+    r"^(?:FAIL(?:ED)?\b.*|ERROR\b.*|---\s*FAIL:\s*\S+.*|.*::\S+\s+FAILED\b.*|test\s+\S+\s+\.\.\.\s+FAILED.*)$",
+    re.MULTILINE,
+)
+
+
+def _extract_failure_markers(stdout: str, stderr: str) -> list[str]:
+    combined = f"{stdout}\n{stderr}"
+    markers = {m.strip()[:160] for m in FAILURE_MARKER_RE.findall(combined) if m.strip()}
+    return sorted(markers)
+
+
+def _load_or_run_baseline_suite(
+    suite_cmd: str,
+    *,
+    repro_dir: pathlib.Path,
+    slot_dir: pathlib.Path,
+    cache_dir: pathlib.Path,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    """Run or load cached clean-`HEAD` baseline suite receipt (`repro/baseline_suite.json`)."""
+    cache_file = repro_dir / "baseline_suite.json"
+    cmd_key = hashlib.sha256(suite_cmd.strip().encode("utf-8")).hexdigest()[:16]
+    store: dict[str, Any] = {}
+    if cache_file.is_file():
+        try:
+            loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                store = loaded
+        except json.JSONDecodeError:
+            store = {}
+
+    if cmd_key in store and isinstance(store[cmd_key], dict):
+        return dict(store[cmd_key])
+
+    res = _run_trials(
+        suite_cmd,
+        slot_dir=slot_dir,
+        cache_dir=cache_dir,
+        timeout_sec=timeout_sec,
+        oracle=None,
+        trials=1,
+    )
+    subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+    subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+
+    entry = {
+        "suite_cmd": scrub_text(suite_cmd.strip()),
+        "exit_code": int(res["exit_code"]),
+        "timed_out": bool(res["timed_out"]),
+        "failure_markers": _extract_failure_markers(str(res.get("stdout", "")), str(res.get("stderr", ""))),
+    }
+    store[cmd_key] = entry
+    cache_file.write_text(json.dumps(store, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return entry
+
 
 def run_8arm_patch_verification(
     conn: sqlite3.Connection,
@@ -44,13 +105,15 @@ def run_8arm_patch_verification(
     variant_cmds: Sequence[str],
     caller_audit: str,
     sibling_audit: str,
+    caller_cmd: str = "",
+    sibling_cmd: str = "",
     oracle: dict[str, Any] | None = None,
     shared_guard_locus: str = "",
     max_changed_lines: int = 120,
     timeout_sec: int = 90,
     worker_id: str = "worker",
 ) -> dict[str, Any]:
-    """Execute all 8 verification arms before promoting a fix to `maintainer_patched`."""
+    """Execute all 9 hardened verification arms before promoting a fix to `maintainer_patched`."""
     finding = conn.execute("SELECT * FROM findings WHERE finding_id = ?", (finding_id,)).fetchone()
     if finding is None:
         raise AjarError(f"Unknown finding_id: {finding_id}", EXIT_USER_ERROR)
@@ -59,6 +122,11 @@ def run_8arm_patch_verification(
     if len(clean_variants) < 3:
         raise AjarError(
             f"Arm 6 requires at least 3 distinct --variant-cmd bypass tests (got {len(clean_variants)}).",
+            EXIT_GATE_BLOCKED,
+        )
+    if len(set(clean_variants)) < len(clean_variants):
+        raise AjarError(
+            "Arm 6 requires distinct --variant-cmd bypass tests; duplicate commands are rejected.",
             EXIT_GATE_BLOCKED,
         )
     if not suite_cmd.strip():
@@ -74,6 +142,15 @@ def run_8arm_patch_verification(
             EXIT_GATE_BLOCKED,
         )
 
+    eff_oracle = oracle
+    if eff_oracle is None and "oracle_json" in finding.keys():
+        try:
+            parsed_oracle = json.loads(str(finding["oracle_json"] or "{}"))
+            if isinstance(parsed_oracle, dict) and parsed_oracle:
+                eff_oracle = parsed_oracle
+        except json.JSONDecodeError:
+            eff_oracle = None
+
     claim_id = str(finding["claim_id"])
     base_repro = run_source_reproduction(
         run_dir=run_dir,
@@ -82,7 +159,7 @@ def run_8arm_patch_verification(
         poc_cmd=str(finding["poc_cmd"]),
         control_cmd=str(finding["control_cmd"]),
         micropatch_path=patch_path,
-        oracle=oracle,
+        oracle=eff_oracle,
         timeout_sec=timeout_sec,
         claim_locus=str(finding["locus"]),
         shared_guard_locus=shared_guard_locus,
@@ -98,7 +175,9 @@ def run_8arm_patch_verification(
         "arm6_bypass_variants": {"arm_passed": False, "variants": []},
         "arm7_caller_audit": {"arm_passed": True, "notes": scrub_text(caller_audit.strip()[:600])},
         "arm8_sibling_audit": {"arm_passed": True, "notes": scrub_text(sibling_audit.strip()[:600])},
+        "arm9_revert_poc": {"arm_passed": False},
     }
+    baseline_suite: dict[str, Any] = {}
 
     if not base_repro["passed"]:
         return _persist_patch_verification(
@@ -111,6 +190,9 @@ def run_8arm_patch_verification(
             variant_cmds=clean_variants,
             caller_audit=caller_audit,
             sibling_audit=sibling_audit,
+            caller_cmd=caller_cmd,
+            sibling_cmd=sibling_cmd,
+            baseline_suite=baseline_suite,
             arms=arms,
             passed=False,
             reason=f"Arms 1-4 failed: {base_repro['reason']}",
@@ -128,6 +210,63 @@ def run_8arm_patch_verification(
 
     try:
         _prepare_slot_worktree(mirror_dir, slot_dir)
+
+        # Clean-HEAD pre-checks:
+        # (a) Record/load clean-HEAD suite baseline (`AISLE` baseline diffing).
+        baseline_suite = _load_or_run_baseline_suite(
+            suite_cmd,
+            repro_dir=repro_dir,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+        )
+
+        # (b) Verify >= 1 `--variant-cmd` triggers the defect on unpatched `HEAD` (blocks `--variant-cmd true` x3).
+        clean_variant_hits = 0
+        for vcmd in clean_variants:
+            cv_res = _run_trials(
+                vcmd,
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                oracle=eff_oracle,
+                trials=1,
+            )
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=False)
+            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=False)
+            if int(cv_res["defect_hits"]) >= 1:
+                clean_variant_hits += 1
+
+        if clean_variant_hits == 0:
+            arms["arm6_bypass_variants"] = {
+                "arm_passed": False,
+                "clean_head_hits": 0,
+                "variant_count": len(clean_variants),
+                "variants": [],
+            }
+            return _persist_patch_verification(
+                conn,
+                finding_id=finding_id,
+                claim_id=claim_id,
+                patch_path=patch_path,
+                patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                suite_cmd=suite_cmd,
+                variant_cmds=clean_variants,
+                caller_audit=caller_audit,
+                sibling_audit=sibling_audit,
+                caller_cmd=caller_cmd,
+                sibling_cmd=sibling_cmd,
+                baseline_suite=baseline_suite,
+                arms=arms,
+                passed=False,
+                reason=(
+                    "Arm 6 failed pre-flight: zero --variant-cmd commands triggered the defect oracle on clean HEAD "
+                    "(noop variants such as `true` are rejected)."
+                ),
+                worker_id=worker_id,
+            )
+
+        # Apply candidate production patch onto `slot-<k>`.
         subprocess.run(
             ["git", "-C", str(slot_dir), "apply", "--whitespace=nowarn", str(patch_path.resolve())],
             capture_output=True,
@@ -138,7 +277,7 @@ def run_8arm_patch_verification(
         _neutralize_python_pth_escapes(slot_dir)
         _bump_files_mtime(slot_dir, touched_files, watermark_file)
 
-        # Arm 5: Full test suite must exit 0 without defect or timeout.
+        # Arm 5: Full test suite passes (exit 0) OR introduces zero new failure markers vs clean-HEAD baseline.
         suite_res = _run_trials(
             suite_cmd,
             slot_dir=slot_dir,
@@ -147,8 +286,25 @@ def run_8arm_patch_verification(
             oracle=None,
             trials=1,
         )
-        suite_passed = int(suite_res["exit_code"]) == 0 and not bool(suite_res["timed_out"])
-        arms["arm5_full_suite"] = {**suite_res, "arm_passed": suite_passed}
+        patched_markers = _extract_failure_markers(str(suite_res.get("stdout", "")), str(suite_res.get("stderr", "")))
+        base_markers = set(baseline_suite.get("failure_markers") or [])
+        new_regressions = sorted(set(patched_markers) - base_markers)
+
+        if bool(suite_res["timed_out"]):
+            suite_passed = False
+        elif int(suite_res["exit_code"]) == 0:
+            suite_passed = True
+        elif int(baseline_suite.get("exit_code", 0)) != 0 and patched_markers and not new_regressions:
+            suite_passed = True
+        else:
+            suite_passed = False
+
+        arms["arm5_full_suite"] = {
+            **suite_res,
+            "arm_passed": suite_passed,
+            "baseline_exit_code": baseline_suite.get("exit_code", 0),
+            "new_regressions": new_regressions,
+        }
         if not suite_passed:
             return _persist_patch_verification(
                 conn,
@@ -160,9 +316,12 @@ def run_8arm_patch_verification(
                 variant_cmds=clean_variants,
                 caller_audit=caller_audit,
                 sibling_audit=sibling_audit,
+                caller_cmd=caller_cmd,
+                sibling_cmd=sibling_cmd,
+                baseline_suite=baseline_suite,
                 arms=arms,
                 passed=False,
-                reason=f"Arm 5 (full suite) failed on patched tree (exit={suite_res['exit_code']}).",
+                reason=f"Arm 5 (full suite) failed on patched tree (exit={suite_res['exit_code']}, new_regressions={new_regressions[:3]}).",
                 worker_id=worker_id,
             )
 
@@ -175,7 +334,7 @@ def run_8arm_patch_verification(
                 slot_dir=slot_dir,
                 cache_dir=cache_dir,
                 timeout_sec=timeout_sec,
-                oracle=oracle,
+                oracle=eff_oracle,
                 trials=1,
             )
             v_blocked = int(vres["defect_hits"]) == 0 and not bool(vres["timed_out"])
@@ -185,6 +344,7 @@ def run_8arm_patch_verification(
 
         arms["arm6_bypass_variants"] = {
             "arm_passed": all_variants_blocked,
+            "clean_head_hits": clean_variant_hits,
             "variant_count": len(clean_variants),
             "variants": variant_results,
         }
@@ -199,9 +359,144 @@ def run_8arm_patch_verification(
                 variant_cmds=clean_variants,
                 caller_audit=caller_audit,
                 sibling_audit=sibling_audit,
+                caller_cmd=caller_cmd,
+                sibling_cmd=sibling_cmd,
+                baseline_suite=baseline_suite,
                 arms=arms,
                 passed=False,
                 reason="Arm 6 failed: one or more bypass variants still triggered the defect on the patched tree.",
+                worker_id=worker_id,
+            )
+
+        # Arm 7: Optional executable caller error-handling test (`--caller-cmd`).
+        if caller_cmd.strip():
+            c_res = _run_trials(
+                caller_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                oracle=None,
+                trials=1,
+            )
+            c_ok = int(c_res["exit_code"]) == 0 and not bool(c_res["timed_out"])
+            arms["arm7_caller_audit"] = {
+                "arm_passed": c_ok,
+                "notes": scrub_text(caller_audit.strip()[:600]),
+                "cmd_result": c_res,
+            }
+            if not c_ok:
+                return _persist_patch_verification(
+                    conn,
+                    finding_id=finding_id,
+                    claim_id=claim_id,
+                    patch_path=patch_path,
+                    patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                    suite_cmd=suite_cmd,
+                    variant_cmds=clean_variants,
+                    caller_audit=caller_audit,
+                    sibling_audit=sibling_audit,
+                    caller_cmd=caller_cmd,
+                    sibling_cmd=sibling_cmd,
+                    baseline_suite=baseline_suite,
+                    arms=arms,
+                    passed=False,
+                    reason=f"Arm 7 (--caller-cmd) failed caller error-return check (exit={c_res['exit_code']}).",
+                    worker_id=worker_id,
+                )
+
+        # Arm 8: Optional executable sibling-entrypoint symmetry test (`--sibling-cmd`).
+        if sibling_cmd.strip():
+            s_res = _run_trials(
+                sibling_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                oracle=eff_oracle,
+                trials=1,
+            )
+            s_ok = int(s_res["defect_hits"]) == 0 and int(s_res["exit_code"]) == 0 and not bool(s_res["timed_out"])
+            arms["arm8_sibling_audit"] = {
+                "arm_passed": s_ok,
+                "notes": scrub_text(sibling_audit.strip()[:600]),
+                "cmd_result": s_res,
+            }
+            if not s_ok:
+                return _persist_patch_verification(
+                    conn,
+                    finding_id=finding_id,
+                    claim_id=claim_id,
+                    patch_path=patch_path,
+                    patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                    suite_cmd=suite_cmd,
+                    variant_cmds=clean_variants,
+                    caller_audit=caller_audit,
+                    sibling_audit=sibling_audit,
+                    caller_cmd=caller_cmd,
+                    sibling_cmd=sibling_cmd,
+                    baseline_suite=baseline_suite,
+                    arms=arms,
+                    passed=False,
+                    reason=f"Arm 8 (--sibling-cmd) failed sibling symmetry check (exit={s_res['exit_code']}, hits={s_res['defect_hits']}).",
+                    worker_id=worker_id,
+                )
+
+        # Arm 9: `git apply -R` patch-revert re-failure proof (`Trail of Bits` patching-bugs discipline).
+        rev_proc = subprocess.run(
+            ["git", "-C", str(slot_dir), "apply", "-R", "--whitespace=nowarn", str(patch_path.resolve())],
+            capture_output=True,
+            text=True,
+            env=scrubbed_subprocess_env(),
+            check=False,
+        )
+        if rev_proc.returncode != 0:
+            arms["arm9_revert_poc"] = {"arm_passed": False, "stderr": scrub_text(rev_proc.stderr[:240])}
+            return _persist_patch_verification(
+                conn,
+                finding_id=finding_id,
+                claim_id=claim_id,
+                patch_path=patch_path,
+                patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                suite_cmd=suite_cmd,
+                variant_cmds=clean_variants,
+                caller_audit=caller_audit,
+                sibling_audit=sibling_audit,
+                caller_cmd=caller_cmd,
+                sibling_cmd=sibling_cmd,
+                baseline_suite=baseline_suite,
+                arms=arms,
+                passed=False,
+                reason=f"Arm 9 (`git apply -R`) failed to revert cleanly: {scrub_text(rev_proc.stderr[:180])}",
+                worker_id=worker_id,
+            )
+
+        _bump_files_mtime(slot_dir, touched_files, watermark_file)
+        rev_poc_res = _run_trials(
+            str(finding["poc_cmd"]),
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            oracle=eff_oracle,
+            trials=1,
+        )
+        rev_passed = int(rev_poc_res["defect_hits"]) >= 1
+        arms["arm9_revert_poc"] = {**rev_poc_res, "arm_passed": rev_passed}
+        if not rev_passed:
+            return _persist_patch_verification(
+                conn,
+                finding_id=finding_id,
+                claim_id=claim_id,
+                patch_path=patch_path,
+                patch_diff=str(base_repro.get("micropatch_diff") or ""),
+                suite_cmd=suite_cmd,
+                variant_cmds=clean_variants,
+                caller_audit=caller_audit,
+                sibling_audit=sibling_audit,
+                caller_cmd=caller_cmd,
+                sibling_cmd=sibling_cmd,
+                baseline_suite=baseline_suite,
+                arms=arms,
+                passed=False,
+                reason="Arm 9 failed: reverting patch (`git apply -R`) did not re-trigger the PoC defect oracle.",
                 worker_id=worker_id,
             )
 
@@ -215,9 +510,12 @@ def run_8arm_patch_verification(
             variant_cmds=clean_variants,
             caller_audit=caller_audit,
             sibling_audit=sibling_audit,
+            caller_cmd=caller_cmd,
+            sibling_cmd=sibling_cmd,
+            baseline_suite=baseline_suite,
             arms=arms,
             passed=True,
-            reason="All 8 production patch verification arms passed; promoted to maintainer_patched.",
+            reason="All 9 production patch verification arms passed (including clean-HEAD variant & revert proof); promoted to maintainer_patched.",
             worker_id=worker_id,
         )
     finally:
@@ -227,6 +525,9 @@ def run_8arm_patch_verification(
             _bump_files_mtime(slot_dir, touched_files, watermark_file)
         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         lock_fh.close()
+
+
+run_9arm_patch_verification = run_8arm_patch_verification
 
 
 def _persist_patch_verification(
@@ -240,6 +541,9 @@ def _persist_patch_verification(
     variant_cmds: Sequence[str],
     caller_audit: str,
     sibling_audit: str,
+    caller_cmd: str,
+    sibling_cmd: str,
+    baseline_suite: dict[str, Any],
     arms: dict[str, Any],
     passed: bool,
     reason: str,
@@ -252,8 +556,9 @@ def _persist_patch_verification(
         INSERT INTO patch_verifications(
             verification_id, finding_id, claim_id, patch_path, patch_diff,
             suite_cmd, variant_cmds_json, caller_audit, sibling_audit,
-            arms_json, passed, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            arms_json, baseline_suite_json, arm7_caller_cmd, arm8_sibling_cmd,
+            arm9_revert_poc_json, passed, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             vid,
@@ -266,6 +571,10 @@ def _persist_patch_verification(
             scrub_text(caller_audit.strip()),
             scrub_text(sibling_audit.strip()),
             json.dumps(arms, sort_keys=True),
+            json.dumps(baseline_suite, sort_keys=True),
+            scrub_text(caller_cmd.strip()),
+            scrub_text(sibling_cmd.strip()),
+            json.dumps(arms.get("arm9_revert_poc", {}), sort_keys=True),
             1 if passed else 0,
             now_iso,
         ),

@@ -2,8 +2,12 @@
 
 Replaces prompt-heavy prose wrappers with deterministic BM25 full-text lookup:
 - `intent`: READMEs, architecture docs, and inline security/invariant comments
-- `reachability`: public routes, handlers, RPC/CLI entrypoints, and extern functions
-- `precedent`: curated CVE, exploit-chain, fix-diff, and false-positive corpora
+  (tagged `provenance='untrusted_target'` so prompt-injected or misleading docs
+  never masquerade as verified code guards)
+- `reachability`: public routes, handlers, RPC/CLI entrypoints, top-level public functions,
+  FFI/intrinsics, and outbound response deserialization sinks (`provenance='code_symbol'`)
+- `precedent`: curated CVE, defect-chain, fix-diff, and false-positive corpora
+  (`provenance='trusted_builtin'`)
 """
 
 from __future__ import annotations
@@ -25,11 +29,14 @@ INVARIANT_COMMENT_RE = re.compile(
 REACHABILITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("python_route", re.compile(r"^\s*@(?:app|router|bp|api)\.(?:route|get|post|put|delete|patch)\b")),
     ("python_cli", re.compile(r"\badd_parser\s*\(|^\s*def\s+do_[A-Za-z0-9_]+\s*\(")),
+    ("python_public_def", re.compile(r"^def\s+(?!_|test_)([A-Za-z][A-Za-z0-9_]*)\s*\(")),
     ("http_handler", re.compile(r"\b(?:HandleFunc|Handle|Get|Post|Put|Delete)\s*\(\s*[\"']/")),
     ("solidity_entry", re.compile(r"^\s*function\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*(?:[^{]*\b(?:external|public)\b)")),
     ("rust_pub_entry", re.compile(r"^\s*pub\s+(?:async\s+)?(?:extern\s+[\"']C[\"']\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*")),
     ("ts_export_handler", re.compile(r"^\s*export\s+(?:default\s+)?(?:async\s+)?function\s+(?:GET|POST|PUT|DELETE|PATCH|fetch|[A-Za-z_][A-Za-z0-9_]*)")),
     ("c_entry", re.compile(r"^\s*(?:int\s+main\s*\(|ssize_t\s+|int\s+parse_[A-Za-z0-9_]*\s*\()")),
+    ("ffi_intrinsic", re.compile(r"(?:@IntrinsicCandidate|\bextern\s+\"C\"|\bctypes\.CDLL\b|\bcgo\b)")),
+    ("peer_response_sink", re.compile(r"\b(?:json\.loads|pickle\.loads|yaml\.load|xml\.etree|json\.Unmarshal)\s*\(")),
 )
 
 
@@ -41,7 +48,8 @@ def _ensure_fts_tables(conn: sqlite3.Connection) -> None:
             kind TEXT NOT NULL CHECK(kind IN ('intent', 'reachability', 'precedent')),
             title TEXT NOT NULL,
             locus TEXT NOT NULL,
-            body TEXT NOT NULL
+            body TEXT NOT NULL,
+            provenance TEXT NOT NULL DEFAULT 'untrusted_target'
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS oracle_fts USING fts5(
             doc_id UNINDEXED,
@@ -52,6 +60,9 @@ def _ensure_fts_tables(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(oracle_docs)").fetchall()}
+    if "provenance" not in cols:
+        conn.execute("ALTER TABLE oracle_docs ADD COLUMN provenance TEXT NOT NULL DEFAULT 'untrusted_target'")
 
 
 def _default_references_dir() -> pathlib.Path | None:
@@ -112,12 +123,12 @@ def index_target_oracles(
     root = target_dir.resolve()
     base_root = root.parent if root.is_file() else root
 
-    def insert_doc(doc_id: str, kind: str, title: str, locus: str, body: str) -> None:
+    def insert_doc(doc_id: str, kind: str, title: str, locus: str, body: str, provenance: str) -> None:
         c_title = scrub_text(title)
         c_body = scrub_text(body)
         conn.execute(
-            "INSERT OR REPLACE INTO oracle_docs(doc_id, kind, title, locus, body) VALUES (?, ?, ?, ?, ?)",
-            (doc_id, kind, c_title, locus, c_body),
+            "INSERT OR REPLACE INTO oracle_docs(doc_id, kind, title, locus, body, provenance) VALUES (?, ?, ?, ?, ?, ?)",
+            (doc_id, kind, c_title, locus, c_body, provenance),
         )
         conn.execute(
             "INSERT INTO oracle_fts(doc_id, kind, title, locus, body) VALUES (?, ?, ?, ?, ?)",
@@ -125,7 +136,7 @@ def index_target_oracles(
         )
         counts[kind] += 1
 
-    # 1. Index target markdown docs into `intent`.
+    # 1. Index target markdown docs into `intent` (`untrusted_target`).
     if root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
             rel_dir = pathlib.Path(dirpath).relative_to(root)
@@ -143,7 +154,7 @@ def index_target_oracles(
                 if fpath.suffix.lower() in (".md", ".txt", ".rst"):
                     rel = str(fpath.relative_to(base_root))
                     for c_idx, (title, locus, body) in enumerate(_chunk_markdown_sections(fpath, rel)):
-                        insert_doc(f"intent:doc:{rel}:{c_idx}", "intent", title, locus, body)
+                        insert_doc(f"intent:doc:{rel}:{c_idx}", "intent", title, locus, body, "untrusted_target")
 
     # 2. Index inline invariant comments (`intent`) and entrypoints (`reachability`) across source files.
     for fpath in iter_source_files(root):
@@ -163,6 +174,7 @@ def index_target_oracles(
                     f"Code invariant note in {rel}",
                     f"{rel}:{idx}",
                     window[:900],
+                    "untrusted_target",
                 )
             for label, pat in REACHABILITY_PATTERNS:
                 if pat.search(line):
@@ -173,23 +185,23 @@ def index_target_oracles(
                         f"{label} @ {rel}:{idx}",
                         f"{rel}:{idx}",
                         snippet[:900],
+                        "code_symbol",
                     )
                     break
 
-    # 3. Index `precedent` reference corpora.
+    # 3. Index `precedent` reference corpora (`trusted_builtin`).
     ref_root = references_dir if references_dir is not None else _default_references_dir()
     if ref_root is not None and ref_root.is_dir():
         for md_file in sorted(ref_root.glob("*.md")):
             rel = md_file.name
             for c_idx, (title, locus, body) in enumerate(_chunk_markdown_sections(md_file, rel)):
-                insert_doc(f"precedent:{rel}:{c_idx}", "precedent", title, locus, body)
+                insert_doc(f"precedent:{rel}:{c_idx}", "precedent", title, locus, body, "trusted_builtin")
 
     return counts
 
 
 def _build_safe_fts_query(raw_query: str) -> str:
     """Convert arbitrary user/CVE queries (e.g. `CVE-2021-31207`) into syntax-safe FTS5 expressions."""
-    # Extract hyphenated IDs (CVE-2021-31207, ZDI-21-815, GHSA-...) as exact quoted phrases AND alphanumeric tokens.
     phrases = re.findall(r"[A-Za-z]+-\d{2,4}-[A-Za-z0-9-]+", raw_query)
     tokens = re.findall(r"[A-Za-z0-9_]{2,}", raw_query)
     parts: list[str] = []
@@ -224,11 +236,13 @@ def query_oracle(
     if kind and kind != "all":
         rows = conn.execute(
             """
-            SELECT doc_id, kind, title, locus,
+            SELECT f.doc_id, f.kind, f.title, f.locus,
+                   COALESCE(d.provenance, 'untrusted_target') AS provenance,
                    snippet(oracle_fts, 4, '[', ']', ' ... ', 32) AS snippet,
                    bm25(oracle_fts) AS rank_score
-            FROM oracle_fts
-            WHERE oracle_fts MATCH ? AND kind = ?
+            FROM oracle_fts f
+            LEFT JOIN oracle_docs d ON f.doc_id = d.doc_id
+            WHERE oracle_fts MATCH ? AND f.kind = ?
             ORDER BY rank_score ASC
             LIMIT ?
             """,
@@ -237,10 +251,12 @@ def query_oracle(
     else:
         rows = conn.execute(
             """
-            SELECT doc_id, kind, title, locus,
+            SELECT f.doc_id, f.kind, f.title, f.locus,
+                   COALESCE(d.provenance, 'untrusted_target') AS provenance,
                    snippet(oracle_fts, 4, '[', ']', ' ... ', 32) AS snippet,
                    bm25(oracle_fts) AS rank_score
-            FROM oracle_fts
+            FROM oracle_fts f
+            LEFT JOIN oracle_docs d ON f.doc_id = d.doc_id
             WHERE oracle_fts MATCH ?
             ORDER BY rank_score ASC
             LIMIT ?
@@ -248,14 +264,20 @@ def query_oracle(
             (fts_expr, int(limit)),
         ).fetchall()
 
-    return [
-        {
-            "doc_id": r["doc_id"],
-            "kind": r["kind"],
-            "title": r["title"],
-            "locus": r["locus"],
-            "snippet": r["snippet"],
-            "score": round(float(-r["rank_score"]), 4),
-        }
-        for r in rows
-    ]
+    results: list[dict[str, Any]] = []
+    for r in rows:
+        prov = str(r["provenance"] or "untrusted_target")
+        raw_snip = str(r["snippet"] or "")
+        snip = f"[UNTRUSTED_TARGET_DOC: verify in code] {raw_snip}" if prov == "untrusted_target" else raw_snip
+        results.append(
+            {
+                "doc_id": r["doc_id"],
+                "kind": r["kind"],
+                "title": r["title"],
+                "locus": r["locus"],
+                "provenance": prov,
+                "snippet": snip,
+                "score": round(float(-r["rank_score"]), 4),
+            }
+        )
+    return results

@@ -49,7 +49,19 @@ def build_report_data(
     active_steers = list_steers(conn, active_only=True)
     patch_verifications = list_rows(
         conn,
-        "SELECT verification_id, finding_id, claim_id, passed, caller_audit, sibling_audit, created_at FROM patch_verifications ORDER BY created_at ASC",
+        "SELECT verification_id, finding_id, claim_id, passed, caller_audit, sibling_audit, arm9_revert_poc_json, created_at FROM patch_verifications ORDER BY created_at ASC",
+    )
+    epistemic_hooks = list_rows(
+        conn,
+        "SELECT hook_id, hook_code, subsystem, target_locus, status, leases_seen FROM epistemic_hooks ORDER BY created_at ASC",
+    )
+    primitive_helpers = list_rows(
+        conn,
+        "SELECT helper_id, primitive_id, module_name, callable_name, provides_tags_json, verified FROM primitive_helpers ORDER BY created_at ASC",
+    )
+    coverage_spans = list_rows(
+        conn,
+        "SELECT span_id, task_id, rel_path, start_line, end_line, file_sha256 FROM coverage_spans ORDER BY rel_path ASC, start_line ASC",
     )
     claim_counts = {
         r["status"]: int(r["c"])
@@ -62,6 +74,7 @@ def build_report_data(
         "run_id": run.get("run_id", ""),
         "target_path": run.get("target_path", ""),
         "target_mode": run.get("target_mode", "source"),
+        "diff_range": run.get("diff_range", ""),
         "goal": run.get("goal", ""),
         "status": run.get("status", ""),
         "commitment_hash": run.get("commitment_hash", ""),
@@ -70,6 +83,9 @@ def build_report_data(
         "findings": findings,
         "verified_chains": chains,
         "patch_verifications": patch_verifications,
+        "epistemic_hooks": epistemic_hooks,
+        "primitive_helpers": primitive_helpers,
+        "coverage_spans": coverage_spans,
         "active_steers": active_steers,
         "surfaces_covered": surfaces,
         "dry_controls": dry_controls,
@@ -85,7 +101,7 @@ def build_report_data(
             """
             SELECT claim_id, title, locus, status, falsify_notes, falsify_control_locus
             FROM claims
-            WHERE status IN ('falsified', 'rejected_repro', 'duplicate_root_cause')
+            WHERE status IN ('falsified', 'rejected_repro', 'duplicate_root_cause', 'config_gated')
             ORDER BY updated_at ASC
             """,
         )
@@ -131,9 +147,11 @@ def render_markdown_report(
                     f"- **Root Cause:** {f['root_cause']}",
                     f"- **Reproduction Command (Arm 1):** `{f['poc_cmd']}`",
                     f"- **Benign Control Command (Arm 2):** `{f['control_cmd']}`",
-                    "",
                 ]
             )
+            if f.get("ub_divergence_class"):
+                lines.append(f"- **Release UB Differential (Arms 5A/5B):** `{f['ub_divergence_class']}`")
+            lines.append("")
             if f.get("micropatch_diff"):
                 lines.extend(
                     [
@@ -151,7 +169,7 @@ def render_markdown_report(
         for c in data["verified_chains"]:
             lines.append(
                 f"- **[{str(c['severity']).upper()}] {c['title']} (`{c['chain_id']}`):** "
-                f"Steps `{c['step_ids_json']}` | PoC: `{c['e2e_poc_cmd']}`"
+                f"Steps `{c['step_ids_json']}` | Ablation `{c.get('ablation_matrix_json', '[]')}` | PoC: `{c['e2e_poc_cmd']}`"
             )
         lines.append("")
 

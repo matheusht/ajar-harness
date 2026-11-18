@@ -1117,6 +1117,132 @@ class TestV32HooksAndComposableRepro(unittest.TestCase):
         )
         self.assertFalse(flagged_real)
 
+    def test_uncapped_campaign_brief_and_cohesive_15k_slice_cap(self) -> None:
+        repo = self.tmp_path / "large_c_repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        # Write a 5,200-line cohesive C state machine (previously split at 3,500 LoC!)
+        c_lines = ["int merge_step(int x) { return x + 1; }"] + [f"// state line {i}" for i in range(5198)] + ["int merge_finish(int x) { return merge_step(x); }"]
+        (repo / "merge_ort.c").write_text("\n".join(c_lines) + "\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@ajar.local"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Ajar Test"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial 5200-line C file"], cwd=repo, check=True)
+
+        brief_md = self.tmp_path / "campaign_brief.md"
+        brief_md.write_text(
+            "# Lead Orchestrator Campaign Brief\n"
+            "## Critical-Class Catalog\n"
+            "- C1: Untrusted repository RCE or out-of-worktree write.\n"
+            "- C5: Unattended server/CI queue exploitation.\n",
+            encoding="utf-8",
+        )
+
+        rc_init, info = _run_cli(
+            [
+                "init",
+                str(repo),
+                "--in-place",
+                "--uncapped",
+                "--brief-file",
+                str(brief_md),
+                "--goal",
+                "Find and reproduce untrusted repo RCE or arbitrary write.",
+                "--run-id",
+                "run-uncapped",
+                "--json",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_init, EXIT_OK)
+        self.assertEqual(info["pricing_mode"], "uncapped_research")  # type: ignore[index]
+        self.assertEqual(float(info["budget_usd"]), 0.0)  # type: ignore[arg-type,index]
+        self.assertTrue(str(info["brief_path"]).endswith("brief.md"))  # type: ignore[index]
+
+        # Default `ajar map` keeps 5,200-line `merge_ort.c` intact as 1 cohesive slice (`slice_cap=15000`)
+        rc_map, mp = _run_cli(["map", "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_map, EXIT_OK)
+        self.assertEqual(int(mp["slice_cap"]), 15000)  # type: ignore[arg-type,index]
+        self.assertEqual(int(mp["slice_count"]), 1)  # type: ignore[arg-type,index]
+        self.assertEqual(mp["call_slices"][0]["seed_locus"], "merge_ort.c:1")  # type: ignore[index]
+
+        # `ajar brief` returns the full Lead Orchestrator brief, while worker `ajar context` stays unbloated
+        rc_brf, brf = _run_cli(["brief", "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_brf, EXIT_OK)
+        self.assertTrue(brf["has_campaign_brief"])  # type: ignore[index]
+        self.assertIn("Critical-Class Catalog", str(brf["brief_markdown"]))  # type: ignore[index]
+
+        rc_surf, surf = _run_cli(
+            [
+                "surface",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--name",
+                "merge_ort",
+                "--kind",
+                "parser",
+                "--subsystem",
+                "merge",
+                "--locus",
+                "merge_ort.c:1",
+                "--priority",
+                "high",
+                "--trust-boundary",
+                "untrusted tree -> merge state",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_surf, EXIT_OK)
+        sid = str(surf["surface_id"])  # type: ignore[index]
+        rc_tsk, tsk = _run_cli(
+            [
+                "task",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--kind",
+                "investigate",
+                "--title",
+                "Audit merge_ort state machine",
+                "--surface",
+                sid,
+                "--locus",
+                "merge_ort.c:1",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_tsk, EXIT_OK)
+        tid = str(tsk["task_id"])  # type: ignore[index]
+
+        rc_ctx, ctx = _run_cli(["context", "--task", tid, "--run", "run-uncapped", "--json"], self.ajar_home)
+        self.assertEqual(rc_ctx, EXIT_OK)
+        self.assertNotIn("Critical-Class Catalog", str(ctx["rendered"]))  # type: ignore[index]
+
+        # Record $250.00 explore spend on uncapped run -> zero budget throttling and gross_margin_floor_pass=True
+        rc_sp, _ = _run_cli(
+            [
+                "spend",
+                "add",
+                "--run",
+                "run-uncapped",
+                "--worker",
+                "w1",
+                "--phase",
+                "explore",
+                "--surface",
+                sid,
+                "--cost-usd",
+                "250.0",
+            ],
+            self.ajar_home,
+        )
+        self.assertEqual(rc_sp, EXIT_OK)
+        rc_stat, stat = _run_cli(["status", "--run", "run-uncapped"], self.ajar_home)
+        self.assertEqual(rc_stat, EXIT_OK)
+        self.assertTrue(stat["has_campaign_brief"])  # type: ignore[index]
+        self.assertTrue(stat["economics"]["gross_margin_floor_pass"])  # type: ignore[index]
+
 
 if __name__ == "__main__":
     unittest.main()

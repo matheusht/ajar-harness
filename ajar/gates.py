@@ -54,7 +54,12 @@ def compute_attribution_and_economics(conn: sqlite3.Connection) -> dict[str, Any
     cogs_cap_usd = float(run["cogs_cap_usd"]) if "cogs_cap_usd" in run_keys else round(0.35 * code_quote_usd, 2)
     pricing_mode = str(run["pricing_mode"]) if "pricing_mode" in run_keys else "commercial_code"
     cost_usd_per_kloc = round((total_usd / (loc / 1000.0)), 4) if loc > 0 else 0.0
-    gross_margin_floor_pass = (total_usd <= cogs_cap_usd) if pricing_mode == "commercial_code" else (total_usd <= budget_usd)
+    if pricing_mode == "uncapped_research" or budget_usd <= 0.0:
+        gross_margin_floor_pass = True
+    elif pricing_mode == "commercial_code":
+        gross_margin_floor_pass = total_usd <= cogs_cap_usd
+    else:
+        gross_margin_floor_pass = total_usd <= budget_usd
 
     return {
         "in_scope_loc": loc,

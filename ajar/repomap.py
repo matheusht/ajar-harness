@@ -378,9 +378,9 @@ def _partition_call_slices(
     out_edges: dict[str, dict[str, float]],
     symbols_by_file: dict[str, list[dict[str, Any]]],
     *,
-    slice_cap: int = 3500,
+    slice_cap: int = 15000,
 ) -> list[dict[str, Any]]:
-    """Partition ranked files + 1-hop call neighbors into bounded slices (`<= slice_cap` LoC)."""
+    """Partition ranked files + 1-hop call neighbors into cohesive subsystem call cones (`<= slice_cap` LoC)."""
     cap = max(250, int(slice_cap))
     assigned_files: set[str] = set()
     slices: list[dict[str, Any]] = []
@@ -447,9 +447,9 @@ def build_repomap(
     focus_files: Sequence[str] = (),
     focus_symbols: Sequence[str] = (),
     budget_tokens: int = 1500,
-    slice_cap: int = 3500,
+    slice_cap: int = 15000,
 ) -> dict[str, Any]:
-    """Extract symbols, compute Personalized PageRank + `<= slice_cap` LoC call slices, and render under `budget_tokens`."""
+    """Extract symbols, compute Personalized PageRank + cohesive subsystem call cones (`<= slice_cap` LoC), and render under `budget_tokens`."""
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS repomap_symbols (

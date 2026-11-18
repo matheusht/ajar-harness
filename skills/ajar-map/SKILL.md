@@ -9,14 +9,15 @@ Use this skill to build the initial component and attack-surface map, record ope
 
 ## 1. Inputs, Quote, and Orientation
 
-1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (and carry forward prior verified state on PR runs via `--parent-run`):
+1. Preview deterministic `Code` LOC scope and the `35%` COGS cap when sizing a repository or PR diff (persist a Lead Orchestrator campaign brief via `--brief-file`, disable caps on open-ended research via `--uncapped`, and carry forward prior verified state on PR runs via `--parent-run`):
    ```bash
    ajar quote <target_dir> [--diff <base..head>]
-   ajar init <target_dir> [--diff <base..head>] [--parent-run <baseline_run_id>]
+   ajar init <target_dir> [--diff <base..head>] [--brief-file <brief.md>] [--uncapped] [--parent-run <baseline_run_id>]
+   ajar brief
    ```
-2. Inspect the Personalized PageRank symbol graph and `<= 3,500` LoC call slices within a bounded token budget:
+2. Inspect the Personalized PageRank symbol graph and cohesive subsystem call cones (`--slice-cap 15000` soft focus target; workers may still inspect any caller or callee across the repository):
    ```bash
-   ajar map --budget-tokens 1500 --slice-cap 3500
+   ajar map --budget-tokens 1500 --slice-cap 15000
    ajar map --focus-file <rel_path> --focus-symbol <symbol> --budget-tokens 1500
    ```
 3. Query local documentation, comments, ADRs, and test intent before labeling behavior anomalous (target docs carry `[UNTRUSTED_TARGET_DOC: verify in code]` so prose claims are always verified in code):

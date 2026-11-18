@@ -11,11 +11,11 @@
 1. **Static Prompt Checklists Create Confirmation Bias:** Injecting long multi-stage exploit checklists on every task wastes prompt budget on clean CRUD code and pushes workers to invent speculative chains when upstream guards are sound.
 2. **Monolithic Shell PoCs Cannot Compose or Ablate Cleanly:** Running `ajar chain propose` as a flat shell command in `workspace/` lacked `slot-<k>` git-reset isolation, could not share verified stage builders across workers without polluting `git clean -fdx`, and could not mechanically prove that each step in `--steps` was causally required.
 3. **Debug-vs-Release UB Divergence and Remediation Loopholes:** Compiled C/C++/Rust/Zig findings reproduced under `-fsanitize=undefined` or debug assertions could turn out to be `debug_assert_only` no-ops or silent wraparound escalations under `-O2` / `--release`. Meanwhile, `ajar patch verify` needed baseline broken-test diffing, clean-`HEAD` variant firing checks, executable caller/sibling verification commands, and a patch-revert re-failure proof.
-4. **Scale and Incremental PR Ergonomics:** Large repositories required `<= 3,500` LoC call-slice partitioning and audited line-span tracking, while `Code` pull-request runs needed incremental differential state sync against a baseline run.
+4. **Scale and Incremental PR Ergonomics:** Large repositories required cohesive subsystem call-cone partitioning (`--slice-cap 15000` soft target so multi-thousand-line C/Rust state machines are never split mid-file), Lead Orchestrator campaign briefs (`brief.md`) that survive compactions without bloating worker prefixes, `--uncapped` research runs, and PR differential state sync.
 
 ## Decision
 
-We upgrade Ajar to `v3.2.0` while preserving the zero-LLM deterministic SQLite WAL core:
+We upgrade Ajar to `v3.2.1` while preserving the zero-LLM deterministic SQLite WAL core:
 
 1. **Event-Driven Epistemic Micro-Hooks (`ajar/epistemic_hooks.py`, `H1`–`H8`):**
    - Inject `0` hook tokens on plain code when no SQLite state transition or lightweight source signal fires.
@@ -31,8 +31,9 @@ We upgrade Ajar to `v3.2.0` while preserving the zero-LLM deterministic SQLite W
 4. **Release-Profile UB Differential & Hardened 9-Arm `Fixes` Gate (`ajar/repro_source.py`, `ajar/patch_verify.py`):**
    - Add Arms `5A`/`5B` (`--release-cmd` / `--release-control-cmd`) to `ajar claim reproduce`, classifying `consistent | silent_wrap_escalated | debug_assert_only | trap_dos_only` and blocking `debug_assert_only` claims from `critical`/`high` severity (`G3`).
    - Harden `ajar patch verify` to 9 arms: cached clean-`HEAD` baseline suite diffing (`repro/baseline_suite.json`), verification that `>= 1` `--variant-cmd` triggers on clean `HEAD`, executable `--caller-cmd` and `--sibling-cmd` support, and **Arm 9 (`git apply -R`)** proving that reverting the fix on the same worktree re-triggers the defect oracle.
-5. **Call-Slice Partitioning, PR Diff State Sync, and Modular Instrumentation (`ajar/repomap.py`, `ajar/diff_sync.py`):**
-   - Partition repository call graphs into `<= 3,500` LoC call slices (`ajar map --slice-cap 3500`) with a `< 1 KB` architectural skeleton and SHA-bound `ajar coverage record`.
+5. **Cohesive Subsystem Cones, Campaign Briefs, PR Diff Sync, and Modular Instrumentation (`ajar/repomap.py`, `ajar/workspace.py`, `ajar/diff_sync.py`):**
+   - Partition repository call graphs into cohesive subsystem call cones (`ajar map --slice-cap 15000`) with a `< 1 KB` architectural skeleton and SHA-bound `ajar coverage record`, avoiding mid-file splits on multi-thousand-line state machines (`apply.c`, `merge-ort.c`).
+   - Persist flexible Lead Orchestrator strategy in `~/.ajar/runs/<run_id>/brief.md` (`ajar init --brief-file`, `ajar brief`) outside worker task prefixes, and support `--uncapped` (`pricing_mode=uncapped_research`) for open-ended deep research runs.
    - Support `ajar init --diff <base..head> [--parent-run <id>]` to carry forward `kept` findings/guards, verify `closed` fixes on `HEAD`, and re-open `invalidated_guard` `dry` tasks when edited hunks touch a cited guard locus.
    - Add `ajar task checkpoint`, `ajar claim instrument` (`slot-inst`), `ajar claim falsify --config-gate`, `[UNTRUSTED_TARGET_DOC]` FTS5 provenance tags, and `detect_soliloquy_transcript`.
 

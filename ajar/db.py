@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS runs (
     code_quote_usd REAL NOT NULL DEFAULT 10.0,
     cogs_cap_usd REAL NOT NULL DEFAULT 3.5,
     pricing_mode TEXT NOT NULL DEFAULT 'commercial_code'
-        CHECK(pricing_mode IN ('commercial_code', 'custom_or_bounty')),
+        CHECK(pricing_mode IN ('commercial_code', 'custom_or_bounty', 'uncapped_research')),
     commitment_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'verify_only', 'finished', 'blocked')),

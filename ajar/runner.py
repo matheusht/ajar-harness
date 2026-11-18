@@ -331,7 +331,7 @@ def run_autonomous_schedule(
             spent = float(econ["total_spend_usd"])
             cap = float(run_row["budget_usd"])
 
-            if spent >= cap:
+            if cap > 0.0 and spent >= cap:
                 stop_reason = "budget_cap_reached"
                 conn.execute(
                     "UPDATE runs SET status = 'blocked', stop_reason = ?, finished_at = ?",
@@ -343,8 +343,8 @@ def run_autonomous_schedule(
             if tripped:
                 dry_breaker_events.extend(tripped)
 
-            # 80/20 Explore-vs-Verify Reserve Cutoff:
-            if spent >= 0.80 * cap and run_row["status"] == "active":
+            # 80/20 Explore-vs-Verify Reserve Cutoff (active only when a finite budget cap exists):
+            if cap > 0.0 and spent >= 0.80 * cap and run_row["status"] == "active":
                 verify_cutoff_triggered = True
                 conn.execute("UPDATE runs SET status = 'verify_only'")
                 drained = _enqueue_verification_drain_tasks(conn)

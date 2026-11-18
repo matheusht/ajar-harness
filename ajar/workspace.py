@@ -168,6 +168,9 @@ def init_run_workspace(
     goal: str = "Identify, falsify, and reproduce high-severity software vulnerabilities.",
     stopping_criterion: str = "exhaustive-high",
     budget_usd: float | None = None,
+    uncapped: bool = False,
+    brief_file: str | None = None,
+    brief_text: str | None = None,
     allowed_hosts: list[str] | None = None,
     allow_live_requests: bool = False,
     allow_live_mutations: bool = False,
@@ -184,6 +187,17 @@ def init_run_workspace(
         raise AjarError(f"Unsupported --mode {target_mode!r}.", EXIT_USER_ERROR)
     if workspace_mode not in ("envelope", "in_place"):
         raise AjarError(f"Unsupported workspace mode {workspace_mode!r}.", EXIT_USER_ERROR)
+    if uncapped and budget_usd is not None:
+        raise AjarError("Cannot combine --uncapped with an explicit --budget / --cogs-cap.", EXIT_USER_ERROR)
+
+    resolved_brief = ""
+    if brief_file:
+        bpath = pathlib.Path(brief_file).expanduser().resolve()
+        if not bpath.is_file():
+            raise AjarError(f"Campaign brief file does not exist: {bpath}", EXIT_USER_ERROR)
+        resolved_brief = bpath.read_text(encoding="utf-8", errors="ignore")
+    elif brief_text:
+        resolved_brief = str(brief_text)
 
     home = get_ajar_home(ajar_home)
     rid = run_id or new_id("run")
@@ -254,7 +268,10 @@ def init_run_workspace(
         target_sha = _compute_target_digest(effective_target_dir, target_mode)
 
     quote_usd = float(loc_info["code_quote_usd"])
-    if budget_usd is None:
+    if uncapped or (budget_usd is not None and float(budget_usd) <= 0.0):
+        eff_cogs_cap = 0.0
+        pricing_mode = "uncapped_research"
+    elif budget_usd is None:
         eff_cogs_cap = compute_cogs_cap_usd(quote_usd)
         pricing_mode = "commercial_code"
     else:
@@ -262,6 +279,13 @@ def init_run_workspace(
         pricing_mode = "custom_or_bounty"
 
     (rdir / "artifacts").mkdir(parents=True, exist_ok=True)
+    brief_saved_path = ""
+    if resolved_brief.strip():
+        clean_brief = scrub_text(resolved_brief).strip() + "\n"
+        bdest = rdir / "brief.md"
+        bdest.write_text(clean_brief, encoding="utf-8")
+        brief_saved_path = str(bdest)
+
     created_at = utc_now_iso()
     clean_goal = scrub_text(goal)
     commit_hash = compute_commitment_hash(target_sha, clean_goal, stopping_criterion, created_at)
@@ -358,6 +382,7 @@ def init_run_workspace(
                 "code_quote_usd": quote_usd,
                 "cogs_cap_usd": eff_cogs_cap,
                 "pricing_mode": pricing_mode,
+                "brief_path": brief_saved_path,
                 "diff_range": (diff_range or "").strip(),
                 "parent_run_id": (parent_run_id or "").strip(),
                 "commitment_hash": commit_hash,
@@ -381,6 +406,7 @@ def init_run_workspace(
         "cogs_cap_usd": eff_cogs_cap,
         "pricing_mode": pricing_mode,
         "budget_usd": eff_cogs_cap,
+        "brief_path": brief_saved_path,
         "commitment_hash": commit_hash,
         "repomap": map_summary,
         "indexed_docs": oracle_counts,

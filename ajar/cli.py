@@ -142,6 +142,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         goal=args.goal,
         stopping_criterion=args.until,
         budget_usd=args.budget,
+        uncapped=bool(args.uncapped),
+        brief_file=args.brief_file,
         allowed_hosts=args.allow_host or [],
         allow_live_requests=bool(args.allow_live_requests),
         allow_live_mutations=bool(args.allow_live_mutations),
@@ -152,13 +154,17 @@ def cmd_init(args: argparse.Namespace) -> int:
     if args.json:
         _emit(info, True)
     else:
+        cap_str = (
+            "uncapped [uncapped_research]"
+            if info["pricing_mode"] == "uncapped_research"
+            else f"${info['cogs_cap_usd']:.2f} [{info['pricing_mode']}]"
+        )
         print(f"Initialized Ajar run: {info['run_id']}")
         print(f"  Workspace ({info['workspace_mode']}): {info['workspace_path']}")
         print(f"  Target ({info['target_mode']}):    {info['target_path']}")
-        print(
-            f"  In-scope LoC:           {info['in_scope_loc']} "
-            f"(Code quote: ${info['code_quote_usd']:.2f}, COGS cap: ${info['cogs_cap_usd']:.2f} [{info['pricing_mode']}])"
-        )
+        print(f"  In-scope LoC:           {info['in_scope_loc']} (Code quote: ${info['code_quote_usd']:.2f}, COGS cap: {cap_str})")
+        if info.get("brief_path"):
+            print(f"  Campaign Brief:         {info['brief_path']}")
         if info.get("diff_range"):
             print(f"  PR Diff Range:          {info['diff_range']}")
         print(f"  Commitment SHA-256:     {info['commitment_hash']}")
@@ -166,8 +172,45 @@ def cmd_init(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_brief(args: argparse.Namespace) -> int:
+    rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    bpath = rdir / "brief.md"
+    if args.set_file:
+        src = pathlib.Path(args.set_file).expanduser().resolve()
+        if not src.is_file():
+            raise AjarError(f"Campaign brief file does not exist: {src}", EXIT_USER_ERROR)
+        raw = src.read_text(encoding="utf-8", errors="ignore")
+        cleaned = scrub_text(raw).strip() + "\n"
+        bpath.write_text(cleaned, encoding="utf-8")
+        conn = open_run_db(rid)
+        try:
+            log_event(conn, "operator", "campaign_brief_updated", rid, {"brief_path": str(bpath), "bytes": len(cleaned)})
+        finally:
+            conn.close()
+    text = bpath.read_text(encoding="utf-8", errors="ignore") if bpath.is_file() else ""
+    if args.json:
+        _emit(
+            {
+                "run_id": rid,
+                "has_campaign_brief": bool(text.strip()),
+                "brief_path": str(bpath) if bpath.is_file() else "",
+                "brief_markdown": text,
+            },
+            True,
+        )
+    else:
+        if text:
+            print(text, end="" if text.endswith("\n") else "\n")
+        else:
+            print(f"(No campaign brief set for run {rid}; pass `ajar brief --set-file <brief.md>`.)")
+    return EXIT_OK
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     rid = resolve_run_id(args.run)
+    rdir = run_dir_for(rid)
+    bpath = rdir / "brief.md"
     conn = open_run_db(rid)
     try:
         run = dict(conn.execute("SELECT * FROM runs LIMIT 1").fetchone())
@@ -175,6 +218,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         gates = check_all_gates(conn, target_dir=tpath, auto_enqueue_chain=False)
         payload = {
             "run": run,
+            "has_campaign_brief": bpath.is_file(),
+            "brief_path": str(bpath) if bpath.is_file() else "",
             "surfaces_count": conn.execute("SELECT COUNT(*) AS c FROM surfaces").fetchone()["c"],
             "tasks_by_status": {
                 r["status"]: int(r["c"])
@@ -1603,9 +1648,11 @@ def build_parser() -> argparse.ArgumentParser:
     grp_ws.add_argument("--envelope", action="store_true", default=True, help="Create isolated workspace with read-only target snapshot (default).")
     grp_ws.add_argument("--in-place", action="store_true", help="Write zero files into target directory.")
     p_init.add_argument("--goal", default="Identify, falsify, and reproduce high-severity software vulnerabilities.")
+    p_init.add_argument("--brief-file", help="Optional Markdown campaign brief persisted for the Lead Orchestrator (`brief.md`, omitted from worker contexts).")
     p_init.add_argument("--until", choices=("exhaustive-high", "first-verified-high"), default="exhaustive-high")
     p_init.add_argument("--budget", type=float, default=None, help="Explicit COGS cap override in USD (defaults to 0.35 * Code quote).")
     p_init.add_argument("--cogs-cap", dest="budget", type=float, help="Alias for --budget explicit COGS cap override in USD.")
+    p_init.add_argument("--uncapped", action="store_true", help="Disable finite COGS budget caps and 25%%/80%% budget throttles (`uncapped_research`).")
     p_init.add_argument("--diff", help="Optional git diff range (`base..head`) for PR differential Code runs.")
     p_init.add_argument("--parent-run", help="Optional baseline/parent run ID to carry forward kept findings and guards.")
     p_init.add_argument("--allow-host", action="append", help="Allowed live target hostname.")
@@ -1614,6 +1661,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--run-id", help="Optional explicit run identifier.")
     p_init.add_argument("--json", action="store_true")
     p_init.set_defaults(func=cmd_init)
+
+    # brief
+    p_brf = sub.add_parser("brief", help="Read or update the Lead Orchestrator campaign brief (`brief.md`) without bloating worker task prefixes.")
+    p_brf.add_argument("--set-file", help="Path to Markdown campaign brief file to store in the run directory.")
+    p_brf.add_argument("--run", help="Run ID.")
+    p_brf.add_argument("--json", action="store_true")
+    p_brf.set_defaults(func=cmd_brief)
 
     # status
     p_stat = sub.add_parser("status", help="Inspect current run progress, gates, and spend.")
@@ -1639,7 +1693,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_map.add_argument("--focus-file", action="append")
     p_map.add_argument("--focus-symbol", action="append")
     p_map.add_argument("--budget-tokens", type=int, default=1500)
-    p_map.add_argument("--slice-cap", type=int, default=3500, help="Maximum LoC per partitioned call slice.")
+    p_map.add_argument("--slice-cap", type=int, default=15000, help="Soft target LoC per cohesive subsystem call cone.")
     p_map.add_argument("--run")
     p_map.add_argument("--json", action="store_true")
     p_map.set_defaults(func=cmd_map)

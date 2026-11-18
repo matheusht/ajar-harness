@@ -1,5 +1,9 @@
 # Decision 0002 — GEPA autoresearch scope, DSPy posture, and capability ladder
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** accepted as product direction; implementation plan still pending  
 **Date:** 2026-06-26  
 **Related:** `docs/architecture-brainstorm-gepa-dspy.html`, `docs/autoresearch-evaluation-rfc.html`, `docs/ROADMAP.md`, `evals/qualification/`, `evals/hermetic/`

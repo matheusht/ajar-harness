@@ -1,5 +1,9 @@
 # 0013 — One versioned signed finding activation
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 19 October 2026. **Implementation draft; #85 incomplete and open.** Implements part
 of the scoped direction in PR #115; it does not establish full retained-gate equivalence.
 Local synthetic qualification was recorded in the implementation worktree and is not part of this

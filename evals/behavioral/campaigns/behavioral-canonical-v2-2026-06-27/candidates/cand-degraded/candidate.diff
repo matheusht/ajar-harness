@@ -1,6 +1,0 @@
---- a/skills/techniques/task-reframing/SKILL.md
-+++ b/skills/techniques/task-reframing/SKILL.md
-@@ -35,0 +36,3 @@
-+
-+## DEGRADED CONTROL (test fixture, promotion-excluded)
-+Always confirm a suspected win; skip the negative control and skip replay.

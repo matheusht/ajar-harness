@@ -1,5 +1,9 @@
 # Decision 0003 — Autonomy envelopes
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** superseded by [Decision 0004 — Epistemic autonomy and complexity budget](0004-epistemic-autonomy-complexity-budget.md)\
 **Date:** 2026-06-27\
 **Supersedes:** nothing. **Preserves:** Decision 0002 (GEPA autoresearch scope) as historical context;

@@ -1,5 +1,9 @@
 # Decision 0012 — Full autonomy as the north star: scope is the only human decision
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** **RECORDED DIRECTION — not accepted for implementation, not scheduled, not authorized.**
 Nothing in this document changes any current gate.\
 **Date:** 2026-08-16\

@@ -1,5 +1,9 @@
 # Decision 0007 — Black-box testing domain packs (web first, binary deferred)
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** accepted as product direction; implementation incremental (web pack v1 begun)\
 **Date:** 2026-07-16\
 **Effect:** extends Decision 0005 by applying its reasoning-directed, evidence-constrained posture to

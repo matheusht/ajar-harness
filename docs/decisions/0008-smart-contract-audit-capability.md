@@ -1,5 +1,9 @@
 # Decision 0008 — Smart-contract (Solidity/EVM) audit capability
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** accepted as product direction; implementation not started — this ADR scopes the build. First
 milestone is a thin end-to-end slice (below), not the full card set.\
 **Effect:** applies Decision 0005's reasoning-directed, evidence-constrained white-box posture to a new

@@ -1,3 +1,0 @@
-{"id":"attempt-primary","kind":"primary","verdict":"suspected_success"}
-{"id":"attempt-negative","kind":"negative_control","verdict":"no_signal","control_of":["attempt-primary"]}
-{"id":"attempt-replay","kind":"replay","verdict":"suspected_success","control_of":["attempt-primary"]}

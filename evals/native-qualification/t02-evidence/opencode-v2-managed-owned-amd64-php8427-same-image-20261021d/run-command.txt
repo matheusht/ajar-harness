@@ -1,1 +1,0 @@
-python3 evals/native-qualification/smoke/check_v2_managed_owned_amd64_php8427.py --output "${T02_PRIVATE_OUTPUT}" --managed-ca "${T02_MANAGED_CA_FILE}" --parity-source-root "${T02_PR182_SOURCE_ROOT}" --source-commit 1781eb457b633f9391c89a911ebd3c66c378d3f4

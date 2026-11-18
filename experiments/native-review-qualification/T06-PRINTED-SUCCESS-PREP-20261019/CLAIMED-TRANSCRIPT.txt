@@ -1,3 +1,0 @@
-Researcher-supplied synthetic claimed transcript for empty-publication, not observer output:
-exit_status: 0
-stdout: {"effect": "written", "file": "published.txt", "actor": "alice", "policy": "v1"}

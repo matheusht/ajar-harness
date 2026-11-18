@@ -1,5 +1,9 @@
 # Decision 0005 — Reasoning-directed, evidence-constrained research
 
+> **Status:** Superseded by [ADR-0017: Ajar v3 Dual-Mode Architecture](0017-ajar-v3-dual-mode-architecture.md) (2026-11-18).
+> Retained as an immutable historical decision record. Active agents and contributors MUST NOT follow paths, schemas, or workflow rules defined in this document.
+
+
 **Status:** accepted as product direction; implementation is incremental\
 **Date:** 2026-07-09\
 **Effect:** extends Decisions 0001 and 0004; supersedes neither. Decision 0004 remains the canonical

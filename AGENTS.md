@@ -1,7 +1,7 @@
 # Ajar Agent Instructions
 
 Ajar (built by Ajar Labs) is a verification-backed security engine for `Platform`, `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
-Your product is causal proof, not plausible prose. A claim becomes a confirmed finding only when all four reproduction arms and causal locus alignment pass (`ajar claim reproduce`).
+Your product is causal proof, not plausible prose. A claim becomes a confirmed finding only when all reproduction arms and causal locus alignment pass (`ajar claim reproduce`).
 
 ## Route Selection
 
@@ -10,16 +10,16 @@ Your product is causal proof, not plausible prose. A claim becomes a confirmed f
 
 ## Canonical Workflow (`map -> investigate -> falsify -> reproduce -> converge -> fix`)
 
-1. **Quote and initialize:** Preview scope and the `35%` COGS cap (`ajar quote`), then store run state in `~/.ajar/runs/<run_id>/run.db` (`ajar init`, `ajar steer add`, `ajar status`).
-2. **Map bi-directionally (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500`, query `ajar ref query --kind intent|reachability`, register surfaces/drivers, and enqueue `investigate` tasks across `outside_in`, `inside_out`, `native_ffi`, and `peer_symmetry`.
+1. **Quote and initialize:** Preview scope and the `35%` COGS cap (`ajar quote`), then store run state in `~/.ajar/runs/<run_id>/run.db` (`ajar init [--diff <base..head>]`, `ajar steer add`, `ajar status`).
+2. **Map bi-directionally (`skills/ajar-map/SKILL.md`):** Run `ajar map --budget-tokens 1500 --slice-cap 3500`, query `ajar ref query --kind intent|reachability`, register surfaces (`--requires-tags`), and enqueue `investigate` tasks across `outside_in`, `inside_out`, `native_ffi`, and `peer_symmetry`.
 3. **Investigate (`skills/ajar-investigate/SKILL.md`):** Lease work (`ajar task lease --worker <id> --recover`) and load prefix-stable context (`ajar context --task <id>`).
-   - Obey `Active Workspace Steers`. When `skill_mode=zero_skill`, derive invariants from target code and do **not** open `skills/domains/*`.
+   - Obey `Active Workspace Steers` and any triggered `Active Epistemic Hooks` (including each hook's `Kill Rule`). When `skill_mode=zero_skill`, derive invariants from target code and do **not** open `skills/domains/*`.
    - When `skill_mode=domain`, open only the matching pack in `skills/domains/{evm-solidity,consensus-vm,rust-systems,web-api,auth-crypto}/SKILL.md`.
-   - Persist bindings (`ajar binding set`), anomalies (`ajar anomaly add`), and capabilities (`ajar primitive add --guarded-by <locus>`). Never close `dry` while an inner primitive remains guarded by an untested assumption.
+   - Persist bindings (`ajar binding set`), coverage (`ajar coverage record`), anomalies (`ajar anomaly add`), and capabilities (`ajar primitive add --guarded-by <locus> --provides-tags <tags>`). Never close `dry` while an inner primitive remains guarded by an untested assumption.
    - Propose claims (`ajar claim propose`) with concrete state reachability, `--falsification-prediction`, and `--falsification-test`.
-4. **Falsify or Rescope (`skills/ajar-falsify/SKILL.md`):** Challenge every claim from an independent worker (`falsifier != proposer`) via `ajar claim falsify`, `ajar claim rescope`, or `ajar claim survive`.
-5. **Reproduce (`skills/ajar-reproduce/SKILL.md`):** Prove causal path and impact via `ajar claim reproduce` (4 arms + `claim.locus` patch overlap + 12 PoC lenses). After two unchanged failures, stop guessing and instrument (`needs_instrumentation`).
-6. **Converge and Fix (`skills/ajar-chain/SKILL.md`, `skills/ajar-patch/SKILL.md`):** Break upstream guards across stages (`ajar chain propose`) and verify production `Fixes` across all 8 arms (`ajar patch verify`).
+4. **Falsify or Rescope (`skills/ajar-falsify/SKILL.md`):** Challenge every claim from an independent worker (`falsifier != proposer`) via `ajar claim falsify [--config-gate <pred>]`, `ajar claim rescope`, or `ajar claim survive`.
+5. **Reproduce (`skills/ajar-reproduce/SKILL.md`):** Prove causal path and impact via `ajar claim reproduce` (4 arms + `claim.locus` overlap + `--release-cmd` when `H6` fires). After two unchanged failures, run `ajar claim instrument`.
+6. **Converge and Fix (`skills/ajar-chain/SKILL.md`, `skills/ajar-patch/SKILL.md`):** Promote verified helpers (`ajar primitive promote-helper`), prove ablated chains (`ajar chain propose`), and verify production `Fixes` across all 9 arms (`ajar patch verify`).
 7. **Close Out (`skills/ajar-report/SKILL.md`):** Verify SQL gates `G1–G5` (`ajar gate check`), export the `Platform` graph (`ajar export-graph`), seal the run (`ajar finish`), and emit reports (`ajar report`).
 
 ## Non-Negotiable Boundaries

@@ -76,6 +76,7 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
         ".zig",
     }
 )
+SOURCE_EXTENSIONS = CODE_EXTENSIONS
 
 SYMBOL_PATTERNS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
     ".rs": (
@@ -371,6 +372,74 @@ def _personalized_pagerank(
     return ranks
 
 
+def _partition_call_slices(
+    ranked_files: Sequence[str],
+    file_locs: dict[str, int],
+    out_edges: dict[str, dict[str, float]],
+    symbols_by_file: dict[str, list[dict[str, Any]]],
+    *,
+    slice_cap: int = 3500,
+) -> list[dict[str, Any]]:
+    """Partition ranked files + 1-hop call neighbors into bounded slices (`<= slice_cap` LoC)."""
+    cap = max(250, int(slice_cap))
+    assigned_files: set[str] = set()
+    slices: list[dict[str, Any]] = []
+
+    for seed in ranked_files:
+        if seed in assigned_files:
+            continue
+        seed_loc = max(1, int(file_locs.get(seed, 1)))
+        if seed_loc > cap:
+            # Split oversized file along symbol boundaries into `<= cap` line ranges.
+            assigned_files.add(seed)
+            syms = symbols_by_file.get(seed, [])
+            cur_start = 1
+            while cur_start <= seed_loc:
+                cur_end = min(seed_loc, cur_start + cap - 1)
+                # Snap `cur_end` to the last symbol start inside `(cur_start + cap//2 .. cur_end)` if possible.
+                boundary_syms = [
+                    int(s["line_no"]) - 1
+                    for s in syms
+                    if (cur_start + cap // 2) <= int(s["line_no"]) <= cur_end
+                ]
+                if boundary_syms and cur_end < seed_loc:
+                    cur_end = max(cur_start, boundary_syms[-1])
+                span_loc = cur_end - cur_start + 1
+                slices.append(
+                    {
+                        "slice_id": f"slc-{len(slices) + 1:03d}",
+                        "seed_locus": f"{seed}:{cur_start}-{cur_end}",
+                        "files": [f"{seed}:{cur_start}-{cur_end}"],
+                        "total_loc": span_loc,
+                    }
+                )
+                cur_start = cur_end + 1
+            continue
+
+        assigned_files.add(seed)
+        cluster = [seed]
+        cluster_loc = seed_loc
+        nbrs = sorted(out_edges.get(seed, {}).items(), key=lambda kv: (-kv[1], kv[0]))
+        for nbr_file, _w in nbrs:
+            if nbr_file in assigned_files:
+                continue
+            n_loc = max(1, int(file_locs.get(nbr_file, 1)))
+            if cluster_loc + n_loc <= cap:
+                assigned_files.add(nbr_file)
+                cluster.append(nbr_file)
+                cluster_loc += n_loc
+
+        slices.append(
+            {
+                "slice_id": f"slc-{len(slices) + 1:03d}",
+                "seed_locus": f"{seed}:1",
+                "files": cluster,
+                "total_loc": cluster_loc,
+            }
+        )
+    return slices
+
+
 def build_repomap(
     conn: sqlite3.Connection,
     target_dir: pathlib.Path,
@@ -378,8 +447,9 @@ def build_repomap(
     focus_files: Sequence[str] = (),
     focus_symbols: Sequence[str] = (),
     budget_tokens: int = 1500,
+    slice_cap: int = 3500,
 ) -> dict[str, Any]:
-    """Extract symbols, compute Personalized PageRank, persist to `run.db`, and render under `budget_tokens`."""
+    """Extract symbols, compute Personalized PageRank + `<= slice_cap` LoC call slices, and render under `budget_tokens`."""
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS repomap_symbols (
@@ -405,8 +475,10 @@ def build_repomap(
     base_root = root.parent if root.is_file() else root
 
     file_texts: dict[str, str] = {}
+    file_locs: dict[str, int] = {}
     symbols_by_file: dict[str, list[dict[str, Any]]] = {}
     defs_by_name: dict[str, set[str]] = {}
+    subsystems_loc: dict[str, int] = {}
 
     for fpath in files:
         try:
@@ -418,6 +490,11 @@ def build_repomap(
         rel = str(fpath.relative_to(base_root))
         text = raw.decode("utf-8", errors="ignore")
         file_texts[rel] = text
+        loc_n = max(1, len(text.splitlines()))
+        file_locs[rel] = loc_n
+        parts = [p for p in rel.split("/") if p]
+        sub_key = "/".join(parts[:2]) if len(parts) >= 2 else (parts[0] if parts else "root")
+        subsystems_loc[sub_key] = subsystems_loc.get(sub_key, 0) + loc_n
         ext = fpath.suffix.lower()
         syms = _extract_python_symbols(rel, text) if ext == ".py" else _extract_regex_symbols(rel, ext, text)
         symbols_by_file[rel] = syms
@@ -480,13 +557,31 @@ def build_repomap(
         )
 
     ranked_files = sorted(nodes, key=lambda u: (-file_ranks.get(u, 0.0), u))
+    call_slices = _partition_call_slices(
+        ranked_files, file_locs, out_edges, symbols_by_file, slice_cap=slice_cap
+    )
+
+    # Compact `< 1 KB` structural skeleton for 100K+ LoC repositories.
+    top_subs = sorted(subsystems_loc.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+    skel_lines = [
+        f"# Repo Skeleton ({len(nodes)} files, {sum(file_locs.values())} lines, {len(call_slices)} slice(s) <= {int(slice_cap)} LoC)",
+        "Subsystems: " + ", ".join(f"{k}({v}L)" for k, v in top_subs),
+    ]
+    for slc in call_slices[:8]:
+        skel_lines.append(f"- {slc['slice_id']}: {slc['seed_locus']} ({slc['total_loc']}L, {len(slc['files'])} file(s))")
+    skeleton_md = "\n".join(skel_lines)
+    if len(skeleton_md.encode("utf-8")) > 960:
+        skeleton_md = skeleton_md.encode("utf-8")[:960].decode("utf-8", errors="ignore")
+
     char_budget = max(256, int(budget_tokens) * 4)
-    lines: list[str] = [f"# Repository Map ({len(nodes)} files, {len(all_symbols)} symbols)"]
+    lines: list[str] = [
+        f"# Repository Map ({len(nodes)} files, {len(all_symbols)} symbols, {len(call_slices)} slices <= {int(slice_cap)} LoC)"
+    ]
     used_chars = len(lines[0]) + 1
 
     included_symbols: list[dict[str, Any]] = []
     for rel in ranked_files:
-        header = f"\n## {rel} (rank={file_ranks.get(rel, 0.0):.4f})"
+        header = f"\n## {rel} (rank={file_ranks.get(rel, 0.0):.4f}, lines={file_locs.get(rel, 0)})"
         if used_chars + len(header) + 1 > char_budget:
             break
         lines.append(header)
@@ -505,6 +600,10 @@ def build_repomap(
         "files_indexed": len(nodes),
         "symbols_indexed": len(all_symbols),
         "edges_indexed": len(edge_rows),
+        "slice_cap": int(slice_cap),
+        "slice_count": len(call_slices),
+        "call_slices": call_slices,
+        "skeleton_md": skeleton_md,
         "token_estimate": max(1, len(rendered) // 4),
         "symbols": included_symbols,
         "rendered": rendered,

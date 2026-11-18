@@ -171,10 +171,15 @@ def init_run_workspace(
     allowed_hosts: list[str] | None = None,
     allow_live_requests: bool = False,
     allow_live_mutations: bool = False,
+    diff_range: str | None = None,
+    parent_run_id: str | None = None,
     run_id: str | None = None,
     ajar_home: pathlib.Path | str | None = None,
 ) -> dict[str, Any]:
     """Initialize a new Ajar run in `--envelope` (default) or `--in-place` mode."""
+    from ajar.repomap import count_diff_loc
+    from ajar.repro_compose import ensure_helpers_runtime
+
     if target_mode not in ("source", "binary", "live"):
         raise AjarError(f"Unsupported --mode {target_mode!r}.", EXIT_USER_ERROR)
     if workspace_mode not in ("envelope", "in_place"):
@@ -186,6 +191,7 @@ def init_run_workspace(
     if (rdir / "run.db").exists():
         raise AjarError(f"Run {rid} already exists at {rdir}", EXIT_USER_ERROR)
 
+    src_git_dir: pathlib.Path | None = None
     if target_mode == "live":
         target_url = target.strip()
         target_path_str = target_url
@@ -200,6 +206,7 @@ def init_run_workspace(
             raise AjarError(f"Target path does not exist: {src_path}", EXIT_USER_ERROR)
         if target_mode == "binary" and not src_path.is_file():
             raise AjarError(f"--mode binary requires an executable file, got: {src_path}", EXIT_USER_ERROR)
+        src_git_dir = src_path if src_path.is_dir() else src_path.parent
 
         if workspace_mode == "envelope":
             workspace_dir = rdir / "workspace"
@@ -215,6 +222,7 @@ def init_run_workspace(
                 env_target = workspace_dir / "target"
                 _snapshot_envelope_target(src_path, env_target)
                 init_source_mirror(rdir, env_target)
+                ensure_helpers_runtime(rdir)
                 _lock_tree_readonly(env_target)
                 effective_target_dir = env_target
 
@@ -227,13 +235,22 @@ def init_run_workspace(
             effective_target_dir = src_path
             if target_mode == "source":
                 init_source_mirror(rdir, src_path)
+                ensure_helpers_runtime(rdir)
 
         target_path_str = str(effective_target_dir)
-        loc_info = count_in_scope_loc(effective_target_dir) if target_mode == "source" else {
-            "total_loc": 0,
-            "files_counted": 1,
-            "code_quote_usd": 10.0,
-        }
+        if target_mode == "source" and diff_range and diff_range.strip():
+            try:
+                loc_info = count_diff_loc(src_git_dir, diff_range.strip())
+            except ValueError as exc:
+                raise AjarError(str(exc), EXIT_USER_ERROR) from exc
+        elif target_mode == "source":
+            loc_info = count_in_scope_loc(effective_target_dir)
+        else:
+            loc_info = {
+                "total_loc": 0,
+                "files_counted": 1,
+                "code_quote_usd": 10.0,
+            }
         target_sha = _compute_target_digest(effective_target_dir, target_mode)
 
     quote_usd = float(loc_info["code_quote_usd"])
@@ -249,6 +266,7 @@ def init_run_workspace(
     clean_goal = scrub_text(goal)
     commit_hash = compute_commitment_hash(target_sha, clean_goal, stopping_criterion, created_at)
 
+    diff_sync_summary: dict[str, Any] | None = None
     conn = open_run_db(rid, create=True, ajar_home=home)
     try:
         conn.execute(
@@ -295,6 +313,7 @@ def init_run_workspace(
                         "allowed_hosts": hosts,
                         "allow_live_requests": bool(allow_live_requests),
                         "allow_live_mutations": bool(allow_live_mutations),
+                        "diff_range": (diff_range or "").strip(),
                     },
                     sort_keys=True,
                 ),
@@ -309,8 +328,21 @@ def init_run_workspace(
             map_summary = {
                 "files_indexed": map_res["files_indexed"],
                 "symbols_indexed": map_res["symbols_indexed"],
+                "slice_count": map_res["slice_count"],
             }
             oracle_counts = index_target_oracles(conn, tpath)
+            if diff_range and diff_range.strip() and src_git_dir is not None:
+                from ajar.diff_sync import sync_pr_differential_state
+
+                diff_sync_summary = sync_pr_differential_state(
+                    conn,
+                    run_dir=rdir,
+                    target_dir=tpath,
+                    git_repo_dir=src_git_dir,
+                    diff_range=diff_range.strip(),
+                    parent_run_id=parent_run_id,
+                    ajar_home=home,
+                )
         else:
             oracle_counts = index_target_oracles(conn, rdir / "artifacts")
 
@@ -326,6 +358,8 @@ def init_run_workspace(
                 "code_quote_usd": quote_usd,
                 "cogs_cap_usd": eff_cogs_cap,
                 "pricing_mode": pricing_mode,
+                "diff_range": (diff_range or "").strip(),
+                "parent_run_id": (parent_run_id or "").strip(),
                 "commitment_hash": commit_hash,
             },
         )
@@ -335,7 +369,7 @@ def init_run_workspace(
     home.mkdir(parents=True, exist_ok=True)
     (home / "current_run").write_text(f"{rid}\n", encoding="utf-8")
 
-    return {
+    result: dict[str, Any] = {
         "run_id": rid,
         "run_dir": str(rdir),
         "workspace_path": str(workspace_dir),
@@ -351,3 +385,6 @@ def init_run_workspace(
         "repomap": map_summary,
         "indexed_docs": oracle_counts,
     }
+    if diff_sync_summary is not None:
+        result["diff_sync"] = diff_sync_summary
+    return result

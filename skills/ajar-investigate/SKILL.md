@@ -17,23 +17,22 @@ Use this skill to execute leased `investigate` or `instrument` tasks, persist ve
    ```bash
    ajar context --task <task_id>
    ```
-3. Follow the task's `skill_mode`, `direction`, and `Active Workspace Steers`:
-   - **Workspace Steers:** Obey all `Active Workspace Steers` listed at the top of the context frame. Never pursue out-of-scope paths barred by a Steer.
+3. Follow the task's `skill_mode`, `direction`, `Active Workspace Steers`, and `Active Epistemic Hooks`:
+   - **Workspace Steers:** Obey all `Active Workspace Steers` listed in the `Certified Run Prefix`. Never pursue out-of-scope paths barred by a Steer.
+   - **Active Epistemic Hooks (`H1`–`H8`):** When `Task Delta` surfaces an active hook (`<= 2` per task), execute its check on the target locus and obey its `Kill Rule` immediately if the compensating invariant holds. Never fabricate shell/gdb output in prose.
    - **`skill_mode=zero_skill`:** Analyze target code from first principles. Do **not** open any file under `skills/domains/`. Derive invariants directly from state transitions, types, locks, and callers.
    - **`skill_mode=domain`:** Open only the single matching contrastive pack under `skills/domains/<domain>/SKILL.md`. Exit immediately if target code enforces a verified compensating control.
-   - **`direction`:** Follow the assigned search direction (`outside_in` entrypoint-to-sink, `inside_out` sink-to-callers, `native_ffi` memory/FFI boundary, or `peer_symmetry` sibling route/hook comparison).
+   - **`direction`:** Follow the assigned search direction (`outside_in`, `inside_out`, `native_ffi`, or `peer_symmetry`).
 
-## 2. Keep-Biased Discovery and Durable Memory
+## 2. Keep-Biased Discovery, Capability Tags, and Durable Memory
 
 Discovery is **keep-biased**: capture real behavioral signals first and let `ajar-falsify` and `ajar-reproduce` act as the kill-biased disconfirmation funnel.
 
-1. Pin verified constants, offsets, role bitmasks, or route guards as line-hashed bindings so downstream workers never re-derive them:
+1. Pin verified constants, record audited line coverage, and checkpoint multi-step progress before context compaction:
    ```bash
-   ajar binding set \
-     --name "<binding_name>" \
-     --value "<verified_value>" \
-     --locus "<file:line>" \
-     --task <task_id>
+   ajar binding set --name "<binding_name>" --value "<verified_value>" --locus "<file:line>" --task <task_id>
+   ajar coverage record <rel_path> --start-line <start> --end-line <end> --task <task_id> --worker <worker_id>
+   ajar task checkpoint <task_id> --worker <worker_id> --state-json '{"checked_callers":["a.c:40"],"next_focus":"b.c:88"}'
    ```
 2. Record unexpected state, differential behavior, or crashes immediately as an `anomaly` (anomalies survive even if an initial claim is later falsified):
    ```bash
@@ -43,7 +42,7 @@ Discovery is **keep-biased**: capture real behavioral signals first and let `aja
      --repro-cmd "<command that triggers observation>" \
      --surface <surface_id>
    ```
-3. Record bounded capabilities (partial path traversal, header write, rounding drift, unauthenticated state nudge, or guarded inner sink) as a `primitive`:
+3. Record bounded capabilities as a `primitive` with typed `--provides-tags` and `--requires-tags` (`ns:name`) so `ajar` matches cross-subsystem bridges automatically:
    ```bash
    ajar primitive add \
      --surface <surface_id> \
@@ -51,6 +50,8 @@ Discovery is **keep-biased**: capture real behavioral signals first and let `aja
      --kind "<capability_type>" \
      --preconditions "<required caller state and inputs>" \
      --postconditions "<state or capability gained>" \
+     --provides-tags "<ns:capability_provided>" \
+     --requires-tags "<ns:precondition_needed>" \
      --guarded-by "<optional upstream guard file:line>" \
      --guard-assumption "<optional invariant assumed by upstream guard>" \
      --evidence-cmd "<verification command>"
@@ -60,9 +61,9 @@ Discovery is **keep-biased**: capture real behavioral signals first and let `aja
 
 Never mark a task `dry` the moment you spot an upstream check if an inner sink or primitive remains dangerous when that check's assumption breaks:
 
-1. Register the inner capability with `ajar primitive add --guarded-by "<guard_file:line>" --guard-assumption "<assumption>"`.
-2. Either enqueue a `chain` / `investigate` task targeting ways to violate `<assumption>` (via sibling routes, callbacks, race windows, or encoding drift), or park the task with `ajar task block`.
-3. `ajar task dry` deterministically rejects closing a task when an unchained guarded primitive on the same surface/subsystem still awaits guard-break evaluation.
+1. Register the inner capability with `ajar primitive add --guarded-by "<guard_file:line>" --guard-assumption "<assumption>"`. `H1_GUARD_SYMMETRY` automatically enqueues an inside-out audit of `<guard_file:line>`.
+2. Either complete the guard-break audit on `<guard_file:line>` (proving it sound via `dry` or breaking it via `chain`), or park the current task with `ajar task block`.
+3. `ajar task dry` deterministically rejects closing a task when an unchained guarded primitive on the same surface/subsystem still awaits completed guard verification.
 
 ## 4. Propose Falsifiable Claims
 

@@ -213,24 +213,40 @@ def export_attack_flow_graph(conn: sqlite3.Connection) -> dict[str, Any]:
             }
         )
 
+    epistemic_hooks = list_rows(conn, "SELECT * FROM epistemic_hooks ORDER BY created_at ASC")
+    primitive_helpers = list_rows(
+        conn,
+        "SELECT helper_id, primitive_id, module_name, callable_name, provides_tags_json, verified FROM primitive_helpers ORDER BY created_at ASC",
+    )
+    cov_row = conn.execute(
+        "SELECT COUNT(*) AS spans, COUNT(DISTINCT rel_path) AS files FROM coverage_spans"
+    ).fetchone()
+
     return {
         "schema": "ajar-platform-graph/1",
         "run_id": run.get("run_id", ""),
         "target_path": run.get("target_path", ""),
         "target_mode": run.get("target_mode", "source"),
+        "diff_range": run.get("diff_range", ""),
         "commitment_hash": run.get("commitment_hash", ""),
         "nodes": nodes,
         "edges": edges,
         "active_steers": steers,
+        "epistemic_hooks": epistemic_hooks,
+        "primitive_helpers": primitive_helpers,
         "summary": {
             "surfaces_total": len(surfaces),
             "surfaces_with_findings": len(finding_surfaces),
             "surfaces_guarded_dry": len(dry_surfaces),
             "primitives_total": len(primitives),
+            "primitive_helpers_verified": sum(1 for h in primitive_helpers if h["verified"]),
             "unchained_primitives": sum(1 for p in primitives if not p["chained"]),
             "unexplained_anomalies": sum(1 for a in anomalies if a["status"] == "unexplained"),
             "confirmed_findings": len(findings),
             "verified_chains": sum(1 for c in chains if c["verified"]),
             "active_steers": len(steers),
+            "epistemic_hooks_total": len(epistemic_hooks),
+            "coverage_spans_total": int(cov_row["spans"] or 0),
+            "coverage_files_total": int(cov_row["files"] or 0),
         },
     }

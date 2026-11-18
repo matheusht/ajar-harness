@@ -25,7 +25,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from ajar.redact import scrub_text, scrubbed_subprocess_env
 
@@ -374,27 +374,51 @@ def _run_shell_in_slot(
     slot_dir: pathlib.Path,
     cache_dir: pathlib.Path,
     timeout_sec: int,
+    helpers_dir: pathlib.Path | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    from ajar.repro_compose import ensure_helpers_runtime
+
+    eff_helpers = helpers_dir or ensure_helpers_runtime(slot_dir.parent.parent)
     ports = _allocate_ephemeral_ports(4)
     arm_token = secrets.token_hex(12)
     tmp_dir = cache_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    has_netns = unshare_netns_available()
 
-    overrides = {
+    overrides: dict[str, str] = {
         "AJAR_ARM_TOKEN": arm_token,
         "AJAR_PORT_0": str(ports[0]),
         "AJAR_PORT_1": str(ports[1]),
         "AJAR_PORT_2": str(ports[2]),
         "AJAR_PORT_3": str(ports[3]),
+        "AJAR_HELPERS_DIR": str(eff_helpers),
         "CARGO_TARGET_DIR": str(cache_dir / "cargo-target"),
         "GOCACHE": str(cache_dir / "go-cache"),
         "PYTHONPYCACHEPREFIX": str(cache_dir / "pycache"),
         "PYTHONNOUSERSITE": "1",
-        "PYTHONPATH": str(slot_dir),
+        "PYTHONPATH": f"{slot_dir}{os.pathsep}{eff_helpers}",
         "GOFLAGS": "-count=1",
     }
+    if not has_netns:
+        overrides.update(
+            {
+                "AJAR_BLOCK_EXTERNAL_NET": "1",
+                "NO_PROXY": "*",
+                "no_proxy": "*",
+                "HTTP_PROXY": "",
+                "HTTPS_PROXY": "",
+                "http_proxy": "",
+                "https_proxy": "",
+            }
+        )
+    if extra_env:
+        for k, v in extra_env.items():
+            overrides[str(k)] = str(v)
+
     env = scrubbed_subprocess_env(overrides=overrides, tmp_dir=tmp_dir)
-    argv = ["unshare", "-rn", "bash", "-c", cmd] if unshare_netns_available() else ["bash", "-c", cmd]
+    env["PATH"] = f"{eff_helpers / 'bin'}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
+    argv = ["unshare", "-rn", "bash", "-c", cmd] if has_netns else ["bash", "-c", cmd]
 
     t0 = time.monotonic()
     timed_out = False
@@ -443,13 +467,20 @@ def _run_trials(
     timeout_sec: int,
     oracle: dict[str, Any] | None,
     trials: int,
+    helpers_dir: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     defect_hits = 0
     clean_passes = 0
     last_res: dict[str, Any] = {}
     total_ms = 0.0
     for _ in range(trials):
-        res = _run_shell_in_slot(cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec)
+        res = _run_shell_in_slot(
+            cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            helpers_dir=helpers_dir,
+        )
         total_ms += float(res["duration_ms"])
         fired = _evaluate_defect_fired(res["exit_code"], res["stdout"], res["stderr"], res["timed_out"], oracle)
         if fired:
@@ -464,6 +495,47 @@ def _run_trials(
         "clean_passes": clean_passes,
         "total_duration_ms": round(total_ms, 1),
     }
+
+
+DEBUG_ABORT_SIGNAL_RE = re.compile(
+    r"(?:runtime error:|UndefinedBehaviorSanitizer|AddressSanitizer|panicked at|"
+    r"assertion failed|attempt to (?:add|subtract|multiply|shift) with overflow|SIGABRT|SIGILL)",
+    re.IGNORECASE,
+)
+
+
+def classify_release_ub_divergence(
+    arm1_debug: dict[str, Any],
+    arm5a_release_poc: dict[str, Any],
+    arm5b_release_ctrl: dict[str, Any],
+    *,
+    min_hits: int = 1,
+    n_trials: int = 1,
+) -> str:
+    """Classify compiler-profile UB divergence between Arm 1 (debug/sanitizer) and Arm 5A/5B (`-O2` / `--release`)."""
+    if arm5b_release_ctrl["defect_hits"] > 0 or arm5b_release_ctrl["clean_passes"] < n_trials:
+        return "release_control_failed"
+
+    rel_fired = int(arm5a_release_poc["defect_hits"]) >= min_hits
+    rel_rc = int(arm5a_release_poc["exit_code"])
+    dbg_rc = int(arm1_debug["exit_code"])
+    dbg_out = f"{arm1_debug.get('stdout', '')}\n{arm1_debug.get('stderr', '')}"
+    rel_out = f"{arm5a_release_poc.get('stdout', '')}\n{arm5a_release_poc.get('stderr', '')}"
+
+    if not rel_fired and rel_rc == 0 and not arm5a_release_poc.get("timed_out"):
+        return "debug_assert_only"
+
+    if not rel_fired and (rel_rc < 0 or rel_rc >= 128):
+        return "trap_dos_only"
+
+    dbg_trapped = bool(DEBUG_ABORT_SIGNAL_RE.search(dbg_out)) or dbg_rc < 0 or dbg_rc >= 128
+    rel_trapped = bool(DEBUG_ABORT_SIGNAL_RE.search(rel_out)) or rel_rc < 0 or rel_rc >= 128
+
+    if rel_fired and dbg_trapped and not rel_trapped:
+        return "silent_wrap_escalated"
+    if rel_trapped and not re.search(r"(?:corrupt|bypass|unauthorized|invariant|overflow_wrap)", rel_out, re.IGNORECASE):
+        return "trap_dos_only"
+    return "consistent"
 
 
 def _acquire_slot(repro_dir: pathlib.Path, max_slots: int = 8) -> tuple[int, Any]:
@@ -515,8 +587,10 @@ def run_source_reproduction(
     claim_locus: str = "",
     shared_guard_locus: str = "",
     max_changed_lines: int = 16,
+    release_cmd: str = "",
+    release_control_cmd: str = "",
 ) -> dict[str, Any]:
-    """Execute 4-arm counterfactual source reproduction inside an isolated fixed-path slot."""
+    """Execute 4-arm counterfactual source reproduction (+ optional Arm 5A/5B Release UB Differential)."""
     if not micropatch_path.is_file():
         return {
             "passed": False,
@@ -527,6 +601,9 @@ def run_source_reproduction(
             "arm2_clean_control": {"arm_passed": False},
             "arm3_patch_poc": {"arm_passed": False},
             "arm4_patch_control": {"arm_passed": False},
+            "arm5a_release_poc": {},
+            "arm5b_release_control": {},
+            "ub_divergence_class": "",
             "cross_killed_claim_ids": [],
         }
 
@@ -548,9 +625,15 @@ def run_source_reproduction(
             "arm2_clean_control": {"arm_passed": False},
             "arm3_patch_poc": {"arm_passed": False},
             "arm4_patch_control": {"arm_passed": False},
+            "arm5a_release_poc": {},
+            "arm5b_release_control": {},
+            "ub_divergence_class": "",
             "cross_killed_claim_ids": [],
         }
 
+    from ajar.repro_compose import ensure_helpers_runtime
+
+    helpers_dir = ensure_helpers_runtime(run_dir)
     mirror_dir = init_source_mirror(run_dir, target_dir)
     repro_dir = run_dir / "repro"
     slot_idx, lock_fh = _acquire_slot(repro_dir)
@@ -567,7 +650,13 @@ def run_source_reproduction(
 
         # Arm 1: Clean baseline + PoC -> MUST fire defect.
         arm1 = _run_trials(
-            poc_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec, oracle=oracle, trials=n_trials
+            poc_cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            oracle=oracle,
+            trials=n_trials,
+            helpers_dir=helpers_dir,
         )
         arm1["arm_passed"] = arm1["defect_hits"] >= min_race_hits
         obs_seed = f"a1:{arm1['exit_code']}:{arm1['stdout'][:240]}:{arm1['stderr'][:240]}"
@@ -582,6 +671,9 @@ def run_source_reproduction(
                 "arm2_clean_control": {"arm_passed": False},
                 "arm3_patch_poc": {"arm_passed": False},
                 "arm4_patch_control": {"arm_passed": False},
+                "arm5a_release_poc": {},
+                "arm5b_release_control": {},
+                "ub_divergence_class": "",
                 "cross_killed_claim_ids": [],
             }
 
@@ -591,7 +683,13 @@ def run_source_reproduction(
 
         # Arm 2: Clean baseline + benign control -> MUST pass cleanly with 0 defect hits.
         arm2 = _run_trials(
-            control_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec, oracle=oracle, trials=n_trials
+            control_cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            oracle=oracle,
+            trials=n_trials,
+            helpers_dir=helpers_dir,
         )
         arm2["arm_passed"] = arm2["defect_hits"] == 0 and arm2["clean_passes"] == n_trials
         if not arm2["arm_passed"]:
@@ -604,6 +702,9 @@ def run_source_reproduction(
                 "arm2_clean_control": arm2,
                 "arm3_patch_poc": {"arm_passed": False},
                 "arm4_patch_control": {"arm_passed": False},
+                "arm5a_release_poc": {},
+                "arm5b_release_control": {},
+                "ub_divergence_class": "",
                 "cross_killed_claim_ids": [],
             }
 
@@ -628,6 +729,9 @@ def run_source_reproduction(
                 "arm2_clean_control": arm2,
                 "arm3_patch_poc": {"arm_passed": False, "stderr": err},
                 "arm4_patch_control": {"arm_passed": False},
+                "arm5a_release_poc": {},
+                "arm5b_release_control": {},
+                "ub_divergence_class": "",
                 "cross_killed_claim_ids": [],
             }
 
@@ -636,7 +740,13 @@ def run_source_reproduction(
 
         # Arm 3: Micro-patched target + PoC -> defect MUST stop firing (0 hits).
         arm3 = _run_trials(
-            poc_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec, oracle=oracle, trials=n_trials
+            poc_cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            oracle=oracle,
+            trials=n_trials,
+            helpers_dir=helpers_dir,
         )
         arm3["arm_passed"] = arm3["defect_hits"] == 0 and not arm3["timed_out"]
         if not arm3["arm_passed"]:
@@ -652,12 +762,21 @@ def run_source_reproduction(
                 "arm2_clean_control": arm2,
                 "arm3_patch_poc": arm3,
                 "arm4_patch_control": {"arm_passed": False},
+                "arm5a_release_poc": {},
+                "arm5b_release_control": {},
+                "ub_divergence_class": "",
                 "cross_killed_claim_ids": [],
             }
 
         # Arm 4: Micro-patched target + benign control -> MUST still pass (blocks destructive patches!).
         arm4 = _run_trials(
-            control_cmd, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec, oracle=oracle, trials=n_trials
+            control_cmd,
+            slot_dir=slot_dir,
+            cache_dir=cache_dir,
+            timeout_sec=timeout_sec,
+            oracle=oracle,
+            trials=n_trials,
+            helpers_dir=helpers_dir,
         )
         arm4["arm_passed"] = arm4["defect_hits"] == 0 and arm4["clean_passes"] == n_trials
         if not arm4["arm_passed"]:
@@ -673,6 +792,9 @@ def run_source_reproduction(
                 "arm2_clean_control": arm2,
                 "arm3_patch_poc": arm3,
                 "arm4_patch_control": arm4,
+                "arm5a_release_poc": {},
+                "arm5b_release_control": {},
+                "ub_divergence_class": "",
                 "cross_killed_claim_ids": [],
             }
 
@@ -685,14 +807,77 @@ def run_source_reproduction(
                 if not sib_id or sib_id == claim_id or not sib_poc:
                     continue
                 sib_res = _run_trials(
-                    sib_poc, slot_dir=slot_dir, cache_dir=cache_dir, timeout_sec=timeout_sec, oracle=oracle, trials=1
+                    sib_poc,
+                    slot_dir=slot_dir,
+                    cache_dir=cache_dir,
+                    timeout_sec=timeout_sec,
+                    oracle=oracle,
+                    trials=1,
+                    helpers_dir=helpers_dir,
                 )
                 if sib_res["defect_hits"] == 0 and not sib_res["timed_out"]:
                     cross_killed.append(sib_id)
 
+        # Optional Arm 5A / Arm 5B: Release-Profile UB Differential (`-O2` / `--release`).
+        arm5a: dict[str, Any] = {}
+        arm5b: dict[str, Any] = {}
+        ub_divergence_class = ""
+        if release_cmd.strip():
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+            _bump_files_mtime(slot_dir, touched_files, watermark_file)
+
+            arm5a = _run_trials(
+                release_cmd.strip(),
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                oracle=oracle,
+                trials=n_trials,
+                helpers_dir=helpers_dir,
+            )
+            subprocess.run(["git", "-C", str(slot_dir), "reset", "--hard", "HEAD"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(slot_dir), "clean", "-fdx"], capture_output=True, check=True)
+
+            eff_rel_ctrl = release_control_cmd.strip() or control_cmd
+            arm5b = _run_trials(
+                eff_rel_ctrl,
+                slot_dir=slot_dir,
+                cache_dir=cache_dir,
+                timeout_sec=timeout_sec,
+                oracle=oracle,
+                trials=n_trials,
+                helpers_dir=helpers_dir,
+            )
+            ub_divergence_class = classify_release_ub_divergence(
+                arm1, arm5a, arm5b, min_hits=min_race_hits, n_trials=n_trials
+            )
+            arm5b["arm_passed"] = ub_divergence_class != "release_control_failed"
+            if ub_divergence_class == "release_control_failed":
+                return {
+                    "passed": False,
+                    "reason": f"Arm 5B (release-profile benign control) failed (exit={arm5b['exit_code']}).",
+                    "observation_hash": hashlib.sha256((obs_seed + "|a5b_fail").encode("utf-8")).hexdigest()[:16],
+                    "micropatch_diff": scrub_text(diff_text[:4000]),
+                    "arm1_clean_poc": arm1,
+                    "arm2_clean_control": arm2,
+                    "arm3_patch_poc": arm3,
+                    "arm4_patch_control": arm4,
+                    "arm5a_release_poc": arm5a,
+                    "arm5b_release_control": arm5b,
+                    "ub_divergence_class": ub_divergence_class,
+                    "cross_killed_claim_ids": cross_killed,
+                }
+
+        reason_msg = (
+            "All 4 causal arms passed (clean PoC triggered, clean control passed, micro-patch mitigated PoC, patched control passed)."
+        )
+        if ub_divergence_class:
+            reason_msg += f" Release UB differential={ub_divergence_class}."
+
         return {
             "passed": True,
-            "reason": "All 4 causal arms passed (clean PoC triggered, clean control passed, micro-patch mitigated PoC, patched control passed).",
+            "reason": reason_msg,
             "observation_hash": hashlib.sha256((obs_seed + "|verified").encode("utf-8")).hexdigest()[:16],
             "slot_index": slot_idx,
             "touched_files": touched_files,
@@ -701,6 +886,9 @@ def run_source_reproduction(
             "arm2_clean_control": arm2,
             "arm3_patch_poc": arm3,
             "arm4_patch_control": arm4,
+            "arm5a_release_poc": arm5a,
+            "arm5b_release_control": arm5b,
+            "ub_divergence_class": ub_divergence_class,
             "cross_killed_claim_ids": cross_killed,
         }
     finally:

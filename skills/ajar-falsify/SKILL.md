@@ -54,6 +54,16 @@ Run the claim's declared `falsification_test`, check `Active Workspace Steers`, 
     --reason "<why the observed behavior is benign and intended>"
   ```
 
+- **If a sink is disabled by default configuration (`config_gated`), park it and spawn a 1-lease override probe instead of burying it permanently:**
+  ```bash
+  ajar claim falsify <claim_id> \
+    --worker <challenger_worker_id> \
+    --control-locus "<file:line>" \
+    --config-gate "<config_flag_or_env_predicate>" \
+    --notes "<sink is real at locus but gated by default-off config predicate>"
+  ```
+  `--config-gate` transitions the claim to `config_gated` and spawns one bounded `investigate` probe checking whether tenant preferences, container templates, or sibling routes enable that predicate.
+
 - **If a real defect exists but its true causal `locus`, preconditions, or `severity` differ from the proposal, rescope instead of discarding:**
   ```bash
   ajar claim rescope <claim_id> \

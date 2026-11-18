@@ -39,6 +39,8 @@ Interrogate every PoC, control, and micro-patch against all 12 lenses before inv
 
 ### Source Targets (`--mode source`)
 
+When `H6_RELEASE_UB_DIFF` fires on compiled C/C++/Rust/Zig UB or integer-overflow claims, supply `--release-cmd` (`-O2` / `--release` without debug assertions or `-ftrapv`) so Arms `5A`/`5B` classify `consistent | silent_wrap_escalated | debug_assert_only | trap_dos_only` (`debug_assert_only` is blocked on `critical`/`high` until rescoped):
+
 ```bash
 ajar claim reproduce <claim_id> \
   --worker <worker_id> \
@@ -46,6 +48,8 @@ ajar claim reproduce <claim_id> \
   --poc-cmd "<command proving exploit impact>" \
   --control-cmd "<command exercising benign caller path>" \
   --micropatch <path/to/micropatch.diff> \
+  [--release-cmd "<release-profile PoC command>"] \
+  [--release-control-cmd "<release-profile benign control command>"] \
   [--shared-guard-locus "<file:line>"] \
   --determinism deterministic
 ```
@@ -78,6 +82,15 @@ ajar claim reproduce <claim_id> \
   --teardown-cmd "<delete canary and verify HTTP 404/absent>"
 ```
 
-## 4. Two-Failure Telemetry Pivot
+## 4. Two-Failure Telemetry Pivot (`ajar claim instrument`)
 
-If `ajar claim reproduce` fails twice on the same claim with an unchanged observation hash, `run.db` transitions the claim to `needs_instrumentation` and spawns an `instrument` task. Stop guessing payload variations; instrument the target, inspect runtime values at `claim.locus`, record a `binding` or `anomaly`, and retry only after new runtime evidence lands.
+If `ajar claim reproduce` fails twice on the same claim with an unchanged observation hash, `run.db` transitions the claim to `needs_instrumentation` and spawns an `instrument` task. Stop guessing payload variations and run an isolated diagnostic probe inside `slot-inst`:
+
+```bash
+ajar claim instrument <claim_id> \
+  --worker <worker_id> \
+  --probe-cmd "<diagnostic trace command>" \
+  [--probe-patch <path/to/temporary_trace.diff>]
+```
+
+`slot-inst` captures runtime output into `anomalies`, resets the worktree cleanly, and unlocks `survived_falsify` so you can retry `reproduce` with verified state.

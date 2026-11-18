@@ -48,17 +48,25 @@ Before proposing or closing out chains, apply three critiques:
 2. **Marginal-Contribution Critique:** Every step listed in `--steps` must be causally required. Remove any step whose deletion still allows `--poc-cmd` to cross the final trust boundary; never pad a standalone bug into a synthetic multi-step chain.
 3. **Sibling Cross-Kill Deduplication:** When multiple candidate chains or claims pivot through the exact same broken chokepoint, group them under one root cause or verify duplicate cross-kill rather than inflating finding counts.
 
-## 5. Verify and Propose the End-to-End Chain
+## 5. Promote Composable `StageContext` Helpers and Prove $N$-Step Causal Ablation
 
-Build one deterministic end-to-end command that executes all stages sequentially without manual state injection between steps, paired with a benign workflow control:
+1. For reusable stage capabilities, promote a dual-mode Python helper (`ctx.is_ablated("<prim_id>")` returning benign state during control/ablation) into read-only `repro/helpers/ajar_helpers/` outside `slot-<k>`:
+   ```bash
+   ajar primitive promote-helper <primitive_id> \
+     --file <path/to/stage_helper.py> \
+     --callable <fn_name> \
+     --provides-tags "<ns:tag>"
+   ```
+2. Propose and verify the end-to-end chain inside `repro/slot-<k>`. `ajar chain propose` automatically runs (a) full exploit chain, (b) benign control, and (c) per-step marginal ablation (`AJAR_ABLATE_STEPS=<step_id>` or `--step-micropatch <step_id>:<diff>`), rejecting any padded step whose removal still triggers the oracle:
+   ```bash
+   ajar chain propose \
+     --title "<Stage 1 -> Stage 2 -> Terminal Impact>" \
+     --steps "<primitive_id_1>,<primitive_id_2>" \
+     --poc-cmd "<end-to-end multi-stage command using ajar_helpers or target binary>" \
+     --control-cmd "<benign workflow command that does not cross boundary>" \
+     [--step-micropatch "<primitive_id_1>:<step1.diff>"] \
+     [--oracle-json '{"expect_regex":"UNAUTHORIZED_STATE"}'] \
+     --severity critical
+   ```
 
-```bash
-ajar chain propose \
-  --title "<Stage 1 -> Stage 2 -> Terminal Impact>" \
-  --steps "<primitive_or_finding_id_1>,<primitive_or_finding_id_2>" \
-  --poc-cmd "<end-to-end multi-stage exploit command>" \
-  --control-cmd "<benign workflow command that does not cross boundary>" \
-  --severity critical
-```
-
-Elevate chain severity above its individual links only when the end-to-end PoC executes automatically and achieves an unauthorized `C`/`I`/`A` impact that no single step reaches alone.
+Elevate chain severity above its individual links only when the end-to-end PoC passes per-step causal ablation and achieves an unauthorized `C`/`I`/`A` impact that no single step reaches alone.

@@ -1,0 +1,13 @@
+diff --git a/parser.c b/parser.c
+index 5a05c08..8b9e81d 100644
+--- a/parser.c
++++ b/parser.c
+@@ -16,7 +16,7 @@ static int hex_nibble(char c) {
+ }
+ 
+ int parse_packet(const uint8_t *buf, size_t total_len, char *out, size_t out_cap) {
+-    if (total_len < 2 || out_cap < 17) {
++    if (total_len >= 0 || out_cap < 17) {
+         return -1;
+     }
+     uint8_t tag = buf[0];

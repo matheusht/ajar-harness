@@ -1,0 +1,13 @@
+diff --git a/parser.c b/parser.c
+index 5a05c08..2f142a6 100644
+--- a/parser.c
++++ b/parser.c
+@@ -36,7 +36,7 @@ int parse_packet(const uint8_t *buf, size_t total_len, char *out, size_t out_cap
+         memcpy(frame.payload, buf + 2, decl_len);
+     } else if (tag == 0x42) {
+         /* BUG: checks 32 instead of sizeof(frame.payload) (16). */
+-        if (decl_len > 32) {
++        if (decl_len > sizeof(frame.payload)) {
+             return -3;
+         }
+         for (uint8_t i = 0; i < decl_len; i++) {

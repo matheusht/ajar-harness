@@ -1,0 +1,13 @@
+diff --git a/app.py b/app.py
+index a09d715..8a9c193 100644
+--- a/app.py
++++ b/app.py
+@@ -17,6 +17,8 @@ STORE: dict[tuple[str, str], str] = {
+ def get_note(tenant: str, note_id: str, requester: str) -> tuple[int, dict[str, str]]:
+     if not requester:
+         return 401, {"error": "unauthenticated"}
++    if requester != tenant:
++        return 403, {"error": "forbidden"}
+     # BUG: checks authentication (`not requester`) but omits `requester != tenant` authorization!
+     key = (tenant, note_id)
+     if key not in STORE:

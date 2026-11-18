@@ -1,0 +1,13 @@
+diff --git a/parser.c b/parser.c
+index 5a05c08..3298e6d 100644
+--- a/parser.c
++++ b/parser.c
+@@ -30,7 +30,7 @@ int parse_packet(const uint8_t *buf, size_t total_len, char *out, size_t out_cap
+     frame.guard_magic = 0xCAFEBABEu;
+ 
+     if (tag == 0x10) {
+-        if (decl_len > sizeof(frame.payload)) {
++        if (decl_len > 15) {
+             return -3;
+         }
+         memcpy(frame.payload, buf + 2, decl_len);

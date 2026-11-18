@@ -1,0 +1,13 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 578cfcb..18355fc 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -27,7 +27,7 @@ impl ShareVault {
+     /// BUG: rounds UP in favor of withdrawer (`+ self.total_shares - 1`), draining vault solvency.
+     pub fn withdraw(&mut self, shares: u128) -> u128 {
+         assert!(shares > 0 && shares <= self.total_shares, "invalid shares");
+-        let assets_out = (shares * self.total_assets + self.total_shares - 1) / self.total_shares;
++        let assets_out = (shares * self.total_assets) / self.total_shares;
+         assert!(assets_out <= self.total_assets, "VAULT_INSOLVENT_UNDERFLOW");
+         self.total_shares -= shares;
+         self.total_assets -= assets_out;

@@ -1,0 +1,20 @@
+diff --git a/ledger.go b/ledger.go
+index 3366216..a7d7692 100644
+--- a/ledger.go
++++ b/ledger.go
+@@ -37,12 +37,10 @@ func (l *Ledger) Transfer(from, to string, amount int64) error {
+ 	if amount < 0 {
+ 		return ErrNegativeAmount
+ 	}
+-	fromBal := l.balances[from]
+-	toBal := l.balances[to]
+-	if fromBal < amount {
++	if l.balances[from] < amount {
+ 		return ErrInsufficientFunds
+ 	}
+-	l.balances[from] = fromBal - amount
+-	l.balances[to] = toBal + amount
++	l.balances[from] -= amount
++	l.balances[to] += amount
+ 	return nil
+ }

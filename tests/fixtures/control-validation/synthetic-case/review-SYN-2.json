@@ -1,0 +1,31 @@
+{
+ "schema_version": 1,
+ "review_id": "review-SYN-2",
+ "engagement_id": "fixture-control-validation",
+ "review_type": "claim_control_validation",
+ "proposed_finding_id": "F-SYN-2",
+ "entity_ref": "F-SYN-2",
+ "recorded_at": "2026-08-09T18:00:00Z",
+ "input_refs": [
+  "attempt-F-SYN-2"
+ ],
+ "input_hash": "sha256:abababababababababababababababababababababababababababababababab",
+ "evidence_refs": [
+  "artifact-F-SYN-2"
+ ],
+ "conflicting_evidence": [],
+ "independence": {
+  "reviewer_id": "reviewer-external-canonical",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-review-SYN-2",
+  "reviewer_session_id": "session-review-SYN-2",
+  "originating_run_id": "attempt-F-SYN-2",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism and control linkage."
+ },
+ "verdict": "supported",
+ "rationale": "Primary trace, matched negative control, and fresh replay establish the bounded claim.",
+ "corrections": [],
+ "required_next_actions": []
+}

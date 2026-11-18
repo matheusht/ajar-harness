@@ -1,9 +1,0 @@
-{
-  "context": {"target": "some-json-lib", "framework": "jvm", "language": "java"},
-  "base": [
-    {"route": "nesting-depth-dos",  "family": "parser-limits",       "priority": 5},
-    {"route": "alloc-amplification","family": "resource-exhaustion", "priority": 5},
-    {"route": "type-confusion",     "family": "deserialization",     "priority": 5},
-    {"route": "gadget-chain",        "family": "deserialization",    "priority": 3}
-  ]
-}

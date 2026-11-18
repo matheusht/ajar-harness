@@ -1,109 +1,110 @@
-# llm-redteam-harness
+# Ajar
 
-A **domain-neutral, portable** harness for **authorized** security research. A researcher works
-inside an explicit authority and evidence boundary; LLM application security is one supported
-domain whose retained cards are a domain pack, not the product boundary. The repository name is
-historical.
+**Ajar** (built by **Ajar Labs**) is a verification-backed security engine powering `Platform`, `Code`, `Fixes`, `Security reviews`, and `Supply chain`.
 
-> **Prime directive.** The product is **rigor, not findings**. A claim is confirmed only with an
-> execution observation, a relevant control, and a clean replay. A narrative, report match, or model
-> agreement cannot supply missing execution evidence.
+Every vulnerability claim must survive independent disconfirmation and pass a deterministic **locus-bound 4-arm causal reproduction** (`ajar claim reproduce`), and every production remediation must pass the **8-arm `Fixes` gate** (`ajar patch verify`). All coordination state lives in an external SQLite WAL database (`~/.ajar/runs/<run_id>/run.db`), keeping target repositories untouched.
 
-**Agent entrypoint:** [`AGENTS.md`](AGENTS.md) routes repository work, legacy queue/record work,
-lifecycle records, the candidate native route and qualification claims. `CLAUDE.md` is kept
-byte-identical to it.
+## Product Lineup Powered by `ajar`
 
-## Current scope
+- **`Platform` (`ajar export-graph`, `ajar steer`):** Deterministic component, trust-boundary, and attack-flow graph (`ajar-platform-graph/1`) with attributable operator `Steers`.
+- **`Code` + `Fixes` (`ajar quote`, `ajar run`, `ajar patch verify`):** Continuous PR/diff and full-repository verification with `35%` COGS margin enforcement (`cogs_cap_usd <= 0.35 * quote`) and 8-arm verified patches.
+- **`Security reviews` (`ajar finish`, `ajar report`):** Deep researcher-signed engagements backed by Stage-5 `Converge` chain synthesis and reproducible 4-arm artifacts.
+- **`Supply chain` *(Coming soon)*:** Reachability-gated dependency and native-extension exploitability verification.
 
-On `main`, the Decision 0005/0006 record kernel (legacy engagements) and the
-[research lifecycle](docs/research-lifecycle.md) layer (attempt start/finish, bounded negative
-results, evidence-bundle manifests) are implemented. New local source research has a candidate
-native route in this checkout. It is not qualified or adopted. #165 adoption, #171 integrated
-qualification and #172 unfamiliar-target study remain open. Treat it as candidate evidence, not a
-shipped procedure.
+## Operating Modes
 
-## Scope fence (read first)
+1. **Host Mode (zero separate API billing):** Drive Ajar from an interactive coding agent session (Claude Code, Codex CLI, Antigravity, OpenCode, or any MCP client) using the `ajar` CLI or `ajar mcp` STDIO server.
+   - `--envelope` (default): Creates an isolated workspace (`~/.ajar/runs/<run_id>/env/`) containing `AGENTS.md`, `.mcp.json`, `.claude/settings.json`, and a clean target checkout (`target/`).
+   - `--in-place`: Runs directly against an existing checkout (writing zero files into the target repository) when build paths or container mounts depend on absolute paths.
+2. **Standalone Mode (`ajar run`):** Runs a headless multi-worker verification loop with keep-biased `--discover-passes N`, role-tier model routing (`AJAR_MODEL_REASON`, `AJAR_MODEL_HUNT`, `AJAR_MODEL_FALLBACK`), dry-surface token breakers, and an `80% / 20%` explore-vs-verify reserve.
 
-The fence is generic. Each route and domain supplies its own benign objective set and safe-signal
-cards.
+## Quickstart
 
-| Boundary | What | Gate |
+```bash
+python3 -m pip install -e ".[dev]"
+ajar doctor
+ajar quote /path/to/target
+```
+
+### Host Mode Run
+
+```bash
+# 1. Initialize an isolated run (defaults COGS cap to 0.35 * Code LOC quote, or pass --cogs-cap)
+ajar init /path/to/target --mode source --until exhaustive-high
+
+# 2. Record workspace Steers, map symbols, and register surfaces
+ajar steer add --scope global --kind scope_authority --rule "Do not mutate production fixtures"
+ajar map --budget-tokens 1500
+ajar surface add --name "auth-token-exchange" --kind http --subsystem auth \
+  --locus "src/oauth.py:84" --priority critical \
+  --trust-boundary "unauthenticated client -> token issuer"
+
+# 3. Enqueue bi-directional tasks, lease, investigate, falsify/rescope, reproduce, and patch
+ajar task add --kind investigate --direction inside_out \
+  --title "Check atomic single-use on auth_code sink" \
+  --surface <surface_id> --locus "src/oauth.py:84" --priority critical
+ajar task lease --worker w-explore-1 --kind investigate --recover
+
+# 4. Verify SQL gates G1-G5, export Platform graph, seal run, and emit report
+ajar gate check
+ajar export-graph --output graph.json
+ajar finish
+ajar report --format md --output report.md
+```
+
+### Standalone Mode Run
+
+```bash
+ajar run /path/to/target --mode source --until exhaustive-high --workers 3 --discover-passes 2
+```
+
+## Two-Stage Verification: 4-Arm Discovery & 8-Arm `Fixes`
+
+| Stage | Command | Arms Enforced |
 | --- | --- | --- |
-| ✅ **Authorized local research** | a benign objective set declared in the signed target-local scope, run only inside the declared local environment | signed scope **+** a benign `safe_signal` for every used card **+** the declared effect, containment and cleanup ceiling |
-| ⚠️ **Authorized impact-escalation** | a real PoC artifact to prove blast radius (e.g. a contained worm or exfiltration chain) | signed `scope.md` **+** fresh human confirmation **+** containment **+** a cleanup obligation recorded at creation |
-| ❌ **Never** | real-harm uplift as the product · a library of working harmful jailbreaks · HarmBench-style harm-elicitation as a metric · wholesale ingestion of harm corpora | — |
+| **Finding Proof (`reproduced`)** | `ajar claim reproduce` | **Arms 1–4 + Locus Match:** Clean+PoC fires, Clean+Control passes, `1–5` line micro-patch at `claim.locus` blocks PoC, Micro-patch+Control passes |
+| **Production Fix (`maintainer_patched`)** | `ajar patch verify` | **Arms 1–8:** Arms 1–4 + **Arm 5** full test suite + **Arm 6** `>= 3` bypass variants blocked + **Arm 7** caller NULL/error-return audit + **Arm 8** sibling-route/peer-hook symmetry audit |
 
-**Authorization is mandatory.** No filled and signed `scope.md` → the legacy loop refuses to run.
+## Core CLI Commands
 
-LLM-domain examples are disclosed in [LLM domain scope](docs/agents/llm-domain-scope.md): benign
-system-prompt disclosure, refusal flip on a harmless target, indirect-injection canaries,
-excessive agency / unsafe rendering, and cross-user canary propagation. The never-boundary holds
-across domains.
-
-## Route quickstart
-
-| Work | Start at |
+| Command | Purpose |
 | --- | --- |
-| Repository engineering, research, docs or planning | [`AGENTS.md`](AGENTS.md), then [the layout](#layout) and [decision index](docs/decisions/README.md) |
-| Existing queue/record engagement | [legacy queue and record entry](docs/agents/legacy-local-research.md) |
-| Attempts, bounded negatives, evidence bundles | [research lifecycle](docs/research-lifecycle.md) |
-| Candidate native source research | [native local research](docs/agents/native-local-research.md) and [status](docs/wiki/native-research-status.md); adoption and qualification remain open |
-| Capability, readiness or qualification claim | [engineering wiki](docs/wiki/index.md), then its source evidence |
+| `ajar quote <target> [--diff <base..head>]` | Preview deterministic `Code` LOC quote (`$0.05/LoC`, `$25` min) and `35%` COGS cap |
+| `ajar init <target>` | Create `~/.ajar/runs/<run_id>/run.db`, mirror/worktree slots, and FTS5 indexes |
+| `ajar steer add\|list\|revoke` | Manage attributable workspace `Steers` (`scope_authority` vs `research_steering`) |
+| `ajar status` / `ajar pulse` | Inspect run metrics, COGS margin, active leases, bindings, and reopened tasks |
+| `ajar map` / `ajar export-graph` | Build Personalized PageRank symbol map and export `Platform` attack-flow JSON graph |
+| `ajar ref query --kind intent\|reachability\|precedent <q>` | Search FTS5 indexes over docs/tests, symbol callers, and precedent corpora |
+| `ajar surface add\|list` / `ajar driver add\|list` | Register attack surfaces and executable harness drivers |
+| `ajar task add\|lease\|done\|dry\|block\|list` | Coordinate bi-directional work items with anti-premature-`dry` guard enforcement |
+| `ajar anomaly add\|explain\|list` | Persist unexpected behaviors independently of specific hypotheses |
+| `ajar primitive add\|list` / `ajar binding set\|list` | Record composable/guarded capabilities and line-hashed verified code facts |
+| `ajar claim propose\|rescope\|falsify\|survive\|reproduce\|list` | Drive hypotheses through disconfirmation, rescoping, and locus-bound 4-arm proof |
+| `ajar chain propose\|list` | Run Stage-5 `Converge` guard-breaking and end-to-end chain verification |
+| `ajar patch verify\|list` | Enforce the 8-Arm Production Remediation Gate (`maintainer_patched`) |
+| `ajar gate check` / `ajar finish` / `ajar report` | Enforce SQL gates `G1–G5`, seal artifacts, and render Markdown/JSON reports |
+| `ajar mcp` / `ajar hook claude-stop` / `ajar loop codex\|omp` | Host Mode MCP server and session-persistence adapters |
 
-## Layout
+## Repository Layout
 
+```text
+AGENTS.md                 <= 50-line ASD-STE100 agent instructions (mirrored in CLAUDE.md)
+ajar/                     Zero-LLM Python engine (SQLite WAL, gates, 4/8-arm repro, graph, quote, MCP)
+skills/
+  ajar-*/                 7 core workflow skills (map, investigate, falsify, reproduce, chain, patch, report)
+  domains/                5 contrastive domain packs (evm-solidity, consensus-vm, rust-systems, web-api, auth-crypto)
+  references/             8 curated CVE, exploit-chain, contest-ruling, fix-diff, and false-positive corpora
+benchmarks/               Foundry, hermetic web/API, and polyglot C/Go/Rust/Python verification targets
+docs/
+  architecture.md         v3.1 engine, schema, 4/8-arm gates, COGS economics, and closeout specification
+  decisions/              Architecture Decision Records (0017 and 0018 active; 0001-0013 superseded)
+  engineering/AGENTS.md   Contributor invariants and required pre-PR verification commands
+tests/                    Unit, gate, v3.1 bug-brain, redaction, trap, and conformance test suite
+tools/legacy/             Read-only historical readers for archived engagements/
 ```
-skills/         PLANE 1 — methodology (read-only): vulns/ · techniques/ · oracles/ · patterns/
-engine/         PLANE 2 — orchestration: loop · persistence · routing · roster · gates · lifecycle
-schemas/        the contracts: attempt · finding · pattern · technique-card · lifecycle records
-fixtures/       sanitized oracle-calibration + routing-activation ground truth
-casebooks/      PLANE 1 — scrubbed prior-engagement memory (routing + false-positive discipline)
-engagements/    PLANE 3 — _TEMPLATE copied OUT into each target's own project repo (append-only)
-tools/          record kernel, research lifecycle, work queue, conformance
-docs/           architecture + decisions + agents + research + wiki
-```
 
-**Plane rule:** Plane 1 is read-only knowledge; Plane 3 is write-only memory. The portable harness
-(Plane 1+2) travels; each engagement's Plane 3 records live with its target.
+## Authorization and Redaction
 
-## Conformance
-
-```sh
-python3 tools/check-conformance.py     # stdlib only; exit 0 = clean
-```
-
-Structural gate: front matter, pattern `activation` tiers, vuln `safe_signal`, `routes_to`
-resolution plus `stub:` quoting, casebook pattern-refs, and a casebook secret scan. A green run is
-required before a pattern/vuln/casebook change is promoted (also enforced in CI). It is structural,
-not a full schema validator, and it does not prove a research result.
-
-## Naming & anonymization
-
-- **Casebooks are strictly anonymized** — no client or marketing name beyond an abstract
-  `target_class`, no live ids/tokens/URLs. Enforced by the schema rule and the conformance scan.
-- **Plane-1 methodology files** may keep an operator-internal engagement label as *provenance*,
-  but never a secret. Keep internal labels internal; repository visibility is not a redaction
-  control.
-- **Before external sharing**, replace engagement labels with abstract handles. Until then they
-  stay internal.
-
-## Links
-
-- [Decision index](docs/decisions/README.md) — accepted and superseded architecture decisions.
-- [Engineering wiki](docs/wiki/index.md) — maintained engineering synthesis and its dated state.
-- [Architecture](docs/architecture.md) and [harness flow](docs/harness-flow.md).
-- [Benchmark results and comparison](docs/research/benchmark-results-and-comparison.md) — earlier
-  calibrations, not a fresh execution result or authorization.
-- [Docker work-queue contract](docs/agents/docker-work-queue.md) and
-  [session-end backstop](docs/agents/session-end-backstop.md).
-- [LLM domain scope](docs/agents/llm-domain-scope.md) and
-  [legacy queue and record entry](docs/agents/legacy-local-research.md).
-
-## Status
-
-Dated pointer, 2026-10-23: the [engineering wiki](docs/wiki/index.md) holds the maintained
-engineering synthesis and its dated delivery state; recheck the source commit and issue state
-before acting. The wiki's own status is an observation, not a live tracker. The candidate native
-route is present in this checkout; #165 adoption, #171 integrated qualification and #172
-unfamiliar-target study remain open. It must not be described as qualified or adopted. Earlier
-benchmark records retain their original scope.
+1. Run `--mode live` only against targets explicitly authorized in `scope_rules` (`--allow-live-requests` and `--allow-host`).
+2. Never store credentials, tokens, session cookies, private keys, or signed URLs in any database row, artifact, or commit.
+3. Obtain explicit operator approval before external disclosure, vendor contact, or publication.

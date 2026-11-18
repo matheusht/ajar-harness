@@ -1,0 +1,36 @@
+{
+ "schema_version": 1,
+ "review_id": "review-F-EVA-2-2",
+ "engagement_id": "fixture-control-validation-evasion",
+ "review_type": "claim_control_validation",
+ "proposed_finding_id": "F-EVA-2",
+ "entity_ref": "F-EVA-2",
+ "recorded_at": "2026-08-10T22:00:00Z",
+ "input_refs": [
+  "attempt-F-EVA-2-primary",
+  "attempt-F-EVA-2-control"
+ ],
+ "input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "evidence_refs": [
+  "artifact-F-EVA-2"
+ ],
+ "conflicting_evidence": [
+  "uncertainty-open-backstop"
+ ],
+ "independence": {
+  "reviewer_id": "reviewer-panel-beta",
+  "reviewer_model": "independent-reviewer",
+  "reviewer_run_id": "run-review-F-EVA-2-2",
+  "reviewer_session_id": "session-review-F-EVA-2-2",
+  "originating_run_id": "attempt-F-EVA-2-primary",
+  "fresh_context": true,
+  "prior_verdict_visible": false,
+  "disconfirming_objective": "Refute the bounded mechanism F-EVA-2."
+ },
+ "verdict": "supported",
+ "rationale": "Primary trace, matched negative control, and fresh replay establish the bounded claim for F-EVA-2.",
+ "corrections": [],
+ "required_next_actions": [
+  "preserve bounded language"
+ ]
+}

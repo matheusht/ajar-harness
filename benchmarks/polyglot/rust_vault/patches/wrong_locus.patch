@@ -1,0 +1,13 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 578cfcb..f920e8c 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -13,7 +13,7 @@ impl ShareVault {
+     }
+ 
+     pub fn deposit(&mut self, assets: u128) -> u128 {
+-        assert!(assets > 0, "zero deposit");
++        assert!(assets >= 1, "zero deposit");
+         let minted = if self.total_shares == 0 || self.total_assets == 0 {
+             assets
+         } else {

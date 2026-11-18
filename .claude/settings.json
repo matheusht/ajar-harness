@@ -1,1 +1,14 @@
-{}
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ajar hook claude-stop --if-active"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,36 +1,22 @@
-# Decisions
+# Architecture Decision Records
 
-Product and architecture decisions that should survive individual engagements.
+This directory records architectural decisions for Ajar.
 
-Use this folder for choices that are more specific than `docs/architecture.md`, but more durable
-than a one-off field note. Decision docs should explain:
+## Active Decisions
 
-- what was decided;
-- why it matters;
-- how future agents should act on it;
-- what remains deliberately flexible.
+| ADR | Title | Status | Summary |
+| --- | --- | --- | --- |
+| [0017](0017-ajar-v3-dual-mode-architecture.md) | Ajar v3 Dual-Mode Verification Architecture | **Accepted (Active)** | Defines the zero-LLM SQLite WAL state engine (`run.db`), Host Mode + Standalone Mode execution, 4-arm causal reproduction (`source`/`binary`/`live`), deterministic SQL gates `G1–G5`, contrastive domain packs, `zero_skill` first-principles quota, and ASD-STE100 documentation rules. |
+| [0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md) | Ajar v3.1 Bug-Brain Upgrades, 8-Arm Fixes Gate, and Platform Economics | **Accepted (Active)** | Adds bi-directional task search, anti-premature-`dry` guarded primitives, locus-bound 4-arm path proof + `claim rescope`, Stage-5 `Converge`, 8-arm `ajar patch verify`, attributable `Steers`, prefix-stable KV caching, `ajar quote` + `35%` COGS cap + `25%` dry-surface breaker, and `ajar export-graph`. |
 
-For the maintained engineering synthesis and implementation evidence, start with the [engineering wiki](../wiki/index.md). These decision records remain canonical; the wiki links to them and preserves their approval and supersession status.
+## Superseded Historical Decisions
 
-## Index
+- **`0001` through `0013` (`0001-*.md` .. `0013-*.md` in this directory):** **Superseded by [ADR-0017](0017-ajar-v3-dual-mode-architecture.md).** Retained strictly as immutable historical context for the archived benchmark runs under `engagements/{cve-bench,cybench,xbow-benchmarks}` and the read-only reader closure in `tools/legacy/`.
+- **`0014` through `0016` (unmerged v2 pull-request drafts `#209`, `#220`, `#224`):** **Superseded before merge by [ADR-0017](0017-ajar-v3-dual-mode-architecture.md).**
 
-- [0001 — Casebooks, pattern cards, and recon routing](0001-casebooks-patterns-routing.md)
-- [0002 — GEPA autoresearch scope, DSPy posture, and capability ladder](0002-gepa-autoresearch-scope.md)
-- [0003 — Autonomy envelopes](0003-autonomy-envelopes.md) — _superseded by 0004_
-- [0004 — Epistemic autonomy and complexity budget](0004-epistemic-autonomy-complexity-budget.md) — **canonical autonomy + complexity policy**
-- [0005 — Reasoning-directed, evidence-constrained research](0005-reasoning-directed-evidence-constrained-research.md) — **canonical live-research + evidence-state policy**; [implementation/evidence report](../decision-0005-implementation-report.md)
-- [0006 — Agent-autonomous record kernel](../decision-0006-agent-autonomous-record-kernel.md) — **Notebook autonomy with authority-preserving async gates and advisory flow telemetry**
-- [0007 — Black-box testing domain packs (web first, binary deferred)](0007-blackbox-testing-domain-packs.md) — **black-box web/API pack + vertical-first-then-horizontal rollout**; engine profile at [`engine/blackbox-web.md`](../../engine/blackbox-web.md)
-- [0008 — Smart-contract (Solidity/EVM) audit capability](0008-smart-contract-audit-capability.md) — **EVM-first contract-audit capability: Foundry+Slither tool-family, thin-slice-first rollout, on-fork-PoC=Zone-2 fence, B1/B2-grounded severity**; build plan at [`docs/research/smart-contract-audit-capability-build-plan.md`](../research/smart-contract-audit-capability-build-plan.md)
-- [0009 — Kernel upgrade path: decision-0005 → decision-0006 with orphan reconciliation](0009-kernel-upgrade-migration.md) — **operator-console-signed in-place kernel migration + orphan reconciliation (`migrate-kernel`)**
-- [0010 — Promotion gates: default-reject, computable where possible, and the fail-open lesson](0010-promotion-gates-and-fail-open.md) — **historical G0–G6 failure evidence; filing-boundary replacement remains incomplete in draft 0013**; doctrine at [`engine/finding-lifecycle.md`](../../engine/finding-lifecycle.md)
-- [0011 — Depth over provability: partials, primitives, external calibration, and the authorization ceiling](0011-depth-external-calibration-ceiling.md) — **two audits measuring excess rigor, the 12-promotions/0-blocks result, and why the ceiling is scope not judgement**; ledger at [`tools/disposition_ledger.py`](../../tools/disposition_ledger.py)
-- [0012 — Full autonomy as the north star: scope is the only human decision](0012-full-autonomy-north-star.md) — **RECORDED DIRECTION, not accepted**: the intended end state, the six preconditions none of which is met today, and the reframe that a hard gate is removed by BOUNDING the capability rather than by trusting supervision more
+## Authoring Rules
 
-- [0013 — One versioned signed finding activation](0013-canonical-filing-contract.md) — **interim fail-closed draft; new positive filings unavailable because original G3/G6 producer is missing; #85 incomplete**
-
-The [native local research source route](../agents/native-local-research.md) is implemented as a
-candidate for new local source research; the [legacy entry](../agents/legacy-local-research.md)
-remains for supported existing queue/record work. This source implementation does not revise
-accepted decisions or historical records. #165 adoption, #171 integrated qualification and #172
-unfamiliar-target study remain open.
+1. Read [ADR-0017](0017-ajar-v3-dual-mode-architecture.md), [ADR-0018](0018-ajar-v3-1-bug-brain-and-platform-economics.md), and [docs/architecture.md](../architecture.md) before proposing any structural change.
+2. Number new decision records sequentially starting at `0019`.
+3. Write in concise ASD-STE100 technical prose and include explicit Context, Decision, Consequences, Risks, and Revisit Triggers sections.
+4. Never delete or rewrite historical ADR files; mark superseded records with a pointer to the replacing ADR.

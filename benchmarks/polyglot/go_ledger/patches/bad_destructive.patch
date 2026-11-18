@@ -1,0 +1,13 @@
+diff --git a/ledger.go b/ledger.go
+index 3366216..6f5486a 100644
+--- a/ledger.go
++++ b/ledger.go
+@@ -34,7 +34,7 @@ func (l *Ledger) TotalSupply() int64 {
+ // Transfer moves amount from sender to recipient.
+ // BUG: caches recipient balance before writing sender debit, inflating supply on self-transfer.
+ func (l *Ledger) Transfer(from, to string, amount int64) error {
+-	if amount < 0 {
++	if amount >= 0 {
+ 		return ErrNegativeAmount
+ 	}
+ 	fromBal := l.balances[from]
